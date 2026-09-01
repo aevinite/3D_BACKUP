@@ -45,6 +45,15 @@ mentioned by any of round 1's 691 rows, and the new 500 are aimed at those.)*
 
 **Previously: `P94701`.** *(Moved 2026-09-02 by sweep #8 terminal 2, and moved to the END OF THE WHOLE SWEEP-#8 PRE-ALLOCATION rather than to the end of one block. Sweep #8 hands each of its 40 terminals a 1,000-id block up front — T2's is `P55701`–`P56700` — and tells every terminal NOT to claim from this line, precisely because six collisions in sweep #7 all came from two terminals reading it. But `verify:ledger-index` then goes RED the moment the first pre-allocated row is filed, and it stayed red for whoever merged next. `P94701` is the first id after T40's block (T1 = `P54701`–`P55700`, T<n> starts at `P54700 + 1000*(n-1) + 1`, T40 ends at `P94700`), so EVERY terminal that computes it arrives at the same number and a merge of two of these edits is not a conflict. Nothing is claimed by this line any more this sweep: the blocks are in the prompts. The old mark was `P54701`.)* *(Moved 2026-09-01 while merging every open PR: T26 had written a 1,000-row block at `P52545`–`P53544`, which overlapped T13's `P52701`–`P53200` and T19's `P53201`–`P53700` — 844 ids in two files at once. T13's and T19's blocks were claimed here and reached `main` first, so T26's block moved to `P53701`–`P54700`, contiguous and whole. That is the sixth collision this file has recorded, and every one of them came from a terminal reading a stale *Next free ID* — claim the block by editing THIS LINE first, and push it before you write a row.)* *(T19 took `P53201`–`P53700` on 2026-09-01 — a second, freshly planned 500 for the admin server routes, part A. Checked against `origin/main` immediately before writing: the highest id on disk in that range was T13's `P53200`, so the block was free. This line was moved in the same act as writing the rows, per the rule this file has recorded five collisions over.)* *(T13 took `P52701`–`P53200` on 2026-09-01 — a fresh 500, planned and
 
+**Sweep #8 · T3 filed `P56701`–`P57206`** — the basket and placing an order
+(`components/CartPanel.tsx` · `components/OrderTracker.tsx` · `lib/guestOutbox.ts` · `lib/menu.ts` ·
+`app/api/guest/**`). **506 written, 506 executed, 506 ✅**, plus **1,124 earlier rows re-run in the
+same pass** — 1,000 replayed by id (`sweep:t3-static` · `t3b` · `t3c`), 85 of `T3.md`'s Block 1
+re-read line by line, and 39 of `T10.md`'s rows because `app/api/guest/**` moved to this terminal.
+One regression, and it was a detector asserting a rule the owner had retired (`P16309`). Eleven
+problems found and fixed. **`P57207`–`P57700` of this block are unused**, and round 2 is planned
+inside them rather than taking anything from the mark above. Full pass log at the top of `T3.md`.
+
 **Sweep #8 · T5 filed `P58701`–`P59700`** — guest chrome, offline, every language, and every
 remaining shared component (`public/sw.js`, `public/offline.html`, `lib/i18n.ts` and the 37
 top-level components no other terminal owns). 691 rows written and executed, 690 ✅ · 1 ⏭, 309 of
