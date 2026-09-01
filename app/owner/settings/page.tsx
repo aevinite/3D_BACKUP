@@ -347,7 +347,17 @@ export default function OwnerSettings() {
             </p>
           </div>
         ) : null}
-        <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+        {/* THE EXPLANATION IS BEHIND A TAP (owner, 2026-09-01 — "you can do 14th").
+            Fourteen lines of it sat between "where your paper comes out" and the four guide buttons,
+            so on a phone the owner scrolled past the whole thing to reach the button they came for.
+            NOT ONE WORD IS CHANGED and nothing is summarised — it is the same paragraph, one tap
+            away, with the status and the buttons now next to each other. Closed by default on every
+            width: on a laptop it was five lines of prose doing the same job. `<details>` is the same
+            control the Add form already uses for "Add their details now", so it is not a new idea on
+            this screen, and it needs no JavaScript and no back-button layer. */}
+        <details className="prn-how">
+          <summary>How printing works <span className="adm-muted">· the short version, and what the guide covers</span></summary>
+          <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 10px" }}>
           A kitchen ticket is queued by the server the moment an order is placed, so it can never be
           lost — it waits until a printer takes it, whether that is a computer running the printer
           program or a screen. The full written guide covers setting a printer up
@@ -357,6 +367,7 @@ export default function OwnerSettings() {
           nothing to download — the guide has one menu per operating system and every command has a Copy
           button, because a downloaded script is blocked by macOS and warned about by Windows.
         </p>
+        </details>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {/* The icon is spaced off its label by `gap` on `.owx .adm-btn` in app/globals.css — a flex
               container TRIMS the leading whitespace of a text run, so `<i/> Open the…` rendered as
@@ -374,6 +385,11 @@ export default function OwnerSettings() {
           <a className="adm-btn" href="/print-setup.html#mac" target="_blank" rel="noopener">🍎 Mac steps</a>
           <a className="adm-btn" href="/print-setup.html#linux" target="_blank" rel="noopener">🐧 Linux / Pi steps</a>
         </div>
+        <style>{`
+          .prn-how { margin: 2px 0 10px; }
+          .prn-how summary { cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--muted); padding: 4px 0; }
+          .prn-how summary::marker { color: var(--muted); }
+        `}</style>
         <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
           Turning printing on, and choosing whether it comes out in the kitchen or at the counter, is
           done for you by Aevidine — ask and it is one switch. The screen that prints is chosen ON that
