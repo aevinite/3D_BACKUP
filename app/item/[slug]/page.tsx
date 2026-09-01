@@ -70,7 +70,14 @@ export default async function ItemPage({
   // friendly "Item not found" card inside a 200, which tells search engines the page is
   // real and tells our own monitoring the request succeeded — the exact reason the /r/
   // twin already 404s here. getMenuItem is cached, so asking costs one small read.
-  if (!(await getMenuItem(slug).catch(() => null))) notFound();
+  //
+  // …AND THE ANSWER IS KEPT, NOT THROWN AWAY (owner's item 9, 2026-09-01). This read was made
+  // purely to decide the 404 and then discarded, so ItemClient asked for the very same row again
+  // from the phone. Handing it down puts the dish in the first paint, drops one read from the
+  // hottest guest page, and means a page restored from the device with no signal shows the dish
+  // instead of a spinner.
+  const dish = await getMenuItem(slug).catch(() => null);
+  if (!dish) notFound();
   // Hand both to the browser-side component, which does the real work.
   return (
     <>
@@ -78,7 +85,7 @@ export default async function ItemPage({
           components/OfflineNotice.tsx therefore cannot render. See that file for the measurement.
           It removes itself the moment React's own bar takes over. (Owner's item 11, 2026-09-01.) */}
       <OfflineNoticeStatic />
-      <ItemClient slug={slug} fromCat={cat} />
+      <ItemClient slug={slug} fromCat={cat} initialItem={dish} initialFeatures={settings.features} />
     </>
   );
 }

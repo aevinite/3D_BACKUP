@@ -13,9 +13,9 @@ import { modelLoader } from "@/lib/modelLoader";     // 3D model download manage
 import { getMenuItems, getMenuItem, CARD_COLUMNS, getItemReviews, submitReview as submitReviewRpc, getSettings } from "@/lib/menu"; // dishes + reviews + the review-saving RPC + per-restaurant settings (Google link)
 import { getDeviceId } from "@/lib/device";          // stable per-browser id (one rating per dish per device)
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
-import { useFeatures } from "@/lib/features"; // per-restaurant feature switches
+import { useFeatures, getFeatures } from "@/lib/features"; // per-restaurant feature switches
 import { tget, tset } from "@/lib/tenantStorage"; // tenant-scoped storage (favorites)
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
+import { formatPrice, getCurrency, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format"; // money formatting
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import { useTranslation } from "@/lib/i18n";         // translated text strings
 import VegIcon from "@/components/VegIcon";           // the little veg/non-veg dot
@@ -129,16 +129,34 @@ interface FoodItem {
 
 // The dish detail component. It receives `slug` (which dish to show) and
 // `fromCat` (which category the guest came from, for prev/next arrows).
-export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug }: { slug: string; fromCat?: string; restaurantId?: string; restaurantSlug?: string }) {
+export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug, initialItem, initialFeatures }: { slug: string; fromCat?: string; restaurantId?: string; restaurantSlug?: string; initialItem?: FoodItem | null; initialFeatures?: Record<string, boolean> | null }) {
   const t = useTranslation();  // translated text for the current language
-  const features = useFeatures(restaurantId); // THIS restaurant's switched-on features
+  // Seeded from the switches the SERVER already read, so the first paint — and, on a reload with no
+  // signal, the ONLY paint — obeys the real ones. Without this the server built the page with
+  // FEATURE_DEFAULTS and a ratings-off restaurant had a five-star row in its own HTML. See the note
+  // on `seed` in lib/features.ts.
+  const features = useFeatures(restaurantId, initialFeatures);
   // Links stay inside this restaurant when opened from /r/<slug>/...; on the default
   // single-restaurant page there's no slug, so links stay global — unchanged for #1.
   const itemBase = restaurantSlug ? `/r/${restaurantSlug}` : "";
   // All the little pieces of memory this page keeps (current value + setter):
   const [allItems, setAllItems] = useState<FoodItem[]>([]);  // every dish (for related/next/prev)
-  const [item, setItem] = useState<FoodItem | null>(null);   // THIS dish (null until found)
-  const [loading, setLoading] = useState(true);              // still fetching?
+  // THE DISH THE SERVER ALREADY HELD (owner's item 9, 2026-09-01).
+  //
+  // Both dish routes read this dish on the server to decide whether the page exists at all
+  // (`if (!(await getMenuItem(...))) notFound()`), and then threw it away — so the phone asked for
+  // exactly the same row a second time, and a diner watched "Plating your dish" while the answer
+  // was already in the HTML. Handing it down instead means the dish is ON SCREEN in the first
+  // paint, one database read disappears from the hottest guest page in the product, and a page
+  // restored from the device with no signal shows the dish instead of a spinner.
+  //
+  // `initialItem` is only ever the SERVER's answer for THIS slug, so starting state from it cannot
+  // mismatch what the server rendered. The client still re-reads below — that is what keeps a price
+  // change or a sold-out flag honest on a page left open — it simply no longer starts from nothing.
+  const [item, setItem] = useState<FoodItem | null>(initialItem ?? null);
+  // …and therefore nothing is "loading" when the server already answered. This is the line that
+  // removes the spinner: it was unconditionally true.
+  const [loading, setLoading] = useState(!initialItem);
   // THE DISH READ DID NOT COME BACK (sweep #7 T2, 2026-08-22 — item 6).
   //
   // Measured with the network switched off after the page had been visited once: this screen sat
@@ -161,7 +179,9 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   const [favorited, setFavorited] = useState(false);         // is this dish hearted?
   const [showFavHint, setShowFavHint] = useState(false); // one-time "tap to save" coachmark
   const [descExpanded, setDescExpanded] = useState(false);   // is the description expanded?
-  const [imageLoaded, setImageLoaded] = useState(false);     // has the photo faded in?
+  // When the server handed the dish down there is no fetch to wait for, so the photo must not sit
+  // invisible waiting for a fade-in that the fetch used to trigger.
+  const [imageLoaded, setImageLoaded] = useState(!!initialItem);
   const [selectedRating, setSelectedRating] = useState(0);   // stars chosen in the review form
   const [reviewName, setReviewName] = useState("");          // reviewer's typed name
   const [reviewText, setReviewText] = useState("");          // reviewer's typed comment
@@ -189,7 +209,23 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   const pinchRef = useRef<number | null>(null);              // distance between two fingers
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null); // last finger position
   const [theme, setTheme] = useState<'dark' | 'light'>('light'); // dark or light mode
-  const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null); // currency for prices
+  // START FROM THE REAL DEFAULT, NOT FROM NOTHING (owner's item 9, 2026-09-01).
+  //
+  // This was `null`, and every price on the page falls back to `$${price}` while it is. That was
+  // invisible before, because the spinner covered the whole page until the client fetch landed —
+  // but now the server renders the dish in the first paint, and the first thing a diner saw was
+  // **$550 on a rupee menu**. Measured on the offline reload, where React never boots at all, so
+  // the `$` was not a flicker: it was the price, permanently.
+  //
+  // `getCurrency()` is SSR-safe by design — it returns DEFAULT_CURRENCY (INR) whenever the device
+  // cannot answer, which includes the server — so this is exactly what the server would compute,
+  // and hydration matches. A guest who picked a different currency still gets it applied by the
+  // effect below, one frame later, the same as before; they just start from ₹ instead of $.
+  //
+  // The `currency ? … : \`$…\`` guards downstream are left in place deliberately: they are now
+  // unreachable, and they are the thing that stops this regressing to a bare crash if a later
+  // change makes this nullable again.
+  const [currency, setCurrencyState] = useState<CurrencyMeta | null>(DEFAULT_CURRENCY); // currency for prices
   const router = useRouter();  // used below to navigate to the 3D view / menu
 
   // First-time-only nudge so guests learn the top-right heart saves a dish to
@@ -377,7 +413,19 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       setLoading(false);   // stop the spinner and show the honest card instead
     }, DISH_READ_DEADLINE_MS);
     Promise.all([
-      getMenuItem(slug, restaurantId).catch(() => null),        // this dish, full detail
+      // THE DISH IS ONLY RE-READ WHEN WE DID NOT ALREADY GET IT (owner's item 9).
+      //
+      // On a first load the server has just read this exact row to decide the 404 and handed it
+      // down, milliseconds ago — asking again is a duplicate read on the hottest guest page in the
+      // product, and it bought nothing: this page has no poll and no realtime refresh, so the
+      // value it replaced the server's with was identical.
+      //
+      // `retryNonce > 0` is the exception that matters: Try again, and item 8's territory, MUST
+      // reach the database. Without this test the button would "succeed" instantly by handing back
+      // the same stale object and the diner would be no better off.
+      initialItem && retryNonce === 0
+        ? Promise.resolve(initialItem)
+        : getMenuItem(slug, restaurantId).catch(() => null),    // this dish, full detail
       getMenuItems(restaurantId, CARD_COLUMNS).catch(() => []), // the rest, light (related/nav)
     ])
       .then(([dish, items]) => {
@@ -388,7 +436,11 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         clearTimeout(deadline);
         setReadTimedOut(false);
         setAllItems(items);                 // light list for related/nav
-        setItem(dish || null);              // this dish (or null if not found)
+        // KEEP THE SERVER'S DISH IF THE CLIENT RE-READ COMES BACK EMPTY. The re-read is a refresh,
+        // not the source of truth for whether the dish exists — the server already answered that,
+        // and answered it with a 404 when it did not. A transient empty reply must not blank a
+        // page the server rendered perfectly well.
+        setItem(dish || initialItem || null);
         // (Reviews load in their own effect below — see why there.)
         setLoading(false);                  // done loading
         setTimeout(() => { if (!cancelled) setImageLoaded(true); }, 50); // trigger the photo fade-in
@@ -455,14 +507,36 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // is derived during render from state this effect would have to duplicate. The two switches are
   // the part worth gating on: they are per-restaurant and permanent, where the Google mode is one
   // restaurant's choice among four and still shows the list in two of them.
+  //
+  // …AND IT ASKS THE RESOLVED SWITCHES, NOT THE DEFAULTS (owner's item 9 caused this, 2026-09-01).
+  //
+  // `useFeatures()` hands back FEATURE_DEFAULTS on the first render and the restaurant's real
+  // switches one tick later. That used to be harmless here, because `item` was null until the
+  // client fetch landed and by then the truth had arrived. Item 9 changed exactly that: the server
+  // now hands the dish down, so `item` is set on the very first render — and this effect fired
+  // against the defaults, where `ratings` and `reviews` are both true. Measured immediately after
+  // item 9 went in: French House, which has ratings OFF, was reading its review rows again on
+  // every dish open. That is the fault item 5 had just fixed, walked back in by an unrelated change
+  // two commits later.
+  //
+  // `getFeatures()` is the async, per-restaurant cached reader the 3D screen already uses for the
+  // same reason. Asking it costs nothing after the first call and it cannot answer with a default
+  // it has not verified.
   const reviewsCanBeSeen = !!features.reviews && !!features.ratings;
   useEffect(() => {
-    if (!item || !reviewsCanBeSeen) { setLocalReviews([]); return; }
+    if (!item) { setLocalReviews([]); return; }
     let cancelled = false;
-    getItemReviews(item.slug, restaurantId)
-      .then((r) => { if (!cancelled) setLocalReviews(r); })
-      .catch(() => {}); // a failure just leaves the list empty
+    (async () => {
+      const real = await getFeatures(restaurantId).catch(() => null);
+      if (cancelled) return;
+      // No answer at all → behave as if it is off. A read we cannot justify is one we do not make.
+      if (!real || !real.reviews || !real.ratings) { setLocalReviews([]); return; }
+      const r = await getItemReviews(item.slug, restaurantId).catch(() => null);
+      if (!cancelled && r) setLocalReviews(r);
+    })();
     return () => { cancelled = true; };
+    // `reviewsCanBeSeen` stays in the list so a live toggle still re-runs this — it is the hook's
+    // own value, which updates when a realtime breadcrumb refreshes the switches.
   }, [item, restaurantId, reviewsCanBeSeen]);
 
   // Load THIS restaurant's Google-review mode + link once (getSettings is cached per

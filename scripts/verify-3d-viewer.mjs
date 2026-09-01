@@ -235,9 +235,15 @@ for (const [file, label] of [[ITEM_PAGE_1, "restaurant #1's /item door"], [ITEM_
   );
   check(
     `${label} answers 404 for a dish that does not exist`,
-    /getMenuItem\([\s\S]{0,60}?\.catch\(\(\) => null\)\)\) notFound\(\)/.test(src[file]),
+    // Two shapes are both correct, and the second is the one item 9 introduced: the row this read
+    // returns is now KEPT and handed to ItemClient instead of being thrown away. What matters is
+    // that a missing dish reaches notFound(), not which spelling gets it there — asserting the
+    // old spelling turned this guard red on an improvement that made the behaviour better.
+    (/getMenuItem\([\s\S]{0,60}?\.catch\(\(\) => null\)\)\) notFound\(\)/.test(src[file]) ||
+      (/const dish = await getMenuItem\(/.test(src[file]) && /if \(!dish\) notFound\(\)/.test(src[file]))),
     `${file} → a friendly card inside a 200 tells search engines and our own monitoring that the ` +
-      "page is real."
+      "page is real. Either `if (!(await getMenuItem(...))) notFound()` or `const dish = await " +
+      "getMenuItem(...); if (!dish) notFound()` satisfies this."
   );
 }
 
@@ -316,6 +322,94 @@ check(
   `${VIEWER} → handleLoad's 800 ms reveal timer and 1 s bar timer must be collected and cleared ` +
     "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
 );
+
+// ── the server hands the dish down instead of the phone asking twice (owner's item 9) ─────────
+{
+  const code = src[ITEM_CLIENT].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the dish page starts from the dish the server already read",
+    /initialItem\?: FoodItem \| null/.test(code) &&
+      /useState<FoodItem \| null>\(initialItem \?\? null\)/.test(code) &&
+      /useState\(!initialItem\)/.test(code),
+    ITEM_CLIENT + " \u2192 both routes read this row on the server to decide the 404. Starting " +
+      "state from it is what removes the spinner and what makes an offline reload show the dish."
+  );
+  for (const [label, file] of [["restaurant #1's /item", ITEM_PAGE_1], ["the /r/<slug>/item", ITEM_PAGE_R]]) {
+    check(
+      label + " door keeps the dish it read and hands it down",
+      /const dish = await getMenuItem\(/.test(src[file]) && /if \(!dish\) notFound\(\)/.test(src[file]) &&
+        /initialItem=\{dish\}/.test(src[file]),
+      file + " \u2192 do not throw the 404 check's own read away. `if (!(await getMenuItem(...)))` " +
+        "discards the row and the phone then fetches it again."
+    );
+  }
+  check(
+    "…and the browser does NOT read it a second time on a first load",
+    /initialItem && retryNonce === 0\s*\n?\s*\? Promise\.resolve\(initialItem\)/.test(code),
+    ITEM_CLIENT + " \u2192 skip the duplicate read when the server just supplied it, but NOT when " +
+      "retryNonce > 0: Try again must reach the database or the button is a lie."
+  );
+  check(
+    "…the price does not read $ on a rupee menu in the first paint",
+    /useState<CurrencyMeta \| null>\(DEFAULT_CURRENCY\)/.test(code),
+    ITEM_CLIENT + " \u2192 the currency state must START at DEFAULT_CURRENCY. It was null, and " +
+      "every price falls back to `$` while it is \u2014 invisible behind the old spinner, but the " +
+      "first thing on screen once the server renders the dish, and PERMANENT on an offline reload " +
+      "where React never boots. getCurrency() is SSR-safe and returns the same value, so hydration matches."
+  );
+  check(
+    "…and a client re-read that comes back empty cannot blank a page the server rendered",
+    /setItem\(dish \|\| initialItem \|\| null\)/.test(code),
+    ITEM_CLIENT + " \u2192 the re-read is a refresh, not the authority on whether the dish exists."
+  );
+  check(
+    "…and the reviews read asks the RESOLVED switches, not useFeatures' first-render defaults",
+    /const real = await getFeatures\(restaurantId\)/.test(code) &&
+      /if \(!real \|\| !real\.reviews \|\| !real\.ratings\)/.test(code),
+    ITEM_CLIENT + " \u2192 handing the dish down means `item` is set on the FIRST render, when " +
+      "useFeatures() still returns FEATURE_DEFAULTS (ratings and reviews both true). Measured right " +
+      "after item 9 landed: French House, which has ratings off, was reading its review rows again " +
+      "on every dish open \u2014 the exact fault item 5 had just fixed, walked back in by an " +
+      "unrelated change. getFeatures() cannot answer with a default it has not verified."
+  );
+}
+
+// ── the server-rendered dish obeys the RESTAURANT'S switches, not the code defaults ───────────
+// (Finishing item 9.) useFeatures' first value is FEATURE_DEFAULTS, where ratings and reviews are
+// both true. That was invisible behind the old spinner; once the server renders the dish it is the
+// first thing on screen, and on a reload with no signal — where React never boots — it is the ONLY
+// thing. Measured: French House, which has ratings OFF, had a five-star row in its own page's HTML.
+{
+  const feat = read("lib/features.ts");
+  check(
+    "useFeatures can be seeded with the switches a server component already read",
+    /seed\?: Record<string, boolean> \| null/.test(feat) &&
+      /cached\.get\(restaurantId\) \|\| \(seed \?/.test(feat),
+    "lib/features.ts \u2192 keep the optional seed. The cache must still win over it, and the " +
+      "effect must still re-read and subscribe, so a live toggle behaves exactly as before."
+  );
+  check(
+    "…and the seed is the RAW settings bag, so a server component needs no import from that file",
+    !/export function featuresFromSettings/.test(feat),
+    "lib/features.ts imports useEffect, which makes it unimportable from a server component. " +
+      "Exporting a helper here to build the map went blank with \"You're importing a module that " +
+      "depends on useEffect into a React Server Component\". Pass settings.features itself."
+  );
+  for (const [label, file] of [["restaurant #1's /item", ITEM_PAGE_1], ["the /r/<slug>/item", ITEM_PAGE_R]]) {
+    check(
+      label + " door hands its restaurant's switches down with the dish",
+      /initialFeatures=\{settings\.features\}/.test(src[file]),
+      file + " \u2192 the settings row is already read on this route; pass its features bag so the " +
+        "first paint and the offline view obey the same switches the live screen does."
+    );
+  }
+  check(
+    "…and the dish page seeds the hook with them",
+    /useFeatures\(restaurantId, initialFeatures\)/.test(src[ITEM_CLIENT]),
+    ITEM_CLIENT + " \u2192 without the seed the server builds the page with ratings and reviews " +
+      "both on, whatever the restaurant chose."
+  );
+}
 
 // ── the offline warning survives a reload with no signal (owner's item 11) ────────────────────
 // After an offline reload the client JavaScript never boots, so components/OfflineNotice.tsx cannot
@@ -432,7 +526,14 @@ check(
   );
   check(
     "…and the honest card is not the 'dish not found' one, which would be a lie",
-    /if \(!item && readTimedOut\)/.test(code) && code.indexOf("if (!item && readTimedOut)") < code.indexOf("if (!item) {"),
+    // Anchored to the RENDER branches by their own markup, not to the first `if (!item)` in the
+    // file: item 9's reviews effect legitimately opens with `if (!item) { setLocalReviews([]);`,
+    // which sits far earlier and made a naive index comparison fail on a correct file.
+    (() => {
+      const timedOut = code.indexOf("if (!item && readTimedOut)");
+      const notFound = code.indexOf("if (!item) {\n    return (");
+      return timedOut > -1 && notFound > -1 && timedOut < notFound;
+    })(),
     ITEM_CLIENT + " \u2192 the timed-out branch must come FIRST and say something about the " +
       "connection. 'Dish not found' would send a diner looking for a dish that is on the paper " +
       "menu in front of them."
@@ -453,11 +554,14 @@ check(
   check(
     "the dish page only fetches reviews when BOTH switches let it show them",
     /const reviewsCanBeSeen = !!features\.reviews && !!features\.ratings/.test(code) &&
-      /if \(!item \|\| !reviewsCanBeSeen\)/.test(code) &&
+      /const real = await getFeatures\(restaurantId\)/.test(code) &&
+      /if \(!real \|\| !real\.reviews \|\| !real\.ratings\)/.test(code) &&
       /\}, \[item, restaurantId, reviewsCanBeSeen\]\)/.test(code),
-    ITEM_CLIENT + " \u2192 gate getItemReviews on the same pair the display uses. Keying it on " +
-      "features.reviews alone makes a ratings-off restaurant pay for 20 review rows on every " +
-      "dish open and render none of them."
+    ITEM_CLIENT + " \u2192 gate getItemReviews on the same pair the display uses, AND ask the " +
+      "resolved switches rather than useFeatures' first-render defaults. Keying it on " +
+      "features.reviews alone makes a ratings-off restaurant pay for 20 review rows on every dish " +
+      "open and render none of them; keying it on the hook's first value does the same thing now " +
+      "that the server hands the dish down on render one."
   );
   // …and the display condition must not drift away from the fetch condition.
   check(

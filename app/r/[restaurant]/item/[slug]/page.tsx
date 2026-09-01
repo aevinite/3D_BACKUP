@@ -92,7 +92,12 @@ export default async function RestaurantItemPage({
   // way, but a 200 tells search engines the page is real and tells our own monitoring the
   // request succeeded. generateMetadata above already fetched this dish, so asking again
   // here costs one small cached read on a page nobody polls.
-  if (!(await getMenuItem(slug, r.id).catch(() => null))) notFound();
+  //
+  // …AND THE ANSWER IS KEPT, NOT THROWN AWAY (owner's item 9, 2026-09-01) — the same change as on
+  // restaurant #1's door beside it, for the same reason: this row was read only to decide the 404
+  // and then discarded, so the phone fetched it all over again while a diner watched a spinner.
+  const dish = await getMenuItem(slug, r.id).catch(() => null);
+  if (!dish) notFound();
   // WHITE-LABEL (audit fix 2026-07-08): this page renders ItemClient WITHOUT the
   // AppShell that themes the menu, so its price + "Add to Cart" button fell back to
   // restaurant #1's GOLD accent for every OTHER restaurant. Emit this restaurant's
@@ -132,7 +137,7 @@ export default async function RestaurantItemPage({
       {/* r.slug, not the address-bar text — the same reason as the menu page: this prop namespaces
           the cart/favourites and builds the back-to-menu link, so a capitalised URL must land in
           the SAME scope as the lower-case one (owner, 2026-08-12). */}
-      <ItemClient slug={slug} fromCat={cat} restaurantId={r.id} restaurantSlug={r.slug} />
+      <ItemClient slug={slug} fromCat={cat} restaurantId={r.id} restaurantSlug={r.slug} initialItem={dish} initialFeatures={settings.features} />
     </>
   );
 }
