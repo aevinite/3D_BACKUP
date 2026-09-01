@@ -26,7 +26,13 @@ const money = (n: number, currency = "INR") => {
   try { return new Intl.NumberFormat("en-IN", { style: "currency", currency: c, maximumFractionDigits: 0 }).format(Number(n) || 0); }
   catch { return `${c} ${Math.round(Number(n) || 0).toLocaleString("en-IN")}`; }
 };
-const today = () => new Date().toISOString().slice(0, 10);
+// THE IST CALENDAR DAY, the same one the server counts Due-soon and Overdue on (T19 sweep #7,
+// 2026-09-01). This was `new Date().toISOString().slice(0, 10)` — the UTC date — while
+// /api/admin/billing works the two summary cards out on the Indian calendar. Between 00:00 and 05:30
+// IST the two disagreed: the card could say "1 overdue" while the row it means still read as due, or
+// the other way round. `next_due_on` is a plain date typed in IST, so IST is the only calendar that
+// can answer "is that date past?".
+const today = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 
 export default function AdminBilling() {
   const [rows, setRows] = useState<Row[] | null>(null);
