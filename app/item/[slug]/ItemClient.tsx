@@ -920,9 +920,24 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           className="img-lightbox"
           onClick={() => { if (lbScale <= 1) { setImgZoom(false); setLbScale(1); setLbPos({ x: 0, y: 0 }); } }}
         >
-          {/* The X button — closes and resets the zoom/pan. */}
+          {/* The X button — closes and resets the zoom/pan.
+              THE ONLY WAY OUT MUST STAY TAPPABLE WHILE THE PHOTO IS ZOOMED (sweep #8 T2,
+              2026-09-02 — item 2). `.img-lightbox-close` is `position: absolute` with no z-index,
+              and the photo below it is a later sibling carrying a `transform` — which makes its own
+              stacking context and paints on top. MEASURED on a 360x780 phone: at 1x,
+              elementFromPoint at the X's own centre is the X; the moment the photo is zoomed it
+              grows to 780x780 and that same point answers `.img-lightbox-img`, at 2.5x and again at
+              5x. So a diner who pinched into the dish photo and tapped the visible X did not close
+              anything — the tap landed on the photo and merely un-zoomed it, and only a SECOND tap
+              on the X closed the view. Backdrop-tap is deliberately disabled while zoomed (you are
+              panning, not leaving), so the X is the only way out and it was the one thing not
+              working.
+              A z-index puts it back in front. Inline, like the two constants at the top of this
+              file, because `app/globals.css` belongs to another part of this sweep; if that rule
+              ever grows a z-index of its own this becomes redundant rather than wrong. */}
           <button
             className="img-lightbox-close"
+            style={{ zIndex: 1 }}
             onClick={(e) => { e.stopPropagation(); setImgZoom(false); setLbScale(1); setLbPos({ x: 0, y: 0 }); }}
           >
             <i className="fas fa-times"></i>

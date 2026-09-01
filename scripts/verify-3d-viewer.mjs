@@ -286,6 +286,18 @@ check(
     "and losing the listener there would freeze the bar at whatever the first paint decided."
 );
 
+// ── the way out of the zoomed photo stays tappable (sweep #8 T2, item 2) ─────────────────────
+// `.img-lightbox-close` is position:absolute with no z-index, and the photo under it carries a
+// transform, which makes its own stacking context and paints on top once it is scaled up. MEASURED:
+// at 1x elementFromPoint at the X's centre is the X; at 2.5x and 5x it is the photo. Backdrop-tap
+// is deliberately off while zoomed, so the X is the only way out.
+check(
+  "the photo lightbox's close button sits above the zoomed photo",
+  /className="img-lightbox-close"\s*\n\s*style=\{\{ zIndex: 1 \}\}/.test(read(ITEM_CLIENT)),
+  "app/item/[slug]/ItemClient.tsx: the lightbox X needs its own z-index, or a zoomed photo covers " +
+    "it and a tap on the only way out merely un-zooms the picture."
+);
+
 // ── a tenant never inherits restaurant #1's static demo config (sweep #8 T2, item 1) ─────────
 // public/content/items/ holds restaurant #1's own two legacy demo dishes. The 3D route is
 // /view/<folder>, and the folder name is whatever an owner typed — so a second restaurant that
