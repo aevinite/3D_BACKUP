@@ -14,7 +14,7 @@ type Bill = {
   sessionId: string; billNo: number | null; invoiceNo: number | null; invoiceVoided: boolean;
   restaurantId: string | null; restaurantName: string; table: string | null; state: BillState;
   amount: number; paid: number; orderCount: number; invoiceGens: number;
-  openedAt: string | null; closedAt: string | null; at: string | null;
+  openedAt: string | null; closedAt: string | null; at: string | null; createdAt: string | null;
   deletedAt: string | null; deletedBy: string | null; deleteReason: string | null;
   // Closed-unpaid bills only: was the food made? (owner 2026-08-20 — see the tile's own note.)
   loss?: "yes" | "no" | "unknown" | null;
@@ -319,7 +319,12 @@ export default function AdminBills() {
             and the capability itself is his own (R27: "The Aevidine admin console keeps a soft delete
             for support work"). What stops is the tile presenting three things as one number. Nothing
             is renamed and no policy is decided here — the split comes from columns already stored. */}
-        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} calculating={!d}
+        {/* "every one, all time" is a PLATFORM-WIDE claim, so an unknown count must not be shown as 0.
+            `counts.deleted` is the true database count (the route overwrites the page-derived value
+            with it), but on a reply that arrives without it, `|| 0` asserted "no bill has ever been
+            deleted" on the one screen whose job is proving that no sale went missing. A real 0 still
+            shows 0; only a missing number now shows "…". */}
+        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={typeof counts.deleted === "number" ? counts.deleted : "…"} calculating={!d}
           sub={d?.deletedByPerson == null || d?.deletedEmptied == null
             ? "restorable · every one, all time"
             : <>
@@ -339,7 +344,7 @@ export default function AdminBills() {
             {META[k].label} <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? (counts[k] || 0) : "\u2014"}</span>
           </button>
         ))}
-        <select value={rid} onChange={(e) => { setRid(e.target.value); setOpen(null); }} style={{ marginLeft: "auto", padding: "9px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
+        <select aria-label="Restaurant" value={rid} onChange={(e) => { setRid(e.target.value); setOpen(null); }} style={{ marginLeft: "auto", padding: "9px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
           <option value="">All restaurants</option>
           {(d?.restaurants || []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
@@ -430,7 +435,14 @@ export default function AdminBills() {
                   </span>
                   <span className="c-tbl" style={{ color: "var(--muted)", fontSize: 12.5 }}>{b.table ? `T${b.table}` : "—"}</span>
                   <span className="c-amt" style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", textDecoration: del ? "line-through" : undefined, opacity: del ? 0.7 : 1 }}>{inr(b.amount)}</span>
-                  <span className="c-when" style={{ color: "var(--muted)", fontSize: 12, fontVariantNumeric: "tabular-nums" }} title={b.at || undefined}>{b.at ? timeAgo(b.at) : "—"}</span>
+                  {/* THE TIME SHOWN IS THE TIME THIS LIST IS SORTED BY — they must be the same instant, or the
+                      column reads as broken. The endpoint orders sessions by `created_at` and pages with a
+                      `created_at` cursor, but this column used to print `at` (= closed_at ?? created_at). A bill
+                      opened yesterday and settled today then sat by its opening time while showing its settling
+                      time, so scanning down the ledger you met "2 days ago" ABOVE "1 day ago" — 4 such pairs on a
+                      192-row page when this was measured. Both moments are still on the row: "Opened" and
+                      "Closed" are spelled out in full, in IST, in the panel below. */}
+                  <span className="c-when" style={{ color: "var(--muted)", fontSize: 12, fontVariantNumeric: "tabular-nums" }} title={b.createdAt ? `Opened ${new Date(b.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}${b.closedAt ? ` · closed ${new Date(b.closedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}` : undefined}>{b.createdAt ? timeAgo(b.createdAt) : b.at ? timeAgo(b.at) : "—"}</span>
                   <span className="blz-chev c-chev" style={{ color: "var(--muted)", display: "inline-flex" }}><Ico n="chev" s={14} /></span>
                 </button>
 
@@ -553,7 +565,7 @@ export default function AdminBills() {
 // `sub` is a ReactNode, not a string: the Closed-unpaid tile says two things (what the food-made
 // half is worth and what the never-made half is worth) and needs its own line break to stay legible
 // at 150px, the narrowest this grid ever draws a tile.
-function Stat({ icon, tone, k, v, sub, calculating }: { icon: IconName; tone: string; k: string; v: number; sub: React.ReactNode; calculating?: boolean }) {
+function Stat({ icon, tone, k, v, sub, calculating }: { icon: IconName; tone: string; k: string; v: number | string; sub: React.ReactNode; calculating?: boolean }) {
   return (
     <div className="adm-card blz-stat" style={{ padding: "14px 16px" }}>
       <div style={{ fontSize: 11.5, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>

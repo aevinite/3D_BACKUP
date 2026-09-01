@@ -909,6 +909,97 @@ try {
     // HIGH, so this is the direction that matters.
     ok(bills.every((b) => Number.isFinite(b.amount) && b.amount >= 0 && b.amount >= b.paid - 0.01),
       "12 · every bill's total is a real number and at least what was collected on it");
+
+    // ── 17 · THE LEDGER SHOWS THE INSTANT IT SORTS BY ─────────────────────────────────────────
+    // The endpoint orders sessions by `created_at` and pages with a `created_at` cursor, but the
+    // collapsed row used to print `at` (= closed_at ?? created_at). A bill opened yesterday and
+    // settled today therefore sat in the list by its OPENING time while displaying its SETTLING
+    // time — so reading down the ledger you met "2 days ago" above "1 day ago". Measured on a
+    // 192-row page when this was found: 29 rows out of order, 4 of them visibly so.
+    //
+    // Two things are asserted, because either one alone can pass while the screen is wrong:
+    //   a) the row carries `createdAt` at all — the field the fix added, and the one it must show;
+    //   b) the sequence of those instants really is newest-first, end to end.
+    ok(bills.length > 0 && bills.every((b) => b.createdAt !== undefined),
+      "17 · every bill row carries the instant the ledger is ordered by");
+    let outOfOrder = 0;
+    for (let i = 1; i < bills.length; i++) {
+      const prev = Date.parse(bills[i - 1].createdAt ?? bills[i - 1].at);
+      const cur = Date.parse(bills[i].createdAt ?? bills[i].at);
+      if (Number.isFinite(prev) && Number.isFinite(cur) && prev < cur - 1000) outOfOrder++;
+    }
+    ok(outOfOrder === 0, `17 · the ledger's own times run newest-first, with no older bill above a newer one (${outOfOrder} out of order of ${Math.max(0, bills.length - 1)})`);
+
+    // And the SCREEN must print that instant, not the other one. Read from the rendered row rather
+    // than from the payload, because the whole fault was a screen showing a different field.
+    {
+      const c17 = await ctx(1280, 900, 1, "dark");
+      const pg = await c17.newPage();
+      await pg.goto(BASE + "/aevinite/bill-audit", { waitUntil: "domcontentloaded" });
+      await settle(pg);
+      const whens = await pg.$$eval(".c-when", (els) => els.map((e) => e.getAttribute("title") || ""));
+      await c17.close();
+      const titled = whens.filter((t) => t.trim());
+      ok(titled.length > 0 && titled.every((t) => /^Opened /.test(t)),
+        `17 · and each row's time says which moment it is, in IST, on hover (${titled.length} rows)`);
+    }
+
+    // ── 18 · A NUMBER NOBODY KNOWS IS NEVER PRINTED AS A CONFIDENT ZERO ───────────────────────
+    // Revenue's `money()` was `Number(n) || 0`, so an absent figure rendered "₹0" — "you collected
+    // nothing" — while the count tile beside it honestly rendered "…" for the same absence. Bills'
+    // Deleted tile did the same with `counts.deleted || 0`, and that one is a PLATFORM-WIDE,
+    // all-time claim on the screen whose whole job is proving no sale went missing.
+    //
+    // /api/admin/revenue already refuses to send a partial payload for precisely this reason, so
+    // nobody has seen it in production — this is the screen being made to agree with the decision
+    // its own route had already taken. Driven by handing each screen a reply with the fields
+    // missing, which is the only way to reach it.
+    for (const [name, path, apiGlob, sel18] of [
+      // Revenue: the five headline money/count tiles, plus the four status figures.
+      ["Revenue", "/aevinite/revenue", "**/api/admin/revenue*", ".rev-strip .cell .v"],
+      // Bills: ONLY the Deleted tile — the one that speaks for all time rather than for this page.
+      ["Bills", "/aevinite/bill-audit", "**/api/admin/bills*", ".blz-stat:has-text('DELETED') .fit-num"],
+    ]) {
+      const c18 = await ctx(1280, 900, 1, "dark");
+      const p18 = await c18.newPage();
+      await p18.route(apiGlob, (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+      await p18.goto(BASE + path, { waitUntil: "domcontentloaded" });
+      await settle(p18);
+      // Read only the figures that make a claim BEYOND the page in front of you. Bills' first three
+      // tiles say "on this page" in their own subtitle, so 0 on an empty page is the truth and must
+      // NOT be flagged; the Deleted tile says "every one, all time", which is the platform-wide
+      // claim that must never be guessed.
+      const tiles = await p18.$$eval(sel18, (els) => els.map((e) => e.textContent.trim()).filter((t) => t.length && t.length < 24));
+      await c18.close();
+      const zeros = tiles.filter((t) => t === "₹0" || t === "0");
+      ok(tiles.length > 0 && zeros.length === 0,
+        `18 · ${name} · with the figures missing, no all-time number claims a confident zero (${tiles.length} read, ${zeros.length} zero${zeros.length === 1 ? "" : "s"})`);
+      ok(tiles.length > 0 && tiles.every((t) => t === "\u2026" || t === "—"),
+        `18 · ${name} · every one of them says the number is not known instead (${tiles.join(" ")})`);
+    }
+
+    // ── 19 · EVERY BOX YOU CAN TYPE IN OR CHOOSE FROM IS NAMED ────────────────────────────────
+    // The restaurant picker on Bills and on the Change log carried no label of any kind — no
+    // aria-label, no wrapping <label>, no label[for] — so a screen reader announced nothing but
+    // "combo box" and the selected value. Every OTHER control on both screens was already named
+    // (the Find box has an aria-label, the two date boxes are wrapped in labels, the page-jump has
+    // a label[for]), and the sibling picker on Customers has carried aria-label="Restaurant" all
+    // along, so this is one wording across the console rather than a new one.
+    for (const [name, path] of [["Customers", "/aevinite/customers"], ["Bills", "/aevinite/bill-audit"], ["Change log", "/aevinite/bill-audit/changes"]]) {
+      const c19 = await ctx(1280, 900, 1, "dark");
+      const p19 = await c19.newPage();
+      await p19.goto(BASE + path, { waitUntil: "domcontentloaded" });
+      await settle(p19);
+      const unnamed = await p19.evaluate(() => {
+        const main = document.querySelector(".adm-main") || document.body;
+        return [...main.querySelectorAll("input, select, textarea")].filter((el) => !(
+          el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder")
+          || (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest("label")
+        )).map((el) => el.tagName + (el.type ? ":" + el.type : ""));
+      });
+      await c19.close();
+      ok(unnamed.length === 0, `19 · ${name} · every box you can type in or choose from is named${unnamed.length ? " — unnamed: " + unnamed.join(", ") : ""}`);
+    }
   }
 
 } finally {
