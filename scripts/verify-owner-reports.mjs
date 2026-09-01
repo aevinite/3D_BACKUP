@@ -785,6 +785,144 @@ console.log("\nT11-H · the manager's till count names the same methods the owne
   );
 }
 
+console.log("\nT11-J · a report he does not have never shows him its shape");
+{
+  // ── R36, ON THE ONE ROUTE THAT WAS SUPPOSED TO REVEAL NOTHING (owner item 15, 2026-09-01) ────
+  // Two of the eight reports belong to admin-controlled modules. The CARD was already hidden when
+  // a module is off — but `?open=inventory` still opened the report shell: its title, its icon and
+  // the five sub-tab names, over a body saying "Inventory isn't enabled for this restaurant". So
+  // the link that revealed nothing described the whole feature.
+  check(
+    "a deep link to a MODULE report is held until the entitlement is known",
+    /MODULE_REPORTS/.test(reportsPage) && /pendingOpen/.test(reportsPage),
+    "app/owner/reports/page.tsx — team and inventory belong to modules the admin switches on. Opening " +
+      "one before the flags arrive puts the whole feature on screen for an owner who does not have it.",
+  );
+  check(
+    "…and dropped to the hub when the module is off",
+    /if \(!on\) return;/.test(reportsPage),
+    "app/owner/reports/page.tsx — an unknown ?open= value already falls back to the hub; a withheld one must too.",
+  );
+  check(
+    "…and closed if the admin switches it off while he is standing in it",
+    /mod === "payroll" \? !hasPayroll : !hasInventory\) backToHub\(\)/.test(reportsPage),
+    "app/owner/reports/page.tsx — otherwise he is left on a shell with nothing behind it.",
+  );
+  check(
+    "…while the six reports everyone has still open at once",
+    /else if \(a\) \{ setSel\(a\.sel\)/.test(reportsPage),
+    "app/owner/reports/page.tsx — hold ONLY the module reports. Gating all eight would make every " +
+      "deep link wait for the entitlement read.",
+  );
+}
+
+console.log("\nT11-K · a composition-scheme sheet does not contradict itself");
+{
+  // The composition flag is the mode the restaurant is on TODAY — there is no history of when it
+  // changed. So a restaurant that switched mid-year shows a window still holding GST it really did
+  // collect, under a sheet that says it charges none: "TAX COLLECTED ₹17,555 · composition scheme
+  // — no GST charged", above a tax chart with real bars. That money is never hidden — it is owed to
+  // the government — it is LABELLED.
+  check(
+    "the sheet knows the difference between 'charges no GST' and 'this window still holds some'",
+    /const legacyTax = composition && Math\.round\(t\.tax\) > 0/.test(reportsPage),
+    "app/owner/reports/page.tsx — without it the tile says \"no GST charged\" over real money.",
+  );
+  check(
+    "…so the tile stops claiming 'no GST charged' when there is some",
+    /legacyTax \? "collected before the change — still yours to file"/.test(reportsPage),
+    "app/owner/reports/page.tsx — the caption must follow the figure above it.",
+  );
+  check(
+    "…and a line explains where that money came from",
+    /This period still contains/.test(reportsPage) && /before the move to the composition scheme/.test(reportsPage),
+    "app/owner/reports/page.tsx — a number the reader cannot account for is a number they distrust.",
+  );
+  check(
+    "…and the tax chart is KEPT when there is tax, and dropped when there is none",
+    /\{\(!composition \|\| legacyTax\) && \(/.test(reportsPage),
+    "app/owner/reports/page.tsx — that money is still owed to the government, so it is never hidden. " +
+      "But \"Not enough data yet\" under \"Tax over time\" on an always-composition restaurant reads as a " +
+      "broken feed rather than as the truth.",
+  );
+  check(
+    "…and the by-period table drops a GST column only when EVERY figure in it would be zero",
+    /hideTax=\{composition && !legacyTax\}/.test(reportsPage) && /hideTax\?: boolean/.test(reportsPage),
+    "app/owner/reports/page.tsx — real tax is never dropped from a table; a column of ₹0 under a sheet " +
+      "that has just said there is no GST is a column asking to be misread.",
+  );
+}
+
+console.log("\nT11-M · a settings change reaches the report, not just an order");
+{
+  // ── THE FINGERPRINT WATCHED THE ORDERS AND NOT THE DEFINITIONS (T11 item 17, 2026-09-01) ─────
+  // The Tax report is built from the orders AND from the restaurant's tax configuration. Both
+  // change-detectors asked only "have the ORDERS moved?", so changing the rate, editing a tax line
+  // or moving to the composition scheme left the stored snapshot alone: revalidate() saw the same
+  // fingerprint, re-stamped computed_at and returned WITHOUT recomputing. On a quiet restaurant
+  // that holds the old rate on a GST document indefinitely.
+  // Measured: price_tax_mode read `excl` in the database while the cached report answered
+  // composition = true · rate 0 · components 0, and only Refresh fixed it.
+  const cache = read("lib/ownerCache.ts");
+  check(
+    "the change-detector watches the tax configuration, not only the orders",
+    /async function taxConfigPart/.test(cache) &&
+    /ordersFingerprint[\s\S]{0,400}taxConfigPart\(ids\)/.test(cache) &&
+    /reportMonthFingerprint[\s\S]{0,400}taxConfigPart\(ids\)/.test(cache),
+    "lib/ownerCache.ts — BOTH detectors must carry it. The global cache version cannot fix this: the " +
+      "definition that moved belongs to one restaurant.",
+  );
+  check(
+    "…and it reads the SAME columns the report itself is built from",
+    /TAX_SETTINGS_COLUMNS/.test(cache) && /from "@\/lib\/tax"/.test(cache),
+    "lib/ownerCache.ts — a second list of columns is a second answer to \"what is the tax configuration\".",
+  );
+  check(
+    "…sorted, so a scope's member order cannot move the fingerprint on its own",
+    /localeCompare\(String\(b2\.restaurant_id\)\)/.test(cache),
+    "lib/ownerCache.ts — otherwise the same estate fingerprints two different ways and recomputes for nothing.",
+  );
+  check(
+    "…and a configuration it cannot read never fails the request",
+    /catch \{ return ""; \}/.test(cache),
+    "lib/ownerCache.ts — a fingerprint is an optimisation; it must never be able to break a report.",
+  );
+}
+
+console.log("\nT11-L · a quiet day is not a failed read");
+{
+  // ── THE ALL-ZERO GUARD HAD NO WAY OUT (T11 item 16, 2026-09-01) ──────────────────────────────
+  // Once a stored snapshot held money and the honest answer became ZERO — a restaurant closed on
+  // its day off, a window whose only bills were cancelled — every recompute was refused and the OLD
+  // money was served to everyone for ever, with "updated X ago" beside it. Caught by the app's own
+  // warning: four "[ownerCache] refused to store an all-zero payload" lines in one run, while a
+  // forced read answered one thing and every other reader was handed another.
+  const cache = read("lib/ownerCache.ts");
+  check(
+    "the all-zero guard is keyed on the AGE of the snapshot it is protecting",
+    /isFresh\(prev\.computed_at, maxAgeMs\) && collapsedToZero/.test(cache),
+    "lib/ownerCache.ts — it was written for a BLIP, a read that fails seconds after a good one. With " +
+      "no time limit a genuinely quiet day froze yesterday's money onto the console permanently.",
+  );
+  check(
+    "…and both call sites use the timed rule, not the old unconditional one",
+    (cache.match(/zeroIsSuspicious\(/g) || []).length >= 2 && !/collapsedToZero\(payload,/.test(cache),
+    "lib/ownerCache.ts — the background path and the forced path must agree.",
+  );
+  check(
+    "…and it reuses the freshness the read path already has, rather than a second definition",
+    /const zeroIsSuspicious[\s\S]{0,200}isFresh\(/.test(cache),
+    "lib/ownerCache.ts — two notions of \"recent\" is how the last pair of these drifted apart.",
+  );
+  check(
+    "…and it counts MONEY, not the tax configuration",
+    /const withoutConfig/.test(cache) && /numbersIn\(withoutConfig\(prev\)\)/.test(cache),
+    "lib/ownerCache.ts — a money payload carries the configured rate and the CGST/SGST components. " +
+      "Switching a restaurant to the composition scheme legitimately zeroes those, and the guard read " +
+      "a deliberate settings change as a failed read.",
+  );
+}
+
 console.log("\nT11-I · the file you download IS the report you were looking at");
 {
   // ── A REPORT THAT SHARES A PAYLOAD SHAPE STILL HAS ITS OWN TABLE (T11 round 2, 2026-09-01) ──
@@ -945,11 +1083,16 @@ console.log("\nT11-E · saying so when a read failed");
       "full of money is what made the swapped-column fault read as a quiet day for months.",
   );
   const cache = read("lib/ownerCache.ts");
+  // The RULE, not its spelling. This asserted the exact call `collapsedToZero(payload,
+  // prevRow?.payload)` and went red when item 16 replaced it with the timed `zeroIsSuspicious`,
+  // against code that does the same job better — the "a guard asserting a retired rule" shape.
+  // What must hold: the FORCED path still reads the row it is about to replace, and still runs the
+  // guard on it. See T11-L for the timing rule itself.
   check(
-    "a forced Refresh cannot store an all-zero payload over a good one",
-    /prevRow/.test(cache) && /collapsedToZero\(payload,\s*prevRow\?\.payload\)/.test(cache),
-    "lib/ownerCache.ts — `force` skipped the read of the row it was about to replace, so the all-zero guard " +
-      "could never fire on the path most likely to need it (Refresh is pressed BECAUSE the numbers look wrong).",
+    "a forced Refresh still reads the row it is about to replace, and still guards it",
+    /prevRow/.test(cache) && /else if \(zeroIsSuspicious\(payload, prevRow, maxAgeMs\)\)/.test(cache),
+    "lib/ownerCache.ts — `force` used to skip that read, so the all-zero guard could never fire on the " +
+      "path most likely to need it (Refresh is pressed BECAUSE the numbers look wrong).",
   );
 }
 

@@ -93,9 +93,25 @@ async function handler(req: NextRequest) {
     if (op === "void_bill") {
       const sessionId = String(body.session_id || "");
       if (!UUID.test(sessionId)) return err("invalid session_id");
-      const owns = (await sb.from("sessions").select("id, table_number, invoice_no, bill_no").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; invoice_no?: number | null; bill_no?: number | null } | null;
+      const owns = (await sb.from("sessions").select("id, table_number, invoice_no, invoice_voided, bill_no").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; invoice_no?: number | null; invoice_voided?: boolean | null; bill_no?: number | null } | null;
       if (!owns) return err("That table isn't for this restaurant.", 404);
       if (!owns.invoice_no) return err("This bill has no invoice to void.", 409);
+      // ── AND IT MUST NOT BE VOIDED TWICE (T20, 2026-09-01) ────────────────────────────────────────
+      // A void KEEPS the invoice number — retired and marked cancelled, never erased, because a number
+      // is never reused. So `invoice_no` is still set afterwards, and the check above passed a SECOND
+      // time: the reopen ran again, answered ok, and wrote a SECOND `invoice_voided` row into the
+      // Removals record — each carrying the full bill amount.
+      //
+      // That is the worst version of this fault so far, because the Removals record is where the owner
+      // and the manager answer "what came off my bills, and how much?". Two rows for one void means
+      // anybody totalling that column reads DOUBLE the money. Reproduced on a fixture: one ₹315 void,
+      // two ₹315 rows.
+      //
+      // The MANAGER's own void — the twin this handler's header promises it matches, "so the rules
+      // can't drift" — has refused this since it was written, in these words. Second time in one round
+      // that this file made that promise and broke it (see the re-fire above). Same sentence, so the
+      // two screens say the same thing about the same state.
+      if (owns.invoice_voided) return err("This bill is already reopened — it's open for edits right now.", 409);
       // What the bill stood at BEFORE it was reopened, so the audit row can say what changed —
       // the same figures the manager's own void records (editor route, invoice_void).
       // ── THE AUDIT'S AMOUNT IS THE POINT OF THE AUDIT ROW (T20 sweep #7, 2026-08-27) ──────────────
@@ -168,6 +184,40 @@ async function handler(req: NextRequest) {
         p_table: table, p_items: items, p_allergies: Array.isArray(src.allergies) ? src.allergies : [], p_note: `re-fired by admin: ${reason}`.slice(0, 200), p_restaurant_id: rid,
       });
       if (error) throw new Error(error.message);
+      // ── A REFUSED RE-FIRE MUST NOT READ AS A SENT ONE (T20 round 4, 2026-09-01) ──────────────────
+      // `lfh_staff_place_order` answers `{ ok:false, reason }` — it does not throw — when it declines
+      // to place the order: a duplicate inside its 3-second per-table lock (mig 202), a sold-out dish,
+      // a dish no longer on the menu, or an as-per-MRP line with no price. Only `error` was inspected
+      // here, so every one of those came back as `{ ok:true, kot_no: null }`: the console said the
+      // order had been re-fired, the diary line read "new KOT ?", and NOTHING reached the kitchen.
+      //
+      // During service that is somebody standing at the pass waiting for food that was never fired —
+      // and the Repair Kit is used precisely when service is already going wrong.
+      //
+      // The editor route has handled this since 2026-08-05 and says why on the line: "A REFUSAL
+      // (sold_out / unknown_item / price_required …) fell through as a SUCCESS with no order_id: the
+      // manager saw 'Order sent to the kitchen' and nothing was placed — a tap that vanished in
+      // silence." This file's own header promises it "reuses the SAME service-role primitives the
+      // panels use … so the rules can't drift". The primitive was shared; the rule was not.
+      //
+      // Found by DRIVING it: two re-fires of the same order inside three seconds, which is exactly
+      // what a person does when the first one appears to have done nothing.
+      const placed = data as { ok?: boolean; reason?: string; kot_no?: number } | null;
+      if (placed && placed.ok === false) {
+        return err(
+          placed.reason === "duplicate" ? "That same order was sent moments ago — check the kitchen board before re-firing it again."
+          : placed.reason === "sold_out" ? "One of the dishes is sold out, so this order can't be re-fired."
+          : placed.reason === "unknown_item" ? "A dish on that order is no longer on the menu, so it can't be re-fired."
+          : placed.reason === "price_required" ? "A dish on that order is priced as-per-MRP and has no price, so it can't be re-fired."
+          : "That order couldn't be re-fired — nothing was sent to the kitchen.",
+          409,
+        );
+      }
+      // …and a success with NO kot number is not a success either: the ticket is what the kitchen
+      // sees, so an answer that cannot name it has not proved anything was fired.
+      if (!placed?.kot_no) {
+        return err("The re-fire didn't produce a kitchen ticket — nothing was sent. Please try again.", 502);
+      }
       // Optionally cancel the broken original so it doesn't linger.
       // ── NEVER RECORD A CHANGE THAT DIDN'T HAPPEN (T20 sweep #7, 2026-08-27) ──────────────────────
       // This write's error was dropped and the diary line said "· old cancelled" regardless — so a
@@ -190,8 +240,19 @@ async function handler(req: NextRequest) {
     if (op === "unstick_table") {
       const sessionId = String(body.session_id || "");
       if (!UUID.test(sessionId)) return err("invalid session_id");
-      const owns = (await sb.from("sessions").select("id, table_number").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string } | null;
+      // ── AND A TABLE THAT IS ALREADY CLOSED IS NOT A TABLE THIS UNSTUCK (T20 round 4, 2026-09-01) ──
+      // `status` is read now. `closeSession` does not look at it — it sets `status:'closed'` over
+      // whatever is there, which SUCCEEDS on an already-closed session — so unsticking the same table
+      // twice answered ok and wrote a second `repair_unstick_table` line into the diary, recording a
+      // repair that repaired nothing. Same rule as the logo removal (item 33) and the re-fire above:
+      // an operation that changed nothing must not be recorded as one.
+      // It is not an ERROR — pressing it on a table someone else just closed is a reasonable thing to
+      // do — so it answers ok with `alreadyClosed`, and writes no diary line.
+      const owns = (await sb.from("sessions").select("id, table_number, status").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; status?: string } | null;
       if (!owns) return err("That table isn't for this restaurant.", 404);
+      if (owns.status === "closed") {
+        return NextResponse.json({ ok: true, alreadyClosed: true, message: "That table is already closed — nothing to unstick." });
+      }
       const res = await closeSession(sessionId, { force: true }, { panel: "admin", restaurantId: rid });
       if (!res.ok) return err(res.message, res.status);
       await clearTableSignals(rid, owns.table_number ?? null);

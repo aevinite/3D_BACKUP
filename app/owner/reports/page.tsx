@@ -384,11 +384,26 @@ export default function OwnerReports() {
     };
     return map[k] ?? null;
   };
+  // ── A REPORT HE DOES NOT HAVE MUST NOT SHOW HIM ITS SHAPE (owner, item 15, 2026-09-01) ───────
+  // Two of the eight reports belong to modules the ADMIN switches on: Team & pay (mig 220) and
+  // Inventory & stock (migs 221/224/227). When a module is off the CARD is already hidden — but a
+  // link straight to `?open=inventory` still opened the report shell: its title, its icon and the
+  // five sub-tab names (On the shelf · Purchases · Usage & cost · Waste · Expenses) over a body
+  // saying "Inventory isn't enabled for this restaurant". So the one route that was supposed to
+  // reveal nothing described the whole feature.
+  //   R36 is the rule: the owner never sees what is withheld — list only what is ON, the admin
+  // alone knows the rest. So a deep link to a module report is HELD until the module flags have
+  // arrived, and then either opened or dropped to the hub, exactly like an unknown ?open= value.
+  //   Held, not gated: the other six reports still open at once, so nothing that used to be
+  // instant becomes a wait.
+  const MODULE_REPORTS: Partial<Record<RKey, "payroll" | "inventory">> = { team: "payroll", inventory: "inventory" };
+  const pendingOpen = useRef<{ sel: RKey; sub?: string; pay?: "discounts" | "cancellations" } | null>(null);
   useEffect(() => {
     const qs = new URLSearchParams(window.location.search);
     const open = qs.get("open");
     const a = open && openAlias(open);
-    if (a) { setSel(a.sel); if (a.sub) setSub(a.sub); if (a.pay) setPayDetail(a.pay); }
+    if (a && MODULE_REPORTS[a.sel]) pendingOpen.current = a;
+    else if (a) { setSel(a.sel); if (a.sub) setSub(a.sub); if (a.pay) setPayDetail(a.pay); }
     // ── THE PERIOD TRAVELS TOO (owner, 2026-08-18) ─────────────────────────────────────────────
     // "for example I'm at thirty days all restaurant, and I open the detail view of orders, then it
     // should be also open in thirty days and all restaurant." This page used to open on its own
@@ -591,6 +606,30 @@ export default function OwnerReports() {
       setReady(true);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The held module deep-link, resolved once the entitlements have actually arrived. Off → it is
+  // dropped and he lands on the hub, which is what an unknown ?open= value already does.
+  useEffect(() => {
+    if (!ready) return;
+    const a = pendingOpen.current;
+    if (!a) return;
+    pendingOpen.current = null;
+    const mod = MODULE_REPORTS[a.sel];
+    const on = mod === "payroll" ? hasPayroll : mod === "inventory" ? hasInventory : true;
+    if (!on) return;
+    setSel(a.sel); if (a.sub) setSub(a.sub); if (a.pay) setPayDetail(a.pay);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, hasPayroll, hasInventory]);
+
+  // …and if the module goes off while he is standing in it (the admin can switch it any time),
+  // close the report rather than leaving him on a shell that no longer has anything behind it.
+  useEffect(() => {
+    if (!ready || !sel) return;
+    const mod = MODULE_REPORTS[sel];
+    if (!mod) return;
+    if (mod === "payroll" ? !hasPayroll : !hasInventory) backToHub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, sel, hasPayroll, hasInventory]);
 
   // The effective backend window for the ACTIVE report: a day-kind report is always a
   // single day (range=custom, from=to=day); a report on the "Custom…" range uses the
@@ -1822,6 +1861,18 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     // (owner-panel sweep 2026-08-04) — the server now says so with a flag and the whole
     // block below reads differently.
     const composition = data.tax?.composition === true;
+    // ── A COMPOSITION SHEET MUST NOT CONTRADICT ITSELF (owner, item 15, 2026-09-01) ────────────
+    // `composition` is the mode the restaurant is on TODAY — the app keeps no history of when it
+    // changed. So a restaurant that switched mid-year shows a window that still contains GST it
+    // really did collect, under a sheet that says it charges none. Measured by putting French
+    // House on the scheme: "TAX COLLECTED ₹25,476 · composition scheme — no GST charged", above a
+    // "Tax over time" chart with real bars and a GST column full of money.
+    //   That money is NOT hidden — it was collected and it is still owed to the government. It is
+    // LABELLED instead, so the two halves of the sheet stop arguing with each other. And when the
+    // window really holds no GST (a restaurant that has always been on the scheme) the tax chart
+    // is dropped altogether, because "Not enough data yet" under "Tax over time" reads as a
+    // missing feed rather than as the truth, which is that there is no tax here by design.
+    const legacyTax = composition && Math.round(t.tax) > 0;
     // The taxable value is recoverable exactly from the tax itself: tax = taxable × rate
     // (lib/taxFiling → taxableValue, shared with the export). It stays right when a period
     // mixes taxed and MRP/exempt lines, and is capped at net sales.
@@ -1873,7 +1924,8 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Tax collected" tone="accent" icon="fa-landmark" big value={inr(t.tax)} sub={composition ? "composition scheme — no GST charged" : `${nfmt(t.paidOrders)} paid bills`} spark={mrows.map((r) => r.tax)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
+          <Stat label="Tax collected" tone="accent" icon="fa-landmark" big value={inr(t.tax)} sub={legacyTax ? "collected before the change — still yours to file"
+            : composition ? "composition scheme — no GST charged" : `${nfmt(t.paidOrders)} paid bills`} spark={mrows.map((r) => r.tax)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
           {composition ? (
             <Stat label="Sales" tone="accent" icon="fa-cart-shopping" value={inr(netSales)}
               sub="none of it taxable to the diner" />
@@ -1898,6 +1950,14 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
             the bill shows no tax line. There is no CGST/SGST split to file — you pay the flat
             composition rate on turnover yourself, from the <b>Sales</b>{" "}
             figure above.
+          </p>
+        )}
+        {legacyTax && (
+          <p className="rs-note" style={{ marginTop: -8, marginBottom: 12 }}>
+            <i className="fas fa-clock-rotate-left" aria-hidden style={{ color: "var(--adm-warn)", marginRight: 6 }} />
+            This period still contains <b>{inr(t.tax)}</b> of GST — collected on bills raised
+            before the move to the composition scheme. That money is still yours to file — anything
+            billed since the change carries no tax line.
           </p>
         )}
         {!composition && configuredPct != null && !rateOk && (
@@ -1933,9 +1993,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         ) : (
           <EmptyCard text="Pick a single restaurant to see its CGST/SGST split — tax lines are set per restaurant." />
         )}
-        <Panel title="Tax over time" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={cser((r) => r.tax)} color={accent} money name="Tax" height={220} /></div>
-        </Panel>
+        {(!composition || legacyTax) && (
+          <Panel title="Tax over time" hint={legacyTax ? "collected before the move to the composition scheme" : undefined} pad={false}>
+            <div style={{ padding: 12 }}><ToggleChart data={cser((r) => r.tax)} color={accent} money name="Tax" height={220} /></div>
+          </Panel>
+        )}
         {filingRows.length > 0 && (
           <Panel title="Tax by period — filing view" hint="taxable value and each tax line, per period" pad={false}>
             <div className="rs-tablewrap">
@@ -1959,7 +2021,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
             money table only duplicates Period+Tax here (orders/revenue belong in Sales).
             Keep it ONLY as a fallback when no tax lines are configured, so the report
             still shows a by-period breakdown (owner round-6, phase-6 no-duplicate rule). */}
-        {filingRows.length === 0 && <MoneyTable rows={mrows} totals={t} bucket={bucket} />}
+        {filingRows.length === 0 && <MoneyTable rows={mrows} totals={t} bucket={bucket} hideTax={composition && !legacyTax} />}
       </>
     );
   }
@@ -2345,19 +2407,23 @@ function DayExtras({ dishesDay, hourlyDay, accent }: { dishesDay?: Payload; hour
 }
 
 // ── Shared money table (sales / avgbill / volume / tax) ───────────────────────
-function MoneyTable({ rows, totals, bucket, showAvg }: { rows: MoneyRow[]; totals: Totals; bucket: string; showAvg?: boolean }) {
+function MoneyTable({ rows, totals, bucket, showAvg, hideTax }: { rows: MoneyRow[]; totals: Totals; bucket: string; showAvg?: boolean;
+  /** A composition-scheme sheet with no GST anywhere in the window. A column of ₹0 under a sheet
+   *  that has just said this restaurant charges no GST is a column asking to be misread. Only
+   *  ever set when EVERY figure in it would be zero — real tax is never dropped (item 15). */
+  hideTax?: boolean }) {
   if (!rows.length) return <EmptyCard text="Nothing in this period." />;
   return (
     <Panel id="rs-by-period" title="By period" pad={false}>
       <div className="rs-tablewrap">
         <table className="rs-table">
-          <thead><tr><th>Period</th><th className="num">Orders</th><th className="num">Paid</th><th className="num">Item sales</th><th className="num">GST</th><th className="num">Discount</th><th className="num">Total collected</th>{showAvg && <th className="num">Avg bill</th>}<th className="num">Cancelled</th></tr></thead>
+          <thead><tr><th>Period</th><th className="num">Orders</th><th className="num">Paid</th><th className="num">Item sales</th>{!hideTax && <th className="num">GST</th>}<th className="num">Discount</th><th className="num">Total collected</th>{showAvg && <th className="num">Avg bill</th>}<th className="num">Cancelled</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.bucket}>
                 <td>{bucketLabel(r.bucket, bucket)}</td>
                 <td className="num">{nfmt(r.orders)}</td><td className="num">{nfmt(r.paidOrders)}</td>
-                <td className="num">{inr(r.subtotal)}</td><td className="num">{inr(r.tax)}</td><td className="num">{inr(r.discount)}</td>
+                <td className="num">{inr(r.subtotal)}</td>{!hideTax && <td className="num">{inr(r.tax)}</td>}<td className="num">{inr(r.discount)}</td>
                 <td className="num"><b>{inr(r.revenue)}</b></td>
                 {showAvg && <td className="num">{inr(r.paidOrders ? r.revenue / r.paidOrders : 0)}</td>}
                 <td className="num">{nfmt(r.cancelledOrders)}</td>
@@ -2366,7 +2432,7 @@ function MoneyTable({ rows, totals, bucket, showAvg }: { rows: MoneyRow[]; total
           </tbody>
           <tfoot><tr>
             <td>Total</td><td className="num">{nfmt(totals.orders)}</td><td className="num">{nfmt(totals.paidOrders)}</td>
-            <td className="num">{inr(totals.subtotal)}</td><td className="num">{inr(totals.tax)}</td><td className="num">{inr(totals.discount)}</td>
+            <td className="num">{inr(totals.subtotal)}</td>{!hideTax && <td className="num">{inr(totals.tax)}</td>}<td className="num">{inr(totals.discount)}</td>
             <td className="num">{inr(totals.revenue)}</td>{showAvg && <td className="num">{inr(totals.paidOrders ? totals.revenue / totals.paidOrders : 0)}</td>}
             <td className="num">{nfmt(totals.cancelledOrders)}</td>
           </tr></tfoot>
