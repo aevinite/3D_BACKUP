@@ -165,6 +165,11 @@ export async function PATCH(req: NextRequest) {
     .update(patch).eq("id", id)
     .select("id, action_id, restaurant_id, pr_url, summary").maybeSingle();
   if (r.error) return adminFail("the repair request", r.error, { action: "save" });
+  // A SAVE THAT MATCHED NO ROW IS NOT A SAVE (T19 sweep #7, 2026-09-01 — the same rule the Rate
+  // limits editor was given in sweep #6). Dismissing or reopening a request that has since gone
+  // answered ok, so the tile changed on screen and came back on the next refresh, with nothing
+  // saying why.
+  if (!r.data) return err("That request is no longer there — refresh the page.", 404);
 
   // Closing a ticket as FIXED records the fix (migs 218/219), so pressing Fix-now on an older
   // occurrence answers "already fixed, here's the PR" instead of opening a duplicate session.

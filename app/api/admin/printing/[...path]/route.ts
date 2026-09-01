@@ -37,6 +37,13 @@ export const dynamic = "force-dynamic";
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
+// THE ID'S SHAPE, BEFORE IT REACHES A UUID COLUMN (T19 sweep #7, 2026-09-01). Every sibling admin
+// route checks this and this one did not: `?rid=nonsense` went straight into
+// `.eq("restaurant_id", rid)`, so every read behind the board was refused by the database and the
+// screen rendered as a restaurant with no computers and no printers, rather than saying the link was
+// wrong. A stale bookmark is the ordinary way that happens.
+const RID_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const needRid = (rid: string) => (!rid ? "Which restaurant?" : !RID_UUID.test(rid) ? "That isn't a restaurant." : null);
 
 /** The install text for every operating system, with this machine's own code already in it. Shown
  *  ONCE, when the code is minted or replaced: the code is stored only as a hash, so it cannot be
@@ -145,7 +152,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   // sit below this line and every request answered 400 — the page rendered nothing and said nothing
   // (caught by driving it, 2026-08-27).
   const rid = new URL(req.url).searchParams.get("rid") || "";
-  if (!rid) return err("Which restaurant?");
+  const ridBad = needRid(rid);
+  if (ridBad) return err(ridBad);
 
   if (!seg.length || seg[0] === "state") {
     // ONE read of the shared board — the same call the restaurant's own Settings → Printing makes,
@@ -236,7 +244,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   const seg = (path || []).map(String);
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const rid = String(body.rid || "");
-  if (!rid) return err("Which restaurant?");
+  const ridBad = needRid(rid);
+  if (ridBad) return err(ridBad);
 
   // ── add a computer ────────────────────────────────────────────────────────────────────────
   if (seg[0] === "agents" && seg.length === 1) {
