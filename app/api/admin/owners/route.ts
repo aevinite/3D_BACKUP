@@ -539,7 +539,8 @@ export async function PATCH(req: NextRequest) {
   if (action === "delete_forever") {
     // Kept for API symmetry — reject here so no one wires a PATCH to a destructive
     // action by accident. DELETE now moves to the recycle bin; POST purge_owner is
-    // the permanent step (after 90 days).
+    // the permanent step (available as soon as they are in it — RETENTION_DAYS is 0,
+    // owner 2026-08-20).
     return bad("Use DELETE /api/admin/owners?id=… to bin, or POST purge_owner to remove permanently.", 405);
   }
 
@@ -557,8 +558,8 @@ export async function PATCH(req: NextRequest) {
   return bad("Unknown action.");
 }
 
-// The old permanent-delete guts, now used ONLY by purge_owner (after the 90-day
-// bin lock). Hands each restaurant's PRIMARY pointer to a remaining co-owner (or
+// The old permanent-delete guts, now used ONLY by purge_owner. Hands each
+// restaurant's PRIMARY pointer to a remaining co-owner (or
 // clears it — owner_user_id must never point at someone with no membership), drops
 // the join rows, then deletes the staff_users row. Returns how many restaurants
 // were released. staff_actions rows are kept on purpose (audit outlives account).
@@ -585,7 +586,10 @@ async function hardDeleteOwner(ownerId: string): Promise<{ error?: string; relea
 // step). Binning sets deleted_at so the owner drops out of the Owners list; their
 // login is already dead (suspended). NOTHING is erased — restaurant links + primary
 // pointers stay intact, so a Restore from the bin brings ownership straight back.
-// After 90 days they can be permanently purged (POST purge_owner). Mirrors the
+// They can be purged permanently (POST purge_owner) whenever the admin chooses —
+// THERE IS NO WAIT. The 90-day hold was deleted by the owner on 2026-08-20 and these
+// three comments still promised it; a comment describing a retired rule is how somebody
+// puts the rule back. See RETENTION_DAYS at the top of this file. Mirrors the
 // restaurant recycle bin (soft_delete_restaurant, mig 128/208).
 export async function DELETE(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
