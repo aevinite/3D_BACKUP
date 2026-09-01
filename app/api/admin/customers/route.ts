@@ -160,6 +160,11 @@ export async function GET(req: NextRequest) {
       key: `admincust:v1:${rid || "all"}`,
       force,
       fingerprint: async () => {
+        // A fingerprint that cannot be read comes back NULL, and lib/ownerCache treats null as "I
+        // cannot tell whether anything changed" — which makes it recompute rather than serve a
+        // possibly-stale snapshot. That is the right way round, so this read stays tolerant on
+        // purpose; the note is here because the line looks like the same omission as the tiles below,
+        // and it is not (item 18, 2026-09-01).
         const { data } = await sb.rpc("lfh_customers_fingerprint", { p_restaurant_id: rid || null });
         return typeof data === "string" ? data : null;
       },
@@ -170,18 +175,32 @@ export async function GET(req: NextRequest) {
           return q0;
         }
         const since30 = new Date(Date.now() - 30 * 86400e3).toISOString();
-        const [c1, c2, c3, c4] = await Promise.all([
-          baseCount(),
-          baseCount().gte("visits", REPEAT_MIN),
-          baseCount().eq("blocked", true),
-          baseCount().gte("first_seen_at", since30),
-        ]);
-        // Guests per restaurant — ONE grouped read in the database (mig 228), never
-        // "fetch every customer row and count them here".
-        const { data: spreadRaw } = await sb.rpc("lfh_admin_customer_spread");
+        const tiles = new ReadSet("admin/customers:tiles", await Promise.all([
+          rd("total", () => baseCount()),
+          rd("regulars", () => baseCount().gte("visits", REPEAT_MIN)),
+          rd("blocked", () => baseCount().eq("blocked", true)),
+          rd("newThisMonth", () => baseCount().gte("first_seen_at", since30)),
+          // Guests per restaurant — ONE grouped read in the database (mig 228), never
+          // "fetch every customer row and count them here".
+          rd("spread", () => sb.rpc("lfh_admin_customer_spread")),
+        ]));
+        // A FAILED COUNT MUST NOT BE STORED AS A ZERO (item 18, T19 sweep #7, 2026-09-01).
+        //
+        // These five read `c1.count || 0` and `spreadRaw || []`, with no `.error` test — so a blip
+        // turned "we could not count" into "0 saved guests · 0 regulars · 0 blocked" and an empty
+        // per-restaurant card. And this compute sits INSIDE cachedOwnerPayload, which stores what it
+        // is given: the invented zeros would then be served from the snapshot for as long as the
+        // fingerprint stayed still, which on a quiet evening is hours. lib/readGuard's own header
+        // names this exact shape as the worst of the ten it was written for.
+        //
+        // THROWN, not zeroed: cachedOwnerPayload lets a synchronous failure reach the caller, so the
+        // page gets a real error it can retry instead of a stored lie, and nothing is written under
+        // the key. `count()` and `rows()` do the throwing, and ReadFailed names which read went.
+        if (tiles.anyFailed) throw new Error(`[admin/customers] tile read(s) failed: ${tiles.failedNames.join(", ")}`);
         return {
-          total: c1.count || 0, regulars: c2.count || 0, blocked: c3.count || 0, newThisMonth: c4.count || 0,
-          spreadRaw: (spreadRaw || []) as Array<{ restaurant_id: string; guests: number; regulars: number; blocked: number }>,
+          total: tiles.count("total"), regulars: tiles.count("regulars"),
+          blocked: tiles.count("blocked"), newThisMonth: tiles.count("newThisMonth"),
+          spreadRaw: tiles.rows<{ restaurant_id: string; guests: number; regulars: number; blocked: number }>("spread"),
         };
       },
     });
