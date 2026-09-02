@@ -36,6 +36,10 @@ import { DEFAULT_RESTAURANT_ID, DEFAULT_RESTAURANT_SLUG, getRestaurantBySlug } f
 // So: import the rule instead of re-writing it. A door added tomorrow is handled in one place.
 import { tenantSlug } from "./tenantStorage";
 
+// The widening waits a failed restaurant lookup retries on — see the block above the effect that
+// uses them. Module-level, so the effect's dependency list stays honest about what can change.
+const RETRY_WAITS_MS = [2_000, 5_000, 12_000, 25_000];
+
 export interface RestaurantMeta {
   /** Resolved restaurant id (defaults to #1 until a /r/<slug> resolves). */
   id: string;
@@ -96,8 +100,52 @@ export function RestaurantProvider({ children }: { children: React.ReactNode }) 
   // /item, the original single-restaurant URLs. Everything else has to be looked up, including
   // the pinned doors: answering "#1, ready" for those is precisely the bug fixed here.
   const [ready, setReady] = useState<boolean>(() => /^\/(menu|item)(\/|$)/.test(pathname || ""));
+  // ── AND THE OTHER HALF OF ITEM 21: THE DINER IS TOLD, AND IT TRIES AGAIN BY ITSELF ─────────────
+  //
+  // (Owner picked this as item 10 of sweep #8's report, 2026-09-02 — the follow-on to the item 21
+  // he called "very imp" in sweep #7.)
+  //
+  // Item 21 answered the dangerous half: a failed lookup says "we do not know" instead of guessing
+  // restaurant #1, so nobody's order can land on somebody else's floor and somebody else's books.
+  // That protection is UNCHANGED below and must stay unchanged — it is the whole point.
+  //
+  // What it left out is the person. `ready` stays false and the effect only re-runs when `pathname`
+  // changes, so a diner who scanned a sticker got a menu that never woke up: the "+" buttons do
+  // nothing useful, the join-a-table gate never opens, and NOTHING on screen says why or offers a
+  // way out. On a restaurant floor that is a diner who cannot order and does not know it.
+  //
+  // So the failed lookup now does two more things, neither of which touches the answer it gives:
+  //   1. IT TRIES AGAIN. Four attempts on a widening, jittered wait (about 2s, 5s, 12s, 25s), then
+  //      it stops. The cause is a refused or cold read (lib/tenant.ts stands on a 10-minute-old
+  //      answer if it has one and otherwise throws), which is exactly the kind of thing that is
+  //      gone a second later — so the ordinary recovery is a page that quietly comes alive with
+  //      the diner none the wiser.
+  //   2. IT SAYS SO, ONCE. One toast on the first failure, and one final one if all four attempts
+  //      fail, that final one tappable to reload. Once, not per attempt: four toasts about the same
+  //      problem is the "don't cry wolf" rule broken in miniature.
+  //
+  // Bounded on purpose. An unbounded retry on a genuinely dead restaurant is a phone quietly
+  // hammering a server that is already unhappy — the retry-storm shape the order queue was fixed
+  // for twice. Four tries over ~45 seconds, then the diner is told to reload, which is an action a
+  // person can take and a loop cannot.
   useEffect(() => {
     let alive = true;
+    let attempt = 0;
+    let toldOnce = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // DELIBERATELY NOT TAPPABLE. A toast is only tappable when it carries an `href` or an
+    // `event`, and neither would work here: `href` does a client-side push, and pushing the path
+    // the diner is already on does not re-run this effect, so the ticket would say "tap to view →"
+    // and do nothing. So the last word is an instruction a person can act on instead — reload, or
+    // ask staff — and it is given 6s rather than an error's default 2.2s, because it is a sentence
+    // to read rather than a flash to notice.
+    const say = (message: string, subtitle: string, ms?: number) => {
+      try {
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+          message, subtitle, kicker: "menu", variant: "error", ...(ms ? { duration: ms } : {}),
+        } }));
+      } catch { /* no window (or no toast host yet) — the retry still runs */ }
+    };
     // Reset name so a stale name from the previous restaurant can't flash during
     // the resolve window (the audit's "widget briefly on old tenant" note).
     setName(null);
@@ -111,50 +159,72 @@ export function RestaurantProvider({ children }: { children: React.ReactNode }) 
     setSlug(s);
     if (s === DEFAULT_RESTAURANT_SLUG) { setId(DEFAULT_RESTAURANT_ID); setReady(true); return; }
     setReady(false);
-    getRestaurantBySlug(s)
-      // ── A FAILED LOOKUP IS "WE DON'T KNOW", NOT "IT'S RESTAURANT #1" ─────────────────────────
-      // (T25, sweep #7, item 21, 2026-08-30. The owner: *"21 is very imp do it solve and make sure
-      // this never happens."*)
-      //
-      // This used to read `setId(r?.id || DEFAULT_RESTAURANT_ID)` with a `.catch` that flipped
-      // `ready` and left the id alone — so on a failed resolve every GLOBAL widget answered
-      // "restaurant #1" for a diner standing in a different restaurant. That is not a theoretical
-      // fault: it is the one written at the top of this file, watched happening on AANGAN'S OWN
-      // TABLE-1 STICKER. Aangan has dining sessions OFF; the widgets read #1's settings, where they
-      // are ON; so tapping "+" on a dish opened the join-a-table gate instead of adding it, and the
-      // basket stayed empty. A diner scanning the sticker on their table could not order at all.
-      //
-      // It went unnoticed because restaurant #1's own stickers resolve to #1 by accident, which is
-      // the right answer for exactly one restaurant.
-      //
-      // WHEN IT CAN HAPPEN NOW. lib/tenant.ts stopped folding a failed READ into `null` on
-      // 2026-08-03 — it stands on a 10-minute-old answer if it has one and otherwise THROWS. So the
-      // `.catch` below is genuinely reachable: a cold process plus one refused read, on the
-      // `/q/<code>` door where the page renders server-side and the client re-resolves.
-      //
-      // WHY THE EMPTY STRING IS THE RIGHT ANSWER, and not a hang. The server half of this is
-      // ALREADY BUILT and already worded. `/api/guest/place-order` and `/api/guest/call-waiter` both
-      // do `isUuid(b.restaurantId) ? … : ""` and refuse with `unknown_restaurant`, and
-      // lib/guestOutbox.ts already words it for a diner: *"We couldn't tell which restaurant this
-      // order was for."* So an unknown restaurant now takes the path this codebase built for exactly
-      // that case — a visible refusal — instead of quietly becoming somebody else's order and
-      // somebody else's money. `ready` stays FALSE, which is what BanGate and CustomerGreeter
-      // already wait on.
-      //
-      // A lookup that succeeds and returns null (a slug nobody owns) is a DIFFERENT answer and keeps
-      // its old behaviour: there is no restaurant to be wrong about.
-      .then((r) => {
-        if (!alive) return;
-        if (r?.id) { setId(r.id); setName(r.name || null); setReady(true); return; }
-        setId(DEFAULT_RESTAURANT_ID); setName(null); setReady(true);
-      })
-      .catch(() => {
-        if (!alive) return;
-        setId("");          // we do not know — and "#1" would be a guess about somebody's money
-        setName(null);
-        setReady(false);    // …so nothing keyed on the restaurant acts on a guess
-      });
-    return () => { alive = false; };
+    // Named, because the retry above has to be able to call it again. Identical body to before.
+    function tryResolve() {
+      getRestaurantBySlug(s)
+        // ── A FAILED LOOKUP IS "WE DON'T KNOW", NOT "IT'S RESTAURANT #1" ─────────────────────────
+        // (T25, sweep #7, item 21, 2026-08-30. The owner: *"21 is very imp do it solve and make sure
+        // this never happens."*)
+        //
+        // This used to read `setId(r?.id || DEFAULT_RESTAURANT_ID)` with a `.catch` that flipped
+        // `ready` and left the id alone — so on a failed resolve every GLOBAL widget answered
+        // "restaurant #1" for a diner standing in a different restaurant. That is not a theoretical
+        // fault: it is the one written at the top of this file, watched happening on AANGAN'S OWN
+        // TABLE-1 STICKER. Aangan has dining sessions OFF; the widgets read #1's settings, where they
+        // are ON; so tapping "+" on a dish opened the join-a-table gate instead of adding it, and the
+        // basket stayed empty. A diner scanning the sticker on their table could not order at all.
+        //
+        // It went unnoticed because restaurant #1's own stickers resolve to #1 by accident, which is
+        // the right answer for exactly one restaurant.
+        //
+        // WHEN IT CAN HAPPEN NOW. lib/tenant.ts stopped folding a failed READ into `null` on
+        // 2026-08-03 — it stands on a 10-minute-old answer if it has one and otherwise THROWS. So the
+        // `.catch` below is genuinely reachable: a cold process plus one refused read, on the
+        // `/q/<code>` door where the page renders server-side and the client re-resolves.
+        //
+        // WHY THE EMPTY STRING IS THE RIGHT ANSWER, and not a hang. The server half of this is
+        // ALREADY BUILT and already worded. `/api/guest/place-order` and `/api/guest/call-waiter` both
+        // do `isUuid(b.restaurantId) ? … : ""` and refuse with `unknown_restaurant`, and
+        // lib/guestOutbox.ts already words it for a diner: *"We couldn't tell which restaurant this
+        // order was for."* So an unknown restaurant now takes the path this codebase built for exactly
+        // that case — a visible refusal — instead of quietly becoming somebody else's order and
+        // somebody else's money. `ready` stays FALSE, which is what BanGate and CustomerGreeter
+        // already wait on.
+        //
+        // A lookup that succeeds and returns null (a slug nobody owns) is a DIFFERENT answer and keeps
+        // its old behaviour: there is no restaurant to be wrong about.
+        .then((r) => {
+          if (!alive) return;
+          if (r?.id) { setId(r.id); setName(r.name || null); setReady(true); return; }
+          setId(DEFAULT_RESTAURANT_ID); setName(null); setReady(true);
+        })
+        .catch(() => {
+          if (!alive) return;
+          setId("");          // we do not know — and "#1" would be a guess about somebody's money
+          setName(null);
+          setReady(false);    // …so nothing keyed on the restaurant acts on a guess
+          // …AND the diner hears about it, and we try again (item 10, above). The answer this
+          // handler gives is untouched; everything below only adds the person and the retry.
+          if (!toldOnce) {
+            toldOnce = true;
+            say("We couldn't load this restaurant", "trying again in a moment…");
+          }
+          const wait = RETRY_WAITS_MS[attempt];
+          if (wait === undefined) {
+            // Out of attempts. Hand it to the one person who can do something about it, with the
+            // one action that actually works.
+            say("Still can't load this restaurant", "please reload the page, or ask a member of staff", 6000);
+            return;
+          }
+          attempt += 1;
+          // Jittered, so twenty phones in one room do not come back on the same beat — the same
+          // reason the saved-work queue rolls its own (lib/guestOutbox.ts scheduleRetry).
+          const jittered = Math.round(wait * (0.75 + Math.random() * 0.5));
+          timer = setTimeout(() => { timer = null; if (alive) tryResolve(); }, jittered);
+        });
+    }
+    tryResolve();
+    return () => { alive = false; if (timer) { clearTimeout(timer); timer = null; } };
   }, [pathname]);
 
   const value = useMemo<RestaurantMeta>(() => ({ id, slug, name, ready }), [id, slug, name, ready]);
