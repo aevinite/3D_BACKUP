@@ -348,3 +348,58 @@ against the no-JavaScript fallback.
   behind; that folder has now been pulled current and the hook is quiet. (`P55233`)
 - **Item 4** (the platform's name in a diner's browser tab): `verify:notfound` now asserts a dead
   dish link's tab title is "Menu". (`P55234`)
+
+---
+
+# T1 · SWEEP #8 ROUND 3 — the behaviour, and the failures (2026-09-02)
+
+Block `P97201`–`P98200`, claimed from the registry and **pushed to `main` before a single row was
+written**. Rounds 1 and 2 spent T1's own block (536 + 464); the owner said *"yes do it"*.
+
+**Planned on a different axis from either earlier round.** Round 1 invented its checks; round 2
+measured the names. Round 3 measured the behaviour: **382 two-way places, 26 failure paths, 91
+exits, 346 readable strings** across 2,866 lines — and then **caused** the failures.
+
+**505 written, 505 executed: 504 ✅ · 1 ❌.**
+
+## The one red — and it is real, and it is live
+
+**A half-written percent-escape in a restaurant address gives a bare 500.** Measured on the local
+production build AND the live backup site:
+
+    /r/%E0%A4/menu        → HTTP 500, 21 bytes: "Internal Server Error"
+    /q/%E0%A4             → HTTP 500
+    /r/fr%E0%A4ance/menu  → HTTP 500
+
+A diner gets no styling, no words they can act on, no restaurant — the exact dead end the two 404
+screens exist to remove. Next rejects the malformed escape inside its own request handling, before
+any of this app's code or any error boundary runs: **proved** by adding a route-level `error.tsx`
+and watching the 500 come back unchanged. **Not fixable inside this terminal's files** — it needs
+either the `middleware.ts` this project deliberately does not have, or a `next.config.ts` rewrite.
+Reported for a decision. (`P97650`)
+
+## Fixed this round
+
+**The closed-restaurant screen used a different apostrophe from the other two dead ends — and the
+guard could not see it.** `verify:notfound` has a row for exactly that rule, but
+`components/Maintenance.tsx` was not in its file list, and its test looked for a raw `'` between
+letters. JSX cannot carry a bare apostrophe in text, so a file that wants the typewriter one writes
+`&apos;` — which matched neither side of the test. Both closed; sabotaged two ways.
+
+**Nothing was watching the owner's per-restaurant browse-state rule (I11).** Replacing `sk()` with
+`(base) => base` turned NO guard in this repo red. One diner's layout, sort, search, diet and folded
+categories would follow them from restaurant to restaurant on the same phone — the bug the scoping
+was introduced to fix in July. Two rows added to `verify:guest`; sabotaged three ways.
+
+## What was caused, not read about
+
+Storage that throws on every call · a menu reply that is 500 / 503 / not JSON / the wrong shape /
+dishes-with-no-sections / sections-with-no-dishes / empty / cut off · no network at all · a browser
+with no `ResizeObserver`, no `Intl.Segmenter`, no `CSS.escape` · twelve corrupt saved values · four
+half-written escapes in the address. **Everything held except the one above.**
+
+## A lesson this round paid for
+
+`git checkout --` restores from the index, so a sabotage block **silently throws away uncommitted
+work** in any file it touches. It wiped an apostrophe fix that had not been committed yet. Commit
+before sabotaging.
