@@ -141,6 +141,29 @@ async function resolveSlug(slug: string): Promise<boolean> {
   } catch { return false; }   // offline → never promise a menu we cannot reach
 }
 
+// ── OBITUARY: four rules that could never match anything, removed 2026-09-02 (T1, item 10) ──
+//
+// Measured, not reasoned about: every one of the fifty rules in the stylesheet below was run
+// against the real screen it belongs to and asked whether it matches a single element.
+//
+//   .nf-s .again .slice                      the toaster used to be re-animated by adding an
+//   .nf-s .again .lever                      "again" class and forcing a reflow. That was replaced
+//   .nf-s .again .slice/.lever (reduce-motion) by re-keying the slice and the lever, which is what
+//                                            the comment on the toaster says. Nothing has carried
+//                                            the class "again" since, so all three were dead weight
+//                                            in every 404 this app serves. A new way replaces the
+//                                            old one — the old one's CSS included.
+//
+//   .nf-g a.nf-again                         the diner's second button is a <button>, never an
+//                                            <a>, and the no-JavaScript fallback is drawn in the
+//                                            .nf-s skin — so no anchor with this class has ever
+//                                            existed on the diner's screen. Its .nf-s twin IS
+//                                            alive, and only because of that fallback (measured
+//                                            with scripting switched off).
+//
+// This comment sits OUTSIDE the template string on purpose: a note inside it would be shipped to
+// every visitor as stylesheet bytes. Guarded by verify:notfound, which now runs every rule in this
+// stylesheet against both screens and fails on any that matches nothing.
 const CSS = `
 .nf { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 24px; text-align: center; }
 /* THE WAY OUT WAS INVISIBLE, AND THIS IS WHY.
@@ -154,8 +177,10 @@ const CSS = `
    UNDERLINE. It needs !important on the colour too. */
 .nf a.nf-btn, .nf a.nf-btn:visited, .nf a.nf-btn:hover, .nf a.nf-btn:active { text-decoration: none !important; }
 .nf-g a.nf-home, .nf-g a.nf-home:visited, .nf-g a.nf-home:hover, .nf-g a.nf-home:active { color: #23201c !important; }
-.nf-g a.nf-again, .nf-g a.nf-again:visited { color: #d9d1c5 !important; }
 .nf-s a.nf-home, .nf-s a.nf-home:visited, .nf-s a.nf-home:hover, .nf-s a.nf-home:active { color: #fff9f0 !important; }
+/* The one below is for the NO-JAVASCRIPT fallback only, and it is alive: that block is the .nf-s
+   skin and its second way out really is an <a class="nf-btn nf-again"> (measured with scripting
+   switched off). Its .nf-g twin was DELETED — see the obituary at the foot of this stylesheet. */
 .nf-s a.nf-again, .nf-s a.nf-again:visited { color: #241a12 !important; }
 .nf .nf-btn { display: block; width: 100%; padding: 14px 18px; border-radius: 12px; border: 0;
               font: 700 14.5px/1 system-ui, sans-serif; cursor: pointer; }
@@ -252,21 +277,19 @@ const CSS = `
 .nf-s .poke { font-size: 12.5px; color: #a4947f; margin: 0 0 20px; }
 .nf-s .nf-home { background: #241a12; color: #fff9f0; }
 .nf-s .nf-again { background: transparent; color: #241a12; border: 1px solid rgba(36,26,18,.22); margin-top: 9px; }
-.nf-s .again .slice { animation: nfPop .62s cubic-bezier(.2,1.5,.4,1) both }
-.nf-s .again .lever { animation: nfLever .62s ease-out both }
 @keyframes nfPop { 0% { transform: translateY(70px) } 70% { transform: translateY(-6px) } 100% { transform: translateY(0) } }
 @keyframes nfLever { 0% { transform: translateY(22px) } 100% { transform: translateY(0) } }
 @keyframes nfRise { 0% { opacity: 0; transform: translateY(0) scale(.6) }
                     20% { opacity: .5 } 100% { opacity: 0; transform: translateY(-58px) scale(2.1) } }
 
 @media (prefers-reduced-motion: reduce) {
-  .nf-g .docket, .nf-g .stamp, .nf-s .slice, .nf-s .lever,
-  .nf-s .again .slice, .nf-s .again .lever { animation: none }
+  .nf-g .docket, .nf-g .stamp, .nf-s .slice, .nf-s .lever { animation: none }
   .nf-g .stamp { opacity: 1; transform: rotate(-11deg) }
   .nf-s .slice { transform: none }
   .nf-s .smoke span { animation: none; opacity: .3 }
   .nf-s .poke { display: none }
-}`;
+}
+`;
 
 export default function NotFound() {
   // NOTHING IS RENDERED UNTIL WE KNOW WHO IS LOOKING, and that is a correction of my own first go.
