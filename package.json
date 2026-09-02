@@ -197,6 +197,9 @@
     "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs",
     "verify:owner-live500": "node scripts/verify-owner-live-500.mjs"
   },
+  "overrides": {
+    "browserslist": "^4.28.8"
+  },
   "dependencies": {
     "@sentry/nextjs": "^10.72.0",
     "@supabase/supabase-js": "^2.112.4",

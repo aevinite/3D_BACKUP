@@ -33,7 +33,18 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P95701`.** *(T2 took `P95201`–`P95700` on 2026-09-02 for its THIRD freshly planned 500. Its own pre-allocated block `P55701`–`P56700` is FULLY SPENT — 1,000 of 1,000 rows filed across rounds 1 and 2 — so this is a registry claim, not an overrun into a neighbour's range. Claimed by editing THIS LINE first and pushing it before a single row was written, which is the half of the rule this file has recorded six collisions over. The highest id actually on disk was re-checked immediately before claiming: `grep -ho '^| P[0-9]\{5\}' .claude/sweep/LEDGER/*.md | sort -u | tail -1` → `P95200`.)* *(T5 of sweep #8 took `P94701`–`P95200` on 2026-09-02 for a SECOND,
+**Next free ID: `P96201`.** *(T5 took `P95701`–`P96200` on 2026-09-02 for a THIRD freshly planned
+500, on the owner's word after round 2 was merged and deployed: *"do all 3 and after making it live
+and merging plan 500 phases test within your boundaries make sure it cover everthing within your
+boundries and test everything again if any error left"*. Its own two blocks are full — `P58701`–`P59700`
+used 694 of 1,000 and `P94701`–`P95200` used all 500 — so a third was needed. **Claimed by editing
+this line and PUSHED before a single row was written**, which is the half of the rule this file has
+recorded six collisions over; the highest id actually on disk was re-checked in the same breath
+(`grep -ho '^| P[0-9]\{5\}' .claude/sweep/LEDGER/*.md | sort -u | tail -1` → `P95700`). Fourteen of
+the block's ids are spent immediately on round 2's item 13, whose two `⏭` rows became `✅` plus
+thirteen new ones once they were driven properly.)*
+
+**Previously: `P95701`.** *(T2 took `P95201`–`P95700` on 2026-09-02 for its THIRD freshly planned 500. Its own pre-allocated block `P55701`–`P56700` is FULLY SPENT — 1,000 of 1,000 rows filed across rounds 1 and 2 — so this is a registry claim, not an overrun into a neighbour's range. Claimed by editing THIS LINE first and pushing it before a single row was written, which is the half of the rule this file has recorded six collisions over. The highest id actually on disk was re-checked immediately before claiming: `grep -ho '^| P[0-9]\{5\}' .claude/sweep/LEDGER/*.md | sort -u | tail -1` → `P95200`.)* *(T5 of sweep #8 took `P94701`–`P95200` on 2026-09-02 for a SECOND,
 freshly planned 500 — the owner's word after round 1 was merged and deployed: *"after making it
 live and merging plan 500 phases test within your boundaries make sure it cover everthing within
 your boundries and test everything again if any error left"*. Its own block `P58701`–`P59700` had
