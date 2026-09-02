@@ -286,6 +286,112 @@ check(
     "and losing the listener there would freeze the bar at whatever the first paint decided."
 );
 
+// ── a labelled section never appears with nothing under it (sweep #8 T2, item 4) ─────────────
+// The nutrition row, the About card and the allergens block all already hide themselves when empty
+// (the MENU1 rule). The INGREDIENTS heading inside the expanded description was the one exception.
+check(
+  "the dish page's INGREDIENTS heading only appears when there are ingredients",
+  (read(ITEM_CLIENT).match(/descExpanded && \(item\.ingredients\?\.length \?\? 0\) > 0/g) || []).length >= 2,
+  "app/item/[slug]/ItemClient.tsx: both the heading and its row must test the list, or a dish with " +
+    "a description and no ingredients prints a label over a blank strip."
+);
+
+// ── the heart tells the truth even when the dish page's second read never lands (item 3) ─────
+// This read used to be a passenger on the main fetch's .then(...). Since item 9 the server hands
+// the dish down, so the page renders in full even when the browser's re-read stalls — and on that
+// path the heart was left at false on a dish the guest had saved. MEASURED: tapping it then wrote
+// the same id twice, and the next tap removed both.
+{
+  const ic = read(ITEM_CLIENT);
+  check(
+    "the dish page reads its saved-dishes list in its own effect, not inside the dish fetch",
+    /useEffect\(\(\) => \{\s*\n\s*if \(!item\?\.id\) return;[\s\S]{0,900}?\}, \[item\?\.id\]\);/.test(ic) &&
+      !/setFavorited\(favorites\.includes\(dish\?\.id\)\)/.test(ic),
+    "app/item/[slug]/ItemClient.tsx: the heart must not depend on the client re-read resolving, " +
+      "or a stalled read shows an empty heart on a dish the guest already saved."
+  );
+  check(
+    "…and it follows a change made elsewhere in the same tab",
+    /addEventListener\("lfh:favorites-updated", read\)/.test(ic) &&
+      /removeEventListener\("lfh:favorites-updated", read\)/.test(ic),
+    "the heart listens for the same event this page fires, and removes the listener on unmount."
+  );
+  check(
+    "…and saving a dish that is already in the list cannot write it twice",
+    /\} else if \(!favorites\.includes\(item\.id\)\) \{/.test(ic),
+    "app/item/[slug]/ItemClient.tsx: toggleFavorite must not push an id the list already holds — " +
+      "a duplicate is then removed two-at-a-time by the next tap."
+  );
+}
+
+// ── the way out of the zoomed photo stays tappable (sweep #8 T2, item 2) ─────────────────────
+// `.img-lightbox-close` is position:absolute with no z-index, and the photo under it carries a
+// transform, which makes its own stacking context and paints on top once it is scaled up. MEASURED:
+// at 1x elementFromPoint at the X's centre is the X; at 2.5x and 5x it is the photo. Backdrop-tap
+// is deliberately off while zoomed, so the X is the only way out.
+check(
+  "the photo lightbox's close button sits above the zoomed photo",
+  /className="img-lightbox-close"\s*\n\s*style=\{\{ zIndex: 1 \}\}/.test(read(ITEM_CLIENT)),
+  "app/item/[slug]/ItemClient.tsx: the lightbox X needs its own z-index, or a zoomed photo covers " +
+    "it and a tap on the only way out merely un-zooms the picture."
+);
+
+// ── a tenant never inherits restaurant #1's static demo config (sweep #8 T2, item 1) ─────────
+// public/content/items/ holds restaurant #1's own two legacy demo dishes. The 3D route is
+// /view/<folder>, and the folder name is whatever an owner typed — so a second restaurant that
+// calls its folder "Croissant" scored a hit on #1's file. MEASURED: /view/Croissant?r=aangan-…
+// served #1's model, #1's dish name and #1's three hotspot cards under Aangan's own colour.
+{
+  const v = read(VIEWER);
+  check(
+    "the 3D screen reads the static /content config only when it really is restaurant #1",
+    /rid !== DEFAULT_RESTAURANT_ID\s*\)\s*\{\s*setConfig\(\{\}\)/.test(v),
+    "app/view/[folder]/ViewerClient.tsx must refuse `/content/items/<folder>/config.json` for any " +
+      "restaurant other than #1, or a folder-name collision serves the flagship's dish to a tenant."
+  );
+  check(
+    "…and it waits until the restaurant is actually resolved before deciding that",
+    /if \(!ridReady\) return;/.test(v) && /\[folder, rid, ridReady\]/.test(v),
+    "`rid` starts at restaurant #1 and resolves async, so the config effect must be gated on " +
+      "`ridReady` and depend on it — otherwise the first pass decides as though it were #1."
+  );
+  check(
+    "…and a restaurant lookup that fails says 'not available' rather than falling through to #1",
+    /getRestaurantBySlug\(fromRestaurant\)\.catch\(\(\) => null\)/.test(v),
+    "a rejected getRestaurantBySlug left `unavailable` unset and `ridReady` never true."
+  );
+}
+
+// ── BACK and AR are big enough for a thumb (owner's item 8, 2026-09-02) ──────────────────────
+// The height is declared in THREE places, and the last two carry `!important`, so moving one alone
+// changes nothing on screen. verify:slow-load measures the RENDERED box; this is the fast half that
+// catches the three drifting apart.
+{
+  const css = read("app/globals.css");
+  const heights = (css.match(/\.viewer-wrapper \.tbtn\{\s*\n\s*height:(\d+)px/) || [])[1];
+  const overrides = (css.match(/  height:44px !important;/g) || []).length;
+  check(
+    "the 3D screen's BACK and AR buttons are declared at 44px in all three places",
+    heights === "44" && overrides === 2,
+    "app/globals.css: .viewer-wrapper .tbtn is " + heights + "px and " + overrides + " of the two " +
+      "`height:44px !important` overrides (.back-btn, .ar-btn) are in place. All three must agree, " +
+      "or the two controls on the flagship screen go back under the 44px a thumb needs."
+  );
+}
+
+// ── a dead dish link names no platform brand in the tab either (owner's item 7, 2026-09-02) ──
+// The screen has been white-label since 2026-08-04; its <head> was not. Next discards a route's
+// generateMetadata when the page calls notFound(), so BOTH doors fell back to the root layout's
+// "Aevidine — Restaurant OS" and the platform's sales description — in the browser tab, and in the
+// preview card of any forwarded link. This is the fast, server-free half; verify:notfound drives
+// the served document, which is what catches the framework changing its mind.
+check(
+  "the guest dish 404 sets its own brand-free title instead of falling back to the platform's",
+  /export const metadata = \{\s*\n\s*title: "Menu",/.test(read("app/item/[slug]/not-found.tsx")),
+  "app/item/[slug]/not-found.tsx (and its twin) must carry a `metadata` export, or a stale dish " +
+    "link reads 'Aevidine — Restaurant OS' in a diner's browser tab and previews as our sales pitch."
+);
+
 // The two guest 404 pages are twins on purpose.
 check(
   "the two guest not-found pages for the dish routes have not drifted apart",
