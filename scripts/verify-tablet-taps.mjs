@@ -50,6 +50,8 @@ import vm from "node:vm";
 const ROOT = repoRootFrom(import.meta.url);
 const TABLET = "public/panels/tablet/app.js";
 const src = fs.readFileSync(path.join(ROOT, TABLET), "utf8");
+// The same text under a name the later blocks can use without shadowing their own local `src`.
+const APPSRC = src;
 const HTML = "public/panels/tablet/index.html";
 const CSS = "public/panels/tablet/style.css";
 
@@ -1010,6 +1012,66 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     `specificity:\n      ${dead.join("\n      ")}\n    ` +
     `Move the @media block BELOW the rule it is meant to override (that is the fix that finally ` +
     `let the restaurant's own name fit on a 360px bar), or raise its specificity on purpose.`,
+  );
+}
+
+
+// ── EVERY DOOR THE PANEL KNOCKS ON HAS TO EXIST (sweep #8 T10, 2026-09-03) ────────────────────
+//
+// The fault this was written for. `printTableBill()` has posted `/sessions/<id>/bill-printed` since
+// the day this panel learned to print a bill. That branch only ever existed on /api/editor, so
+// every one of those posts fell through to the route's "unknown POST endpoint" 404 — and the
+// `.catch(() => {})` beside the call swallowed it silently. The visible cost: the owner's rule
+// (2026-08-19) that a printed bill's button reads "Reprint" from then on held on the manager's till
+// and NOT from the waiter's handheld, because the stamp that carries the fact between panels
+// (sessions.bill_printed_at, mig 333) was never written.
+//
+// verify:twins could not see it: that guard compares the branches the three routes DO have against
+// each other. Nothing compared the calls the PANEL makes against the branches its own route
+// answers. This does, and it is the cheap half of the pair — a static read of both files.
+//
+// Every path is normalised to its shape (`${...}` → :id, query string dropped) and matched against
+// the dispatcher's own conditions, which are read out of the route rather than typed here, so a
+// branch renamed tomorrow moves this check with it.
+{
+  const routeRel = "app/api/tablet/[...path]/route.ts";
+  const route = (() => { try { return fs.readFileSync(path.join(ROOT, routeRel), "utf8"); } catch { return ""; } })();
+  const shape = (raw) => raw.replace(/\?.*$/, "").replace(/\$\{[^}]*\}/g, ":id").replace(/^\//, "").split("/").filter(Boolean);
+  // What the panel asks for — through api(), actGated() and runOptimistic() alike.
+  const calls = [];
+  for (const m of APPSRC.matchAll(/(?:api|actGated)\(\s*"(GET|POST|PUT|PATCH|DELETE)"\s*,\s*(`[^`]*`|"[^"]*")/g)) {
+    calls.push({ method: m[1], raw: m[2].slice(1, -1) });
+  }
+  // The dispatcher's own conditions. GET matches on the whole joined path; POST on [a, b, c].
+  const gets = [...route.matchAll(/path\.join\("\/"\) === "([^"]+)"/g)].map((m) => m[1]);
+  const posts = [];
+  for (const m of route.matchAll(/if \(\(?a === "([a-z-]+)"[^)\n]*?\)?\s*&&\s*([bc]) === "([a-z-]+)"/g)) posts.push({ a: m[1], pos: m[2], v: m[3] });
+  for (const m of route.matchAll(/if \(a === "([a-z-]+)" && path\.length === 1\)/g)) posts.push({ a: m[1], pos: "len1", v: "" });
+  for (const m of route.matchAll(/\(a === "order" \|\| \(a === "sessions" && b === "open"\)\)/g)) posts.push({ a: "sessions", pos: "b", v: "open" });
+  const missing = [];
+  for (const c of calls) {
+    const segs = shape(c.raw);
+    if (!segs.length) continue;
+    if (c.method === "GET") {
+      if (!gets.includes(segs.join("/"))) missing.push(`GET /${segs.join("/")}`);
+      continue;
+    }
+    const [a, b, cc] = segs;
+    const ok2 = posts.some((p2) => {
+      if (p2.a !== a) return false;
+      if (p2.pos === "len1") return segs.length === 1;
+      if (p2.pos === "b") return b === p2.v;
+      return cc === p2.v;
+    });
+    if (!ok2) missing.push(`${c.method} /${segs.join("/")}`);
+  }
+  const uniq = [...new Set(missing)];
+  check(
+    "tablet: every endpoint the panel calls exists on the tablet route",
+    uniq.length === 0,
+    `${TABLET} calls ${uniq.length} path(s) that ${routeRel} has no branch for, so each one answers\n    404 "unknown endpoint":\n      ${uniq.join("\n      ")}\n    ` +
+    `A call with a .catch() beside it fails in total silence — which is how /sessions/:id/bill-printed\n    ` +
+    `went a fortnight posting into nothing. Add the branch (mirror the manager's, word for word), or\n    remove the call.`,
   );
 }
 

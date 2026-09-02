@@ -1373,6 +1373,44 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(Array.isArray(data) ? data[0] : data);
     }
 
+    // sessions/:id/bill-printed — record that this table's bill went to the printer (mig 333).
+    //
+    // THE PANEL HAS BEEN CALLING THIS SINCE THE DAY IT LEARNED TO PRINT, AND IT WAS NOT HERE
+    // (sweep #8 T10, 2026-09-03). `printTableBill()` in public/panels/tablet/app.js posts
+    // `/sessions/<id>/bill-printed` right after it opens the bill — the branch only ever existed on
+    // /api/editor, so every one of those posts fell through to "unknown POST endpoint" and the
+    // `.catch(() => {})` beside it swallowed the 404 without a word.
+    //
+    // What that cost, in the owner's own terms. His rule (2026-08-19) is *"after once print the
+    // button will just show reprint instead of print"*, and the tablet's own comment promises the
+    // fact travels: "the manager printing at the till makes THIS screen say Reprint a minute later".
+    // It only travelled ONE WAY. A waiter printing from the handheld stamped nothing, so the flag
+    // lived in `_billPrintedHere`, an in-memory Set — the label reverted to "Print" on that same
+    // tablet after a reload, and it never said "Reprint" on the manager's till or on a second
+    // waiter's device at all. A guest asking for their bill twice is service, not an incident (that
+    // is why there is no duplicate band and no audit row) — but the two panels have to agree about
+    // whether paper has already been produced, or the till reprints a bill it thinks is the first.
+    //
+    // A BYTE-FOR-BYTE TWIN of the editor's own branch, on purpose: same read, same idempotent
+    // answer when it is already stamped, same 404 wording, same one-way stamp. Two routes writing
+    // one column with two rules is how the panels start disagreeing.
+    //   · NO tri-state gate, exactly like its twin and like `print/send` above — this is a record
+    //     that paper came out, not a permission. The waiter-section gate further up already
+    //     resolved the table from the session (lib/tableOfAction line 120), and `.eq(restaurant_id)`
+    //     is the tenant boundary, since sb is service-role.
+    //   · Stamped ONCE and never moved: the first print stays the first print.
+    //   · Answering ok() when it is already stamped is what lets the panel call it after every
+    //     print with no guard of its own, and makes a retry free.
+    if (a === "sessions" && c === "bill-printed") {
+      const ownsPrint = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
+      if (!ownsPrint) return err("That bill isn't for this restaurant.", 404);
+      if (ownsPrint.bill_printed_at) return ok({ ok: true, id: b, bill_printed_at: ownsPrint.bill_printed_at, reprint: true });
+      const atPrint = new Date().toISOString();
+      const upPrint = await sb.from("sessions").update({ bill_printed_at: atPrint }).eq("id", b).eq("restaurant_id", rid);
+      if (upPrint.error) throw pgError(upPrint.error);
+      return ok({ ok: true, id: b, bill_printed_at: atPrint, reprint: false });
+    }
+
     // tables/:t/restart — clear the round off the floor but KEEP the table open:
     // every active order on the CURRENT party's session becomes served + archived
     // (a completed order kept in records/revenue — NOT cancelled). Mirrors the
