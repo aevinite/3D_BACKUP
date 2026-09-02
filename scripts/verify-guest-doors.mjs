@@ -520,6 +520,41 @@ flush();
     /import \{ hexToRgbTriplet, isHexColor \} from ".\/brandTheme";/.test(accent));
 }
 
+// ── A RESTAURANT'S OWN LIST, NEVER RESTAURANT #1's (sweep 8 T5 round 2, 2026-09-02) ───────────
+// This guard's whole reason for existing is fault #1 at the top of this file: the global widgets
+// answered "restaurant #1" because the id resolves ASYNCHRONOUSLY. components/Header.tsx had the
+// same shape and it destroyed a guest's own choice.
+//
+// MEASURED on a production build, /r/spice-route/menu — a restaurant that sells in all six
+// languages. A diner reading in German, Arabic or Korean had their saved language silently
+// rewritten to English on page load, at random. Traced by watching localStorage: one write of
+// "en", from the effect that moves a guest off a language "this restaurant doesn't offer" — asked
+// of restaurant #1's list, ["en","fr","hi"], because that is what had resolved. Whether it hit
+// depended on which landed first, which is why it looked flaky: one run wiped de and ar, the next
+// wiped ko.
+//
+// The rule those effects exist for is right and stays. They just have to wait for `ready`.
+{
+  const hdr = read("components/Header.tsx");
+  const bare = hdr.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*)/.test(l)).join("\n");
+  check("the guest header waits for the REAL restaurant before it reads any list",
+    /const \{ id: restaurantId, ready \} = useRestaurantMeta\(\);/.test(bare));
+  check("…so the settings read never fetches restaurant #1's lists on another restaurant's page",
+    /if \(!ready\) return;[\s\S]{0,200}getSettings\(restaurantId\)/.test(bare));
+  check("…the language/currency correction waits for it too (this is the one that wiped a choice)",
+    /if \(!ready\) return;\s*\n\s*if \(menuLangs && menuLangs\.length/.test(bare));
+  check("…and so does the feature-switch correction",
+    /if \(!ready\) return;[^\n]*\n\s*if \(features\.currency === false/.test(bare));
+  check("…and every one of those effects re-runs when it finally resolves",
+    (bare.match(/\}, \[[^\]]*\bready\b[^\]]*\]\);/g) || []).length >= 3);
+  // The rule itself must not be quietly deleted instead of gated — that would "fix" the wipe by
+  // letting a guest keep a language the restaurant switched off.
+  check("…and the rule they exist for is still there: a guest is moved off a language this restaurant does not offer",
+    /!menuLangs\.includes\(getLanguage\(\)\.code\)\) setLanguage\(menuLangs\[0\]/.test(bare));
+  check("…and off a currency it does not offer",
+    /!menuCurrs\.includes\(getCurrency\(\)\.code\)\) setCurrency\(menuCurrs\[0\]/.test(bare));
+}
+
 // ── GUEST CHROME MOUNTS ON GUEST DOORS ONLY ───────────────────────────────────────────────────
 // components/GuestChrome.tsx renders sixteen always-on guest widgets, and its whole reason for
 // existing is that they must NOT run on a staff screen: the table-session machinery auto-opened
