@@ -139,3 +139,81 @@ it is 58 passed, 0 failed. Both rows are now ✅ on T5's evidence.
 
 That is the ledger's own warning turned on me: **a carried-forward reason is not a re-run.** The two
 rows said "re-checked this run" and what I actually re-checked was the sentence, not the guard.
+
+
+---
+
+# ROUND 3 (2026-09-02) — `P95201`–`P95700`
+
+Planned by measuring what the first 1,000 checks did NOT reach: 176 branches whose false side was
+never driven, 30 failure paths of which 19 had been, 50 optional reads, and 32 interactive controls
+never keyboard-checked. **500 written, 500 executed, 500 green.** Three real faults.
+
+## 10 — a dish's allergy list could not be reached from a keyboard · FIXED (`77c7102b`)
+
+Three accessibility faults, found by walking every control rather than reading the markup.
+
+* **Read more was a `<span>`**, which takes no focus and answers no key — and the INGREDIENTS and
+  CONTAINS blocks live behind it. A guest using a keyboard could not see what a dish contains. Now a
+  real `<button>` with `aria-expanded` and `aria-controls`: takes focus, Enter opens it (5 ingredient
+  chips and 1 allergy chip appear), Space closes it.
+* **The favourites heart had no accessible name** — its only child is an icon, so a screen reader
+  announced it as "button". Its neighbour was named in the T11 sweep on 2026-08-15 and it was missed.
+  17 visible controls, 1 unnamed, and it was this one. Now named both ways round, with `aria-pressed`.
+* **The 3D screen's working state had no heading at all** — the three `<h2>` in that file are on
+  dead-end screens. The dish name is now an `<h2>`, pixel-identical (22px, weight 800, bar 208px).
+
+One regression I introduced and caught by measuring: `font: "inherit"` is a SHORTHAND and took
+`.desc-toggle`'s own `font-size: 11px` with it — Read more rendered at 16px. Narrowed to the family.
+
+## 11 — the dish price is under the readable bar on five live restaurants · NOT FIXED
+
+Measured on **all nine live restaurants, in both skins**. The light skin passes everywhere. The
+**dark skin — the default — fails on five**:
+
+| restaurant | accent | price | section labels |
+|---|---|---|---|
+| burger-barn | `#78350f` | **2.07:1** | 2.07:1 |
+| pizza-palace | `#c0392b` | 3.41:1 | 3.41:1 |
+| spice-route | `#c2410c` | 3.57:1 | 3.57:1 |
+| green-bowl | `#15803d` | 3.66:1 | 3.66:1 |
+| sakura-sushi | `#db2777` | 4.02:1 | 4.02:1 |
+
+Passing: aangan `#e8772e`, taco-fiesta `#f59e0b`, french-house `#e3c06f`, demo-bistro (no accent).
+
+The price is 34px, so as large text its bar is 3:1 — burger-barn fails even that. The section labels
+are small text and all five fail the 4.5:1 bar. Screenshot read: `₹279` renders as dark brown on
+near-black. The dish NAME is white and fine; it is the price and the headings that recede.
+
+**The pattern is the accent's lightness.** Every restaurant whose brand colour is dark or deeply
+saturated fails; every warm, light one passes. The derived text colour tracks the accent and the dark
+canvas is near-black.
+
+**Not fixed here, and deliberately:** the colour comes from the shared accent derivation and the
+shared stylesheet, neither of which is this terminal's territory, and changing how every tenant's
+palette is derived affects every screen in the product. It is also not a regression from anything
+this sweep did — it has been true for as long as tenants have had accent colours.
+
+## The dish page's three fallback screens can no longer render · NOT FIXED, his call
+
+`initialItem` is now always a real dish on both doors (both pass it, both `notFound()` without one),
+so `item` starts non-null and can never become null again. That makes the spinner branch, the honest
+"we couldn't load this dish" card, "Dish not found", and the Try again button inside it **all
+unreachable** — and `retryNonce` can never leave 0.
+
+**Driven four ways to be sure:** with every database read held open for 13 seconds the guest still
+sees the dish, its name and its price. No spinner, no card, no Try again. What is lost is the related
+row and the prev/next arrows, silently.
+
+The product is better than it was. But three assertions in `verify:3d-viewer` defend a screen that
+cannot render — including the deadline VALUE this terminal hardened as item 9 earlier the same day.
+That is the owner's own "a new way replaces the old one" rule, and deleting ~60 lines of guest-facing
+fallback on the hottest page in the product is his call, not one to take at the end of a long run.
+
+## One failure path worth naming
+
+`catch {}` around the 3D screen's dish read reports nothing. For a tenant it is harmless — that read
+also supplies the model, so losing it means the 32-second overlay says "3D view unavailable" honestly.
+For restaurant #1 it is not: the model comes from the static config instead, so the model loads, the
+bar falls back to the config's own name and stats, and **Add to order sits disabled with nothing
+saying why**. Narrow, real, and a wording decision rather than a code one.
