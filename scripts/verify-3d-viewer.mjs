@@ -270,13 +270,22 @@ check(
 );
 
 // The pinned add bar is a phone-and-tablet shortcut. On a laptop it floats over the description.
+//
+// THE NUMBER IS CHECKED, NOT JUST THE NAME (sweep #8 T2, 2026-09-02 — item 9). This read
+// `/const PINNED_BAR_MAX_WIDTH = (\d+)/` — which captures the digits and then throws them away, so
+// `= 99999` satisfied it exactly as well as `= 1024` while putting the bar back on every laptop.
+// PROVEN by sabotage: setting it to 99999 left this guard GREEN. A breakpoint outside this range is
+// not a tuning choice, it is the fix being switched off, so the range is deliberately generous
+// (480 = a large phone, 1200 = past every tablet) and only a value that defeats it fails.
+const PINNED_BAR_PX = Number((src[ITEM_CLIENT].match(/const PINNED_BAR_MAX_WIDTH = (\d+)/) || [])[1]);
 check(
   "the pinned Add bar is limited to phone/tablet widths",
-  /const PINNED_BAR_MAX_WIDTH = (\d+)/.test(src[ITEM_CLIENT]) &&
+  Number.isFinite(PINNED_BAR_PX) && PINNED_BAR_PX >= 480 && PINNED_BAR_PX <= 1200 &&
     /matchMedia\(`\(max-width: \$\{PINNED_BAR_MAX_WIDTH\}px\)`\)/.test(src[ITEM_CLIENT]) &&
     /includes\("sold-out"\) && barFitsScreen && \(/.test(src[ITEM_CLIENT]),
-  `${ITEM_CLIENT} → keep PINNED_BAR_MAX_WIDTH, its live matchMedia, and the barFitsScreen condition ` +
-    "on the bar. Measured at 1280×800 before the fix: the bar sat at y=754 covering two lines of " +
+  `${ITEM_CLIENT} → PINNED_BAR_MAX_WIDTH is ${PINNED_BAR_PX}px; it must be a real phone/tablet ` +
+    "breakpoint (480–1200), and its live matchMedia and the barFitsScreen condition must stay on the " +
+    "bar. Measured at 1280×800 before the fix: the bar sat at y=754 covering two lines of " +
     '"About this dish".'
 );
 check(
@@ -610,13 +619,20 @@ check(
 // deadline, and past it the guest gets a card that says so, with Try again and Back to menu.
 {
   const code = src[ITEM_CLIENT].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const DEADLINE_MS = Number((code.match(/const DISH_READ_DEADLINE_MS = (\d+)/) || [])[1]);
   check(
     "the dish page puts a deadline on its own read, so it can never spin forever",
-    /const DISH_READ_DEADLINE_MS = \d+/.test(code) &&
+    // THE NUMBER IS CHECKED, NOT JUST THE NAME (sweep #8 T2, 2026-09-02 — item 9). `\d+` matched
+    // `= 0` just as happily as `= 8000`, and a zero deadline trips on EVERY load — the honest
+    // "we couldn't load this dish" card would replace a dish that was arriving perfectly well.
+    // PROVEN by sabotage: setting it to 0 left this guard green. 3–20s is the range in which this
+    // is a patience timer at all; outside it, it is either a hair-trigger or never fires.
+    Number.isFinite(DEADLINE_MS) && DEADLINE_MS >= 3000 && DEADLINE_MS <= 20000 &&
       /const deadline = setTimeout\(/.test(code) &&
       /setReadTimedOut\(true\)/.test(code) && /setLoading\(false\)/.test(code),
-    ITEM_CLIENT + " \u2192 keep DISH_READ_DEADLINE_MS and the timer that trips it. Without it a " +
-      "stalled read leaves the guest on 'Plating your dish' with no dish and no way out."
+    ITEM_CLIENT + " \u2192 DISH_READ_DEADLINE_MS is " + DEADLINE_MS + "ms; it must be a real patience " +
+      "window (3000–20000) and the timer that trips it must stay. Too small and every load shows the " +
+      "failure card; absent and a stalled read leaves the guest on 'Plating your dish' with no way out."
   );
   check(
     "…the deadline is cleared when the reply lands, and when the screen goes",
