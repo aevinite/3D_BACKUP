@@ -50,6 +50,7 @@ Code: `app/menu`, `app/r/[restaurant]`, `app/q/[code]`, `components/*`, `lib/men
 | a dish hidden or taken off the menu | `verify:hidden` | nothing | no |
 | the scroll-spy category strip | `verify:scrollspy` | app running | no |
 | languages / translated text | `verify:i18n-scope` | nothing | no |
+| accent-coloured TEXT on a guest screen (dish price, links) — the `--accent-ink` / `--accent-ink-dim` tokens | `verify:accent-ink` | nothing | no |
 | allergy chips or per-item allergy data | `verify:allergy-isolation` | `.env.local` | **YES** |
 | the guest's cart, order placing, or the offline outbox | `verify:order-retry`, `verify:guest-recovery`, `verify:outbox` | nothing | no |
 | the basket panel or the order tracker themselves (`components/CartPanel.tsx`, `components/OrderTracker.tsx`, `lib/guestOutbox.ts`) | `verify:basket` ← reads the shipped files and executes the shipped logic against synthetic input; no DB, no login, no server | nothing | no |
@@ -246,6 +247,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 
 | you touched | run | needs | writes |
 |---|---|---|---|
+| an activity-log or audit line a person will read | `verify:plain-logs` | nothing | no |
 | `CLAUDE.md`, `AGENTS.md`, or any doc CLAUDE.md points at | `verify:pointers` | nothing | no |
 | **`.vercelignore`** — adding or removing an exclusion | `npm run build` **with the folder moved out of the tree**, then move it back. Nothing else proves it: an unanchored `/editor` line once 404'd the whole manager panel on every deploy, and a grep finding no reader is not the same as a build succeeding. `/supabase` (371 files) was added this way on 2026-08-22. | nothing | no |
 | `.claude/settings.json` or a permission rule | `verify:no-ask` | reads `~/.claude/CLAUDE.md` | no |
