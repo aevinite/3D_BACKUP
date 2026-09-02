@@ -96,6 +96,21 @@ check("158-161", "a switched-off category's dishes are filtered in the data laye
 // groups however many dishes arrived — and the branch under it said "No dishes match these
 // filters. Try turning a filter off." with no filter on, above 59 undrawn dishes. Measured on a
 // production build at 360x780 with the sections half of the menu read emptied.
+// ── A NAME'S HIGHLIGHT MARKERS NEVER REACH A SCREEN (owner, item 6, 2026-09-02) ──────────────
+// A wordmark is stored with *asterisks* around the part that wears the accent. Every render site
+// divides it through lib/brandText first — except the maintenance screen, which used the raw
+// string, so `alt="Demo *Bistro*"` went to a screen reader and a restaurant with markers and no
+// uploaded logo would have shown the asterisks in 40px text.
+check("P55225", "the maintenance screen strips a name's highlight markers before showing it", () => {
+  const m = code("components/Maintenance.tsx");
+  return { ok: has(m, "stripBrandMarkers") && rx(m, /const name = isDefault \? "Little French House" : stripBrandMarkers\(logoText \|\| ""\)/),
+           note: "one call, on the single value that feeds the alt text, the aria-label and the text fallback" };
+});
+check("P55226", "…and every OTHER guest render site still divides the same text the same way", () => {
+  const want = { "components/Header.tsx": "splitBrandSegments", "components/HeroTitle.tsx": "lib/brandText", "components/IntroSplash.tsx": "lib/brandText" };
+  const missing = Object.entries(want).filter(([f, k]) => !has(code(f), k)).map(([f]) => f.split("/").pop());
+  return { ok: missing.length === 0, note: missing.length ? "missing: " + missing.join(", ") : "header, hero and splash all go through lib/brandText" };
+});
 check("P55217", "with dishes but no sections, the menu shows the dishes rather than blaming a filter", () => {
   const mv = F.menuView;
   return { ok: has(mv, "allGroups.length === 0 && filteredItems.length > 0 && !anyFilterOn")
