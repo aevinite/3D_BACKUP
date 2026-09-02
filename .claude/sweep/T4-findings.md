@@ -227,3 +227,42 @@ place: **108 ✅, 1 ⏭, ZERO regressions.**
   reconciles it once. It is not in the PostToolUse hook, so it blocks nobody.
 * `lib/tableConnection.ts` still says the card "polls the live session every 3s". Same stale claim
   as item 12, in a file this territory does not own.
+
+## ROUND 2 (2026-09-02) — after round 1 was merged and deployed
+
+Owner: *"after making it live and merging plan 500 phases test within your boundaries make sure it
+cover everthing within your boundries and test everything again if any error left"*.
+
+**363 rows, `P58205`–`P58567`, 0 red.** Deliberately not round 1 again: round 1 was 405 reads and
+99 driven checks, because the hardest ground in this territory needs a LIVE session at an OPEN
+table and round 1 never opened one. Round 2 went there.
+
+* A real session on French House table 27, opened and closed by this run, with every row deleted by
+  its own id in a `finally` — and **the floating table card photographed for the first time in any
+  sweep**.
+* Round 1's item 2 DRIVEN: the order held in flight in the browser, the sheet dismissed mid-send,
+  and the basket proved to hear the send's real result (`{ok:true, orderId}`) instead of the
+  cancellation the close used to invent. No database write at all — both the session read and the
+  order POST were answered inside the page.
+* The Allow door signed in as a manager, an owner, a kitchen user, a tablet AND the admin.
+* The live-socket config for four roles, including that a `?rid=` cannot move a real staff member.
+* The one name across the whole sheet; offline and a will-not-answer restaurant, both driven.
+* All 30 `verify:*` guards touching this ground, re-run. Two exited non-zero and BOTH were
+  "could not run", not "ran and found something" — `verify:offline` refuses a dev server honestly
+  (dev serves JavaScript no-cache, so no offline check could pass) and `verify:notfound` needs
+  `--base`. Green on a production build: 58 passed, 0 failed.
+
+**Three things I got wrong this round, all recorded as rows rather than quietly fixed:**
+
+1. `P58550` — my first offline run answered from **another session's production server on 4305**:
+   my own `next start` died with `EADDRINUSE` and I read the green without checking whose server
+   had replied. Discarded and redone on 4344, proved free and proved mine by pid. Theirs untouched.
+2. `P58224` — my cleanup ASSERTION counted every row ever written to table 27 (248 historical
+   sessions) instead of only mine. The delete was right; the check was the exact
+   "clean up whatever is there" shape the rules warn about.
+3. `P58262` — a made-up session token meant the sheet never reached "One moment…", so the first
+   in-flight check measured the wrong screen. Kept in the ledger as a `✅ NOT a finding`, because a
+   row saying "my harness was wrong" is worth as much as one saying the product was.
+
+**Still not reachable, named rather than glossed:** a second diner joining a head's table and being
+approved or declined needs `components/SessionOwner.tsx`, which this territory does not own.
