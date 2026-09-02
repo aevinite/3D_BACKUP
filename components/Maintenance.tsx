@@ -75,8 +75,14 @@ export default function Maintenance({ logoText, logoUrl, isDefault = true }: { l
       </div>
       {/* The small pill-shaped label */}
       <div className="maint-badge">🔧 Under Maintenance</div>
-      {/* The big friendly headline */}
-      <h1 className="maint-title">We&apos;ll be right back</h1>
+      {/* The big friendly headline.
+          THE TYPESET APOSTROPHE, like the two 404 screens (T1 round 3, 2026-09-02). This file used
+          &apos; — the typewriter one — while app/not-found.tsx and components/GuestNotFound.tsx both
+          use &rsquo;. A diner who hits a dead link and then finds the restaurant closed is the same
+          person on the same evening, and the difference is the sort of thing nobody can name when
+          they see it and everybody registers. verify:notfound guards that rule; this file simply
+          was not in its list, and the rule could not see &apos; at all. Both are fixed. */}
+      <h1 className="maint-title">We&rsquo;ll be right back</h1>
       {/* The reassuring sentence underneath.
           P5 (T15, 2026-08-14): this used to end "Please check back in a few minutes." Nothing turns
           this screen off on a timer — it stays until a person flips Menu maintenance back off — so a
@@ -86,7 +92,7 @@ export default function Maintenance({ logoText, logoUrl, isDefault = true }: { l
           taking orders right now, and ask them to check with the staff, who DO know when. Do not put
           a time back in unless the switch gains one. */}
       <p className="maint-sub">
-        We&apos;re not taking orders right now. Please ask a member of staff — they can tell you when
+        We&rsquo;re not taking orders right now. Please ask a member of staff — they can tell you when
         the menu is back.
       </p>
       {/* Three bouncing dots, the classic "still working..." animation */}

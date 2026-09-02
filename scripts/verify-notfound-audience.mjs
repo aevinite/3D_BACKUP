@@ -355,7 +355,11 @@ const run = async () => {
     // guest screens did. Nobody can name it when they see it and everybody registers it. So it is
     // a check rather than a thing to remember.
     {
-      const files = ["app/not-found.tsx", "components/GuestNotFound.tsx", "public/offline.html"];
+      // components/Maintenance.tsx joined this list on 2026-09-02 (T1 round 3). It is the third
+      // screen a diner meets when something is not available, it carries readable words, and it was
+      // the only one of the three not guarded — it had drifted to the typewriter apostrophe while
+      // the other two use the typeset one.
+      const files = ["app/not-found.tsx", "components/GuestNotFound.tsx", "components/Maintenance.tsx", "public/offline.html"];
       const { readFileSync } = await import("node:fs");
       const { join, dirname } = await import("node:path");
       const { fileURLToPath } = await import("node:url");
@@ -376,8 +380,15 @@ const run = async () => {
           .map((l) => l.replace(/\s\/\/.*$/, ""))
           .join("\n");
         const curly = /[\u2019]|&rsquo;/.test(text);
-        // a typewriter apostrophe INSIDE a word ("isn't", "doesn't") — not a JS string delimiter
-        const straight = /[a-z]'[a-z]/i.test(text);
+        // a typewriter apostrophe INSIDE a word ("isn't", "doesn't") — not a JS string delimiter.
+        //
+        // …AND ITS HTML ENTITIES, which this check could not see until 2026-09-02 (T1 round 3).
+        // JSX cannot carry a bare apostrophe in text, so a file that wants the typewriter one writes
+        // `&apos;` — and `&apos;` matched neither side of this test. components/Maintenance.tsx used
+        // it twice and read as having no apostrophes at all; mixing the two styles in that file did
+        // not turn this row red. A guard that cannot see the thing it is for is worse than no guard,
+        // because it reads as a pass. Proven by sabotage after the fix: one of each now goes red.
+        const straight = /[a-z]'[a-z]/i.test(text) || /&apos;|&#0*39;/.test(text);
         if (curly && straight) mixed.push(f);
       }
       mixed.length === 0
