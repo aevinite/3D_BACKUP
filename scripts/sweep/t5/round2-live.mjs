@@ -24,6 +24,21 @@ const SHOTS = path.join(ROOT, ".claude/sweep/shots/T5");
 fs.mkdirSync(SHOTS, { recursive: true });
 const A35 = { viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// POLL, NEVER SLEEP-AND-HOPE. Driven against the DEPLOYED site, six of these rows went red on one
+// run and green on the next: a fixed `wait(1400)` is enough for a star animation on localhost and
+// not over the network. A check that passes on the second run is worse than no check — it teaches
+// whoever sees it to re-run until green, which is how this repo has twice lost ten checks without
+// noticing. So anything asynchronous is waited for BY ITS RESULT, with a deadline.
+const until = async (page, fn, ms = 12000, every = 250) => {
+  const deadline = Date.now() + ms;
+  let last;
+  for (;;) {
+    last = await page.evaluate(fn);
+    if (last && (last.ok === undefined ? true : last.ok)) return last;
+    if (Date.now() > deadline) return last;
+    await wait(every);
+  }
+};
 
 await requireUp(BASE, "the T5 round-2 live walk");
 const browser = await chromium.launch();
@@ -178,7 +193,16 @@ try {
     await op.evaluate(() => window.dispatchEvent(new Event("lfh:open-cart")));
     await wait(900);
     await op.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => /place order/i.test(x.textContent || "")); if (b) b.click(); });
-    await wait(3000);
+    // Wait for the ORDER TO BE IN THE STORE, however long the network takes to refuse it.
+    await until(op, async () => {
+      const rows = await new Promise((res) => {
+        const r = indexedDB.open("lfh_guest_outbox", 1);
+        r.onsuccess = () => { try { const g = r.result.transaction("orders", "readonly").objectStore("orders").getAll();
+          g.onsuccess = () => res(g.result); g.onerror = () => res([]); } catch { res([]); } };
+        r.onerror = () => res([]);
+      });
+      return { ok: rows.length > 0 && !!document.querySelector(".gob-chip") };
+    }, 25000);
     outbox = await op.evaluate(async () => {
       const rows = await new Promise((res) => {
         const r = indexedDB.open("lfh_guest_outbox", 1);
@@ -188,7 +212,7 @@ try {
       });
       const chipEl = document.querySelector(".gob-chip");
       if (chipEl) chipEl.click();
-      await new Promise((r) => setTimeout(r, 600));
+      for (let i = 0; i < 30 && !document.querySelector(".gob-row"); i++) await new Promise((r) => setTimeout(r, 150));
       return { queued: rows.length, kinds: rows.map((x) => x.kind || "order"),
                chip: (chipEl?.textContent || "").trim(),
                rows: document.querySelectorAll(".gob-row").length,
@@ -323,7 +347,7 @@ try {
   await p.waitForSelector(".review-tab-btn", { timeout: 30000 }).catch(() => {});
   const starsClosed = await p.evaluate(() => document.querySelectorAll(".sr-li").length);
   await p.click(".review-tab-btn").catch(() => {});
-  await wait(800);
+  await until(p, () => ({ ok: document.querySelectorAll(".sr-li").length === 5 }));
   const dish = await p.evaluate(() => {
     const pill = document.querySelector(".sr-score-pill");
     const r = pill?.getBoundingClientRect();
@@ -343,14 +367,18 @@ try {
   check("P95711", "…and it fits the phone", () => dish.pillW <= dish.vw || `${dish.pillW}px`);
   // pick a rating with a real tap, and with the keyboard, and watch the score follow
   const toggles = await p.$$(".sr-li .sr-toggle");
-  if (toggles[2]) { await toggles[2].click(); await wait(1400); }
-  const tapped = await p.evaluate(() => ({ active: document.querySelectorAll(".sr-li.active").length,
-                                           num: document.querySelector(".sr-score-num")?.textContent }));
+  // The dive-in animation is ~1.4s on localhost and longer over the network — so the SCORE is what
+  // is waited for, not the clock.
+  if (toggles[2]) await toggles[2].click();
+  const tapped = await until(p, () => ({ active: document.querySelectorAll(".sr-li.active").length,
+                                         num: document.querySelector(".sr-score-num")?.textContent,
+                                         ok: document.querySelectorAll(".sr-li.active").length === 3 }));
   check("P95712", "tapping the third star lights three, and the score says 3", () =>
     (tapped.active === 3 && tapped.num === "3") || JSON.stringify(tapped));
-  if (toggles[4]) { await toggles[4].focus(); await p.keyboard.press("Enter"); await wait(1400); }
-  const keyed = await p.evaluate(() => ({ active: document.querySelectorAll(".sr-li.active").length,
-                                          num: document.querySelector(".sr-score-num")?.textContent }));
+  if (toggles[4]) { await toggles[4].focus(); await p.keyboard.press("Enter"); }
+  const keyed = await until(p, () => ({ active: document.querySelectorAll(".sr-li.active").length,
+                                        num: document.querySelector(".sr-score-num")?.textContent,
+                                        ok: document.querySelectorAll(".sr-li.active").length === 5 }));
   check("P95713", "…and Enter on the fifth lights five, so it is not mouse-only", () =>
     (keyed.active === 5 && keyed.num === "5") || JSON.stringify(keyed));
   check("P95714", "the dish page shows no code token", () =>
