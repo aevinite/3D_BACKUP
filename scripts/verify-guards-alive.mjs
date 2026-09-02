@@ -231,7 +231,10 @@ function quotedStrings(src) {
     const drivesBrowser = /\.goto\(|frameLocator\(|newContext\(/.test(src);
     const fetchesBase = /fetch\(\s*`\$\{BASE\}|fetch\(\s*BASE\s*\+|fetch\(\s*`\$\{B\}/.test(src);
     if (!drivesBrowser && !fetchesBase) continue;
-    if (/requireAppUp|requireUp/.test(bare(src))) continue;                    // has the preflight — in CODE, not in a comment about it
+    // THE CALL, NOT THE IMPORT. `/requireUp/` matched the `import { requireUp }` line on its own,
+    // so deleting the actual `await requireUp(BASE, …)` and leaving the import kept this green —
+    // found by sabotage, sweep 8 T5 round 2, on the very guard that had just been given one.
+    if (/\brequire(?:App)?Up\s*\(/.test(bare(src))) continue;                    // has the preflight — in CODE, not in a comment about it
     // A GUARD THAT SERVES ITS OWN PAGES NEEDS NO APP AND NO BASE (sweep #7 / T28, 2026-08-28).
     // scripts/verify-bill-screens.mjs opens a browser and navigates — to page.setContent() and to
     // addresses it fulfils itself with page.route(). There is no server to preflight and no base to

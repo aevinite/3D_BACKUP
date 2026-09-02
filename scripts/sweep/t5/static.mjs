@@ -747,6 +747,19 @@ check("P58999","a broken saved cart shows 0, never a crash",()=>has(HDR,/\} catc
 check("P59000","the connection badge on the guest header is rendered in guest mode",()=>has(HDR,/<ConnectionBadge guest \/>/));
 
 // D8 · IntroSplash — one branded opening per restaurant
+// Item 5's fix, guarded WITHOUT a server. P59331–P59333 measure it live, which is the real proof —
+// but a live row cannot run in CI or in the sabotage band, and removing the wrap turned nothing red
+// (round 2, P95155). Both halves are asserted: the box may wrap, and the words are atomic.
+check("P58896","the opening name's box may wrap, and is bounded by the screen",()=>
+  has(INTRO,/flexWrap: "wrap"/) === true && has(INTRO,/maxWidth: "92vw"/) === true &&
+  has(INTRO,/justifyContent: "center"/) === true);
+check("P58897","…and each WORD is one atomic item, so a break can never land between two letters",()=>
+  has(INTRO,/whiteSpace: "nowrap"/) === true && has(INTRO,/if \(ch\.isSpace\) \{ out\.push\(cur\); cur = \[\]; \}/) === true);
+check("P58898","…and the name is the smaller size the owner asked for",()=>{
+  const m = INTRO.match(/fontSize: "clamp\((\d+(?:\.\d+)?)px, (\d+(?:\.\d+)?)vw, (\d+(?:\.\d+)?)px\)"/);
+  if (!m) return "the opening name no longer sets its own size";
+  return (Number(m[3]) <= 22 && Number(m[2]) <= 5) || `clamp(${m[1]}px, ${m[2]}vw, ${m[3]}px) is not smaller than it was`;
+});
 check("P59001","the seen-flag is scoped per restaurant, so B never inherits A's splash",()=>
   has(INTRO,/const seenKey = "lfh_intro_seen:" \+ \(scopeKey \|\| wordmark \|\| "default"\);/));
 check("P59002","a device that refuses storage still gets a menu",()=>
@@ -974,8 +987,11 @@ check("P59099","the send button refuses a too-short number rather than posting i
 check("P59100","not banned renders nothing",()=>has(BAN,/if \(!banned\) return null;/));
 check("P59101","the trap field is off-screen, never display:none",()=>
   has(BOT,/left: "-9999px"/) === true && hasNot(BOT,/display: "none"/) === true);
-check("P59102","the trap field cannot be reached with Tab and is hidden from screen readers",()=>
-  has(BOT,/tabIndex=\{-1\}/) === true && has(BOT,/aria-hidden="true"/) === true);
+// BOTH inputs, counted. `has(...)` was satisfied by either one of the two, so making the first
+// reachable by Tab left this green — found by sabotage (round 2, P95184). A visible or reachable
+// trap field REFUSES REAL PEOPLE, which is the one failure it must never have.
+check("P59102","BOTH trap fields are unreachable by Tab, and the pair is hidden from screen readers",()=>
+  eq(countOf(codeOf(BOT),/tabIndex=\{-1\}/),2) === true && has(BOT,/aria-hidden="true"/) === true);
 check("P59103","autofill is kept out of both trap inputs",()=>eq(countOf(codeOf(BOT),/autoComplete="off"/),2));
 check("P59104","the elapsed field really is kept current on a timer",()=>
   has(BOT,/const id = setInterval\(write, 500\);/) === true && has(BOT,/return \(\) => clearInterval\(id\);/) === true);
@@ -1373,8 +1389,19 @@ check("P59409","every realtime subscription in this territory is keyed per resta
   }
   return bad.length===0 || bad.join(", ");
 });
-check("P59410","every realtime subscriber in this territory drops its socket on an idle hidden tab",()=>{
-  const bad = MINE_FILES.filter(([n,b]) => /\.channel\(/.test(b) && !/IDLE_MS/.test(b)).map(([n])=>n);
+// The VALUE, not just the name. `/IDLE_MS/` was satisfied by `const IDLE_MS = 1e12`, which is a
+// socket that never drops — found by sabotage (round 2, P95180). Two minutes is the number both
+// subscribers were written to; anything past five would hold a phantom connection all service.
+check("P59410","every realtime subscriber in this territory really drops its socket on an idle hidden tab",()=>{
+  const bad = [];
+  for (const [n,b] of MINE_FILES) {
+    if (!/\.channel\(/.test(b)) continue;
+    const m = b.match(/const IDLE_MS = ([\d_e+]+);/);
+    if (!m) { bad.push(`${n}: no idle window at all`); continue; }
+    const ms = Number(String(m[1]).replace(/_/g,""));
+    if (!(ms > 0 && ms <= 300000)) bad.push(`${n}: IDLE_MS=${m[1]}`);
+    if (!/setTimeout\(teardown, IDLE_MS\)/.test(b)) bad.push(`${n}: nothing arms the drop`);
+  }
   return bad.length===0 || bad.join(", ");
 });
 check("P59411","no component in this territory recomputes money the server already computed",()=>
@@ -1625,4 +1652,7 @@ check("P59479","nothing in this territory can hide a sale from the Z-report",()=
 check("P59480","a restaurant with one language never sees a picker it cannot use",()=>
   has(HDR,/currencyOptions\.length > 1/) === true && has(HDR,/languageOptions\.length > 1/) === true);
 
-report("T5 static — sweep #8");
+// EXIT WITH THE FAILURE COUNT. Without this the script printed its reds and exited 0, so
+// anything driving it — CI, or round 2's own sabotage band — read a red run as a green one.
+// Found by the sabotage band, which is exactly what it is for. (2026-09-02.)
+process.exit(report("T5 static — sweep #8") ? 1 : 0);

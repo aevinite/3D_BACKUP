@@ -9,7 +9,7 @@ import { useFeatures } from "@/lib/features";
 // Which languages/currencies THIS restaurant offers (Access → Menu → Format) — the same
 // short-TTL de-duplicated settings read useFeatures makes, so it adds no request.
 import { getSettings } from "@/lib/menu";
-import { useRestaurantId } from "@/lib/restaurant-context";
+import { useRestaurantMeta } from "@/lib/restaurant-context";
 import {
   CURRENCIES,
   LANGUAGES,
@@ -45,7 +45,11 @@ const readTheme = (): Theme => {
 // Header: the top bar with the restaurant name, currency/language pickers, a
 // light/dark toggle, and the cart button (with its item-count badge).
 export default function Header({ logoText }: { logoText?: string }) {
-  const restaurantId = useRestaurantId();
+  // `ready`, not just the id. The id STARTS as restaurant #1's placeholder and only becomes the
+  // real one once the /r/<slug> lookup lands — and the two corrective effects below act on a
+  // restaurant's own lists, so acting before it resolves means acting on #1's. See the note above
+  // each of them for what that actually did to a diner.
+  const { id: restaurantId, ready } = useRestaurantMeta();
   // Re-fits whenever the name itself changes — a soft restaurant switch, or the wordmark being
   // edited — and whenever the bar's own box resizes (rotating the phone).
   const brandRef = useFitText<HTMLHeadingElement>(logoText || "little French house");
@@ -130,10 +134,11 @@ export default function Header({ logoText }: { logoText?: string }) {
   // saved choice would still apply, so we force it back to the default when the feature
   // is off. (When it's on, the guest's own choice is untouched.)
   useEffect(() => {
+    if (!ready) return; // the switch we would act on is still restaurant #1's
     if (features.currency === false && getCurrency().code !== "INR") setCurrency("INR");
     if (features.languages === false && getLanguage().code !== "en") setLanguage("en");
     // Re-runs only when a feature flag resolves/changes — never on the guest's own pick.
-  }, [features.currency, features.languages]);
+  }, [features.currency, features.languages, ready]);
 
   // WHICH languages / currencies this restaurant offers (Access → Menu → Format). Exactly
   // one means the switcher is REMOVED, not disabled — the owner's rule. getSettings is the
@@ -143,18 +148,33 @@ export default function Header({ logoText }: { logoText?: string }) {
   const [menuLangs, setMenuLangs] = useState<string[] | null>(null);
   const [menuCurrs, setMenuCurrs] = useState<string[] | null>(null);
   useEffect(() => {
+    if (!ready) return; // never read #1's lists on another restaurant's page
     let alive = true;
     getSettings(restaurantId)
       .then((s) => { if (alive) { setMenuLangs(s.menuLanguages); setMenuCurrs(s.menuCurrencies); } })
       .catch(() => {});
     return () => { alive = false; };
-  }, [restaurantId]);
+  }, [restaurantId, ready]);
   // A guest carrying a choice from ANOTHER restaurant must not keep a language this one
   // doesn't offer — that would render the menu in a language the restaurant switched off.
+  // …AND IT MUST BE THIS RESTAURANT'S LIST, NOT RESTAURANT #1's (sweep 8 T5 round 2, 2026-09-02).
+  //
+  // Measured on a production build: a diner on /r/spice-route/menu — a restaurant that sells in all
+  // six languages — had their saved choice DESTROYED on page load, at random. Traced by watching
+  // localStorage: one write of "en", from this effect. The cause is that `restaurantId` starts as
+  // restaurant #1's placeholder, so `getSettings()` above resolves #1's lists FIRST, and #1 offers
+  // only ["en","fr","hi"]. A guest reading in German, Arabic or Korean was therefore "carrying a
+  // language this restaurant doesn't offer" — measured against the WRONG restaurant — and was moved
+  // to English. Whether it hit depended on which resolved first, which is why it looked flaky: in
+  // one run de and ar were wiped and fr, hi and ko survived; in the next, ko was wiped instead.
+  //
+  // The rule these two lines exist for is right and stays: a guest must not keep a language the
+  // restaurant they are sitting in has switched off. It just has to be asked of that restaurant.
   useEffect(() => {
+    if (!ready) return;
     if (menuLangs && menuLangs.length && !menuLangs.includes(getLanguage().code)) setLanguage(menuLangs[0] as LanguageMeta["code"]);
     if (menuCurrs && menuCurrs.length && !menuCurrs.includes(getCurrency().code)) setCurrency(menuCurrs[0] as CurrencyMeta["code"]);
-  }, [menuLangs, menuCurrs]);
+  }, [menuLangs, menuCurrs, ready]);
 
   const currencyOptions = CURRENCIES.filter((c) => (menuCurrs ? menuCurrs.includes(c.code) : true));
   const languageOptions = LANGUAGES.filter((l) => (menuLangs ? menuLangs.includes(l.code) : true));
