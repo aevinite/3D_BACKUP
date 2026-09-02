@@ -1075,6 +1075,47 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+
+// ── A COLUMN THE PANEL READS HAS TO BE A COLUMN THE ROUTE SENDS (sweep #8 T10, 2026-09-03) ─────
+//
+// The fault this was written for. `printTableBill()` passes `state.data.restaurant.logo_url` into
+// billdoc.js as the bill's `logo`, and billdoc prints an <img class="logo"> for any http(s) value.
+// The tablet route's `restaurants` select did not include that column, so the expression evaluated
+// to "" every single time: a bill printed from the WAITER's handheld came out with no logo, while
+// the identical bill printed at the manager's till carried it (the editor route's twin of the same
+// read does select it). One document, two different papers depending on which panel produced it —
+// and nothing could tell you: an absent column arrives as `undefined`, which the panel's own
+// /^https?:/ test quietly rejects. There is no error, no empty state, no log line.
+//
+// So both sides get grepped. Every field the panel reads off `state.data.restaurant` must appear in
+// the route's restaurants select, and the three the shared bill document resolves the restaurant's
+// IDENTITY from are named explicitly, because they are read inside billdoc.js off a parameter and a
+// scan of this panel alone would never see them.
+{
+  const routeRel = "app/api/tablet/[...path]/route.ts";
+  const route = (() => { try { return fs.readFileSync(path.join(ROOT, routeRel), "utf8"); } catch { return ""; } })();
+  // The select that feeds `restaurant` into the tablet payload: the one that names `slug`, since the
+  // route's other restaurants reads fetch access_config alone.
+  const sel = (route.match(/from\("restaurants"\)\.select\("([^"]*slug[^"]*)"\)/) || [])[1] || "";
+  const sent = new Set(sel.split(",").map((x) => x.trim()).filter(Boolean));
+  const read = new Set();
+  for (const m of APPSRC.matchAll(/state\.data\.restaurant\s*(?:\|\|\s*\{\}\s*\))?\s*\.\s*([a-z_]+)/g)) read.add(m[1]);
+  for (const m of APPSRC.matchAll(/\(state\.data\.restaurant\s*\|\|\s*\{\}\)\.([a-z_]+)/g)) read.add(m[1]);
+  // billdoc.js → billIdentity(settings, restaurant) reads these off the row it is handed. Named
+  // here rather than scanned, because they are read through a parameter in ANOTHER file.
+  for (const k of ["logo_text", "name", "slug"]) read.add(k);
+  const missing = [...read].filter((k) => !sent.has(k)).sort();
+  check(
+    "tablet route: every restaurant column the panel reads is in the payload",
+    sel !== "" && missing.length === 0,
+    sel === ""
+      ? `${routeRel}: could not find the restaurants select that feeds the tablet payload (the one naming\n    slug). If it was renamed, point this check at it — do not delete the check.`
+      : `${TABLET} (and billdoc.js, for the bill's identity) reads restaurant column(s) that\n    ${routeRel} never sends: ${missing.join(", ")}\n    ` +
+        `Sent: ${[...sent].join(", ")}\n    ` +
+        `An absent column arrives as undefined and every guard on it fails SILENTLY — which is how\n    every bill printed from a waiter's handheld lost the restaurant's logo. Add the column to that\n    select (it costs nothing: the read already happens), or stop reading it.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

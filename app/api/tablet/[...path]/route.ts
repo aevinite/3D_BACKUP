@@ -564,7 +564,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order").limit(500),   // bounded like its twin — see the note on the menu-sig read above
-        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, access_config").eq("id", rid).maybeSingle(),
+        // `logo_url` IS READ BY THIS PANEL AND WAS NEVER SENT (sweep #8 T10, 2026-09-03).
+        // printTableBill() in public/panels/tablet/app.js passes
+        // `state.data.restaurant.logo_url` into LFH_BILLDOC.billData as the bill's `logo`, and
+        // billdoc.js prints an <img class="logo"> whenever that is a http(s) URL. The column was
+        // simply not in this select, so the expression always evaluated to "" — every bill a
+        // WAITER printed came out with no logo while the same bill printed at the manager's till
+        // carried it (the editor route's twin of this read selects it: app/api/editor line 1137).
+        // One document, two different papers depending on which panel produced it, and the panel's
+        // own read gave no sign: an absent column is `undefined`, which its /^https?:/ test
+        // quietly rejects. Both sides of a field have to be grepped, which is what caught it.
+        // Costs one short text column on a read this panel already makes.
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, logo_url, access_config").eq("id", rid).maybeSingle(),
       ]);
       // KOT ▾ module rung resolved server-side from the settings row itself (canonical
       // ladder, mig 177 — no extra query): when the module isn't effective the tri-state
