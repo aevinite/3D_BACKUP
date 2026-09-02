@@ -217,3 +217,47 @@ also supplies the model, so losing it means the 32-second overlay says "3D view 
 For restaurant #1 it is not: the model comes from the static config instead, so the model loads, the
 bar falls back to the config's own name and stats, and **Add to order sits disabled with nothing
 saying why**. Narrow, real, and a wording decision rather than a code one.
+
+
+---
+
+# ROUND 4 (2026-09-02) — `P96201`–`P96700`
+
+Items 11 and 12 built, merged and deployed first, then the round that followed. **500 written, 500
+executed, 500 green.** One fault, and it was mine.
+
+## 11 — the dish price was too dark to read on five restaurants · FIXED (`c35a83e7`)
+
+`--accent-ink` already existed and the light skin already computed it. The dark skin — the default —
+used the raw brand colour, with the comment *"on a dark tint the bright accent already reads clean"*.
+True for a gold, false for a brown. The comment was the assumption, written down.
+
+| restaurant | accent | before | after |
+|---|---|---|---|
+| burger-barn | `#78350f` | **2.07:1** | 5.11:1 |
+| pizza-palace | `#c0392b` | 3.40:1 | 5.04:1 |
+| spice-route | `#c2410c` | 3.58:1 | 5.07:1 |
+| green-bowl | `#15803d` | 3.66:1 | 5.00:1 |
+| sakura-sushi | `#db2777` | 4.03:1 | 5.02:1 |
+
+aangan, taco-fiesta, french-house and demo-bistro pass before and after, **byte-identical**. Not a
+fixed percentage and not a threshold: it finds the largest share of the brand colour that still
+clears the bar against that tenant's own background. Only the ink; the accent as a FILL is untouched.
+
+## 12 — three screens that could no longer render · REMOVED (`a9e6a305`)
+
+`initialItem` is always a real dish on both doors, so the spinner, the "we couldn't load this dish"
+card, "Dish not found" and Try again were unreachable. Driven four ways before deleting and re-driven
+after: identical behaviour. 130 lines out, 34 in. `initialItem` is now required and non-null, so what
+the runtime relied on is a compile error. The guards now assert what actually keeps the promise.
+
+## 13 — item 11 had shipped with NO guard · FIXED (`6e402bcb`)
+
+Found by re-sabotaging all thirty guarded behaviours after items 11 and 12 changed the files. 29 went
+red; tearing out the accent fix entirely left `verify:3d-viewer` green, because I had never written a
+guard for it — against §7 of this sweep's own rules, which I had applied to every other item.
+
+`verify:accent-ink`: 23 assertions, runs the real function over every accent in the database plus
+hostile colours, and measures the contrast produced. Asserts the **fact**, not the shape. Bite-tested
+three ways including over-correction. **The lesson: a sabotage pass is only as good as its last run —
+two files changed under these guards and one of them had never been covered at all.**
