@@ -237,6 +237,65 @@ const run = async () => {
       } finally { await p.close().catch(() => {}); }
     }
 
+    // ── AN ADDRESS A BROWSER CANNOT READ MUST NOT ANSWER A BARE ERROR (owner, 2026-09-02) ───
+    //
+    // His words: "make sure it doesn't happen only and if it happens, then what will the staff do?"
+    //
+    // A web address carries anything unusual as % plus two digits. Damage those digits — a link cut
+    // short by a chat app, a stray % typed by hand, a QR photographed badly and retyped — and the
+    // address is no longer readable text. Next decodes the restaurant name out of the path while
+    // matching /r/[restaurant]/menu, that decode throws, and the throw lands INSIDE Next's own
+    // request handling, before any page or error boundary. It answered twenty-one bytes:
+    // "Internal Server Error". middleware.ts now turns each of these into the guest screen that
+    // says what to do. This row is what stops that regressing.
+    {
+      const damaged = [
+        ["a name cut short mid-character", "/r/%E0%A4/menu"],
+        ["a name with a broken character inside it", "/r/fr%E0%A4ance/menu"],
+        ["a lone percent sign in the name", "/r/%/menu"],
+        ["a printed code cut short mid-character", "/q/%E0%A4"],
+        ["a printed code with a bad escape", "/q/%zz"],
+        ["a broken character in the middle of a name", "/r/a%E0b/menu"],
+      ];
+      const bad500 = [];
+      for (const [what, url] of damaged) {
+        let st = -1;
+        try { st = (await fetch(BASE + url, { redirect: "follow" })).status; } catch { st = -2; }
+        if (st >= 500 || st === -2) bad500.push(`${what} (${url}) -> ${st === -2 ? "no answer at all" : st}`);
+      }
+      if (bad500.length) bad("a damaged address still answers a bare server error", bad500.join("  ·  "));
+      else ok(`all ${damaged.length} damaged addresses answer a real guest screen, never a bare server error`);
+
+      const p4 = await browser.newPage();
+      try {
+        await p4.setViewportSize({ width: 360, height: 780 });
+        await p4.goto(`${BASE}/r/%E0%A4/menu`, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+        await p4.waitForTimeout(3500);
+        const t4 = await p4.evaluate(() => document.body.innerText).catch(() => "");
+        if (/member of staff/i.test(t4) && /menu isn|table doesn/i.test(t4))
+          ok("…and a damaged address tells the person to ask a member of staff");
+        else bad("a damaged address does not tell the person what to do next", `screen reads: ${t4.slice(0, 90).replace(/\n/g, " · ")}`);
+      } finally { await p4.close().catch(() => {}); }
+
+      const { readFileSync: rf } = await import("node:fs");
+      const { join: jn, dirname: dn } = await import("node:path");
+      const { fileURLToPath: fu } = await import("node:url");
+      const R2 = jn(dn(fu(import.meta.url)), "..");
+      let mw = null;
+      try { mw = rf(jn(R2, "middleware.ts"), "utf8"); } catch { mw = null; }
+      if (!mw) bad("middleware.ts is gone", "the damaged-address fix lived there; without it those addresses answer a bare 500 again");
+      else {
+        const code2 = mw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+        const gatey = /tokenIsValid|requireRole|ownerScope|cookies\(|supabase|ADMIN_PASSWORD|session/i.test(code2);
+        const scoped = /matcher: \["\/r\/:path\*", "\/q\/:path\*"\]/.test(code2);
+        const temporary = /307/.test(code2) && !/\b308\b/.test(code2);
+        if (gatey) bad("the middleware has grown a gate", "CLAUDE.md: the gate is per-route on purpose. This file checks no permission, reads no session, touches no database.");
+        else if (!scoped) bad("the middleware is no longer scoped to the two guest doors", "it must not run on the panels, the APIs or the assets");
+        else if (!temporary) bad("the middleware's hop is not temporary", "a permanent hop would be cached in that person's browser for ever, and this is a mistake, not a move");
+        else ok("…and the middleware that does it still holds no gate, runs only on the two guest doors, and hops temporarily");
+      }
+    }
+
     // ── EVERY RULE IN THIS SCREEN'S STYLESHEET MATCHES SOMETHING (T1 round 2, 2026-09-02) ───
     // Fifty rules ship with every 404 and not one of them had ever been checked. Four could never
     // match anything: three left behind when the toaster's "again" class was replaced by re-keying,
