@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P96201`.** *(T5 took `P95701`–`P96200` on 2026-09-02 for a THIRD freshly planned
+**Next free ID: `P96701`.** *(T2 took `P96201`–`P96700` on 2026-09-02 for its FOURTH freshly planned 500. Its pre-allocated block `P55701`–`P56700` was spent at round 2 and its first registry claim `P95201`–`P95700` at round 3, so this is a second registry claim. Claimed by editing THIS LINE first and pushed on its own before a single row was written. Highest id actually on disk, re-checked immediately before claiming: `P95700`.)* *(T5 took `P95701`–`P96200` on 2026-09-02 for a THIRD freshly planned
 500, on the owner's word after round 2 was merged and deployed: *"do all 3 and after making it live
 and merging plan 500 phases test within your boundaries make sure it cover everthing within your
 boundries and test everything again if any error left"*. Its own two blocks are full — `P58701`–`P59700`
