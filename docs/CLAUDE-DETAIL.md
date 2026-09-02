@@ -486,8 +486,9 @@ the separate editor repo were deleted (`docs/PROJECT-HISTORY.md` §12).
 
 ## Security gate (2026-06-13)
 
-**⚠️ THERE IS NO `middleware.ts`** (nor a Next 16 `proxy.ts`). Looking for that file finds nothing
-and may suggest the gate is missing — it isn't, it MOVED, and the per-route shape is deliberate:
+**⚠️ THE GATE IS NOT IN A MIDDLEWARE.** A `middleware.ts` exists since 2026-09-02, and it holds
+NO part of the gate — see "the one middleware, and what it is not" below. Looking at that file may
+suggest the gate lives there; it doesn't, it MOVED, and the per-route shape is deliberate:
 env vars are reliable in the Node runtime, which edge middleware could not promise (hence
 `lib/staffAuth.ts`'s comment that the admin gate runs in "layout + /api/admin routes"). What
 actually guards what, verified route by route in the 2026-08-04 API sweep:
@@ -573,6 +574,51 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
 
 `ADMIN_PASSWORD` is in `.env.local` (must also be set in the Vercel project env for the gate to
 work in prod). **If you re-introduce a middleware, update this section in the same commit.**
+
+### The one middleware, and what it is NOT (2026-09-02)
+
+`middleware.ts` exists. It is **eight lines of logic and holds no part of the gate**: no permission
+check, no session read, no database call, no knowledge of who anyone is. It runs on `/r/*` and
+`/q/*` only — the two guest doors — and does exactly one thing.
+
+**Why it had to exist.** A web address can only carry plain characters, so anything else is written
+as `%` plus two digits. When those digits are damaged — a link cut short by a chat app, a stray `%`
+typed by hand, a QR photographed badly and retyped — the address is no longer readable text. Next
+decodes the restaurant name out of the path as part of matching `/r/[restaurant]/menu`, that decode
+throws, and **the throw happens inside Next's own request handling: before any page, any layout and
+any error boundary.** Measured on both a local production build and the deployed site:
+
+    /r/%E0%A4/menu        →  HTTP 500, twenty-one bytes: "Internal Server Error"
+    /q/%E0%A4             →  HTTP 500
+    /r/fr%E0%A4ance/menu  →  HTTP 500
+
+Proved that nothing else can stand there: a route-level `error.tsx` was added under
+`app/r/[restaurant]/menu/` and the same bare 500 came back unchanged. A `next.config.ts` rewrite
+CAN see the address before it is decoded (tested), but "an escape sequence that decodes to invalid
+UTF-8" is not something a path pattern can express — only an allow-list approximation, which would
+misfire on a legitimate address. Middleware is the only place the question *"can this even be
+read?"* can be asked without throwing.
+
+**Two things about it that cost an hour to learn, so nobody re-learns them:**
+
+- It **redirects**, it does not rewrite. A rewrite keeps the ORIGINAL address on the request, so the
+  tenant route pulled the restaurant name out of that same unreadable path and threw exactly as
+  before — the 500 came back unchanged, while the identical rewrite on `/q` worked, which is what
+  made the cause obvious. A redirect replaces the address, so what reaches the route is readable.
+- **307, never 308.** A permanent hop would be cached in that person's browser for ever, and this
+  is a mistake, not a move.
+
+**What the person gets:** the guest screen that already exists — *"This menu isn't available right
+now. Please ask a member of staff — they can bring you the menu or scan the current code for your
+table."* That is the honest sentence: we cannot tell which restaurant a broken address meant, and
+the way back is the QR on their table, which is short, printed and always valid.
+
+**Cost, measured:** ~5 ms on a warm normal menu load, and one `decodeURIComponent` per request on
+those two routes. Nothing else on the site is touched — not the panels, not the APIs, not the
+assets. Guarded by `verify:notfound`, which drives six damaged addresses and fails on any 500.
+
+**Do not move a gate into this file.** If you ever need to, the rule above still stands: update
+this section in the same commit.
 
 ## The decision format — every list he has to CHOOSE from
 
