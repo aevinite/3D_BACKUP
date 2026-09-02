@@ -274,23 +274,17 @@ update the detail doc's section in the same commit.
 
 ## Known gotchas (one line each — stories in docs/CLAUDE-DETAIL.md `## Known gotchas` and `docs/PROJECT-HISTORY.md §12`)
 
-- **Don't narrow `boardSig`** (kitchen/tablet redraw fingerprint) back to a field list — new
-  volatile columns go in `RT_VOLATILE`; guarded by `scripts/verify-board-sig.mjs`.
-- **"Blur" = frosted glass**, ONE unprefixed `backdrop-filter` line — hand-adding `-webkit-` makes
-  the build DROP it (`docs/CLAUDE-DETAIL.md` → What "blur" means).
-- Supabase HEAD lies about Cache-Control — use GET with `Range: bytes=0-0`.
 - **Secrets NEVER appear in chat — whole or partial** (sbp_/service-role/tokens): redirect
   `claude mcp` output to null; masked reads only. Treat a pasted key as compromised.
-- MCP servers load from `~/.claude.json` / root `.mcp.json`, NOT `.claude/settings.json`;
-  config changes need a full restart.
-- **Light mode: which surfaces even HAVE it.** GUEST menu: a toggle (`lfh_theme`; a tenant's default is an
-  ADMIN setting, not always dark). Manager/kitchen/tablet panels: `lfh_panel_theme`, default LIGHT, **remembered per staff
-  member**. The **owner console DOES have light mode** — its own ☀/🌙 in `OwnerShell.tsx`, stored as
-  **`aevidine_skin`** (localStorage + cookie), survives a reload, and pushed into the embed by
-  postMessage (`useOwnerSkin`). DARK stays the default. So light-skin checks on `/owner` are real:
-  drive **`aevidine_skin`**, never `lfh_theme` (that key does nothing there — the mistake that made
-  an old note here claim "dark-only"; full story: `docs/CLAUDE-DETAIL.md`).
-- Staff can run a weeks-old panel: `?v=` is a content hash — `verify:panel-cache`.
+- MCP servers load from `~/.claude.json`, NOT `.claude/settings.json`; config changes need a
+  full restart. *(The repo's own `.mcp.json` was deleted 2026-09-02 — its only server, shadcn,
+  had 0 tool calls in the entire transcript history. `chrome-devtools` had 420 and lives in
+  `~/.claude.json`. Don't re-add a project-level `.mcp.json` without measuring use first.)*
+
+- **⚙️ Rendering, theming, cache and Supabase-HTTP gotchas moved to `.claude/rules/`**
+  (2026-09-03): `rendering-and-cache.md` (boardSig · what "blur" means · which surfaces have
+  light mode · the `?v=` panel hash) and `supabase-http.md`. They load when you touch that
+  code. **Creating something new there? Open the rule file first.**
 
 ## Definition of done
 

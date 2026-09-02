@@ -50,6 +50,7 @@ Code: `app/menu`, `app/r/[restaurant]`, `app/q/[code]`, `components/*`, `lib/men
 | a dish hidden or taken off the menu | `verify:hidden` | nothing | no |
 | the scroll-spy category strip | `verify:scrollspy` | app running | no |
 | languages / translated text | `verify:i18n-scope` | nothing | no |
+| accent-coloured TEXT on a guest screen (dish price, links) — the `--accent-ink` / `--accent-ink-dim` tokens | `verify:accent-ink` | nothing | no |
 | allergy chips or per-item allergy data | `verify:allergy-isolation` | `.env.local` | **YES** |
 | the guest's cart, order placing, or the offline outbox | `verify:order-retry`, `verify:guest-recovery`, `verify:outbox` | nothing | no |
 | the basket panel or the order tracker themselves (`components/CartPanel.tsx`, `components/OrderTracker.tsx`, `lib/guestOutbox.ts`) | `verify:basket` ← reads the shipped files and executes the shipped logic against synthetic input; no DB, no login, no server | nothing | no |
