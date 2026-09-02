@@ -259,6 +259,24 @@ console.log("\n7 · the table field's own words fit the box they are in");
   }
   P("…and the field keeps its own accessible label, which is not length-bound", /aria-label="Table number"/.test(cart));
   P("…and it is still capped at four characters", /maxLength=\{4\}/.test(cart));
+
+  // ── ITEM 15: and the SAME RULE for every other placeholder in this file ────────────────────────
+  // Item 7 fixed one clipped placeholder. Round 2's screenshots then caught a second, right beside
+  // it and worse — "Type an allergy, then press Enter…" needed 332px in a 232px box, so it was cut
+  // off on BOTH phone widths the owner tests. Two of the same fault in one file is a rule, not a
+  // coincidence, so this asserts the rule for ALL of them rather than one string at a time.
+  //
+  // The ceilings are MEASURED, not guessed, at the rendered 20px in the shipped face: a full-width
+  // box has 262px of room at 360px and the face averages ~9.6px a character, so 24 characters is the
+  // most that fits with headroom; a box inside the allergy section has 232px, so 22.
+  const placeholders = [...cart.matchAll(/placeholder="([^"]*)"/g)].map((m) => m[1]);
+  P("every box in the bill has words in it", placeholders.length >= 2, placeholders.length);
+  const tooLong = placeholders.filter((t) => t.length > 24);
+  P("…and none of them is longer than a 360px phone can show", tooLong.length === 0, tooLong);
+  const allergyBox = placeholders.find((t) => /Enter/i.test(t));
+  P("the narrower free-text box has its own, tighter ceiling", !!allergyBox && allergyBox.length <= 22, allergyBox);
+  P("…and it still tells the diner that Enter is what adds it", !!allergyBox && /Enter/.test(allergyBox));
+  P("…and it is still capped at 80 characters of typing", /maxLength=\{80\}/.test(cart));
 }
 
 // ── 8. THE FOUR THINGS THE OWNER PICKED OFF THIS REPORT (items 10, 12, 13, 14) ───────────────────

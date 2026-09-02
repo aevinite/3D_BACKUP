@@ -1172,7 +1172,19 @@ export default function CartPanel() {
                   type="text"
                   className="table-input"
                   style={{ marginTop: "10px", marginBottom: 0 }}
-                  placeholder="Type an allergy, then press Enter…"
+                  // ── AND SO DOES THIS ONE (sweep #8 T3 round 2, item 15) ────────────────────
+                  // Found by opening a screenshot the round-2 live block had just taken and looking
+                  // at it: a diner read "Type an allergy, then pre". The same class of fault as
+                  // item 7, on the field right next to it, and WORSE — measured at the rendered
+                  // 20px, the old text needed 332px in a 232px box (this one sits inside the
+                  // allergy section, so its box is 30px narrower than the table field's): clipped
+                  // by 100px at 360px AND by 70px at 390px, so it was cut off on BOTH phone widths
+                  // and only whole on a desktop. "Type it, then Enter" is 173px, 59px spare, and it
+                  // keeps the one thing a diner has to know — that Enter is what adds it. "it" is
+                  // unambiguous under a heading reading "Any allergies? Tap what you avoid" and a
+                  // chip reading "✏️ Other". Guarded by verify:basket, which now holds a measured
+                  // character ceiling for EVERY placeholder in this file, not just these two.
+                  placeholder="Type it, then Enter"
                   aria-label="Other allergy"
                   maxLength={80}
                   value={otherAllergy}
