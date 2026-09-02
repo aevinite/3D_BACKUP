@@ -600,6 +600,23 @@ export async function submitReview(
   return (data ?? { ok: false, reason: "no response" }) as { ok: boolean; reason?: string };
 }
 
+// Rename every review THIS device has left at THIS restaurant (migration 378).
+//
+// The diner has one name now (lib/guestName.ts) and changing it has to reach the reviews they
+// already left, or the same person is signed two different ways on one menu — which is exactly
+// what the owner asked for on 2026-09-02. It can only touch rows carrying the device id the caller
+// already holds, and it changes one column: the name. Never throws; a failed rename leaves an older
+// review with an older name and nothing else.
+export async function renameMyReviews(
+  deviceId: string, restaurantId: string, name: string
+): Promise<{ ok: boolean; renamed?: number; reason?: string }> {
+  const { data, error } = await supabase.rpc("lfh_rename_my_reviews", {
+    p_device: deviceId, p_restaurant_id: restaurantId, p_name: name,
+  });
+  if (error) return { ok: false, reason: error.message };
+  return (data ?? { ok: false, reason: "no response" }) as { ok: boolean; renamed?: number };
+}
+
 // Active categories, in display order. The virtual "All" tab is added by the UI.
 export async function getCategories(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Category[]> {
   const { data, error } = await supabase

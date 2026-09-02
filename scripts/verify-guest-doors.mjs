@@ -654,8 +654,10 @@ flush();
 // reaches with a session already on their phone.
 {
   say("\n11) A request to staff names who is asking, wherever the name came from");
+  // The chain grew a third link when item 14 landed (the ONE name), so this asserts the LINK this
+  // item added rather than the whole line — section 13 owns the full chain.
   check("the escape-hatch request falls back to the name this device already gave",
-    /const who = name\.trim\(\) \|\| getNickname\(sess\.current\?\.token\) \|\| null;/.test(gate));
+    /const who = name\.trim\(\) \|\| getNickname\(sess\.current\?\.token\)/.test(gate));
   check("…and it is that value that is sent, not the raw box",
     /requestAccess\(p\.table, type, who, null, ridRef\.current\)/.test(gate));
   check("the OPEN request still requires a freshly typed name, which is the rule's own screen",
@@ -683,6 +685,68 @@ flush();
     !/\.sg-overlay[^}]*favHintIn/.test(css.replace(/\/\*[\s\S]*?\*\//g, "")));
   check("the add-to-cart gate's own note no longer claims a 3-second poll either",
     !/polls the live session every 3s/.test(read("lib/tableConnection.ts")));
+}
+
+// ── ONE NAME, EVERYWHERE (T4 s8, item 14 — owner, 2026-09-02) ─────────────────────────────────────
+// His words: "if you add name in review it will save as there name … when name ask again in review
+// what will name will be autofill there and there they add diff name the reviews name will be
+// change to again added name … so like everywhere there wil be 1 name". Before this, a diner was
+// asked their name on FIVE screens that knew nothing about each other, so one person could be three
+// people to one restaurant in one evening. DRIVEN end to end before this guard was written: an empty
+// box, then a filled one on the next dish, then a different name renaming both reviews.
+{
+  const gname = read("lib/guestName.ts");
+  const item = read("app/item/[slug]/ItemClient.tsx");
+  const mig = read("supabase/migrations/378_one_name_everywhere_for_a_guest.sql");
+  const menu = read("lib/menu.ts");
+  say("\n13) One name, everywhere a diner is asked for one");
+  check("there is ONE module that owns the diner's name",
+    /export function getGuestName\(\)/.test(gname) && /export function setGuestName\(/.test(gname));
+  check("…and it is tenant-scoped, like every other guest key",
+    /import \{ tget, tset \} from "\.\/tenantStorage";/.test(gname) && /const KEY = "lfh_my_name";/.test(gname));
+  check("…with one definition of what a tidy name is, used on the way in and out",
+    /export const tidyGuestName/.test(gname) && /GUEST_NAME_MAX = 40/.test(gname));
+  check("…and it only announces a name that actually CHANGED",
+    /if \(before === tidy\) return false;/.test(gname));
+  check("the review box fills itself in from that one name",
+    /getGuestName\(\)/.test(item) && /window\.addEventListener\(GUEST_NAME_EVENT, fill\)/.test(item));
+  check("…in an EFFECT, never during render, because that page is server-rendered",
+    item.indexOf("useEffect(() => {\n    const fill = () => setReviewName") > -1);
+  check("…and a name typed there becomes their name everywhere",
+    /const nameChanged = setGuestName\(typedName, restaurantId\);/.test(item));
+  check("…and the box keeps it afterwards rather than emptying, because it is their name now",
+    /setReviewName\(typedName\);/.test(item));
+  check("…and the diner is TOLD when their name changed, so nothing happens behind their back",
+    /saved as your name/.test(item));
+  check("…and that box has the same 40-character ceiling as every other name box",
+    /maxLength=\{GUEST_NAME_MAX\}/.test(item));
+  check("all three places the table sheet learns a name write it back as THE name",
+    (gate.match(/setGuestName\((?:nick|headName|nm), ridRef\.current\)/g) || []).length === 3);
+  check("…and so does the screen that asks a name before a waiter is called",
+    /setGuestName\(name\.trim\(\), ridRef\.current\); \/\/ a name given here is a name given/.test(gate));
+  check("…and the sheet's own boxes start filled in",
+    /const fill = \(\) => setName\(\(cur\) => cur \|\| getGuestName\(\)\);/.test(gate));
+  check("…and the nameless request to staff falls back to it last",
+    /name\.trim\(\) \|\| getNickname\(sess\.current\?\.token\) \|\| getGuestName\(\) \|\| null/.test(gate));
+  check("renaming past reviews is a server function, because the phone cannot reach them",
+    /CREATE OR REPLACE FUNCTION lfh_rename_my_reviews/.test(mig) && /export async function renameMyReviews/.test(menu));
+  check("…scoped to ONE restaurant, so a name given at one cafe never rewrites another's reviews",
+    /AND restaurant_id = p_restaurant_id/.test(mig));
+  check("…and it can only ever touch rows carrying the device id the caller already holds",
+    /WHERE device_id = p_device/.test(mig));
+  check("…changing the name column and nothing else",
+    /SET name = v_name/.test(mig) && !/SET stars|SET comment|SET item_slug/.test(mig));
+  check("…refusing a device id of the wrong shape, exactly as the review write does",
+    /length\(p_device\) < 8 OR length\(p_device\) > 64/.test(mig));
+  check("…writing no row at all when the name has not moved",
+    /AND name IS DISTINCT FROM v_name;/.test(mig));
+  check("…and its grant is written down rather than left to the default",
+    /REVOKE ALL ON FUNCTION lfh_rename_my_reviews\(text, uuid, text\) FROM PUBLIC;/.test(mig)
+    && /GRANT EXECUTE ON FUNCTION lfh_rename_my_reviews\(text, uuid, text\) TO anon, authenticated, service_role;/.test(mig));
+  check("the rename uses the REVIEW device id, not the session one — they are different keys",
+    /import \{ getDeviceId \} from "\.\/device";/.test(gname) && /renameMyReviews\(getDeviceId\(\)/.test(gname));
+  check("…and it never delays or fails what the diner was actually doing",
+    /void renameMyReviews\(/.test(gname));
 }
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);

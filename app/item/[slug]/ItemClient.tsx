@@ -12,6 +12,10 @@ import InfinityLoader from "@/components/InfinityLoader"; // the loading spinner
 import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
 import { getMenuItems, getMenuItem, CARD_COLUMNS, getItemReviews, submitReview as submitReviewRpc, getSettings } from "@/lib/menu"; // dishes + reviews + the review-saving RPC + per-restaurant settings (Google link)
 import { getDeviceId } from "@/lib/device";          // stable per-browser id (one rating per dish per device)
+// ONE NAME EVERYWHERE (owner, 2026-09-02): the name this diner gave anywhere else in the app fills
+// this box in, and a different one typed HERE becomes their name everywhere — including the
+// reviews they have already left. See lib/guestName.ts.
+import { getGuestName, setGuestName, GUEST_NAME_EVENT, GUEST_NAME_MAX, tidyGuestName } from "@/lib/guestName";
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { useFeatures, getFeatures } from "@/lib/features"; // per-restaurant feature switches
 import { tget, tset } from "@/lib/tenantStorage"; // tenant-scoped storage (favorites)
@@ -183,7 +187,10 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // invisible waiting for a fade-in that the fetch used to trigger.
   const [imageLoaded, setImageLoaded] = useState(!!initialItem);
   const [selectedRating, setSelectedRating] = useState(0);   // stars chosen in the review form
-  const [reviewName, setReviewName] = useState("");          // reviewer's typed name
+  // Starts EMPTY and is filled in by the effect below, never by reading storage during render —
+  // this page is server-rendered and a value read at render time would not match the first
+  // client paint. (The same rule lib/restaurant-context.tsx records for the tenant pin.)
+  const [reviewName, setReviewName] = useState("");          // reviewer's name — their ONE name
   const [reviewText, setReviewText] = useState("");          // reviewer's typed comment
   const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string; deviceId?: string}[]>([]); // reviews shown (incl. ones just added)
   const [reviewTab, setReviewTab] = useState<"rate" | "reviews">("reviews"); // which review tab is open
@@ -745,6 +752,17 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     });
   };
 
+  // ── THE ONE NAME FILLS THIS BOX IN (owner, 2026-09-02) ──────────────────────────────────────
+  // A diner who has already told this restaurant their name — opening a table, joining one, or on
+  // an earlier review — should not be asked again with an empty box. It also re-fills if the name
+  // changes somewhere else while this page is open, so two tabs cannot disagree.
+  useEffect(() => {
+    const fill = () => setReviewName((cur) => cur || getGuestName());
+    fill();
+    window.addEventListener(GUEST_NAME_EVENT, fill);
+    return () => window.removeEventListener(GUEST_NAME_EVENT, fill);
+  }, []);
+
   // Post a review. Saves it to the DATABASE (one live rating per device per
   // dish — re-rating updates your previous one) and shows it immediately.
   // The name is optional now; stars + a note are required.
@@ -767,8 +785,16 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't save review", subtitle: "please try again", kicker: "review", variant: "error" } }));
       return;
     }
+    // ── THE NAME THEY JUST TYPED IS NOW THEIR NAME, EVERYWHERE (owner, 2026-09-02) ────────────
+    // "there they add diff name the reviews name will be change to again added name". setGuestName
+    // stores it, tells the rest of the app, and renames the reviews this device has already left at
+    // this restaurant (migration 378) — so a diner is never signed two different ways on one menu.
+    // It answers true only when the name actually changed, which is what decides whether the
+    // reviews already on screen need re-labelling.
+    const typedName = tidyGuestName(reviewName);
+    const nameChanged = setGuestName(typedName, restaurantId);
     const newReview = {
-      name: reviewName.trim() || "Guest",
+      name: typedName || "Guest",
       rating: selectedRating,
       text: reviewText.trim(),
       deviceId: myDevice,
@@ -776,12 +802,28 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     // The DB upserts (one review per device per dish) — mirror that on screen:
     // drop this device's previous review before prepending the new one, so
     // re-rating never shows two reviews or skews the average.
+    //
+    // NOTHING ELSE ON THIS PAGE NEEDS RE-LABELLING, and it is worth writing down why, because the
+    // obvious version of this loop is wrong: `reviews` is UNIQUE on (restaurant, dish, device), so
+    // this device has at most ONE review per dish and the line below has just removed it. The
+    // diner's OTHER reviews live on other dishes' pages; migration 378 has already renamed those
+    // rows, so each shows the new name the next time its page is opened. A `.map()` over the list
+    // we just filtered this device out of could never match anything. (`nameChanged` is read by the
+    // toast below — a name that quietly rewrites their other reviews would be a surprise.)
     setLocalReviews([newReview, ...localReviews.filter((r) => r.deviceId !== myDevice)]);
-    setReviewName("");        // clear the form
+    // The box keeps their name rather than emptying — it is their name now, not one-off form data.
+    setReviewName(typedName);
     setReviewText("");
     setSelectedRating(0);
     // Show a friendly success toast.
-    window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Review posted", subtitle: "thanks for sharing", kicker: "review", variant: "success" } }));
+    // If they just changed the name they are known by, SAY so — quietly, in the subtitle. A name
+    // that silently rewrites their other reviews would be a surprise, and the one thing this
+    // feature must not be is a surprise.
+    window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+      message: "Review posted",
+      subtitle: nameChanged ? `saved as your name — ${typedName}` : "thanks for sharing",
+      kicker: "review", variant: "success",
+    } }));
     // HAPPY diner → invite a Google review, but ONLY in the "google_after_normal" mode
     // (owner 2026-07-24). A low rating (< 4★) stays private. The other Google modes show a
     // standing call-to-action instead (see the review section), so they don't post-nudge.
@@ -1258,6 +1300,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
               id="review-name"
               placeholder={t.yourName}
               value={reviewName}
+              maxLength={GUEST_NAME_MAX}
               onChange={(e) => setReviewName(e.target.value)}
             />
             <textarea

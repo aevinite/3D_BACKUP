@@ -39,6 +39,12 @@ import { useBackClose } from "@/lib/backStack";
 import { useRestaurantId, useRestaurantMeta } from "@/lib/restaurant-context";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { tget, tset } from "@/lib/tenantStorage";
+// ONE NAME EVERYWHERE (owner, 2026-09-02). A diner is asked their name on four screens in this
+// sheet and again in the review box on a dish page, and none of them used to know about the
+// others — so one person could be three people to the same restaurant in one evening. The name
+// given anywhere now fills in everywhere, and a different one typed here becomes their name
+// everywhere, reviews already left included. See lib/guestName.ts.
+import { getGuestName, setGuestName, GUEST_NAME_EVENT } from "@/lib/guestName";
 
 // Once you're in a session, that table becomes your default everywhere (cart +
 // call-waiter prefill from the scanned-table key, and re-read on lfh:table-scanned).
@@ -205,6 +211,17 @@ export default function SessionGate() {
   // typing the name no longer tears down & restarts the flow's effect (which used
   // to silently KILL the open-watch poll → guest stuck on "we've let staff know").
   const nameRef = useRef(name); nameRef.current = name;
+  // ── THE BOXES START FILLED IN (item 14) ──────────────────────────────────────────────────────
+  // Read in an EFFECT, never during render: this component is client-only but the page around it is
+  // server-rendered, and a value taken from storage at render time would not match the first paint.
+  // `setName((cur) => cur || …)` never overwrites something the diner is in the middle of typing —
+  // which matters because this also runs when the name changes in another tab.
+  useEffect(() => {
+    const fill = () => setName((cur) => cur || getGuestName());
+    fill();
+    window.addEventListener(GUEST_NAME_EVENT, fill);
+    return () => window.removeEventListener(GUEST_NAME_EVENT, fill);
+  }, []);
   // doJoinAsGuest is defined far below (it depends on helpers declared after this
   // point). afterLocation needs to trigger a silent re-join, so we reach it through
   // a ref — assigned once doJoinAsGuest exists — to avoid a forward reference.
@@ -452,6 +469,7 @@ export default function SessionGate() {
     if (!nick) { setNote("Add a name so we know who you are."); return; }
     const s = sess.current;
     setNicknameFor(s?.token, nick); // session-scoped: cleared when this session ends
+    setGuestName(nick, ridRef.current); // …and it is their ONE name from now on (item 14)
     if (s) { try { await setMemberName(s.token, nick); } catch {} }
     window.dispatchEvent(new Event("lfh:session-changed")); // refresh widgets that show the name
     setNote("");
@@ -489,6 +507,7 @@ export default function SessionGate() {
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
       setNicknameFor(s.token, headName); // session-scoped name for the head (asked above)
+      setGuestName(headName, ridRef.current); // …and their ONE name everywhere (item 14)
       setTableName(s.table, r.session_id as string, headName); // reused if this device rejoins the SAME session
       window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller
       await act();
@@ -783,6 +802,7 @@ export default function SessionGate() {
       // They just typed a name to join → reuse it as their nickname so the order
       // step never re-asks. (Joining as head sends no name, so the head still gets asked.)
       setNicknameFor(s.token, nm);                              // session-scoped name
+      setGuestName(nm, ridRef.current);                         // …and their ONE name (item 14)
       setTableName(p.table, r.session_id as string, nm);        // table+session name → survives leave/rejoin
       window.dispatchEvent(new Event("lfh:session-changed"));
       // If the table auto-approves, go straight to acting; else wait for the host.
@@ -850,7 +870,12 @@ export default function SessionGate() {
     // scoped, from whenever they last gave it. Using it costs nothing and cannot be worse than null.
     // (What it still cannot help: a brand-new diner on the very first screen, who has never been
     // asked. That one needs a decision about adding a name step, not a fallback.)
-    const who = name.trim() || getNickname(sess.current?.token) || null;
+    // …and the ONE name is the last fallback (item 14, owner 2026-09-02). This is the case sweep #8
+    // could NOT fix with what was on the device: a diner tapping "Not at the restaurant? Call a
+    // waiter" on the very first screen has no session and no session nickname, so the floor saw
+    // "Someone". If they have ever given this restaurant a name — on a review, or at a table on an
+    // earlier visit — it is here, and the pending-requests view names a person again.
+    const who = name.trim() || getNickname(sess.current?.token) || getGuestName() || null;
     const r = await requestAccess(p.table, type, who, null, ridRef.current);
     // NOBODY WAS TOLD IS NOT "WE'VE LET THE STAFF KNOW" (sweep 6 T3, 2026-08-17).
     //
@@ -896,6 +921,7 @@ export default function SessionGate() {
     // that did. The guest stays on "Your table isn't open yet" with their name still typed, and
     // the Request button still works — so the next tap is one that can actually get them served.
     if (!requestLanded(r, true)) return;
+    setGuestName(name.trim(), ridRef.current); // a name given here is a name given (item 14)
     setNote("");
     setReqAt(Date.now());
     setStep("request_sent");
