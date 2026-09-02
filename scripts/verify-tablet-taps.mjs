@@ -933,6 +933,86 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+
+// ── A PHONE RULE THAT SITS ABOVE THE RULE IT OVERRIDES IS NOT A RULE (sweep #8 T10, 2026-09-03) ──
+//
+// The fault this was written for. On 2026-08-04 the tablet's top bar was measured to the pixel and
+// the restaurant's own name was given room on a phone:
+//
+//     @media (max-width: 430px) { .brand .rest-name { font-size: 12.5px; padding: 2px 8px; } }
+//     ...
+//     .brand .rest-name { ... font-size: 13px; ... padding: 2px 10px; ... }
+//
+// Two rules, the SAME selector, therefore the same specificity — and the plain one comes LATER in
+// the file, so document order gives it the win at every width. The phone rule never applied once:
+// measured 13px / "2px 10px" at both 390px and 360px, a month after it was written. Nothing was
+// red, because a CSS rule that does nothing looks exactly like a CSS rule that is not needed.
+//
+// A media query does NOT add specificity. That is the whole trap, and it will be walked into again
+// on a 1,500-line stylesheet, so it gets a guard rather than a comment: for every declaration
+// inside an `@media` block, if an UNCONDITIONAL rule with the identical selector text appears
+// further down the file and sets the same property, the phone rule is dead and is named here.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  // Comments first, and line comments before block comments — a `//` line holding a `/*` has hidden
+  // 190 lines from two shipped guards before (see docs/CLAUDE-DETAIL.md). CSS has no line comments,
+  // so only block comments are stripped, but the order is stated so nobody "tidies" it into a bug.
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  // Split into top-level chunks: text outside any @media, and each @media body with its offset.
+  const inMedia = [];      // { selector, prop, at }
+  const unconditional = []; // { selector, prop, at }
+  let i = 0;
+  while (i < bare.length) {
+    const m = /@media[^{]*\{/g;
+    m.lastIndex = i;
+    const hit = m.exec(bare);
+    const end = hit ? hit.index : bare.length;
+    harvest(bare.slice(i, end), i, unconditional);
+    if (!hit) break;
+    // Walk to the matching close brace of the @media block (rules inside carry their own braces).
+    let depth = 1, j = m.lastIndex;
+    while (j < bare.length && depth > 0) { if (bare[j] === "{") depth++; else if (bare[j] === "}") depth--; j++; }
+    harvest(bare.slice(m.lastIndex, j - 1), m.lastIndex, inMedia);
+    i = j;
+  }
+  function harvest(text, base, into) {
+    const rule = /([^{}]+)\{([^{}]*)\}/g;
+    let r;
+    while ((r = rule.exec(text))) {
+      const selector = r[1].replace(/\s+/g, " ").trim();
+      if (!selector || selector.startsWith("@")) continue;
+      for (const decl of r[2].split(";")) {
+        const colon = decl.indexOf(":");
+        if (colon < 0) continue;
+        const prop = decl.slice(0, colon).replace(/\s+/g, "").toLowerCase();
+        // The VALUE matters as much as the property: an override that sets the same value changes
+        // nothing on screen, so naming it would be crying wolf — and a guard that cries wolf is
+        // how a real one comes to be ignored. (The tablet has one of those: a 760px `.layout {
+        // grid-template-columns: 1fr }` that the "no side panel anywhere" rule at the bottom of
+        // the file sets identically. Dead, yes; wrong on screen, no.)
+        const value = decl.slice(colon + 1).replace(/!important/gi, "").replace(/\s+/g, " ").trim().toLowerCase();
+        if (!prop) continue;
+        into.push({ selector, prop, value, at: base + r.index, important: /!important/i.test(decl) });
+      }
+    }
+  }
+  const dead = [];
+  for (const q of inMedia) {
+    if (q.important) continue; // an !important in the query still beats a later plain rule
+    const killer = unconditional.find((u) => u.selector === q.selector && u.prop === q.prop && u.at > q.at && !u.important && u.value !== q.value);
+    if (killer) dead.push(`${q.selector} { ${q.prop}: ${q.value} } — the same selector sets ${q.prop}: ${killer.value} later, at char ${killer.at}`);
+  }
+  check(
+    "tablet: no @media rule is silently overridden by a later plain rule with the same selector",
+    dead.length === 0,
+    `${CSS}: ${dead.length} declaration(s) inside an @media block can never apply, because an ` +
+    `identical selector later in the file sets the same property and a media query adds NO ` +
+    `specificity:\n      ${dead.join("\n      ")}\n    ` +
+    `Move the @media block BELOW the rule it is meant to override (that is the fix that finally ` +
+    `let the restaurant's own name fit on a 360px bar), or raise its specificity on purpose.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

@@ -74,13 +74,42 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 @media (max-width: 430px) {
   .qo-top .qo-word { display: none; }
   .qo-top { min-width: 44px; justify-content: center; padding: 10px; font-size: 17px; }
-  .brand .rest-name { font-size: 12.5px; padding: 2px 8px; }
 }
 /* Which restaurant this panel is scoped to (multi-tenant). Truncates so it can
    never push the top-bar actions off-screen at narrow (~390px) widths. Hidden
    when empty (name not loaded yet). */
 .brand .rest-name { display: inline-block; vertical-align: middle; max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; margin-left: 8px; }
 .brand .rest-name:empty { display: none; }
+/* ── THE NAME'S PHONE RULE HAS TO SIT *AFTER* THE RULE IT OVERRIDES (sweep #8 T10, 2026-09-03) ──
+   These two declarations were written on 2026-08-04, inside the `max-width: 430px` block above,
+   and they never took effect once: the plain `.brand .rest-name` rule three lines up has the SAME
+   specificity and comes LATER in the file, so document order handed it back its 13px font and its
+   10px padding on every phone. Measured before this move: 13px / "2px 10px" at both 390px and
+   360px. So the 2026-08-04 fix was only half-applied for a month, which is why "little French
+   house" was still reading "little Fren…" on the phone the owner tests.
+
+   And at ≤430px the CHIP GOES, not the name. The border + 20px of side padding is 22px of our own
+   decoration standing in front of a tenant's own name on a 360px bar — the name is the branding,
+   the rounded outline is not. Above 430px the chip stays exactly as it was. */
+@media (max-width: 430px) {
+  .brand .rest-name { font-size: 12.5px; padding: 1px 0; border: 0; }
+  /* …AND THE CONNECTION PILL STOPS SPELLING OUT "GOOD NEWS" ON A PHONE (same pass).
+     Measured on a 360px screen: the pill was 85px of the 360, purely to write the word beside
+     three green bars that already say it. That is 38px more than the pill needs, taken off the
+     only element on this bar that belongs to the restaurant rather than to us.
+
+     NO WARNING IS HIDDEN BY THIS, and that is the test it had to pass. The pill keeps its
+     colour and its bar count, so a drop still goes amber-with-one-bar and a dead line still
+     goes red-with-none; `.lfh-conn-n` ("· 3 waiting", "· 1 failed") is a different element and
+     is untouched; and offline.js paints a solid full-width red/amber bar ABOVE this one that
+     says "No internet — you can keep working" or "Connection is struggling" in words. The word
+     in the pill was the third copy of a message, not the message.
+
+     It also stops the bar JITTERING. `.lfh-conn-ms` is already hidden here, so the pill was
+     47px whenever a latency sample was fresh and 85px the moment it went stale — the name
+     beside it grew and shrank by 38px on a timer. One width now, always. */
+  .top-actions .lfh-conn-txt { display: none !important; }
+}
 /* On a phone the theme toggle moves INTO the ☰ menu, leaving only ⚡ Quick order, the
    connection light and 🚩 on the bar so a long restaurant name has room. #themeToggle stays
    in the DOM (just hidden) because the drawer's "Theme" button proxies a .click() to it.
