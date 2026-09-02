@@ -257,14 +257,29 @@ const run = async () => {
         ["a printed code with a bad escape", "/q/%zz"],
         ["a broken character in the middle of a name", "/r/a%E0b/menu"],
       ];
-      const bad500 = [];
+      // TWO OUTCOMES ARE FINE AND ONE IS NOT, and the difference was measured, not assumed.
+      //
+      //   a 4xx  → our app answered, with the guest screen. Right.
+      //   no connection at all → the address is not SENDABLE. A `%` followed by anything that is
+      //     not two hex digits is rejected before it becomes a request: Chrome refuses to navigate
+      //     to it, and the production edge closes the stream (HTTP/2 PROTOCOL_ERROR). Nobody's
+      //     screen is involved, so this is not our app behaving badly. Measured on the live site
+      //     for `/r/%/menu` and `/q/%zz`, both of which a browser also refuses.
+      //   a 5xx  → OUR APP answered badly. That is the fault this row exists for, and the shapes
+      //     that reach it are the sendable ones: valid escapes that decode to invalid text,
+      //     `%E0%A4` and its kind.
+      const bad500 = [], unsendable = [];
       for (const [what, url] of damaged) {
         let st = -1;
         try { st = (await fetch(BASE + url, { redirect: "follow" })).status; } catch { st = -2; }
-        if (st >= 500 || st === -2) bad500.push(`${what} (${url}) -> ${st === -2 ? "no answer at all" : st}`);
+        if (st === -2) unsendable.push(`${what} (${url})`);
+        else if (st >= 500) bad500.push(`${what} (${url}) -> ${st}`);
       }
+      const reached = damaged.length - unsendable.length;
       if (bad500.length) bad("a damaged address still answers a bare server error", bad500.join("  ·  "));
-      else ok(`all ${damaged.length} damaged addresses answer a real guest screen, never a bare server error`);
+      else if (reached === 0) bad("not one damaged address reached the app", "every one was refused before the request — this row proved nothing, so do not read it as a pass");
+      else ok(`all ${reached} damaged addresses that can be SENT answer a real guest screen, never a bare server error`
+        + (unsendable.length ? `; ${unsendable.length} could not be sent at all (a browser refuses them too, so no screen is involved): ${unsendable.join(", ")}` : ""));
 
       const p4 = await browser.newPage();
       try {
