@@ -388,6 +388,45 @@ check(
   );
 }
 
+// ── every control a guest can reach has a NAME, and the allergy list has a way in (item 10) ──
+// Measured on the running dish page: 17 visible controls, ONE with no accessible name — the heart,
+// whose only child is an icon. Its neighbour the back arrow was named in the T11 sweep on
+// 2026-08-15 and the heart was missed. And Read more was a <span>, which takes no focus and answers
+// no key — so the INGREDIENTS and CONTAINS blocks behind it were unreachable without a mouse.
+{
+  // COMMENTS STRIPPED FIRST. The `font: "inherit"` check below is a NEGATIVE one, and the source
+  // carries a comment quoting that exact string to explain why it was wrong — which made the guard
+  // fail on a correct file. Same trap this guard's own `<Script\s` check exists for, from the other
+  // direction: there, prose satisfied a positive check; here, prose broke a negative one.
+  const ic = read(ITEM_CLIENT).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the favourites heart tells a screen reader what it is, and whether the dish is already saved",
+    /id="detail-fav"[\s\S]{0,400}aria-pressed=\{favorited\}[\s\S]{0,200}aria-label=\{favorited \?/.test(ic),
+    "app/item/[slug]/ItemClient.tsx: the heart's only child is an icon, so without aria-label a " +
+      "screen reader announces it as just \"button\" — on the control that saves a dish."
+  );
+  check(
+    "Read more is a real button, so the allergy list can be reached from a keyboard",
+    /<button\s*\n\s*type="button"\s*\n\s*id="desc-toggle"/.test(ic) &&
+      /aria-expanded=\{descExpanded\}/.test(ic) && /aria-controls="detail-desc"/.test(ic),
+    "app/item/[slug]/ItemClient.tsx: a <span> with an onClick takes no focus and answers no key. " +
+      "The INGREDIENTS and CONTAINS blocks live behind this control, so a span made a dish's " +
+      "allergy information unreachable without a mouse or a touchscreen."
+  );
+  check(
+    "…and it does not drag the browser's own button font in with it",
+    /fontFamily: "inherit"/.test(ic) && !/font: "inherit"/.test(ic),
+    "the shorthand `font: inherit` beats the class and takes its `font-size: 11px` with it — " +
+      "measured at 16px before this was narrowed to the family alone."
+  );
+  check(
+    "the 3D screen's working state has a heading, not a bare div",
+    /<h2 className="dname" id="dish-title"/.test(read(VIEWER)),
+    "app/view/[folder]/ViewerClient.tsx: the three <h2> in this file are all on dead-end screens, " +
+      "so the screen this product is sold on had no heading at all for a screen-reader user."
+  );
+}
+
 // ── a dead dish link names no platform brand in the tab either (owner's item 7, 2026-09-02) ──
 // The screen has been white-label since 2026-08-04; its <head> was not. Next discards a route's
 // generateMetadata when the page calls notFound(), so BOTH doors fell back to the root layout's
