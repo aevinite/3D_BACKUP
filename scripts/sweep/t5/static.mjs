@@ -380,7 +380,11 @@ const DICT = (()=>{
 
 // 57 since 2026-09-02, when ten keys no screen rendered were retired (see the obituary in
 // lib/i18n.ts). The floor is a tripwire against a block being truncated, not a target.
-check("P58841","the interface still declares every key the screens ask for",()=>KEYS.length >= 55 || `only ${KEYS.length} keys`);
+// 54 since 2026-09-02: ten keys with no render site were retired in round 1, and three MORE went
+// when commit a9e6a305 removed the three dish screens they were the words on. The floor is a
+// tripwire against a block being truncated, not a target — it moves down when a key is honestly
+// retired and never to make a run green.
+check("P58841","the interface still declares every key the screens ask for",()=>KEYS.length >= 52 || `only ${KEYS.length} keys`);
 check("P58842","all six languages are present",()=>eq(Object.keys(DICT).length,6));
 LANGS.forEach((L,i)=>check(`P588${43+i}`,`the ${L} block parses and carries a value for every interface key`,()=>{
   const missing = KEYS.filter(k=>!(k in DICT[L]));
@@ -482,8 +486,18 @@ check("P58889","the Arabic block reads as Arabic script, not as transliteration"
   /[؀-ۿ]/.test(DICT.ar.greeting) || "ar.greeting is not Arabic script");
 check("P58890","the Hindi block reads as Devanagari",()=>/[ऀ-ॿ]/.test(DICT.hi.greeting) || "hi.greeting is not Devanagari");
 check("P58891","the Korean block reads as Hangul",()=>/[가-힯]/.test(DICT.ko.greeting) || "ko.greeting is not Hangul");
-check("P58892","every language's loading label is a sentence, not a code word",()=>{
-  const bad = LANGS.filter(L=>String(DICT[L].loadingLabel).trim().split(/\s+/).length < 2);
+// SUBJECT RETIRED 2026-09-02. It asked this of `loadingLabel`, which went with the three dish
+// screens commit a9e6a305 removed. The question is worth keeping, so it now asks it of every
+// sentence-shaped value the dictionary still has: an empty state or a sub-line that comes back as
+// one word is almost always a stub.
+check("P58892","every sentence-shaped value really is a sentence, not a single code word",()=>{
+  const SENTENCES = ["noDishesYetSub","noFavouritesSub","noMatchSub","noSearchResultsSub","sharePlaceholder"];
+  const bad = [];
+  for (const L of LANGS) for (const k of SENTENCES)
+    // CHARACTERS, not words. Korean is agglutinative and Arabic is dense: "의견을 공유해주세요…" is a
+    // whole polite sentence in two words, and counting words called it a stub. Eight characters is
+    // the floor a genuine stub cannot clear in any of the six.
+    if (k in DICT[L] && String(DICT[L][k]).trim().length < 8) bad.push(`${L}.${k}`);
   return bad.length===0 || bad.join(", ");
 });
 check("P58893","no two interface keys collide inside one language block (a duplicate key silently wins)",()=>{
