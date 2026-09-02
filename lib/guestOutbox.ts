@@ -914,8 +914,33 @@ function ensureStarted() {
 /** Read back whatever this device saved in an earlier session and get it moving again. */
 function restoreQueue() {
   idbAll().then((all) => {
-    queued = all.filter((x) => x.status !== "failed").sort((a, b) => a.at - b.at);
-    failed = all.filter((x) => x.status === "failed");
+    // ── MERGE, NEVER REPLACE (owner picked item 13) ────────────────────────────────────────────
+    //
+    // These two lines used to ASSIGN, throwing away whatever was already in memory. The restore is
+    // asynchronous and it is kicked off by ensureStarted(), which enqueueGuestOrder() also calls —
+    // so an order saved in the same instant the read comes back could be wiped out of the list.
+    // Not lost from the device: `persist()` had already put it in storage. Lost from the list that
+    // decides what gets SENT — and since restoreQueue only ever runs once, nothing would try it
+    // again until the page was reloaded. That is "saved work with nothing to send it", which is a
+    // named rule in this project, arrived at from the other direction.
+    //
+    // In practice it is nearly unreachable: the connection badge subscribes on mount, so the queue
+    // is awake long before anyone taps Place Order. "Nearly" is the reason to fix it in four lines
+    // rather than argue about it — losing a diner's order to a millisecond is not a trade worth
+    // keeping.
+    //
+    // WHAT WINS. Storage is the older truth and memory is the newer one, so a row that exists in
+    // both keeps its IN-MEMORY version — that copy may already have been through a flush and be
+    // carrying fresh attempt counters. Everything else is taken from storage. Sorted oldest-first
+    // afterwards, exactly as before, so the queue still drains in the order the diner placed it.
+    const byId = new Map<string, GuestOrder>();
+    for (const x of all.filter((x) => x.status !== "failed")) byId.set(x.id, x);
+    for (const x of queued) byId.set(x.id, x);
+    queued = [...byId.values()].sort((a, b) => a.at - b.at);
+    const failedById = new Map<string, GuestOrder>();
+    for (const x of all.filter((x) => x.status === "failed")) failedById.set(x.id, x);
+    for (const x of failed) failedById.set(x.id, x);
+    failed = [...failedById.values()];
     notify();
     // An order restored from a previous session gets a timer too, not just a single attempt.
     ensureRetry();
