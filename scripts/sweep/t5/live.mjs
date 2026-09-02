@@ -129,22 +129,42 @@ async function run(browser) {
   await mp.goto(`${BASE}/r/${TENANT}/menu`, { waitUntil: "domcontentloaded", timeout: 45000 });
   await mp.waitForSelector("#app", { timeout: 20000 }).catch(() => {});
   await mp.waitForSelector(".item-card", { timeout: 25000 }).catch(() => {});
+  // Built the way components/IntroSplash.tsx builds it — one flex item per WORD, with the box's
+  // own inline style — and measured against the REAL stylesheet. The live splash has already
+  // lifted by the time a script can look, and one visit only ever shows one name.
   const phoneSplash = await mp.evaluate(() => {
     const probeName = "The Great Indian Kitchen & Bakehouse";
+    const NB = String.fromCharCode(0xa0);
     const wrap = document.createElement("div");
     wrap.className = "intro-splash"; wrap.style.visibility = "hidden";
     const word = document.createElement("div"); word.className = "intro-word";
-    for (const ch of Array.from(probeName)) { const s = document.createElement("span"); s.textContent = ch === " " ? " " : ch; word.appendChild(s); }
+    Object.assign(word.style, { flexWrap: "wrap", justifyContent: "center", maxWidth: "92vw", rowGap: "2px", fontSize: "clamp(17px, 5vw, 22px)" });
+    for (const w of probeName.split(" ")) {
+      const seg = document.createElement("div"); seg.className = "intro-word-seg";
+      seg.style.display = "inline-block"; seg.style.whiteSpace = "nowrap";
+      for (const ch of Array.from(w + " ")) { const s = document.createElement("span"); s.textContent = ch === " " ? NB : ch; seg.appendChild(s); }
+      word.appendChild(seg);
+    }
     wrap.appendChild(word); document.body.appendChild(wrap);
     const r = word.getBoundingClientRect();
+    const cs = getComputedStyle(word.querySelector("span"));
+    const fs = parseFloat(cs.fontSize) || 0;
+    const lh = parseFloat(cs.lineHeight) || fs * 1.2;
     const out = { w: Math.round(r.width), vw: window.innerWidth, left: Math.round(r.left), right: Math.round(r.right),
-                  wrap: getComputedStyle(word).flexWrap, splashOverflow: getComputedStyle(wrap).overflowX };
+                  wrap: getComputedStyle(word).flexWrap, font: fs, lines: Math.max(1, Math.round(r.height / lh)),
+                  segs: word.querySelectorAll(".intro-word-seg").length };
     wrap.remove(); return out;
   });
   check("P59268", "a 36-character restaurant name fits the splash on a 360px phone", () =>
     phoneSplash.w <= phoneSplash.vw || `${phoneSplash.w}px of name in a ${phoneSplash.vw}px screen`);
   check("P59269", "…and none of it sits off the left or the right edge", () =>
     (phoneSplash.left >= 0 && phoneSplash.right <= phoneSplash.vw) || `x runs ${phoneSplash.left}→${phoneSplash.right}`);
+  check("P59331", "…because it wrapped onto a second line rather than being cut", () =>
+    phoneSplash.lines >= 2 || `the name is still on ${phoneSplash.lines} line(s) at ${phoneSplash.w}px`);
+  check("P59332", "…and the break landed between WORDS, never between two letters", () =>
+    phoneSplash.segs >= 2 || `${phoneSplash.segs} word group(s) — the letters are loose in the box again`);
+  check("P59333", "the opening name is the smaller size the owner asked for", () =>
+    (phoneSplash.font > 0 && phoneSplash.font <= 22) || `${phoneSplash.font}px`);
 
   const phone = await mp.evaluate(() => {
     const nav = document.querySelector(".nav");
@@ -321,6 +341,13 @@ async function run(browser) {
     /menu/i.test(lastResort.homeText) || `the button says "${lastResort.homeText}"`);
   check("P59299", "…and names the restaurant this device has actually stored", () =>
     (lastResort.brandHidden === false && lastResort.brand.length > 0) || `brand hidden=${lastResort.brandHidden} text="${lastResort.brand}"`);
+  // Item 6: the card must call the restaurant what the MENU calls it. The card upper-cases in CSS,
+  // so the comparison is case-insensitive; what must match is the WORDS.
+  check("P59334", "…using the same name the menu header shows, not the longer registered one", () => {
+    const a = lastResort.brand.replace(/\s+/g, " ").trim().toLowerCase();
+    const b = (tenant.brand || "").replace(/\s+/g, " ").trim().toLowerCase();
+    return (a && b && a === b) || `card says "${lastResort.brand}", the menu header says "${tenant.brand}"`;
+  });
   check("P59300", "the signal meter is drawn with its five bars", () => lastResort.bars === 5 || `${lastResort.bars} bars`);
   check("P59301", "…and says something rather than inventing a number", () =>
     (lastResort.label.length > 0 && !/undefined|NaN/.test(lastResort.label)) || `label="${lastResort.label}"`);
