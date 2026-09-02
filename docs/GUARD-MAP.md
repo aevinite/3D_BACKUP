@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **169** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **171** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 169 names in their head, so in practice a person runs none of them, or reaches for
+can hold 171 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -247,6 +247,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 
 | you touched | run | needs | writes |
 |---|---|---|---|
+| a rulebook that states a COUNT (guards, routes, docs), or you added a `verify:*`/`test:*` script | `verify:doc-counts` ← also chained into `verify:push`, because it lives in `.github/scripts/` and for months nothing ran it locally, so CI went red for everyone | nothing | no |
 | an activity-log or audit line a person will read, or an alert's action button | `verify:plain-logs` | nothing | no |
 | `CLAUDE.md`, `AGENTS.md`, or any doc CLAUDE.md points at | `verify:pointers` | nothing | no |
 | **`.vercelignore`** — adding or removing an exclusion | `npm run build` **with the folder moved out of the tree**, then move it back. Nothing else proves it: an unanchored `/editor` line once 404'd the whole manager panel on every deploy, and a grep finding no reader is not the same as a build succeeding. `/supabase` (371 files) was added this way on 2026-08-22. | nothing | no |
