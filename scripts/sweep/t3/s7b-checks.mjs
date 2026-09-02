@@ -509,8 +509,9 @@ P("P41212", "…reading the table from either query name the QR might use",
   /u\.searchParams\.get\("table"\) \|\| u\.searchParams\.get\("t"\)/.test(F.gate));
 P("P41213", "…and a raw non-URL code is still tried rather than discarded",
   /catch \{ t = raw; \}/.test(F.gate));
+// RE-AIMED: a `return;` was added after setStep, which is a tightening, not a loosening.
 P("P41214", "…and the camera is stopped the moment a code is read",
-  /if \(t\) \{ stopScan\(\); setTableInput\(t\); setStep\("ask_table"\); \}/.test(F.gate));
+  /if \(t\) \{ stopScan\(\); setTableInput\(t\); setStep\("ask_table"\);/.test(F.gate));
 P("P41215", "the gate is driven by ONE event, so no screen can open it a second way",
   /window\.addEventListener\("lfh:session-do", onDo\)/.test(F.gate));
 P("P41216", "…which refuses a malformed request rather than opening on nothing",
@@ -570,10 +571,14 @@ P("P41240", "…so a restaurant whose name has not resolved shows NO brand rathe
 H("I1. the queue's edges the first pass did not reach (P41241-P41285)");
 P("P41241", "the queue is restored oldest-first, so orders send in the order they were placed",
   /\.sort\(\(a, b\) => a\.at - b\.at\)/.test(F.outbox));
+// RE-AIMED, and by MY OWN change: sweep #8's item 13 made the restore MERGE with what is already
+// in memory instead of assigning over it, so an order saved in the same instant is not dropped from
+// the sending list. The two filters are unchanged and still the source of both lists — they now feed
+// a map rather than an assignment.
 P("P41242", "…and failed rows are restored separately, not re-sent",
-  /failed = all\.filter\(\(x\) => x\.status === "failed"\)/.test(F.outbox));
+  /all\.filter\(\(x\) => x\.status === "failed"\)\) failedById\.set/.test(F.outbox));
 P("P41243", "…and anything not explicitly failed counts as still queued",
-  /queued = all\.filter\(\(x\) => x\.status !== "failed"\)/.test(F.outbox));
+  /all\.filter\(\(x\) => x\.status !== "failed"\)\) byId\.set/.test(F.outbox));
 P("P41244", "restoring immediately gives the queue a timer and a flush",
   /notify\(\);\s*ensureRetry\(\);\s*void flushGuestOutbox\(\);/.test(bare(F.outbox)));
 P("P41245", "a phone that never queued anything does not gain a database",

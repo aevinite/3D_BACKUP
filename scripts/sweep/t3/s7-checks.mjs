@@ -188,8 +188,12 @@ P("P16148", "the join flow reads its answer and branches on every ending it can 
   ["blocked", "too_far", "no_open_session"].every((r) => new RegExp(`r\\.reason === "${r}"`).test(F.gate)));
 P("P16149", "…and treats anything else as 'could not reach', keeping the guest's place",
   /if \(!r\.ok\) \{ setTableInput\(p\.table\); setNote\("Couldn't reach the restaurant's system/.test(F.gate));
+// RE-AIMED, sweep #8 (2026-09-02). The rule HOLDS and the code got STRONGER: the bare
+// `const r = await callWaiterSession(...)` is now wrapped in the gate's own `guarded()` helper and
+// falls back to `{ ok:false, reason:"timed_out" }`, so the answer is not only read, it can no longer
+// be undefined. Asserting the call is made, its answer is bound, and `ok` is branched on.
 P("P16150", "the waiter-call-in-session path reads its answer",
-  /const r = await callWaiterSession\(s\.token, note\);/.test(F.gate) && /if \(r\.ok\) \{ fireDone/.test(F.gate));
+  /callWaiterSession\(s\.token, note\)/.test(F.gate) && /if \(r\.ok\) \{ fireDone/.test(F.gate));
 P("P16151", "…and tells a timeout apart from a refusal in what it says",
   /isSessionTimeout\(r\)\s*\?\s*"We couldn't reach the restaurant just now/.test(F.gate));
 P("P16152", "…and never tells a diner to retry something the restaurant rate-limited",
@@ -233,8 +237,11 @@ P("P16170", "the presence heartbeat is deliberately fire-and-forget (nothing wai
   /if \(token && !document\.hidden\) \{ touchSession\(token\); \}/.test(F.widget));
 P("P16171", "setMemberName is deliberately best-effort and cannot break the flow it sits in",
   /if \(s\) \{ try \{ await setMemberName\(s\.token, nick\); \} catch \{\} \}/.test(F.gate));
+// RE-AIMED: a line was inserted between the two (setGuestName — "their ONE name from now on"), so
+// a 120-character window was too tight. The ORDER is what the row means, so assert the order.
 P("P16172", "…and the name is stored on the phone first, so the flow never depends on that call",
-  /setNicknameFor\(s\?\.token, nick\);[\s\S]{0,120}await setMemberName/.test(F.gate));
+  F.gate.indexOf("setNicknameFor(s?.token, nick);") > 0
+  && F.gate.indexOf("setNicknameFor(s?.token, nick);") < F.gate.indexOf("await setMemberName"));
 P("P16173", "placing an order reads the answer through one function, so every path is guarded alike",
   /async function postGuestOrder\(body: Record<string, unknown>, actionId: string\): Promise<string>/.test(F.menu));
 P("P16174", "…and both order paths go through it",
@@ -326,10 +333,13 @@ P("P16211", "the gate's 'One moment…' step is always left by one of a finite s
   && (bare(F.gate).match(/setStep\("working"\)/g) || []).length === 2);
 P("P16212", "…the order path leaves it by placing, refusing, saving or closing",
   /orderKeyRef\.current = null; \/\/ placed → the next basket is a new order/.test(F.gate));
+// RE-AIMED: `setOpen(true)` was inserted before setStep — the sheet may have been dismissed
+// mid-send, so re-opening it is the fix that makes this row's own point BETTER. Asserted loosely
+// enough to allow that, and still tightly enough to require all three of report / show / stop.
 P("P16213", "…and a blocked order lands on its own screen rather than sitting on 'One moment'",
-  /if \(reason === "blocked"\) \{ fireDone\(\{ ok: false, reason: "blocked", action: "order" \}\); setStep\("blocked"\); return; \}/.test(F.gate));
+  /if \(reason === "blocked"\) \{ fireDone\(\{ ok: false, reason: "blocked", action: "order" \}\);[\s\S]{0,60}setStep\("blocked"\); return; \}/.test(F.gate));
 P("P16214", "…and the call path leaves it the same way",
-  /if \(r\.reason === "blocked"\) \{ fireDone\(\{ ok: false, reason: "blocked", action: "call" \}\); setStep\("blocked"\); return; \}/.test(F.gate));
+  /if \(r\.reason === "blocked"\) \{ fireDone\(\{ ok: false, reason: "blocked", action: "call" \}\);[\s\S]{0,60}setStep\("blocked"\); return; \}/.test(F.gate));
 P("P16215", "the waiting-for-approval poll pauses on a hidden tab instead of beating in the background",
   /if \(typeof document !== "undefined" && document\.hidden\) \{\s*pollTimer\.current = setTimeout\(loop, HIDDEN\);/.test(F.gate));
 P("P16216", "…and slows down the longer someone waits, rather than hammering at a fixed rate",
@@ -527,18 +537,36 @@ P("P16302", "…and the provider imports it rather than carrying a second copy",
   /import \{ tenantSlug \} from "\.\/tenantStorage";/.test(F.ctx));
 P("P16303", "…and there is no path-matching regex left in the provider deciding the tenant",
   (bare(F.ctx).match(/\/\^\\\/r\\\//g) || []).length <= 1);
+// RE-AIMED, and by MY OWN change: sweep #8's item 10 added the retry and the one-message rule to
+// this effect, which pushed `const s = tenantSlug()` past a 900-character window. The rule is
+// unchanged — the read happens inside the effect and nowhere else — so assert exactly that.
 P("P16304", "the provider reads it inside an effect, never during render (there is no sessionStorage on the server)",
-  /useEffect\(\(\) => \{[\s\S]{0,900}const s = tenantSlug\(\);/.test(F.ctx));
+  /const s = tenantSlug\(\);/.test(F.ctx)
+  && F.ctx.indexOf("useEffect(() => {") > 0
+  && F.ctx.indexOf("useEffect(() => {") < F.ctx.indexOf("const s = tenantSlug();"));
 P("P16305", "…so the first render is identical on the server and the client",
   /const \[slug, setSlug\] = useState<string>\(pathSlug\);/.test(F.ctx));
 P("P16306", "…and `ready` starts true only for the routes that genuinely ARE restaurant #1",
   /useState<boolean>\(\(\) => \/\^\\\/\(menu\|item\)\(\\\/\|\$\)\/\.test\(pathname \|\| ""\)\)/.test(F.ctx));
+// RE-AIMED, and by MY OWN change: item 10's cleanup now also clears the retry timer, so the
+// teardown reads `return () => { alive = false; if (timer) { … } };`. That is strictly MORE than the
+// row asked for. Assert the flag and that the teardown clears it, whatever else it does.
 P("P16307", "a late reply for restaurant A cannot land on restaurant B",
-  /let alive = true;/.test(F.ctx) && /return \(\) => \{ alive = false; \};/.test(F.ctx));
+  /let alive = true;/.test(F.ctx) && /return \(\) => \{ alive = false;/.test(F.ctx) && /if \(!alive\) return;/.test(F.ctx));
 P("P16308", "…and a stale NAME cannot flash during the resolve window",
   /setName\(null\);/.test(F.ctx));
-P("P16309", "a failed lookup can never leave a widget waiting for ever",
-  /\.catch\(\(\) => \{ if \(alive\) setReady\(true\); \}\)/.test(F.ctx));
+// RE-AIMED, sweep #8 T3, 2026-09-01. This asserted `.catch(() => { if (alive) setReady(true); })`,
+// and that line is GONE ON PURPOSE: T25's item 21 (the owner: "21 is very imp do it solve and make
+// sure this never happens") made a failed tenant lookup answer "we do not know" instead of
+// "restaurant #1", so the catch now sets the id to "" and deliberately leaves `ready` FALSE — the
+// point being that nothing keyed on the restaurant acts on a guess about somebody's money. A
+// detector that keeps demanding the retired line is a red guard for a decision that was taken, and
+// a red guard hides real regressions. So it now asserts the rule ACTUALLY in force: the catch is
+// alive-guarded, and it answers with no restaurant rather than defaulting to #1.
+// The residual question — that a diner on that path waits with no message — is reported as a
+// decision item against lib/restaurant-context.tsx, not smuggled in as a check on someone's file.
+P("P16309", "a failed lookup answers 'we do not know' rather than guessing restaurant #1",
+  /\.catch\(\(\) => \{[\s\S]{0,200}if \(!alive\) return;[\s\S]{0,200}setId\(""\)[\s\S]{0,200}setReady\(false\)/.test(F.ctx));
 P("P16310", "the slug the provider hands out is folded to lower case, so one restaurant is one bucket",
   /decodeURIComponent\(m\[1\]\)\.trim\(\)\.toLowerCase\(\)/.test(F.ctx));
 P("P16311", "…and storage folds it the same way, so the two cannot disagree on spelling",

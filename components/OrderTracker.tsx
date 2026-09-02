@@ -274,13 +274,31 @@ export default function OrderTracker() {
     // so a non-#1 guest reads THIS tenant's sessionsEnabled, not #1's (audit).
   }, [restaurantId]);
 
-  // Auto-hide a served/cancelled strip one minute after it finishes.
-  // We set a single timer for whichever finished order is due to disappear soonest.
+  // One redraw at the moment a finished order passes its linger mark, so anything keyed on
+  // that instant repaints once. We set a single timer for whichever finished order is due soonest.
+  //
+  // ── ONLY FOR A MOMENT THAT IS STILL AHEAD OF US (sweep #8 T3, item 1) ─────────────────────────
+  // This used to look at EVERY finished order and clamp the wait to zero for one already past its
+  // mark — and a served order stays on this device for the rest of the visit on purpose (the
+  // owner's own rule, 2026-06-14; see SERVED_LINGER_MS in lib/orderStatus.ts, which spells out that
+  // nothing filters a finished order out). So five seconds after the first dish was served, the
+  // moment was permanently in the past: `delay` was 0, the timer fired 100 ms later, `refresh()`
+  // published a brand-new array from localStorage, `orders` changed identity, this effect re-ran,
+  // and it scheduled itself again. MEASURED on a phone-sized page with one served order seeded:
+  // exactly 10.0 reads of `lfh_active_orders` per second, indefinitely — ten localStorage reads,
+  // ten JSON parses and ten re-renders a second, on a diner's phone, with nothing changing on
+  // screen. Nothing was visibly wrong, which is why it survived seven sweeps.
+  //
+  // Keeping only the marks that are genuinely in the FUTURE preserves the single redraw the
+  // constant exists for and ends the loop: an order whose mark has passed has already had it.
   useEffect(() => {
-    const finals = orders.filter((o) => isFinal(o.status) && o.finalizedAt && !o.dismissed);
-    if (finals.length === 0) return;
-    const soonest = Math.min(...finals.map((o) => (o.finalizedAt as number) + SERVED_LINGER_MS));
-    const delay = Math.max(0, soonest - Date.now()); // how long until that moment
+    const now = Date.now();
+    const pending = orders.filter(
+      (o) => isFinal(o.status) && o.finalizedAt && !o.dismissed && (o.finalizedAt as number) + SERVED_LINGER_MS > now,
+    );
+    if (pending.length === 0) return;
+    const soonest = Math.min(...pending.map((o) => (o.finalizedAt as number) + SERVED_LINGER_MS));
+    const delay = Math.max(0, soonest - now); // how long until that moment
     const t = setTimeout(refresh, delay + 100); // refresh just after it's due
     return () => clearTimeout(t); // cancel the timer if things change first
   }, [orders]);

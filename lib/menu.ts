@@ -193,11 +193,25 @@ export async function callWaiter(tableNumber: string, note?: string, restaurantI
   // Go through the GUARDED RPC (not a direct insert): the database function
   // refuses blocked tables, throttles rapid repeats, and caps pile-up. Direct
   // inserts to waiter_calls are no longer allowed (see migration 050).
-  const { data, error } = await supabase.rpc("lfh_call_waiter_table", {
-    p_table: tableNumber || null,
-    p_note: note || null,
-    p_restaurant_id: restaurantId,
-  });
+  //
+  // ── AND IT HAS A DEADLINE, LIKE EVERY OTHER GUEST WRITE (sweep #8 T3, item 2) ─────────────────
+  // This was the last guest write in the app with no ceiling on it. A browser `fetch` has no
+  // timeout of its own, so on a connection that HANGS rather than drops — the café Wi-Fi with a
+  // dead uplink, which is the exact case the whole saved-work layer exists for — this await never
+  // settled: the bell popup's `finally` never ran, its buttons stayed disabled reading "sending",
+  // and the diner was told nothing, for ever. Every neighbour already had the guard and said so in
+  // its own comment: placing an order (orderDeadline, below), the saved-work queue
+  // (lib/guestOutbox.ts sendDeadline) and every table-session call including a SEATED diner's
+  // waiter call (lib/session.ts SESSION_TIMEOUT_MS) — so the seated door was bounded while the
+  // QR door, which is the busiest one, was not.
+  //
+  // An abort surfaces as an ordinary error, which is what the popup's catch already words as
+  // "Couldn't reach staff — please try again": the tap resolves and says something true. Nothing
+  // is invented here and nothing new can be swallowed.
+  const signal = orderDeadline();
+  const { data, error } = signal
+    ? await supabase.rpc("lfh_call_waiter_table", { p_table: tableNumber || null, p_note: note || null, p_restaurant_id: restaurantId }).abortSignal(signal)
+    : await supabase.rpc("lfh_call_waiter_table", { p_table: tableNumber || null, p_note: note || null, p_restaurant_id: restaurantId });
   // A real transport/DB failure is an error we surface.
   if (error) throw new Error(`Call failed: ${error.message}`);
   // Otherwise hand back the RPC's own {ok, reason} so the UI can react honestly.
@@ -316,10 +330,17 @@ export async function updateOrderTableNumber(
 ): Promise<boolean> {
   // `.rpc(...)` calls a database FUNCTION (a bit of logic that lives in the DB)
   // by name, here "set_order_table_number", passing the order id and new table.
-  const { data, error } = await supabase.rpc("set_order_table_number", {
-    order_id: id,
-    new_table: tableNumber,
-  });
+  //
+  // DEADLINE, for the same reason as callWaiter above (sweep #8 T3, item 2): this is a TAP — the
+  // "Wrong table? Fix it" control on the bill's Live-status tab — and it sets `savingTable` before
+  // awaiting. With nothing bounding the await, a hung connection left the button reading "Saving…"
+  // with both it and its own double-tap guard stuck, and no message. A timeout comes back as an
+  // error, which this function already reports as `false`, and the caller already words that
+  // honestly ("Couldn't move that order — please ask a member of staff").
+  const signal = orderDeadline();
+  const { data, error } = signal
+    ? await supabase.rpc("set_order_table_number", { order_id: id, new_table: tableNumber }).abortSignal(signal)
+    : await supabase.rpc("set_order_table_number", { order_id: id, new_table: tableNumber });
   // Success means: no error AND the function returned at least one row (proof a
   // matching, still-open order was actually updated).
   return !error && Array.isArray(data) && data.length > 0;

@@ -28,6 +28,47 @@ const isUuid = (v: unknown) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4
 // first; this is the half that does not depend on the phone getting it right.
 const STALE_CALL_MS = 10 * 60 * 1000;
 
+// ── A CALL THAT NEVER LANDED DID NOT CHANGE THE FLOOR (sweep #8 T3, item 5) ───────────────────────
+//
+// Both branches below dropped the restaurant's shared floor snapshot after EVERY answer, including
+// the three that create no row at all: `already_sent` (the same request within six seconds),
+// `capped` (six unresolved calls already stacked on that table) and a refusal such as `blocked`.
+// Migration 238 exists precisely so one floor read is shared for 1.5 seconds instead of recomputed
+// per panel, and its own note says not to simplify it back — so throwing that snapshot away for an
+// answer that changed nothing forces every manager, tablet and kitchen screen on the floor to
+// recompute for no reason, and it happens most during a rush, when a table taps the bell repeatedly
+// and gets `already_sent` each time. Its own sibling already had this right: /api/guest/place-order
+// drops the snapshot through dropFloorIfPlaced(), which checks the answer first.
+//
+// The three "no new row" answers are the RPCs' own words — migration 207 for the table call
+// (`already_sent` / `capped` / `blocked`) and migration 084 for the session one (`already_active`).
+// A code, never prose, per the branch-on-codes rule.
+function callLanded(data: unknown): boolean {
+  if (!data || typeof data !== "object") return false;
+  const d = data as { ok?: unknown; reason?: unknown; already_active?: unknown };
+  if (d.ok === false) return false;                                  // refused outright
+  if (d.already_active === true) return false;                       // session path: same request pending
+  return !["already_sent", "capped", "rate_limited"].includes(String(d.reason ?? ""));
+}
+
+// The restaurant a session token belongs to. The twin of the helper in
+// /api/guest/place-order — and it exists for the same reason: `lfh_call_waiter` (migration 084)
+// returns `{ok:true}` and nothing else, so the "prefer the restaurant the RPC itself resolved"
+// note below has never had a value to prefer, and an older saved call carrying no `restaurantId`
+// left the floor snapshot standing. Two single-row, column-listed, capped reads, and only when
+// both cheaper answers came back empty.
+async function ridFromToken(token: string | undefined): Promise<string> {
+  if (!token) return "";
+  try {
+    const m = await sb.from("session_members").select("session_id").eq("token", token).limit(1).maybeSingle();
+    const sid = m.data?.session_id;
+    if (!sid) return "";
+    const s = await sb.from("sessions").select("restaurant_id").eq("id", sid).limit(1).maybeSingle();
+    const rid = s.data?.restaurant_id;
+    return isUuid(rid) ? String(rid) : "";
+  } catch { return ""; }
+}
+
 // ── "THE RESTAURANT IS BUSY — WAIT THIS LONG" (T10 sweep, improvement I2) ─────────────────────────
 //
 // A 502 here means the restaurant's server did not answer, and the phone saves the call and retries
@@ -107,9 +148,12 @@ async function postImpl(req: NextRequest): Promise<Response> {
     const fromRpc = (data && typeof data === "object")
       ? ((data as Record<string, unknown>).restaurant_id ?? (data as Record<string, unknown>).restaurantId)
       : null;
-    const rid = isUuid(fromRpc) ? (fromRpc as string) : (isUuid(b.restaurantId) ? (b.restaurantId as string) : "");
-    if (rid) invalidateFloor(rid);   // a raised hand changes the floor
-    else console.warn("[guest/call-waiter] session replay had no resolvable restaurant — floor snapshot not dropped");
+    const rid = isUuid(fromRpc)
+      ? (fromRpc as string)
+      : (isUuid(b.restaurantId) ? (b.restaurantId as string) : await ridFromToken(b.token));
+    // A raised hand changes the floor — a duplicate of one already raised does not.
+    if (rid && callLanded(data)) invalidateFloor(rid);
+    else if (!rid) console.warn("[guest/call-waiter] session replay had no resolvable restaurant — floor snapshot not dropped");
     return NextResponse.json(data ?? { ok: false, reason: "empty" });
   }
 
@@ -142,7 +186,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     p_restaurant_id: rid,
   });
   if (error) { console.error("[guest/call-waiter] public RPC failed:", error.message); return busy(); }
-  invalidateFloor(rid);
+  if (callLanded(data)) invalidateFloor(rid);   // …and only when a call really landed
   return NextResponse.json(data ?? { ok: false, reason: "empty" });
 }
 

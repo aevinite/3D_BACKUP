@@ -92,6 +92,7 @@
     "verify:busy": "node scripts/verify-busy-server.mjs",
     "verify:outbox": "node scripts/verify-outbox-drain.mjs",
     "verify:order-retry": "node scripts/verify-order-retry.mjs",
+    "verify:basket": "node scripts/verify-basket.mjs",
     "verify:guest-doors": "node scripts/verify-guest-doors.mjs",
     "sweep:t3": "node scripts/sweep/t3/run-all.mjs",
     "sweep:t3-static": "node scripts/sweep/t3/s7-checks.mjs",

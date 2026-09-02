@@ -112,6 +112,49 @@ function notify() {
   try { window.dispatchEvent(new CustomEvent("lfh:guest-outbox-changed")); } catch { /* ignore */ }
 }
 
+/** What one saved thing IS, for the sentences that have to name it. Absent → an order. */
+export type GuestKind = "order" | "call" | "leave";
+
+/**
+ * The refusal codes whose sentence in reasonMsg is true of ANY saved thing — an order, a raised
+ * hand, or "I've left this table". Every other code gets a per-kind sentence (see reasonMsg).
+ *
+ * Deliberately a SHORT list, and deliberately not including `rate_limited`: its wording is "that's
+ * a lot of ORDERS in a row", which is the wrong thing to say to someone whose bell taps hit the
+ * waiter-call limit. Anything not listed here is answered by the kind's own sentence, which is the
+ * safe direction — a slightly general sentence about the right thing beats an exact one about the
+ * wrong thing.
+ */
+const WORDED_FOR_EVERY_KIND = new Set([
+  "session_closed", "not_approved", "blocked", "otp_required", "invalid_token",
+  "server_busy", "call_too_old", "off_plan_table",
+]);
+
+/**
+ * THE FOUR "WE COULD NOT GET THIS THROUGH" SENTENCES, SAID ABOUT THE RIGHT THING.
+ *
+ * These are the queue's own words — they never come from the server, so no code reaches reasonMsg
+ * for them. All three used to end in "please order again" whichever kind had failed. The order
+ * wording is unchanged to the byte (three guards assert those exact phrases).
+ */
+const CANT_SEND: Record<GuestKind, { unreachable: string; stillBusy: string; refused: string }> = {
+  order: {
+    unreachable: "We couldn't reach the restaurant — please order again.",
+    stillBusy: "The restaurant's system is still busy with this one — please order again.",
+    refused: "The restaurant's system didn't take this one — please order again.",
+  },
+  call: {
+    unreachable: "We couldn't reach the restaurant — please ask a member of staff.",
+    stillBusy: "The restaurant's system is still busy with your call — please ask a member of staff.",
+    refused: "The restaurant's system didn't take your call — please ask a member of staff.",
+  },
+  leave: {
+    unreachable: "We couldn't reach the restaurant — please tell a member of staff you've left.",
+    stillBusy: "The restaurant's system is still busy with this — please tell a member of staff you've left.",
+    refused: "The restaurant's system didn't take this — please tell a member of staff you've left.",
+  },
+};
+
 /**
  * WHY AN ORDER WAS REFUSED, in words a diner can act on. THE ONE COPY.
  *
@@ -123,12 +166,34 @@ function notify() {
  * guest who was only doing what the app told them to. Wording lives here once so a new reason
  * added to the RPCs can only be missing in one place.
  */
-export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: boolean }): string {
+export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: boolean; kind?: GuestKind }): string {
   // `queued` = this order had been SAVED on the phone and is only being refused now, so the past
   // tense ("while you were offline") is the true sentence. A live refusal happens while the person
   // is standing at the screen, so it says what to do instead. Same code, two honest tenses.
   const q = opts?.queued;
   const dish = opts?.dish ? `“${opts.dish}”` : "";
+  // ── A SAVED CALL IS NOT AN ORDER, AND NOR IS LEAVING A TABLE (sweep #8 T3, item 3) ─────────────
+  //
+  // One queue drains three kinds of saved thing (order · call · leave) and every generic sentence
+  // in the switch below is about an ORDER, because orders were the only kind when it was written.
+  // So a diner who tapped the bell in a dead spot, and whose call could not be delivered, read:
+  //
+  //     “Couldn't send this order — please order again.”
+  //
+  // — about an order they never placed, with advice that does not help the thing they actually
+  // asked for. The same held for `rate_limited` ("that's a lot of orders in a row"), for
+  // `unknown_restaurant` ("which restaurant this ORDER was for") and for `bad_body`.
+  //
+  // Only the codes whose existing sentence is TRUE of any saved thing are left to the switch — a
+  // table that closed, a session that expired, a system that would not answer, a call that went
+  // stale, a table number the restaurant does not have. Everything else gets the sentence that
+  // fits what the person did. `kind` is OPTIONAL and absent means "order", so the two live callers
+  // (the bill and the table gate, which only ever place orders) are unchanged to the byte.
+  if (opts?.kind && opts.kind !== "order" && !WORDED_FOR_EVERY_KIND.has(String(reason))) {
+    return opts.kind === "call"
+      ? "Couldn't send your call for a server — please ask a member of staff."
+      : "Couldn't tell the restaurant you'd left the table — please tell a member of staff.";
+  }
   switch (reason) {
     case "session_closed": return q ? "Your table was closed while you were offline." : "This table has been closed — please ask your server.";
     case "not_approved": return q ? "You weren't approved to order on this table." : "You're not approved to order on this table yet.";
@@ -438,6 +503,8 @@ function sendDeadline(): AbortSignal | undefined {
 
 const isCall = (it: GuestOrder) => it.kind === "call";
 const isLeave = (it: GuestOrder) => it.kind === "leave";
+/** WHICH of the three kinds this saved row is. A row written before `kind` existed is an order. */
+const kindOf = (it: GuestOrder): GuestKind => (isCall(it) ? "call" : isLeave(it) ? "leave" : "order");
 
 /**
  * THE LIST THAT ACTUALLY HAS NAMES ON IT.
@@ -577,7 +644,7 @@ export async function flushGuestOutbox() {
         // never told and nothing to tap. Bounded now, exactly like the staff queue.
         item.netTries = (item.netTries || 0) + 1;
         if (item.netTries < NET_MAX_TRIES) { await persist(item); idx++; continue; }
-        await moveToFailed(item, "We couldn't reach the restaurant — please order again.");
+        await moveToFailed(item, CANT_SEND[kindOf(item)].unreachable);
         notify(); continue;
       }
       // Read the body ONCE: the old code parsed it inside the 409 branch and then again
@@ -597,7 +664,7 @@ export async function flushGuestOutbox() {
       if (res.status === 409 && j?.retry) {
         item.busyTries = (item.busyTries || 0) + 1;
         if (item.busyTries < BUSY_MAX_TRIES) { await persist(item); idx++; continue; }
-        await moveToFailed(item, "The restaurant's system is still busy with this one — please order again.");
+        await moveToFailed(item, CANT_SEND[kindOf(item)].stillBusy);
         notify(); continue;
       }
       if (res.status === 409 && j?.clash?.plain) {          // the table moved on while offline
@@ -614,7 +681,7 @@ export async function flushGuestOutbox() {
       // an order the diner had been promised would send simply vanished — no ticket, no entry in
       // their list, no message. Now it is surfaced like any other refusal.
       if (res.ok && j?.duplicate) {
-        if (j.ok === false) { await moveToFailed(item, reasonMsg(j.reason, { queued: true, dish: dishFor(j.reason, j.item, namedLines(item)) })); notify(); continue; }
+        if (j.ok === false) { await moveToFailed(item, reasonMsg(j.reason, { queued: true, dish: dishFor(j.reason, j.item, namedLines(item)), kind: kindOf(item) })); notify(); continue; }
         progressed = true;
         if (j.order_id) recordActive(item, j.order_id as string);
         await removeItem(item.id); notify(); continue;
@@ -626,7 +693,7 @@ export async function flushGuestOutbox() {
       if (!res.ok && res.status >= 500) {
         item.tries = (item.tries || 0) + 1;
         if (item.tries < SERVER_MAX_TRIES) { await persist(item); idx++; continue; }
-        await moveToFailed(item, "The restaurant's system didn't take this one — please order again.");
+        await moveToFailed(item, CANT_SEND[kindOf(item)].refused);
         notify(); continue;
       }
       // Server accepted the call but rejected the order (state changed while offline),
@@ -648,7 +715,7 @@ export async function flushGuestOutbox() {
         item.blocked = oneDish;
         item.blockedId = blockedLineId(item, j?.reason, j?.item);
       }
-      await moveToFailed(item, reasonMsg(j?.reason, { queued: true, dish: oneDish })); notify(); continue;
+      await moveToFailed(item, reasonMsg(j?.reason, { queued: true, dish: oneDish, kind: kindOf(item) })); notify(); continue;
     }
   } finally {
     flushing = false;
@@ -847,8 +914,33 @@ function ensureStarted() {
 /** Read back whatever this device saved in an earlier session and get it moving again. */
 function restoreQueue() {
   idbAll().then((all) => {
-    queued = all.filter((x) => x.status !== "failed").sort((a, b) => a.at - b.at);
-    failed = all.filter((x) => x.status === "failed");
+    // ── MERGE, NEVER REPLACE (owner picked item 13) ────────────────────────────────────────────
+    //
+    // These two lines used to ASSIGN, throwing away whatever was already in memory. The restore is
+    // asynchronous and it is kicked off by ensureStarted(), which enqueueGuestOrder() also calls —
+    // so an order saved in the same instant the read comes back could be wiped out of the list.
+    // Not lost from the device: `persist()` had already put it in storage. Lost from the list that
+    // decides what gets SENT — and since restoreQueue only ever runs once, nothing would try it
+    // again until the page was reloaded. That is "saved work with nothing to send it", which is a
+    // named rule in this project, arrived at from the other direction.
+    //
+    // In practice it is nearly unreachable: the connection badge subscribes on mount, so the queue
+    // is awake long before anyone taps Place Order. "Nearly" is the reason to fix it in four lines
+    // rather than argue about it — losing a diner's order to a millisecond is not a trade worth
+    // keeping.
+    //
+    // WHAT WINS. Storage is the older truth and memory is the newer one, so a row that exists in
+    // both keeps its IN-MEMORY version — that copy may already have been through a flush and be
+    // carrying fresh attempt counters. Everything else is taken from storage. Sorted oldest-first
+    // afterwards, exactly as before, so the queue still drains in the order the diner placed it.
+    const byId = new Map<string, GuestOrder>();
+    for (const x of all.filter((x) => x.status !== "failed")) byId.set(x.id, x);
+    for (const x of queued) byId.set(x.id, x);
+    queued = [...byId.values()].sort((a, b) => a.at - b.at);
+    const failedById = new Map<string, GuestOrder>();
+    for (const x of all.filter((x) => x.status === "failed")) failedById.set(x.id, x);
+    for (const x of failed) failedById.set(x.id, x);
+    failed = [...failedById.values()];
     notify();
     // An order restored from a previous session gets a timer too, not just a single attempt.
     ensureRetry();
