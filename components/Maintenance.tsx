@@ -25,7 +25,23 @@
 // broken image, and cross-origin so the offline layer deliberately never caches it. `public/
 // lfh-logo.png` is the identical file (same sha256, 35,633 bytes — checked, not assumed) and is
 // what IntroSplash has always used. (T1 improvement 13, 2026-08-07.)
+import { stripBrandMarkers } from "@/lib/brandText";
 const DEFAULT_LOGO = "/lfh-logo.png";
+
+// THE NAME'S HIGHLIGHT MARKERS ARE NOT PART OF THE NAME (owner, item 6, 2026-09-02).
+//
+// A restaurant's wordmark is stored with *asterisks* around the part that should wear the accent
+// colour — "Demo *Bistro*", "Aangan *Garden*". Header, HeroTitle and IntroSplash all divide that
+// text through lib/brandText before drawing it, so the markers never reach a screen. This file
+// used the raw string, so on the maintenance screen the asterisks went straight into `alt` and
+// into the text fallback: measured on /r/demo-bistro/menu, `alt="Demo *Bistro*"`, which a screen
+// reader says out loud as "Demo star Bistro star" (guest sweep T1, sweep #8).
+//
+// STRIPPED rather than SPLIT, deliberately. Header colours the marked half with the accent, but
+// this whole screen is already drawn in one ink derived from that same accent (--maint-ink), so
+// highlighting a part of the name would mean inventing a second colour on a screen whose design
+// is one colour. Stripping gives the right words in the right ink, which is what the name is for.
+// (The import itself sits at the top of the file, where every other import lives.)
 
 // The whole-screen "we're temporarily closed / under maintenance" page.
 // AppShell swaps the normal menu out for this when Service Mode is switched on,
@@ -34,7 +50,7 @@ export default function Maintenance({ logoText, logoUrl, isDefault = true }: { l
   // #1 keeps its hardcoded logo; other restaurants use their uploaded logo, or
   // fall back to showing their name in text (never the French House mark).
   const showLogo = isDefault ? DEFAULT_LOGO : (logoUrl || null);
-  const name = isDefault ? "Little French House" : (logoText || "");
+  const name = isDefault ? "Little French House" : stripBrandMarkers(logoText || "");
   return (
     // role="alert" makes screen readers announce this important message.
     // `maint-flagship` pins restaurant #1's hand-tuned gold; every other tenant's screen derives

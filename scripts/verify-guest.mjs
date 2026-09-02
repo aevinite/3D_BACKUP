@@ -91,6 +91,39 @@ check("473-474", "a guest can correct a wrong table number, and the dead sheet i
   has(F.cart, "live-order-fixlink", "saveOrderTable") && !has(F.tracker, "ot-sheet"));
 check("158-161", "a switched-off category's dishes are filtered in the data layer", () =>
   has(F.menuLib, "activeCategorySlugs", "inLiveCategory"));
+// ── NO SECTIONS IS NOT "NO DISHES MATCH YOUR FILTERS" (guest sweep T1, sweep #8, 2026-09-02) ──
+// The grouped view is built by walking the categories, so an empty categories list produces no
+// groups however many dishes arrived — and the branch under it said "No dishes match these
+// filters. Try turning a filter off." with no filter on, above 59 undrawn dishes. Measured on a
+// production build at 360x780 with the sections half of the menu read emptied.
+// ── A NAME'S HIGHLIGHT MARKERS NEVER REACH A SCREEN (owner, item 6, 2026-09-02) ──────────────
+// A wordmark is stored with *asterisks* around the part that wears the accent. Every render site
+// divides it through lib/brandText first — except the maintenance screen, which used the raw
+// string, so `alt="Demo *Bistro*"` went to a screen reader and a restaurant with markers and no
+// uploaded logo would have shown the asterisks in 40px text.
+check("P55225", "the maintenance screen strips a name's highlight markers before showing it", () => {
+  const m = code("components/Maintenance.tsx");
+  return { ok: has(m, "stripBrandMarkers") && rx(m, /const name = isDefault \? "Little French House" : stripBrandMarkers\(logoText \|\| ""\)/),
+           note: "one call, on the single value that feeds the alt text, the aria-label and the text fallback" };
+});
+check("P55226", "…and every OTHER guest render site still divides the same text the same way", () => {
+  const want = { "components/Header.tsx": "splitBrandSegments", "components/HeroTitle.tsx": "lib/brandText", "components/IntroSplash.tsx": "lib/brandText" };
+  const missing = Object.entries(want).filter(([f, k]) => !has(code(f), k)).map(([f]) => f.split("/").pop());
+  return { ok: missing.length === 0, note: missing.length ? "missing: " + missing.join(", ") : "header, hero and splash all go through lib/brandText" };
+});
+check("P55217", "with dishes but no sections, the menu shows the dishes rather than blaming a filter", () => {
+  const mv = F.menuView;
+  return { ok: has(mv, "allGroups.length === 0 && filteredItems.length > 0 && !anyFilterOn")
+             && has(mv, "const anyFilterOn = !!(chefActive || favActive || dietActive)"),
+           note: "the flat grid is reached before the no-match message, and only a NARROWING chip counts as a filter" };
+});
+check("P55218", "a sort alone never counts as a filter, because a sort hides nothing", () =>
+  ({ ok: !rx(F.menuView, /const anyFilterOn = [^;]*currentSort/), note: "anyFilterOn names chef, favourites and diet only" }));
+check("P55219", "the placeholder category chips stop once the menu has loaded", () => {
+  const mv = F.menuView;
+  const n = (mv.match(/\(dbCategories\.length === 0 && !loaded\) \|\| visibleCategories\.length > 0/g) || []).length;
+  return { ok: n === 2, note: `${n} of 2 places (the heading and the bar) gate the still-loading arm on !loaded, so eight grey chips cannot sit there for ever` };
+});
 check("24-27", "the viewer honours the Menu switch + maintenance, and never falls back to #1's dish", () =>
   has(F.viewer, "s.menuEnabled", "s.serviceMode") && rx(F.viewer, /if \(!r\) \{[^}]*setUnavailable\(true\)/));
 check(303, "the offline strip promises a queue on GUEST paths only", () =>
@@ -98,8 +131,28 @@ check(303, "the offline strip promises a queue on GUEST paths only", () =>
 check("122-127", "allergies and notes are gated at the SEND site, not only where they're saved", () =>
   has(F.cart, "allergyPayload", "orderItems") &&
   has(F.cart, "features.allergies ? it.removed : undefined", "features.guest_note ? it.note : undefined"));
-check(110, "reviews are only fetched once the switch has resolved", () =>
-  rx(F.item, /!features\.reviews\) \{ setLocalReviews/) && rx(F.item, /features\.reviews\]\)/));
+// ── ASSERT THE RULE, NOT THE SPELLING IT HAD IN JULY (owner, item 8, 2026-09-02) ──────────────
+// This row asserted two literal fragments — `!features.reviews) { setLocalReviews` and
+// `features.reviews])`. The dish page has since replaced that with a STRICTER gate: the read now
+// waits for `getFeatures(restaurantId)`, and a restaurant with reviews on but ratings OFF (where
+// nothing on the page draws a review) no longer pays for the read at all. So the guard was red on
+// clean main against code that is better than what it demanded — the same way row 261 was, and
+// with the same cost: a permanently red row makes the next genuine red indistinguishable from it.
+//
+// What actually matters, and what is asserted here instead: the read waits for THIS restaurant's
+// resolved answer; a "no" (or no answer at all) empties the list and returns BEFORE any review is
+// fetched; and the effect re-runs when the switches change, so a live toggle is still honoured.
+check(110, "reviews are only fetched once THIS restaurant's switches have resolved", () => {
+  const s = F.item;
+  const eff = (s.match(/const reviewsCanBeSeen[\s\S]{0,900}?\}, \[item, restaurantId, reviewsCanBeSeen\]\);/) || [""])[0];
+  if (!eff) return { ok: false, note: "the reviews effect is not where this guard can see it" };
+  const waits = /await getFeatures\(restaurantId\)/.test(eff);
+  const refuses = /if \(!real \|\| !real\.reviews \|\| !real\.ratings\) \{ setLocalReviews\(\[\]\); return; \}/.test(eff);
+  const beforeRead = eff.indexOf("getFeatures(restaurantId)") < eff.indexOf("getItemReviews(");
+  const reruns = /\}, \[item, restaurantId, reviewsCanBeSeen\]\);/.test(eff);
+  return { ok: waits && refuses && beforeRead && reruns,
+           note: `waits=${waits} refuses=${refuses} refusal-before-read=${beforeRead} re-runs-on-toggle=${reruns}` };
+});
 check(110, "getMenuItem no longer pulls a review list nothing reads", () =>
   !has(F.menuLib, "mapped.reviews = revs"));
 check("394-395", "no internal dev text on a guest 3D screen", () =>
@@ -150,8 +203,28 @@ check(261, "no guest component hand-rolls history outside the two managers", () 
   const files = ["components/CartPanel.tsx", "components/OrderConfirmModal.tsx", "components/ChefPopup.tsx",
     "components/SessionGate.tsx", "components/OrderTracker.tsx", "components/MenuView.tsx",
     "app/item/[slug]/ItemClient.tsx", "app/view/[folder]/ViewerClient.tsx"];
-  const bad = files.filter((f) => rx(code(f), /history\.(pushState|replaceState)|addEventListener\("popstate"/));
-  return { ok: bad.length === 0, note: bad.join(",") || "clean" };
+  // A BACK-BUTTON LAYER IS pushState AND popstate. THAT is what must go through useBackClose /
+  // LFH_BACK, because that is what the phone's Back key walks (guest sweep T1, sweep #8, 2026-09-02).
+  //
+  // This row was RED on clean main and had been for days, and it was red for doing what the owner
+  // asked for: on 2026-08-30 he said the table number must not sit in the address bar where anyone
+  // can edit it, so MenuView reads `?table=N` once and then removes it with `replaceState`. A
+  // `replaceState` adds NO history entry — it is the opposite of a back layer, and MenuView's own
+  // comment says so and explains why `pushState` would be wrong there. Asserting against it made
+  // the guard defend a rule that had been overruled, which is the one way a guard costs more than
+  // it earns.
+  //
+  // So: pushState and popstate stay banned outright, everywhere in this list. A `replaceState` is
+  // allowed ONLY in a file that is using it for exactly that address tidy-up — it must sit with the
+  // `table` parameter being deleted — so nothing else can slip through under the same name.
+  const layer = files.filter((f) => rx(code(f), /history\.pushState|addEventListener\("popstate"/));
+  const strayReplace = files.filter((f) => {
+    const s = code(f);
+    return rx(s, /history\.replaceState/) && !rx(s, /searchParams\.delete\("table"\)/);
+  });
+  const bad = [...new Set([...layer, ...strayReplace])];
+  return { ok: bad.length === 0,
+           note: bad.length ? bad.join(",") : `clean — ${files.length} files, no pushState, no popstate; the one replaceState is the table-number wipe the owner asked for` };
 });
 check("72-77", "every per-restaurant guest key goes through tenant-scoped storage", () => {
   const want = { "components/FoodCard.tsx": ["lfh_cart"], "components/MiniCart.tsx": ["lfh_cart"],
@@ -536,6 +609,42 @@ async function live(base) {
       await c.close();
     }
 
+    // LIVE: A MENU WITH NO SECTIONS STILL FEEDS THE DINER (guest sweep T1, sweep #8, 2026-09-02).
+    //
+    // The only thing changed is the SECTIONS half of the reply — the dishes are handed through
+    // untouched — which is what an ordinary blip on one of the two parallel reads looks like, and
+    // what a restaurant with every category switched off looks like. Before the fix this drew a
+    // blank page reading "No dishes match these filters. Try turning a filter off." over 59 dishes,
+    // above eight grey placeholder chips that never resolved.
+    //
+    // The service worker is blocked for this one context: it would serve its own stored copy of the
+    // reply and the injection would never be seen (the trap `verify:offline` records too).
+    {
+      const cc = await b.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true, serviceWorkers: "block" });
+      const pg3 = await cc.newPage();
+      await pg3.route("**/api/r/*/menu-data*", async (route) => {
+        try {
+          const res = await route.fetch();
+          const j = await res.json();
+          await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: j.items, categories: [] }) });
+        } catch { await route.continue(); }
+      });
+      await pg3.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg3.waitForTimeout(4000);
+      const r3 = await pg3.evaluate(() => ({
+        cards: document.querySelectorAll(".item-card:not(.skeleton-card)").length,
+        skeletonChips: document.querySelectorAll(".cat-skeleton").length,
+        blamesFilter: /match these filters/i.test(document.body.innerText),
+      }));
+      check("P55217", "LIVE: with the sections missing, the dishes are still drawn", () =>
+        ({ ok: r3.cards > 0, note: `${r3.cards} dish tiles on screen` }));
+      check("P55217", "LIVE: …and the diner is not told a filter they never set hid them", () =>
+        ({ ok: !r3.blamesFilter, note: r3.blamesFilter ? 'the page says "No dishes match these filters"' : "no filter is blamed" }));
+      check("P55219", "LIVE: …and no placeholder chip is left sitting there for ever", () =>
+        ({ ok: r3.skeletonChips === 0, note: `${r3.skeletonChips} grey placeholder chips` }));
+      await cc.close();
+    }
+
     // LIVE: the wide list row is laid out and nothing in it overlaps — and the PHONE is untouched.
     // The veg mark centred beside the button was the first attempt and the two landed on top of
     // each other, so every pair is measured rather than eyeballed.
@@ -580,6 +689,22 @@ async function live(base) {
       await pg2.goto(`${base}/r/${slug}/menu`, { waitUntil: "domcontentloaded", timeout: 60000 });
       await pg2.waitForSelector("#search-input", { timeout: 30000 }).catch(() => {});
       await pg2.waitForTimeout(2000);
+      // ── A CLOSED RESTAURANT MUST NOT KILL THE WHOLE GUARD (guest sweep T1, sweep #8, 2026-09-02).
+      // This loop names `demo-bistro`, and `demo-bistro` is a real restaurant somebody can switch to
+      // maintenance from the editor. When they do there is no search box, this `fill` threw, and the
+      // live half of verify:guest died with a stack trace BEFORE the report — so every one of its
+      // other live rows silently stopped being run. Measured on origin/main: exit with a
+      // TimeoutError, no PASS/FAIL line at all. The repo's own hook says it in one sentence — "a
+      // guard that cannot run looks exactly like a guard nobody ran, and neither looks like a red" —
+      // so say WHICH it is, and carry on with the rest.
+      const boxThere = (await pg2.locator("#search-input").count()) > 0;
+      if (!boxThere) {
+        const closed = await pg2.evaluate(() => /UNDER MAINTENANCE|right back/i.test(document.body.innerText));
+        check("P15607", `LIVE: ${slug} "${qq}" @${wdt}px — every suggestion name is whole`, () =>
+          ({ ok: closed, note: closed ? `⏭ ${slug} is showing its own maintenance sign, so it has no search box to type in — not a fault, and not a pass either` : "no search box, and the restaurant is NOT closed" }));
+        await cc.close();
+        continue;
+      }
       await pg2.fill("#search-input", qq);
       await pg2.waitForSelector(".search-result", { timeout: 20000 }).catch(() => {});
       await pg2.waitForTimeout(1200);

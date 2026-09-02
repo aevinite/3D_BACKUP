@@ -237,6 +237,108 @@ const run = async () => {
       } finally { await p.close().catch(() => {}); }
     }
 
+    // ── EVERY RULE IN THIS SCREEN'S STYLESHEET MATCHES SOMETHING (T1 round 2, 2026-09-02) ───
+    // Fifty rules ship with every 404 and not one of them had ever been checked. Four could never
+    // match anything: three left behind when the toaster's "again" class was replaced by re-keying,
+    // and one anchor rule for a button that is a <button>. They were deleted; this stops the next
+    // four appearing. A rule that matches nothing is bytes every visitor downloads for no reason —
+    // and, worse, it hides the ones that were MEANT to match and no longer do.
+    //
+    // Judged on the right screen, and with scripting BOTH on and off: .nf-g rules on a diner's
+    // address, .nf-s rules on a staff one, and the no-JavaScript fallback (which is the .nf-s skin
+    // and is the only place an <a class="nf-btn nf-again"> exists) with scripting disabled.
+    {
+      const { readFileSync } = await import("node:fs");
+      const { join, dirname } = await import("node:path");
+      const { fileURLToPath } = await import("node:url");
+      const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+      const nf = readFileSync(join(ROOT, "app/not-found.tsx"), "utf8");
+      const css = (nf.match(/const CSS = `([\s\S]*?)`;/) || [])[1] || "";
+      const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(^|\n)([^@\n{}][^{}\n]*?)\s*\{([^}]*)\}/g)]
+        .map((m) => m[2].trim()).filter((s2) => s2 && !s2.startsWith("@") && !/^\d/.test(s2));
+      const pages = {};
+      for (const [k, url, js] of [["guest", "/menu/zz-css-guard", true], ["staff", "/manager/zz-css-guard", true], ["nojs", "/zz-css-guard", false]]) {
+        const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, javaScriptEnabled: js });
+        const pg = await ctx.newPage();
+        await pg.goto(BASE + url, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+        await pg.waitForTimeout(js ? 3000 : 900);
+        pages[k] = { ctx, pg };
+      }
+      const dead = [];
+      for (const sel of rules) {
+        const parts = sel.replace(/:focus-visible|::before|::after|:visited|:hover|:active/g, "").split(",").map((x) => x.trim()).filter(Boolean);
+        let hits = 0;
+        // EACH COMMA-SEPARATED PART IS JUDGED ON ITS OWN SCREEN. The reduce-motion rule names
+        // `.nf-g .docket` AND `.nf-s .slice` in one selector; routing the whole rule by whether it
+        // mentions .nf-g or .nf-s skipped BOTH screens and called a live rule dead.
+        for (const k of ["guest", "staff", "nojs"]) {
+          const mine = parts.filter((s2) => (/\.nf-g/.test(s2) ? k !== "staff" : /\.nf-s/.test(s2) ? k !== "guest" : true));
+          if (!mine.length) continue;
+          if (k === "nojs") {
+            // With scripting off there is no DOM to query, so match the MARKUP: every class token
+            // in the selector must be present, and a tag qualifier (`a.nf-again`) must appear on a
+            // tag of that name. Crude, but it is the only way to see the <noscript> fallback — and
+            // that fallback is the one place an <a class="nf-btn nf-again"> exists.
+            const html = await pages[k].pg.content();
+            const ns = (html.match(/<noscript>([\s\S]*?)<\/noscript>/) || [])[1] || "";
+            for (const s2 of mine) {
+              const classes = [...s2.matchAll(/\.([\w-]+)/g)].map((mm) => mm[1]);
+              const tag = (s2.match(/(?:^|\s)([a-z]+)\./) || [])[1];
+              const classesThere = classes.every((cl) => ns.includes(cl));
+              const tagThere = !tag || new RegExp(`<${tag}\\b[^>]*class="[^"]*${classes[classes.length - 1]}`).test(ns);
+              if (classesThere && tagThere) hits += 1;
+            }
+          } else {
+            hits += await pages[k].pg.evaluate((ss) => ss.reduce((a, s2) => { try { return a + document.querySelectorAll(s2).length; } catch { return a; } }, 0), mine);
+          }
+        }
+        // .nf-brand is only drawn when the device has stored THIS restaurant's name — a cold probe
+        // has not, so it is exempted rather than counted as dead.
+        if (hits === 0 && !/nf-brand/.test(sel)) dead.push(sel);
+      }
+      for (const k of Object.keys(pages)) await pages[k].ctx.close().catch(() => {});
+      if (!rules.length) bad("the 404 stylesheet could not be read", "the `const CSS = \\`…\\`` block did not parse");
+      else if (dead.length) bad(`${dead.length} rule(s) in the 404's stylesheet match nothing at all`, dead.join("  ·  "));
+      else ok(`all ${rules.length} rules in the 404's stylesheet match something real (checked on both screens, and with scripting off)`);
+    }
+
+    // ── THE VOID STAMP COVERS NO WORD ON THE DOCKET (owner, item 9, 2026-09-02) ─────────────
+    // It used to be pinned to the docket's BOTTOM, which on a 206px docket put it straight across
+    // the last two rows: "none" half covered, "no such table" struck through by its own border.
+    // The stamp is meant to slam across the docket — that is the design — it just has to land on
+    // the blank part, which is the top-right beside the big "404".
+    //
+    // MEASURED AS INK, NEVER AS BOXES. `h2` and `.big` are block elements: their rectangles span
+    // the whole docket even when the words inside them are 70px wide on the left, so a box test
+    // reports an overlap that a reader cannot see. A Range around the text node gives what is
+    // actually painted. The first version of this check got that wrong and reported two overlaps
+    // that were not there.
+    for (const [label, w, h] of [["phone", 360, 780], ["desktop", 1280, 800]]) {
+      const p = await browser.newPage();
+      try {
+        await p.setViewportSize({ width: w, height: h });
+        await p.goto(`${BASE}/zz-nf-stamp-probe`, { waitUntil: "domcontentloaded", timeout: 45000 });
+        await p.waitForSelector(".nf-g .stamp", { timeout: 15000 }).catch(() => {});
+        const r = await p.evaluate(() => {
+          const st = document.querySelector(".nf-g .stamp");
+          if (!st) return null;
+          const s = st.getBoundingClientRect();
+          const ink = (el) => { const rg = document.createRange(); rg.selectNodeContents(el); return rg.getBoundingClientRect(); };
+          const hit = [];
+          for (const el of document.querySelectorAll(".nf-g .docket h2, .nf-g .big, .nf-g .row span")) {
+            if (!el.textContent.trim()) continue;
+            const b = ink(el);
+            if (b.width && b.left < s.right && s.left < b.right && b.top < s.bottom && s.top < b.bottom) hit.push(el.textContent.trim());
+          }
+          return { hit, onDocket: s.width > 0 && s.height > 0 };
+        });
+        if (!r) skip(`${label}: the VOID stamp covers no word on the docket`, "this address did not draw the guest docket");
+        else if (!r.onDocket) bad(`${label}: the VOID stamp is not drawn at all`, "it should still slam onto the docket");
+        else if (r.hit.length) bad(`${label}: the VOID stamp covers words on the docket`, `it lands on: ${r.hit.join(", ")}`);
+        else ok(`${label}: the VOID stamp slams onto the blank part of the docket, covering no word`);
+      } finally { await p.close().catch(() => {}); }
+    }
+
     // ── ONE APOSTROPHE ACROSS THE GUEST SCREENS ─────────────────────────────────────────────
     // This exact fault has now been made three times in one day: the French dictionary mixed the
     // typographic ’ with the typewriter ', then the rewritten offline page did, then these two
