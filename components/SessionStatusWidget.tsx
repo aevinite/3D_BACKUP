@@ -69,13 +69,21 @@ const callIcon = (note: string) => {
 // it is the wrong length for a sentence a diner has to read and act on, and a tick is the wrong
 // mark for being removed from a table.
 //
-// `info` (a neutral •) is the same call components/FoodCard.tsx already makes for "Maximum 99 per
-// dish": nothing went wrong, and there is nothing to fix, so it is not an error either. `duration`
-// is a lever ToastHost has always supported. Neither is a new idea; they were simply never used here.
+// ── AND IT IS SHOWN AS BAD NEWS, NOT AS A NEUTRAL FACT (owner, 2026-09-02) ───────────────────────
+// I first gave these the neutral `info` mark, on the grounds that a table ending is nobody's fault.
+// His answer: *"you can keep msg but you can show it like bad news"* — and he is right about the
+// diner's side of it. Losing your table, or being removed from it, or holding a message the
+// restaurant has not been told, is not a neutral fact to the person it happens to; it is the thing
+// that just went wrong for them. `error` gives it the ✕, the red ticket, AND — the part that makes
+// it read correctly — components/ToastHost.tsx withholds the "thank you" sign-off from a refusal,
+// so the card no longer thanks somebody for being thrown off their table.
+//
+// The WORDING is untouched, exactly as he asked. Only the mark and the length changed.
 const toast = (message: string, kicker = "table", variant = "success", duration?: number) =>
   window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message, kicker, variant, ...(duration ? { duration } : {}) } }));
-// A sentence that ENDS something, or asks the diner to keep a page open, gets a neutral mark and
-// long enough to read at a normal pace.
+// A sentence that ENDS something, or asks the diner to keep a page open, needs long enough to read
+// at a normal pace. ToastHost's own default for a refusal is 2,200 ms; these sentences are longer
+// than the ones that number was chosen for, so they say how long they need.
 const NEWS_MS = 3400;
 
 // SessionStatusWidget — the small floating card (draggable, collapsible) that tells
@@ -175,13 +183,13 @@ export default function SessionStatusWidget() {
           if (reason === "session_closed") {
             const tellThem = wasActive.current; // only toast someone who was actually connected
             wasActive.current = false; tokenRef.current = null;
-            if (tellThem) { clearLocal(); toast("This table’s session ended — scan the QR again to start a new one", "table", "info", NEWS_MS); }
+            if (tellThem) { clearLocal(); toast("This table’s session ended — scan the QR again to start a new one", "table", "error", NEWS_MS); }
             else clearStoredSession();
             setSt(null);
           } else if (reason === "removed") {
             const tellThem = wasActive.current;
             wasActive.current = false; tokenRef.current = null;
-            if (tellThem) { clearLocal(); toast("You’ve been removed from this table", "table", "info", NEWS_MS); }
+            if (tellThem) { clearLocal(); toast("You’ve been removed from this table", "table", "error", NEWS_MS); }
             else clearStoredSession();
             setSt(null);
           } else if (reason === "invalid_token") {
@@ -193,7 +201,7 @@ export default function SessionStatusWidget() {
         // clean up and tell the guest; otherwise just quietly drop the token.
         const sess = state.session as { table_number?: string; status?: string } | undefined;
         if (sess?.status !== "open") {
-          if (wasActive.current) { wasActive.current = false; clearLocal(); toast("This table’s session ended", "table", "info", NEWS_MS); }
+          if (wasActive.current) { wasActive.current = false; clearLocal(); toast("This table’s session ended", "table", "error", NEWS_MS); }
           else { clearStoredSession(); }
           setSt(null);
           return;
@@ -342,12 +350,14 @@ export default function SessionStatusWidget() {
     // the person holding the job. Save it and send it the moment there is signal, exactly like an
     // order. If they re-join this very table first, the queue drops it (see leaveIsStale).
     const q = await enqueueGuestLeave({ token, restaurantId, restaurantSlug });
-    // The second of these is an INSTRUCTION — the message only gets through if they keep the page
-    // open — so it needs reading time even more than the news above does.
+    // THESE TWO ARE NOT THE SAME NEWS, so they no longer wear the same mark. The first is a promise
+    // this phone can keep on its own — neutral. The second is a job still outstanding: the
+    // restaurant has NOT been told, and it only will be if the diner keeps this page open. That is
+    // bad news for them, and it gets the refusal mark so it does not read as "all done".
     toast(q.persisted
       ? "You've left — we'll tell the restaurant as soon as there's signal"
       : "You've left on this phone — keep this page open so we can tell the restaurant",
-      "table", "info", NEWS_MS);
+      "table", q.persisted ? "info" : "error", NEWS_MS);
   };
   // This runs when the guest taps "Change table": leave the current one, clean
   // up, then send them back to the menu to pick/scan a different table.

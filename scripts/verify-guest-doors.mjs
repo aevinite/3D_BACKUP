@@ -612,10 +612,18 @@ flush();
     /This table asked for/.test(widget) && !/You called for/.test(widget));
   check("the card can ask for a mark and a length, instead of always taking the flash default",
     /const toast = \(message: string, kicker = "table", variant = "success", duration\?: number\)/.test(widget));
-  check("…and the three endings and the keep-this-page-open instruction all use it",
-    (widget.match(/"table", "info", NEWS_MS\)/g) || []).length === 4);
-  check("…with a neutral mark, not an error — nothing went wrong and there is nothing to fix",
-    /const NEWS_MS = 3400;/.test(widget) && !/"table", "error"/.test(widget));
+  check("…and all four of the sentences that matter use it",
+    (widget.match(/"table", (?:"error"|"info"|q\.persisted \? "info" : "error"), NEWS_MS\)/g) || []).length === 4);
+  // Owner, 2026-09-02: "you can keep msg but you can show it like bad news". The three endings and
+  // the not-yet-delivered leave wear the refusal mark; the leave this phone CAN keep does not.
+  check("…and the three endings are shown as bad news, with the refusal mark",
+    (widget.match(/"table", "error", NEWS_MS\)/g) || []).length === 3);
+  check("…and a leave the phone really saved is not dressed up as a failure",
+    /q\.persisted \? "info" : "error", NEWS_MS\)/.test(widget));
+  check("…and the refusal mark is what withholds the thank-you sign-off, which is why it reads right",
+    /t\.variant !== "error"/.test(read("components/ToastHost.tsx")));
+  check("…and NEWS_MS is longer than ToastHost's own default for a refusal",
+    /const NEWS_MS = 3400;/.test(widget) && /variant === "error" \? 2200 : 1100/.test(read("components/ToastHost.tsx")));
   check("the flash default is still what ToastHost gives an unmarked message, which is why this matters",
     /variant === "error" \? 2200 : 1100/.test(read("components/ToastHost.tsx")));
   check("…and `duration` is still a thing ToastHost honours",
