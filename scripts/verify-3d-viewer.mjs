@@ -482,9 +482,8 @@ check(
   const code = src[ITEM_CLIENT].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   check(
     "the dish page starts from the dish the server already read",
-    /initialItem\?: FoodItem \| null/.test(code) &&
-      /useState<FoodItem \| null>\(initialItem \?\? null\)/.test(code) &&
-      /useState\(!initialItem\)/.test(code),
+    /initialItem: FoodItem;/.test(code) &&
+      /useState<FoodItem>\(initialItem\)/.test(code),
     ITEM_CLIENT + " \u2192 both routes read this row on the server to decide the 404. Starting " +
       "state from it is what removes the spinner and what makes an offline reload show the dish."
   );
@@ -498,8 +497,8 @@ check(
     );
   }
   check(
-    "…and the browser does NOT read it a second time on a first load",
-    /initialItem && retryNonce === 0\s*\n?\s*\? Promise\.resolve\(initialItem\)/.test(code),
+    "…and the browser does NOT read it a second time, ever",
+    /Promise\.resolve\(initialItem\),/.test(code) && !/getMenuItem\(slug, restaurantId\)/.test(code),
     ITEM_CLIENT + " \u2192 skip the duplicate read when the server just supplied it, but NOT when " +
       "retryNonce > 0: Try again must reach the database or the button is a lie."
   );
@@ -513,7 +512,7 @@ check(
   );
   check(
     "…and a client re-read that comes back empty cannot blank a page the server rendered",
-    /setItem\(dish \|\| initialItem \|\| null\)/.test(code),
+    /setItem\(dish \|\| initialItem\)/.test(code),
     ITEM_CLIENT + " \u2192 the re-read is a refresh, not the authority on whether the dish exists."
   );
   check(
@@ -637,72 +636,46 @@ check(
 // classes are inert here. An inline style cannot lose.
 {
   const code = src[ITEM_CLIENT];
-  check(
-    "the dish page's error cards are laid out inline, so the cascade cannot flatten them",
-    /const ERROR_CARD_LAYOUT: React\.CSSProperties/.test(code) &&
-      (code.match(/style=\{ERROR_CARD_LAYOUT\}/g) || []).length === 2,
-    ITEM_CLIENT + " \u2192 both the timed-out card and the not-found card must use " +
-      "ERROR_CARD_LAYOUT. Tailwind's centring utilities are outranked by #detail-page in " +
-      "app/globals.css, so a card that relies on them renders flush-left with no padding."
-  );
-  check(
-    "…and neither of them has gone back to relying on those utilities",
-    !/item-detail-page flex flex-col items-center justify-center min-h-screen p-4/.test(code),
-    ITEM_CLIENT + " \u2192 that class string looks like it centres the card and does not."
-  );
 }
 
-// ── a screen must never spin forever (sweep #7 T2, item 6) ───────────────────────────────────
-// Measured with the dish page's data reads held open: "PLATING YOUR DISH" at 2s, 5s, 10s, 20s and
-// 35s — a spinner with no dish, no honest word and no way out. Every read on this screen now has a
-// deadline, and past it the guest gets a card that says so, with Try again and Back to menu.
+// ── a screen must never spin forever — and the way it is kept has CHANGED (item 12, 2026-09-02) ──
+//
+// Sweep #7's item 6 kept this promise with a deadline and an honest "we couldn't load this dish"
+// card. Owner's item 9 then made the SERVER hand the dish down, which keeps the same promise better
+// and always — and made the card unreachable, because `initialItem` is always a real dish so `item`
+// can never be null. The card, the spinner, "Dish not found", Try again and the deadline were
+// removed on 2026-09-02 (owner's item 12); the obituary is at the top of ItemClient.
+//
+// So this guard now asserts THE THING THAT ACTUALLY KEEPS THE PROMISE. Asserting the deleted
+// machinery would have been a guard defending a screen that cannot render — which is what it had
+// silently become for a day.
 {
   const code = src[ITEM_CLIENT].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  const DEADLINE_MS = Number((code.match(/const DISH_READ_DEADLINE_MS = (\d+)/) || [])[1]);
   check(
-    "the dish page puts a deadline on its own read, so it can never spin forever",
-    // THE NUMBER IS CHECKED, NOT JUST THE NAME (sweep #8 T2, 2026-09-02 — item 9). `\d+` matched
-    // `= 0` just as happily as `= 8000`, and a zero deadline trips on EVERY load — the honest
-    // "we couldn't load this dish" card would replace a dish that was arriving perfectly well.
-    // PROVEN by sabotage: setting it to 0 left this guard green. 3–20s is the range in which this
-    // is a patience timer at all; outside it, it is either a hair-trigger or never fires.
-    Number.isFinite(DEADLINE_MS) && DEADLINE_MS >= 3000 && DEADLINE_MS <= 20000 &&
-      /const deadline = setTimeout\(/.test(code) &&
-      /setReadTimedOut\(true\)/.test(code) && /setLoading\(false\)/.test(code),
-    ITEM_CLIENT + " \u2192 DISH_READ_DEADLINE_MS is " + DEADLINE_MS + "ms; it must be a real patience " +
-      "window (3000–20000) and the timer that trips it must stay. Too small and every load shows the " +
-      "failure card; absent and a stalled read leaves the guest on 'Plating your dish' with no way out."
+    "the dish page cannot spin forever, because it never starts without a dish",
+    /initialItem: FoodItem;/.test(code) && /useState<FoodItem>\(initialItem\)/.test(code),
+    ITEM_CLIENT + " \u2192 `initialItem` must stay REQUIRED and non-null, and `item` must start from " +
+      "it. That is what makes a spinner impossible; a deadline is no longer what keeps this promise."
   );
   check(
-    "…the deadline is cleared when the reply lands, and when the screen goes",
-    /landed = true;\s*\n\s*clearTimeout\(deadline\)/.test(code) &&
-      /return \(\) => \{ cancelled = true; clearTimeout\(deadline\); \}/.test(code),
-    ITEM_CLIENT + " \u2192 a reply that beats the deadline must cancel it, and leaving the page must too."
+    "…and both routes really do hand it down, and 404 rather than render without one",
+    [ITEM_PAGE_1, ITEM_PAGE_R].every((f) => /initialItem=\{dish\}/.test(src[f]) && /if \(!dish\) notFound\(\)/.test(src[f])),
+    "both dish routes must pass initialItem AND answer 404 when there is no dish. If either stopped, " +
+      "the page would be handed `undefined` — and the fallback that used to catch that is gone."
   );
   check(
-    "…a late reply still wins, so the screen heals itself",
-    /setReadTimedOut\(false\)/.test(code),
-    ITEM_CLIENT + " \u2192 when the read finally lands, clear the honest card rather than making " +
-      "the guest tap Try again for something that has already arrived."
+    "…and a client re-read that fails leaves the server's copy on screen rather than blanking it",
+    /setItem\(dish \|\| initialItem\)/.test(code),
+    ITEM_CLIENT + " \u2192 a transient empty or failed re-read must not blank a page the server " +
+      "rendered perfectly well."
   );
   check(
-    "…and the honest card is not the 'dish not found' one, which would be a lie",
-    // Anchored to the RENDER branches by their own markup, not to the first `if (!item)` in the
-    // file: item 9's reviews effect legitimately opens with `if (!item) { setLocalReviews([]);`,
-    // which sits far earlier and made a naive index comparison fail on a correct file.
-    (() => {
-      const timedOut = code.indexOf("if (!item && readTimedOut)");
-      const notFound = code.indexOf("if (!item) {\n    return (");
-      return timedOut > -1 && notFound > -1 && timedOut < notFound;
-    })(),
-    ITEM_CLIENT + " \u2192 the timed-out branch must come FIRST and say something about the " +
-      "connection. 'Dish not found' would send a diner looking for a dish that is on the paper " +
-      "menu in front of them."
-  );
-  check(
-    "…and Try again really re-reads",
-    /setRetryNonce\(\(v\) => v \+ 1\)/.test(code) && /\[slug, restaurantId, retryNonce\]/.test(code),
-    ITEM_CLIENT + " \u2192 the retry counter must be a dependency of the fetch, or the button does nothing."
+    "…and the machinery that used to keep this promise is really gone, not left beside the new way",
+    !/readTimedOut|retryNonce|DISH_READ_DEADLINE_MS|ERROR_CARD_LAYOUT/.test(code) &&
+      !/InfinityLoader/.test(code),
+    ITEM_CLIENT + " \u2192 the deadline, the honest card, Try again, the spinner and the error-card " +
+      "layout were removed as item 12. Leaving both ways is what 'a new way replaces the old one' " +
+      "forbids, and a guard on the dead one gives false confidence."
   );
 }
 

@@ -54,6 +54,68 @@ export function inkOnAccent(accentColor: string): string {
   return contrast(acc, lum("ffffff")) >= contrast(acc, lum("1a0f0a")) ? "#ffffff" : "#1a0f0a";
 }
 
+// ── ACCENT-COLOURED TEXT ON THE DARK PAGE (owner's item 11, 2026-09-02) ─────────────────────────
+//
+// `--accent-ink` and `--accent-ink-dim` already exist and the guest screens already use them for
+// accent-coloured TEXT — the dish price, the section headings, Read more, the hero sub-line. The
+// LIGHT skin already computes them (`[data-theme="light"]` darkens the accent to 55%/62% toward
+// black). The DARK skin does not: globals.css `:root` says `--accent-ink: var(--accent)` with the
+// comment *"on a dark tint the bright accent already reads clean"*.
+//
+// That assumption is true for a warm, light brand colour and FALSE for a dark or deeply saturated
+// one, and it was measured on every live restaurant, in both skins:
+//
+//     burger-barn  #78350f  2.07:1     pizza-palace #c0392b  3.40:1
+//     spice-route  #c2410c  3.58:1     green-bowl   #15803d  3.66:1
+//     sakura-sushi #db2777  4.03:1  ·  aangan 6.05, taco-fiesta 8.09, french-house 9.82 all pass
+//
+// Five of the nine, in the skin that is the DEFAULT, on the dish PRICE. Screenshot read: Burger
+// Barn's `₹279` is dark brown on near-black.
+//
+// NOT A FIXED PERCENTAGE, and not a brightness threshold — the same reasoning `inkOnAccent` above
+// records for choosing black-or-white ink. A fixed mix would wash out the three restaurants that are
+// already fine. This finds the LARGEST share of the brand colour that still clears the bar against
+// that tenant's OWN computed background, so a passing accent is returned untouched (100%) and a
+// failing one is changed by the least that works: 65% for the brown, 77–83% for the rest.
+//
+// Two targets on purpose. `--accent-ink` aims at 5:1 and `--accent-ink-dim` at 4.5:1, so "dim" stays
+// visibly dimmer than "ink" while both clear the bar for small text.
+function srgbLuminance(rgb: [number, number, number]): number {
+  const ch = (v: number) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+  return 0.2126 * ch(rgb[0]) + 0.7152 * ch(rgb[1]) + 0.0722 * ch(rgb[2]);
+}
+function contrastOf(a: [number, number, number], b: [number, number, number]): number {
+  const x = srgbLuminance(a), y = srgbLuminance(b);
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+function parseHex(hex: string): [number, number, number] | null {
+  const h = hex.trim().replace(/^#/, "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
+  return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16)) as [number, number, number];
+}
+/** Mix `a` toward `b`; `share` is how much of `a` survives (1 = all of it). */
+function mixRgb(a: [number, number, number], b: [number, number, number], share: number): [number, number, number] {
+  return a.map((v, i) => Math.round(v * share + b[i] * (1 - share))) as [number, number, number];
+}
+/**
+ * The most of a brand colour that still reads as text on `bg`. Walks DOWN from the untouched colour
+ * because adding white raises contrast, so the first share that clears the target is the largest one
+ * that works — the least we can change a restaurant's colour and still have its price be readable.
+ * Exported so a guard can re-derive it rather than trust a number typed into a test.
+ */
+export function readableInkOn(accentColor: string, bg: [number, number, number], target: number): string | null {
+  const acc = parseHex(accentColor);
+  if (!acc) return null;
+  const white: [number, number, number] = [255, 255, 255];
+  for (let share = 100; share >= 5; share--) {
+    const c = mixRgb(acc, white, share / 100);
+    if (contrastOf(c, bg) >= target) return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+  }
+  const floor = mixRgb(acc, white, 0.05);
+  return `rgb(${floor[0]}, ${floor[1]}, ${floor[2]})`;
+}
+
 // The colour VARIABLES only (no page background) — safe to set on :root so the
 // whole document, including body-level widgets, follows the restaurant colour.
 export function accentPaletteCss(accentColor: string): string {
@@ -111,12 +173,23 @@ export function accentPaletteCss(accentColor: string): string {
 export function accentCanvasCss(accentColor: string): string {
   if (!hexToRgbTriplet(accentColor)) return ""; // unparseable → change nothing, keep today's look
   const mix = (pct: number, base: string) => `color-mix(in srgb, ${accentColor} ${pct}%, ${base})`;
+  // The dark page's own background, computed here rather than guessed, because the ink below has to
+  // be measured against the surface it will actually sit on — which is this mix, not plain #0d0d10.
+  const accRgb = parseHex(accentColor);
+  const darkBase: [number, number, number] = [0x0d, 0x0d, 0x10];
+  const darkBg: [number, number, number] | null = accRgb ? mixRgb(accRgb, darkBase, 0.08) : null;
+  const ink = darkBg ? readableInkOn(accentColor, darkBg, 5.0) : null;
+  const inkDim = darkBg ? readableInkOn(accentColor, darkBg, 4.5) : null;
   const dark = [
     `--bg:${mix(8, "#0d0d10")}`,
     `--card:${mix(12, "#17171c")}`,
     `--text:#f2f3f5`,
     `--muted:rgba(235, 238, 245, 0.62)`,
     `--border:1px solid ${mix(30, "transparent")}`,
+    // See the note above readableInkOn. A restaurant whose colour already reads gets its own colour
+    // back unchanged; only a dark or deeply saturated one is lightened, and only as far as it must be.
+    ...(ink ? [`--accent-ink:${ink}`] : []),
+    ...(inkDim ? [`--accent-ink-dim:${inkDim}`] : []),
   ].join(";");
   const light = [
     `--bg:${mix(6, "#ffffff")}`,
