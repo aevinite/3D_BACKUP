@@ -4194,6 +4194,34 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
    always wants white on it, in both skins, so state it once and be done. */
 .adm .adm-btn.danger, .adm a.adm-btn.danger { color: #fff !important; }
 .adm-btn.ok { background: var(--adm-ok); border-color: transparent; color: #fff; }
+
+/* ── "THIS IS THE CONTROL YOU WERE SENT TO" ──────────────────────────────────────────────────────
+   Owner, 2026-09-02: "there is one red thing showing menu is in maintenance — if I click manage it
+   should take me to the toggle where I can turn on menu; it takes to the restaurant."
+
+   Scrolling to the right CARD was already possible (?section= on the restaurants page), and it was
+   not enough: a card holds several controls, so he still had to work out which one the alert meant.
+   An element carrying data-adm-flash gets a ring that pulses three times and stops — long enough
+   to find, short enough not to become part of the furniture.
+
+   Why an attribute and not a class: the flash is set by whatever handled the deep-link and cleared
+   by a timer, and an attribute cannot collide with the className a component is already computing
+   for its own state (the maintenance button switches between .adm-btn and .adm-btn.primary).
+
+   prefers-reduced-motion gets the ring without the pulse — the ring is the information, the
+   movement is only what draws the eye to it. */
+[data-adm-flash] {
+  animation: admFlashRing 0.9s ease-out 3;
+  border-radius: 10px;
+}
+@keyframes admFlashRing {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 65%, transparent); }
+  60%  { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-adm-flash] { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); }
+}
 .adm-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 13px; border-radius: 11px; border: var(--border); background: var(--bg); color: var(--text); font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; transition: background .15s; }
 .adm-toggle:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 /* iOS-style sliding SWITCH (replaces the old ON/OFF pill the owner disliked). The

@@ -3,7 +3,7 @@
 // Limits are enforced in the DB (mig 205); when one is reached it shows here AND in the Problems
 // section. Per limit: how many / per how long / on-off. Hits can be Allowed (reset that person's
 // counter) or handed to Claude. Admin-only.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
@@ -61,12 +61,33 @@ export default function AdminRateLimits() {
   // then scroll on the frame AFTER the row actually exists.
   const jumpToRule = (e: React.MouseEvent, key: string) => {
     e.preventDefault();
+    revealRule(key);
+  };
+  // ── ARRIVING FROM ANOTHER SCREEN WITH #rule-<key> ────────────────────────────────────────────
+  // The Repair board's rate-limit alerts carry a "Change rate limit" button pointing here at
+  // `#rule-guest_order`, and IT DID NOTHING (found 2026-09-02 while making every alert land on
+  // its control). Two reasons, both the same shape as the same-page problem solved above: the
+  // rules arrive from a fetch, so at the moment the browser resolves the hash the row does not
+  // exist yet; and "The limits" may be folded shut on this device, so it would not exist even
+  // after the fetch. So the alert told him which limit to change and then left him at the top of
+  // the page — the exact complaint he raised about the maintenance banner.
+  //
+  // Extracted rather than duplicated: the button on this page and the link from the other one now
+  // run the same three lines, so neither can drift into working while the other doesn't.
+  const revealRule = useCallback((key: string) => {
     setSection("rules", false);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const el = document.getElementById(`rule-${key}`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Ring it, the same way every other "here is the control you were sent to" does
+      // (lib/adminJump.ts + [data-adm-flash] in globals.css). A rule row holds three inputs and a
+      // switch, so landing near it is not the same as being shown which one.
+      el.setAttribute("data-adm-flash", "");
+      setTimeout(() => el.removeAttribute("data-adm-flash"), 3000);
     }));
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -84,6 +105,20 @@ export default function AdminRateLimits() {
     setLoading(false);
   }, [toast]);
   useEffect(() => { load(); }, [load]);
+
+  // Honour a #rule-<key> the admin ARRIVED with, once the rules are actually on screen. Runs on
+  // the load that brings rules in (not on mount), because that is the first moment the row exists.
+  // `once` so an auto-refresh later in the session cannot yank him back to a rule he has moved on
+  // from — being scrolled somewhere you didn't ask for is worse than not being scrolled at all.
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (jumped.current || rules.length === 0) return;
+    const key = (window.location.hash || "").replace(/^#rule-/, "");
+    if (!key || key === window.location.hash) return;
+    if (!rules.some((r) => r.key === key)) return; // a stale link naming no rule: leave the page alone
+    jumped.current = true;
+    revealRule(key);
+  }, [rules, revealRule]);
 
   const saveRule = async (r: Rule, patch: Partial<Pick<Rule, "max_count" | "window_seconds" | "enabled">>) => {
     setBusy(r.id);

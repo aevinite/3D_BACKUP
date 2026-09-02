@@ -10,7 +10,10 @@
 // Opening a panel carries &uid=<owner> so it lands on THAT owner's cockpit even when
 // the restaurant has several owners (the dashboard chooser uses the same uid).
 // Data + writes: /api/admin/owners (admin-cookie gated, service-role) — unchanged.
-import { errorHeadline } from "@/lib/errorSignature";
+// An error row reads as one plain English sentence; ordinary rows use the shared label list.
+// (owner, 2026-09-02 — this screen was printing raw action codes.)
+import { plainHeadline } from "@/lib/plainError";
+import { actLabel, detailForList } from "@/components/admin/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { CopyButton } from "@/components/admin/CopyButton";
@@ -549,7 +552,7 @@ function AssignRestaurantModal({ owner, attachable, busy, onAssign, onClose }: {
 // the restaurants they own (add / remove / open-their-panel), the activity trail,
 // and the suspend-first permanent-delete zone. Activity is fetched ONCE per owner.
 // ─────────────────────────────────────────────────────────────────────────────
-type ActivityRow = { id: string; panel: string; action: string; actor: string | null; detail: string | null; restaurant: string | null; at: string };
+type ActivityRow = { id: string; panel: string; action: string; actor: string | null; detail: string | null; restaurant: string | null; at: string; level?: "info" | "warn" | "error" | null };
 const PANEL_COLOR: Record<string, string> = { owner: "#34d399", admin: "#60a5fa", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#a78bfa", editor: "#d4a574" };
 
 function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted }: {
@@ -810,12 +813,20 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
               <div key={a.id} style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "8px 12px", borderTop: "var(--border)", fontSize: 12.5 }}>
                 <span style={{ flexShrink: 0, marginTop: 3, width: 7, height: 7, borderRadius: "50%", background: PANEL_COLOR[a.panel] || "#9ca3af" }} title={a.panel} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <span style={{ fontWeight: 700 }}>{a.action.replace(/_/g, " ")}</span>
+                  {/* THE ACTION, IN WORDS (owner, 2026-09-02: "it should be in the human
+                      language"). This printed the raw database code with its underscores swapped
+                      for spaces — "user create", "staff reset password", "rate limit edit" — which
+                      is the same `MAP[x] || x` mistake the standing rule bans, just written by
+                      hand. actLabel() is the ONE label list every other log screen uses, and it
+                      prettifies a code nobody has written a line for yet. */}
+                  <span style={{ fontWeight: 700 }}>{actLabel(a.action)}</span>
                   {a.actor ? <span style={{ color: "var(--muted)" }}> · by {a.actor}</span> : null}
                   {a.restaurant ? <span style={{ color: "var(--muted)" }}> · {a.restaurant}</span> : null}
-                  {/* Same as the Problems board: a legacy row can hold a whole gateway HTML page,
-                      and this is a one-line activity row. The hover title keeps the full text. */}
-                  {a.detail ? <div style={{ color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.detail}>{errorHeadline(a.detail)}</div> : null}
+                  {/* An ERROR row's detail is the browser's own sentence → plainHeadline. Anything
+                      else is already English, but can carry a machine id on the end → detailForList
+                      drops that tail. The hover title keeps the exact text either way, which is why
+                      this line can afford to be readable. */}
+                  {a.detail ? <div style={{ color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.detail}>{a.level === "error" ? plainHeadline(a.detail) : detailForList(a.action, a.detail)}</div> : null}
                 </div>
                 <span style={{ flexShrink: 0, color: "var(--muted)", fontSize: 11 }} title={a.at}>{when(a.at)}</span>
               </div>

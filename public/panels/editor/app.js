@@ -15378,7 +15378,15 @@ function pinPill(r) {
 // printed that verbatim — a wall of JSON on the manager's own Activity log. Same rule and same
 // output as the admin screens (components/admin/shared.tsx → formatActionDetail); the two are
 // checked against each other by npm run verify:audit.
-function opDetailText(action, detail) {
+function opDetailText(action, detail, plain) {
+  // AN ERROR ROW ARRIVES WITH ITS PLAIN SENTENCE ALREADY WRITTEN (owner, 2026-09-02: "make sure
+  // every possible log and stuff in human language"). /oplog attaches `plain` to level:'error'
+  // rows (lib/plainError.ts, called in app/api/editor/[...path]/route.ts) rather than this file
+  // carrying a JS copy of the translator — a second copy is what drifted last time, when this
+  // panel's own label map covered 19 of ~130 action codes. A stale cached app.js talking to a
+  // newer server simply doesn't get `plain` and falls through to the old behaviour, and a NEW
+  // app.js talking to an older server does the same, so neither half can lose the line.
+  if (plain) return String(plain);
   if (!detail) return "";
   if (action !== "ui_taps") return String(detail).replace(/_/g, " ");
   let arr; try { arr = JSON.parse(detail); } catch { return detail; }
@@ -15437,7 +15445,7 @@ function oplogHtml() {
     const device = r.device_id
       ? `<span class="op-dev">📱 #${esc(r.device_id)}</span>`
       : `<span class="lg-muted">—</span>`;
-    const where = r.table_number ? "T" + esc(r.table_number) : (r.detail ? esc(opDetailText(r.action, r.detail)) : "");
+    const where = r.table_number ? "T" + esc(r.table_number) : (r.detail ? esc(opDetailText(r.action, r.detail, r.plain)) : "");
     // Block/Unblock only for field devices (tablet/kitchen) — never the editor,
     // so the owner can't lock themselves out of the panel that does the unblocking.
     let act = "";

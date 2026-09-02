@@ -28,7 +28,9 @@
 // four things here is the image". Do not re-add a pill strip, a chip row or a KPI band here.
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { timeAgo, useActiveAutoRefresh } from "@/components/admin/shared";
+import { timeAgo, useActiveAutoRefresh, openRestaurantPanel } from "@/components/admin/shared";
+// Every alert on this page must offer the control that ends it, not just report it (2026-09-02).
+import { jumpUrl } from "@/lib/adminJump";
 import { SkelList } from "@/components/admin/Skeleton";
 
 type Health = {
@@ -382,6 +384,52 @@ export default function AdminHealth() {
             {checks.map((c) => <CheckRow key={c.key} c={c} />)}
           </div>
 
+          {/* ── SCREENS SWITCHED ON THAT NOBODY EVER SIGNED INTO ─────────────────────────────────
+              This was a NUMBER and nothing else: the check row said "Staff screens · 3", marked
+              itself "needs you", and no part of this page said which three or where to go
+              (owner, 2026-09-02: "make sure you do it for all alert and notification and
+              everything" — and the standing rule that every problem names panel → screen → what
+              he'd see). The rows were already fetched for that count, so naming them costs
+              nothing, and each one gets the door that finishes the setup: the restaurant's own
+              page, scrolled to the sign-in details card.
+
+              Drawn only when there IS something to finish — a card saying "all set up" is how a
+              page gets too long to read (same reasoning as the 3D card below). */}
+          {neverSeen > 0 && (
+            <div className="adm-card" style={{ marginBottom: 14 }}>
+              <div className="adm-cardbody">
+                <h2>Staff screens nobody has signed into</h2>
+                <p className="hint">
+                  These are switched on for the restaurant but have never been signed into once, so
+                  that setup was never finished. Open the restaurant to see its sign-in details and
+                  hand them over.
+                </p>
+                <div className="adm-logwrap hx-kv">
+                  {liveRows.flatMap((r) =>
+                    r.panels
+                      .filter((x) => x.role !== "owner" && x.status === "never")
+                      .map((x) => (
+                        <div key={`${r.id}-${x.role}`} className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}>
+                          <span style={{ minWidth: 0 }}>
+                            {ROLE_LABEL[x.role] || x.role}
+                            <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />
+                              {r.name}
+                            </span>
+                          </span>
+                          <Link className="adm-btn" style={{ fontSize: 12, padding: "6px 10px" }}
+                            href={jumpUrl({ path: "/aevinite/restaurants", restaurantSlug: r.slug, section: "credentials", control: "credentials" })}
+                            title={`Open ${r.name} and go straight to its sign-in details`}>
+                            <i className="fas fa-key" aria-hidden="true" style={{ marginRight: 6 }} />Sign-in details
+                          </Link>
+                        </div>
+                      )),
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 3D THAT CANNOT OPEN (owner, 2026-08-12). A dish ticked "4D" whose model file was never
               uploaded used to wear a "4D" badge on the menu and then tell the diner "3D view isn't
               ready for this dish". The badge no longer lies (components/FoodCard.tsx → has3d), and
@@ -413,7 +461,21 @@ export default function AdminHealth() {
                           {restaurantName(d.restaurantId)}
                         </span>
                       </span>
-                      <span className="mono adm-muted">missing: {d.missing}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span className="mono adm-muted">missing: {d.missing}</span>
+                        {/* A DOOR TO THE FIX, NOT JUST THE NEWS (owner, 2026-09-02: "make sure you
+                            do it for all alert and notification and everything"). This row named a
+                            dish, named its restaurant, and then stopped — the admin had to go back
+                            to the Restaurants list, find that restaurant, and open its manager
+                            panel by hand. Uploading a model file happens in that panel's Edit menu,
+                            so the button goes exactly there, act-as, no password (the same
+                            openRestaurantPanel every other admin door uses). */}
+                        <button className="adm-btn" style={{ fontSize: 12, padding: "6px 10px" }}
+                          onClick={() => openRestaurantPanel(d.restaurantId, "/manager")}
+                          title={`Open ${restaurantName(d.restaurantId)}'s manager panel to upload the model file for "${d.title || d.slug}"`}>
+                          <i className="fas fa-arrow-up-right-from-square" aria-hidden="true" style={{ marginRight: 6 }} />Open its menu
+                        </button>
+                      </span>
                     </div>
                   ))}
                 </div>

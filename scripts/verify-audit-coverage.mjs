@@ -255,7 +255,14 @@ else fail("the admin bill ledger deletes bills without an Audit row — the admi
   if (rawHits.length) fail(`a screen prints a raw action/panel key instead of calling actLabel()/panelLabel(): ${rawHits.join(" · ")}`);
   else ok("no screen renders a row's action or panel key raw — every one goes through actLabel()/panelLabel()");
   // The "Where" column must never print stored JSON: the tap batches are formatted on BOTH sides.
-  if (/function opDetailText\(/.test(panelJs) && /opDetailText\(r\.action, r\.detail\)/.test(panelJs))
+  //
+  // Matched up to `r.detail` and no further (2026-09-02). It used to require the call to be
+  // EXACTLY `opDetailText(r.action, r.detail)`, and that went red the day a third argument was
+  // added — `r.plain`, the plain-English sentence the server now attaches to an error row
+  // (lib/plainError.ts). The RULE was never broken: the column still formats tap batches on both
+  // sides. Only the argument list grew. A guard pinned to a call's exact shape fails for changes
+  // that keep its rule, which teaches people to edit the guard instead of reading it.
+  if (/function opDetailText\(/.test(panelJs) && /opDetailText\(r\.action, r\.detail\b/.test(panelJs))
     ok("the manager panel turns a stored tap batch into readable words, not JSON");
   else fail("the manager panel prints r.detail raw — a ui_taps row would show [{\"t\":3,\"l\":\"Close\"}] on screen");
   // The bill trail's "Where" column must name the table + bill, not a session uuid.

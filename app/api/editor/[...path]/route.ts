@@ -16,6 +16,9 @@ import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { offPlanTable } from "@/lib/planTable";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
+// The manager panel is plain JS and cannot import this, so /oplog attaches the plain sentence to
+// each error row rather than a second copy of the translator being written in JS (2026-09-02).
+import { plainHeadline } from "@/lib/plainError";
 import { recordRemoval, reasonFromBody } from "@/lib/removalAudit";
 import { watchCancellations } from "@/lib/cancelWatch";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
@@ -2612,6 +2615,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // 2026-07-28). Only the admin's own view may see that marker — for staff/owner
       // viewers the row must stay a plain, neutral panel row (the admin stays invisible).
       if (g.user) for (const row of rows) if (row.actor_id === ADMIN_VIEW_ACTOR_ID) row.actor_id = null;
+      // ── AN ERROR ROW ARRIVES WITH ITS PLAIN SENTENCE ATTACHED (owner, 2026-09-02) ─────────────
+      // "make sure every possible log and stuff in human language so I can understand easily."
+      // The admin and owner screens are React and import lib/plainError directly, so they pay
+      // nothing for this. The manager panel is plain JS in public/ and cannot import a TS module,
+      // and the alternative — a second copy of the translator written in JS — is exactly the drift
+      // this family of files exists to prevent (see lib/errorSignature.ts's header, and the 2026-08-03
+      // lesson where the panel's own label map covered 19 of ~130 action codes).
+      //
+      // So the SERVER says it once and the panel prints it. Attached to error rows ONLY: an
+      // ordinary row's detail is already English, and a sentence per row on 200 rows would be
+      // paid-for payload with nothing in it. Nothing is removed — `detail` still carries the
+      // exact text, which is what the panel's own detail view shows.
+      for (const row of rows as { level?: string | null; detail?: string | null; plain?: string }[]) {
+        if (row.level === "error" && row.detail) row.plain = plainHeadline(row.detail);
+      }
       return ok(rows);
     }
 
@@ -3411,7 +3429,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (typeof body.platform_in_bills === "boolean") patch.platform_in_bills = body.platform_in_bills;
       if (!Object.keys(patch).length) return err("no toggle given");
       must(await sb.from("settings").update(patch).eq("restaurant_id", rid).select());
-      await log("manager", "platform_toggle", { restaurant_id: rid, detail: JSON.stringify(patch), device_id: dev });
+      // A SENTENCE, NOT THE PATCH OBJECT (owner, 2026-09-02: "it should be in the human
+      // language"). This recorded `{"platform_in_bills":true}` — a database column name and a
+      // boolean, on a screen the manager and the owner both read. Both toggles are named here in
+      // the words their own switches use on the Parcel & platforms screen.
+      const TOGGLE_WORDS: Record<string, [string, string]> = {
+        kitchen_can_accept_platform: ["the kitchen can now accept delivery-app orders", "the kitchen can no longer accept delivery-app orders"],
+        platform_in_bills: ["delivery-app orders now show in the bills", "delivery-app orders no longer show in the bills"],
+      };
+      const said = Object.entries(patch)
+        .map(([k, v]) => TOGGLE_WORDS[k]?.[v ? 0 : 1] ?? `${k.replace(/_/g, " ")} turned ${v ? "on" : "off"}`)
+        .join("; ");
+      await log("manager", "platform_toggle", { restaurant_id: rid, detail: said, device_id: dev });
       return ok({ ok: true, ...patch });
     }
 

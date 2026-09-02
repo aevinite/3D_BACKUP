@@ -14,6 +14,8 @@ import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
 import { useBackClose } from "@/lib/backStack";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
+// An alert that names a control sends the admin here with #ctl-<name>; this rings it.
+import { flashTarget } from "@/lib/adminJump";
 
 
 type Restaurant = { id: string; slug: string; name: string; active: boolean; createdAt: string | null; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
@@ -88,7 +90,10 @@ export default function AdminRestaurants() {
       const u = new URL(window.location.href);
       if (slug) u.searchParams.set("focus", slug);
       else { u.searchParams.delete("focus"); u.searchParams.delete("tab"); }
-      window.history.replaceState(window.history.state, "", u.pathname + u.search);
+      // KEEP THE HASH. It carries which CONTROL an alert pointed at (#ctl-maintenance), and this
+      // rewrite used to drop it — so the deep-link arrived, the hash was gone before anything
+      // could read it, and the ring never fired (found in the browser, 2026-09-02).
+      window.history.replaceState(window.history.state, "", u.pathname + u.search + u.hash);
     } catch {}
   };
   const openRestaurant = (r: Restaurant) => { writeFocusUrl(r.slug); setSelected(r); };
@@ -663,7 +668,10 @@ function StatusCard({ restaurant }: { restaurant: Restaurant }) {
               <i className="fas fa-rotate-right" style={{ marginRight: 7 }} aria-hidden="true" />Retry
             </button>
           ) : (
-            <button className={maint ? "adm-btn primary" : "adm-btn"} disabled={mBusy || maint === null} onClick={toggleMaint}>
+            /* data-adm-ctl names this button so an alert elsewhere in the console can send the
+               admin straight to it and ring it (owner, 2026-09-02 — the Dashboard's maintenance
+               banner used to drop him on the restaurants LIST). See lib/adminJump.ts. */
+            <button data-adm-ctl="maintenance" className={maint ? "adm-btn primary" : "adm-btn"} disabled={mBusy || maint === null} onClick={toggleMaint}>
               <i className={`fas ${maint ? "fa-play" : "fa-pause"}`} style={{ marginRight: 7 }} aria-hidden="true" />
               {maint === null ? "…" : maint ? "Bring menu back online" : "Take menu offline"}
             </button>
@@ -842,6 +850,19 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     const giveUp = () => { stop = true; };
     let want = 0;
     try { want = Number(sessionStorage.getItem(key) || 0); } catch {}
+    // ── AN EXPLICIT "TAKE ME HERE" BEATS "PUT ME BACK WHERE YOU WERE" ────────────────────────────
+    // Found in the browser, 2026-09-02. The maintenance alert's deep-link scrolled correctly to the
+    // switch and then this restore dragged the page back to wherever the admin had last been on
+    // that restaurant — it re-applies the saved position every 120ms for two seconds, so it wins
+    // every time. The admin was left looking at the Logins card wondering what the alert meant.
+    //
+    // Arriving with ?section= or #ctl- is the admin being SENT somewhere on purpose, which is
+    // strictly better information than where he happened to be scrolled last time. So the restore
+    // stands down for that one arrival; the position stays saved and is used again next time.
+    try {
+      const u = new URL(window.location.href);
+      if (u.searchParams.get("section") || u.hash.startsWith("#ctl-")) want = 0;
+    } catch {}
     const gestures = ["wheel", "touchstart", "keydown"] as const;
     if (want > 0) {
       gestures.forEach((e) => window.addEventListener(e, giveUp, { passive: true }));
@@ -909,7 +930,9 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     try {
       const u = new URL(window.location.href);
       u.searchParams.delete("section");
-      window.history.replaceState(history.state, "", u.pathname + u.search);
+      // Keep the hash for the same reason as writeFocusUrl above: it names the control an alert
+      // sent the admin to, and this consumer only means to strip `section`.
+      window.history.replaceState(history.state, "", u.pathname + u.search + u.hash);
     } catch {}
     // These sections are not on this page any more — they moved to Access & permissions with
     // the rest of the settings (owner, 2026-08-01). An old ?section= link would otherwise scroll
@@ -924,6 +947,14 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   }, []);
+
+  // ── AND RING THE EXACT CONTROL, WHEN THE LINK NAMED ONE ──────────────────────────────────────
+  // `?section=` above gets him to the right CARD; a card holds several buttons, so an alert that
+  // meant one of them says which in the hash (`#ctl-maintenance`). One shared helper does the
+  // scroll + ring for every alert in the console, so they cannot drift apart (lib/adminJump.ts).
+  // Separate effect from the one above on purpose: a link may name a control WITHOUT a section
+  // (the control's own scroll is enough), and the section effect returns early in that case.
+  useEffect(() => flashTarget(), []);
 
   // ── THE PANELS READ IS GONE, AND SO IS THE ROUTE (owner, 2026-08-31 — item 27) ────────────────
   // This fetched /api/admin/restaurants/panels on every open of a restaurant, to decide which Enter

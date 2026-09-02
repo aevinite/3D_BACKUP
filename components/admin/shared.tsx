@@ -4,6 +4,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRealtime } from "@/lib/useRealtime";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
+// An error row is said in plain words, never in the browser's own — see lib/plainError.ts.
+import { plainHeadline, legacyJsonDetail } from "@/lib/plainError";
 
 export type Tile = {
   table_number: string;
@@ -265,6 +267,20 @@ export function isManagerPinRow(row: { panel?: string; action?: string; actor?: 
 // can't parse falls back to the raw string, so a future detail shape is never hidden.
 export function formatActionDetail(action: string, detail: string | null | undefined): string {
   if (!detail) return "";
+  // ── ROWS ALREADY IN THE TABLE, WRITTEN AS JSON ────────────────────────────────────────────────
+  // Two call sites used to stringify their patch object straight into `detail`, so the record of
+  // the change read as the change's machine shape (owner, 2026-09-02 — he screenshotted the
+  // rate-limit one sitting on the admin dashboard):
+  //
+  //   rate_limit_edit  → rate limit "guest_order" updated: {"enabled":true,"updated_at":…}
+  //   platform_toggle  → {"platform_in_bills":true}
+  //
+  // Both now write a sentence (lib/rateLimit.ts → rateEditWords, and the editor route's
+  // TOGGLE_WORDS). But history is not rewritten — nothing in this app edits a log row after the
+  // fact — so the OLD rows are translated here, on the way to the screen. Anything that doesn't
+  // parse falls through to the raw string, so an unfamiliar shape is never hidden.
+  const legacy = legacyJsonDetail(action, detail);
+  if (legacy) return legacy;
   if (action !== "ui_taps") return detail;
   let arr: unknown;
   try { arr = JSON.parse(detail); } catch { return detail; }
@@ -491,7 +507,14 @@ export function ActivityFeed({ rows }: { rows: Action[] }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", maxHeight: 340, overflowY: "auto" }}>
       {rows.map((a) => {
-        const det = detailForList(a.action, a.detail);
+        // THE DASHBOARD'S "LATEST ACTIVITY" STRIP — and the one he screenshotted with raw JSON
+        // in it (owner, 2026-09-02). Two different faults met on this line:
+        //   • an ERROR row printed the browser's own sentence → plainHeadline says it in words;
+        //   • a rate-limit edit printed `{"enabled":true,"updated_at":"2026-09-02T09:03:46.697Z",
+        //     "updated_by":"admin"}` → formatActionDetail (via detailForList) now writes that as
+        //     "the guest-ordering limit was switched on".
+        // Both keep their exact text: the row opens into LogDetailModal.
+        const det = a.level === "error" ? plainHeadline(a.detail) : detailForList(a.action, a.detail);
         return (
         <div key={a.id} role="button" tabIndex={0} onClick={() => setDetailRow(a)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailRow(a); } }}

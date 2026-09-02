@@ -10,6 +10,8 @@
 // Data: the SAME existing admin endpoints as before (one fetch each, no per-row
 // fetches), refreshed by useActiveAutoRefresh (60s, only while visible & in use).
 import Link from "next/link";
+// An alert's button lands on the CONTROL that ends the problem, not on the page it lives on.
+import { jumpUrl } from "@/lib/adminJump";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openRestaurantPanel, useActiveAutoRefresh, ActivityFeed, timeAgo, type Action } from "@/components/admin/shared";
 import { useToast } from "@/components/admin/toast";
@@ -40,6 +42,9 @@ export default function AdminCommand() {
   const [ordersToday, setOrdersToday] = useState<number | null>(null);
   const [maintenance, setMaintenance] = useState(false);
   const [maintenanceNames, setMaintenanceNames] = useState<string[]>([]);
+  // The same restaurants with their id + slug, so the banner's button can point at ONE
+  // restaurant's maintenance switch instead of at the list of all of them (owner, 2026-09-02).
+  const [maintenanceList, setMaintenanceList] = useState<{ id: string; name: string; slug: string }[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [online, setOnline] = useState<Staff[]>([]);
   const [onlineCount, setOnlineCount] = useState<number | null>(null);
@@ -67,6 +72,7 @@ export default function AdminCommand() {
       setRests(j.restaurants || []);
       setMaintenance(!!j.maintenance);
       setMaintenanceNames(Array.isArray(j.maintenanceNames) ? j.maintenanceNames : []);
+      setMaintenanceList(Array.isArray(j.maintenanceList) ? j.maintenanceList : []);
       setOrdersToday(Number(j.ordersToday) || 0);
       setIssues(j.issues || []);
       setOpenIssuesCount(typeof j.openIssuesCount === "number" ? j.openIssuesCount : null);
@@ -134,7 +140,11 @@ export default function AdminCommand() {
               measured 2.31:1 — the least readable label in the console, on its most urgent button.
               Darkened here only (the token keeps its value everywhere else) so white sits at
               ~5.7:1 and it still reads as a danger button, not a warning chip. */}
-          <Link href="/aevinite/repair" className={`adm-btn${fixCount > 0 ? " danger" : ""}`}
+          {/* #problems, not the top of the page (2026-09-02): this button is the console's loudest
+              alert, and it landed the admin above a header, three pills and a restaurant picker,
+              with the board it named further down. Same rule as the maintenance banner beside it —
+              an alert lands on the thing it is about. */}
+          <Link href="/aevinite/repair#problems" className={`adm-btn${fixCount > 0 ? " danger" : ""}`}
             style={fixCount > 0 ? { background: "color-mix(in srgb, var(--adm-danger) 72%, #000)", borderColor: "color-mix(in srgb, var(--adm-danger) 72%, #000)", color: "#fff", fontWeight: 700, boxShadow: "0 0 0 3px color-mix(in srgb, var(--adm-danger) 25%, transparent)" } : undefined}
             title={fixCount > 0 ? `${fixCount} to fix — unresolved app problems plus problems staff reported and nobody has solved. Counted exactly the way the Repair board counts them (repeats of one fault count once). Separate from the "Staff-raised issues" number, which is only the reports.` : "Repair page — report a problem or use the repair tools"}>
             <i className={`fas ${fixCount > 0 ? "fa-triangle-exclamation" : "fa-screwdriver-wrench"}`} style={{ marginRight: 7 }} aria-hidden="true" />
@@ -147,14 +157,47 @@ export default function AdminCommand() {
       </div>
       <p className="adm-page-sub">Every restaurant on the platform — open any panel, no password.</p>
 
+      {/* ── THE MAINTENANCE ALERT NOW LANDS ON THE SWITCH ───────────────────────────────────────
+          Owner, 2026-09-02: "if I click manage it should take me to the toggle where I can turn on
+          menu — it takes to the restaurant." Manage went to /aevinite/restaurants, the list of
+          nine, and left him to find the row, open it, scroll, and work out which of that card's
+          buttons the alert meant.
+
+          ONE restaurant in maintenance → one button that goes to THAT restaurant, scrolled to its
+          status card, with the maintenance toggle ringed (lib/adminJump.ts).
+
+          SEVERAL → a button EACH, named. A single "Manage" for three restaurants cannot land on a
+          switch, because there are three of them, and picking the first silently would send him to
+          fix one restaurant while telling him about three. The names were already printed in this
+          banner, so this costs no new words on screen — each name simply became its own door. */}
       {maintenance && (
-        <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-danger)", fontSize: 15 }} aria-hidden="true" />
-          <div style={{ flex: 1, fontSize: 13 }}>
+          <div style={{ flex: 1, fontSize: 13, minWidth: 200 }}>
             <b>{maintenanceNames.length === 1 ? "1 guest menu is in maintenance" : `${maintenanceNames.length} guest menus are in maintenance`}.</b>
             {maintenanceNames.length > 0 && <span className="adm-muted"> — {maintenanceNames.join(", ")}</span>}
+            <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 3 }}>
+              Guests see a &ldquo;we&rsquo;ll be right back&rdquo; screen and can&rsquo;t order. Staff panels keep working.
+            </span>
           </div>
-          <Link href="/aevinite/restaurants" className="adm-btn">Manage</Link>
+          {/* maintenanceList carries id + name + slug per restaurant. It can be empty on an older
+              server response (the banner used to get names only), and then the plain door to the
+              list is still better than no button at all. */}
+          {maintenanceList.length > 0 ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {maintenanceList.map((r) => (
+                <Link key={r.id}
+                  href={jumpUrl({ path: "/aevinite/restaurants", restaurantSlug: r.slug, section: "status", control: "maintenance" })}
+                  className="adm-btn"
+                  title={`Open ${r.name} and go straight to the switch that brings its guest menu back online`}>
+                  <i className="fas fa-play" aria-hidden="true" style={{ marginRight: 7 }} />
+                  {maintenanceList.length === 1 ? "Bring it back online" : r.name}
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <Link href="/aevinite/restaurants" className="adm-btn">Manage</Link>
+          )}
         </div>
       )}
 

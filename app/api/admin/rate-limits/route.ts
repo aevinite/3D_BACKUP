@@ -13,6 +13,8 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
 import { logAction } from "@/lib/oplog";
+// The diary line for an edit is written in words, next to the label list it borrows them from.
+import { rateEditWords } from "@/lib/rateLimit";
 import { throttleBlock, throttleUnblock, listBlocked, clientIp } from "@/lib/loginThrottle";
 
 export const dynamic = "force-dynamic";
@@ -103,7 +105,14 @@ export async function PATCH(req: NextRequest) {
   // limit he had just raised sit at its old value with no hint why, and the record of the change
   // named a rule nobody can find.
   if (!r.data) return err("that limit no longer exists — refresh the page", 404);
-  await logAction("admin", "rate_limit_edit", { level: "info", detail: `rate limit "${r.data.key}" updated: ${JSON.stringify(patch)}` });
+  // THE RECORD OF THE CHANGE IS A SENTENCE, NOT THE PATCH OBJECT (owner, 2026-09-02: "why the
+  // logs are in the code supabase language"). This wrote `rate limit "guest_order" updated:
+  // {"enabled":true,"updated_at":"…","updated_by":"admin"}` — and that line is shown on the
+  // admin DASHBOARD in "Latest activity", so raw JSON was the first thing the console printed.
+  // rateEditWords lives in lib/rateLimit.ts next to the label list, so the diary calls a limit
+  // exactly what the Rate limits screen calls it. Rows written the old way still read correctly:
+  // formatActionDetail (components/admin/shared.tsx) parses that legacy shape back into English.
+  await logAction("admin", "rate_limit_edit", { level: "info", detail: rateEditWords(r.data.key, patch) });
   return NextResponse.json({ ok: true });
 }
 

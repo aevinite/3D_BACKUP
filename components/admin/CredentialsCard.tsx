@@ -119,7 +119,11 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
   };
 
   return (
-    <div className="adm-card" style={{ marginBottom: 14 }} id="det-credentials">
+    // data-adm-ctl: an alert elsewhere in the console (System health's "screens nobody has signed
+    // into") sends the admin here and rings this card, so he can see which of the page's cards the
+    // alert meant (owner, 2026-09-02 — see lib/adminJump.ts). The `id` is the existing ?section=
+    // scroll anchor and is unchanged.
+    <div className="adm-card" style={{ marginBottom: 14 }} id="det-credentials" data-adm-ctl="credentials">
       <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 220 }}>
           <h2 style={{ margin: 0 }}>

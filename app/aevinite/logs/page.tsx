@@ -11,6 +11,8 @@
 //      1 month / 7 days). This is the MANUAL complement to the automatic per-restaurant
 //      nightly prune (lfh_prune_logs, migration 152). It only ever deletes activity-log
 //      rows (staff_actions) — never bills or customer records.
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, detailForList, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
@@ -19,6 +21,9 @@ import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 // The ONE definition of "is this the same problem" — shared with the Repair board's ×N tile and
 // with /api/admin/resolve-error, so this screen can never disagree with what the server just did.
 import { errorSig } from "@/lib/errorSignature";
+// An error row reads as one plain English sentence in the list; the opened row keeps the exact
+// text (owner, 2026-09-02). See lib/plainError.ts for why it translates on DISPLAY, not on write.
+import { plainHeadline } from "@/lib/plainError";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
@@ -90,9 +95,24 @@ export default function AdminLogs() {
   // Everything-Log filters (Operations tab): severity + free-text search. Seed the severity
   // from the URL (?level=error) so the bell's "View log →" deep-link actually lands on Errors
   // instead of All — the link used to be ignored (client component, searchParams never read).
+  //
+  // ── READ IT WITH useSearchParams, NOT off `window` (found 2026-09-02, in the browser) ─────────
+  // This used to be `if (typeof window === "undefined") return ""` inside the initialiser, and it
+  // HALF worked in a way nothing would ever have caught from the code: the client state really was
+  // "error", so the feed really was filtered to errors — but the server had rendered the strip with
+  // ALL active, and React's own words for what happens next are
+  //
+  //     "some attributes of the server rendered HTML didn't match the client properties.
+  //      This won't be patched up."
+  //
+  // So arriving from the bell's "View log →" gave a list of nothing but errors above a strip
+  // insisting the filter was All. The data was right and the screen was lying about it, which is
+  // worse than either being wrong — he would have counted 98 errors as "everything that happened".
+  // A server/client branch inside a render is what causes it; useSearchParams answers the same on
+  // both sides, so there is nothing to mismatch and no extra fetch on arrival.
+  const search = useSearchParams();
   const [level, setLevel] = useState<"" | "error" | "warn" | "info">(() => {
-    if (typeof window === "undefined") return "";
-    const l = new URLSearchParams(window.location.search).get("level");
+    const l = search.get("level");
     return l === "error" || l === "warn" || l === "info" ? l : "";
   });
   const [q, setQ] = useState("");
@@ -199,6 +219,13 @@ export default function AdminLogs() {
   const opsChips = AUDITSORT.activityCounts(ops || []) as { group: string; count: number; label: string; icon: string }[];
   const opsGroupSafe = opsGroup && opsChips.some((c) => c.group === opsGroup) ? opsGroup : "";
   const opsRows = ops === null ? null : (AUDITSORT.activityView(ops, { group: opsGroupSafe, sort: opsSort }) as Action[]);
+  // How many UNRESOLVED errors are in the feed the page is holding — the number on the "Fix now"
+  // button. Counted from the ARRIVED rows, so it means exactly "errors in this list", which is
+  // what the button beside it acts on. Deliberately NOT the dashboard's "Fix problems · N": that
+  // one counts 24h app errors PLUS unsolved staff reports and groups repeats, so the two can
+  // honestly differ — and two counters with the same name giving different answers is the exact
+  // fault the T11 sweep fixed on the dashboard (see the STATS comment in app/aevinite/page.tsx).
+  const errorCount = (ops || []).filter((a) => a.level === "error" && !a.resolved_at).length;
   // The Removals record (deletion_audit) — every restaurant's audit rows, searchable.
   const loadAud = useCallback(async () => {
     const qs = (rid ? `&restaurant_id=${rid}` : "") + (qDebounced.trim() ? `&q=${encodeURIComponent(qDebounced.trim())}` : "");
@@ -279,7 +306,26 @@ export default function AdminLogs() {
 
   return (
     <>
-      <h1 className="adm-page-h">Audit &amp; logs</h1>
+      {/* ── THE DOOR TO FIX NOW (owner, 2026-09-02: "make sure from here you can go to fix now
+          page") ────────────────────────────────────────────────────────────────────────────────
+          This screen is where he FINDS a problem, and the Repair board is where he DOES something
+          about it — and there was no way between them except the sidebar. The link carries the
+          restaurant he is currently filtered to, so arriving on the board he is looking at the
+          same restaurant's problems rather than all nine again, and it lands on #problems (the
+          board itself) instead of the top of a long page. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Audit &amp; logs</h1>
+        <Link
+          href={`/aevinite/repair${rid ? `?focus=${encodeURIComponent(rid)}` : ""}#problems`}
+          className={`adm-btn${errorCount > 0 ? " danger" : ""}`}
+          style={errorCount > 0 ? { background: "color-mix(in srgb, var(--adm-danger) 72%, #000)", borderColor: "color-mix(in srgb, var(--adm-danger) 72%, #000)", color: "#fff", fontWeight: 700 } : undefined}
+          title={errorCount > 0
+            ? `${errorCount} error${errorCount === 1 ? "" : "s"} in this list. Open the Repair board to hand them to Claude with Fix now, or mark them resolved.`
+            : "Open the Repair board — Fix now, the overnight queue, and the hands-on repair tools."}>
+          <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 7 }} />
+          {errorCount > 0 ? `Fix now · ${errorCount}` : "Fix now"}
+        </Link>
+      </div>
       <p className="adm-page-sub">Everything, for every restaurant — what was removed and why (Audit), every staff action including errors (Operations), and the guests (Customers). (Change how long logs are kept in Settings.)</p>
 
       {/* Restaurant filter — scopes BOTH tabs to one restaurant. */}
@@ -480,9 +526,16 @@ function OpsTable({ rows, err, onRetry, scopedName, capped, onSendToClaude, onRe
         const showRed = isErr && !isResolved && !waitingUntil;
         // A row is expandable when it carries detail longer than fits on one line, or is a
         // tap-batch / error worth reading in full.
-        // Errors keep their raw text (stack/where matters); everything else (esp. tap batches)
-        // is shown in plain English via the shared formatter.
-        const det = isErr ? (a.detail || "") : detailForList(a.action, a.detail);
+        //
+        // AN ERROR ROW READS AS ENGLISH HERE (owner, 2026-09-02: "why the logs are in the code
+        // supabase language it should be in the human language"). It used to print the browser's
+        // own sentence — "Failed to execute 'removeChild' on 'Node'…" — which is written for
+        // whoever wrote the engine. plainHeadline says what a PERSON would have experienced, plus
+        // where and on which browser. The exact text is NOT lost: the row opens into
+        // LogDetailModal, which prints it character-for-character under "Exact message", and
+        // nothing about what is recorded, grouped or sent to Claude changes.
+        // Everything else (esp. tap batches) goes through the shared formatter as before.
+        const det = isErr ? plainHeadline(a.detail) : detailForList(a.action, a.detail);
         // On a TABLET row, `actor` is the manager whose PIN unlocked the action (no per-person
         // tablet login exists) — except a person's own login/profile actions. A name with
         // " / " = a PIN shared by >1 manager → ambiguous.
@@ -520,7 +573,17 @@ function OpsTable({ rows, err, onRetry, scopedName, capped, onSendToClaude, onRe
                     style={{ marginLeft: 6, fontWeight: 700, background: "color-mix(in srgb, #6b7280 20%, transparent)", color: "var(--adm-muted, #8b919c)" }}><i className="fas fa-user-shield" aria-hidden="true" style={{ marginRight: 4 }} />Admin</span>
                 : a.actor ? <span className="adm-muted"> · {a.actor}</span> : ""}
               {a.table_number && (isTabletPin || !a.actor) ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
-              {det ? <span className="adm-muted"> · {det.length > 60 ? det.slice(0, 60) + "…" : det}</span> : null}
+              {/* TRUNCATED BY THE BOX, NOT BY A NUMBER (found in the browser, 2026-09-02).
+                  This was `det.slice(0, 60)`, a cap chosen when this line was raw error text. The
+                  column measures 835px on a desktop console — room for about 150 characters — so
+                  every plain sentence was cut mid-word at 60 and the two things worth reading, the
+                  screen name and the browser, never appeared at all. A fixed character count also
+                  cannot be right on two screen sizes at once: 60 is short on a desktop and still
+                  too long at 390px. CSS ellipsis truncates at whatever room there actually is, and
+                  the full text is on the row's `title` and in the card it opens. */}
+              {/* No leading "·": the ellipsis needs `display: block`, which puts this on its own
+                  line, and a separator dot at the start of a line separates it from nothing. */}
+              {det ? <span className="adm-muted" title={det} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{det}</span> : null}
               {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
               {isErr && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>

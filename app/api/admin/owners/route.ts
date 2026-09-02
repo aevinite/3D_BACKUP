@@ -92,7 +92,11 @@ export async function GET(req: NextRequest) {
     // member's rows under the wrong owner (audit 2026-07-09). ownerId is a validated UUID — safe
     // in the .or() filter (no delimiter chars to escape).
     const actQ = await sb.from("staff_actions")
-      .select("id, panel, action, actor, detail, restaurant_id, created_at")
+      // `level` is read so the screen can tell an ERROR row from an ordinary one and say each in
+      // the right words (owner, 2026-09-02): an error's detail is the browser's own sentence and
+      // needs lib/plainError, an ordinary row's detail is already English. One more small column
+      // on a 100-row read — no extra query.
+      .select("id, panel, action, actor, detail, restaurant_id, level, created_at")
       .or(`actor_id.eq.${ownerId},detail.ilike.%${ownerId}%`)
       .order("created_at", { ascending: false })
       .limit(100);
@@ -105,7 +109,7 @@ export async function GET(req: NextRequest) {
     return ok({
       owner: { id: o.id, username: o.username, name: o.name || o.username, active: o.active === true, lastSeenAt: o.last_seen_at, createdAt: o.created_at },
       activity: (actQ.data || []).map((a) => ({
-        id: a.id, panel: a.panel, action: a.action, actor: a.actor, detail: redactMoney(a.detail),
+        id: a.id, panel: a.panel, action: a.action, actor: a.actor, detail: redactMoney(a.detail), level: a.level,
         restaurant: a.restaurant_id ? (restNames.get(a.restaurant_id) || null) : null, at: a.created_at,
       })),
     });

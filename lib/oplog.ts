@@ -3,6 +3,8 @@
 // must never break the actual action, so it's wrapped in try/catch.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { readableError } from "@/lib/errorSignature";
+// The phone alert says what went wrong in plain words; the log row keeps the exact text.
+import { plainProblem } from "@/lib/plainError";
 
 // Redact currency from a free-text `detail` string for ADMIN-facing feeds only. The admin
 // must never see food money (hard rule: "admin sees NO earnings"), but some staff actions
@@ -113,9 +115,13 @@ export async function logError(
     // Structured like every other alert (owner 2026-07-29) — headline, then labelled facts.
     // No extra DB read here on purpose: an error can arrive in bursts, so the restaurant NAME is
     // left to the bell / Everything Log rather than paid for on every error.
+    // THE PHONE ALERT IS THE ONE PLACE HE CANNOT CLICK THROUGH TO THE EXACT TEXT, so it is the
+    // one that most needs plain words (owner, 2026-09-02). It used to push the engine's own
+    // sentence — "TimeoutError: The operation was aborted due to timeout" — to a phone at 2am.
+    // The exact text is untouched in the log row this alert points at.
     const body = alertText([
       ["Action", String(action).replace(/_/g, " ")],
-      ["Problem", msg.slice(0, 160)],
+      ["Problem", plainProblem(msg).headline.slice(0, 200)],
       ["Who", fields.actor ?? null],
     ], "Open admin → Logs to see the full detail.");
     await sendOwnerAlert(body, `${panel}:${action}`, { title: `Something went wrong in ${panel}`, tags: "warning" });

@@ -4,7 +4,8 @@
 // right-side drawer listing them. Tickets can be resolved inline; a restaurant name
 // jumps to that restaurant's detail. Polls /api/admin/notifications every 60s (only
 // while the tab is active — useActiveAutoRefresh), one cheap call.
-import { errorHeadline } from "@/lib/errorSignature";
+// The bell says what went wrong in plain words (owner, 2026-09-02) — see lib/plainError.ts.
+import { plainHeadline } from "@/lib/plainError";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useActiveAutoRefresh } from "@/components/admin/shared";
@@ -219,10 +220,13 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
                         style={{ fontWeight: 700, fontSize: 13.5, background: "none", border: 0, padding: 0, cursor: a.restaurantSlug ? "pointer" : "default", color: "var(--text)" }}>
                         {a.restaurantName}
                       </button>
-                      {/* Rows recorded before readableError() landed hold a whole gateway HTML page
-                          as their detail, and this drawer is the thing that tells the owner
-                          something is wrong — the one place it must read as a sentence. */}
-                      <div style={{ fontSize: 12, color: "var(--muted)" }}>{errorHeadline(a.detail)}</div>
+                      {/* THE DRAWER IS THE THING THAT TELLS HIM SOMETHING IS WRONG, so it is the
+                          one place a machine sentence is least excusable (owner, 2026-09-02).
+                          plainHeadline says what a person would have experienced, where, and on
+                          which browser; the exact text is one tap away on the log row this links
+                          to. It also covers the legacy rows that hold a whole gateway HTML page as
+                          their detail, which is what errorHeadline was here for. */}
+                      <div style={{ fontSize: 12, color: "var(--muted)" }}>{plainHeadline(a.detail)}</div>
                     </div>
                   </div>
                 ))}

@@ -20,6 +20,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, detailForList, isManagerPinRow, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
+// An error row is said in plain words here as well — see lib/plainError.ts.
+import { plainHeadline } from "@/lib/plainError";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { asValue } from "@/lib/ownerPin";
@@ -809,7 +811,13 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
             const isWarn = a.level === "warn";
             const isResolved = isErr && !!a.resolved_at;
             const showRed = isErr && !isResolved;
-            const det = isErr ? (a.detail || "") : detailForList(a.action, a.detail);
+            // THE OWNER'S LOG READS AS ENGLISH TOO (owner, 2026-09-02: "every possible log and
+            // stuff in human language"). An error row used to print the browser's own sentence
+            // here, which on this screen is worse than on the admin's: the restaurant owner has
+            // no use for it at all and no developer to hand it to. plainHeadline says what a
+            // person would have experienced; the exact text is still in the row he opens
+            // (LogDetailModal prints it under "Exact message").
+            const det = isErr ? plainHeadline(a.detail) : detailForList(a.action, a.detail);
             // A non-empty actor on a tablet row = the manager whose PIN unlocked it (except
             // the person's own login/profile actions).
             const isPin = isManagerPinRow(a);

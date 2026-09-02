@@ -8,6 +8,7 @@
 // (action_id bundles the error's context; mode picks instant vs the 02:30 robot). NO earnings shown.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
@@ -16,6 +17,13 @@ import Dropdown from "@/components/admin/Dropdown";
 import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
 import { openRestaurantPanel, PANEL_COLOR, actLabel, timeAgo, type Action } from "@/components/admin/shared";
 import { errorSig, errorGroupKey, errorHeadline } from "@/lib/errorSignature";
+// Every error LINE on this board reads as English; the exact text stays one tap away, because it
+// is what Fix now hands Claude (owner, 2026-09-02). Run TITLES above still use errorHeadline —
+// a title is not an error message, and putting it through the translator would wrap a perfectly
+// good "Owner panel nightly audit" in "the app reported this in its own words".
+import { plainHeadline, plainProblem } from "@/lib/plainError";
+// An alert / lever lands on the control that ends the problem (owner, 2026-09-02).
+import { jumpUrl } from "@/lib/adminJump";
 
 type Restaurant = { id: string; name: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
@@ -114,9 +122,77 @@ function memoryFor(g: ErrGroup, mem: ErrMemory[]): ErrMemory | null {
   return hits.find((m) => m.restaurant_id === (g.sample.restaurant_id || null)) || hits.find((m) => m.restaurant_id === null) || null;
 }
 
+// ── WHY A "NIGHT" JOB CAN CARRY A DAYTIME CLOCK ──────────────────────────────────────────────────
+//
+// Owner, 2026-09-02: "why night audit is going on in afternoon".
+//
+// It is not scheduled in the afternoon. The three LaunchAgents on the Mac are set to 02:30
+// (nightly repair), 04:00 (tablet audit) and 06:00 (owner audit) IST, and twelve days of launchd
+// logs show every run starting within a couple of minutes of those times — with ONE exception,
+// 1 Sept, where the repair run and the owner audit both started at 09:27am in the same second.
+//
+// That is macOS, not the app. launchd runs a job it MISSED as soon as the machine next wakes, so a
+// night with the lid shut produces a "nightly" run stamped whenever he opened the laptop. Two jobs
+// missing the same night therefore fire together, which is exactly the 09:27 pair.
+//
+// The second cause is longer runs: an audit that starts at 06:00 and takes three and a half hours
+// (24 Aug did: 06:03 → 09:34) is genuinely still working late in the morning, and the row only
+// ever showed the START, so it read as a 6am job either way.
+//
+// So the row now says which of the two it is, in plain words. NOTHING IS PREVENTED: a catch-up run
+// is still a real audit and still worth having, and refusing it would mean no audit at all on the
+// days he sleeps with the lid closed. This is the label that was missing, not a new rule.
+//
+// THE WINDOW is 00:00–07:59 local. It is deliberately wider than the latest schedule (06:00): a
+// run that starts at 06:00 and takes an hour is a normal night run, and calling that "late" would
+// put a warning on most rows — which is how a warning stops being read (the same lesson the
+// System health page learned twice; see its "quiet panels" and "complaints" notes).
+const NIGHT_WINDOW_END_HOUR = 8;
+/** The scheduled hour of each night job, for the "it was due at…" half of the sentence. */
+const SCHEDULED: Record<string, string> = { nightly: "2:30 am", audit: "6:00 am" };
+function lateNightRun(s: AgentRun): string {
+  if (s.kind === "live") return "";       // a live fix is started by hand, whenever he asks for it
+  const start = new Date(s.started_at);
+  const hour = start.getHours();          // the admin's own clock — the same one the row prints
+  const due = SCHEDULED[s.kind] || "the night";
+  if (hour >= NIGHT_WINDOW_END_HOUR) {
+    return `Started ${start.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}, not overnight — it was due at ${due} and the Mac was asleep, so macOS ran it when you next woke it.`;
+  }
+  // Started on time, but was it still going once the day began? Only worth saying when it really
+  // ran past the window — a 40-minute 6am audit is not news.
+  if (s.ended_at) {
+    const end = new Date(s.ended_at);
+    if (end.getHours() >= NIGHT_WINDOW_END_HOUR && end.getDate() === start.getDate()) {
+      return `Started on time but ran until ${end.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} — so it was still working during the morning.`;
+    }
+  } else if (s.status === "running" && Date.now() - start.getTime() > 2 * 3600_000) {
+    return "Started overnight and is STILL running — over two hours. It may be stuck.";
+  }
+  return "";
+}
+
 export default function AdminRepair() {
   const toast = useToast();
-  const [rid, setRid] = useState("");
+  // ?focus=<restaurant id> — the restaurant this board should open on. Sent by the "Fix now"
+  // button on Audit & logs (owner, 2026-09-02), so arriving here keeps the restaurant he was
+  // already filtered to instead of resetting to all nine. Read from the URL on the FIRST render
+  // via useState's initialiser rather than in an effect: an effect runs after the first paint, so
+  // the board would flash every restaurant's problems and then narrow — and the ONE thing an
+  // admin must not misread on this screen is whose problem he is looking at. Validated as a uuid;
+  // anything else is ignored, so a hand-typed or stale link falls back to "every restaurant"
+  // rather than filtering to a restaurant that does not exist and showing an empty board.
+  //
+  // Read with useSearchParams, NOT off `window`. A `typeof window === "undefined"` branch inside a
+  // render makes the server and the client disagree, and React does not patch an attribute
+  // mismatch — its exact words are "This won't be patched up." The sibling reader on
+  // app/aevinite/logs/page.tsx did precisely that and shipped a screen whose filter strip said
+  // "All" over a list of nothing but errors (found in the browser, 2026-09-02). Here it would have
+  // been the restaurant picker: narrowed data under a picker reading "All restaurants".
+  const search = useSearchParams();
+  const [rid, setRid] = useState(() => {
+    const f = search.get("focus") || "";
+    return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(f) ? f : "";
+  });
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [data, setData] = useState<RepairData | null>(null);
   const [dataErr, setDataErr] = useState(false);
@@ -185,7 +261,15 @@ export default function AdminRepair() {
   useEffect(() => {
     (async () => {
       const r = await adminFetch<{ restaurants: Restaurant[] }>("/api/admin/restaurants");
-      if (r.ok) setRestaurants(r.data.restaurants || []);
+      if (!r.ok) return;
+      const list = r.data.restaurants || [];
+      setRestaurants(list);
+      // A ?focus= id that names no restaurant this admin can see (a stale bookmark, a restaurant
+      // since removed) falls back to "every restaurant". Otherwise the picker would sit blank and
+      // the board would draw an empty, all-clear-looking page for a restaurant that isn't there —
+      // and an empty board on this screen reads as "nothing is wrong", which is the one wrong
+      // thing it can say.
+      setRid((cur) => (cur && !list.some((x) => x.id === cur) ? "" : cur));
     })();
   }, []);
 
@@ -816,10 +900,25 @@ export default function AdminRepair() {
                     </div>
                   ) : null}
                   {a.detail ? (
-                    // Closed, a gateway failure would put "<!DOCTYPE html> <!--[if lt IE 7]>…" on the
-                    // one visible line and bury "502 Bad Gateway" a hundred characters in. Closed
-                    // shows the readable line; OPEN still shows the captured text byte for byte.
-                    <div className="rp-detail" style={{ maxHeight: isOpen ? 240 : 34 }}>{isOpen ? a.detail : errorHeadline(a.detail)}</div>
+                    // CLOSED = the plain sentence, one line: what a person would have experienced,
+                    // where, on which browser (owner, 2026-09-02 — "it should be in the human
+                    // language"). It used to print the browser's own words, so the one visible line
+                    // read "Failed to execute 'removeChild' on 'Node'…", and a gateway failure put
+                    // "<!DOCTYPE html> <!--[if lt IE 7]>…" there and buried "502 Bad Gateway" a
+                    // hundred characters in.
+                    //
+                    // OPEN = the plain sentence AND the captured text byte for byte. The exact text
+                    // is what Fix now hands Claude and what the ×N grouping is computed from, so it
+                    // stays one tap away and unaltered — the plain line is added above it, never
+                    // instead of it.
+                    <div className="rp-detail" style={{ maxHeight: isOpen ? 240 : 34 }}>
+                      {plainHeadline(a.detail)}
+                      {isOpen && plainProblem(a.detail).translated ? (
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(148,163,184,0.16)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 11.5, opacity: 0.72, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                          {a.detail}
+                        </div>
+                      ) : null}
+                    </div>
                   ) : <div className="adm-muted" style={{ fontSize: 12 }}>No further detail was recorded.</div>}
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
                     {jl ? (
@@ -950,8 +1049,11 @@ export default function AdminRepair() {
                       </span>
                     </div>
                     {/* A signature is meant to be short, but rows written before errorSig learned
-                        about gateway pages (mig 218) can still hold raw markup — same treatment. */}
-                    <div className="rp-detail" style={{ maxHeight: 34 }}>{errorHeadline(m.sig)}</div>
+                        about gateway pages (mig 218) can still hold raw markup — same treatment.
+                        Said in plain English like every other error line (owner, 2026-09-02): a
+                        FIXED row is exactly where a machine sentence is least useful, because the
+                        thing it describes is already dealt with. */}
+                    <div className="rp-detail" style={{ maxHeight: 34 }}>{plainHeadline(m.sig)}</div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
                       {m.pr_url ? (
                         <a className="rp-link" href={m.pr_url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>see the fix</a>
@@ -1249,7 +1351,14 @@ export default function AdminRepair() {
             <h2 style={{ margin: "0 0 8px", fontSize: 14 }}>Other quick levers</h2>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <Link className="adm-btn" href={`/aevinite/restaurants?focus=${rid}`}><i className="fas fa-toggle-on" aria-hidden="true" /> Feature switches</Link>
-              <Link className="adm-btn" href="/aevinite/settings"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Maintenance mode</Link>
+              {/* THIS LEVER WENT NOWHERE USEFUL (found 2026-09-02, making every alert land on its
+                  control). It pointed at /aevinite/settings — and maintenance stopped living there
+                  when it became per-restaurant (audit 2026-07-08). All that page has now is a
+                  read-only row saying "Guest-menu maintenance · per restaurant", so the button
+                  named the setting and then took him to a sentence telling him it was somewhere
+                  else. A restaurant is already chosen here (these levers only render once one is),
+                  so it goes to THAT restaurant's switch and rings it. */}
+              <Link className="adm-btn" href={jumpUrl({ path: "/aevinite/restaurants", restaurantId: rid, section: "status", control: "maintenance" })}><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Maintenance mode</Link>
               <Link className="adm-btn" href={`/aevinite/logs?restaurant_id=${rid}`}><i className="fas fa-scroll" aria-hidden="true" /> Full activity log</Link>
             </div>
           </div>
@@ -1263,10 +1372,43 @@ export default function AdminRepair() {
             <i className="fas fa-clock-rotate-left" aria-hidden="true" style={{ color: "var(--muted)" }} />
             <h2>Claude session history</h2><span className="rp-chip">{runs.length}</span>
           </div>
+          {/* ── HOW THE SCHEDULED RUNS ARE ACTUALLY DOING ────────────────────────────────────────
+              Found 2026-09-02 while answering "why is the night audit running in the afternoon":
+              the owner audit had FAILED on 8 of its last 12 nights, and nothing anywhere said so.
+              Every row carried its own red "failed", which is the same fault as a list of nine
+              restaurants with no total — you can only see it by reading and counting, and nobody
+              reads a history list to audit its own reliability.
+
+              A pattern, not a single run: one failure overnight is normal (the dev server did not
+              come up, the port was busy). Half of them failing means the scheduled job is broken
+              and every night since has been wasted. Drawn only when it IS a pattern, so a healthy
+              stretch adds nothing to the page. */}
+          {(() => {
+            const scheduled = runs.filter((r) => r.kind !== "live");
+            const recent = scheduled.slice(0, 12);
+            const failed = recent.filter((r) => r.status === "failed").length;
+            if (recent.length < 4 || failed * 2 < recent.length) return null;
+            return (
+              <div className="adm-card" style={{ marginBottom: 8, borderColor: "var(--adm-warn)", background: "color-mix(in srgb, var(--adm-warn) 8%, var(--card))" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, lineHeight: 1.55 }}>
+                  <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: "var(--adm-warn)", marginTop: 2 }} />
+                  <div>
+                    <b>{failed} of the last {recent.length} scheduled runs failed.</b>{" "}
+                    <span className="adm-muted">
+                      These are the overnight jobs on your Mac. When they fail, nothing looked at the
+                      app that night — so problems that would have been found and fixed are still
+                      there. Open any red row below and read what it did to see where it stopped.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           <div className="adm-card" style={{ marginBottom: 8 }}>
             {runs.map((s) => {
               const mins = s.ended_at ? Math.max(1, Math.round((new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 60000)) : null;
               const kindLabel = s.kind === "live" ? "LIVE" : s.kind === "nightly" ? "NIGHT" : "AUDIT";
+              const late = lateNightRun(s);
               const statusInfo: Record<AgentRun["status"], { label: string; color: string }> = {
                 running: { label: "working…", color: "var(--adm-accent, #e8a13c)" },
                 done: { label: "finished", color: "var(--adm-ok, #4caf82)" },
@@ -1291,6 +1433,20 @@ export default function AdminRepair() {
                         {mins !== null ? <> · {mins} min</> : null} · <span style={{ color: st.color }}>{st.label}</span>
                         {s.report ? <> · {isOpen ? "hide" : "read what it did"}</> : null}
                       </span>
+                      {/* WHY IS A NIGHT JOB STAMPED IN THE MORNING? (owner, 2026-09-02: "why night
+                          audit is going on in afternoon"). The schedules are right — 2:30am, 4am,
+                          6am — but macOS runs a MISSED scheduled job the moment the Mac next
+                          wakes, so a night the laptop was shut produces a "nightly" run stamped
+                          09:27am. On 1 Sept both the repair run and the owner audit fired in the
+                          same second at 09:27 for exactly that reason.
+                          The row showed the true time and no explanation, so the only reading
+                          available was "the night job is running in the daytime". It now says
+                          which of the two it is, in words. */}
+                      {late ? (
+                        <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, color: "var(--adm-warn)" }}>
+                          <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 5, fontSize: 10 }} />{late}
+                        </span>
+                      ) : null}
                     </span>
                     {s.report ? <i className={`fas fa-chevron-${isOpen ? "up" : "down"}`} aria-hidden="true" style={{ marginTop: 4, opacity: 0.5, fontSize: 11 }} /> : null}
                   </button>

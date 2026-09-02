@@ -12,6 +12,8 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sendOwnerAlert, alertText } from "@/lib/alerts";
+// The phone alert reads as a sentence, not as the browser's own words (2026-09-02).
+import { plainProblem, screenName } from "@/lib/plainError";
 import { capKeyFor, recentActionCount } from "@/lib/publicCap";
 import { getRestaurantBySlug } from "@/lib/tenant";
 
@@ -170,9 +172,13 @@ export async function POST(req: NextRequest) {
     // response is sent — a bare fire-and-forget gets frozen on Vercel and drops the alert
     // (proven flaky in a live test 2026-07-24). The response stays instant; the push runs after.
     after(sendOwnerAlert(
+      // Plain words on the phone (owner, 2026-09-02) — the browser's own sentence went out as-is
+      // before this, and a push notification is the one surface with nothing to click through to.
+      // `detail` (the exact text, with the address and browser on it) is what got stored above and
+      // is what the log row shows; this is only how the alert READS.
       alertText([
-        ["Problem", message.slice(0, 160)],
-        ["Screen", where || null],
+        ["Problem", plainProblem(message).headline.slice(0, 200)],
+        ["Screen", screenName(where) || where || null],
       ], "Open admin → Logs to see the full detail."),
       `client:${panel}`,
       { title: `Screen error in ${panel}`, tags: "warning" },

@@ -12,18 +12,48 @@ export type RateKey =
   | "guest_order" | "staff_login" | "admin_login" | "manager_pin"
   | "waiter_call" | "join_session" | "otp_request" | "password_change";
 
-// Friendly names for the phone ping (the DB rule labels aren't loaded here).
-const RATE_LABELS: Record<string, string> = {
-  guest_order: "Guest orders", staff_login: "Staff / owner login", admin_login: "Admin login",
-  manager_pin: "Manager PIN", waiter_call: "Waiter calls", join_session: "Join table", otp_request: "OTP requests",
-  // mig 277 — the "change my password" box, the one credential check that had no wall.
-  password_change: "Change-password attempts",
-};
+// Friendly names for the phone ping (the DB rule labels aren't loaded here). MOVED to
+// lib/plainError.ts on 2026-09-02 and re-exported here so existing readers are unchanged: the
+// activity log needs the same words, and that file is the client-safe side both can import. This
+// one is not — it pulls in supabaseAdmin.
+export { RATE_LABELS } from "@/lib/plainError";
+import { RATE_LABELS } from "@/lib/plainError";
 
 // How long the window was, in words ("5 min", "60 sec") — for the alert text only.
 function perWords(secs?: number | null): string {
   if (!secs || secs <= 0) return "";
   return secs % 60 === 0 ? `${secs / 60} min` : `${secs} sec`;
+}
+
+/**
+ * rateEditWords — a change to one limit, written as a sentence.
+ *
+ * WHY (owner, 2026-09-02): "why the logs are in the code supabase language". The record of a
+ * rate-limit edit used to be the patch object, stringified:
+ *
+ *   rate limit "guest_order" updated: {"enabled":true,"updated_at":"2026-09-02T09:03:46.697Z",
+ *   "updated_by":"admin"}
+ *
+ * That line sat on the admin DASHBOARD, in "Latest activity" — the first thing the console shows.
+ * Two thirds of it (`updated_at`, `updated_by`) is bookkeeping the log row already carries in its
+ * own timestamp and panel, so it said nothing twice and the one thing that changed was buried in
+ * the middle of it.
+ *
+ * Now the same edit records: `Guest orders — switched on` / `Guest orders — now 5 tries per 10 min`.
+ * Nothing is lost: what a limit currently IS lives in the rate_limit_rules row, not in its diary.
+ */
+export function rateEditWords(key: string, patch: { enabled?: unknown; max_count?: unknown; window_seconds?: unknown }): string {
+  const name = RATE_LABELS[key] || key.replace(/_/g, " ");
+  const parts: string[] = [];
+  // `enabled` first: switching a limit off makes the numbers beside it irrelevant, so it is the
+  // fact a person needs to read first.
+  if (patch.enabled !== undefined) parts.push(patch.enabled ? "switched on" : "switched off");
+  const count = patch.max_count === undefined ? null : Number(patch.max_count);
+  const secs = patch.window_seconds === undefined ? null : Number(patch.window_seconds);
+  if (count !== null && secs !== null) parts.push(`now ${count} tries per ${perWords(secs) || `${secs} sec`}`);
+  else if (count !== null) parts.push(`now ${count} tries per window`);
+  else if (secs !== null) parts.push(`window now ${perWords(secs) || `${secs} sec`}`);
+  return `${name} — ${parts.length ? parts.join(", ") : "settings changed"}`;
 }
 
 // Phone ping (ntfy/Telegram) when a rate limit is reached — same channel as complaints. The owner

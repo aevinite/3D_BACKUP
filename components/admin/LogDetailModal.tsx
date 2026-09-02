@@ -19,6 +19,8 @@ import { useEffect, useRef } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { actLabel, PANEL_COLOR, formatActionDetail, fullWhen, timeAgo, isManagerPinRow, type Action } from "@/components/admin/shared";
+// An error row is shown as one plain sentence + the exact text underneath (owner, 2026-09-02).
+import { plainProblem } from "@/lib/plainError";
 import { trailOf } from "@/lib/logTrail";
 
 // One "label : value" line. Renders nothing when the value is empty, so no blank rows.
@@ -67,9 +69,22 @@ export function LogDetailModal({ row, onClose, showRestaurant = true }: { row: A
   // " / " in the name = one PIN shared by several managers → genuinely ambiguous who tapped it.
   const isPin = isManagerPinRow(row);
   const pinShared = isPin && String(row.actor).includes(" / ");
-  // Errors keep their raw text (the stack / where matters); everything else is shown in plain
+  // AN ERROR ROW IS SAID TWICE HERE (owner, 2026-09-02: "it should be in the human language").
+  //
+  // `detail` is the plain-English sentence — what a person would have experienced, where, and on
+  // which browser. `exact` is the row's own text, character for character, printed below it in a
+  // monospaced block. Both, deliberately: the plain line is what the owner reads, and the exact
+  // line is the only thing that can fix the bug (it is what "Send to Claude", the Fix-now ticket
+  // and the Repair board's repeat-grouping all work from). Showing only one of them loses
+  // somebody — that is why the list line is plain and this card carries both.
+  //
+  // Everything that is NOT an error is unchanged: formatActionDetail already writes those in
   // English (esp. the button-tap batches, which are unreadable JSON otherwise).
-  const detail = isErr ? (row.detail || "") : formatActionDetail(row.action, row.detail);
+  const plain = isErr ? plainProblem(row.detail) : null;
+  const detail = isErr ? (plain?.headline || "") : formatActionDetail(row.action, row.detail);
+  // Only worth its own block when it says something the plain sentence didn't. When we have no
+  // plain words for a message, `headline` already quotes it in full, so a second copy is noise.
+  const exact = isErr && plain?.translated ? plain.technical : "";
   const actionLabel = actLabel(row.action);
   const panelColor = PANEL_COLOR[panel] || "#94a3b8";
   // The full path this action happened at. Computed here rather than trusted from the API, so the
@@ -173,8 +188,29 @@ export function LogDetailModal({ row, onClose, showRestaurant = true }: { row: A
           {(detail || row.table_number || row.order_id) && (
             <Section title="What happened">
               <Field label="Details">{detail || null}</Field>
+              {/* The "why / what to do" half. It is deliberately NOT on the list line: the row is
+                  one line, and putting it there cut the screen name and browser off the end
+                  (measured in the browser, 2026-09-02). This is the place there is room for it. */}
+              {plain?.advice ? <Field label="What it means">{plain.advice}</Field> : null}
+              {plain?.screen ? <Field label="Screen">{plain.screen}</Field> : null}
+              {plain?.browser ? <Field label="Browser">{plain.browser}</Field> : null}
               <Field label="Table">{row.table_number ? "Table " + row.table_number : null}</Field>
               <Field label="Order" mono>{row.order_id || null}</Field>
+            </Section>
+          )}
+
+          {/* THE APP'S OWN WORDS — kept in full, below the plain sentence, never instead of it.
+              This is what a fix is built from: "Send to Claude", the Fix-now ticket and the
+              Repair board's "same problem ×N" grouping all read this exact string. Monospaced
+              and muted, so it reads as a reference rather than as the message. */}
+          {exact && (
+            <Section title="Exact message">
+              <div style={{ fontSize: 12, lineHeight: 1.5, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "var(--muted, #93a1b0)", background: "rgba(148,163,184,0.08)", border: "1px solid rgba(148,163,184,0.16)", borderRadius: 8, padding: "8px 10px", whiteSpace: "pre-wrap", wordBreak: "break-word", userSelect: "text" }}>
+                {exact}
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--muted, #93a1b0)", marginTop: 6 }}>
+                The app&rsquo;s own words. You don&rsquo;t need to read this &mdash; it&rsquo;s what a developer (or Claude) uses to fix it.
+              </div>
             </Section>
           )}
 

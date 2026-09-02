@@ -50,7 +50,11 @@ export async function GET(req: NextRequest) {
     rd("onlineStaff", () => sb.from("staff_users").select("name, username, role, restaurant_id, last_seen_at", { count: "exact" }).eq("active", true).gte("last_seen_at", onlineSinceIso).limit(200)),
     rd("issues", () => sb.from("issues").select("id, restaurant_id, subject, status, created_at", { count: "exact" }).eq("status", "open").order("created_at", { ascending: false }).limit(50)),
     // Only the columns the activity feed renders (not select("*")) — trims wire size.
-    rd("activity", () => sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, created_at").order("created_at", { ascending: false }).limit(18)),
+    // `level` rides along (2026-09-02) so the "Latest activity" strip can tell an ERROR row from
+    // an ordinary one and say each in the right words — an error's detail is the browser's own
+    // sentence and needs lib/plainError; an ordinary row's is already English. One small column
+    // on an 18-row read.
+    rd("activity", () => sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, level, created_at").order("created_at", { ascending: false }).limit(18)),
     // Two HEAD counts for the red "Fix problems" button (owner 2026-07-22): recent app
     // errors (partial error index, mig 159) + problems reported but not yet solved.
     // ONE DEFINITION OF "A PROBLEM", SHARED WITH THE REPAIR BOARD (T20 sweep, 2026-08-16).
@@ -128,10 +132,22 @@ export async function GET(req: NextRequest) {
     panels: panelsByRid.get(r.id) || null,
   }));
 
-  // Live restaurants currently in maintenance, by name.
-  const maintenanceNames = reads.rows<{ restaurant_id: string | null }>("maintenance")
-    .map((s) => s.restaurant_id && nameByRid.get(s.restaurant_id))
-    .filter((n): n is string => !!n);
+  // id → { name, slug } for every restaurant on this payload. Declared HERE because the
+  // maintenance list below is now its first reader; it used to sit further down, next to the
+  // activity feed.
+  const restMeta = new Map(restRows.map((r) => [r.id, { name: r.name, slug: r.slug }]));
+
+  // ── LIVE RESTAURANTS CURRENTLY IN MAINTENANCE ────────────────────────────────────────────────
+  // The banner used to get NAMES only, so its "Manage" button could only send him to the
+  // restaurants LIST and leave him to find the right row himself (owner, 2026-09-02: "if I click
+  // manage it should take me to the toggle where I can turn on menu — it takes to the
+  // restaurant"). Each entry now carries the id and slug too, so the button lands on that exact
+  // restaurant's maintenance switch. `maintenanceNames` is kept alongside it: it is what the
+  // sentence in the banner reads out, and dropping it would be a payload change for no gain.
+  const maintenanceList = reads.rows<{ restaurant_id: string | null }>("maintenance")
+    .map((s) => (s.restaurant_id ? restMeta.get(s.restaurant_id) && { id: s.restaurant_id, ...restMeta.get(s.restaurant_id)! } : null))
+    .filter((x): x is { id: string; name: string; slug: string } => !!x);
+  const maintenanceNames = maintenanceList.map((r) => r.name);
 
   const issues = reads.rowsOr<{ id: string; restaurant_id: string | null; subject: string; status: string; created_at: string }>("issues", []).map((i) => ({
     id: i.id, restaurantName: (i.restaurant_id && nameByRid.get(i.restaurant_id)) || "—",
@@ -144,8 +160,7 @@ export async function GET(req: NextRequest) {
     last_seen_at: u.last_seen_at,
   }));
 
-  const restMeta = new Map(restRows.map((r) => [r.id, { name: r.name, slug: r.slug }]));
-  const activity = reads.rowsOr<{ id: string; panel: string; action: string; actor: string | null; detail: string | null; table_number: string | null; restaurant_id: string | null; created_at: string }>("activity", []).map((a) => {
+  const activity = reads.rowsOr<{ id: string; panel: string; action: string; actor: string | null; detail: string | null; table_number: string | null; restaurant_id: string | null; level: "info" | "warn" | "error" | null; created_at: string }>("activity", []).map((a) => {
     const meta = a.restaurant_id ? restMeta.get(a.restaurant_id) : undefined;
     return { ...a, detail: redactMoney(a.detail), restaurant_name: meta?.name ?? null, restaurant_slug: meta?.slug ?? null };
   });
@@ -154,6 +169,7 @@ export async function GET(req: NextRequest) {
     restaurants,
     maintenance: maintenanceNames.length > 0,
     maintenanceNames,
+    maintenanceList,
     ordersToday: Number(reads.value<number>("ordersToday")) || 0,   // the RPC returns the number (mig 348)
     online,
     onlineCount: reads.failed("onlineStaff") ? online.length : reads.count("onlineStaff"), // exact total (list capped at 200)
