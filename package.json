@@ -140,6 +140,7 @@
     "verify:avlive-release": "node scripts/verify-avlive-offline-complete.mjs",
     "verify:board-sig": "node scripts/verify-board-sig.mjs",
     "verify:3d-viewer": "node scripts/verify-3d-viewer.mjs",
+    "verify:accent-ink": "node scripts/verify-accent-ink.mjs",
     "verify:cache": "node scripts/verify-cache.mjs",
     "verify:cancelled-tile": "node scripts/verify-cancelled-tile-parity.mjs",
     "verify:edge-cases": "node scripts/verify-edge-cases.mjs",
