@@ -1610,6 +1610,10 @@ body.menu-frost .nav {
 @keyframes sgSpin { to { transform: rotate(360deg); } }
 /* Small uppercase brand line above the title on the consent screen. */
 .sg-kicker { font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--accent); font-weight: 700; margin-bottom: 6px; }
+/* Sized like its sibling on the blocked-guest wall (.ban-emoji, 54px). It had no rule, so the 🙋
+   on the host's approve prompt rendered at body size — 16px — while every other dialog in the app
+   leads with a large mark. Measured, sweep 8 T5 round 2. */
+.sg-emoji { font-size: 46px; line-height: 1; margin-bottom: 10px; }
 .sg-title { font-family: 'Playfair Display', serif; font-size: 23px; font-weight: 700; color: var(--text); margin: 0 0 10px; line-height: 1.2; }
 .sg-sub { font-size: 14px; color: var(--muted); line-height: 1.5; margin: 0 0 18px; }
 .sg-input { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; border: var(--border); background: rgba(128,90,60,0.08); color: var(--text); font-size: 15px; font-family: inherit; }
@@ -3813,6 +3817,15 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .gob-btn:disabled { opacity: 0.6; cursor: default; }
 .gob-retry { background: var(--accent-grad); color: var(--accent-on, #fff); border-color: transparent; }
 .gob-drop { background: transparent; color: var(--muted); }
+/* "Order the rest" had NO rule at all, so it fell back to the browser's default button — measured
+   on a 360px phone: background rgb(239,239,239) and black text, sitting between two themed
+   siblings. It is the RESCUE on the failed-order sheet (one dish ran out, keep the other five),
+   so the button that matters most was the one that looked least like it belonged. Quiet, not
+   loud: this is the secondary action, and Try again stays the accent one. (Sweep 8 T5 round 2.) */
+.gob-rest { background: transparent; color: var(--text); border-color: var(--line, rgba(127,127,127,.28)); }
+/* The failed row's own marker. It was in the markup with nothing behind it; the red was carried by
+   the reason line alone (.gob-why), so the ROW read the same as one still waiting to send. */
+.gob-row-failed { border-left: 3px solid rgba(239,68,68,.55); padding-left: 9px; }
 .gob-spin { color: var(--muted); flex: none; }
 .gob-spin i { animation: gobSpin 1.4s linear infinite; }
 @keyframes gobSpin { to { transform: rotate(360deg); } }
