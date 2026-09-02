@@ -190,7 +190,14 @@ const CSS = `
 .nf-g .big { font: 800 33px/1 ui-monospace, Menlo, monospace; margin: 2px 0 8px; }
 .nf-g .row { display: flex; justify-content: space-between; font: 600 11.5px/1.6 ui-monospace, Menlo, monospace;
              color: #8a8175; border-top: 1px dashed #ded5c4; padding-top: 5px; }
-.nf-g .stamp { position: absolute; right: -6px; bottom: 24px; padding: 5px 9px; border: 2.5px solid #c0392b;
+/* THE STAMP LANDS ON THE BLANK PART OF THE DOCKET, NOT ACROSS ITS WORDS (owner, item 9, 2026-09-02).
+   It was pinned to the BOTTOM, which on a 206px docket put it straight over the last two rows: the
+   word "none" was half covered and "no such table" was struck through by the stamp's own border.
+   Measured at 360x780. A rubber stamp slammed across a docket is exactly what was asked for — the
+   fault was only WHERE it landed. The top-right of the docket is genuinely empty (the big "404" is
+   about 70px of a 178px-wide box), so the stamp now slams down there: same slam, same angle, same
+   size, nothing underneath it. Measured after the change: 0 overlapping text nodes. */
+.nf-g .stamp { position: absolute; right: -6px; top: 34px; padding: 5px 9px; border: 2.5px solid #c0392b;
   color: #c0392b; font: 800 12px/1 system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase;
   border-radius: 4px; opacity: 0; animation: nfSlam .32s cubic-bezier(.2,1.4,.4,1) 1.25s forwards; }
 .nf-g h1 { font-size: 21px; margin: 12px 0 8px; }

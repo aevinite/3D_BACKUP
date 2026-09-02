@@ -237,6 +237,43 @@ const run = async () => {
       } finally { await p.close().catch(() => {}); }
     }
 
+    // ── THE VOID STAMP COVERS NO WORD ON THE DOCKET (owner, item 9, 2026-09-02) ─────────────
+    // It used to be pinned to the docket's BOTTOM, which on a 206px docket put it straight across
+    // the last two rows: "none" half covered, "no such table" struck through by its own border.
+    // The stamp is meant to slam across the docket — that is the design — it just has to land on
+    // the blank part, which is the top-right beside the big "404".
+    //
+    // MEASURED AS INK, NEVER AS BOXES. `h2` and `.big` are block elements: their rectangles span
+    // the whole docket even when the words inside them are 70px wide on the left, so a box test
+    // reports an overlap that a reader cannot see. A Range around the text node gives what is
+    // actually painted. The first version of this check got that wrong and reported two overlaps
+    // that were not there.
+    for (const [label, w, h] of [["phone", 360, 780], ["desktop", 1280, 800]]) {
+      const p = await browser.newPage();
+      try {
+        await p.setViewportSize({ width: w, height: h });
+        await p.goto(`${BASE}/zz-nf-stamp-probe`, { waitUntil: "domcontentloaded", timeout: 45000 });
+        await p.waitForSelector(".nf-g .stamp", { timeout: 15000 }).catch(() => {});
+        const r = await p.evaluate(() => {
+          const st = document.querySelector(".nf-g .stamp");
+          if (!st) return null;
+          const s = st.getBoundingClientRect();
+          const ink = (el) => { const rg = document.createRange(); rg.selectNodeContents(el); return rg.getBoundingClientRect(); };
+          const hit = [];
+          for (const el of document.querySelectorAll(".nf-g .docket h2, .nf-g .big, .nf-g .row span")) {
+            if (!el.textContent.trim()) continue;
+            const b = ink(el);
+            if (b.width && b.left < s.right && s.left < b.right && b.top < s.bottom && s.top < b.bottom) hit.push(el.textContent.trim());
+          }
+          return { hit, onDocket: s.width > 0 && s.height > 0 };
+        });
+        if (!r) skip(`${label}: the VOID stamp covers no word on the docket`, "this address did not draw the guest docket");
+        else if (!r.onDocket) bad(`${label}: the VOID stamp is not drawn at all`, "it should still slam onto the docket");
+        else if (r.hit.length) bad(`${label}: the VOID stamp covers words on the docket`, `it lands on: ${r.hit.join(", ")}`);
+        else ok(`${label}: the VOID stamp slams onto the blank part of the docket, covering no word`);
+      } finally { await p.close().catch(() => {}); }
+    }
+
     // ── ONE APOSTROPHE ACROSS THE GUEST SCREENS ─────────────────────────────────────────────
     // This exact fault has now been made three times in one day: the French dictionary mixed the
     // typographic ’ with the typewriter ', then the rewritten offline page did, then these two
