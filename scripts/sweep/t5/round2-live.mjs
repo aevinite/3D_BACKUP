@@ -18,6 +18,8 @@ import path from "node:path";
 
 const BASE = process.env.T5_BASE || "http://localhost:4305";
 const TENANT = "aangan-garden-restaurant";
+// A restaurant with the table gate OFF, so an order can be placed without joining a session.
+const ORDER_TENANT = process.env.T5_ORDER_TENANT || "spice-route";
 const SHOTS = path.join(ROOT, ".claude/sweep/shots/T5");
 fs.mkdirSync(SHOTS, { recursive: true });
 const A35 = { viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
@@ -153,32 +155,75 @@ try {
   const cleared = await p.evaluate(() => document.querySelectorAll(".toast-ticket").length);
   check("P95107", "every notice takes itself away again", () => cleared === 0 || `${cleared} left on screen`);
 
-  /* ── 4 · the saved-work sheet, driven from this phone's own storage ── */
-  const chip = await p.evaluate(async () => {
-    // The guest queue lives on the phone. Writing to it here is exactly what losing signal does,
-    // and it reaches no server — no ticket lands on anyone's board.
-    const key = Object.keys(localStorage).find((k) => /guest_outbox|lfh_outbox/i.test(k)) || "lfh_guest_outbox";
-    const rows = [
-      { id: "zz-t5-a", kind: "order", at: Date.now() - 90_000, track: { items: [{ qty: 2, title: "Espresso" }], total: "438" } },
-      { id: "zz-t5-b", kind: "call", at: Date.now() - 30_000, reason: "Water" },
-      { id: "zz-t5-c", kind: "order", at: Date.now() - 400_000, error: "That dish just ran out.", blocked: true,
-        lines: [{ id: "x" }, { id: "y" }], failed: true, track: { items: [{ qty: 1, title: "Soup" }] } },
-    ];
-    localStorage.setItem(key, JSON.stringify(rows));
-    window.dispatchEvent(new Event("storage"));
-    window.dispatchEvent(new Event("lfh:outbox-changed"));
-    await new Promise((r) => setTimeout(r, 900));
-    const el = document.querySelector(".gob-chip");
-    return { key, shown: !!el, text: (el?.textContent || "").trim() };
-  });
-  if (!chip.shown) skip("P95108", "the saved-work chip appears when something is waiting on the phone",
-    `the queue's storage key could not be driven from outside it (tried "${chip.key}") — lib/guestOutbox.ts owns the shape, and faking it is worse than skipping`);
-  else {
-    check("P95108", "the saved-work chip appears when something is waiting on the phone", () => true);
-    check("P95109", "…and never calls a request for water an order", () =>
-      !/^\d+ orders? waiting/.test(chip.text) || chip.text);
+  /* ── 4 · the saved-work sheet, driven the REAL way (item 13, 2026-09-02) ──
+   *
+   * The first version wrote a fake queue into localStorage and skipped when it did not take. The
+   * queue is in INDEXEDDB (`lfh_guest_outbox` / `orders`, keyPath "id") — so the fake could never
+   * have worked, and skipping was the right call at the time but not the answer.
+   *
+   * This does what a diner does: add a dish, cut the signal, tap Place order. The order is queued
+   * ON THIS BROWSER and nothing reaches the server — the context stays offline for its whole life
+   * and the store is emptied before it closes, so no ticket can ever land on a kitchen board
+   * another terminal is watching. */
+  const oc = await browser.newContext({ ...A35, offline: false });
+  const op = await oc.newPage();
+  let outbox = { chip: "", rows: 0, queued: 0, title: "", sub: "", foot: "", kinds: [] };
+  try {
+    await op.goto(`${BASE}/r/${ORDER_TENANT}/menu?table=7`, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await op.waitForSelector(".item-card", { timeout: 30000 });
+    await wait(1500);
+    await op.click(".item-card .cart-add-btn").catch(() => {});
+    await wait(900);
+    await oc.setOffline(true);                       // from here on, nothing can reach the server
+    await op.evaluate(() => window.dispatchEvent(new Event("lfh:open-cart")));
+    await wait(900);
+    await op.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => /place order/i.test(x.textContent || "")); if (b) b.click(); });
+    await wait(3000);
+    outbox = await op.evaluate(async () => {
+      const rows = await new Promise((res) => {
+        const r = indexedDB.open("lfh_guest_outbox", 1);
+        r.onsuccess = () => { try { const g = r.result.transaction("orders", "readonly").objectStore("orders").getAll();
+          g.onsuccess = () => res(g.result); g.onerror = () => res([]); } catch { res([]); } };
+        r.onerror = () => res([]);
+      });
+      const chipEl = document.querySelector(".gob-chip");
+      if (chipEl) chipEl.click();
+      await new Promise((r) => setTimeout(r, 600));
+      return { queued: rows.length, kinds: rows.map((x) => x.kind || "order"),
+               chip: (chipEl?.textContent || "").trim(),
+               rows: document.querySelectorAll(".gob-row").length,
+               title: (document.querySelector(".gob-row-title")?.textContent || "").trim(),
+               sub: (document.querySelector(".gob-row-sub")?.textContent || "").trim(),
+               foot: (document.querySelector(".gob-foot")?.textContent || "").trim() };
+    });
+    await op.screenshot({ path: path.join(SHOTS, "r3-outbox-a35.png") });
+  } finally {
+    // EMPTY IT BEFORE THE CONTEXT DIES. Playwright throws the profile away, so this is belt and
+    // braces — but a queued order is a real order, and "delete the exact rows you inserted" is the
+    // rule whether or not the storage would have survived.
+    await op.evaluate(() => new Promise((res) => {
+      const r = indexedDB.open("lfh_guest_outbox", 1);
+      r.onsuccess = () => { try { const tx = r.result.transaction("orders", "readwrite"); tx.objectStore("orders").clear(); tx.oncomplete = () => res(); tx.onerror = () => res(); } catch { res(); } };
+      r.onerror = () => res();
+    })).catch(() => {});
+    await oc.close().catch(() => {});
   }
-  await p.evaluate(() => { try { for (const k of Object.keys(localStorage)) if (/outbox/i.test(k)) localStorage.removeItem(k); } catch {} });
+  check("P95108", "an order placed with no signal really is saved on the phone", () =>
+    outbox.queued >= 1 || `the queue holds ${outbox.queued}`);
+  check("P95701", "…and it is saved as an ORDER, not as something else", () =>
+    outbox.kinds.includes("order") || JSON.stringify(outbox.kinds));
+  check("P95702", "…the chip says so, and counts it as one order", () =>
+    /1 order waiting to send/.test(outbox.chip) || `the chip said "${outbox.chip}"`);
+  check("P95703", "…the sheet opens and shows exactly that one row", () =>
+    outbox.rows === 1 || `${outbox.rows} rows`);
+  check("P95704", "…naming the dish and how many, not a bare count", () =>
+    /\d+ × \S/.test(outbox.title) || `the row said "${outbox.title}"`);
+  check("P95705", "…with when it happened and what it comes to", () =>
+    (/ago|just now/.test(outbox.sub) && /[₹$]/.test(outbox.sub)) || `the row said "${outbox.sub}"`);
+  check("P95706", "…and it promises only what is true: saved here, sends itself", () =>
+    /Saved on this phone only/.test(outbox.foot) || `the footer said "${outbox.foot}"`);
+  check("P95707", "…and nothing on that sheet renders as a code token", () =>
+    !/undefined|NaN|\[object|\$\{/.test(outbox.chip + outbox.title + outbox.sub + outbox.foot) || outbox.title + outbox.sub);
 
   /* ── 5 · every one of the six languages, rendered ── */
   const LANGS = ["en", "de", "fr", "ar", "hi", "ko"];
@@ -267,30 +312,50 @@ try {
   }
   await p.evaluate(() => { try { localStorage.setItem("lfh_language", "en"); } catch {} });
 
-  /* ── 6 · a dish page: the star rating and the sold-out label ── */
+  /* ── 6 · a dish page: the star rating, with its tab actually OPENED (item 13) ──
+   *
+   * The first version read `.sr-li` on page load and skipped, blaming the ratings switch. The
+   * picker lives behind the "Rate dish" TAB — the switch was on all along, and the check simply
+   * never opened the thing it was measuring. */
   await menu();
   const href = await p.evaluate(() => document.querySelector(".item-card-link")?.getAttribute("href") || "");
   await p.goto(BASE + href, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
-  await wait(2500);
+  await p.waitForSelector(".review-tab-btn", { timeout: 30000 }).catch(() => {});
+  const starsClosed = await p.evaluate(() => document.querySelectorAll(".sr-li").length);
+  await p.click(".review-tab-btn").catch(() => {});
+  await wait(800);
   const dish = await p.evaluate(() => {
-    const stars = document.querySelectorAll(".sr-li").length;
     const pill = document.querySelector(".sr-score-pill");
     const r = pill?.getBoundingClientRect();
-    return { stars, pill: (pill?.textContent || "").replace(/\s+/g, " ").trim(),
+    return { stars: document.querySelectorAll(".sr-li").length,
+             named: [...document.querySelectorAll(".sr-toggle")].map((t) => t.getAttribute("aria-label")).filter(Boolean).length,
+             keyboard: [...document.querySelectorAll(".sr-toggle")].filter((t) => t.getAttribute("tabindex") === "0").length,
+             pill: (pill?.textContent || "").replace(/\s+/g, " ").trim(),
              pillW: r ? Math.round(r.width) : 0, vw: innerWidth,
-             names: [...document.querySelectorAll(".sr-toggle")].map((t) => t.getAttribute("aria-label")).filter(Boolean).length,
              text: document.body.innerText.replace(/\s+/g, " ").slice(0, 300) };
   });
-  if (!dish.stars) skip("P95141", "the star rating draws five stars", "this restaurant has ratings switched off, so the box is correctly absent");
-  else {
-    check("P95141", "the star rating draws five stars", () => dish.stars === 5 || `${dish.stars}`);
-    check("P95142", "…every one of them named for a screen reader", () => dish.names === 5 || `${dish.names} named`);
-    check("P95143", "…and the score pill reads as a score out of five", () => /\/\s*5/.test(dish.pill) || dish.pill);
-    check("P95144", "…and it fits the phone", () => dish.pillW <= dish.vw || `${dish.pillW}px`);
-  }
-  check("P95145", "the dish page shows no code token", () =>
+  check("P95141", "the star rating is behind its own tab, and appears when the tab is opened", () =>
+    (starsClosed === 0 && dish.stars === 5) || `${starsClosed} before, ${dish.stars} after`);
+  check("P95708", "…all five named for a screen reader", () => dish.named === 5 || `${dish.named} named`);
+  check("P95709", "…all five reachable with the keyboard", () => dish.keyboard === 5 || `${dish.keyboard} reachable`);
+  check("P95710", "…and the score reads as a score out of five, starting at nought", () =>
+    /^0\s*\/\s*5$/.test(dish.pill) || `the pill said "${dish.pill}"`);
+  check("P95711", "…and it fits the phone", () => dish.pillW <= dish.vw || `${dish.pillW}px`);
+  // pick a rating with a real tap, and with the keyboard, and watch the score follow
+  const toggles = await p.$$(".sr-li .sr-toggle");
+  if (toggles[2]) { await toggles[2].click(); await wait(1400); }
+  const tapped = await p.evaluate(() => ({ active: document.querySelectorAll(".sr-li.active").length,
+                                           num: document.querySelector(".sr-score-num")?.textContent }));
+  check("P95712", "tapping the third star lights three, and the score says 3", () =>
+    (tapped.active === 3 && tapped.num === "3") || JSON.stringify(tapped));
+  if (toggles[4]) { await toggles[4].focus(); await p.keyboard.press("Enter"); await wait(1400); }
+  const keyed = await p.evaluate(() => ({ active: document.querySelectorAll(".sr-li.active").length,
+                                          num: document.querySelector(".sr-score-num")?.textContent }));
+  check("P95713", "…and Enter on the fifth lights five, so it is not mouse-only", () =>
+    (keyed.active === 5 && keyed.num === "5") || JSON.stringify(keyed));
+  check("P95714", "the dish page shows no code token", () =>
     !/undefined|NaN|\[object Object\]|\$\{/.test(dish.text) || dish.text.slice(0, 120));
-  await p.screenshot({ path: path.join(SHOTS, "r2-dish-a35.png") });
+  await p.screenshot({ path: path.join(SHOTS, "r3-stars-a35.png") });
 
   /* ── 7 · the guest dead end, again, and its way out really works ── */
   await p.goto(`${BASE}/r/${TENANT}/item/zz-none-${Date.now()}`, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
