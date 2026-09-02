@@ -313,29 +313,39 @@ const run = async () => {
     // reports an overlap that a reader cannot see. A Range around the text node gives what is
     // actually painted. The first version of this check got that wrong and reported two overlaps
     // that were not there.
-    for (const [label, w, h] of [["phone", 360, 780], ["desktop", 1280, 800]]) {
+    //
+    // BOTH DOCKETS, because there are two: the platform 404's VOID stamp, and the guest menu's own
+    // CLOSED stamp on components/GuestNotFound.tsx — the screen a diner reaches from a wrong or
+    // retired restaurant link, which is the commoner of the two. They had the identical fault and
+    // it was found on the second one only because this check was pointed at it.
+    for (const [label, w, h, url, root] of [
+      ["phone", 360, 780, "/zz-nf-stamp-probe", ".nf-g"],
+      ["desktop", 1280, 800, "/zz-nf-stamp-probe", ".nf-g"],
+      ["phone, the wrong-restaurant screen", 360, 780, "/r/zz-nf-stamp-probe/menu", ".gnf"],
+      ["desktop, the wrong-restaurant screen", 1280, 800, "/r/zz-nf-stamp-probe/menu", ".gnf"],
+    ]) {
       const p = await browser.newPage();
       try {
         await p.setViewportSize({ width: w, height: h });
-        await p.goto(`${BASE}/zz-nf-stamp-probe`, { waitUntil: "domcontentloaded", timeout: 45000 });
-        await p.waitForSelector(".nf-g .stamp", { timeout: 15000 }).catch(() => {});
-        const r = await p.evaluate(() => {
-          const st = document.querySelector(".nf-g .stamp");
+        await p.goto(`${BASE}${url}`, { waitUntil: "domcontentloaded", timeout: 45000 });
+        await p.waitForSelector(`${root} .stamp`, { timeout: 15000 }).catch(() => {});
+        const r = await p.evaluate((rt) => {
+          const st = document.querySelector(`${rt} .stamp`);
           if (!st) return null;
           const s = st.getBoundingClientRect();
           const ink = (el) => { const rg = document.createRange(); rg.selectNodeContents(el); return rg.getBoundingClientRect(); };
           const hit = [];
-          for (const el of document.querySelectorAll(".nf-g .docket h2, .nf-g .big, .nf-g .row span")) {
+          for (const el of document.querySelectorAll(`${rt} .docket h2, ${rt} .big, ${rt} .row span`)) {
             if (!el.textContent.trim()) continue;
             const b = ink(el);
             if (b.width && b.left < s.right && s.left < b.right && b.top < s.bottom && s.top < b.bottom) hit.push(el.textContent.trim());
           }
           return { hit, onDocket: s.width > 0 && s.height > 0 };
-        });
-        if (!r) skip(`${label}: the VOID stamp covers no word on the docket`, "this address did not draw the guest docket");
-        else if (!r.onDocket) bad(`${label}: the VOID stamp is not drawn at all`, "it should still slam onto the docket");
-        else if (r.hit.length) bad(`${label}: the VOID stamp covers words on the docket`, `it lands on: ${r.hit.join(", ")}`);
-        else ok(`${label}: the VOID stamp slams onto the blank part of the docket, covering no word`);
+        }, root);
+        if (!r) skip(`${label}: the stamp covers no word on the docket`, "this address did not draw a guest docket");
+        else if (!r.onDocket) bad(`${label}: the stamp is not drawn at all`, "it should still slam onto the docket");
+        else if (r.hit.length) bad(`${label}: the stamp covers words on the docket`, `it lands on: ${r.hit.join(", ")}`);
+        else ok(`${label}: the stamp slams onto the blank part of the docket, covering no word`);
       } finally { await p.close().catch(() => {}); }
     }
 

@@ -307,3 +307,44 @@ the `table` parameter being deleted. Proven by three sabotages, not by reading.
 - All nine live restaurants are set to a LIGHT default, so the dark-default script could only be
   exercised in the negative direction. Flipping one would change a fixture other terminals are
   reading this run.
+
+---
+
+# T1 · SWEEP #8 ROUND 2 — a fresh plan over the same ground (2026-09-02)
+
+Asked for after round 1 was merged and made live: *"plan 500 phases test within your boundaries make
+sure it cover everthing within your boundries and test everything again if any error left"*.
+
+**Planned by measuring.** Every const, state, ref, prop and storage key in the nine owned files —
+183 distinct named things — cross-referenced against all 1,547 rows already in `T1.md`. **Fifty had
+never been named by a single check.** That gap list is the plan.
+
+**464 written, 464 executed, 464 ✅ · 0 ❌.** Not 500: the pre-allocated block `P54701`–`P55700`
+had 464 ids left after round 1's 536. Block O was trimmed by four repeats rather than take an id
+belonging to another terminal.
+
+Everything from block L onwards was driven against the **live backup site**, after the merge.
+
+## 9 (the other docket) — the CLOSED stamp covered "none" and "not serving" · FIXED
+
+The identical fault to the VOID stamp fixed earlier the same day, on the screen a diner is far MORE
+likely to reach: `components/GuestNotFound.tsx`, shown for a wrong or retired restaurant link.
+Pinned to the docket's bottom, the stamp covered the value "none" and struck through "not serving".
+Found on the **live site**, by pointing the same check at the twin screen. Same fix, same guard —
+which now runs on both dockets at two widths.
+
+## 10 — four rules in the 404's stylesheet could never match anything · FIXED
+
+Fifty rules ship with every 404 and not one had ever been checked. Three were left behind when the
+toaster's `again` class was replaced by re-keying (the file's own comment says so), and one was an
+anchor rule for a control that is a `<button>`. Removed, with the obituary as a source comment
+rather than stylesheet bytes. Guard: every rule is now run against the screen it belongs to, and
+against the no-JavaScript fallback.
+
+## Already built by other terminals — checked, not assumed
+
+- **Item 7** (`verify-t24b-live.mjs` missing its app-up preflight): fixed on `main` on 2026-09-02.
+  The hook noise every session was still seeing came from the SHARED folder sitting 38 commits
+  behind; that folder has now been pulled current and the hook is quiet. (`P55233`)
+- **Item 4** (the platform's name in a diner's browser tab): `verify:notfound` now asserts a dead
+  dish link's tab title is "Menu". (`P55234`)

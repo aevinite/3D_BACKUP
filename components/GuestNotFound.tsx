@@ -73,7 +73,13 @@ const CSS = `
             font: 600 11.5px/1.6 ui-monospace, Menlo, monospace; color: #8a8175;
             border-top: 1px dashed #ded5c4; padding-top: 5px; }
 .gnf .row span:last-child { text-align: right; }
-.gnf .stamp { position: absolute; right: -6px; bottom: 24px; padding: 5px 9px; border: 2.5px solid #c0392b;
+/* THE STAMP LANDS ON THE BLANK PART OF THE DOCKET, NOT ACROSS ITS WORDS (owner, item 9, 2026-09-02).
+   The same fault as the platform 404's VOID stamp, on the screen a diner is far MORE likely to
+   reach — a wrong or retired restaurant link. Pinned to the BOTTOM it slammed straight over the
+   docket's own values: "none" was covered and "not serving" was struck through by the stamp's own
+   border. Measured on the live backup site at 360x780. The slam is the design and is untouched —
+   only where it lands changes, to the empty top-right beside the big dash. */
+.gnf .stamp { position: absolute; right: -6px; top: 34px; padding: 5px 9px; border: 2.5px solid #c0392b;
   color: #c0392b; font: 800 12px/1 system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase;
   border-radius: 4px; opacity: 0; animation: gnfSlam .32s cubic-bezier(.2,1.4,.4,1) 1.25s forwards; }
 .gnf h1 { font-size: 21px; margin: 12px 0 8px; font-weight: 800; }
