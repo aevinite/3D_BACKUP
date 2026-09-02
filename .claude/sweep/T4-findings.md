@@ -266,3 +266,30 @@ table and round 1 never opened one. Round 2 went there.
 
 **Still not reachable, named rather than glossed:** a second diner joining a head's table and being
 approved or declined needs `components/SessionOwner.tsx`, which this territory does not own.
+
+## ROUND 3 (2026-09-02) — 500 phases, planned by measuring the territory
+
+**`P96701`–`P97200`, claimed from the registry and pushed to `main` before a single row existed**
+(PR #1255). T4's own block was spent by rounds 1 and 2.
+
+Planned from real counts, not guesses: 2,960 lines · 38 exports · **108 user-visible sentences** ·
+274 branches · 31 storage keys · 13 events · 19 database calls · 58 tap handlers. Every block is
+sized to one of those, so anything added tomorrow is covered when it exists.
+
+**One real fault, and it was in a GUARD — findable only by breaking something (item 19).**
+`verify:print-helper` asserted the Allow page's unreachable card with a substring test on
+*"Could not reach the site"*, and that sentence appears **twice** in `app/pair/page.tsx`. Deleting
+the card outright left the guard green. It now anchors on the branch that renders it.
+**36 protections were sabotaged one at a time; this was the one that stayed green.**
+
+**Two red rows were my own detectors** and are recorded, not hidden: an event named through a
+constant that a literal-only grep called dead, and a sabotage that appended after a signature
+instead of changing it.
+
+**One thing that looks dead and must not be deleted:** `sendOtp` / `verifyOtp` have zero callers
+because OTP sits behind `verification`, a backend-only flag. Migration 360 calls them "the live OTP
+path" while deleting the genuinely retired half — which came back **three times** because people
+kept re-deriving it as dead. `P96895`/`P96896` record it.
+
+**Not one database row was written this round.** Port proved free and proved mine by pid. Aangan's
+switches untouched; AV live never read or named.
