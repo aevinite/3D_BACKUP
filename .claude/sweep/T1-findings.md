@@ -362,7 +362,7 @@ exits, 346 readable strings** across 2,866 lines — and then **caused** the fai
 
 **505 written, 505 executed: 504 ✅ · 1 ❌.**
 
-## The one red — and it is real, and it is live
+## The one red — CORRECTED: real, but not something a diner can reach
 
 **A half-written percent-escape in a restaurant address gives a bare 500.** Measured on the local
 production build AND the live backup site:
@@ -371,12 +371,27 @@ production build AND the live backup site:
     /q/%E0%A4             → HTTP 500
     /r/fr%E0%A4ance/menu  → HTTP 500
 
-A diner gets no styling, no words they can act on, no restaurant — the exact dead end the two 404
-screens exist to remove. Next rejects the malformed escape inside its own request handling, before
-any of this app's code or any error boundary runs: **proved** by adding a route-level `error.tsx`
-and watching the 500 come back unchanged. **Not fixable inside this terminal's files** — it needs
-either the `middleware.ts` this project deliberately does not have, or a `next.config.ts` rewrite.
-Reported for a decision. (`P97650`)
+Next rejects the malformed escape inside its own request handling, before any of this app's code or
+any error boundary runs — **proved** by adding a route-level `error.tsx` and watching the 500 come
+back unchanged. So it is not fixable inside this terminal's files.
+
+**BUT THE FIRST WRITE-UP OVERSTATED IT, AND THE CORRECTION MATTERS MORE THAN THE FINDING.** It was
+found with a script that issues RAW requests, and reported as "a diner gets a blank error page"
+before the browser path had been driven. Driven afterwards, in a real browser at 360×780 against the
+live site, every realistic version of it is harmless:
+
+| what a person actually does | what happens |
+|---|---|
+| mistypes the restaurant name | the friendly "this menu isn't available" screen |
+| types it IN CAPITALS | the menu opens normally |
+| leaves a space in the address | the friendly screen |
+| a stray `%` in the address | **the browser refuses to send it** — they never reach this app |
+| a link cut short mid-character | the browser refuses to send it |
+
+So no diner can reach the bare 500. What reaches it is a link-preview fetcher, a crawler or an
+uptime check — things that read a status code, not a screen. Downgraded from a guest-facing dead end
+to an untidy status code for machines. **Measure the door a person actually walks through.**
+(`P97650`)
 
 ## Fixed this round
 
