@@ -131,8 +131,28 @@ check(303, "the offline strip promises a queue on GUEST paths only", () =>
 check("122-127", "allergies and notes are gated at the SEND site, not only where they're saved", () =>
   has(F.cart, "allergyPayload", "orderItems") &&
   has(F.cart, "features.allergies ? it.removed : undefined", "features.guest_note ? it.note : undefined"));
-check(110, "reviews are only fetched once the switch has resolved", () =>
-  rx(F.item, /!features\.reviews\) \{ setLocalReviews/) && rx(F.item, /features\.reviews\]\)/));
+// ── ASSERT THE RULE, NOT THE SPELLING IT HAD IN JULY (owner, item 8, 2026-09-02) ──────────────
+// This row asserted two literal fragments — `!features.reviews) { setLocalReviews` and
+// `features.reviews])`. The dish page has since replaced that with a STRICTER gate: the read now
+// waits for `getFeatures(restaurantId)`, and a restaurant with reviews on but ratings OFF (where
+// nothing on the page draws a review) no longer pays for the read at all. So the guard was red on
+// clean main against code that is better than what it demanded — the same way row 261 was, and
+// with the same cost: a permanently red row makes the next genuine red indistinguishable from it.
+//
+// What actually matters, and what is asserted here instead: the read waits for THIS restaurant's
+// resolved answer; a "no" (or no answer at all) empties the list and returns BEFORE any review is
+// fetched; and the effect re-runs when the switches change, so a live toggle is still honoured.
+check(110, "reviews are only fetched once THIS restaurant's switches have resolved", () => {
+  const s = F.item;
+  const eff = (s.match(/const reviewsCanBeSeen[\s\S]{0,900}?\}, \[item, restaurantId, reviewsCanBeSeen\]\);/) || [""])[0];
+  if (!eff) return { ok: false, note: "the reviews effect is not where this guard can see it" };
+  const waits = /await getFeatures\(restaurantId\)/.test(eff);
+  const refuses = /if \(!real \|\| !real\.reviews \|\| !real\.ratings\) \{ setLocalReviews\(\[\]\); return; \}/.test(eff);
+  const beforeRead = eff.indexOf("getFeatures(restaurantId)") < eff.indexOf("getItemReviews(");
+  const reruns = /\}, \[item, restaurantId, reviewsCanBeSeen\]\);/.test(eff);
+  return { ok: waits && refuses && beforeRead && reruns,
+           note: `waits=${waits} refuses=${refuses} refusal-before-read=${beforeRead} re-runs-on-toggle=${reruns}` };
+});
 check(110, "getMenuItem no longer pulls a review list nothing reads", () =>
   !has(F.menuLib, "mapped.reviews = revs"));
 check("394-395", "no internal dev text on a guest 3D screen", () =>
