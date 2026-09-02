@@ -939,10 +939,27 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         {/* A flexible spacer that pushes the heart to the right edge. */}
         <div style={{ flex: 1 }}></div>
         {/* The favorite heart. "fas" = solid (hearted), "far" = outline (not).
-            Gone entirely when the favorites feature is switched off. */}
+            Gone entirely when the favorites feature is switched off.
+
+            IT HAD NO NAME (sweep #8 T2 round 3, 2026-09-02 — item 10). The only thing inside it is
+            an icon, so a screen reader announced it as "button" and nothing else — on the control
+            that SAVES a dish. Its neighbour, the back arrow one line up, was given a name in the
+            T11 sweep on 2026-08-15 for exactly this reason, and the heart was missed. Measured: 17
+            visible controls on this page, 1 with no accessible name, and it was this one.
+            `aria-pressed` is the other half — a screen reader should say whether the dish is
+            ALREADY saved, which is the whole state this button carries. English on purpose, like
+            the two "we couldn't load this" cards below (R23 — the guest translation set is parked)
+            and like this file's other hardcoded fallbacks. */}
         {features.favorites && (
-          <button id="detail-fav" className="nav-btn" onClick={toggleFavorite}>
-            <i className={`${favorited ? 'fas' : 'far'} fa-heart`} style={{ color: favorited ? '#ef4444' : '' }}></i>
+          <button
+            id="detail-fav"
+            className="nav-btn"
+            onClick={toggleFavorite}
+            aria-pressed={favorited}
+            aria-label={favorited ? "Remove from Favourites" : "Save to Favourites"}
+            title={favorited ? "Remove from Favourites" : "Save to Favourites"}
+          >
+            <i aria-hidden="true" className={`${favorited ? 'fas' : 'far'} fa-heart`} style={{ color: favorited ? '#ef4444' : '' }}></i>
           </button>
         )}
       </div>
@@ -1137,9 +1154,30 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
             {item.longDescription}
           </p>
           {/* The Read more / Read less toggle. */}
-          <span id="desc-toggle" className="desc-toggle" onClick={() => setDescExpanded(!descExpanded)}>
+          {/* READ MORE WAS A <span>, AND THE ALLERGY LIST LIVES BEHIND IT (sweep #8 T2 round 3,
+              2026-09-02 — item 10). A span with an onClick takes no focus and answers no key, so a
+              guest using a keyboard could not expand this section — and the INGREDIENTS and the
+              CONTAINS block are inside it. That is not a nicety: it made a dish's allergy
+              information unreachable without a mouse or a touchscreen.
+              A real <button> fixes focus, Enter and Space in one go, at the cost of the browser's
+              own button styling — so the four properties `.desc-toggle` does not set are
+              neutralised inline. `aria-expanded` and `aria-controls` tell a screen reader what the
+              control does and to what, which a span could never say. */}
+          <button
+            type="button"
+            id="desc-toggle"
+            className="desc-toggle"
+            aria-expanded={descExpanded}
+            aria-controls="detail-desc"
+            /* `font: "inherit"` was WRONG and measured so: an inline shorthand beats the class, so it
+               took the stylesheet's own `font-size: 11px` with it and Read more rendered at 16px.
+               Only the FAMILY needs inheriting — a button otherwise renders in the browser's UI font.
+               The size, colour and margin stay where they belong, in `.desc-toggle`. */
+            style={{ background: "none", border: "none", padding: 0, fontFamily: "inherit", textAlign: "left" }}
+            onClick={() => setDescExpanded(!descExpanded)}
+          >
             {descExpanded ? t.readLess : t.readMore}
-          </span>
+          </button>
           {/* When expanded, also reveal the ingredients list and allergens.
               THE HEADING GOES WITH ITS LIST (sweep #8 T2, 2026-09-02 — item 4). The allergens block
               a few lines down already asks `item.allergens.length > 0`, and this page already hides

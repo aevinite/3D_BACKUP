@@ -1039,9 +1039,15 @@ export default function ViewerClient({ folder }: { folder: string }) {
           once "on" is added. Values prefer the live menu item, falling back
           to the config. */}
       <div id="bar" ref={barRef} className={barVisible ? "on" : ""}>
-        <div className="dname" id="dish-title">
+        {/* A HEADING, NOT A DIV (sweep #8 T2 round 3, 2026-09-02 — item 10). Measured: on the
+            WORKING 3D screen there was no <h1> or <h2> at all — the three that exist are on the
+            three dead-end screens above. So a screen-reader user had no heading to jump to on the
+            one screen this product is sold on, and the dish's own name was just text in a box.
+            `.dname` carries every visual property except the margin a heading brings with it, so
+            that one is zeroed inline and the screen looks identical. */}
+        <h2 className="dname" id="dish-title" style={{ marginTop: 0 }}>
           {menuItem?.title || config?.title || ""}
-        </div>
+        </h2>
         <div className="dsub" id="dish-sub">
           {menuItem?.description || config?.subtitle || ""}
         </div>
