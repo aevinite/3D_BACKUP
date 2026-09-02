@@ -274,6 +274,43 @@ const run = async () => {
           "two apostrophes on one screen reads as cheap on the screen a restaurant is paying us for");
     }
 
+    // ── THE TAB AND THE SHARE PREVIEW ARE PART OF THE WHITE LABEL TOO (owner's item 7, 2026-09-02) ──
+    //
+    // The guest 404's SCREEN has been white-label since 2026-08-04. Its <head> was not: both dish
+    // doors answered a correct 404 carrying `<title>Aevidine — Restaurant OS</title>` and the
+    // platform's own sales description, because Next discards a route's generateMetadata when the
+    // page calls notFound() and falls back to the ROOT layout's. So a diner read our company across
+    // the top of their phone, and a forwarded link previewed as our pitch under the restaurant's name.
+    //
+    // DRIVEN, NOT READ, and deliberately so: the fix is a `metadata` export in a not-found boundary,
+    // which is a framework behaviour rather than a rule of ours. A source check would keep passing
+    // the day Next stops honouring it. This asks the served document.
+    {
+      for (const path of ["/item/no-such-dish-zz", "/r/french-house/item/no-such-dish-zz"]) {
+        let head = null, status = 0;
+        try {
+          const res = await fetch(BASE + path, { redirect: "follow" });
+          status = res.status;
+          head = (await res.text()).split("</head>")[0];
+        } catch { head = null; }
+        if (head === null) {
+          skipped++;
+          console.log(`  ⏭  could not read the head of ${path}`);
+          continue;
+        }
+        const title = (head.match(/<title>([^<]*)/) || [])[1] || "";
+        const desc = (head.match(/<meta name="description" content="([^"]*)/) || [])[1] || "";
+        const brandInHead = /Aevidine/i.test(head);
+        status === 404 && !brandInHead
+          ? ok(`a dead dish link names no platform brand in the tab or the share preview (${path} → 404, title "${title}")`)
+          : bad(`${path} answered ${status} and its <head> still says: title "${title}" / description "${desc.slice(0, 60)}"`,
+            "a guest who opens a stale dish link reads OUR company in their browser tab, and a forwarded "
+            + "link previews as our sales pitch under the restaurant's name. The fix is a `metadata` export "
+            + "in BOTH app/item/[slug]/not-found.tsx and app/r/[restaurant]/item/[slug]/not-found.tsx, which "
+            + "verify:3d-viewer requires to stay byte-identical.");
+      }
+    }
+
     // The two screens must stay DIFFERENT. A future tidy-up that makes them share one look would
     // quietly undo the whole point of the decision.
     {

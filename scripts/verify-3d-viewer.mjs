@@ -362,6 +362,19 @@ check(
   );
 }
 
+// ── a dead dish link names no platform brand in the tab either (owner's item 7, 2026-09-02) ──
+// The screen has been white-label since 2026-08-04; its <head> was not. Next discards a route's
+// generateMetadata when the page calls notFound(), so BOTH doors fell back to the root layout's
+// "Aevidine — Restaurant OS" and the platform's sales description — in the browser tab, and in the
+// preview card of any forwarded link. This is the fast, server-free half; verify:notfound drives
+// the served document, which is what catches the framework changing its mind.
+check(
+  "the guest dish 404 sets its own brand-free title instead of falling back to the platform's",
+  /export const metadata = \{\s*\n\s*title: "Menu",/.test(read("app/item/[slug]/not-found.tsx")),
+  "app/item/[slug]/not-found.tsx (and its twin) must carry a `metadata` export, or a stale dish " +
+    "link reads 'Aevidine — Restaurant OS' in a diner's browser tab and previews as our sales pitch."
+);
+
 // The two guest 404 pages are twins on purpose.
 check(
   "the two guest not-found pages for the dish routes have not drifted apart",
