@@ -14,6 +14,11 @@ which is where the owner reads it; this file is the durable record of the faults
 | problems found | **4** |
 | problems fixed | **4** |
 
+**A second round followed, on the owner's word after the merge** (2026-09-02): items 7 and 8 built,
+merged and deployed to backup, then a freshly planned 500 (`P56201`–`P56700`) driven against the LIVE
+site. That round found item 9 — see below. Totals for the whole terminal: **1,438 rows re-run or
+written before it, 500 more added, 9 problems found, 9 fixed.**
+
 ## 1 — another restaurant's 3D screen served restaurant #1's dish · FIXED (`c86318c7`)
 
 `public/content/items/` holds exactly two folders, `Croissant` and `Waffle`, and they are restaurant
@@ -74,3 +79,63 @@ Not fixed here because `verify:3d-viewer` requires `app/item/[slug]/not-found.ts
 `app/r/[restaurant]/item/[slug]/not-found.tsx` to stay byte-identical, and the second file is not
 this terminal's territory this run. It is item 5 in the chat report, in the group that needs the
 owner's word first.
+
+
+## 7 — a dead dish link put OUR company in the guest's browser tab · FIXED (`559633f9`)
+
+Both dish doors answered a correct HTTP 404 with a fully white-label page — and
+`<title>Aevidine — Restaurant OS</title>` plus the platform's own sales description. So a diner who
+opened a stale or forwarded dish link read our company across the top of their phone, and forwarding
+that link previewed our SALES PITCH under the restaurant's name.
+
+Next discards a route's `generateMetadata` when the page calls `notFound()` and falls back to the
+root layout's. Fixed with a `metadata` export written identically into both not-found twins.
+Verified on the live site: all three doors answer 404 with one title ("Menu"), one description, and
+**zero** occurrences of "Aevidine" in the document. Guarded twice — `verify:notfound` FETCHES both
+404s (driven, because honouring that export is the framework's behaviour, not our rule), and
+`verify:3d-viewer` carries the source-level half.
+
+## 8 — BACK and AR were 4px under the size a thumb needs · FIXED (`f296c29f`)
+
+83×40 and 111×40 on a Samsung A35, on the one screen this product is sold on. The height lives in
+THREE places in `app/globals.css`, so moving one alone does nothing. All three now say 44, and the
+pill's radius moved with it. Re-measured live: 83×44 and 111×44, both reachable, top bar 64→68px,
+nothing else moved. Guarded by a live measurement in `verify:slow-load` (Phase C3) and a source
+check in `verify:3d-viewer`.
+
+## 9 — two guards checked the NAME of a number and never the number · FIXED (`dd8f7b74`)
+
+**Found by sabotage, not by reading.** All 25 behaviours this territory's guards defend were broken
+one at a time and the guard re-run after each. 22 went red. One was covered by a different guard.
+Two stayed green over their own fault:
+
+* `PINNED_BAR_MAX_WIDTH` — the test was `/= (\d+)/`, which captures the digits and throws them away.
+  `= 99999` passed, putting the pinned Add bar back on every laptop over "About this dish".
+* `DISH_READ_DEADLINE_MS` — `/= \d+/` matched `= 0`, which would trip on every load and replace an
+  arriving dish with the failure card.
+
+Both now check the value against a generous range, so a tuning change is still allowed and only a
+value that switches the fix off fails. Bite-tested: 99999 → red, 0 → red, restored → green.
+
+**Third time this project has recorded a guard that stays green over the thing it defends.** The tell
+was the same each time: the assertion matched a SHAPE rather than a FACT.
+
+
+## Two things about the LEDGER itself, found while merging round 2
+
+**1 — T5's merge had reverted this file, and T5 also improved it.** `T2.md` went 1,050 → 1,550 rows
+with this terminal's first block, then back to 1,050 when sweep #8's T5 committed a copy taken
+before that merge. Nothing was lost permanently: the rebase conflict was resolved by INTEGRATING —
+this terminal's 938 re-run stamps and 1,000 new rows restored, and T5's own 22 note additions and 3
+verdict changes carried across on top of them. Neither side was discarded. Worth recording because
+the shape repeats: a ledger file is append-only in practice, and a session holding a stale copy of
+one silently deletes another's work when it commits.
+
+**2 — T5 caught a stale skip reason of MINE, and was right.** `P00697` and `P00813` had been ⏭ for
+three sweeps with the reason *"verify:offline is hard-pinned to port 4000 and ignores --base"*. This
+terminal re-ran them and wrote *"still skipped, same reason, re-checked this run"* — which was not
+true. T5 read the guard: it takes `--base` on line 55 and only defaults to 4000. Run on its own port
+it is 58 passed, 0 failed. Both rows are now ✅ on T5's evidence.
+
+That is the ledger's own warning turned on me: **a carried-forward reason is not a re-run.** The two
+rows said "re-checked this run" and what I actually re-checked was the sentence, not the guard.
