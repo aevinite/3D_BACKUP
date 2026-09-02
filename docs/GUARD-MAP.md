@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **167** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **168** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 167 names in their head, so in practice a person runs none of them, or reaches for
+can hold 168 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -52,6 +52,7 @@ Code: `app/menu`, `app/r/[restaurant]`, `app/q/[code]`, `components/*`, `lib/men
 | languages / translated text | `verify:i18n-scope` | nothing | no |
 | allergy chips or per-item allergy data | `verify:allergy-isolation` | `.env.local` | **YES** |
 | the guest's cart, order placing, or the offline outbox | `verify:order-retry`, `verify:guest-recovery`, `verify:outbox` | nothing | no |
+| the basket panel or the order tracker themselves (`components/CartPanel.tsx`, `components/OrderTracker.tsx`, `lib/guestOutbox.ts`) | `verify:basket` ← reads the shipped files and executes the shipped logic against synthetic input; no DB, no login, no server | nothing | no |
 | the guest session / table hand-over | `verify:session-ux` | `.env.local` | **YES** |
 | branding, theme, IntroSplash (one tenant must never show another's) | `test:units` (`lib/brandText`, `lib/brandTheme`) | nothing | no |
 | any of the THREE guest doors (`/menu`, `/r/<slug>/menu`, `/q/<code>`), or a tap that promises the guest something | `verify:guest-doors` ← all three doors must reach the SAME restaurant, and a guest's tap must never claim something that did not happen | nothing | no |

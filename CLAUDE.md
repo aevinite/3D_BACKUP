@@ -169,8 +169,6 @@ update the detail doc's section in the same commit.
 
 ## Operational rules — one line each; open the detail/doc BEFORE working in that area
 
-- **Feature switches (mig 035):** `settings.features` + `useFeatures()`; four backend-only flags
-  (`verification`, `payments`, `aggregators`, `gst_invoice`) stay invisible in every UI.
 - **KOT/bills (migs 036–038):** daily `kot_no`/`bill_no`; discount apart from totals. Which of the
   THREE numbers is which, and why series have honest gaps: `docs/NUMBERING.md`. **Auto-print = a QUEUE
   (mig 335)**, never a tab noticing; no `document.hidden` refusal: `docs/KITCHEN-PRINT-SETUP.md`.
@@ -182,19 +180,10 @@ update the detail doc's section in the same commit.
   REVOKE/GRANT (mig 038/267 lesson); `verify:grants` guards it.
 - **3D loading:** `lib/modelLoader.ts` singleton on `globalThis` — it is what makes "no re-fetch
   on navigation" work. Event bus: `lfh:*` CustomEvents. Don't re-suggest Draco (done).
-- **Charts are DYNAMIC, never a lonely 1-bar plot:** route through `populated()` / `NotEnough` /
-  `ScrollX` in `components/owner/Charts.tsx`; sparse timelines auto-drill to finer buckets.
-- **Analytics/dashboards use the compute-on-view snapshot cache** (`lib/ownerCache.ts`,
-  `cachedOwnerPayload`, fingerprint-gated; Refresh forces live) — never recompute per open, never
-  a blind cron.
 - **🚦 Never trip the app's own rate limits while testing:** sign in ONCE per session
   (`scripts/sweep/login.mjs` `loginAs()` caches; `adminHeaders()` for admin APIs — never POST
   JSON to `/api/staff-login`); a test that must hit a wall cleans up its rows the same run.
   Enforced by `npm run verify:test-safety` (auto PostToolUse hook on `scripts/`/`tests/` edits).
-- **👆 A tap must never vanish in silence:** no silent `return` on a user action — hold it
-  (`tapGuard().act()`), or refuse visibly; never leave a promise unresolved; overlays with
-  `.confirm-overlay` stamp `data-closing`; branch on server reason CODES, not prose.
-  `npm run verify:taps` runs as a hook on panel edits.
 - **🪑 A table shows only its own party:** ownership is the SESSION, never the table number; an
   order can never outlive its session (close-trigger cleans up, mig 232). `verify:table-ownership`.
 - **🧾 Floor reads are shared (1.5s window):** EVERY write handler calls `invalidateFloor(rid)`;
@@ -205,10 +194,6 @@ update the detail doc's section in the same commit.
   guard; 5xx/timeout = queue like offline (4xx = tell the person); every write has deadline +
   jittered backoff; no fixed fast poll while reads fail (`LFH_RT.catchUp()`). `verify:busy`.
   `verify:everything` refuses to start while another run is alive (pid lock).
-- **Offline layer is LIVE — keep extending:** read `docs/OFFLINE-SYNC.md` before touching a panel
-  or write endpoint; every staff write is wrapped `withIdempotency(...)` + goes through `api()`
-  (X-LFH-Action-Id); on the guest side ONLY place-order is queued so far — don't rebuild the
-  staff outbox on a misreading.
 - **🔑 Access model v2 (the 4-rung ladder is RETIRED):** a toggle exists only where the owner
   listed one (`lib/accessTree.ts`); only the ADMIN holds permissions; hiding is never the only
   guard. Spec: `docs/ACCESS-MODEL.md`; **unbuilt owner asks: `docs/ACCESS-REDESIGN-SPEC.md`
@@ -222,10 +207,6 @@ update the detail doc's section in the same commit.
   `/owner/staff`. Otherwise read `docs/STAFF-PROFILE.md` before adding anything about a person;
   one permission list feeds profile + Access tab + write allow-list (`lib/staffCaps.ts`); unknown
   keys are REFUSED.
-- **Mobile back button:** every popup/overlay registers `useBackClose(...)` (guest) or
-  `LFH_BACK.layer(...)` (panels) the moment it's built — never hand-roll pushState/popstate.
-- **🧱 A new MODULE adds no column to `settings`** (110 already): declare `moduleBag: true` in
-  `lib/accessModel.ts`, ladder goes in `settings.modules` (mig 326). `verify:settings-columns`.
 - **♻️ A NEW WAY REPLACES THE OLD ONE — never leave both** (owner, 2026-08-29, STANDING): adding a
   thing REMOVES the thing that did that job, in the same change; changing how a feature works removes
   the previous way. *"There is two printing things, one is working and one is just showing."* Delete
@@ -259,6 +240,14 @@ update the detail doc's section in the same commit.
   vault (`~/Brain`) · another live session's uncommitted work in this shared folder · force-pushing
   `main`. Guarded by `npm run verify:no-ask`. What counts as "anything", and the three ways that
   guard fails: `docs/CLAUDE-DETAIL.md` → "Never ask permission to delete".
+
+- **⚙️ Rules that load only when you touch their code — `.claude/rules/`** (moved there
+  2026-09-02 so they cost nothing in a session that never goes near them; the text is verbatim,
+  nothing was reworded): `panels.md` taps-never-vanish · back-button · offline-wrapping ·
+  `owner-analytics.md` dynamic charts · snapshot cache · `settings-and-modules.md` feature
+  switches (mig 035) · a new module adds no `settings` column (mig 326).
+  **Creating something NEW in one of those areas? Open the rule file first** — a path-scoped
+  rule fires when you READ a matching file, so it can miss you on a greenfield write.
 
 ## 🚦 Deploying & the folder ladder (pointer — invoke `ship-safety` AT the moment of deploying)
 

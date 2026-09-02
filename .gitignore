@@ -48,6 +48,11 @@ yarn-error.log*
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
+# Path-scoped Claude Code rules (added 2026-09-02). These MUST be tracked: a sweep session
+# runs in a git worktree, and an ignored .claude/rules/ simply would not exist there — the
+# rules would silently stop applying in exactly the sessions that do the most editing.
+!.claude/rules/
+!.claude/rules/*.md
 .claude/hooks/*
 !.claude/hooks/health-nudge.mjs
 
