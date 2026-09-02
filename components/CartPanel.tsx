@@ -642,6 +642,29 @@ export default function CartPanel() {
       const itemsS = orderItems();
       const trackS = cart.map((it) => ({ title: it.title, qty: it.qty })); // slim list for the tracker
       const totalS = totalUsd, countS = itemCount; // USD — order records convert at render
+      // ── A BUTTON THAT WAITS ON SOMEBODY ELSE NEEDS ITS OWN WAY BACK (owner picked item 12) ──────
+      //
+      // With dining sessions ON this button does not place the order itself: it hands the job to the
+      // join-a-table gate and waits to be TOLD the outcome. Every check says that gate reports
+      // exactly once, including when it is cancelled — and that is not the same thing as this
+      // button being safe, because nothing here bounded the wait. If the gate ever failed to
+      // answer — an exception on its way to reporting, a screen unmounted mid-flow — `placing`
+      // stayed true, the button stayed disabled reading "Placing…", and it stayed that way for as
+      // long as the diner kept the page open. No message, nothing to tap: the exact shape of the
+      // "a tap must never vanish in silence" rule, at the one moment a diner is paying attention.
+      //
+      // So the wait has a ceiling, and both halves of it clean up after themselves:
+      //   · the gate answering CANCELS the failsafe (the ordinary case, unchanged);
+      //   · the failsafe firing removes the listener, releases the button, and SAYS something true.
+      //
+      // 60 seconds, deliberately long. The gate can legitimately take a while — a location check,
+      // a head approving a guest, an OTP typed off a phone — so this must never cut in front of a
+      // gate that is merely slow. It is insurance against silence, not a timeout on the flow. The
+      // basket is left ALONE when it fires: we genuinely do not know whether the order landed, and
+      // emptying it could hide an order that went through, while keeping it lets the diner try
+      // again under the same at-most-once key.
+      const GATE_FAILSAFE_MS = 60_000;
+      let failsafe: ReturnType<typeof setTimeout> | null = null;
       // onDone: runs once the SessionGate finishes (after location/join/OTP). If the
       // server actually placed the order, we record it locally so the tracker follows it.
       const onDone = (e: Event) => {
@@ -651,6 +674,7 @@ export default function CartPanel() {
         // WITHOUT deregistering, so a gated add mid-placement can't steal our listener.
         if (d?.action !== "order") return;
         window.removeEventListener("lfh:session-done", onDone);
+        if (failsafe) { clearTimeout(failsafe); failsafe = null; }
         placingRef.current = false;
         setPlacing(false);
         if (d?.queued) {
@@ -678,6 +702,21 @@ export default function CartPanel() {
       };
       // Listen for the gate's result, then kick off the session flow.
       window.addEventListener("lfh:session-done", onDone);
+      // …and arm the way back, in case that result never comes (item 12, above).
+      failsafe = setTimeout(() => {
+        failsafe = null;
+        window.removeEventListener("lfh:session-done", onDone);
+        placingRef.current = false;
+        setPlacing(false);
+        // Honest about what we do and do not know. "Check your order" points at the one screen
+        // that can answer it — the Live-status tab — rather than telling them to order again,
+        // which could put the same food on the table twice.
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+          message: "We didn't hear back about that order",
+          subtitle: "check Live status before ordering again",
+          kicker: "order", variant: "error", event: "lfh:show-previous-orders",
+        } }));
+      }, GATE_FAILSAFE_MS);
       // `lines` = the basket as a PERSON sees it, id AND name per line. The QR path has carried
       // this since the queue was written; the SESSION path never did, and two things needed it:
       // a refusal that names a dish by id (`unknown_item` sends the id, not the title — a seated
