@@ -40,9 +40,6 @@ export interface Translations {
   carbs: string;
   sugar: string;
   price: string;
-  loadingLabel: string;
-  itemNotFound: string;
-  itemNotFoundDesc: string;
   tabRate: string;
   tabReviews: string;
   review: string;
@@ -99,6 +96,22 @@ export interface Translations {
   // now fails if a key nobody renders is added.
   // TO PUT THE PREP-TIME LABEL BACK you need `prepTime` in all six languages AND a render site in
   // components/FoodCard.tsx's `.dish-meta` line — the key alone changes nothing.
+
+  // ── RETIRED 2026-09-02 (sweep 8, T5 round 3) — and this one was a REGRESSION the guard caught,
+  // not a leftover from years ago. `loadingLabel` ("Plating your dish"), `itemNotFound` and
+  // `itemNotFoundDesc` were the words on three dish screens, and they were LIVE when the dead-key
+  // check was written in round 1. Commit a9e6a305 — "refactor(dish): item 12 — remove three
+  // screens that could no longer render" — took the screens out and left the words: eighteen
+  // translated values with nothing to print them on, which is exactly the shape that cost an
+  // earlier sweep a translation fix aimed at a label no card renders.
+  //
+  // `npm run verify:i18n-scope` went red the moment those screens left, which is the whole reason
+  // that check exists. Removing the screen and leaving its words is the SAME rule as the one this
+  // project already writes down for features — "a new way replaces the old one; delete the old
+  // path, its buttons, its storage keys and its duplicate guides".
+  //
+  // If a loading or not-found screen ever comes back it needs the key AND a render site; the key
+  // alone changes nothing, and the guard will say so.
   noMatch: string;
   noMatchSub: string;
   noSearchResults: string;   // takes the typed term, e.g. `No dishes found for “{q}”`
@@ -151,9 +164,6 @@ const translations: Record<LanguageCode, Translations> = {
     carbs: "Carbs",
     sugar: "Sugar",
     price: "Price",
-    loadingLabel: "Plating your dish",
-    itemNotFound: "Dish not found",
-    itemNotFoundDesc: "That dish isn\u2019t on the menu any more.",
     tabRate: "Rate dish",
     tabReviews: "Reviews",
     review: "review",
@@ -168,9 +178,9 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "Not available",
   },
   de: {
-    noDishesYet: "Noch keine Gerichte auf der Karte",
+    noDishesYet: "Noch keine Gerichte auf der Karte.",
     noDishesYetSub: "Dieses Restaurant hat noch keine Gerichte hinzugef\u00fcgt. Bitte schauen Sie bald wieder vorbei.",
-    noFavourites: "Noch keine Favoriten",
+    noFavourites: "Noch keine Favoriten.",
     favTapToSave: "zum Speichern tippen",
     noRatingsYet: "noch keine Bewertungen",
     noFavouritesSub: "\u00d6ffnen Sie ein Gericht und tippen Sie oben rechts auf das {heart} \u2014 es bleibt hier gespeichert.",
@@ -210,9 +220,6 @@ const translations: Record<LanguageCode, Translations> = {
     carbs: "Kohlenhydrate",
     sugar: "Zucker",
     price: "Preis",
-    loadingLabel: "Ihr Gericht wird vorbereitet",
-    itemNotFound: "Gericht nicht gefunden",
-    itemNotFoundDesc: "Der gesuchte Artikel existiert nicht.",
     tabRate: "Bewerten",
     tabReviews: "Bewertungen",
     review: "Bewertung",
@@ -232,9 +239,9 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "Nicht verfügbar",
   },
   fr: {
-    noDishesYet: "Aucun plat au menu pour l\u2019instant",
+    noDishesYet: "Aucun plat au menu pour l\u2019instant.",
     noDishesYetSub: "Ce restaurant n\u2019a pas encore ajout\u00e9 de plats. Revenez bient\u00f4t.",
-    noFavourites: "Aucun favori pour l\u2019instant",
+    noFavourites: "Aucun favori pour l\u2019instant.",
     favTapToSave: "touchez pour enregistrer",
     noRatingsYet: "pas encore d\u2019avis",
     noFavouritesSub: "Ouvrez un plat, puis touchez le {heart} en haut \u00e0 droite \u2014 il reste enregistr\u00e9 ici.",
@@ -274,9 +281,6 @@ const translations: Record<LanguageCode, Translations> = {
     carbs: "Glucides",
     sugar: "Sucre",
     price: "Prix",
-    loadingLabel: "Préparation de votre plat",
-    itemNotFound: "Plat introuvable",
-    itemNotFoundDesc: "L\u2019article que vous cherchez n\u2019existe pas.",
     tabRate: "Évaluer",
     tabReviews: "Avis",
     review: "avis",
@@ -291,9 +295,9 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "Non disponible",
   },
   ar: {
-    noDishesYet: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0623\u0637\u0628\u0627\u0642 \u0641\u064a \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u0628\u0639\u062f",
+    noDishesYet: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0623\u0637\u0628\u0627\u0642 \u0641\u064a \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u0628\u0639\u062f.",
     noDishesYetSub: "\u0644\u0645 \u064a\u0636\u0641 \u0647\u0630\u0627 \u0627\u0644\u0645\u0637\u0639\u0645 \u0623\u064a \u0623\u0637\u0628\u0627\u0642 \u0628\u0639\u062f. \u064a\u0631\u062c\u0649 \u0627\u0644\u0639\u0648\u062f\u0629 \u0642\u0631\u064a\u0628\u064b\u0627.",
-    noFavourites: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0641\u0636\u0644\u0627\u062a \u0628\u0639\u062f",
+    noFavourites: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0641\u0636\u0644\u0627\u062a \u0628\u0639\u062f.",
     favTapToSave: "\u0627\u0636\u063a\u0637 \u0644\u0644\u062d\u0641\u0638",
     noRatingsYet: "\u0644\u0627 \u062a\u0642\u064a\u064a\u0645\u0627\u062a \u0628\u0639\u062f",
     noFavouritesSub: "\u0627\u0641\u062a\u062d \u0623\u064a \u0637\u0628\u0642\u060c \u062b\u0645 \u0627\u0636\u063a\u0637 \u0639\u0644\u0649 {heart} \u0641\u064a \u0627\u0644\u0623\u0639\u0644\u0649 \u2014 \u0633\u064a\u0628\u0642\u0649 \u0645\u062d\u0641\u0648\u0638\u064b\u0627 \u0647\u0646\u0627.",
@@ -333,9 +337,6 @@ const translations: Record<LanguageCode, Translations> = {
     carbs: "كربوهيدرات",
     sugar: "سكر",
     price: "السعر",
-    loadingLabel: "يتم تجهيز طبقك",
-    itemNotFound: "العنصر غير موجود",
-    itemNotFoundDesc: "العنصر الذي تبحث عنه غير موجود.",
     tabRate: "قيّم",
     tabReviews: "التقييمات",
     review: "تقييم",
@@ -350,9 +351,9 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "غير متوفر",
   },
   hi: {
-    noDishesYet: "\u092e\u0947\u0928\u0942 \u092e\u0947\u0902 \u0905\u092d\u0940 \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902",
+    noDishesYet: "\u092e\u0947\u0928\u0942 \u092e\u0947\u0902 \u0905\u092d\u0940 \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902।",
     noDishesYetSub: "\u0907\u0938 \u0930\u0947\u0938\u094d\u091f\u0949\u0930\u0947\u0902\u091f \u0928\u0947 \u0905\u092d\u0940 \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902 \u091c\u094b\u0921\u093c\u093e \u0939\u0948\u0964 \u0915\u0943\u092a\u092f\u093e \u091c\u0932\u094d\u0926 \u0939\u0940 \u0926\u094b\u092c\u093e\u0930\u093e \u0926\u0947\u0916\u0947\u0902\u0964",
-    noFavourites: "\u0905\u092d\u0940 \u0915\u094b\u0908 \u092a\u0938\u0902\u0926\u0940\u0926\u093e \u0928\u0939\u0940\u0902",
+    noFavourites: "\u0905\u092d\u0940 \u0915\u094b\u0908 \u092a\u0938\u0902\u0926\u0940\u0926\u093e \u0928\u0939\u0940\u0902।",
     favTapToSave: "\u0938\u0939\u0947\u091c\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u091f\u0948\u092a \u0915\u0930\u0947\u0902",
     noRatingsYet: "\u0905\u092d\u0940 \u0915\u094b\u0908 \u0930\u0947\u091f\u093f\u0902\u0917 \u0928\u0939\u0940\u0902",
     noFavouritesSub: "\u0915\u094b\u0908 \u092d\u0940 \u0935\u094d\u092f\u0902\u091c\u0928 \u0916\u094b\u0932\u0947\u0902, \u092b\u093f\u0930 \u090a\u092a\u0930 \u0926\u093e\u0908\u0902 \u0913\u0930 {heart} \u092a\u0930 \u091f\u0948\u092a \u0915\u0930\u0947\u0902 \u2014 \u092f\u0939 \u092f\u0939\u093e\u0901 \u0938\u0939\u0947\u091c\u093e \u0930\u0939\u0947\u0917\u093e\u0964",
@@ -392,9 +393,6 @@ const translations: Record<LanguageCode, Translations> = {
     carbs: "कार्ब्स",
     sugar: "शुगर",
     price: "कीमत",
-    loadingLabel: "आपका व्यंजन तैयार हो रहा है",
-    itemNotFound: "आइटम नहीं मिला",
-    itemNotFoundDesc: "आप जिस आइटम की तलाश में हैं वह मौजूद नहीं है।",
     tabRate: "रेट करें",
     tabReviews: "समीक्षाएं",
     review: "समीक्षा",
@@ -409,9 +407,9 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "उपलब्ध नहीं",
   },
   ko: {
-    noDishesYet: "\uc544\uc9c1 \uba54\ub274\uc5d0 \uc694\ub9ac\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
+    noDishesYet: "\uc544\uc9c1 \uba54\ub274\uc5d0 \uc694\ub9ac\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.",
     noDishesYetSub: "\uc774 \uc2dd\ub2f9\uc740 \uc544\uc9c1 \uc694\ub9ac\ub97c \ub4f1\ub85d\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uacf1 \ub2e4\uc2dc \ud655\uc778\ud574 \uc8fc\uc138\uc694.",
-    noFavourites: "\uc990\uaca8\ucc3e\uae30\uac00 \uc544\uc9c1 \uc5c6\uc2b5\ub2c8\ub2e4",
+    noFavourites: "\uc990\uaca8\ucc3e\uae30\uac00 \uc544\uc9c1 \uc5c6\uc2b5\ub2c8\ub2e4.",
     favTapToSave: "\ub20c\ub7ec\uc11c \uc800\uc7a5",
     noRatingsYet: "\uc544\uc9c1 \ud3c9\uac00 \uc5c6\uc74c",
     noFavouritesSub: "\uc694\ub9ac\ub97c \uc5f4\uace0 \uc624\ub978\ucabd \uc704\uc758 {heart}\ub97c \ub204\ub974\uc138\uc694 \u2014 \uc5ec\uae30\uc5d0 \uc800\uc7a5\ub429\ub2c8\ub2e4.",
@@ -451,9 +449,6 @@ const translations: Record<LanguageCode, Translations> = {
     carbs: "탄수화물",
     sugar: "당",
     price: "가격",
-    loadingLabel: "요리를 준비 중입니다",
-    itemNotFound: "항목을 찾을 수 없음",
-    itemNotFoundDesc: "찾으시는 항목이 존재하지 않습니다.",
     tabRate: "평가하기",
     tabReviews: "리뷰",
     review: "리뷰",
