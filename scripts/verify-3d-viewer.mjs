@@ -362,6 +362,23 @@ check(
   );
 }
 
+// ── BACK and AR are big enough for a thumb (owner's item 8, 2026-09-02) ──────────────────────
+// The height is declared in THREE places, and the last two carry `!important`, so moving one alone
+// changes nothing on screen. verify:slow-load measures the RENDERED box; this is the fast half that
+// catches the three drifting apart.
+{
+  const css = read("app/globals.css");
+  const heights = (css.match(/\.viewer-wrapper \.tbtn\{\s*\n\s*height:(\d+)px/) || [])[1];
+  const overrides = (css.match(/  height:44px !important;/g) || []).length;
+  check(
+    "the 3D screen's BACK and AR buttons are declared at 44px in all three places",
+    heights === "44" && overrides === 2,
+    "app/globals.css: .viewer-wrapper .tbtn is " + heights + "px and " + overrides + " of the two " +
+      "`height:44px !important` overrides (.back-btn, .ar-btn) are in place. All three must agree, " +
+      "or the two controls on the flagship screen go back under the 44px a thumb needs."
+  );
+}
+
 // ── a dead dish link names no platform brand in the tab either (owner's item 7, 2026-09-02) ──
 // The screen has been white-label since 2026-08-04; its <head> was not. Next discards a route's
 // generateMetadata when the page calls notFound(), so BOTH doors fell back to the root layout's

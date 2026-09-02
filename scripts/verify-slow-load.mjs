@@ -232,6 +232,38 @@ try {
     }
   }
 
+  // ── the two controls a thumb has to hit are big enough to hit (owner's item 8, 2026-09-02) ──
+  //
+  // BACK and AR are the only two controls on this screen and both measured 83x40 and 111x40 on a
+  // Samsung A35 — 4px under the 44px a thumb needs. Their height lives in THREE places in
+  // app/globals.css (.tbtn, and an `!important` on each of .back-btn and .ar-btn), so moving one
+  // and not the others changes nothing on screen; this measures the RENDERED box, which is the only
+  // thing that can tell you that.
+  log("\n=== Phase C3: BACK and AR are big enough for a thumb ===");
+  {
+    const chrome = await viewPage.evaluate(() => {
+      const m = (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return { w: Math.round(r.width), h: Math.round(r.height), right: Math.round(r.right),
+          reachable: !!(hit && (hit === el || el.contains(hit))) };
+      };
+      return { back: m(".back-btn"), ar: m(".ar-btn"), winW: window.innerWidth };
+    });
+    log("  chrome:", JSON.stringify(chrome));
+    const MIN = 44;
+    for (const [name, b] of [["BACK", chrome.back], ["AR", chrome.ar]]) {
+      if (!b) { fail(`The ${name} button is missing from the 3D screen.`); continue; }
+      if (b.h < MIN) fail(`The ${name} button is ${b.w}x${b.h} — ${MIN - b.h}px under the ${MIN}px a thumb ` +
+        "needs. Its height is set in THREE places in app/globals.css (.tbtn and an !important on each " +
+        "of .back-btn and .ar-btn); all three have to agree or nothing moves.");
+      if (!b.reachable) fail(`The ${name} button does not own the point at its own centre — something is on top of it.`);
+      if (b.right > chrome.winW) fail(`The ${name} button runs ${b.right - chrome.winW}px off the right edge.`);
+    }
+  }
+
   // ── the ticket, from a page the guest has moved on to ───────────────────────────────────────
   log("\n=== Phase D: leaving before the model lands still earns a ticket, named correctly ===");
   await ctx.close(); ctx = null;

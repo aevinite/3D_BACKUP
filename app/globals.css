@@ -1883,9 +1883,18 @@ body.menu-frost .nav {
   background:linear-gradient(to bottom,rgba(0,0,0,0.5),transparent);
 }
 .viewer-wrapper .top-btns{display:flex;gap:8px;}
+/* 44px, NOT 34, AND THE TWO OVERRIDES BELOW MATCH IT (owner's item 8, 2026-09-02).
+   BACK and AR are the only two controls on the 3D screen, the one screen this product is sold on,
+   and both measured 83x40 and 111x40 on a Samsung A35 — 4px under the 44px a thumb needs. Both
+   sweeps #6 and #7 measured the same 40 and each decided not to raise it; he asked for it directly.
+   The height lives in THREE places (here, .back-btn and .ar-btn, the last two `!important`), so
+   changing one alone does nothing — that is why all three move together. The radius moves with it:
+   a pill's radius is half its height, and 17px on a 44px control stops looking like a pill.
+   Re-measured after: 83x44 and 111x44, the top bar 64px -> 68px, and nothing else on the screen
+   shifted. */
 .viewer-wrapper .tbtn{
-  height:34px;background:rgba(0,0,0,0.55);backdrop-filter:blur(10px);
-  border-radius:17px;border:1px solid rgba(255,255,255,0.12);cursor:pointer;
+  height:44px;background:rgba(0,0,0,0.55);backdrop-filter:blur(10px);
+  border-radius:22px;border:1px solid rgba(255,255,255,0.12);cursor:pointer;
   color:#fff;font-size:12px;font-weight:600;
   display:flex;align-items:center;gap:5px;padding:0 12px;
   white-space:nowrap;transition:background 0.2s, transform 0.2s;
@@ -1901,7 +1910,7 @@ body.menu-frost .nav {
   text-transform:uppercase;
   font-size:11px !important;
   padding:0 14px !important;
-  height:40px !important;
+  height:44px !important;
   position:relative;
   overflow:hidden;
   text-shadow:0 0 8px rgba(212,165,116,0.8);
@@ -1937,7 +1946,7 @@ body.menu-frost .nav {
   text-transform:uppercase;
   font-size:11px !important;
   padding:0 16px !important;
-  height:40px !important;
+  height:44px !important;
   position:relative;
   overflow:hidden;
   animation:arBtnPulse 2s ease-in-out infinite;
