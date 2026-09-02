@@ -13,6 +13,73 @@ import { splitBrandSegments, splitGraphemes } from "@/lib/brandText";
 const LOGO = "/lfh-logo.png";
 const WORDMARK = "little French house";
 
+
+// A RESTAURANT'S OWN NAME IS NEVER CUT — not on the first screen it ever shows a diner
+// (owner, 2026-09-02: *"caan do 5th one and can size of name a bit small"*).
+//
+// `.intro-word` in app/globals.css is `display: flex` with no `flex-wrap` and no width limit, so
+// the wordmark was ONE unbreakable row that simply ran off the screen. Measured on this build at
+// 320 / 360 / 390px: past roughly 31 letters (about 24 in capitals) it overflows BOTH edges —
+// "Aangan Garden Restaurant" measured 385px of name inside a 360px screen, running from x = −13
+// to 373, so the first and last letters were off-screen on the opening animation.
+//
+// Two changes, and they only work together:
+//
+//   1. THE BOX MAY WRAP, AND ONLY BETWEEN WORDS. `flex-wrap: wrap` alone would have been the
+//      WRONG fix and is the exact trap this repo already recorded once: every letter is its own
+//      `display:inline-block` box, so a wrapping flex row may break between any two LETTERS —
+//      "Ganztags Café & Bäcke / rei". So each WORD becomes one flex item and the letters live
+//      inside it; a break can then only land where a person would put one.
+//   2. THE NAME IS A LITTLE SMALLER. `clamp(17px, 5vw, 22px)` instead of
+//      `clamp(20px, 6vw, 26px)` — about 17% down at phone width, which is what he asked for and
+//      also buys roughly six more letters before wrapping is needed at all.
+//
+// Both are inline on purpose: `.intro-word` lives in app/globals.css, which is another sweep
+// terminal's file this week. Inline wins over the stylesheet, so nothing there had to change.
+const WORD_BOX: React.CSSProperties = {
+  flexWrap: "wrap",
+  justifyContent: "center",
+  // 92vw, not 100%: the splash is a centred column, and a name touching the glass edge-to-edge
+  // reads as broken even when every letter is technically on screen.
+  maxWidth: "92vw",
+  rowGap: 2,
+  fontSize: "clamp(17px, 5vw, 22px)",
+};
+// `white-space: nowrap` is what makes the word atomic; the letters inside keep the `inline-block`
+// and `white-space: pre` that `.intro-word span` already gives them.
+const WORD_SEG: React.CSSProperties = { display: "inline-block", whiteSpace: "nowrap" };
+
+/**
+ * The wordmark as a list of WORDS, each a list of letters carrying its own highlight flag.
+ *
+ * The `*asterisk*` highlight segments and the WORDS are two different groupings that can cross
+ * each other ("Aangan *Garden Bistro*" is one highlight and two words), so the string is flattened
+ * to (letter, highlighted) pairs first and only then cut at the spaces. The space travels with the
+ * word BEFORE it and stays a non-breaking space, exactly as it always has — the break opportunity
+ * now comes from the flex box, not from the character.
+ */
+function wordGroups(word: string): { c: string; hi: boolean; key: string }[][] {
+  const chars = splitBrandSegments(word).flatMap((seg, si) =>
+    splitGraphemes(seg.text).map((c, ci) => ({
+      c: c === " " ? "\u00a0" : c,
+      hi: !!seg.hi,
+      key: `${si}-${ci}`,
+      isSpace: c === " ",
+    })),
+  );
+  const out: { c: string; hi: boolean; key: string }[][] = [];
+  let cur: { c: string; hi: boolean; key: string }[] = [];
+  for (const ch of chars) {
+    cur.push({ c: ch.c, hi: ch.hi, key: ch.key });
+    if (ch.isSpace) { out.push(cur); cur = []; }
+  }
+  if (cur.length) out.push(cur);
+  // A name that is one long unbroken word cannot be split anywhere — it shrinks by the font size
+  // above and no further. That is the honest limit of this fix, and it is the right one: breaking
+  // a single word mid-letter is the fault, not the cure.
+  return out;
+}
+
 // The opening "splash" screen shown once when the app first loads: the logo
 // fades in, the wordmark assembles, then the whole curtain slides up to reveal
 // the menu. After it finishes it removes itself from the page.
@@ -132,12 +199,17 @@ export default function IntroSplash({ wordmark, accentColor, logoUrl, scopeKey }
           have its own wordmark broken apart; see lib/brandText.ts).
           *asterisk*-marked parts use the restaurant's accent colour; the rest
           stays the default wordmark colour. #1 passes no markers → unchanged. */}
-      <div className="intro-word">
-        {splitBrandSegments(word).flatMap((seg, si) =>
-          splitGraphemes(seg.text).map((c, ci) => (
-            <span key={`${si}-${ci}`} style={seg.hi && accentColor ? { color: accentColor } : undefined}>{c === " " ? " " : c}</span>
-          ))
-        )}
+      <div className="intro-word" style={WORD_BOX}>
+        {wordGroups(word).map((group, gi) => (
+          // ONE FLEX ITEM PER WORD, so a line can only ever break BETWEEN words. The letters keep
+          // their own spans inside it, so GSAP's ".intro-word span" target is unchanged and the
+          // per-letter stagger still plays exactly as it did.
+          <div key={gi} className="intro-word-seg" style={WORD_SEG}>
+            {group.map((ch) => (
+              <span key={ch.key} style={ch.hi && accentColor ? { color: accentColor } : undefined}>{ch.c}</span>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );
