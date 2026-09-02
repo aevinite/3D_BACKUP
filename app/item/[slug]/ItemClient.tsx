@@ -8,7 +8,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";              // fast page-to-page navigation
 import { useRouter } from "next/navigation"; // lets us send the user to another page in code
 import StarRating from "@/components/StarRating";   // the tappable star picker
-import InfinityLoader from "@/components/InfinityLoader"; // the loading spinner
 import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
 import { getMenuItems, getMenuItem, CARD_COLUMNS, getItemReviews, submitReview as submitReviewRpc, getSettings } from "@/lib/menu"; // dishes + reviews + the review-saving RPC + per-restaurant settings (Google link)
 import { getDeviceId } from "@/lib/device";          // stable per-browser id (one rating per dish per device)
@@ -60,33 +59,31 @@ const BTN_ROW_ABOVE_NAV_STRIPS = { position: "relative" as const, zIndex: 50 };
 // no height to spare) — this is the width half of the same idea.
 const PINNED_BAR_MAX_WIDTH = 1024;
 
-// HOW LONG THIS SCREEN WILL WAIT FOR ITS DISH (sweep #7 T2, 2026-08-22 — item 6).
+// ── OBITUARY: THE SPINNER, THE "COULDN'T LOAD THIS DISH" CARD, "DISH NOT FOUND", AND TRY AGAIN ──
+// Removed 2026-09-02 (owner's item 12), because they could no longer render.
 //
-// 8 seconds, the same patience the floor's own reads use. Long enough for a genuinely slow first
-// load on restaurant wi-fi; short enough that a diner with no signal is not left staring at a
-// spinner. See the note on `readTimedOut`: past this the screen says so, honestly, with a way out
-// — and if the reply lands later it still wins.
-const DISH_READ_DEADLINE_MS = 8000;
+// Sweep #7's item 6 (2026-08-22) built a deadline and an honest card so this screen could never spin
+// forever with nothing on it. Owner's item 9 (2026-09-01) then made the SERVER hand the dish down —
+// and did the same job better and always. Both stayed in the file for a day, which is exactly what
+// "a new way replaces the old one" forbids.
+//
+// WHY THEY WERE UNREACHABLE, not merely unlikely. Both dish routes pass `initialItem={dish}` and
+// both call `notFound()` when there is no dish, so `initialItem` is ALWAYS a real dish. `item`
+// therefore starts non-null, and `setItem(dish || initialItem)` can never make it null again. So
+// `loading` was always false, `!item` was always false, and the Try again button inside that card
+// could never be tapped — which also meant `retryNonce` could never leave 0.
+//
+// DRIVEN BEFORE DELETING, four ways: with the light-list read held open, with every menu_items read
+// held open, with every Supabase read held open, and with every read refused outright — 13 seconds
+// each. In all four the guest sees the dish, its name, its price and a working Add button, from the
+// server's copy. No spinner, no card, no Try again, in any of them.
+//
+// WHAT IS ACTUALLY LOST when a read stalls: the "You might like" row and the prev/next arrows, which
+// simply are not there. That was true before this deletion too — the card never covered them.
+//
+// `initialItem` is now REQUIRED and non-null, so the thing the runtime relied on is a compile error
+// if a future caller forgets it, rather than dead code standing in for a guarantee.
 
-// THE TWO "SOMETHING WENT WRONG" CARDS HAVE TO BE CENTRED BY INLINE STYLE (sweep #7 T2 — item 7).
-//
-// Both cards carry `flex flex-col items-center justify-center min-h-screen p-4`, and NONE of it
-// applies. Measured on the running page: `#detail-page` computes to `padding: 70px 0 0`,
-// `align-items: normal`, `justify-content: normal`, and the heading's left edge is at x=0 — hard
-// against the side of a 360px phone, with the Try again button running edge to edge.
-//
-// The cause is the cascade, not the markup. `#detail-page` is an ID selector in app/globals.css
-// and it sets `padding-top` and `flex-direction` as plain author rules; Tailwind 4 puts its
-// utilities in a layer that those rules outrank. So the utility classes are inert here and have
-// been since the "Dish not found" card was written — this was found by building a sibling of it.
-//
-// An inline style outranks any stylesheet rule short of `!important`, so this cannot lose. Kept as
-// one shared object precisely so the two cards can never drift apart. `paddingTop` is left to the
-// stylesheet's 70px, which is the room the fixed header needs.
-const ERROR_CARD_LAYOUT: React.CSSProperties = {
-  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-  textAlign: "center", gap: 12, minHeight: "60vh", paddingLeft: 24, paddingRight: 24,
-};
 
 // This describes the "shape" of one dish — every field a dish object can have.
 // It's a TypeScript guide so the editor can catch typos; it doesn't run.
@@ -133,7 +130,7 @@ interface FoodItem {
 
 // The dish detail component. It receives `slug` (which dish to show) and
 // `fromCat` (which category the guest came from, for prev/next arrows).
-export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug, initialItem, initialFeatures }: { slug: string; fromCat?: string; restaurantId?: string; restaurantSlug?: string; initialItem?: FoodItem | null; initialFeatures?: Record<string, boolean> | null }) {
+export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug, initialItem, initialFeatures }: { slug: string; fromCat?: string; restaurantId?: string; restaurantSlug?: string; initialItem: FoodItem; initialFeatures?: Record<string, boolean> | null }) {
   const t = useTranslation();  // translated text for the current language
   // Seeded from the switches the SERVER already read, so the first paint — and, on a reload with no
   // signal, the ONLY paint — obeys the real ones. Without this the server built the page with
@@ -157,35 +154,13 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // `initialItem` is only ever the SERVER's answer for THIS slug, so starting state from it cannot
   // mismatch what the server rendered. The client still re-reads below — that is what keeps a price
   // change or a sold-out flag honest on a page left open — it simply no longer starts from nothing.
-  const [item, setItem] = useState<FoodItem | null>(initialItem ?? null);
-  // …and therefore nothing is "loading" when the server already answered. This is the line that
-  // removes the spinner: it was unconditionally true.
-  const [loading, setLoading] = useState(!initialItem);
-  // THE DISH READ DID NOT COME BACK (sweep #7 T2, 2026-08-22 — item 6).
-  //
-  // Measured with the network switched off after the page had been visited once: this screen sat
-  // on "PLATING YOUR DISH" at 2 s, 5 s, 10 s, 20 s and 35 s — a spinner with no dish, no honest
-  // word and no way out. The guest MENU beside it renders fine offline, which is what makes the
-  // difference so stark to a diner: the list works, the dish is a dead screen.
-  //
-  // The reason it hangs is not this file's to fix. The menu's data comes through
-  // `/api/r/<restaurant>/menu-data`, which `public/sw.js` → DATA_PATHS serves from the device;
-  // this page's reads go STRAIGHT to Supabase, and every DATA_PATHS pattern is an `/api/…` one, so
-  // the service worker never sees them and the request simply never settles. That is a handoff
-  // (`public/sw.js` and `lib/menu.ts` belong to other territories) — recorded in the findings.
-  //
-  // What IS this file's to fix: a screen must never spin forever. Every read here gets a deadline,
-  // and when it passes the guest gets an honest card with a way out and a Try again. If the real
-  // reply lands afterwards it still wins, so the page heals itself the moment the signal returns.
-  const [readTimedOut, setReadTimedOut] = useState(false);
-  // Bumped by Try again, and a dependency of the fetch, so retrying really re-reads.
-  const [retryNonce, setRetryNonce] = useState(0);
+  const [item, setItem] = useState<FoodItem>(initialItem);
   const [favorited, setFavorited] = useState(false);         // is this dish hearted?
   const [showFavHint, setShowFavHint] = useState(false); // one-time "tap to save" coachmark
   const [descExpanded, setDescExpanded] = useState(false);   // is the description expanded?
   // When the server handed the dish down there is no fetch to wait for, so the photo must not sit
   // invisible waiting for a fade-in that the fetch used to trigger.
-  const [imageLoaded, setImageLoaded] = useState(!!initialItem);
+  const [imageLoaded, setImageLoaded] = useState(true);
   const [selectedRating, setSelectedRating] = useState(0);   // stars chosen in the review form
   // Starts EMPTY and is filled in by the effect below, never by reading storage during render —
   // this page is server-rendered and a value read at render time would not match the first
@@ -409,16 +384,6 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     // "You might like" cards + prev/next nav need). Before, this pulled the WHOLE menu
     // with every heavy column (long_description, nutrition, ingredients, reviews…) on
     // every single dish open — the "SELECT * on a hot path" the egress rules warn about.
-    // THE DEADLINE. See the note on `readTimedOut`. 8 s is the same patience the floor's own reads
-    // use — long enough for a slow first load on restaurant wi-fi, short enough that a diner is not
-    // left staring. `landed` is a plain local, not state: it must be readable from the timer's
-    // closure without waiting for a render.
-    let landed = false;
-    const deadline = setTimeout(() => {
-      if (cancelled || landed) return;
-      setReadTimedOut(true);
-      setLoading(false);   // stop the spinner and show the honest card instead
-    }, DISH_READ_DEADLINE_MS);
     Promise.all([
       // THE DISH IS ONLY RE-READ WHEN WE DID NOT ALREADY GET IT (owner's item 9).
       //
@@ -427,42 +392,32 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       // product, and it bought nothing: this page has no poll and no realtime refresh, so the
       // value it replaced the server's with was identical.
       //
-      // `retryNonce > 0` is the exception that matters: Try again, and item 8's territory, MUST
-      // reach the database. Without this test the button would "succeed" instantly by handing back
-      // the same stale object and the diner would be no better off.
-      initialItem && retryNonce === 0
-        ? Promise.resolve(initialItem)
-        : getMenuItem(slug, restaurantId).catch(() => null),    // this dish, full detail
+      // The server already read this exact row milliseconds ago and handed it down, so asking
+      // again is a duplicate read on the hottest guest page in the product. The client still
+      // re-reads the LIGHT LIST below, which is what keeps the related row and the arrows honest.
+      Promise.resolve(initialItem),
       getMenuItems(restaurantId, CARD_COLUMNS).catch(() => []), // the rest, light (related/nav)
     ])
       .then(([dish, items]) => {
         if (cancelled) return; // a newer slug's fetch superseded this one
-        // A reply that arrives AFTER the deadline still wins — the screen heals itself rather than
-        // making the guest tap Try again for something that has already arrived.
-        landed = true;
-        clearTimeout(deadline);
-        setReadTimedOut(false);
         setAllItems(items);                 // light list for related/nav
         // KEEP THE SERVER'S DISH IF THE CLIENT RE-READ COMES BACK EMPTY. The re-read is a refresh,
         // not the source of truth for whether the dish exists — the server already answered that,
         // and answered it with a 404 when it did not. A transient empty reply must not blank a
         // page the server rendered perfectly well.
-        setItem(dish || initialItem || null);
+        setItem(dish || initialItem);
         // (Reviews load in their own effect below — see why there.)
-        setLoading(false);                  // done loading
         setTimeout(() => { if (!cancelled) setImageLoaded(true); }, 50); // trigger the photo fade-in
         // (The heart reads the saved list in its OWN effect below — see why there.)
       })
       .catch((err) => {
         if (cancelled) return;
-        // If the fetch failed, log it and stop the spinner.
-        landed = true;
-        clearTimeout(deadline);
+        // A failed re-read leaves the SERVER's copy on screen, which is the right answer: the dish,
+        // its price and the Add button are all still correct. What is missing is the related row and
+        // the prev/next arrows, and there is nothing honest to say about that beyond not showing them.
         console.error(err);
-        setReadTimedOut(true);   // an outright failure is as honest a "couldn't reach it" as a stall
-        setLoading(false);
       });
-    return () => { cancelled = true; clearTimeout(deadline); };
+    return () => { cancelled = true; };
     // `restaurantId` belongs in here as well as `slug` (sweep #7 T2, 2026-08-22 — item 3).
     //
     // Both reads above are SCOPED BY IT — getMenuItem(slug, restaurantId) and
@@ -477,7 +432,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     // another's, and a shared link opens a fresh document — which is why it has never been seen.
     // It is still the wrong dependency list, and `restaurantId` is a stable string prop, so adding
     // it costs no extra fetch on any journey that exists.
-  }, [slug, restaurantId, retryNonce]);
+  }, [slug, restaurantId]);
 
   // Real reviews, in their OWN effect keyed on the switch.
   //
@@ -837,57 +792,6 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // re-ran Math.random() on every keystroke/toggle, reshuffling the row each time.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const relatedItems = useMemo(() => getRelatedItems(), [item, allItems]);
-
-  // While the dish is still loading, show only the spinner.
-  if (loading) {
-    return (
-      <div id="detail-page" className="page active item-detail-page flex items-center justify-center min-h-screen">
-        <InfinityLoader label={t.loadingLabel} />
-      </div>
-    );
-  }
-
-  // THE READ NEVER CAME BACK — say so, rather than calling a dish that exists "not found".
-  // Different words from the branch below on purpose: "Dish not found" would be a lie when the
-  // truth is that this phone cannot reach the menu, and it would send a diner looking for a dish
-  // that is on the table's paper menu in front of them. Deliberately English, like the 3D screen's
-  // own unavailable card beside it (R23 — the guest translation set is parked).
-  if (!item && readTimedOut) {
-    return (
-      <div id="detail-page" className="page active item-detail-page" style={ERROR_CARD_LAYOUT}>
-        <div style={{ fontSize: 40 }} aria-hidden="true">📶</div>
-        <h2 className="text-xl font-bold text-[var(--text)]">We couldn&apos;t load this dish</h2>
-        <p className="text-[var(--muted)]" style={{ maxWidth: 320 }}>
-          Your phone can&apos;t reach the menu right now. Check your connection, or ask a member of staff.
-        </p>
-        <button
-          className="btn btn-gold"
-          style={{ marginTop: 4 }}
-          onClick={() => { setReadTimedOut(false); setLoading(true); setRetryNonce((v) => v + 1); }}
-        >
-          <i className="fas fa-rotate-right" aria-hidden="true"></i> Try again
-        </button>
-        <Link href={`${itemBase}/menu`} className="text-[var(--accent)] font-semibold hover:underline">
-          ← {t.backToMenu}
-        </Link>
-      </div>
-    );
-  }
-
-  // If loading finished but no matching dish was found, show a friendly
-  // "not found" message with a link back to the menu.
-  if (!item) {
-    return (
-      <div id="detail-page" className="page active item-detail-page" style={ERROR_CARD_LAYOUT}>
-        <div style={{ fontSize: 40 }} aria-hidden="true">⚠️</div>
-        <h2 className="text-xl font-bold text-[var(--text)]">{t.itemNotFound}</h2>
-        <p className="text-[var(--muted)]" style={{ maxWidth: 320 }}>{t.itemNotFoundDesc}</p>
-        <Link href={`${itemBase}/menu`} className="text-[var(--accent)] font-semibold hover:underline">
-          ← {t.backToMenu}
-        </Link>
-      </div>
-    );
-  }
 
   // The shown rating uses the SAME authoritative aggregate the menu card uses
   // (item.rating / item.reviewCount from item_ratings), so the two never disagree.
