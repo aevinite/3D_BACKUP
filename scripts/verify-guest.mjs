@@ -226,6 +226,38 @@ check(261, "no guest component hand-rolls history outside the two managers", () 
   return { ok: bad.length === 0,
            note: bad.length ? bad.join(",") : `clean — ${files.length} files, no pushState, no popstate; the one replaceState is the table-number wipe the owner asked for` };
 });
+// ── THE BROWSE STATE IS FILED UNDER THE RESTAURANT (owner's I11 rule) ────────────────────────
+// "the first person who was new, what he will see — it's the restaurant dependent; after the first
+// person has came, then it will be person dependent" (owner, 2026-08-12), remembered per phone AND
+// per restaurant. MenuView does that with sk(), which suffixes every browse key with the slug.
+//
+// NOTHING WAS WATCHING IT. Proven by sabotage on 2026-09-02 (T1 round 3): replacing sk() with
+// `(base) => base` — so every key becomes unscoped — turned NO guard in this repo red. One diner's
+// layout, sort, search, diet and folded categories would then follow them from one restaurant to
+// the next on the same phone, and the next restaurant could never show a first-timer what it had
+// configured. That is the exact bug the scoping was introduced to fix (audit fix 2026-07-06).
+check("I11", "the guest's browse state is filed under the restaurant, not shared across them", () => {
+  const mv = F.menuView;
+  const scoped = /const sk = \(base: string\) => `\$\{base\}:\$\{restaurantSlug \|\| DEFAULT_RESTAURANT_SLUG\}`/.test(mv);
+  // …and every browse key really goes through it, so a new one cannot be added unscoped
+  const keys = [...mv.matchAll(/(?:local|session)Storage\.(?:get|set)Item\(\s*(sk\()?"(lfh_menu[a-z_]*)"/g)]
+    .map((m) => ({ key: m[2], scoped: !!m[1] }));
+  const unscoped = keys.filter((k) => !k.scoped).map((k) => k.key);
+  // the ONE deliberate exception: the legacy global lfh_menu_layout, read last in the ?? chain so a
+  // returning guest is not visibly reset once. It is a READ; a write would be the fault.
+  const stray = unscoped.filter((k) => k !== "lfh_menu_layout");
+  const writes = [...mv.matchAll(/(?:local|session)Storage\.setItem\(\s*"(lfh_menu[a-z_]*)"/g)].map((m) => m[1]);
+  return { ok: scoped && stray.length === 0 && writes.length === 0,
+           note: !scoped ? "sk() no longer names the restaurant" :
+                 `${keys.length} browse keys, ${writes.length} unscoped writes, stray unscoped reads: ${stray.join(",") || "none"}` };
+});
+check("I11", "…and the layout is the only key allowed an unscoped fallback, because it is a returning guest's", () => {
+  const mv = F.menuView;
+  const chain = (mv.match(/const sl = [\s\S]{0,320}?;/) || [""])[0];
+  const order = [...chain.matchAll(/(localStorage|sessionStorage)\.getItem\((sk\()?"?lfh_menu_layout/g)].map((m) => (m[2] ? "scoped" : "global"));
+  return { ok: order.length === 4 && order[0] === "scoped" && order[1] === "scoped" && order[2] === "global",
+           note: order.join(" → ") || "the fallback chain is gone" };
+});
 check("72-77", "every per-restaurant guest key goes through tenant-scoped storage", () => {
   const want = { "components/FoodCard.tsx": ["lfh_cart"], "components/MiniCart.tsx": ["lfh_cart"],
     "components/Header.tsx": ["lfh_cart"], "lib/orderStatus.ts": ["lfh_active_orders"],
