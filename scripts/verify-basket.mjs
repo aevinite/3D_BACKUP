@@ -58,6 +58,15 @@ const P = (name, ok, extra) => {
   else { fails.push(name); console.log(`  ❌ ${name}${extra ? ` — ${extra}` : ""}`); }
 };
 
+// The body of one function, so a check can never be satisfied by a matching line somewhere else.
+const between = (src, from, to) => {
+  const a = src.indexOf(from);
+  if (a < 0) return "";
+  const rest = src.slice(a);
+  const b = to ? rest.indexOf(to) : -1;
+  return b > 0 ? rest.slice(0, b) : rest;
+};
+
 const tracker = read("components/OrderTracker.tsx");
 const outbox = read("lib/guestOutbox.ts");
 const menu = read("lib/menu.ts");
@@ -250,6 +259,61 @@ console.log("\n7 · the table field's own words fit the box they are in");
   }
   P("…and the field keeps its own accessible label, which is not length-bound", /aria-label="Table number"/.test(cart));
   P("…and it is still capped at four characters", /maxLength=\{4\}/.test(cart));
+}
+
+// ── 8. THE FOUR THINGS THE OWNER PICKED OFF THIS REPORT (items 10, 12, 13, 14) ───────────────────
+console.log("\n8 · a button that waits on someone else, a queue that never drops work, and a diner who is told");
+{
+  // ITEM 12 — with dining sessions on, Place Order hands the job to the join-a-table gate and waits
+  // to be TOLD the outcome. Every check says that gate reports exactly once; nothing bounded the
+  // wait if it ever did not, and the button would then sit disabled reading "Placing…" for as long
+  // as the page stayed open. Watched happening with the gate's outcome event swallowed: disabled at
+  // 2.5s, released with a message at 60s, basket kept.
+  const place = between(cart, "const placeOrder = async ()", "// If the panel isn't open");
+  P("Place Order arms a way back before it hands over to the table gate", /const GATE_FAILSAFE_MS = 60_000;/.test(place) && /failsafe = setTimeout\(/.test(place));
+  P("…the gate answering CANCELS it, so the ordinary case is unchanged", /if \(failsafe\) \{ clearTimeout\(failsafe\); failsafe = null; \}/.test(place));
+  P("…the failsafe firing releases the button", /failsafe = null;[\s\S]{0,300}placingRef\.current = false;[\s\S]{0,60}setPlacing\(false\);/.test(place));
+  P("…and removes the listener, so a late answer cannot fire into a dead handler", /failsafe = setTimeout\(\(\) => \{[\s\S]{0,200}removeEventListener\("lfh:session-done", onDone\)/.test(place));
+  P("…and SAYS something, rather than just going quiet", /message: "We didn't hear back about that order"/.test(place));
+  P("…pointing at the screen that can answer it, not at ordering again", /subtitle: "check Live status before ordering again"/.test(place) && /event: "lfh:show-previous-orders"/.test(place));
+  P("…and it leaves the basket alone, because we do not know whether the order landed", !/failsafe = setTimeout\(\(\) => \{[\s\S]{0,700}saveCart\(\[\]\)/.test(place));
+  P("…and 60s is long enough not to cut in front of a merely slow gate", /GATE_FAILSAFE_MS = 60_000/.test(place));
+
+  // ITEM 13 — the restore used to ASSIGN over whatever was in memory, so an order saved in the same
+  // instant the read came back could be dropped from the list that decides what gets SENT. Not
+  // reproducible by hand in a browser (the queue is awake long before anyone taps Place Order), so
+  // this is asserted on the shape: merge by id, memory wins, still sorted oldest-first.
+  const restore = between(outbox, "function restoreQueue", "// ── React hook");
+  P("the restore MERGES the saved queue with what is already in memory", /const byId = new Map<string, GuestOrder>\(\);/.test(restore));
+  P("…and never assigns over it", !/queued = all\.filter/.test(restore) && !/failed = all\.filter/.test(restore));
+  P("…storage first, then memory, so the newer copy wins its own attempt counters", /for \(const x of all\.filter\(\(x\) => x\.status !== "failed"\)\) byId\.set/.test(restore) && /for \(const x of queued\) byId\.set\(x\.id, x\);/.test(restore));
+  P("…and the failed list is merged the same way", /const failedById = new Map<string, GuestOrder>\(\);/.test(restore));
+  P("…and the queue still drains oldest-first", /\.sort\(\(a, b\) => a\.at - b\.at\)/.test(restore));
+  P("…and it still gets a timer and a flush after restoring", /ensureRetry\(\);[\s\S]{0,120}void flushGuestOutbox\(\);/.test(restore));
+
+  // ITEM 10 — the other half of sweep #7's item 21. The ANSWER a failed lookup gives is unchanged
+  // (that is the protection the owner called "very imp"); what is added is the person and the retry.
+  // Watched with the lookup made to fail: told once, retried, and the page came alive on the third
+  // attempt with no reload. Made to fail every time: 5 attempts, then it STOPS, with 2 toasts total.
+  const ctx = read("lib/restaurant-context.tsx");
+  P("a failed tenant lookup still answers 'we do not know'", /setId\(""\);/.test(ctx) && /setReady\(false\);/.test(ctx));
+  P("…and still never guesses restaurant #1 on a failure", !/catch\(\(\) => \{[\s\S]{0,300}setId\(DEFAULT_RESTAURANT_ID\)/.test(ctx));
+  P("…the diner is now told", /say\("We couldn't load this restaurant"/.test(ctx));
+  P("…ONCE, not once per attempt", /if \(!toldOnce\) \{/.test(ctx));
+  P("…and it tries again by itself", /timer = setTimeout\(\(\) => \{ timer = null; if \(alive\) tryResolve\(\); \}, jittered\);/.test(ctx));
+  P("…on a widening wait", /const RETRY_WAITS_MS = \[2_000, 5_000, 12_000, 25_000\];/.test(ctx));
+  P("…jittered, so a room full of phones does not come back on one beat", /0\.75 \+ Math\.random\(\) \* 0\.5/.test(ctx));
+  P("…BOUNDED, so a dead restaurant is never hammered", /if \(wait === undefined\) \{/.test(ctx));
+  P("…ending with an action a person can take", /say\("Still can't load this restaurant", "please reload the page, or ask a member of staff", 6000\)/.test(ctx));
+  P("…and it does not promise a tap it cannot honour", !/tap to try again/.test(ctx));
+  P("…the timer is cleared when the door changes or the widget goes", /return \(\) => \{ alive = false; if \(timer\) \{ clearTimeout\(timer\); timer = null; \} \};/.test(ctx));
+  P("…and the waits live outside the component, so the effect's dep list stays honest", /^const RETRY_WAITS_MS/m.test(ctx));
+
+  // ITEM 14 — one guard drove a browser with no app-up preflight, so the shared after-edit hook was
+  // red for every session in this repo on unmodified main.
+  const t24 = read("scripts/verify-t24b-live.mjs");
+  P("the live money guard does the app-up preflight like its siblings", /import \{ requireUp \} from "\.\/sweep\/appUp\.mjs";/.test(t24) && /await requireUp\(BASE,/.test(t24));
+  P("…before it launches a browser", t24.indexOf("await requireUp(BASE,") < t24.indexOf("await chromium.launch()"));
 }
 
 console.log(`\n${fails.length ? "✗" : "✓"} verify:basket — ${pass} passed, ${fails.length} failed`);
