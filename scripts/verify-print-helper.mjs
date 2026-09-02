@@ -872,8 +872,12 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
   // 3 · "we could not ask" had no card, so it fell through to "sign in" — for somebody already
   // signed in, about a problem that has nothing to do with signing in. Measured headless before
   // the fix: the card read "Sign in on this computer first".
+  // ASSERT THE CARD, NOT THE SENTENCE. Found by SABOTAGE (T4 round 3): "Could not reach the site"
+  // appears TWICE in this file — once as the card's heading and once in the POST failure handler's
+  // setErr — so deleting the card's own heading left this check matching the OTHER copy and the
+  // guard stayed green over the removed card. Anchor on the branch that RENDERS it instead.
   check(/const \[unreachable, setUnreachable\] = useState\(false\);/.test(pairPage)
-    && /Could not reach the site/.test(pairPage),
+    && /if \(unreachable\) return \([\s\S]{0,400}<h1>Could not reach the site<\/h1>/.test(pairPage),
     "the Allow page has its own card for 'this computer is not getting an answer'",
     "app/pair/page.tsx lost the unreachable card — a network fault reads as 'sign in' again");
   check(/if \(!r\.ok\) \{ setUnreachable\(true\); return; \}/.test(pairPage),
