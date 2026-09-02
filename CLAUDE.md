@@ -99,8 +99,10 @@ claims a decision the doc doesn't record, or if this pointer goes missing).
   no hint shown to the owner.
 - **Keep `.claude/REQUESTS.md` current** — every owner request; tick only when built AND verified.
 - **Verify across ALL panels + realtime** (owner/admin/manager/kitchen/tablet), desktop AND ~390px.
-- **shadcn/ui CLI is BLOCKED on Tailwind 4 — do not reopen**; hand-build to existing patterns
-  (the shadcn MCP is fine as reference).
+- **shadcn/ui CLI is BLOCKED on Tailwind 4 — do not reopen**; hand-build to existing patterns.
+  **The shadcn MCP was REMOVED 2026-09-02** (`.mcp.json` deleted): across every transcript on
+  this machine it was invoked **zero** times, while spawning two processes in every session.
+  `chrome-devtools` stays — it has 420 real calls. Don't re-add shadcn as "reference".
 - **Verify where the owner looks: `localhost:4000`, with cache-busting** (`app.js` caches in the
   iframe). ONE codebase: main. Never a worktree dev server on 4000.
 - **Reference app** `~/Documents/LIVE_PROJECTS/3D_Menu_Av` is also the gold-standard
