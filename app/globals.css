@@ -1576,14 +1576,24 @@ body.menu-frost .nav {
   position: fixed; inset: 0; z-index: 7000;
   display: flex; align-items: center; justify-content: center; padding: 22px;
   background: rgba(15,8,5,0.6); backdrop-filter: blur(6px);
-  animation: favHintIn .2s ease;
+  /* ── ITS OWN FADE, NOT THE FAVOURITES HINT'S (T4 sweep #8, item 17, owner 2026-09-02) ───────────
+     This said `animation: favHintIn .2s ease`, borrowing the keyframes the favourites hint uses.
+     Two problems, both small and both real: changing that hint would silently change this backdrop,
+     and favHintIn starts at `translateY(-8px)` — which on a full-screen fixed overlay lifts the dim
+     layer and leaves an 8px unblurred strip along the bottom for the first 200ms. A backdrop should
+     fade, and nothing else. */
+  animation: sgVeilIn .2s ease;
 }
+@keyframes sgVeilIn { from { opacity: 0; } to { opacity: 1; } }
 .sg-box {
   position: relative; width: min(380px, 100%); text-align: center; padding: 30px 26px 24px;
   background: var(--card); color: var(--text); border: var(--border); border-radius: 22px;
   box-shadow: 0 30px 70px rgba(0,0,0,0.5); animation: sgPop .26s cubic-bezier(0.22,1,0.36,1);
 }
 @keyframes sgPop { from { opacity: 0; transform: scale(0.94) translateY(8px); } to { opacity: 1; transform: none; } }
+/* The "it is looking" line under the camera (item 16). Quiet on purpose: it is reassurance, not an
+   instruction, and it sits between a moving picture and the way out. */
+.sg-scan-hint { margin: 10px 0 0; opacity: .72; }
 .sg-x { position: absolute; top: 12px; right: 14px; background: transparent; border: none; color: var(--muted); font-size: 15px; cursor: pointer; }
 /* Premium icon badge — a gold-tinted ring around a FontAwesome glyph, replacing
    the old emoji so the gate matches the restaurant's brand. */
@@ -1604,6 +1614,15 @@ body.menu-frost .nav {
 .sg-sub { font-size: 14px; color: var(--muted); line-height: 1.5; margin: 0 0 18px; }
 .sg-input { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; border: var(--border); background: rgba(128,90,60,0.08); color: var(--text); font-size: 15px; font-family: inherit; }
 .sg-input:focus { outline: none; border-color: var(--accent); }
+/* ── NO SPINNER ARROWS ON THE TABLE BOX (T4 sweep #8, item 15, owner 2026-09-02) ──────────────────
+   The table box is type="number" so a phone shows the numeric keypad. The browser throws in tiny
+   up/down arrows with that, and on a phone they are a control nobody wants: they do nothing useful,
+   they sit on top of the value, and a stray tap moves a diner to the wrong table by one. The keypad
+   is the way in; these are not. (-moz-appearance is NOT hand-added — one unprefixed line, per the
+   "blur" rule in CLAUDE.md's gotchas; `appearance` is what modern browsers read.) */
+.sg-input[type="number"] { appearance: textfield; }
+.sg-input[type="number"]::-webkit-outer-spin-button,
+.sg-input[type="number"]::-webkit-inner-spin-button { appearance: none; margin: 0; }
 /* wrapper that lets the little ✕ float inside the join-flow table box */
 .sg-input-wrap { position: relative; }
 .sg-input-wrap .sg-input { padding-right: 42px; }

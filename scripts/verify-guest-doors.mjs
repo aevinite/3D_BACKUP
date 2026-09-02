@@ -661,6 +661,29 @@ flush();
   check("the OPEN request still requires a freshly typed name, which is the rule's own screen",
     /if \(!name\.trim\(\)\) \{ setNote\("Add your name so staff know who's asking\."\); return; \}/.test(gate));
 }
+
+// ── THREE SMALL THINGS THE OWNER PICKED (T4 s8, items 15, 16 and 17 — owner, 2026-09-02) ──────────
+{
+  const css = read("app/globals.css");
+  say("\n12) The three small ones he picked off the list");
+  check("the table box no longer shows browser spinner arrows a diner can tap",
+    /\.sg-input\[type="number"\] \{ appearance: textfield; \}/.test(css)
+    && /::-webkit-inner-spin-button \{ appearance: none/.test(css));
+  check("…with ONE unprefixed appearance line, per the rule a hand-added -webkit- makes the build drop it",
+    !/-moz-appearance/.test(css.slice(css.indexOf(".sg-input[type=\"number\"]"), css.indexOf(".sg-input[type=\"number\"]") + 400)));
+  check("the scan screen says it is looking, instead of showing a picture that could be frozen",
+    /Looking for your table&apos;s code… hold steady\./.test(gate) && /\.sg-scan-hint \{/.test(css));
+  check("…and it is a line, not a second spinner competing with the badge",
+    !/sg-scan-hint[^}]*animation/.test(css));
+  check("the gate's backdrop has its OWN fade, not the favourites hint's keyframes",
+    /animation: sgVeilIn \.2s ease;/.test(css) && /@keyframes sgVeilIn \{ from \{ opacity: 0; \} to \{ opacity: 1; \} \}/.test(css));
+  // Comments stripped first: the rule's own note NAMES favHintIn to record what it replaced, and a
+  // raw-text test would read that note as the fault. (Third time this repo has recorded that shape.)
+  check("…so nothing else can change it, and the dim layer no longer slides 8px on open",
+    !/\.sg-overlay[^}]*favHintIn/.test(css.replace(/\/\*[\s\S]*?\*\//g, "")));
+  check("the add-to-cart gate's own note no longer claims a 3-second poll either",
+    !/polls the live session every 3s/.test(read("lib/tableConnection.ts")));
+}
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);

@@ -8,7 +8,8 @@
 // the menu behaves like a normal browse-and-order menu (no table needed).
 //
 // How the pieces fit:
-//   • SessionStatusWidget already polls the live session every 3s. It calls
+//   • SessionStatusWidget already follows the live session — on realtime nudges, with a 60-second
+//     backstop, NOT the 3-second poll this line used to claim (T4 sweep #8, item 17). It calls
 //     setTableConnection() each poll, so the answer is cached and readable
 //     SYNCHRONOUSLY here — no per-tap network call, no second poller.
 //   • gateAddToCart() reads that cache. Allowed -> run the add now. Not allowed ->

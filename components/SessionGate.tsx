@@ -1057,6 +1057,13 @@ export default function SessionGate() {
           <p className="sg-sub">Point the camera at the QR sticker on your table — it fills in the number for you.</p>
           {/* muted + playsInline keep phone browsers from blocking or fullscreening the preview */}
           <video ref={videoRef} className="sg-scan-video" muted playsInline />
+          {/* ── SAY THAT IT IS LOOKING (T4 sweep #8, item 16, owner 2026-09-02) ─────────────────────
+              There was nothing on this screen to tell a frozen picture from a working one, so a diner
+              holding their phone at a sticker had no way to know whether to keep holding it. It is the
+              same rule as never dropping a tap in silence: the app is doing something, so it says so.
+              A plain line, not a spinner — the badge above already spins, and two moving things on one
+              small screen read as a fault rather than as progress. */}
+          <p className="sg-sub sg-scan-hint">Looking for your table&apos;s code… hold steady.</p>
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={() => { stopScan(); setStep("ask_table"); }}>Type it instead</button>
           </div>
