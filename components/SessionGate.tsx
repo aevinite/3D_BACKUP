@@ -39,6 +39,12 @@ import { useBackClose } from "@/lib/backStack";
 import { useRestaurantId, useRestaurantMeta } from "@/lib/restaurant-context";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { tget, tset } from "@/lib/tenantStorage";
+// ONE NAME EVERYWHERE (owner, 2026-09-02). A diner is asked their name on four screens in this
+// sheet and again in the review box on a dish page, and none of them used to know about the
+// others — so one person could be three people to the same restaurant in one evening. The name
+// given anywhere now fills in everywhere, and a different one typed here becomes their name
+// everywhere, reviews already left included. See lib/guestName.ts.
+import { getGuestName, setGuestName, GUEST_NAME_EVENT } from "@/lib/guestName";
 
 // Once you're in a session, that table becomes your default everywhere (cart +
 // call-waiter prefill from the scanned-table key, and re-read on lfh:table-scanned).
@@ -172,6 +178,28 @@ export default function SessionGate() {
   // The at-most-once key for the basket being placed, so an online attempt and anything saved
   // for later are ONE action to the server. Cleared on success (next basket = new order).
   const orderKeyRef = useRef<{ sig: string; id: string } | null>(null);
+  // ── A SENT ACTION IS NOT A CANCELLED ONE (T4 sweep #8, item 2) ─────────────────────────────────
+  // While one of the two irreversible server calls is OUTSTANDING — placing the order, or saving
+  // it to the phone — closing the sheet must NOT report the action as cancelled. It used to: the
+  // ✕, the dim background and the phone's back button all call close(), close() called fireDone
+  // with reason "cancelled", and fireDone is once-only — so when the order then landed in the
+  // kitchen, its own { ok:true, orderId } report was swallowed. components/CartPanel.tsx also
+  // deregisters its listener on the FIRST result carrying action:"order", so nothing was left
+  // listening either way. The result on a real phone: the order is cooked, the basket still holds
+  // every dish, and the diner places it a second time under a fresh at-most-once id.
+  //
+  // Not blocking the tap (that would leave the ✕ dead and break the back stack, which pops the
+  // layer whether or not close() honours it). The sheet still closes; we simply stay quiet and let
+  // the send report what really happened — success, refusal or save-for-later — a moment later.
+  // The counter is raised and lowered around the AWAIT only, so every screen decision below it
+  // runs with the sheet closable again.
+  const inFlight = useRef(0);
+  const guarded = async <T,>(fn: () => Promise<T>): Promise<{ v?: T; e?: unknown }> => {
+    inFlight.current++;
+    try { return { v: await fn() }; }
+    catch (e) { return { e }; }
+    finally { inFlight.current--; }
+  };
   const joining = useRef(false); // blocks DOUBLE-TAPS on the join buttons (a second tap while one join is in flight would create a duplicate membership)
   const reqBusy = useRef(false); // blocks DOUBLE-TAPS on "Request a waiter" — a 2nd tap while the first request is in flight would POST twice (sweep C4)
   const videoRef = useRef<HTMLVideoElement | null>(null); // the camera preview on the scan screen
@@ -183,6 +211,17 @@ export default function SessionGate() {
   // typing the name no longer tears down & restarts the flow's effect (which used
   // to silently KILL the open-watch poll → guest stuck on "we've let staff know").
   const nameRef = useRef(name); nameRef.current = name;
+  // ── THE BOXES START FILLED IN (item 14) ──────────────────────────────────────────────────────
+  // Read in an EFFECT, never during render: this component is client-only but the page around it is
+  // server-rendered, and a value taken from storage at render time would not match the first paint.
+  // `setName((cur) => cur || …)` never overwrites something the diner is in the middle of typing —
+  // which matters because this also runs when the name changes in another tab.
+  useEffect(() => {
+    const fill = () => setName((cur) => cur || getGuestName());
+    fill();
+    window.addEventListener(GUEST_NAME_EVENT, fill);
+    return () => window.removeEventListener(GUEST_NAME_EVENT, fill);
+  }, []);
   // doJoinAsGuest is defined far below (it depends on helpers declared after this
   // point). afterLocation needs to trigger a silent re-join, so we reach it through
   // a ref — assigned once doJoinAsGuest exists — to avoid a forward reference.
@@ -245,7 +284,10 @@ export default function SessionGate() {
     // for { action:"connect", ok:false } to DROP the held add when the guest backs
     // out — without this tag the gate couldn't tell its cancel apart and would keep
     // the abandoned item, adding it later on the next successful connect.
-    fireDone({ ok: false, reason: "cancelled", action: pending.current?.action });
+    // …but only when there is genuinely nothing on its way. See `inFlight` above: an order already
+    // handed to the restaurant has not been cancelled just because the sheet was dismissed, and
+    // saying so once is enough to lose its real result forever.
+    if (inFlight.current === 0) fireDone({ ok: false, reason: "cancelled", action: pending.current?.action });
     stopPoll(); stopScan(); setOpen(false); setStep("idle"); setName(""); setNote(""); pending.current = null;
     accessReqRef.current = false; // fresh gate -> waiter-call guard resets (bug #18)
   }, []);
@@ -294,7 +336,11 @@ export default function SessionGate() {
     // Saving it on the phone, whether because there is no signal or because the restaurant's
     // system can't take it this second. Both use the SAME key as the attempt above.
     const saveForLater = async (offline: boolean) => {
-      const q = await enqueueGuestOrder({ mode: "session", token: s.token, restaurantId: rid, items: pl.items, allergies: pl.allergies || [], lines: pl.lines, track: pl.track, actionId });
+      // guarded: once the basket is being written to the phone's queue it WILL be sent, so a close
+      // in that window must not report it cancelled either (item 2).
+      const saved = await guarded(() => enqueueGuestOrder({ mode: "session", token: s.token, restaurantId: rid, items: pl.items, allergies: pl.allergies || [], lines: pl.lines, track: pl.track, actionId }));
+      if (saved.e) throw saved.e;
+      const q = saved.v!;
       orderKeyRef.current = null;
       fireDone({ ok: true, action: "order", queued: true });
       toast(
@@ -309,9 +355,11 @@ export default function SessionGate() {
     if (typeof navigator !== "undefined" && navigator.onLine === false) { await saveForLater(true); return; }
 
     let orderId: string;
-    try {
-      orderId = await placeSessionOrderSafe(s.token, pl.items, pl.allergies || [], rid, actionId);
-    } catch (err) {
+    // guarded: this is the call the whole item is about — while it is outstanding, a dismissed
+    // sheet says nothing and this send keeps the right to report what really happened (item 2).
+    const placed = await guarded(() => placeSessionOrderSafe(s.token, pl.items, pl.allergies || [], rid, actionId));
+    if (placed.e) {
+      const err = placed.e;
       // THE RESTAURANT COULDN'T TAKE IT THIS SECOND (swamped, or the reply never came). Not a
       // refusal, so do exactly what being offline does — this path used to have no such story at
       // all: it sat on "One moment…" with no deadline and then lost the order outright.
@@ -323,7 +371,9 @@ export default function SessionGate() {
       // showed for every reason there is. Reading the code out of the message happens ONCE now,
       // in refusalOf() — both guest order paths were doing their own version of that regex.
       const { reason, dish } = refusalOf(err);
-      if (reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "order" }); setStep("blocked"); return; }
+      // setOpen(true) as well as the step: the sheet may have been dismissed while the send was in
+      // flight (item 2), and a refusal a diner has to read must not be set on a closed sheet.
+      if (reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "order" }); setOpen(true); setStep("blocked"); return; }
       // NAME THE DISH, NEVER ITS ID. `unknown_item` is the one refusal whose token is the dish's
       // id rather than its title — the row was not found, so the server has nothing else to send
       // — and on any restaurant but #1 that id reads "paneer-tikka__a1b2c3d4". The QR path has
@@ -334,6 +384,8 @@ export default function SessionGate() {
       fireDone({ ok: false, reason, action: "order" });
       close();
       return;
+    } else {
+      orderId = placed.v as string;
     }
     // Every completion below MUST carry action:"order" so the cart's onDone listener
     // recognises it and re-enables the "Place Order" button. Omitting it on the
@@ -371,7 +423,11 @@ export default function SessionGate() {
     // and app/api/guest/call-waiter has a full session branch nothing on the client ever called.
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       try {
-        const q = await enqueueGuestCall({ mode: "session", token: s.token, restaurantId: ridRef.current || DEFAULT_RESTAURANT_ID, reason: note });
+        // guarded, for the same reason as the order (item 2): once it is in the phone's queue it
+        // will be sent, so a dismissed sheet must not report it cancelled.
+        const savedCall = await guarded(() => enqueueGuestCall({ mode: "session", token: s.token, restaurantId: ridRef.current || DEFAULT_RESTAURANT_ID, reason: note }));
+        if (savedCall.e) throw savedCall.e;
+        const q = savedCall.v!;
         fireDone({ ok: true, action: "call", queued: true });
         // Only promise the automatic part when it really reached this phone's storage.
         toast(q.persisted ? "Saved — we'll call them the moment you're back online" : "Saved — keep this page open and we'll call them", "service");
@@ -379,9 +435,12 @@ export default function SessionGate() {
       } catch { /* couldn't even save → fall through and let the live attempt say so honestly */ }
     }
     setStep("working"); // show the "One moment…" screen
-    const r = await callWaiterSession(s.token, note);
+    // guarded: a call already on its way to the floor is not cancelled by the sheet closing (item 2).
+    const called = await guarded(() => callWaiterSession(s.token, note));
+    const r = called.v ?? { ok: false, reason: "timed_out" };
     // action:"call" so anything waiting on this action's completion isn't stranded (audit fix).
-    if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "call" }); setStep("blocked"); return; }
+    // setOpen(true) with the step, because the sheet may have been dismissed mid-send.
+    if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "call" }); setOpen(true); setStep("blocked"); return; }
     if (r.ok) { fireDone({ ok: true, action: "call" }); toast("On our way!", "service"); close(); }
     else {
       // BRANCH ON THE CODE, NEVER ON "IT DIDN'T WORK". Every failure used to read "Couldn't reach
@@ -410,6 +469,7 @@ export default function SessionGate() {
     if (!nick) { setNote("Add a name so we know who you are."); return; }
     const s = sess.current;
     setNicknameFor(s?.token, nick); // session-scoped: cleared when this session ends
+    setGuestName(nick, ridRef.current); // …and it is their ONE name from now on (item 14)
     if (s) { try { await setMemberName(s.token, nick); } catch {} }
     window.dispatchEvent(new Event("lfh:session-changed")); // refresh widgets that show the name
     setNote("");
@@ -447,6 +507,7 @@ export default function SessionGate() {
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
       setNicknameFor(s.token, headName); // session-scoped name for the head (asked above)
+      setGuestName(headName, ridRef.current); // …and their ONE name everywhere (item 14)
       setTableName(s.table, r.session_id as string, headName); // reused if this device rejoins the SAME session
       window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller
       await act();
@@ -741,6 +802,7 @@ export default function SessionGate() {
       // They just typed a name to join → reuse it as their nickname so the order
       // step never re-asks. (Joining as head sends no name, so the head still gets asked.)
       setNicknameFor(s.token, nm);                              // session-scoped name
+      setGuestName(nm, ridRef.current);                         // …and their ONE name (item 14)
       setTableName(p.table, r.session_id as string, nm);        // table+session name → survives leave/rejoin
       window.dispatchEvent(new Event("lfh:session-changed"));
       // If the table auto-approves, go straight to acting; else wait for the host.
@@ -799,7 +861,22 @@ export default function SessionGate() {
     // fresh one each time — otherwise the same person can appear repeatedly in the
     // staff's list (audit fix bug #18). "open" requests are unaffected.
     if (type === "access" && accessReqRef.current) { setStep("request_sent"); return; }
-    const r = await requestAccess(p.table, type, name.trim() || null, null, ridRef.current);
+    // ── SEND THE NAME WE ALREADY HAVE (T4 sweep #8, item 7) ──────────────────────────────────────
+    // The owner's NAME-FIRST rule (2026-06-17) exists so the manager's and tablet's pending-requests
+    // view shows WHO is asking rather than a nameless "Someone". This call passed only what was
+    // typed into `name` — which close() and rescan() both clear, and which is empty on the two
+    // screens a returning diner reaches with a session already on their phone (a failed location
+    // check, and the escape hatch on the intro). The device has known their name all along, session-
+    // scoped, from whenever they last gave it. Using it costs nothing and cannot be worse than null.
+    // (What it still cannot help: a brand-new diner on the very first screen, who has never been
+    // asked. That one needs a decision about adding a name step, not a fallback.)
+    // …and the ONE name is the last fallback (item 14, owner 2026-09-02). This is the case sweep #8
+    // could NOT fix with what was on the device: a diner tapping "Not at the restaurant? Call a
+    // waiter" on the very first screen has no session and no session nickname, so the floor saw
+    // "Someone". If they have ever given this restaurant a name — on a review, or at a table on an
+    // earlier visit — it is here, and the pending-requests view names a person again.
+    const who = name.trim() || getNickname(sess.current?.token) || getGuestName() || null;
+    const r = await requestAccess(p.table, type, who, null, ridRef.current);
     // NOBODY WAS TOLD IS NOT "WE'VE LET THE STAFF KNOW" (sweep 6 T3, 2026-08-17).
     //
     // The answer used to be thrown away: whatever the server said, the next line showed the
@@ -844,6 +921,7 @@ export default function SessionGate() {
     // that did. The guest stays on "Your table isn't open yet" with their name still typed, and
     // the Request button still works — so the next tap is one that can actually get them served.
     if (!requestLanded(r, true)) return;
+    setGuestName(name.trim(), ridRef.current); // a name given here is a name given (item 14)
     setNote("");
     setReqAt(Date.now());
     setStep("request_sent");
@@ -881,8 +959,8 @@ export default function SessionGate() {
 
   // Open the camera and read the table's QR sticker. Uses the browser's built-in
   // BarcodeDetector (Chrome / Android phones — no scanning library to download);
-  // phones without it just type the number instead. The sticker holds a menu
-  // link (…?table=N), but a QR with a bare number works too.
+  // phones without it just type the number instead. Today's sticker is `/q/<code>`
+  // (mig 210); the older `…?table=N` links and a QR holding a bare number work too.
   const startScan = async () => {
     type Detector = { detect: (v: HTMLVideoElement) => Promise<{ rawValue?: string }[]> };
     const Ctor = (window as unknown as { BarcodeDetector?: new (o?: { formats?: string[] }) => Detector }).BarcodeDetector;
@@ -910,12 +988,50 @@ export default function SessionGate() {
           const codes = await detector.detect(videoRef.current);
           const raw = codes[0]?.rawValue || "";
           if (!raw) return;
-          // Pull the table number out of the link (?table=N or ?t=N); if the QR
-          // isn't a link, treat the whole text as the number.
+          // ── THIS READER COULD NOT READ A SINGLE STICKER THIS PRODUCT PRINTS (T4, sweep #8) ──────
+          // It only understood `?table=N`, `?t=N`, or a bare number. But every QR this app has
+          // generated since migration 210 is `/q/<code>` — `components/admin/RestaurantSettings.tsx`
+          // builds `${origin}/q/${code}` and nothing builds `?table=N` any more (the same fact
+          // components/MenuView.tsx states in its own comment). So a diner holding their phone at the
+          // sticker on their table got a camera view that sat there, forever, saying nothing.
+          //
+          // The `/q/` door already knows how to turn that code into a table: it pins the tenant and
+          // hands MenuView `qrTable`. So we GO THERE, exactly as the phone's own camera app would.
+          // That is also why we do not add a code→table lookup instead: MenuView's comment records
+          // the reason — a route that answers "which table is this code?" would turn a private code
+          // into something harvestable. Walking through the door the sticker points at exposes
+          // nothing that scanning it with the camera did not already expose.
+          //
+          // SAME ORIGIN ONLY. A QR is a thing a stranger can stick on a table, so a scanned link is
+          // never followed off this site.
           let t = "";
-          try { const u = new URL(raw); t = u.searchParams.get("table") || u.searchParams.get("t") || ""; } catch { t = raw; }
+          let ourCode = "";
+          let foreign = false;
+          try {
+            const u = new URL(raw); // absolute link…
+            if (u.origin === window.location.origin) {
+              t = u.searchParams.get("table") || u.searchParams.get("t") || ""; // the pre-mig-210 stickers
+              const m = /^\/q\/([A-Za-z0-9]{6,16})\/?$/.exec(u.pathname);       // today's stickers
+              if (!t && m) ourCode = m[1].toUpperCase();
+            } else foreign = true;
+          } catch { t = raw; } // …not a link at all, so treat the whole text as the number
           t = (t || "").replace(/\D/g, "");
-          if (t) { stopScan(); setTableInput(t); setStep("ask_table"); }
+          if (t) { stopScan(); setTableInput(t); setStep("ask_table"); return; }
+          // A FULL PAGE LOAD, NOT router.push — and the lint warning here is the price of being
+          // right. app/q/[code]/page.tsx pins this tab's tenant with an inline <script> that runs
+          // as the parser reaches it; React does not execute a script it inserts client-side, so a
+          // soft navigation would land on the menu with no tenant pinned and every guest widget
+          // would answer "restaurant #1" — the exact fault section 1 of verify:guest-doors exists
+          // to catch.
+          if (ourCode) { stopScan(); window.location.href = `/q/${ourCode}`; return; }
+          // AND A SCAN NEVER ENDS IN SILENCE. Reading a QR that is not a table sticker used to leave
+          // the camera running with no explanation, which is the same "nothing happened" a dead
+          // button gives. Say which kind of QR it was and send them to the box that always works.
+          stopScan();
+          setNote(foreign
+            ? "That QR belongs to another site — please type your table number."
+            : "That QR doesn’t say which table it is — please type your table number.");
+          setStep("ask_table");
         } catch {} // a frame that fails to decode is normal — just try the next one
       }, 350);
     } catch {
@@ -967,6 +1083,13 @@ export default function SessionGate() {
           <p className="sg-sub">Point the camera at the QR sticker on your table — it fills in the number for you.</p>
           {/* muted + playsInline keep phone browsers from blocking or fullscreening the preview */}
           <video ref={videoRef} className="sg-scan-video" muted playsInline />
+          {/* ── SAY THAT IT IS LOOKING (T4 sweep #8, item 16, owner 2026-09-02) ─────────────────────
+              There was nothing on this screen to tell a frozen picture from a working one, so a diner
+              holding their phone at a sticker had no way to know whether to keep holding it. It is the
+              same rule as never dropping a tap in silence: the app is doing something, so it says so.
+              A plain line, not a spinner — the badge above already spins, and two moving things on one
+              small screen read as a fault rather than as progress. */}
+          <p className="sg-sub sg-scan-hint">Looking for your table&apos;s code… hold steady.</p>
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={() => { stopScan(); setStep("ask_table"); }}>Type it instead</button>
           </div>
@@ -1050,7 +1173,13 @@ export default function SessionGate() {
         {step === "guest_name" && (<>
           <div className="sg-badge"><i className="fas fa-handshake"></i></div><h3 className="sg-title">This table&apos;s already open</h3>
           <p className="sg-sub">Someone at table {pending.current?.table} started this tab. Add your name so they can confirm it&apos;s you, then ask to join.</p>
-          <input className="sg-input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          {/* THE SAME BOX AS EVERY OTHER NAME BOX IN THIS SHEET (T4 sweep #8, item 8). It was the one
+              without a length cap and the one that ignored the phone keyboard's blue Go key: the
+              other three (open_name, not_open, nickname) both cap at 40 and submit on Enter, so on
+              this screen alone a diner pressed Go and nothing happened, and a pasted paragraph went
+              through to the head's approve list and the manager's floor. */}
+          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
+            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doJoinAsGuest(); }} autoFocus />
           {/* e.g. "couldn't reach the restaurant's system" after a failed join attempt */}
           {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
           <div className="sg-actions">

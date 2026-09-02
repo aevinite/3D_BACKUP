@@ -552,7 +552,202 @@ flush();
   }
 }
 
+// ── THE GATE'S OWN QR READER MUST UNDERSTAND THE STICKER THIS PRODUCT PRINTS (T4 s8, item 1) ──────
+// Measured before the fix, running the reader's own two lines in the browser against each sticker
+// shape: `?table=12` → "12" ✓ · a bare "14" → "14" ✓ · `/q/K7M2P9` → "" ✗. Every QR this app
+// generates has been `/q/<code>` since mig 210 (components/admin/RestaurantSettings.tsx builds
+// `${origin}/q/${code}`, and components/MenuView.tsx's own comment says nothing builds `?table=N`
+// any more) — so "Scan QR" could not read one single sticker in the building, and said nothing while
+// failing. These four checks are the ones that go red if any of that is undone.
+{
+  say("\n7) The gate's QR reader understands the sticker this product actually prints");
+  check("the reader knows today's `/q/<code>` sticker",
+    /\/\^\\\/q\\\/\(\[A-Za-z0-9\]\{6,16\}\)\\\/\?\$\//.test(gate));
+  check("…and walks through that door rather than inventing a table number",
+    /window\.location\.href = `\/q\/\$\{ourCode\}`/.test(gate));
+  check("…and still reads the older `?table=` sticker and a bare-number QR",
+    /searchParams\.get\("table"\) \|\| u\.searchParams\.get\("t"\)/.test(gate) && /catch \{ t = raw; \}/.test(gate));
+  check("a scanned link is never followed off this site",
+    /u\.origin === window\.location\.origin/.test(gate));
+  check("a QR that is not a table sticker SAYS so instead of leaving the camera running",
+    /That QR belongs to another site/.test(gate) && /That QR doesn’t say which table it is/.test(gate));
+  check("…and the admin's QR builder still makes the shape the reader was taught",
+    /\$\{window\.location\.origin\}\/q\/\$\{code\}/.test(read("components/admin/RestaurantSettings.tsx")));
+}
+
 flush();
+
+// ── AN ORDER ALREADY SENT IS NOT A CANCELLED ORDER (T4 s8, item 2) ────────────────────────────────
+// The ✕, the dim background and the phone's back button all call the gate's close(), which reported
+// { ok:false, reason:"cancelled" }. fireDone is once-only and components/CartPanel.tsx deregisters
+// its listener on the first result carrying action:"order" — so an order that then landed in the
+// kitchen could never say so. The basket kept every dish and the diner placed it again.
+{
+  say("\n8) An order already on its way is not reported as cancelled");
+  check("the gate knows when one of its two irreversible sends is outstanding",
+    /const inFlight = useRef\(0\);/.test(gate) && /inFlight\.current\+\+;/.test(gate) && /inFlight\.current--;/.test(gate));
+  check("…and close() stays quiet while one is",
+    /if \(inFlight\.current === 0\) fireDone\(\{ ok: false, reason: "cancelled"/.test(gate));
+  check("placing the order runs through that guard",
+    /guarded\(\(\) => placeSessionOrderSafe\(/.test(gate));
+  check("…and so does saving it to the phone, which is just as final",
+    /guarded\(\(\) => enqueueGuestOrder\(/.test(gate));
+  check("…and calling a waiter, both live and saved",
+    /guarded\(\(\) => callWaiterSession\(/.test(gate) && /guarded\(\(\) => enqueueGuestCall\(/.test(gate));
+  check("a refusal the diner must read re-opens the sheet, which may have been dismissed mid-send",
+    (gate.match(/setOpen\(true\); setStep\("blocked"\)/g) || []).length === 2);
+  check("the basket still deregisters on the first ORDER result, which is why the gate must not spend it",
+    /if \(d\?\.action !== "order"\) return;/.test(cart) && /removeEventListener\("lfh:session-done", onDone\)/.test(cart));
+}
+
+// ── THE TABLE CARD'S OWN WORDS (T4 s8, items 5 and 6) ─────────────────────────────────────────────
+// 5 · `calls` from lfh_session_state is every OPEN request at the table, from any member (mig 318
+//     builds it from waiter_calls by session_id) — the card labelled it "You called for".
+// 6 · every message from this card went out with no variant, so ToastHost fell back to a green tick
+//     and to its shortest life. MEASURED on the rendered page: 1,283 ms for a twelve-word sentence,
+//     and the same tick and length for "You've been removed from this table". After: 3,800 ms, •.
+{
+  say("\n9) The table card's own words say the right thing, for long enough to read");
+  check("the shared list of requests is named as the TABLE's, not this diner's",
+    /This table asked for/.test(widget) && !/You called for/.test(widget));
+  check("the card can ask for a mark and a length, instead of always taking the flash default",
+    /const toast = \(message: string, kicker = "table", variant = "success", duration\?: number\)/.test(widget));
+  check("…and all four of the sentences that matter use it",
+    (widget.match(/"table", (?:"error"|"info"|q\.persisted \? "info" : "error"), NEWS_MS\)/g) || []).length === 4);
+  // Owner, 2026-09-02: "you can keep msg but you can show it like bad news". The three endings and
+  // the not-yet-delivered leave wear the refusal mark; the leave this phone CAN keep does not.
+  check("…and the three endings are shown as bad news, with the refusal mark",
+    (widget.match(/"table", "error", NEWS_MS\)/g) || []).length === 3);
+  check("…and a leave the phone really saved is not dressed up as a failure",
+    /q\.persisted \? "info" : "error", NEWS_MS\)/.test(widget));
+  check("…and the refusal mark is what withholds the thank-you sign-off, which is why it reads right",
+    /t\.variant !== "error"/.test(read("components/ToastHost.tsx")));
+  check("…and NEWS_MS is longer than ToastHost's own default for a refusal",
+    /const NEWS_MS = 3400;/.test(widget) && /variant === "error" \? 2200 : 1100/.test(read("components/ToastHost.tsx")));
+  check("the flash default is still what ToastHost gives an unmarked message, which is why this matters",
+    /variant === "error" \? 2200 : 1100/.test(read("components/ToastHost.tsx")));
+  check("…and `duration` is still a thing ToastHost honours",
+    /typeof d\.duration === "number" && d\.duration > 0/.test(read("components/ToastHost.tsx")));
+  // 12 · a comment that lies about a poll is how a fast poll gets "restored".
+  check("the card's comments no longer claim a 3-second poll it has not done for a long time",
+    !/every 3s/.test(widget) && /RT_BACKUP_MS \(60s\) as the backstop/.test(widget));
+}
+
+// ── EVERY NAME BOX IN THE GATE BEHAVES THE SAME (T4 s8, item 8) ───────────────────────────────────
+// Four screens ask for a name. Three capped it at 40 and submitted on Enter; `guest_name` — the one
+// a diner reaches when somebody else already holds the table — did neither, so the phone keyboard's
+// blue Go key did nothing there and a pasted paragraph reached the head's approve list.
+{
+  say("\n10) Every name box in the gate behaves the same");
+  const boxes = gate.match(/<input className="sg-input"[\s\S]*?\/>/g) || [];
+  const named = boxes.filter((b) => /value=\{name\}/.test(b));
+  check("all four name boxes were found", named.length === 4);
+  check("…every one of them caps the name at 40",
+    named.length === 4 && named.every((b) => /maxLength=\{40\}/.test(b)));
+  check("…and every one of them submits on Enter, so the phone's Go key is never dead",
+    named.length === 4 && named.every((b) => /e\.key === "Enter"/.test(b)));
+}
+
+// ── A REQUEST TO STAFF CARRIES THE NAME WE ALREADY HAVE (T4 s8, item 7) ───────────────────────────
+// NAME-FIRST (owner, 2026-06-17) exists so the pending-requests view names who is asking. The
+// escape-hatch path passed only what was typed, which is empty on the two screens a returning diner
+// reaches with a session already on their phone.
+{
+  say("\n11) A request to staff names who is asking, wherever the name came from");
+  // The chain grew a third link when item 14 landed (the ONE name), so this asserts the LINK this
+  // item added rather than the whole line — section 13 owns the full chain.
+  check("the escape-hatch request falls back to the name this device already gave",
+    /const who = name\.trim\(\) \|\| getNickname\(sess\.current\?\.token\)/.test(gate));
+  check("…and it is that value that is sent, not the raw box",
+    /requestAccess\(p\.table, type, who, null, ridRef\.current\)/.test(gate));
+  check("the OPEN request still requires a freshly typed name, which is the rule's own screen",
+    /if \(!name\.trim\(\)\) \{ setNote\("Add your name so staff know who's asking\."\); return; \}/.test(gate));
+}
+
+// ── THREE SMALL THINGS THE OWNER PICKED (T4 s8, items 15, 16 and 17 — owner, 2026-09-02) ──────────
+{
+  const css = read("app/globals.css");
+  say("\n12) The three small ones he picked off the list");
+  check("the table box no longer shows browser spinner arrows a diner can tap",
+    /\.sg-input\[type="number"\] \{ appearance: textfield; \}/.test(css)
+    && /::-webkit-inner-spin-button \{ appearance: none/.test(css));
+  check("…with ONE unprefixed appearance line, per the rule a hand-added -webkit- makes the build drop it",
+    !/-moz-appearance/.test(css.slice(css.indexOf(".sg-input[type=\"number\"]"), css.indexOf(".sg-input[type=\"number\"]") + 400)));
+  check("the scan screen says it is looking, instead of showing a picture that could be frozen",
+    /Looking for your table&apos;s code… hold steady\./.test(gate) && /\.sg-scan-hint \{/.test(css));
+  check("…and it is a line, not a second spinner competing with the badge",
+    !/sg-scan-hint[^}]*animation/.test(css));
+  check("the gate's backdrop has its OWN fade, not the favourites hint's keyframes",
+    /animation: sgVeilIn \.2s ease;/.test(css) && /@keyframes sgVeilIn \{ from \{ opacity: 0; \} to \{ opacity: 1; \} \}/.test(css));
+  // Comments stripped first: the rule's own note NAMES favHintIn to record what it replaced, and a
+  // raw-text test would read that note as the fault. (Third time this repo has recorded that shape.)
+  check("…so nothing else can change it, and the dim layer no longer slides 8px on open",
+    !/\.sg-overlay[^}]*favHintIn/.test(css.replace(/\/\*[\s\S]*?\*\//g, "")));
+  check("the add-to-cart gate's own note no longer claims a 3-second poll either",
+    !/polls the live session every 3s/.test(read("lib/tableConnection.ts")));
+}
+
+// ── ONE NAME, EVERYWHERE (T4 s8, item 14 — owner, 2026-09-02) ─────────────────────────────────────
+// His words: "if you add name in review it will save as there name … when name ask again in review
+// what will name will be autofill there and there they add diff name the reviews name will be
+// change to again added name … so like everywhere there wil be 1 name". Before this, a diner was
+// asked their name on FIVE screens that knew nothing about each other, so one person could be three
+// people to one restaurant in one evening. DRIVEN end to end before this guard was written: an empty
+// box, then a filled one on the next dish, then a different name renaming both reviews.
+{
+  const gname = read("lib/guestName.ts");
+  const item = read("app/item/[slug]/ItemClient.tsx");
+  const mig = read("supabase/migrations/378_one_name_everywhere_for_a_guest.sql");
+  const menu = read("lib/menu.ts");
+  say("\n13) One name, everywhere a diner is asked for one");
+  check("there is ONE module that owns the diner's name",
+    /export function getGuestName\(\)/.test(gname) && /export function setGuestName\(/.test(gname));
+  check("…and it is tenant-scoped, like every other guest key",
+    /import \{ tget, tset \} from "\.\/tenantStorage";/.test(gname) && /const KEY = "lfh_my_name";/.test(gname));
+  check("…with one definition of what a tidy name is, used on the way in and out",
+    /export const tidyGuestName/.test(gname) && /GUEST_NAME_MAX = 40/.test(gname));
+  check("…and it only announces a name that actually CHANGED",
+    /if \(before === tidy\) return false;/.test(gname));
+  check("the review box fills itself in from that one name",
+    /getGuestName\(\)/.test(item) && /window\.addEventListener\(GUEST_NAME_EVENT, fill\)/.test(item));
+  check("…in an EFFECT, never during render, because that page is server-rendered",
+    item.indexOf("useEffect(() => {\n    const fill = () => setReviewName") > -1);
+  check("…and a name typed there becomes their name everywhere",
+    /const nameChanged = setGuestName\(typedName, restaurantId\);/.test(item));
+  check("…and the box keeps it afterwards rather than emptying, because it is their name now",
+    /setReviewName\(typedName\);/.test(item));
+  check("…and the diner is TOLD when their name changed, so nothing happens behind their back",
+    /saved as your name/.test(item));
+  check("…and that box has the same 40-character ceiling as every other name box",
+    /maxLength=\{GUEST_NAME_MAX\}/.test(item));
+  check("all three places the table sheet learns a name write it back as THE name",
+    (gate.match(/setGuestName\((?:nick|headName|nm), ridRef\.current\)/g) || []).length === 3);
+  check("…and so does the screen that asks a name before a waiter is called",
+    /setGuestName\(name\.trim\(\), ridRef\.current\); \/\/ a name given here is a name given/.test(gate));
+  check("…and the sheet's own boxes start filled in",
+    /const fill = \(\) => setName\(\(cur\) => cur \|\| getGuestName\(\)\);/.test(gate));
+  check("…and the nameless request to staff falls back to it last",
+    /name\.trim\(\) \|\| getNickname\(sess\.current\?\.token\) \|\| getGuestName\(\) \|\| null/.test(gate));
+  check("renaming past reviews is a server function, because the phone cannot reach them",
+    /CREATE OR REPLACE FUNCTION lfh_rename_my_reviews/.test(mig) && /export async function renameMyReviews/.test(menu));
+  check("…scoped to ONE restaurant, so a name given at one cafe never rewrites another's reviews",
+    /AND restaurant_id = p_restaurant_id/.test(mig));
+  check("…and it can only ever touch rows carrying the device id the caller already holds",
+    /WHERE device_id = p_device/.test(mig));
+  check("…changing the name column and nothing else",
+    /SET name = v_name/.test(mig) && !/SET stars|SET comment|SET item_slug/.test(mig));
+  check("…refusing a device id of the wrong shape, exactly as the review write does",
+    /length\(p_device\) < 8 OR length\(p_device\) > 64/.test(mig));
+  check("…writing no row at all when the name has not moved",
+    /AND name IS DISTINCT FROM v_name;/.test(mig));
+  check("…and its grant is written down rather than left to the default",
+    /REVOKE ALL ON FUNCTION lfh_rename_my_reviews\(text, uuid, text\) FROM PUBLIC;/.test(mig)
+    && /GRANT EXECUTE ON FUNCTION lfh_rename_my_reviews\(text, uuid, text\) TO anon, authenticated, service_role;/.test(mig));
+  check("the rename uses the REVIEW device id, not the session one — they are different keys",
+    /import \{ getDeviceId \} from "\.\/device";/.test(gname) && /renameMyReviews\(getDeviceId\(\)/.test(gname));
+  check("…and it never delays or fails what the diner was actually doing",
+    /void renameMyReviews\(/.test(gname));
+}
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);

@@ -11,6 +11,7 @@ import { DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 // device reverts to its own private cart; the table keeps its order). If the head
 // leaves, ownership passes on / the table closes (handled server-side).
 //
+// It follows the table on realtime nudges, with a 60-second backstop poll — not a fixed fast poll.
 // It only shows when dining sessions are ON and this device holds a session. When
 // the session ends (anyone closes it, or the head leaves with no one left), the
 // widget detects it on the next poll, clears the local token + cart, and hides.
@@ -59,8 +60,31 @@ const callIcon = (note: string) => {
   return "🔔";
 };
 // Tiny helper to pop a notification toast.
-const toast = (message: string, kicker = "table", variant = "success") =>
-  window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message, kicker, variant } }));
+// ── THE MESSAGES THAT MATTER MOST WERE THE ONES THAT FLASHED (T4 sweep #8, item 6) ───────────────
+// Every message from this card went out with no variant, so components/ToastHost.tsx fell back to
+// `success` — a green ✓ — and to its shortest life. MEASURED on the rendered page: 1,282 ms for
+// "This table's session ended — scan the QR again to start a new one", a twelve-word sentence, and
+// the identical tick and 1.3 seconds for "You've been removed from this table". 1,100 ms is the
+// deliberate flash for "Espresso added" (owner, 2026-06-16, so a confirmation never feels naggy) —
+// it is the wrong length for a sentence a diner has to read and act on, and a tick is the wrong
+// mark for being removed from a table.
+//
+// ── AND IT IS SHOWN AS BAD NEWS, NOT AS A NEUTRAL FACT (owner, 2026-09-02) ───────────────────────
+// I first gave these the neutral `info` mark, on the grounds that a table ending is nobody's fault.
+// His answer: *"you can keep msg but you can show it like bad news"* — and he is right about the
+// diner's side of it. Losing your table, or being removed from it, or holding a message the
+// restaurant has not been told, is not a neutral fact to the person it happens to; it is the thing
+// that just went wrong for them. `error` gives it the ✕, the red ticket, AND — the part that makes
+// it read correctly — components/ToastHost.tsx withholds the "thank you" sign-off from a refusal,
+// so the card no longer thanks somebody for being thrown off their table.
+//
+// The WORDING is untouched, exactly as he asked. Only the mark and the length changed.
+const toast = (message: string, kicker = "table", variant = "success", duration?: number) =>
+  window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message, kicker, variant, ...(duration ? { duration } : {}) } }));
+// A sentence that ENDS something, or asks the diner to keep a page open, needs long enough to read
+// at a normal pace. ToastHost's own default for a refusal is 2,200 ms; these sentences are longer
+// than the ones that number was chosen for, so they say how long they need.
+const NEWS_MS = 3400;
 
 // SessionStatusWidget — the small floating card (draggable, collapsible) that tells
 // a guest they're connected to a table and lets them leave or switch tables.
@@ -116,9 +140,12 @@ export default function SessionStatusWidget() {
     try { setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1"); } catch {}
   }, []);
 
-  // This runs once on first appear: check if sessions are on, and if so keep
-  // polling the server every 3s so the card always reflects the live table state.
-  // settings gate + live poll of the session state
+  // This runs once on first appear: check if sessions are on, and if so follow the live table state
+  // — driven by realtime nudges (`lfh:rt-tick`), with RT_BACKUP_MS (60s) as the backstop for when
+  // the socket is asleep. It claimed a three-second poll for a long time after that stopped being
+  // true, which is exactly the sort of comment that gets a later session to "restore" that poll and
+  // put 20x the reads back on the owner's bill. (T4 sweep #8, item 12.)
+  // settings gate + live follow of the session state
   useEffect(() => {
     let alive = true; // guards against updating state after the component is gone
     let iv: ReturnType<typeof setInterval> | null = null; // the poll timer
@@ -156,13 +183,13 @@ export default function SessionStatusWidget() {
           if (reason === "session_closed") {
             const tellThem = wasActive.current; // only toast someone who was actually connected
             wasActive.current = false; tokenRef.current = null;
-            if (tellThem) { clearLocal(); toast("This table’s session ended — scan the QR again to start a new one", "table"); }
+            if (tellThem) { clearLocal(); toast("This table’s session ended — scan the QR again to start a new one", "table", "error", NEWS_MS); }
             else clearStoredSession();
             setSt(null);
           } else if (reason === "removed") {
             const tellThem = wasActive.current;
             wasActive.current = false; tokenRef.current = null;
-            if (tellThem) { clearLocal(); toast("You’ve been removed from this table", "table"); }
+            if (tellThem) { clearLocal(); toast("You’ve been removed from this table", "table", "error", NEWS_MS); }
             else clearStoredSession();
             setSt(null);
           } else if (reason === "invalid_token") {
@@ -174,7 +201,7 @@ export default function SessionStatusWidget() {
         // clean up and tell the guest; otherwise just quietly drop the token.
         const sess = state.session as { table_number?: string; status?: string } | undefined;
         if (sess?.status !== "open") {
-          if (wasActive.current) { wasActive.current = false; clearLocal(); toast("This table’s session ended", "table"); }
+          if (wasActive.current) { wasActive.current = false; clearLocal(); toast("This table’s session ended", "table", "error", NEWS_MS); }
           else { clearStoredSession(); }
           setSt(null);
           return;
@@ -323,9 +350,14 @@ export default function SessionStatusWidget() {
     // the person holding the job. Save it and send it the moment there is signal, exactly like an
     // order. If they re-join this very table first, the queue drops it (see leaveIsStale).
     const q = await enqueueGuestLeave({ token, restaurantId, restaurantSlug });
+    // THESE TWO ARE NOT THE SAME NEWS, so they no longer wear the same mark. The first is a promise
+    // this phone can keep on its own — neutral. The second is a job still outstanding: the
+    // restaurant has NOT been told, and it only will be if the diner keeps this page open. That is
+    // bad news for them, and it gets the refusal mark so it does not read as "all done".
     toast(q.persisted
       ? "You've left — we'll tell the restaurant as soon as there's signal"
-      : "You've left on this phone — keep this page open so we can tell the restaurant", "table");
+      : "You've left on this phone — keep this page open so we can tell the restaurant",
+      "table", q.persisted ? "info" : "error", NEWS_MS);
   };
   // This runs when the guest taps "Change table": leave the current one, clean
   // up, then send them back to the menu to pick/scan a different table.
@@ -447,7 +479,13 @@ export default function SessionStatusWidget() {
             know the staff have been told. */}
         {st.calls.length > 0 && (
           <div className="ssw-called">
-            <span className="ssw-called-label">You called for</span>
+            {/* ── WHOSE REQUEST IS IT? THE TABLE'S (T4 sweep #8, item 5) ────────────────────────
+                This list is `calls` out of lfh_session_state, and migration 318 builds it from
+                `waiter_calls WHERE session_id = <this session> AND NOT resolved` — every open
+                request at the table, from ANY member, not this device's own. The label said "You
+                called for", so a diner whose friend asked for water was shown it as something they
+                had done, and could sit there wondering why. The list is right; only the label was. */}
+            <span className="ssw-called-label">This table asked for</span>
             <span className="ssw-called-list">
               {st.calls.map((c, i) => (
                 <span key={i} className="ssw-called-chip">{callIcon(c.note)} {c.note}</span>

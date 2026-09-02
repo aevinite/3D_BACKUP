@@ -862,6 +862,44 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     "lib/printQueue.ts lost the wrote() helper — every write would be silent again");
 }
 
+// ── 8f · THE ALLOW PAGE TELLS THE TRUTH WHEN IT CANNOT ASK (T4 sweep #8, items 3, 4 and 9) ────────
+// A person is standing at a printer, on a machine a program just opened this page on. Three things
+// were wrong there and each is one line of the shape below.
+{
+  const pairPage = read("app/pair/page.tsx");
+  const pairApi = read("app/api/pair/route.ts");
+
+  // 3 · "we could not ask" had no card, so it fell through to "sign in" — for somebody already
+  // signed in, about a problem that has nothing to do with signing in. Measured headless before
+  // the fix: the card read "Sign in on this computer first".
+  check(/const \[unreachable, setUnreachable\] = useState\(false\);/.test(pairPage)
+    && /Could not reach the site/.test(pairPage),
+    "the Allow page has its own card for 'this computer is not getting an answer'",
+    "app/pair/page.tsx lost the unreachable card — a network fault reads as 'sign in' again");
+  check(/if \(!r\.ok\) \{ setUnreachable\(true\); return; \}/.test(pairPage),
+    "…and a 5xx from our own door counts as that, not as 'not signed in'",
+    "the Allow page trusts the body of a non-2xx answer again, so a 503 reads as signed-out");
+  check(pairPage.indexOf("if (unreachable) return") < pairPage.indexOf('if (!st) return <p className="pr-lead">Reading…'),
+    "…and that card is chosen before the 'Reading…' placeholder",
+    "the unreachable card sits after the Reading… fallback, so it can never be reached");
+
+  // 4 · the door had no answer for a database flap: every neighbour catches AuthDbError, this one
+  // let it escape as an unclassified 500.
+  check(/AuthDbError/.test(pairApi) && /reason: "pair_busy"/.test(pairApi) && /status: 503/.test(pairApi),
+    "the Allow door answers 503 with a code when the database will not say who is asking",
+    "app/api/pair lost its AuthDbError branch — a database blip is an unclassified 500 again");
+  check((pairApi.match(/who\.kind === "busy"/g) || []).length === 2,
+    "…on the read AND on the press, since both ask who is there",
+    "only one of GET/POST in app/api/pair handles the busy case");
+
+  // 9 · the page asked its own door once per keystroke, because the two defaults it fills in were
+  // dependencies of the function that fills them.
+  check(/\}, \[code\]\);/.test(pairPage) && /setName\(\(cur\) => cur \|\| /.test(pairPage)
+    && /setRid\(\(cur\) => cur \|\| /.test(pairPage),
+    "…and it asks the door once per open, not once per character typed",
+    "app/pair/page.tsx put `name`/`rid` back in load()'s dependencies — every keystroke asks the door again");
+}
+
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
 check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan),
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",

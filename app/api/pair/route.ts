@@ -13,7 +13,7 @@
 // unknown code and an expired one give the same answer.
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
+import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
 import { managerCan } from "@/lib/managerCan";
 import { pairingByCode, approvePairing } from "@/lib/printPair";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
@@ -26,11 +26,37 @@ const err = (m: string, status = 400) => NextResponse.json({ error: m }, { statu
 type Who =
   | { kind: "admin" }
   | { kind: "staff"; userId: string; name: string; restaurantId: string }
-  | { kind: "none" };
+  | { kind: "none" }
+  | { kind: "busy" };
+
+// ── "THE DATABASE DIDN'T ANSWER" IS NOT "YOU ARE NOT SIGNED IN" (T4 sweep #8, item 4) ─────────────
+// `userFromCookie` THROWS AuthDbError when the staff_users lookup fails after its own retry, and
+// this call was bare — so a database flap escaped as an unclassified 500. Seven other routes catch
+// it; the neighbour this door is modelled on, app/api/rt-config, answers 503 with a CODE and says
+// in its own comment why. Here it mattered more than most: this page is opened BY A PROGRAM on a
+// machine at a printer, and the person standing there was being told their sign-in was the problem.
+// `retryable` is the honest half — this one really does come back on its own.
+const BUSY = () => NextResponse.json(
+  {
+    error: "The system is very busy right now — try again in a moment.",
+    reason: "pair_busy",
+    retryable: true,
+    /** Nothing for the person at the printer to do, and nothing to call Aevidine about. */
+    selfFixable: false,
+  },
+  { status: 503, headers: { "Cache-Control": "no-store" } },
+);
 
 async function whoIsPressing(req: NextRequest): Promise<Who> {
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { kind: "admin" };
-  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  let u;
+  try {
+    u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  } catch (e) {
+    if (!(e instanceof AuthDbError)) throw e;
+    console.error("[pair] couldn't resolve who is pressing Allow:", e.message);
+    return { kind: "busy" };
+  }
   if (!u) return { kind: "none" };
   // The SAME permission the panel's own printing verbs ask for. A manager who may not set printers
   // up may not adopt a machine either — otherwise this page would be a way around that switch.
@@ -48,6 +74,7 @@ export async function GET(req: NextRequest) {
 
   // The two are reported separately on purpose: "sign in" and "that code has expired" are different
   // problems with different fixes, and a person standing at a printer needs to know which they have.
+  if (who.kind === "busy") return BUSY();
   if (who.kind === "none") return NextResponse.json({ signedIn: false });
   if (!row) return NextResponse.json({ signedIn: true, found: false });
   // `who` travels on THIS branch too, and it is load-bearing. The Allow page keeps `who` in state
@@ -74,6 +101,7 @@ export async function GET(req: NextRequest) {
 // POST /api/pair — Allow. This is the act that creates the print_agents row.
 export async function POST(req: NextRequest) {
   const who = await whoIsPressing(req);
+  if (who.kind === "busy") return BUSY();
   if (who.kind === "none") return err("Sign in on this computer first, then press Allow.", 401);
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const code = String(body.code || "");

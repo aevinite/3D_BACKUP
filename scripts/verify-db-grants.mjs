@@ -84,6 +84,15 @@ const ANON_ALLOWED = {
   // revoke would have silently broken every guest cart's pricing. Verified by reading the caller.
   lfh_resolve_tax_mode:       "decides a dish's tax mode; called BY lfh_price_order (INVOKER). DEFINER since mig 300 so its settings read works",
   lfh_phone10:                "phone-number formatter, pure",
+  // ONE NAME EVERYWHERE (mig 378, owner 2026-09-02). A diner gives their name on a dish page's
+  // review box with no login at all, so the half that reaches the reviews they ALREADY left has to
+  // be anon-callable too — lfh_submit_review, right beside it on this list, has always been.
+  // It is narrower than that neighbour, not wider: it can only touch rows whose `device_id` the
+  // caller already holds (the same id lfh_submit_review demands before it will write anything), it
+  // is scoped to one restaurant, and it changes exactly one column — `name`. It cannot reach the
+  // stars, the comment, the dish, the date, or anybody else's row, and it answers with a count of
+  // the caller's OWN rows, so it reveals nothing either.
+  lfh_rename_my_reviews:      "a diner renames the reviews THEIR OWN device left at THIS restaurant, so one person is not signed two ways on one menu (mig 378; no login — it is a dish page)",
   // An old printed QR code is scanned by a DINER with no login, so the lookup that rescues it has
   // to be anon-callable (mig 350). It is about as narrow as a function gets: given one address it
   // returns one slug and nothing else — no name, no id, no settings — and only when NO live
