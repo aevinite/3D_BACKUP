@@ -561,8 +561,15 @@ check("P58919","the brand memo refuses a slug that is not a plain slug",()=>
   has(APP,/if \(slug && !\/\^\[a-z0-9-\]\+\$\/\.test\(slug\)\) return;/));
 check("P58920","a device that refuses storage gets the anonymous card, never a crash",()=>
   has(APP,/localStorage\.setItem\("lfh_brand"[\s\S]{0,80}\} catch \{/));
-check("P58921","the brand NAME is handed in, never read off logoText (which is undefined for #1)",()=>
-  hasNot(APP,/name = \(logoText/) === true && has(APP,/const name = \(brandName \|\| ""\)\.trim\(\);/) === true);
+// EXPECTATION MOVED 2026-09-02, on the owner's own instruction (item 6, "do 6th"). It used to read
+// "the brand NAME is handed in, never read off logoText" — which was right for the fault it was
+// written for (logoText is undefined for restaurant #1, so reading it ALONE stored nothing for the
+// busiest restaurant of the lot) and wrong about what a diner sees: `brandName` is the REGISTERED
+// name, so the last-resort card called the restaurant something the menu never calls it. The
+// wordmark now wins AND `brandName` is still the fallback, so both facts hold at once.
+check("P58921","the offline card takes the wordmark first, with the registered name still as the fallback",()=>
+  has(APP,/stripBrandMarkers\(logoText \|\| ""\)\.trim\(\) \|\| \(brandName \|\| ""\)\.trim\(\)/) === true &&
+  has(APP,/\}, \[brandName, brandSlug, logoText\]\);/) === true);
 
 // D2 · RealtimeProvider — the guest socket
 check("P58922","the guest socket is scoped to this restaurant server-side once the id lands",()=>
