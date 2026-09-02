@@ -13,19 +13,12 @@ export interface Translations {
   categories: string;
   slide: string;
   searchPlaceholder: string;
-  filterAll: string;
   filterVeg: string;
   filterNonVeg: string;
   filterChef: string;      // "Chef's Special" filter chip
   filterFav: string;       // "Favorites" filter chip
   sortTopRated: string;    // "Top Rated" sort chip
   sortLowPrice: string;    // "Low Price" sort chip
-  catAll: string;
-  catBurgers: string;
-  catPizza: string;
-  catSushi: string;
-  catPasta: string;
-  catSalads: string;
   addToCart: string;
   viewIn3D: string;
   preview3dUnavailable: string;
@@ -42,7 +35,6 @@ export interface Translations {
   youMightLike: string;
   previous: string;
   next: string;
-  startingPrice: string;
   cal: string;
   protein: string;
   carbs: string;
@@ -55,8 +47,6 @@ export interface Translations {
   tabReviews: string;
   review: string;
   reviews: string;
-  prepTime: string;
-  newDish: string; // badge for dishes with no real reviews yet
   // The 3D viewer's own chrome. It was the ONE guest screen still hardcoded in
   // English while the menu and dish page around it translated, so a Hindi or
   // Korean diner met a wall of English the moment they opened 3D (guest sweep
@@ -90,6 +80,25 @@ export interface Translations {
   // Deliberately lower case and muted: the owner turned down a "New" BADGE here in June 2026,
   // so this is a quiet line of text, not a decoration. (T1 improvement 4, 2026-08-07.)
   noRatingsYet: string;
+
+  // ── RETIRED 2026-09-02 (sweep 8, T5): ten keys × six languages = 60 translated words that NO
+  // screen rendered. Measured, not assumed — nothing in app/ or components/ read any of them, and
+  // there is no dynamic `t[key]` access anywhere, so none could be reached by name:
+  //     filterAll · catAll · catBurgers · catPizza · catSushi · catPasta · catSalads
+  //       — the menu's categories and filters have been DB-driven for a long time and go through
+  //         localized() in lib/menu.ts. These were the hardcoded demo list they replaced.
+  //     startingPrice — no screen has ever shown a "starting price".
+  //     newDish       — added by the 2026-06-10 plan for a "New" badge on unrated dishes. The owner
+  //                     refused that badge in June 2026; the key was never removed with it.
+  //     prepTime      — the short label ("Prep") for a dish card's prep-time line. The card renders
+  //                     `item.time` on its own, with no label, so the word was never on screen. The
+  //                     T4 sweep translated de.prepTime to "Zub." on 2026-08-17 believing a German
+  //                     diner was reading it; nobody was.
+  // A dead key is not harmless: it is six values a wording sweep re-reads every run, and one of
+  // them cost a previous sweep a fix on a string that renders nowhere. `npm run verify:i18n-scope`
+  // now fails if a key nobody renders is added.
+  // TO PUT THE PREP-TIME LABEL BACK you need `prepTime` in all six languages AND a render site in
+  // components/FoodCard.tsx's `.dish-meta` line — the key alone changes nothing.
   noMatch: string;
   noMatchSub: string;
   noSearchResults: string;   // takes the typed term, e.g. `No dishes found for “{q}”`
@@ -115,19 +124,12 @@ const translations: Record<LanguageCode, Translations> = {
     categories: "CATEGORIES",
     slide: "Swipe",
     searchPlaceholder: "Search dishes…",
-    filterAll: "All",
     filterVeg: "🌿 Veg",
     filterNonVeg: "🍖 Non-Veg",
     filterChef: "⭐ Chef\u2019s special",
     filterFav: "❤️ Favourites",
     sortTopRated: "⭐ Top rated",
     sortLowPrice: "↓ Low price",
-    catAll: "All",
-    catBurgers: "Burgers",
-    catPizza: "Pizza",
-    catSushi: "Sushi",
-    catPasta: "Pasta",
-    catSalads: "Salads",
     addToCart: "Add to order",
     viewIn3D: "View in 3D",
     preview3dUnavailable: "3D preview unavailable",
@@ -144,7 +146,6 @@ const translations: Record<LanguageCode, Translations> = {
     youMightLike: "You might also like",
     previous: "Previous",
     next: "Next",
-    startingPrice: "Starting price",
     cal: "Calories",
     protein: "Protein",
     carbs: "Carbs",
@@ -155,10 +156,8 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "That dish isn\u2019t on the menu any more.",
     tabRate: "Rate dish",
     tabReviews: "Reviews",
-    newDish: "New",
     review: "review",
     reviews: "reviews",
-    prepTime: "Prep",
     loading3d: "Loading 3D model",
     arView: "AR View",
     addToOrder: "Add to order",
@@ -184,19 +183,12 @@ const translations: Record<LanguageCode, Translations> = {
     categories: "KATEGORIEN",
     slide: "Wischen",
     searchPlaceholder: "Gerichte suchen…",
-    filterAll: "Alle",
     filterVeg: "🌿 Vegetarisch",
     filterNonVeg: "🍖 Nicht vegetarisch",
     filterChef: "⭐ Chef-Empfehlung",
     filterFav: "❤️ Favoriten",
     sortTopRated: "⭐ Top bewertet",
     sortLowPrice: "↓ Günstigster Preis",
-    catAll: "Alle",
-    catBurgers: "Burger",
-    catPizza: "Pizza",
-    catSushi: "Sushi",
-    catPasta: "Pasta",
-    catSalads: "Salate",
     addToCart: "Zur Bestellung",
     viewIn3D: "In 3D ansehen",
     preview3dUnavailable: "3D-Vorschau nicht verfügbar",
@@ -213,7 +205,6 @@ const translations: Record<LanguageCode, Translations> = {
     youMightLike: "Das könnte Ihnen gefallen",
     previous: "Vorherige",
     next: "Nächste",
-    startingPrice: "Ab Preis",
     cal: "Kal",
     protein: "Protein",
     carbs: "Kohlenhydrate",
@@ -224,7 +215,6 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "Der gesuchte Artikel existiert nicht.",
     tabRate: "Bewerten",
     tabReviews: "Bewertungen",
-    newDish: "Neu",
     review: "Bewertung",
     reviews: "Bewertungen",
     // Was the English word "Prep" — the only value in any non-English block that had never been
@@ -232,7 +222,6 @@ const translations: Record<LanguageCode, Translations> = {
     // a German diner read an English abbreviation on a card whose every other word was German.
     // "Zub." is the ordinary German shortening of Zubereitung, and it is the same length as the
     // other languages' labels, so no card re-flows.
-    prepTime: "Zub.",
     loading3d: "3D-Modell wird geladen",
     arView: "AR-Ansicht",
     addToOrder: "Zur Bestellung",
@@ -258,19 +247,12 @@ const translations: Record<LanguageCode, Translations> = {
     categories: "CATÉGORIES",
     slide: "Glisser",
     searchPlaceholder: "Rechercher des plats…",
-    filterAll: "Tout",
     filterVeg: "🌿 Végé",
     filterNonVeg: "🍖 Non-Végé",
     filterChef: "⭐ Spécialité du chef",
     filterFav: "❤️ Favoris",
     sortTopRated: "⭐ Les mieux notés",
     sortLowPrice: "↓ Prix bas",
-    catAll: "Tout",
-    catBurgers: "Burgers",
-    catPizza: "Pizza",
-    catSushi: "Sushis",
-    catPasta: "Pâtes",
-    catSalads: "Salades",
     addToCart: "Ajouter à la commande",
     viewIn3D: "Voir en 3D",
     preview3dUnavailable: "Aperçu 3D indisponible",
@@ -287,7 +269,6 @@ const translations: Record<LanguageCode, Translations> = {
     youMightLike: "Vous pourriez aussi aimer",
     previous: "Précédent",
     next: "Suivant",
-    startingPrice: "Prix de départ",
     cal: "Cal",
     protein: "Protéines",
     carbs: "Glucides",
@@ -298,10 +279,8 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "L\u2019article que vous cherchez n\u2019existe pas.",
     tabRate: "Évaluer",
     tabReviews: "Avis",
-    newDish: "Nouveau",
     review: "avis",
     reviews: "avis",
-    prepTime: "Prép",
     loading3d: "Chargement du modèle 3D",
     arView: "Vue RA",
     addToOrder: "Ajouter à la commande",
@@ -327,19 +306,12 @@ const translations: Record<LanguageCode, Translations> = {
     categories: "الفئات",
     slide: "اسحب",
     searchPlaceholder: "ابحث عن الأطباق…",
-    filterAll: "الكل",
     filterVeg: "🌿 نباتي",
     filterNonVeg: "🍖 غير نباتي",
     filterChef: "⭐ اختيار الشيف",
     filterFav: "❤️ المفضلة",
     sortTopRated: "⭐ الأعلى تقييماً",
     sortLowPrice: "↓ السعر الأقل",
-    catAll: "الكل",
-    catBurgers: "برجر",
-    catPizza: "بيتزا",
-    catSushi: "سوشي",
-    catPasta: "باستا",
-    catSalads: "سلطات",
     addToCart: "أضف إلى الطلب",
     viewIn3D: "عرض ثلاثي الأبعاد",
     preview3dUnavailable: "المعاينة 3D غير متاحة",
@@ -356,7 +328,6 @@ const translations: Record<LanguageCode, Translations> = {
     youMightLike: "قد يعجبك أيضاً",
     previous: "السابق",
     next: "التالي",
-    startingPrice: "السعر الابتدائي",
     cal: "سعرة",
     protein: "بروتين",
     carbs: "كربوهيدرات",
@@ -367,10 +338,8 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "العنصر الذي تبحث عنه غير موجود.",
     tabRate: "قيّم",
     tabReviews: "التقييمات",
-    newDish: "جديد",
     review: "تقييم",
     reviews: "تقييمات",
-    prepTime: "وقت",
     loading3d: "جارٍ تحميل المجسم ثلاثي الأبعاد",
     arView: "عرض الواقع المعزز",
     addToOrder: "أضف إلى الطلب",
@@ -396,19 +365,12 @@ const translations: Record<LanguageCode, Translations> = {
     categories: "श्रेणियां",
     slide: "स्लाइड करें",
     searchPlaceholder: "व्यंजन खोजें…",
-    filterAll: "सभी",
     filterVeg: "🌿 शाकाहारी",
     filterNonVeg: "🍖 मांसाहारी",
     filterChef: "⭐ शेफ स्पेशल",
     filterFav: "❤️ पसंदीदा",
     sortTopRated: "⭐ टॉप रेटेड",
     sortLowPrice: "↓ कम कीमत",
-    catAll: "सभी",
-    catBurgers: "बर्गर",
-    catPizza: "पिज्जा",
-    catSushi: "सुशी",
-    catPasta: "पास्ता",
-    catSalads: "सलाद",
     addToCart: "ऑर्डर में जोड़ें",
     viewIn3D: "3D में देखें",
     preview3dUnavailable: "3D पूर्वावलोकन उपलब्ध नहीं",
@@ -425,7 +387,6 @@ const translations: Record<LanguageCode, Translations> = {
     youMightLike: "आपको यह भी पसंद आ सकता है",
     previous: "पिछला",
     next: "अगला",
-    startingPrice: "शुरुआती कीमत",
     cal: "कैलोरी",
     protein: "प्रोटीन",
     carbs: "कार्ब्स",
@@ -436,10 +397,8 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "आप जिस आइटम की तलाश में हैं वह मौजूद नहीं है।",
     tabRate: "रेट करें",
     tabReviews: "समीक्षाएं",
-    newDish: "नया",
     review: "समीक्षा",
     reviews: "समीक्षाएं",
-    prepTime: "समय",
     loading3d: "3D मॉडल लोड हो रहा है",
     arView: "AR व्यू",
     addToOrder: "ऑर्डर में जोड़ें",
@@ -465,19 +424,12 @@ const translations: Record<LanguageCode, Translations> = {
     categories: "카테고리",
     slide: "스와이프",
     searchPlaceholder: "요리 검색…",
-    filterAll: "전체",
     filterVeg: "🌿 채식",
     filterNonVeg: "🍖 비채식",
     filterChef: "⭐ 셰프 추천",
     filterFav: "❤️ 즐겨찾기",
     sortTopRated: "⭐ 최고 평점",
     sortLowPrice: "↓ 낮은 가격",
-    catAll: "전체",
-    catBurgers: "버거",
-    catPizza: "피자",
-    catSushi: "스시",
-    catPasta: "파스타",
-    catSalads: "샐러드",
     addToCart: "주문에 추가",
     viewIn3D: "3D로 보기",
     preview3dUnavailable: "3D 미리보기 불가",
@@ -494,7 +446,6 @@ const translations: Record<LanguageCode, Translations> = {
     youMightLike: "이런 것도 좋아하실 수 있어요",
     previous: "이전",
     next: "다음",
-    startingPrice: "시작 가격",
     cal: "칼로리",
     protein: "단백질",
     carbs: "탄수화물",
@@ -505,10 +456,8 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "찾으시는 항목이 존재하지 않습니다.",
     tabRate: "평가하기",
     tabReviews: "리뷰",
-    newDish: "신메뉴",
     review: "리뷰",
     reviews: "리뷰",
-    prepTime: "시간",
     loading3d: "3D 모델 불러오는 중",
     arView: "AR 보기",
     addToOrder: "주문에 추가",

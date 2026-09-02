@@ -122,6 +122,19 @@ const apiFamily = (p) => { const m = p.match(/^\/api\/([^/?]+)/); return m ? m[1
 // page — and worse, that failed navigation stopped the next one being handled too, taking
 // our offline page down with it. This is the single most likely offline moment for staff:
 // tab wakes, reloads, no signal. (Found on the live client site.)
+// TWO OF THESE SIX MATCH NOTHING TODAY, AND THAT IS DELIBERATE — but it has to be written down,
+// because this file's own rule (see the two obituaries in DATA_PATHS below) is that "a dead pattern
+// is worse than a missing one: it reads as cover that is not there". Checked against app/api/ on
+// 2026-09-02 (sweep 8, T5):
+//   LIVE   /api/staff-login · /api/panel-login · /api/health   → routes on disk
+//   LIVE   /api/owner/login                                     → the owner sign-in
+//   MATCHES NOTHING TODAY  /api/auth  ·  /api/verify            → no such route, and nothing calls
+//     one. They stay as cover for two doors this product already has a switch for and has not
+//     built: the `verification` feature flag (mig 035, backend-only) is what /api/verify would
+//     serve. Keeping the pattern costs one regex test per request and means the route cannot ship
+//     accidentally cacheable. Deleting them would be equally defensible — what is NOT defensible is
+//     leaving a reader to assume they cover something they do not.
+//   `npm run verify:sw-version` / this terminal's P59429 fail if a dead pattern loses this note.
 const NEVER = [
   /^\/api\/(staff-)?login/, /^\/api\/auth/, /^\/api\/owner\/login/,
   /^\/api\/panel-login/, /^\/api\/verify/, /^\/api\/health/,

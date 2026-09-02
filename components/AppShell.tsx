@@ -11,6 +11,8 @@ import { getSettings } from "@/lib/menu";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
 import { sanitizeBrandTheme, buildModeBlock, buildCanvasBlock } from "@/lib/brandTheme";
+// The wordmark can carry *asterisk* highlight markers; the offline card is plain text.
+import { stripBrandMarkers } from "@/lib/brandText";
 import { accentPaletteCss, accentBackground, accentCanvasCss } from "@/lib/accent";
 
 // The accent palette now lives in lib/accent.ts so the 3D viewer (a separate
@@ -155,8 +157,24 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
   // and the name was then refused as belonging to a different restaurant. Measured on a production
   // build. The two sides must apply ONE rule, so this applies exactly the rule that page applies.
   // `brandSlug` is kept only as the fallback for a caller with no path to read.
+  // THE CARD CALLS THE RESTAURANT WHAT THE MENU CALLS IT (owner, 2026-09-02: item 6, "do 6th").
+  //
+  // `brandName` is handed in as `restaurantName || logoText` — the REGISTERED name — while every
+  // other guest surface shows `logoText`, the wordmark the restaurant chose. So the one screen a
+  // diner sees when something has already gone wrong was also the one calling the place something
+  // else: measured on Aangan, the menu header read "Aangan Garden" and the last-resort card read
+  // "AANGAN GARDEN RESTAURANT" a second later.
+  //
+  // The wordmark wins, with `brandName` kept as the fallback — that fallback is load-bearing, not
+  // tidiness: restaurant #1 is passed `logoText={undefined}` on purpose (MenuView keeps the
+  // flagship's hardcoded branding), so reading the wordmark alone would store nothing at all for
+  // the busiest restaurant of the lot. That is the exact fault this effect's own history records.
+  //
+  // The markers are stripped for the same reason the header strips them: a wordmark may be written
+  // "Aangan *Garden*" to colour one half, and this card is plain text with nowhere to put a colour,
+  // so it would otherwise print the asterisks.
   useEffect(() => {
-    const name = (brandName || "").trim();
+    const name = (stripBrandMarkers(logoText || "").trim() || (brandName || "").trim());
     if (!name) return;
     try {
       const p = location.pathname;
@@ -171,7 +189,7 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
       /* a device that refuses storage simply gets the anonymous card — never a crash. The
          guest menu going down over a nicety would be far worse than the nicety. */
     }
-  }, [brandName, brandSlug]);
+  }, [brandName, brandSlug, logoText]);
 
   // Per-restaurant FULL palette (Phase 2). When a restaurant has theme overrides, we
   // emit mode-scoped CSS (inline styles can't switch on the [data-theme] toggle). The

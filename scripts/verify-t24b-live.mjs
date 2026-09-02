@@ -16,6 +16,10 @@
 // reaching that wall pings the owner's phone; our own tooling has set it off before.
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+// A guard that drives the app says "the app isn't running" in a sentence, and exits 2 — never a
+// page of stack trace that reads like a product fault. It was the last one in the repo without
+// this; verify:guards-alive had been naming it for a while. (Owner asked for it, 2026-09-02.)
+import { requireUp } from "./sweep/appUp.mjs";
 
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : d; };
 const BASE = arg("--base", "http://localhost:4000");
@@ -23,6 +27,8 @@ const SHOTS = arg("--shots", null);   // omit to take no screenshots at all
 let n = 0; const bad = [];
 const check = (m, c, got) => { if (c) { n++; console.log("  \u2713 " + m); } else { bad.push(m); console.log("  \u2717 " + m + (got === undefined ? "" : "  \u2192 " + JSON.stringify(got).slice(0, 300))); } };
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: false }); };
+
+await requireUp(BASE, "the T24 money-rules live walk");
 
 const browser = await chromium.launch();
 

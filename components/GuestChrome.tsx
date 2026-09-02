@@ -49,7 +49,15 @@ const GuestOutboxChip    = dynamic(() => import("@/components/GuestOutboxChip"),
 // panels + login again (the exact bug this file exists to prevent). Matching the
 // staff SEGMENT wherever it appears fixes it for good, even as routes grow.
 // (Audit fix 2026-07-06.)
-const STAFF_SEGMENTS = ["aevinite", "admin", "manager", "editor", "kitchen", "tablet", "staff-login", "login", "owner"];
+// `pair` was missing until 2026-09-02 and it is the same bug a third time. /pair is the ALLOW
+// screen a printer's computer opens on its own machine — one card, one button, nobody
+// necessarily signed in. Every widget below was mounting on it: the ban check and the
+// returning-guest greeting each made a database round trip against restaurant #1, the guest
+// socket opened, and a device that happened to hold a diner session would have painted
+// "Hosting Table N" over the one decision the page exists to ask for. Any NEW top-level route
+// that is not one of the five guest doors belongs in this list — `npm run verify:guest-doors`
+// now fails if one is added and forgotten.
+const STAFF_SEGMENTS = ["aevinite", "admin", "manager", "editor", "kitchen", "tablet", "staff-login", "login", "owner", "pair"];
 // Matches: /<seg>...  OR  /r/<slug>/<seg>...  (seg at path end or followed by "/")
 const STAFF_RE = new RegExp(
   `^(?:/r/[^/]+)?/(?:${STAFF_SEGMENTS.join("|")})(?:/|$)`
