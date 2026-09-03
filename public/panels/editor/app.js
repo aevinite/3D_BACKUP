@@ -11151,6 +11151,18 @@ function openDishEditModal(itemId, rerender) {
     const added = [...working].filter((s) => !initial.has(s));    // new avoids → this dish only
     const newItemRemoved = [...new Set([...itemRemoved.filter((s) => !removed.includes(s)), ...added])];
     const newOrderAllergies = orderAllergies.filter((s) => !removed.includes(s));
+    // DECLARED OUT HERE, WHERE THE TOAST READS IT (sweep #8 T6, 2026-09-03).
+    // The identical fault restoreBill carried, in the same file: `const _wq` was declared inside the
+    // `if (note !== ...)` block below and read from outside it, so "Dish updated" threw
+    // "_wq is not defined" EVERY time — the writes had already gone through, the modal had already
+    // closed, and the person editing a guest's allergy note was told nothing at all. Found by running
+    // ESLint's no-undef over this panel, which is what the new verify:panel-scope guard now does on
+    // every change so a third one cannot appear.
+    //
+    // It also has to answer for THREE writes, not one: a save can change the note, the dish's own
+    // avoid-list and the whole order's allergies in one press. If any of them only reached this
+    // device, the whole save is a queued one and the sentence has to say so.
+    let anyQueued = false;
     try {
       // Each save carries the value this modal OPENED with. If another device changed the
       // same thing while it was open, the server refuses and says what it holds now, instead
