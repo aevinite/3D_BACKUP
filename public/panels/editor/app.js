@@ -17220,13 +17220,22 @@ function bqNewHtml() {
   const pkgSel = bqOn("dish")
     ? fld("Package / dish", "bqPkg", `<select class="sx-input" id="bqPkg">${active.map((p, i) => `<option value="${i}"${i === Math.min(f.pkg, active.length - 1) ? " selected" : ""}>${esc(p.title)} — ${Number(p.price) ? inr(p.price) + " " + esc(p.unit || "") : "price typed on the bill"}</option>`).join("")}</select>`)
     : "";
+  // EVERY MONEY BOX ON THIS SCREEN ACCEPTS ITS OWN NUMBERS (sweep #8 T7 — the other half of the
+  // 2026-08-30 repair whose comment sits on the Packages screen above). Six boxes here declared
+  // `type="number"` with no `step`, which means whole rupees only: the per-plate rate, its
+  // discount %, an extra line's rate and discount, a payment amount and the advance received.
+  // The rate box is FILLED BY THIS SCREEN from the stored package price — the same price the
+  // Packages screen was fixed to accept at ₹249.50 — so it was handed a value it then declared
+  // invalid, the hardware ↑/↓ snapped it to a whole rupee, and an advance of ₹5,000.50 could not
+  // be stepped to. Plates, extra-line quantity and the table number stay whole numbers, because
+  // those really are counted in ones.
   const pkg = active[Math.min(f.pkg, active.length - 1)];
   const openPkg = pkg && Number(pkg.price) === 0;
   const plates = [pkgSel];
   if (bqOn("pax")) plates.push(fld("No. of plates", "bqPax", `<input class="sx-input" id="bqPax" type="number" min="1" max="5000" value="${esc(String(f.pax))}" style="font-size:18px;font-weight:700" />`));
   if (bqOn("rate")) plates.push(fld(openPkg ? "Price per plate ₹" : "Price per plate ₹ (set by the package)", "bqRate",
-    `<input class="sx-input" id="bqRate" type="number" min="0" value="${esc(String(openPkg ? f.rate : (pkg ? pkg.price : 0)))}" ${openPkg ? "" : "readonly"} style="font-size:18px;font-weight:700" />`));
-  if (bqOn("disc")) plates.push(fld("Discount %", "bqDisc", `<input class="sx-input" id="bqDisc" type="number" min="0" max="100" value="${esc(String(f.disc))}" />`));
+    `<input class="sx-input" id="bqRate" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(String(openPkg ? f.rate : (pkg ? pkg.price : 0)))}" ${openPkg ? "" : "readonly"} style="font-size:18px;font-weight:700" />`));
+  if (bqOn("disc")) plates.push(fld("Discount %", "bqDisc", `<input class="sx-input" id="bqDisc" type="number" inputmode="decimal" min="0" max="100" step="0.01" value="${esc(String(f.disc))}" />`));
   let extrasHtml = "";
   if (bqOn("extras")) {
     const rows = f.extras.map((ex, i) => {
@@ -17236,8 +17245,8 @@ function bqNewHtml() {
       return `<div style="display:grid;grid-template-columns:1fr 80px 100px ${bqOn("disc") ? "74px " : ""}96px 30px;gap:8px;align-items:center;margin-bottom:8px" data-bqex="${i}">
         <select class="sx-input" data-exf="id">${active.map((p) => `<option value="${esc(p.id)}"${p.id === ex.id ? " selected" : ""}>${esc(p.title)}</option>`).join("")}</select>
         <input class="sx-input" data-exf="qty" type="number" min="1" value="${esc(String(ex.qty))}" />
-        <input class="sx-input" data-exf="price" type="number" min="0" value="${esc(String(open ? ex.price : (it ? it.price : 0)))}" ${open ? "" : "readonly"} />
-        ${bqOn("disc") ? `<input class="sx-input" data-exf="disc" type="number" min="0" max="100" value="${esc(String(ex.disc || 0))}" />` : ""}
+        <input class="sx-input" data-exf="price" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(String(open ? ex.price : (it ? it.price : 0)))}" ${open ? "" : "readonly"} />
+        ${bqOn("disc") ? `<input class="sx-input" data-exf="disc" type="number" inputmode="decimal" min="0" max="100" step="0.01" value="${esc(String(ex.disc || 0))}" />` : ""}
         <div style="text-align:right;font-weight:700">${bq0(amt)}</div>
         <button class="btn small" data-exdel="${i}" title="Remove">✕</button></div>`;
     }).join("");
@@ -17266,14 +17275,14 @@ function bqNewHtml() {
       <input class="sx-input" data-pf="date" type="date" value="${esc(p.date || "")}" />
       <select class="sx-input" data-pf="mode">${["Cash", "Online", "Card", "Cheque", "Other"].map((x) => `<option${x === p.mode ? " selected" : ""}>${x}</option>`).join("")}</select>
       <input class="sx-input" data-pf="ref" value="${esc(p.ref || "")}" placeholder="reference" />
-      <input class="sx-input" data-pf="amt" type="number" min="0" value="${esc(String(p.amt || 0))}" />
+      <input class="sx-input" data-pf="amt" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(String(p.amt || 0))}" />
       <button class="btn small" data-paydel="${i}">✕</button></div>`).join("");
     payCard = card("What they have paid", `${rows}<button class="btn small" id="bqAddPay">＋ Add a payment</button>`,
       "Each payment prints on the bill and the balance is worked out for you.");
   } else if (bqOn("advance")) {
     payCard = card("What they have paid",
       `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
-        ${fld("Amount received ₹", "bqAdv", `<input class="sx-input" id="bqAdv" type="number" min="0" value="${esc(String(f.advance))}" style="font-size:18px;font-weight:700" />`)}
+        ${fld("Amount received ₹", "bqAdv", `<input class="sx-input" id="bqAdv" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(String(f.advance))}" style="font-size:18px;font-weight:700" />`)}
         ${fld("How", "bqAdvMode", `<select class="sx-input" id="bqAdvMode">${["Cash", "Online", "Card", "Cheque"].map((x) => `<option${x === f.advMode ? " selected" : ""}>${x}</option>`).join("")}</select>`)}
       </div>`);
   }
@@ -17467,7 +17476,7 @@ function bindBanquet() {
         f.extras[i][k] = k === "id" ? inp.value : Number(inp.value) || 0;
         renderEditor();
       };
-      if (k === "id") inp.onchange = apply; else inp.onchange = apply;
+      inp.onchange = apply;   // (was an if/else whose two branches were the same line)
     });
     const del = row.querySelector("[data-exdel]");
     if (del) del.onclick = () => { f.extras.splice(i, 1); renderEditor(); };
