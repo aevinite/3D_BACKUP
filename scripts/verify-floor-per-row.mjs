@@ -179,6 +179,60 @@ check("the header's stat chips wrap instead of scrolling", !/\.floor-head \.floo
 check("the editor keeps its x-hidden backstop", /\.editor:has\(\.floor-wrap\)\s*\{\s*overflow-x:\s*hidden/.test(mgrCss),
   "if the grid is ever made too wide again this is what stops the page itself sliding");
 
+// ── 4b · the three floor numbers are BUTTONS, on the heading's line, and each opens its list ──
+// Owner, 2026-09-03: "can you click on it? It should show … the tables which you need to pay",
+// "Ensure that thing in the line of table view in between the table view and KOT and Q op option",
+// "this clickable is chnage for laptop as weel phone". Three separate ways this can quietly break:
+// the chip goes back to being a <div> (no keyboard, no screen reader), the popup loses its BACK
+// registration, or the floor's PATCH path rewrites the strip's outerHTML and never re-binds — which
+// leaves three numbers that look tappable and do nothing on every render after the first.
+{
+  check("each floor number is a real <button>", /<button type="button" class="fstat\$\{/.test(mgrJs),
+    "a <div> with an onclick cannot be reached by a keyboard and is announced as nothing");
+  check("…carrying which list it opens", /data-fstat="\$\{kind\}"/.test(mgrJs));
+  check("…and a hover/announced explanation", /title="\$\{esc\(tip\)\}"/.test(mgrJs) && /aria-label="\$\{esc\(tip\)\}"/.test(mgrJs),
+    "NY means nothing on its own — he asked for \"when you over it, it should tell its need you\"");
+  check("NY is the short label, spelled out only in the explanation", /"NY"/.test(mgrJs) && /Needs you:/.test(mgrJs));
+  check("the strip records the tables behind each number", /state\.floorStatLists\s*=/.test(mgrJs),
+    "without the lists the popup can only re-derive them and drift from the count beside it");
+  check("the popup exists", /function openFloorStatList\(/.test(mgrJs));
+  // scoped to THIS popup's body: the panel has a dozen popups that each register __lfhClose, so a
+  // whole-file match stayed green while this one lost its registration entirely.
+  const popAt = mgrJs.indexOf("function openFloorStatList(");
+  const popBody = popAt >= 0 ? mgrJs.slice(popAt, popAt + 2600) : "";
+  check("…and hardware BACK closes it", /__lfhClose\s*=\s*close/.test(popBody),
+    "every popup in this panel is registered with the back-button manager — one that is not traps the phone");
+  check("…and a row opens that table's floor card", /data-fstat-table/.test(mgrJs) && /openFloatingTable\(/.test(mgrJs));
+
+  // the re-bind. floorStatsHtml() is written back with outerHTML on the patch path, which throws
+  // away the element the handler was attached to.
+  // Assert it where it matters: the code that DOES the outerHTML write must re-bind within a few
+  // lines of doing it. Counting bind sites inside bindFloor() alone was wrong — the two live in
+  // different functions, so a correct implementation read as one site and this guard cried wolf.
+  const patchAt = mgrJs.indexOf("statsEl.outerHTML = floorStatsHtml()");
+  const afterPatch = patchAt >= 0 ? mgrJs.slice(patchAt, patchAt + 600) : "";
+  check("the strip's patch path re-binds the numbers it just replaced",
+    /\[data-fstat\]/.test(afterPatch) && /openFloorStatList/.test(afterPatch),
+    "outerHTML throws the old node away with its handler, so without this the numbers go dead after the first render");
+  const totalBinds = (mgrJs.match(/\[data-fstat\]/g) || []).length;
+  check("…and the full-draw path binds them too", totalBinds >= 2,
+    `found ${totalBinds} bind site(s); the first draw needs one as well as the patch`);
+
+  // …and they sit BEFORE the two buttons on the narrow layout, not on a row underneath them
+  // the LAST `.floor-head .floor-stats` rule that actually sets an order — an earlier rule with the
+  // same selector only sets display/gap, and matching that one made this read "no order at all".
+  const narrowAll = [...mgrCss.matchAll(/\.floor-head \.floor-stats\s*\{([^}]*)\}/g)];
+  const narrow = narrowAll.filter((m) => /order:/.test(m[1])).pop();
+  const acts = /\.floor-head-acts\s*\{\s*order:\s*(\d+)/.exec(mgrCss);
+  const statOrder = narrow && /order:\s*(\d+)/.exec(narrow[1]);
+  check("on a narrow screen the numbers come before KOT / QO-P, not on their own row below",
+    !!statOrder && !!acts && Number(statOrder[1]) < Number(acts[1]) && !/flex:\s*0 0 100%/.test(narrow[1]),
+    "he asked for them IN the Table view line, between the heading and the two buttons");
+  check("the heading is what gives way on a phone, not the numbers",
+    /body:not\(\.floor-preview\) \.floor-head h2 \{ display: none/.test(mgrCss),
+    "at 390px there is room for the heading or the three numbers — he asked for the numbers");
+}
+
 // ── 5 · the admin screen no longer promises the number on every device ──────────────────────
 const adminCard = read("components/admin/RestaurantSettings.tsx");
 check("the admin card names the tablet cap", /never more than <b>6<\/b> a row/.test(adminCard),

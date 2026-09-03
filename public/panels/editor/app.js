@@ -9936,6 +9936,9 @@ function floorStatsHtml() {
   // — how many TABLES want me — so it can never be larger than the floor, and a table that has both
   // a new order and a raised hand is still one place to walk to.
   const needy = new Set();
+  // The same walk that counts also REMEMBERS which tables it counted, so tapping a number can name
+  // them without a second pass over the floor.
+  const occList = [], payList = [];
   for (const i of drawnList) {
     const { st, pay, hasNew, hasCall } = tableTileState(i);
     if (hasNew || hasCall) needy.add(String(i));
@@ -9947,8 +9950,8 @@ function floorStatsHtml() {
     // MONEY IS DELIBERATELY NOT WIDENED: the party's whole bill already rides on the table that
     // holds it, so counting the child in "To pay" too would show two bills where there is one.
     const joined = !!mergeParentOf(i);
-    if (joined || (st !== "free" && st !== "req")) cOcc++;
-    if (pay === "red" || st === "bill") cPay++;
+    if (joined || (st !== "free" && st !== "req")) { cOcc++; occList.push(String(i)); }
+    if (pay === "red" || st === "bill") { cPay++; payList.push(String(i)); }
   }
   // Count only what a person can actually SEE and act on from this floor: something waiting at
   // a table that is drawn here. A request for a table the restaurant doesn't have (a stale row,
@@ -9966,7 +9969,71 @@ function floorStatsHtml() {
   // 34 printed "31/30 Occupied". The drawn list IS the floor, so it is both halves; with no strays
   // it equals the table count exactly, which is every ordinary day.
   const total = drawnList.length || n;
-  return `<div class="floor-stats"><div class="fstat"><div class="fstat-n">${cOcc}/${total}</div><div class="fstat-l">Occupied</div></div><div class="fstat warn"><div class="fstat-n">${cPay}</div><div class="fstat-l">To pay</div></div><div class="fstat alert" title="${needsYou === 1 ? "1 table wants you" : needsYou + " tables want you"}"><div class="fstat-n">${needsYou}</div><div class="fstat-l">Needs you</div></div></div>`;
+  // ── EACH NUMBER OPENS THE TABLES IT COUNTED (owner, 2026-09-03) ────────────────────────────
+  // *"can you click on it? It should show and the tables which you need to pay"*. A count on its
+  // own makes a manager hunt the floor for the two tiles it means; tapping it should just name
+  // them. The three lists are kept on `state` rather than stuffed into a data- attribute: this
+  // strip is rebuilt by the patch path on every breadcrumb, and a 30-table list in an attribute
+  // would be re-serialised each time for something only a tap ever reads.
+  state.floorStatLists = { occupied: occList, pay: payList, needy: [...needy].sort((a, b) => (+a || 0) - (+b || 0)) };
+  // THE LABELS ARE SHORT AND THE FULL WORDS ARE IN THE TOOLTIP (his words: "you can just keep NY
+  // when you over it, it should tell its need you"). The strip has to share one line with the
+  // heading and both buttons on a 360px phone, and "OCCUPIED / TO PAY / NEEDS YOU" spelled out is
+  // what pushed it onto a row of its own. Every chip still says what it is on hover and on its
+  // own popup heading, so nothing depends on remembering an abbreviation.
+  const chip = (kind, cls, num, short, tip) =>
+    `<button type="button" class="fstat${cls ? " " + cls : ""}" data-fstat="${kind}" title="${esc(tip)}" aria-label="${esc(tip)}">` +
+    `<span class="fstat-n">${num}</span>${short ? `<span class="fstat-l">${short}</span>` : ""}</button>`;
+  return `<div class="floor-stats">`
+    + chip("occupied", "", `${cOcc}/${total}`, "",
+        cOcc === 1 ? `1 of ${total} tables has someone at it — tap to see it` : `${cOcc} of ${total} tables have someone at them — tap to see them`)
+    + chip("pay", "warn", cPay, "pay",
+        cPay === 1 ? "1 table is waiting to pay — tap to see it" : `${cPay} tables are waiting to pay — tap to see them`)
+    + chip("needy", "alert", needsYou, "NY",
+        needsYou === 1 ? "Needs you: 1 table wants you — tap to see it" : `Needs you: ${needsYou} tables want you — tap to see them`)
+    + `</div>`;
+}
+
+// The sheet behind a tapped number: the tables it counted, each one a way straight to that table.
+// Deliberately the SAME popup for all three — one list, one heading, one way out — because they
+// answer the same shape of question ("which ones?") and three different sheets would be three
+// things to learn.
+function openFloorStatList(kind) {
+  const L = (state.floorStatLists || {})[kind] || [];
+  const HEAD = {
+    // Short enough to stay on ONE line at 360px. "Tables with someone at them" was plainer English
+    // but wrapped to two lines of display serif and pushed the actual list down the screen.
+    occupied: ["Tables in use", "Nobody is seated right now."],
+    pay: ["Waiting to pay", "Nothing is waiting to be paid."],
+    needy: ["Tables that need you", "Nothing is waiting on you right now."],
+  }[kind] || ["Tables", "Nothing here."];
+  document.querySelector(".fstat-overlay")?.remove();
+  const rows = L.length
+    ? L.map((t) => {
+        const { st, label } = tableTileState(t);
+        return `<button type="button" class="fstat-row" data-fstat-table="${esc(String(t))}">
+          <span class="fstat-row-t">${esc(tileFace(t))}</span>
+          <span class="fstat-row-s ft-${esc(st || "free")}">${esc(label || "")}</span>
+          <span class="fstat-row-go">›</span></button>`;
+      }).join("")
+    : `<div class="sx-empty">${esc(HEAD[1])}</div>`;
+  const wrap = el(`<div class="sx-modal-overlay fstat-overlay"><div class="sx-modal fstat-modal">
+      <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(HEAD[0])}${L.length ? ` · ${L.length}` : ""}</h3>
+        <button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+      <div class="fstat-body">${rows}</div>
+    </div></div>`);
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.__lfhClose = close;                       // the phone's BACK closes this, not the panel
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.onclick = (e) => {
+    if (e.target === wrap) return close();
+    const row = e.target.closest("[data-fstat-table]");
+    if (!row) return;
+    close();
+    // Straight to that table, the same door the notification bell uses.
+    try { openFloatingTable(row.dataset.fstatTable); } catch (err) { toast("Couldn't open that table.", "err"); }
+  };
 }
 
 // floorPlan(): this restaurant's hand-written floor plan, or null for the classic grid.
@@ -10427,7 +10494,12 @@ function patchFloorTiles(tables) {
   // refresh ONLY those nodes in place — never the grid. Their buttons are delegated, so swapping
   // the nodes can't orphan a listener.
   const statsEl = ed.querySelector(".floor-stats");
-  if (statsEl) statsEl.outerHTML = floorStatsHtml();
+  if (statsEl) {
+    statsEl.outerHTML = floorStatsHtml();
+    // outerHTML replaces the NODE, so every handler on the old chips died with it. Re-bind, or the
+    // numbers stop opening their list the first time anything on the floor changes.
+    document.querySelectorAll("#editor [data-fstat]").forEach((b) => (b.onclick = () => openFloorStatList(b.dataset.fstat)));
+  }
   // (No queue cards to refresh any more — the stats strip above is the only floor-wide node.)
   // A patch draws the new summary WITHOUT updating loadSessions' lastBoardSig fingerprint.
   // If a later FULL poll lands carrying the PREVIOUS summary (a wake/reconnect/platform event
@@ -10655,6 +10727,12 @@ function bindFloor() {
   bindFloorDelegation(); // attach the delegated tile/quick/queue handler ONCE
   syncLegendToDrawer();  // phone: the colour key lives in the ☰ menu (item 23)
   const ed = $("#editor");
+  // Each floor number opens the tables it counted (owner, 2026-09-03). Bound here rather than in
+  // the delegated handler because the strip is REPLACED wholesale by the patch path
+  // (`statsEl.outerHTML = floorStatsHtml()`), and a listener on a node that gets swapped out is a
+  // listener that quietly stops working — the class of bug this file has a note about further up.
+  // bindFloor runs after every full render, and the patch path re-binds these below.
+  ed.querySelectorAll("[data-fstat]").forEach((b) => (b.onclick = () => openFloorStatList(b.dataset.fstat)));
   // (The ↻ Refresh button was removed — the floor is live via realtime + the 60s backup poll,
   //  so a manual refresh was redundant and looked broken. Coordinator-relayed owner request.)
   // Bulk open/close for the whole floor (both confirm before acting).

@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=b6e55516" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=50467bde" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=b075dd8f" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=7aaf299f"></script>
 </head>
@@ -23,7 +23,11 @@
     <button id="navBurger" class="nav-burger" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="mainTabs">
       <span></span><span></span><span></span>
     </button>
-    <div class="brand"><span>🍽️</span> Manager<span class="brand-rest" id="brandRest"></span></div>
+    <!-- No emoji in front of "Manager" (owner, 2026-09-03: "can remove the emoji from manager
+         front"). It was decoration on the one bar that has to hold the brand, the restaurant, the
+         connection and the bell on a single phone row — and this project's own style rule says an
+         emoji is not an icon. The word alone is the panel's name. -->
+    <div class="brand">Manager<span class="brand-rest" id="brandRest"></span></div>
     <!-- Dimmed backdrop behind the phone drawer; tap to close. Lives INSIDE the topbar so
          it shares the topbar's stacking context and can't cover the drawer itself. -->
     <div id="navScrim" class="nav-scrim"></div>
@@ -224,6 +228,6 @@
   <script src="/panels/auditsort.js?v=1da861b5"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=e412edef"></script>
+  <script src="/panels/editor/app.js?v=5b13b2ff"></script>
 </body>
 </html>
