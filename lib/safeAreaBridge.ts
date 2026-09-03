@@ -37,7 +37,28 @@ export function attachSafeAreaBridge(getFrame: () => HTMLIFrameElement | null | 
     "padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);";
   document.body.appendChild(probe);
 
+  // THE `load` LISTENER IS BOUND WHEN THE FRAME APPEARS, NOT WHEN THIS IS CALLED
+  // (T8 sweep #8, 2026-09-03). This used to read the frame once, up front, and attach the
+  // listener to whatever it found — so for the case the doc-comment below explicitly promises
+  // is safe ("call it before the frame exists"), it attached to NOTHING and the load push was
+  // silently never wired. All that was left was the two delayed pushes at 400ms and 1500ms,
+  // and on a phone this panel's own app.js is over a megabyte: finish loading after 1.5s and
+  // the panel got NO insets at all until something resized, which on a phone is nothing.
+  // Binding on the first push that can see a frame costs one property read and makes the
+  // promise true. It re-binds if a caller swaps the element (the owner console rebuilds its
+  // embed), and never double-registers, because the element we bound to is remembered.
+  let bound: HTMLIFrameElement | null = null;
+  const onLoad = () => push();
+  const bindLoad = () => {
+    const f = getFrame() || null;
+    if (!f || f === bound) return;
+    bound?.removeEventListener("load", onLoad);
+    f.addEventListener("load", onLoad);
+    bound = f;
+  };
+
   const push = () => {
+    bindLoad();
     const cs = getComputedStyle(probe);
     const envTop = parseFloat(cs.paddingTop) || 0;
     const envBottom = parseFloat(cs.paddingBottom) || 0;
@@ -63,9 +84,6 @@ export function attachSafeAreaBridge(getFrame: () => HTMLIFrameElement | null | 
     } catch { /* iframe not ready yet — the load handler / delayed pushes will catch it */ }
   };
 
-  const el = getFrame();
-  const onLoad = () => push();
-  el?.addEventListener("load", onLoad);
   window.addEventListener("resize", push);
   window.addEventListener("orientationchange", push);
   // The URL bar showing/hiding fires visualViewport resize (NOT always window resize).
@@ -78,7 +96,7 @@ export function attachSafeAreaBridge(getFrame: () => HTMLIFrameElement | null | 
   push();
 
   return () => {
-    el?.removeEventListener("load", onLoad);
+    bound?.removeEventListener("load", onLoad);
     window.removeEventListener("resize", push);
     window.removeEventListener("orientationchange", push);
     vv?.removeEventListener("resize", push);
