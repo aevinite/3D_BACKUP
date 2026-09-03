@@ -33,9 +33,16 @@
       <div class="tabs-head"><span>Sections</span><button id="navClose" type="button" aria-label="Close menu">✕</button></div>
       <!-- DESKTOP RAIL ONLY: collapse to icons / expand to full names. Hidden on phone, where
            the same nav is already a full-width drawer with labels. -->
-      <button class="tab active" data-tab="items" title="Editor"><i class="tab-ico" aria-hidden="true">📝</i><span class="tab-lbl">Editor</span></button>
+      <!-- THE PANEL ALWAYS OPENS ON THE FLOOR, so the floor is the row that ships marked
+           active (T8 sweep #8, 2026-09-03). app.js pins `tab: "tables"` for the real panel,
+           for the owner console's Manager mode and for the layout preview — "the floor is what
+           they need on arrival, every time" — and then setTab() moves the highlight. This markup
+           shipped the highlight on Editor, so between first paint and app.js finishing (it is
+           over a megabyte) the wrong section was lit and then jumped. The two single-purpose
+           embeds (menuonly / invonly) open on their own tab and setTab corrects them either way. -->
+      <button class="tab" data-tab="items" title="Editor"><i class="tab-ico" aria-hidden="true">📝</i><span class="tab-lbl">Editor</span></button>
       <button class="tab" data-tab="orders" title="Bills"><i class="tab-ico" aria-hidden="true">🧾</i><span class="tab-lbl">Bills</span><span id="ordersBadge" class="tab-badge" hidden></span></button>
-      <button class="tab" data-tab="tables" title="Tables"><i class="tab-ico" aria-hidden="true">🪑</i><span class="tab-lbl">Tables</span><span id="tablesBadge" class="tab-badge" hidden></span></button>
+      <button class="tab active" data-tab="tables" title="Tables"><i class="tab-ico" aria-hidden="true">🪑</i><span class="tab-lbl">Tables</span><span id="tablesBadge" class="tab-badge" hidden></span></button>
       <button class="tab" data-tab="platform" title="Platform"><i class="tab-ico" aria-hidden="true">🛵</i><span class="tab-lbl">Platform</span><span id="platformBadge" class="tab-badge" hidden></span></button>
       <!-- Banquet module (mig 130): admin-entitled per restaurant — unhidden by syncBanquetTab() only when settings.banquet_allowed. -->
       <button class="tab" data-tab="banquet" hidden title="Banquet"><i class="tab-ico" aria-hidden="true">🎪</i><span class="tab-lbl">Banquet</span></button>
