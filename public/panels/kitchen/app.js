@@ -1617,9 +1617,16 @@ function renderKitchenSettings() {
   // (printerStatusHtml() does the OPPOSITE: it pre-escapes its pieces and inserts `where` raw.
   // Two functions, two conventions, so do not copy one into the other without checking which end
   // does the escaping.)
+  // "both" IS GONE, and this is its obituary. It was the third value of mig 336's coarse
+  // kot_print_target — "the kitchen prints and the counter picks up what it leaves" — and it died
+  // with the backup screen (owner, 2026-08-30: paper appearing in a room nobody is standing in is
+  // worse than paper that has not appeared). The route derives kotPrintTarget from the ROUTE now and
+  // can only ever answer "kitchen" or "counter", so the two `tgt === "both"` branches this file kept
+  // could not run — and both described a 30-second backup that no longer exists. A dead branch that
+  // reads as handled is how `o.tag` and `o.source` survived here for the whole life of their
+  // features. Do not add a third value back without a route that can produce it.
   const where = hlp ? `${hlp.printer} — from ${hlp.agent}`
     : tgt === "counter" ? "the counter screen"
-    : tgt === "both" ? "the kitchen screen, counter as backup"
     : "the kitchen screen";
   // PRINTING IS ABSENT, NOT GREYED, WHEN IT IS OFF FOR THE RESTAURANT (owner's rule). `auto` is
   // already "on AND this room prints", so a counter-only restaurant sees the explanation once, not a
@@ -1739,7 +1746,7 @@ function printerStatusHtml() {
     : refused === "other_person" ? "one named person's screen — not this one"
     : refused === "other_device" ? "one named computer — not this one"
     : tgt === "counter" ? "the counter screen — not this one"
-    : tgt === "both" ? "this screen, with the counter as a 30-second backup"
+    // (no "both" case: see the obituary in renderKitchenSettings — the route cannot produce it.)
     : "this screen";
   // Who is printing RIGHT NOW (mig 338) — the question a cook at a silent printer actually has.
   const stn = state.station || null;
