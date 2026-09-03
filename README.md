@@ -83,7 +83,7 @@ more**, so a green run here is necessary but not sufficient:
 
 Run those two as well before you push and the local answer really is the CI answer.
 
-There are 167 `verify:*` scripts in all, one per bug that once reached somebody's screen.
+There are 169 `verify:*` scripts in all, one per bug that once reached somebody's screen.
 **`docs/GUARD-MAP.md` tells you which ones your change needs** — look up the file you touched.
 
 Do **not** run `npm run verify:everything` casually: it is the 500-phase suite, it writes to the
