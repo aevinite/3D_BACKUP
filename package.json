@@ -157,6 +157,7 @@
     "verify:open-request-guard": "node scripts/verify-open-request-guard.mjs",
     "verify:order": "node scripts/verify-order.mjs",
     "verify:ready-tile": "node scripts/verify-ready-tile-and-kitchen.mjs",
+    "verify:kitchen": "node scripts/verify-kitchen-screen.mjs",
     "verify:realtime": "node scripts/verify-realtime.mjs",
     "verify:scrollspy": "node scripts/verify-scrollspy.mjs",
     "verify:sections": "node scripts/verify-sections.mjs",

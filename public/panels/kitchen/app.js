@@ -466,7 +466,21 @@ function ticketHtml(o, rows) {
     // Each cooking dish gets a ✓ to mark it READY (cooked). Once ready it shows a
     // pink "ready" tag (waiter still has to carry it out); once the waiter serves
     // it on the tablet it reads "served".
-    const tick = r.fromDb && r.status === "preparing"
+    // A NEW TICKET OFFERS NO ACTION AT ALL, per-dish included (T9 sweep #8 round 2).
+    // The kitchen does not accept orders — the waiter does (owner, 2026-06-14) — and this ticket
+    // already says so in words: a `received` order draws "🆕 new — waiting for the waiter to
+    // accept" INSTEAD of ALL READY. The per-dish ✓ escaped that rule: it keyed only on the DISH
+    // being `preparing`, never on the order, so a NEW card could offer a cook ticks to press while
+    // telling them it was not theirs yet.
+    //
+    // NOT REACHABLE TODAY, and that is written down rather than assumed: every path that sets an
+    // item to `preparing` is gated on `.eq("status", "received")` and paired with the parent
+    // order's accept, in all three panel routes; and `lfh_staff_move_order_item` (mig 175) derives
+    // the receiving order's status FROM the moved item. So `order.status === "received"` with a
+    // `preparing` dish cannot be produced by the app. This closes the contradiction anyway, because
+    // it costs one condition and the alternative is a card that argues with itself if the state
+    // ever does appear — which is exactly how `o.tag` and `o.source` survived here.
+    const tick = r.fromDb && r.status === "preparing" && o.status !== "received"
       ? `<button class="tick" data-item-ready="${esc(r.id)}">✓</button>`
       : r.status === "ready" ? `<span class="done rdy">ready</span>`
         : r.status === "served" ? `<span class="done">served ✓</span>` : "";
@@ -518,7 +532,7 @@ function ticketHtml(o, rows) {
   // device platform tickets have always used for their channel.
   const phase = orderPhase(o, rows);
   return `<div class="ticket st-${esc(o.status)} ph-${esc(phase)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageTitle(o.created_at) ? ` title="${esc(ageTitle(o.created_at))}"` : ""}>${ageMinutes(o.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="thead-r"><span class="age${ageClass(o.created_at)}"${ageTitle(o.created_at) ? ` title="${esc(ageTitle(o.created_at))}"` : ""}>${ageMinutes(o.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(o.created_at))}</span>${reprintBtn}</span></div>
     ${orderNoteHtml}${lines}${action}</div>`;
 }
 
@@ -547,6 +561,8 @@ function bindDelegation() {
   document.body.addEventListener("click", (e) => {
     const reprint = e.target.closest("[data-reprint]");
     if (reprint) { reprintOrder(reprint.dataset.reprint); return; }
+    const platReprint = e.target.closest("[data-plat-reprint]");
+    if (platReprint) { reprintPlatform(platReprint.dataset.platReprint); return; }
     const ready = e.target.closest("[data-ready]");
     if (ready) { markOrderReady(ready.dataset.ready); return; }
     // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
@@ -590,8 +606,14 @@ function platTicketHtml(p) {
   } else {
     action = `<button class="big" data-plat-hand="${esc(p.id)}">HANDED OVER</button>`;
   }
+  // A DELIVERY TICKET GETS THE SAME 🖨 AS A TABLE'S (owner picked item 9 of the T9 sweep #8 report).
+  // It had none for the whole life of the feature: after a jam or a paper-out a cook could reprint
+  // table 6's ticket and NOT the Zomato order sitting beside it, which is the one with a clock
+  // running against the restaurant. Same class, same place on the header, same 44px target — the
+  // only difference is which row it reads (platform tickets live in aggregator_orders, not orders).
+  const platReprintBtn = `<button class="reprint" data-plat-reprint="${esc(p.id)}" title="Print this kitchen ticket" aria-label="Print kitchen ticket">🖨</button>`;
   return `<div class="ticket plat plat-${esc(meta.cls)} st-plat-${esc(p.status)}" data-ticket="plat-${esc(p.id)}">
-    <div class="thead"><span class="src-badge ${esc(meta.cls)}">${esc(meta.label)}</span><span class="kot">#${esc(p.kot_no ?? "—")}</span><span class="age${ageClass(p.created_at)}"${ageTitle(p.created_at) ? ` title="${esc(ageTitle(p.created_at))}"` : ""}>${ageMinutes(p.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(p.created_at))}</span></div>
+    <div class="thead"><span class="src-badge ${esc(meta.cls)}">${esc(meta.label)}</span><span class="kot">#${esc(p.kot_no ?? "—")}</span><span class="thead-r"><span class="age${ageClass(p.created_at)}"${ageTitle(p.created_at) ? ` title="${esc(ageTitle(p.created_at))}"` : ""}>${ageMinutes(p.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(p.created_at))}</span>${platReprintBtn}</span></div>
     ${p.customer_name ? `<div class="plat-cust-line">${esc(p.customer_name)}</div>` : ""}
     ${lines}${action}</div>`;
 }
@@ -1043,6 +1065,30 @@ function reprintOrder(id) {
   } else toast(`Couldn't print KOT #${o.kot_no ?? "—"} — check the printer, then try again.`);
 }
 
+// Manual reprint of a DELIVERY ticket — the other half of item 9. Same contract as reprintOrder:
+// a local, no-network action, tappable as many times as needed, branded DUPLICATE only from the
+// second time this screen has printed it.
+//
+// A platform ticket has no table and no allergy list, so the label is the CHANNEL plus the
+// customer's name when the platform sent one — "ZOMATO · Ramesh" — which is what a cook needs to
+// match paper to bag. Its `items` column is already the same {title, qty, note, removed} shape the
+// print document expects, and its own id is safe to keep in `printedIds`: the ids there are pruned
+// against the board's id set, and loadImpl() builds that set from BOTH orders and platform rows, so
+// a delivery ticket's id is never pruned while it is still on the board.
+function reprintPlatform(id) {
+  const p = (state.platform || []).find((x) => x.id === id);
+  if (!p) { toast("That order isn't on the board any more."); return; }
+  const meta = PLAT_META[p.source] || PLAT_META.other;
+  const who = String(p.customer_name || "").trim();
+  const label = meta.label + (who ? " · " + who : "");
+  const dup = printedIds.has(p.id);
+  // The order shape printKot reads: kot_no, created_at and items all exist on an aggregator row.
+  if (printKot(p, Array.isArray(p.items) ? p.items : [], state.restaurant, { reprint: dup, tableLabel: label })) {
+    if (!dup) { printedIds.add(p.id); savePrintedIds(); }   // a manual FIRST print counts
+    toast(`${dup ? "Reprinting (marked DUPLICATE)" : "Printing"} KOT #${p.kot_no ?? "—"} · ${label}`);
+  } else toast(`Couldn't print KOT #${p.kot_no ?? "—"} — check the printer, then try again.`);
+}
+
 // ── the 86 board (sold-out toggles) ──────────────────────────────────────────
 function renderDishes() {
   // Trim so a stray space / spaces-only search isn't treated as a real query that matches
@@ -1319,7 +1365,13 @@ function printKot(order, itemRows, restaurant, opts) {
     const rname = restDisplayName(restaurant).replace(/\*/g, "") || "Kitchen";
     // The table as the FLOOR knows it — its name when the owner gave it one ("A1"), else
     // "Table 7". Printing the raw number on a renamed table sends staff to the wrong table.
-    const tlab = whereFor(order, true);   // the table as the FLOOR knows it ("A1"), or "T?" when a bill has no table
+    // WHERE THE TICKET IS FOR. A dine-in order takes the table as the FLOOR knows it ("A1"), or
+    // "T?" when a bill has no table. A DELIVERY has no table at all, so the caller hands over its
+    // own label instead ("ZOMATO · Ramesh") — see reprintPlatform(). Passing a label rather than
+    // teaching this function about aggregator_orders is what keeps ONE print path: the paper is
+    // still described once, in /panels/billdoc.js, and a delivery slip is the same document with a
+    // different word in the table slot.
+    const tlab = (opts && opts.tableLabel) || whereFor(order, true);
     const kot = order.kot_no != null ? order.kot_no : "—";
     // LFH_BILLDOC.kotWhen, not a bare time — a ticket rung five days ago on an overnight table
     // used to print exactly like one rung tonight, and paper has no colour to say otherwise.
@@ -1603,10 +1655,34 @@ function renderKitchenSettings() {
   const holder = st && st.active
     ? `${esc(st.active.label || (st.active.panel === "editor" ? "A counter screen" : "A kitchen screen"))}${st.active.claimed_by ? " · " + esc(st.active.claimed_by) : ""}`
     : "";
-  const where = tgt === "counter" ? "the counter screen" : tgt === "both" ? "the kitchen screen, counter as backup" : "the kitchen screen";
+  // A COMPUTER MAY OWN THE PAPER, AND THIS SHEET HAS TO SAY SO (T9 sweep #8).
+  // With a print helper named for kitchen slips the route answers autoPrintKot:false and
+  // kotPrintTarget:"kitchen" — so `auto` was false, `tgt` was not "counter", and the whole Printing
+  // section below disappeared. A cook opening ⚙️ Settings beside a perfectly good printer read
+  // NOTHING about printing and would conclude it was switched off, while the 🖨 sheet two taps away
+  // said "Printer_POS_80 — from Shop's computer". Two screens in one panel, one silent and one
+  // truthful, is worse than either answer alone. Same source (`state.helper`), same words.
+  const hlp = state.helper && state.helper.owned ? state.helper : null;
+  // RAW here, escaped ONCE at the render site below. The first version of this fix pre-escaped
+  // these two values as well, and an apostrophe then reached the sheet as the literal
+  // "Shop&#39;s computer" — caught by driving the screen, not by reading it.
+  // (printerStatusHtml() does the OPPOSITE: it pre-escapes its pieces and inserts `where` raw.
+  // Two functions, two conventions, so do not copy one into the other without checking which end
+  // does the escaping.)
+  // "both" IS GONE, and this is its obituary. It was the third value of mig 336's coarse
+  // kot_print_target — "the kitchen prints and the counter picks up what it leaves" — and it died
+  // with the backup screen (owner, 2026-08-30: paper appearing in a room nobody is standing in is
+  // worse than paper that has not appeared). The route derives kotPrintTarget from the ROUTE now and
+  // can only ever answer "kitchen" or "counter", so the two `tgt === "both"` branches this file kept
+  // could not run — and both described a 30-second backup that no longer exists. A dead branch that
+  // reads as handled is how `o.tag` and `o.source` survived here for the whole life of their
+  // features. Do not add a third value back without a route that can produce it.
+  const where = hlp ? `${hlp.printer} — from ${hlp.agent}`
+    : tgt === "counter" ? "the counter screen"
+    : "the kitchen screen";
   // PRINTING IS ABSENT, NOT GREYED, WHEN IT IS OFF FOR THE RESTAURANT (owner's rule). `auto` is
   // already "on AND this room prints", so a counter-only restaurant sees the explanation once, not a
-  // set of controls it can never use.
+  // set of controls it can never use. A helper owning the paper is NOT "off" — see the note above.
   // ── FACTS ONLY (owner, 2026-08-29) ────────────────────────────────────────────────────────
   // This used to carry the same "take the printer over / stop printing here / setup guide" controls
   // as the manager panel's strip — the model from BEFORE the Printing board, where a restaurant
@@ -1615,10 +1691,12 @@ function renderKitchenSettings() {
   // and one is just showing."
   //
   // The admin names one person on Printing. This screen states where the paper comes out and stops.
-  const printSection = (!auto && tgt !== "counter") ? "" : `
+  const printSection = (!auto && tgt !== "counter" && !hlp) ? "" : `
     <div class="kset-sec">
       <h4>🖨 Printing</h4>
-      ${tgt === "counter" && !auto ? `<p class="kset-note">Kitchen tickets print on <b>the counter screen</b> for this restaurant, so this screen prints nothing automatically. The 🖨 button on a ticket still prints here if this screen has a printer of its own.</p>` : `
+      ${hlp ? `<div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
+      <p class="kset-note">A printer program on <b>${esc(hlp.agent)}</b> prints this restaurant's kitchen slips, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : " It has not been heard from for a while — tickets are waiting, and print the moment it is back."}</p>`
+      : tgt === "counter" && !auto ? `<p class="kset-note">Kitchen tickets print on <b>the counter screen</b> for this restaurant, so this screen prints nothing automatically. The 🖨 button on a ticket still prints here if this screen has a printer of its own.</p>` : `
       <div class="kset-line"><span>Automatic printing</span><b>${auto ? "ON" : "OFF"}</b></div>
       <div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
       <div class="kset-line"><span>Printing right now</span><b>${printingHere ? "THIS screen" : st && st.active ? (st.stale ? holder + " (gone quiet)" : holder) : "no screen yet"}</b></div>
@@ -1626,7 +1704,15 @@ function renderKitchenSettings() {
         ? "Tickets are coming out of this screen's printer, and they keep coming when this window is minimised or covered."
         : heldByOther
           ? `Tickets are coming out at <b>${holder}</b>.`
-          : "No screen has taken the printer yet. Aevidine chooses which screen prints, on the Printing screen."}</p>
+          // A STALE STATION IS NOT "NOBODY" (T9 sweep #8, watched on the running board). `st.stale`
+          // makes heldByOther false, so this note used to fall through to "No screen has taken the
+          // printer yet." while the row directly above it named that very screen and said "(gone
+          // quiet)". A cook reading the two lines together gets opposite answers about the same
+          // printer. Say what is actually true: it held the printer, it stopped answering, and a
+          // quiet station is taken over by itself.
+          : (st && st.active)
+            ? `<b>${holder}</b> was printing and has stopped answering. Another screen takes over by itself after a few minutes; the tickets are waiting, not lost.`
+            : "No screen has taken the printer yet. Aevidine chooses which screen prints, on the Printing screen."}</p>
       `}
     </div>`;
   box.innerHTML = `
@@ -1712,7 +1798,7 @@ function printerStatusHtml() {
     : refused === "other_person" ? "one named person's screen — not this one"
     : refused === "other_device" ? "one named computer — not this one"
     : tgt === "counter" ? "the counter screen — not this one"
-    : tgt === "both" ? "this screen, with the counter as a 30-second backup"
+    // (no "both" case: see the obituary in renderKitchenSettings — the route cannot produce it.)
     : "this screen";
   // Who is printing RIGHT NOW (mig 338) — the question a cook at a silent printer actually has.
   const stn = state.station || null;
