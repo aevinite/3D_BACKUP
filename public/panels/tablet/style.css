@@ -803,7 +803,12 @@ html[data-theme="light"] .ifrom { color: #7e22ce; background: color-mix(in srgb,
 .billbox .pay { font-size: 11px; font-weight: 800; margin-top: 2px; }
 .billbox.unpaid .pay { color: var(--red); }
 .billbox.paid .pay { color: var(--green); }
-.attend { flex: 1; background: linear-gradient(180deg, #ff6b6b, #ef4444); color: #fff; border: 0; border-radius: 12px;
+/* WHITE ON RED, ALL THE WAY UP THE BUTTON (owner picked it as item 13, 2026-09-03). Measured: the
+   label sits at the gradient's midpoint and cleared 3.24:1 there, but the TOP stop was #ff6b6b —
+   2.78:1 — so the top sliver of the button was under the line for large bold text. The top stop is
+   now #f45b5b, which measures 3.06:1 at the very top and 3.47:1 where the word actually is. Nothing
+   else about the button moves; it still reads as the same red. */
+.attend { flex: 1; background: linear-gradient(180deg, #f45b5b, #ef4444); color: #fff; border: 0; border-radius: 12px;
   display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; font-size: 16px; cursor: pointer;
   box-shadow: 0 0 0 4px rgba(239,68,68,.16); font-family: inherit; }
 .attend:hover { filter: brightness(1.06); }
