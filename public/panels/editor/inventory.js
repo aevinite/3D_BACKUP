@@ -348,6 +348,10 @@
   }
   function stockListHtml(active, cats, q) {
     const match = (i) => !q || i.name.toLowerCase().includes(q);
+    // THE EMPTY SHELF AND THE EMPTY SEARCH ARE TWO DIFFERENT SENTENCES (sweep #8 T7). Both fell
+    // through to "No ingredients yet — add your first one.", so a manager with 60 ingredients who
+    // mistyped one name was told the store room was empty and invited to add a first ingredient.
+    // Say which of the two it actually is.
     return cats.map((c) => {
       const rows = active.filter((i) => i.category === c && match(i));
       if (!rows.length) return "";
@@ -360,7 +364,9 @@
           <span class="inv-row-val">${inr(Math.max(0, Number(i.qty_base)) * Number(i.avg_cost))}</span>
         </button>`;
       }).join("");
-    }).join("") || `<div class="empty">No ingredients yet — add your first one.</div>`;
+    }).join("") || (q
+      ? `<div class="empty">No ingredient matches “${esc(q)}”. Check the spelling, or clear the search to see all ${active.length}.</div>`
+      : `<div class="empty">No ingredients yet — add your first one.</div>`);
   }
   const bindStockRows = () => S.root.querySelectorAll(".inv-row[data-item]").forEach((r) => { r.onclick = () => itemPop(itemById(r.dataset.item)); });
 
