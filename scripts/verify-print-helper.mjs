@@ -13,7 +13,15 @@ const read = (p) => { try { return readFileSync(p, "utf8"); } catch { return "";
 // file tripped on their own explanations while it was being written — the ESC/POS one, the awaited
 // gate, the parity harness and the owner read — and a guard that fails because of the sentence
 // explaining it is a guard the next person deletes.
-const code = (src) => String(src).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+// ⚠️ LINE COMMENTS FIRST, THEN BLOCK COMMENTS — and the order is the whole bug (T9, sweep #8,
+// 2026-09-03). Stripping `/*…*/` FIRST means a `/*` that appears inside a `//` line opens a block
+// comment that never closes, and everything up to the next `*/` vanishes. Measured on the files
+// this guard reads: 341 lines of public/panels/editor/app.js, 249 of app/api/editor/route.ts and
+// 97 of the waiter tablet were INVISIBLE to it — every check grepping those regions was asserting
+// nothing while printing ok. The culprit here is one real comment: `// This read `catch { /* tip
+// is non-critical */ }`…`. This is the same trap the project note "Strip line comments BEFORE
+// block comments" records after it hid 190 lines from two other guards. Do not swap these back.
+const code = (src) => String(src).replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
 let pass = 0; const fails = [];
 const check = (cond, ok, bad) => { if (cond) { pass++; console.log("  ok   " + ok); } else fails.push(bad); };
 

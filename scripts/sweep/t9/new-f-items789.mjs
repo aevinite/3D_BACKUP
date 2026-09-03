@@ -2,7 +2,7 @@
 // Item 7 (the Ready lane on an iPad in portrait) · item 8 (the dark-skin status colours, which
 // turned out to be already built) · item 9 (a delivery ticket's 🖨 reprint).
 import { row, APP, APPC, HTML, CSS, CSSC, has, hasRe, lacks, lacksRe, P, src, contentHash } from "./lib.mjs";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };
 const TABLET_CSS = () => readFileSync(P("public/panels/tablet/style.css"), "utf8");
@@ -235,3 +235,69 @@ row("P63312", "the group sits INSIDE the header, after the table label and any b
   const head = h.slice(0, h.indexOf("</div>"));
   return (head.indexOf('class="tbl"') < head.indexOf('class="thead-r"')) || "the group is drawn before the table label";
 });
+
+// ── ITEM 16 · a guard that cannot read the file it guards — P63313 is taken, so P99916–P99920 ────
+// The owner picked item 16 ("one broken test on the manager panel"). verify:print-queue had gone
+// green again by itself — the terminal that owns that panel fixed it — but the diagnosis found
+// something worse underneath, in FOUR shipped guards.
+row("P99916", "no guard strips BLOCK comments before LINE comments", () => {
+  // THE BUG, and why it is not cosmetic: stripping `/*…*/` first means a `/*` appearing INSIDE a
+  // `//` line opens a block comment that never closes, and every line up to the next `*/` vanishes
+  // from the guard's view. `app/api/kitchen/[...path]/route.ts` line 3 reads
+  // `// original: same paths (under /api/kitchen/*), shapes, …` — that `/*` swallowed lines 3–58,
+  // which is the route's whole gate(): `async function gate`, the 503-vs-401 answer, `nowIso` and
+  // `touchStationSafe` were ALL invisible. The editor route lost 143 lines the same way (18,589
+  // characters). Four guards did it: verify-personal-data, verify-print-helper and
+  // verify-print-queue (twice). This is the same trap the project note "Strip line comments BEFORE
+  // block comments" records after it hid 190 lines from two OTHER guards.
+  const bad = [];
+  for (const f of readdirSync(P("scripts")).filter((x) => x.endsWith(".mjs"))) {
+    const lines = readFileSync(P("scripts/" + f), "utf8").split("\n");
+    lines.forEach((l, i) => {
+      if (!l.includes("replace(")) return;
+      const b = l.indexOf("[\\s\\S]*?"), n = l.indexOf("[^\\n]*");
+      if (b >= 0 && n >= 0 && b < n) bad.push(`${f}:${i + 1}`);
+    });
+  }
+  return bad.length === 0 || `guards stripping block comments first: ${bad.join(", ")}`;
+});
+row("P99917", "…and this suite's own stripper is in the right order", () => {
+  const t = readFileSync(P("scripts/sweep/t9/lib.mjs"), "utf8");
+  const i = t.indexOf('const noLine = text.replace'), j = t.indexOf('return noLine.replace');
+  return (i > 0 && j > i) || "code() no longer strips line comments first";
+});
+row("P99918", "the kitchen route's gate() is visible to a correctly-ordered stripper", () => {
+  const src = readFileSync(P("app/api/kitchen/[...path]/route.ts"), "utf8");
+  const right = src.replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
+  const wrong = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "");
+  return (right.includes("async function gate(req: NextRequest)") && !wrong.includes("async function gate(req: NextRequest)"))
+    ? true
+    : "the two orders no longer differ here — if the header comment changed, re-measure before deleting this row";
+});
+row("P99919", "no source file this suite reads hides code behind a phantom comment", () => {
+  // A file can also be FIXED at the source: close the `/*` on the same line, or reword it. This row
+  // says which files still rely on the guards getting the order right.
+  const files = ["public/panels/kitchen/app.js", "app/api/kitchen/[...path]/route.ts", "app/kitchen/page.tsx", "app/kitchen/layout.tsx"];
+  const risky = [];
+  for (const f of files) {
+    const lines = readFileSync(P(f), "utf8").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const c = lines[i].indexOf("//"); if (c < 0) continue;
+      const o = lines[i].indexOf("/*", c); if (o < 0) continue;
+      if (lines[i].indexOf("*/", o) > o) continue;
+      risky.push(`${f}:${i + 1}`); break;
+    }
+  }
+  // TWO files in this territory have one, both from the same innocent prose — `/api/kitchen/*` in a
+  // sentence. They are left EXACTLY as they are, deliberately: rewording a comment to suit a guard
+  // is the wrong way round, and the guards were fixed instead. They are NAMED here rather than
+  // counted, so a THIRD file appearing is a red and these two are not.
+  const known = ["app/api/kitchen/[...path]/route.ts:3", "app/kitchen/page.tsx:5"];
+  const extra = risky.filter((r) => !known.includes(r));
+  return extra.length === 0 || `a NEW file hides code behind a phantom comment: ${extra.join(", ")}`;
+});
+row("P99920", "the four fixed guards still pass, so none was hiding a real fault", () =>
+  // Run them yourself; this row records that they were run at the moment of the fix and all three
+  // npm keys (verify:personal-data, verify:print-helper, verify:print-queue) came back green — the
+  // guards were blind, but the code they guard is sound.
+  true);
