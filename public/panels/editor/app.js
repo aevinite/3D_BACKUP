@@ -519,11 +519,17 @@ function promptDialog(message, opts = {}) {
   });
 }
 
-// Quick-pick reason chips for bill-affecting actions (owner 2026-07-23). Free text still
-// allowed; these just save typing for the common cases. Kept short so they fit on a phone.
+// Quick-pick reason chips for reverting a payment (owner 2026-07-23). Free text still allowed;
+// these just save typing for the common cases. Kept short so they fit on a phone.
 const REASONS_REVERT = ["Mis-tap / misclick", "Wrong amount", "Refund to customer", "Paid by mistake", "Redo the bill"];
-const REASONS_DELETE = ["Mis-tap / misclick", "Duplicate bill", "Test order", "Order cancelled", "Wrong table"];
-const REASONS_CLOSE = ["Customer left unpaid", "Mis-tap / misclick", "On the house", "Staff meal", "Moved to another bill"];
+// REASONS_DELETE and REASONS_CLOSE lived here and were DELETED on 2026-09-03 (sweep #8 T6): each was
+// declared, and mentioned nowhere else in the file. Deleting a bill has asked through
+// askRemovalReason() and its shared REMOVAL_REASONS since migration 251, which is the same six
+// reasons every removal in the app now uses; and there is no "close a table" at all since
+// 2026-07-31 (a walk-out is dealt with by voiding what was not paid for), so nothing was left to
+// offer REASONS_CLOSE to. A list of words that reaches no screen is worse than none: it reads as
+// the wording a screen uses, so the next person edits it and nothing changes.
+// Put either back only alongside the screen that would show it.
 
 // Manager (or any staff) raises an operational issue → the owner sees it on their
 // Issues page and the admin sees it as a platform complaint. The modal (subject +
@@ -2751,20 +2757,21 @@ function formGeneral(s) {
   </div>`;
 }
 
-// STATUS_META: how each order status looks on screen — its badge label and the
-// CSS class that colours it.
-const STATUS_META = {
-  received: { label: "🔔 New", cls: "received" },
-  // "Preparing" is the ONE word for this status on every screen a guest or a manager sees — the
-  // floor tile (built by the database), this pill, the progress legend and the dish badge. Only
-  // the KITCHEN board says "Cooking", deliberately: it is the cook's own word on the cook's own
-  // screen. Don't change one of these without the others (T15 sweep, 2026-08-05).
-  preparing: { label: "👨‍🍳 Preparing", cls: "preparing" },
-  served: { label: "✓ Served", cls: "served" },
-  cancelled: { label: "✕ Cancelled", cls: "cancelled" },
-};
-// STATUS_RANK: a sort order so the Orders list shows New first, then Preparing, etc.
-const STATUS_RANK = { received: 0, preparing: 1, served: 2, cancelled: 3 };
+// STATUS_META and STATUS_RANK lived here and were DELETED on 2026-09-03 (sweep #8 T6): both were
+// declared and mentioned nowhere else in this file or any other.
+//
+// STATUS_META was the badge label + CSS class per order status. The bill cards have built their own
+// pill for a long time (see mergedOrderCardHtml: `anyReceived ? "New order" : ...` with
+// `ord-pill ${cls}`), so this map coloured and labelled nothing. It mattered that it went, rather
+// than sitting quietly: its comment carried a real cross-panel RULE — "Preparing" is the one word
+// every screen but the kitchen board uses — attached to a map nothing read. A person sent here to
+// change that wording would have changed it, seen no difference anywhere, and had no way to tell
+// whether the rule was wrong or their edit was. The rule itself is true and still lives where it is
+// enforced: verify:manager-behaviour and the ledger's own five-status-word checks compare the
+// panels' literals directly.
+//
+// STATUS_RANK sorted the old Orders list New-first. That list is grouped by table number now
+// (ordersLiveHtml sorts by table_number, numeric), so there was nothing to rank.
 
 // itemDetailLine: the small sub-line under a dish showing EVERYTHING the guest
 // chose — picked options ("Large · Oat milk · Extra shot"), removed/allergen
@@ -5948,7 +5955,11 @@ async function loadDashboard(useCache) {
     const chTotal = chRows.reduce((a, c) => a + c.rev, 0);
     document.getElementById("chanCenter").innerHTML = `<b>${inr(chTotal)}</b><small>${esc(rangeLabel)}</small>`;
     document.getElementById("chanLegend").innerHTML = chRows.map((c) => `
-      <div class="pay-row togglable" data-ch="${c.k}">
+      ${""/* No data-ch here any more (sweep #8 T6, 2026-09-03): it was written and never read.
+             The legend's rows are wired by their INDEX below, matched to the chart's own dataset
+             order, so the channel key on the element was a second, unused way of saying which row
+             this is -- and two ways of naming the same thing is how they drift apart. */}
+      <div class="pay-row togglable">
         <span class="dot" style="background:${c.color}"></span>
         <span class="m">${esc(c.name)}</span><span class="amt">${inr(c.rev)}</span>
         <span class="meta">${pctOf(c.rev, chTotal)}% · ${c.count} order${c.count === 1 ? "" : "s"}${c.count ? ` · avg ${inr(c.rev / c.count)}` : ""}</span>
