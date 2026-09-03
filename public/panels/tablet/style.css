@@ -457,8 +457,11 @@ html[data-theme="light"] .tile .tmerge { color: var(--merge-ink); }
 @keyframes pulse { 50% { transform: scale(1.12); } }
 .t-free { --c: #6b6253; opacity: 0.7; }
 .t-seated { --c: #2dd4bf; }
-/* open but nobody seated yet → bright yellow fill (like the editor's ft-waiting) */
-.t-waiting { --c: #f5c451; background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
+/* (.t-waiting WAS HERE — the bright yellow "open but nobody seated yet" tile. Dead on THIS panel
+   since 2026-07-31, when the owner ruled that a party with nothing ordered is an available table:
+   summaryTile() re-presents the RPC's `waiting` state as `free` AT THE SOURCE, so tileState() can
+   never return it and no tile can ever wear the class. The manager panel still applies it and that
+   one is live — this note is not permission to touch it. Removed sweep #8 T10, 2026-09-03.) */
 /* SERVED = GREEN inside (manager parity, owner 2026-08-01: money is told by the pay RING —
    red owing / green settled — so inside, green means one thing: the food is out). */
 .t-bill { --c: #22c55e; background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
@@ -491,8 +494,11 @@ html[data-theme="light"] .tile .tmerge { color: var(--merge-ink); }
 .my-section .ms-key { color: var(--muted); font-weight: 600; }
 .my-section b { font-size: 15px; font-weight: 800; letter-spacing: .01em; }
 .my-section .ms-n { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 600; }
-/* Nothing assigned: the strip is the warning, so it reads as "needs attention", not decoration. */
-.my-section .ms-none { color: var(--red, #ef4444); font-weight: 700; }
+/* (.ms-none WAS HERE — a red "none" inside the "Your tables" strip. renderMySection() returns
+   early and hides the whole strip when nothing is assigned, deliberately: "the big empty state
+   where the tiles would be already says it, in more words and more kindly. Two identical warnings
+   stacked on a 360px phone just eats the screen." So nothing can ever put this class on screen.
+   Removed sweep #8 T10, 2026-09-03.) */
 
 /* shift-to-table picker: a grid of free-table buttons */
 .shiftgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
@@ -510,7 +516,9 @@ html[data-theme="light"] .tile .tmerge { color: var(--merge-ink); }
 /* the per-line ✎ edit button (size / extras / allergy) sits next to − qty + */
 .qbtn.edit { color: var(--gold); border-color: rgba(212,165,116,.4); }
 .qbtn.edit:hover { border-color: var(--gold); background: rgba(212,165,116,.1); }
-.cedit { background: none; border: 0; color: var(--gold); font-size: 12px; cursor: pointer; padding: 0; text-decoration: underline; }
+/* (.cedit WAS HERE — an underlined "edit" link on a cart line. The cart's per-line edit is the
+   ✎ .qbtn.edit button styled two lines above; nothing has rendered .cedit for as long as this file
+   has been in git. Removed sweep #8 T10, 2026-09-03.) */
 .allergy { border-color: rgba(239,68,68,.45); }
 .t-new { --c: #f59e0b; box-shadow: 0 0 16px color-mix(in srgb, var(--c) 26%, transparent); }
 /* "Wants in" — a guest asked to be let in: amber glow, like the manager (NOT red) */
@@ -526,7 +534,8 @@ html[data-theme="light"] .tile .tmerge { color: var(--merge-ink); }
    nearly invisible, so light mode mixes stronger; dark theme is untouched. */
 html[data-theme="light"] .tile {
   background: linear-gradient(157deg, color-mix(in srgb, var(--c) 32%, var(--panel)), var(--panel) 82%); }
-html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting {
+/* .t-waiting dropped from this selector with the rule above — it can never be applied here. */
+html[data-theme="light"] .tile.t-bill {
   background: linear-gradient(157deg, color-mix(in srgb, var(--c) 58%, var(--panel)), var(--panel) 84%); }
 
 /* the right work panel */
@@ -644,9 +653,10 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 .panel.has-detail .phead { padding: 16px 16px 0; }
 .detail-body { padding: 12px 16px; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 12px; }
 .pmeta { color: var(--muted); font-size: 13px; }
-/* back-to-tables affordance — only useful on the stacked (narrow) layout */
-.backtop { display: none; }
-@media (max-width: 760px) { .backtop { display: inline-flex; } }
+/* (.backtop WAS HERE — a "back to tables" affordance for the stacked phone layout. The table
+   detail became a centred POPUP at every width on 2026-07-05 ("no trace it was ever a side
+   panel"), so there is no stacked layout to come back FROM: the popup's own ✕ and the phone's
+   Back button close it. Nothing renders the class. Removed sweep #8 T10, 2026-09-03.) */
 
 /* an order card */
 .ord { background: #211a12; border: 1px solid #34291a; border-radius: 12px; overflow: hidden; }
@@ -763,7 +773,9 @@ html[data-theme="light"] .ifrom { color: #7e22ce; background: color-mix(in srgb,
 /* top-of-orders "Serve all" — full-width green action, matches the Serve buttons */
 .serve-all-btn { display: block; width: 100%; margin: 0 0 10px; background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800; font-size: 14px; text-align: center; padding: 11px; border: 0; border-radius: 11px; cursor: pointer; }
 .serve-all-btn:hover { filter: brightness(1.06); }
-.oallergy { margin: 0 12px; margin-top: 10px; background: rgba(239,68,68,.14); border: 1px solid rgba(239,68,68,.5); color: #ff8a8a; font-weight: 800; font-size: 12px; padding: 7px 10px; border-radius: 9px; letter-spacing: .03em; }
+/* (.oallergy WAS HERE — an order-wide allergy banner above an order card. The order's avoid-list
+   is drawn by .callergy on the line it belongs to and by the chips in the edit modal; nothing has
+   rendered .oallergy. Removed sweep #8 T10, 2026-09-03.) */
 /* min-height: 44px like every other button on this panel (T7 sweep #7, 2026-08-30). Line 960 says
    `.panel .btn, .floor-nav button { min-height: 44px }` — and ✓ Accept is not a `.btn`, it is its
    own class, so it never got the rule and rendered 38px: the one control on the table detail below
@@ -992,7 +1004,7 @@ html[data-theme="light"] .dw-btn.danger { border-color: #b91c1c; color: #b91c1c;
   body.tbl-open .floor { display: none; }
   body.tbl-open #panel { position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; min-height: 100dvh; max-height: 100dvh; overflow: auto; background: var(--bg); padding: 56px 14px calc(84px + var(--sab)); }
   body.tbl-open #tabletClose { display: inline-flex; align-items: center; justify-content: center; position: fixed; top: calc(var(--sat) + 10px); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 22px; line-height: 1; z-index: 52; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
-  body.tbl-open .backtop { display: none; } /* the ✕ replaces the "↑ Tables" link */
+  /* (the .backtop hide-rule went with .backtop itself — see its obituary further up.) */
 }
 /* ── A PHONE TURNED SIDEWAYS PUTS ITS HEADINGS ON ONE ROW (owner, 2026-08-17) ──────────────────
    His words: "whenever you do sideway, everything should be in one row — not so many rows".
@@ -1103,8 +1115,9 @@ body.om-mode .panel.om-open { position: fixed; inset: 0; z-index: 40; border: 0;
 /* the cart pane — content is the untouched .cart, this just gives it its own scroll */
 .om-cart { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 12px; }
 .om-cart .cart { border-top: 0; margin-top: 0; padding-top: 0; }
-/* the size/extras/allergy screen inside the takeover keeps its old padded look */
-.om-optwrap { height: 100%; overflow-y: auto; padding: 16px; max-width: 680px; margin: 0 auto; box-sizing: border-box; }
+/* (.om-optwrap WAS HERE — a wrapper for the size/extras/allergy screen inside the order takeover.
+   That screen is the .opt-overlay / .opt-pop sheet (renderDishOptions), which builds its own
+   markup and never wore this class. Removed sweep #8 T10, 2026-09-03.) */
 @media (max-width: 760px) {
   .om-head { flex-wrap: wrap; padding: 10px 12px 8px; }
   .om-head h2 { font-size: 16.5px; flex: 1; }
@@ -1327,7 +1340,7 @@ body:has(.detail-pop) .layout { grid-template-columns: 1fr; }   /* floor fills; 
   background: var(--panel); color: var(--text); border: 1px solid var(--line);
   border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.5); padding: 12px 16px calc(14px + var(--sab));
   display: flex; flex-direction: column; }
-.detail-pop .backtop { display: none; }                          /* "↑ Tables" makes no sense in a popup */
+/* (the .backtop hide-rule went with .backtop itself — see its obituary further up.) */
 .detail-pop .detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain; padding: 12px 0; }
 /* The card is a flex COLUMN whose body is the only scrolling part — every pinned row below it must
