@@ -1647,9 +1647,21 @@ function bindPrintingBoard(ed) {
         if (d) { toast(`This screen now manages “${d.name}”.`); await loadPrintBoard(); }
         return;
       }
+      // THESE TWO ASK IN THE PANEL, NOT WITH THE BROWSER'S OWN DIALOG (sweep #8 T6, 2026-09-03).
+      // They were the last bare prompt() and confirm() left in this file, and this panel already owns
+      // a themed replacement for each (promptDialog / confirmDialog, right at the top).
+      // A kiosk browser, an embedded webview, and Chrome after somebody ticks "prevent this page from
+      // creating additional dialogs" all return NULL from prompt() and FALSE from confirm() having
+      // shown nothing at all, and both call sites below `return` on a falsy answer. So on the very
+      // devices a restaurant runs, "Rename this computer" did nothing and "Unlink" quietly refused,
+      // with not one word on screen: a tap vanishing in silence, which is the rule this product does
+      // not break. Same reasoning, same fix and the same wording as editor/inventory.js's four
+      // (2026-08-31) and maint.js's two (2026-08-30).
+      // verify:panel-dialogs now covers this file too, so they cannot come back.
       if (what === "rename") {
         const cur = (B().thisComputer || {}).name || "";
-        const name = prompt("What should this computer be called?", cur);
+        const name = await promptDialog("What should this computer be called?",
+          { confirmLabel: "Rename", placeholder: "e.g. Front till", defaultValue: cur, required: true, danger: false });
         if (!name || !name.trim() || name === cur) return;
         const d = await post("this-computer", { name: name.trim() });
         if (d) { toast("Renamed."); await loadPrintBoard(); }
@@ -1657,7 +1669,10 @@ function bindPrintingBoard(ed) {
       }
       if (what === "unlink") {
         const nm = (B().thisComputer || {}).name || "this computer";
-        if (!confirm("Unlink \u201c" + nm + "\u201d?\n\nIt stops printing at once, and anything routed to it needs a printer choosing again.\n\nTo bring it back: double-click the helper file on this computer and press Allow.")) return;
+        if (!(await confirmDialog(
+          `Unlink \u201c${nm}\u201d? It stops printing at once, and anything routed to it needs a printer choosing again. `
+          + "To bring it back: double-click the helper file on that computer and press Allow.",
+          "Unlink"))) return;
         const d = await post("unlink", {});
         if (d) { toast("Unlinked."); await loadPrintBoard(); }
         return;
