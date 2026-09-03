@@ -224,13 +224,22 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 /* the outline glow is gone: the left edge carries the lane now, and two signals for one fact is what
    made every ticket on the board look equally urgent. */
 .ticket.st-served { opacity: 0.75; }
-.thead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+/* THE HEADER WRAPS, AND THE AGE NEVER BREAKS IN HALF (T9 sweep #8, measured at 360px).
+   `settings.table_names` lets a restaurant call table 6 "Patio Table 12" — which is the whole
+   point of mig 131, and what the owner asked for on 2026-07-29 so a cook reads the SAME label the
+   floor uses. On a 360px phone that label is 79px of a row that also carries a 26px KOT number,
+   the age chip and the print button, so `.age` was squeezed until its own text wrapped: the
+   stale chip went from 22px to 39px tall and "DAY 4d 17h" rendered as "DAY 4d" over "17h".
+   Both tickets on the renamed table, every time. Truncating either value is the wrong trade —
+   the table is the field a cook must not misread and the age is the one they scan — so the ROW
+   wraps instead and both stay whole. Above ~760px there is room and nothing wraps at all. */
+.thead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; row-gap: 4px; }
 /* THE ONE LOUD THING. Bigger and tighter than before, in tabular figures so a board full of numbers
    never jitters as the ages tick over. */
 .kot { font-size: 26px; font-weight: 900; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
 /* the table and the age STEP BACK — they are context for the number, not competitors to it */
 .tbl { font-size: 14px; font-weight: 700; color: var(--muted); }
-.age { margin-left: auto; color: var(--muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.age { margin-left: auto; color: var(--muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* A TICKET THAT HAS BEEN SITTING SAYS SO (T4 sweep, 2026-08-04). A 44-hour-old Cooking ticket
    rendered in the same small grey text as "5m", so nothing on the board flagged a stuck order.
    Amber past 30 min, red-and-bold past 2 h. Both skins get a value — the light skin's --muted is
