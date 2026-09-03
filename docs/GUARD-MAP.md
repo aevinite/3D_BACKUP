@@ -49,6 +49,7 @@ Code: `app/menu`, `app/r/[restaurant]`, `app/q/[code]`, `components/*`, `lib/men
 | the menu read / what a guest is allowed to read | `verify:guest-read` | `.env.local` | no |
 | a dish hidden or taken off the menu | `verify:hidden` | nothing | no |
 | the scroll-spy category strip | `verify:scrollspy` | app running | no |
+| a restaurant's own BRAND COLOUR, or `lib/accent.ts` | `verify:accent-ink` ← the accent is used as TEXT on the guest screens (the dish price, the section headings, Read more, the hero sub-line). The light skin always computed a readable ink from it; the DARK skin — the default — used the raw brand colour on the reasoning that a bright accent already reads clean, which is true of a warm gold and false of a dark brown. Measured on the live restaurants, five of nine failed on the PRICE: burger-barn 2.07:1, pizza-palace 3.40, spice-route 3.58, green-bowl 3.66, sakura-sushi 4.03. It runs the real function over real and hostile colours and MEASURES the contrast, rather than checking that a variable exists | nothing | no |
 | languages / translated text | `verify:i18n-scope` | nothing | no |
 | accent-coloured TEXT on a guest screen (dish price, links) — the `--accent-ink` / `--accent-ink-dim` tokens | `verify:accent-ink` | nothing | no |
 | allergy chips or per-item allergy data | `verify:allergy-isolation` | `.env.local` | **YES** |
