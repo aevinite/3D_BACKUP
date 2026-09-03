@@ -466,7 +466,21 @@ function ticketHtml(o, rows) {
     // Each cooking dish gets a ✓ to mark it READY (cooked). Once ready it shows a
     // pink "ready" tag (waiter still has to carry it out); once the waiter serves
     // it on the tablet it reads "served".
-    const tick = r.fromDb && r.status === "preparing"
+    // A NEW TICKET OFFERS NO ACTION AT ALL, per-dish included (T9 sweep #8 round 2).
+    // The kitchen does not accept orders — the waiter does (owner, 2026-06-14) — and this ticket
+    // already says so in words: a `received` order draws "🆕 new — waiting for the waiter to
+    // accept" INSTEAD of ALL READY. The per-dish ✓ escaped that rule: it keyed only on the DISH
+    // being `preparing`, never on the order, so a NEW card could offer a cook ticks to press while
+    // telling them it was not theirs yet.
+    //
+    // NOT REACHABLE TODAY, and that is written down rather than assumed: every path that sets an
+    // item to `preparing` is gated on `.eq("status", "received")` and paired with the parent
+    // order's accept, in all three panel routes; and `lfh_staff_move_order_item` (mig 175) derives
+    // the receiving order's status FROM the moved item. So `order.status === "received"` with a
+    // `preparing` dish cannot be produced by the app. This closes the contradiction anyway, because
+    // it costs one condition and the alternative is a card that argues with itself if the state
+    // ever does appear — which is exactly how `o.tag` and `o.source` survived here.
+    const tick = r.fromDb && r.status === "preparing" && o.status !== "received"
       ? `<button class="tick" data-item-ready="${esc(r.id)}">✓</button>`
       : r.status === "ready" ? `<span class="done rdy">ready</span>`
         : r.status === "served" ? `<span class="done">served ✓</span>` : "";
