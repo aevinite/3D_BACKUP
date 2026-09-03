@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=b6e55516" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=3e94bfd1" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=086904f4" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=7aaf299f"></script>
 </head>
@@ -204,8 +204,14 @@
        way first. There is nothing for the helper to do there, and a bill figure is the one number
        fitnums.js says in capitals must never end up in a net that can abbreviate it. If the row is
        ever redesigned so the amount can clip, add `.bl-amt` here AND to EXACT_SEL in fitnums.js —
-       both, in the same change. -->
-  <script src="/panels/fitnums.js?v=49e195eb" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
+       both, in the same change.
+       `:not(.ktext)` also went on 2026-09-03. A dashboard tile whose value was WORDS rather than a
+       figure used to be rendered `<b class="ktext">` (commit 9d9d8be3) and excluded here, because
+       shrinking a sentence to fit is not the same as shrinking a number. That branch left the
+       renderer long ago — `dashCard()` now writes a bare `<b>` — so the exclusion had nothing to
+       exclude, and `.dash-card b.ktext` in style.css had nothing to style. If a word-valued tile
+       comes back, the class goes back on the element AND back in this list, together. -->
+  <script src="/panels/fitnums.js?v=49e195eb" data-fit=".dash-card .kbody b,.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
   <script src="/panels/editor/inventory.js?v=aabfc336"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC) and shared with

@@ -832,7 +832,10 @@ body[data-tab]:not([data-tab="items"]) #bulkBtn { display: none !important; }
    overlong figure EXPANDS the track past the card edge and fitnums.js can't see the
    overflow (grid blowout), so the big number could never shrink-to-fit. */
 .dash-card b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; }
-.dash-card b.ktext { font-size: 14.5px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+/* OBITUARY (2026-09-03): `.dash-card b.ktext` styled a dashboard tile whose value was WORDS
+   rather than a figure — smaller, one line, ellipsised. The renderer stopped applying that class
+   (dashCard() writes a bare `<b>`), so this rule and the matching `:not(.ktext)` on the fitnums
+   tag were both styling and excluding nothing. Removed together with it. */
 .dash-card .ksub { grid-column: 2 / 4; color: var(--muted); font-size: 11px; margin-top: 1px; font-variant-numeric: tabular-nums; }
 .dash-card .kgo { grid-column: 3; grid-row: 1; color: var(--muted); font-size: 10px; opacity: 0.55; }
 .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
