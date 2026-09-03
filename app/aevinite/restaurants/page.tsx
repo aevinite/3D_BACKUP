@@ -1265,8 +1265,11 @@ function EnterCard({ restaurant }: { restaurant: Restaurant }) {
 
   // EVERY restaurant has every staff app (owner, 2026-07-31). There is no per-restaurant switch left
   // to consult — see the note on the deleted panels read above — so all four doors are always offered.
+  // The manager door pointed at "/editor" until 2026-09-03 — the retired address, which only
+  // redirects to /manager. Same screen, one round trip less, and the console stops depending on
+  // a back-compat door. /editor still answers, for links taped up before the rename.
   const PANELS: [string, string, string][] = [
-    ["/editor", "Manager panel", "fa-table-columns"],
+    ["/manager", "Manager panel", "fa-table-columns"],
     ["/kitchen", "Kitchen display", "fa-fire-burner"],
     ["/tablet", "Waiter tablet", "fa-mobile-screen-button"],
   ];

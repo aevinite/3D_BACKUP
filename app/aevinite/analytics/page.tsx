@@ -300,7 +300,7 @@ export default function AdminAnalytics() {
                     <div style={{ textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{nf.format(r.orders)}</div>
                     <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} className="adm-muted">{r.activeTablesNow}</div>
                     <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                      <button className="adm-btn" onClick={() => openRestaurantPanel(r.id, "/editor")} title={`Open ${r.name}'s manager panel`}>
+                      <button className="adm-btn" onClick={() => openRestaurantPanel(r.id, "/manager")} title={`Open ${r.name}'s manager panel`}>
                         <i className="fas fa-arrow-up-right-from-square" style={{ marginRight: 5 }} aria-hidden="true" />Manager
                       </button>
                       <a className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(r.slug)}`}>Manage →</a>
@@ -384,7 +384,7 @@ export default function AdminAnalytics() {
                     </span>
                   </div>
                   <div className="q-act">
-                    <button className="adm-btn" onClick={() => openRestaurantPanel(r.id, "/editor")} title={`Open ${r.name}'s manager panel`}>
+                    <button className="adm-btn" onClick={() => openRestaurantPanel(r.id, "/manager")} title={`Open ${r.name}'s manager panel`}>
                       <i className="fas fa-arrow-up-right-from-square" style={{ marginRight: 5 }} aria-hidden="true" />Manager
                     </button>
                     <a className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(r.slug)}`}>Manage →</a>

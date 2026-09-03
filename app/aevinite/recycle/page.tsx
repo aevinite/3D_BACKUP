@@ -190,9 +190,13 @@ function BlockedHere({ href, label, onClose }: { href: string; label: string; on
   );
 }
 
+// ONE DOOR PER PANEL (2026-09-03). There were TWO rows here that opened the same screen:
+// "Manager" → /manager and "Menu editor" → /editor, which is the retired address that only
+// redirects to /manager. So the recycle bin offered a binned restaurant's manager panel twice
+// under two different names, and the second name ("Menu editor") described a TAB inside it
+// rather than a screen of its own. The duplicate is gone; /editor itself stays, for old links.
 const PANEL_DOORS: { to: string; label: string; icon: string }[] = [
   { to: "/manager", label: "Manager", icon: "fa-table-columns" },
-  { to: "/editor", label: "Menu editor", icon: "fa-pen-to-square" },
   { to: "/kitchen", label: "Kitchen", icon: "fa-fire-burner" },
   { to: "/tablet", label: "Tablet", icon: "fa-tablet-screen-button" },
   { to: "/owner", label: "Owner", icon: "fa-crown" },

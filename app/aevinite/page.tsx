@@ -28,8 +28,12 @@ type Issue = { id: string; restaurantName: string; subject: string; status: stri
 type Staff = { name: string | null; username: string; role: string; restaurantName: string | null; last_seen_at: string | null };
 
 // The four operational panels, in chip order. A panel is ON unless explicitly false.
+// `path` is the panel's REAL address. The manager chip pointed at "/editor" until 2026-09-03 —
+// the retired address, which only redirects to /manager — so every admin panel-open from this
+// table paid an extra round trip and kept a back-compat door load-bearing. /editor still exists,
+// for taped-up links and old bookmarks; nothing in the console needs to go through it.
 const PANEL_DEFS: { key: string; letter: string; label: string; path: string }[] = [
-  { key: "manager", letter: "M", label: "Manager", path: "/editor" },
+  { key: "manager", letter: "M", label: "Manager", path: "/manager" },
   { key: "kitchen", letter: "K", label: "Kitchen", path: "/kitchen" },
   { key: "tablet", letter: "T", label: "Tablet", path: "/tablet" },
   { key: "owner", letter: "O", label: "Owner", path: "/owner" },
