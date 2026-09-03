@@ -25,7 +25,7 @@
 // Splitting is on UNESCAPED pipes only. Cells legitimately contain `\|` — the checks are full of
 // `grep -c 'a\|b'`, `find … \| wc -l` and JavaScript's `a \|\| b`. Splitting naively both
 // under-counts real rows and invents malformed ones.
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const DIR = ".claude/sweep/LEDGER";
@@ -143,6 +143,56 @@ if (declared) {
     `sweep collides on its very first new phase.`);
 }
 
+// ── 5 · A LEDGER MAY GROW. IT MAY NOT SHRINK. ─────────────────────────────────────────────────
+//
+// Found the expensive way (sweep #8, terminal 7, 2026-09-03): a terminal wrote its new section by
+// OVERWRITING T7.md instead of appending to it, and destroyed 2,802 permanent rows — and this
+// guard, whose entire job is protecting the ledger, PASSED. Everything it checked was still true
+// of what was left: no duplicate ids, no dangling back-reference, the index still carried its
+// instructions. It counts what is there; it had no idea what used to be.
+//
+// That is the one thing the ledger cannot survive, because the whole value of 55,000 numbered
+// checks is that "re-run P04477" still means something years later. A row count per file, kept
+// beside the ledgers and committed with them, is enough: growth is always fine and is recorded
+// automatically, a DROP is never fine and stops the run.
+//
+//   node scripts/verify-ledger-index.mjs --bless    ← the deliberate escape hatch, for the one
+//   legitimate case: a repair that MOVES ids between files (T18 moved 1,029 in 2026-09-01). It
+//   records today's counts as the new floor, and it is a thing a person types on purpose.
+const COUNTS = join(DIR, "ROW-COUNTS.json");
+const BLESS = process.argv.includes("--bless");
+const nowCounts = {};
+for (const f of ledgers) {
+  nowCounts[f] = readFileSync(join(DIR, f), "utf8").split("\n").filter(isPhaseRow).length;
+}
+let floor = {};
+if (existsSync(COUNTS)) { try { floor = JSON.parse(readFileSync(COUNTS, "utf8")); } catch { floor = {}; } }
+if (!BLESS) {
+  for (const [f, was] of Object.entries(floor)) {
+    if (!(f in nowCounts)) {
+      fail(`the ledger ${f} is GONE. It held ${was} numbered check(s). A ledger file is permanent — ` +
+        `every one of those ids is a sentence somebody can still say ("re-run P04477"). Restore it ` +
+        `from git, or run --bless if the rows genuinely moved to another file.`);
+      continue;
+    }
+    if (nowCounts[f] < was) {
+      fail(`the ledger ${f} has SHRUNK — ${was} numbered check(s) before, ${nowCounts[f]} now, ` +
+        `${was - nowCounts[f]} lost. A sweep APPENDS its section; it never overwrites the file. ` +
+        `Recover them with \`git diff ${join(DIR, f)}\`, or run --bless if the rows genuinely moved ` +
+        `to another ledger.`);
+    }
+  }
+}
+// Growth (and a brand-new ledger) is normal and is recorded without being asked. This write only
+// happens on a run that is otherwise about to pass, so the baseline can never be moved DOWN by
+// simply running the guard again after the damage.
+if (!problems.length) {
+  const next = {};
+  for (const f of Object.keys(nowCounts).sort()) next[f] = BLESS ? nowCounts[f] : Math.max(nowCounts[f], floor[f] || 0);
+  const text = JSON.stringify(next, null, 2) + "\n";
+  if (!existsSync(COUNTS) || readFileSync(COUNTS, "utf8") !== text) writeFileSync(COUNTS, text);
+}
+
 if (problems.length) {
   console.error(`\n❌ verify:ledger-index — ${problems.length} problem(s):\n`);
   problems.forEach((p) => console.error("  · " + p + "\n"));
@@ -150,4 +200,4 @@ if (problems.length) {
 }
 console.log(`✅ verify:ledger-index — ${ledgers.length} ledger(s), ${phaseRows} phase rows, ` +
   `${owner.size} distinct ids, no collisions, ${referenced.size} summary back-reference(s) all resolving, ` +
-  `and INDEX.md still tells the next sweep to re-run before it re-invents.`);
+  `no ledger has lost a row, and INDEX.md still tells the next sweep to re-run before it re-invents.`);
