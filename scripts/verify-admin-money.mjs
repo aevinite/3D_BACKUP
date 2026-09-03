@@ -191,7 +191,18 @@ head("I-M · the ledger's net, the platform count, the guest filter, the loss sp
     "10 · with a stable tiebreak, so no row can appear on two pages (bill actions land in the same millisecond)");
   ok(/wantCount = url\.searchParams\.get\("count"\) === "1"/.test(api), "10 · the exact total is only counted when asked");
   ok(/count: "exact", head: true/.test(api), "10 · and counted without pulling rows");
-  ok(/riskCount = riskQ && !riskQ\.error \? \(riskQ\.count \?\? null\) : null/.test(api),
+  // Matched on the RULE, not on the expression that implemented it (re-pinned 2026-09-02, found by
+  // sweep #8 / T17 round 2). This was pinned to `riskCount = riskQ && !riskQ.error ? (riskQ.count
+  // ?? null) : null` — the exact old text. The read was later moved onto the shared ReadSet helper
+  // and now says `riskCount = wantCount && !reads.failed("riskTotal") ? reads.count("riskTotal")
+  // : null`: the same answer, and the same refusal to call a failed count zero. The guard went red
+  // for a refactor that kept its behaviour, and had been red on `main` since — which is worse than
+  // not existing, because a permanently-red guard is one nobody reads and it hides the next real
+  // regression behind it.
+  //
+  // What has to be true is that riskCount ends up `null` when the count could not be read, rather
+  // than 0. Anything narrower breaks again the next time the read is tidied.
+  ok(/riskCount =[\s\S]{0,120}?:\s*null;/.test(api) && /riskTotal/.test(api),
     "10 · the risk banner counts the WHOLE log, and says null rather than 0 when it could not");
   ok(/MAX_RETENTION_DAYS = 30/.test(api), "10 · the reply states how long a change survives (mig 158)");
   const chg = R("app/aevinite/bill-audit/changes/page.tsx");

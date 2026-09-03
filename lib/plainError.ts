@@ -69,6 +69,73 @@
  * and ASK it: components/admin/shared.tsx is a .tsx, and Node cannot strip JSX, so anything the
  * guard needs to run has to sit in a plain .ts. Same reason lib/logTrail.ts is client-safe.
  */
+/** How long a limit's window is, in words ("5 min", "60 sec"). */
+function perWords(secs?: number | null): string {
+  if (!secs || secs <= 0) return "";
+  return secs % 60 === 0 ? `${secs / 60} min` : `${secs} sec`;
+}
+
+/**
+ * rateEditWords — a change to one limit, written as a sentence.
+ *
+ * WHY (owner, 2026-09-02): "why the logs are in the code supabase language". The record of a
+ * rate-limit edit used to be the patch object, stringified:
+ *
+ *   rate limit "guest_order" updated: {"enabled":true,"updated_at":"2026-09-02T09:03:46.697Z",
+ *   "updated_by":"admin"}
+ *
+ * That line sat on the admin DASHBOARD, in "Latest activity" — the first thing the console shows.
+ * Two thirds of it (`updated_at`, `updated_by`) is bookkeeping the log row already carries in its
+ * own timestamp and panel, so it said nothing twice and the one thing that changed was buried in
+ * the middle of it.
+ *
+ * Now the same edit records: `Guest orders — switched on` / `Guest orders — now 5 tries per 10 min`.
+ * Nothing is lost: what a limit currently IS lives in the rate_limit_rules row, not in its diary.
+ */
+export function rateEditWords(key: string, patch: { enabled?: unknown; max_count?: unknown; window_seconds?: unknown }): string {
+  const name = RATE_LABELS[key] || key.replace(/_/g, " ");
+  const parts: string[] = [];
+  // `enabled` first: switching a limit off makes the numbers beside it irrelevant, so it is the
+  // fact a person needs to read first.
+  if (patch.enabled !== undefined) parts.push(patch.enabled ? "switched on" : "switched off");
+  const count = patch.max_count === undefined ? null : Number(patch.max_count);
+  const secs = patch.window_seconds === undefined ? null : Number(patch.window_seconds);
+  if (count !== null && secs !== null) parts.push(`now ${count} tries per ${perWords(secs) || `${secs} sec`}`);
+  else if (count !== null) parts.push(`now ${count} tries per window`);
+  else if (secs !== null) parts.push(`window now ${perWords(secs) || `${secs} sec`}`);
+  return `${name} — ${parts.length ? parts.join(", ") : "settings changed"}`;
+}
+
+/**
+ * What a person calls each database table, for the messages that name one.
+ *
+ * Only the tables that actually appear in a refusal, and only where a person has a word for them.
+ * An unknown table keeps its real name in quotes: a name somebody can search for beats "a table",
+ * and inventing a friendly word for a table nobody recognises would just hide which one it was.
+ */
+const TABLE_WORDS: Record<string, string> = {
+  staff_actions: "the activity log",
+  deletion_audit: "the removals record",
+  orders: "the orders",
+  order_items: "the order items",
+  sessions: "the table sessions",
+  menu_items: "the menu",
+  categories: "the menu categories",
+  restaurants: "the restaurants list",
+  staff_users: "the staff list",
+  settings: "the settings",
+  bills: "the bills",
+  invoices: "the invoices",
+  customers: "the guest records",
+  rate_limit_rules: "the rate limits",
+  agent_runs: "the overnight-run history",
+  print_jobs: "the printing queue",
+};
+function tableInWords(name: string): string {
+  const bare = String(name || "").replace(/^public\./, "");
+  return TABLE_WORDS[bare] ? TABLE_WORDS[bare] : `"${bare}"`;
+}
+
 /**
  * What a person calls each rate limit. THE ONE LIST — the phone alert (lib/rateLimit.ts), the
  * diary line written when one is edited (rateEditWords) and the translation of the old JSON rows
@@ -372,7 +439,11 @@ const RULES: Rule[] = [
   // ── Permission and sign-in ────────────────────────────────────────────────────────────────────
   {
     test: /\bpermission denied for (?:table|relation|function) ([\w.]+)/i,
-    say: (m) => `The app wasn't allowed to read "${m[1]}" from the database.`,
+    // The TABLE NAME is the one useful fact in this message, and `staff_actions` is still database
+    // language (sweep #8 / T17 round 2 flagged it: the plain sentence was quoting a table name at
+    // him). So the tables a person has a word for are named in that word, and anything else keeps
+    // its real name — better than dropping it, because "some table" tells nobody anything.
+    say: (m) => `The app wasn't allowed to read ${tableInWords(m[1])} from the database.`,
     then: "A permission is missing on the server side — nothing to do with the permission switches on the Access screen, and nothing that can be fixed from there.",
   },
   {

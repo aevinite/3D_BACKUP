@@ -20,18 +20,27 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 // Day-aligned (Asia/Kolkata) [from, to) bounds for the three range presets —
 // matches the bucketing the RPCs use (date_trunc('day', … AT TIME ZONE 'Asia/Kolkata')).
-function rangeBounds(range: string): { from: Date; to: Date } {
+//
+// It also reports `days` — how many WHOLE IST DAYS the window covers. That number cannot be
+// derived from the span (found 2026-09-02, sweep #8/T17 round 2): `to` is NOW, so a 7-day window
+// opened at 07:03 spans 6.29 days and one opened at 18:00 spans 6.75, and rounding either gives
+// the wrong answer half the day. The route was reporting `quietWindowDays: 6` for the same window
+// whose `trend` it filled with 7 day-buckets — its own two answers about one window disagreeing,
+// and the one it told the screen changed with the clock.
+function rangeBounds(range: string): { from: Date; to: Date; days: number } {
   const now = new Date();
   // "today" starts at the 05:00-IST business-day rollover — the SAME boundary the Dashboard
   // (/api/admin/dashboard) and the Live-floor RPC use, so "Orders today" can't disagree
   // between screens for orders placed 00:00–05:00 IST (audit 2026-07-07). Multi-day ranges
   // stay day-aligned (their buckets are whole IST days anyway).
-  if (range === "today") return { from: new Date(businessDayStartIso(now)), to: now };
+  if (range === "today") return { from: new Date(businessDayStartIso(now)), to: now, days: 1 };
   const istNow = new Date(now.getTime() + IST_OFFSET_MS);
   const istMidnight = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate());
-  const days = range === "30d" ? 29 : 6;
-  const fromIst = istMidnight - days * 86400000;
-  return { from: new Date(fromIst - IST_OFFSET_MS), to: now };
+  // `back` is how many midnights to step back; the window then covers `back + 1` calendar days,
+  // because it runs from that midnight up to now — today included.
+  const back = range === "30d" ? 29 : 6;
+  const fromIst = istMidnight - back * 86400000;
+  return { from: new Date(fromIst - IST_OFFSET_MS), to: now, days: back + 1 };
 }
 
 // Zero-fill the trend so every bucket in the window exists — a day/hour with no
@@ -104,7 +113,7 @@ export async function GET(req: NextRequest) {
   const dayMs = dayLooksRight ? Date.parse(`${rawDay}T00:00:00Z`) : NaN;
   const dayIsReal = Number.isFinite(dayMs) && new Date(dayMs).toISOString().slice(0, 10) === rawDay;
   const drillDay = dayIsReal ? rawDay : "";
-  const { from, to } = drillDay ? istDayBounds(drillDay) : rangeBounds(range);
+  const { from, to, days: windowDays } = drillDay ? { ...istDayBounds(drillDay), days: 1 } : rangeBounds(range);
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
   // ?refresh=1 — the page's ↻ button asks for the live value and waits for it.
@@ -123,6 +132,14 @@ export async function GET(req: NextRequest) {
   // true, [])), and the change-detector is the same cheap orders fingerprint the owner reports
   // use — with ids = null meaning "every restaurant", so a single order anywhere refreshes it.
   const payload = await cachedOwnerPayload({
+    // v3 → v4 (2026-09-02): `quietWindowDays` CHANGED MEANING. It used to be the span rounded to
+    // whole days — 6 before noon and 7 after it, for the same 7-day range — and it is now the
+    // range's own calendar-day count, so the card stops saying "previous 6 days" under a picker
+    // that says 7. The change-detector is an ORDERS fingerprint: it notices a new order and it
+    // cannot notice that a number now means something different. Without this bump every stored
+    // v3 snapshot would go on serving the old figure until an order happened to land in that
+    // window — hours for a 30-day window, never for an old drilled day. Exactly the v1 → v2 story
+    // below, which is why that note ends by asking for this.
     // v2 → v3 (2026-09-01): the payload gained the "going quiet" comparison. A stored v2 snapshot
     // has no `quiet` field at all, and the fingerprint watches ORDERS, so the new card would sit
     // empty on every cached window until an order happened to land in it. Bumping retires them all
@@ -135,10 +152,10 @@ export async function GET(req: NextRequest) {
     // window, which for a 30-day window could be hours and for an old drilled day is never. Bumping
     // the version retires every stale snapshot the moment this deploys. Any future change to what
     // these numbers MEAN has to bump it again.
-    key: `admin:v3:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
+    key: `admin:v4:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
     force,
     fingerprint: () => ordersFingerprint(null, fromIso, toIso),
-    compute: () => computeAnalytics(drillDay ? "today" : range, from, to, fromIso, toIso, !!drillDay),
+    compute: () => computeAnalytics(drillDay ? "today" : range, from, to, fromIso, toIso, !!drillDay, windowDays),
   });
   return NextResponse.json(payload);
 }
@@ -155,11 +172,37 @@ export async function GET(req: NextRequest) {
 const QUIET_MIN_PREV_PER_DAY = 3;
 const QUIET_DROP = 0.6;
 
-async function computeAnalytics(range: string, from: Date, to: Date, fromIso: string, toIso: string, hourly = false) {
+async function computeAnalytics(range: string, from: Date, to: Date, fromIso: string, toIso: string, hourly = false, windowDays = 1) {
   // The window immediately BEFORE this one, of exactly the same length, so the comparison is
   // like-for-like (7 days against the previous 7, 30 against the previous 30).
+  // ── ONE WINDOW, TWO HONEST NUMBERS (found 2026-09-02, sweep #8 / T17 round 2) ────────────────
+  //
+  // The route was reporting `quietWindowDays: 6` for the very same window whose `trend` it had
+  // filled with SEVEN day-buckets — its own two answers about one window disagreeing. And which
+  // answer you got depended on the clock: `to` is NOW, so a 7-day window opened at 07:03 spans
+  // 6.29 days and one opened at 18:00 spans 6.75, and the old `Math.round(spanMs / 86400000)`
+  // turned that into 6 before noon and 7 after it. On screen the card read "fallen against their
+  // previous 6 days" under a picker that says 7 days.
+  //
+  // The mistake was using ONE number for two jobs that genuinely need different ones:
+  //
+  //   · `windowDays` — how many CALENDAR days this range covers (7, 30). It comes from
+  //     rangeBounds, the range's own definition, so it cannot drift with the time of day. This is
+  //     the number the CARD SAYS OUT LOUD, and it is the one that has to agree with the picker.
+  //
+  //   · `spanDays` — how long the window actually IS, to the hour, unrounded. The previous window
+  //     is exactly `spanMs` long so the comparison stays like-for-like (that symmetry is the whole
+  //     claim of this card: "a restaurant against ITS OWN previous window"). So the "was it ever
+  //     busy enough to bother flagging" average below must divide by THIS, not by the label —
+  //     dividing a 6.29-day count by 7 quietly raises the threshold.
+  //
+  // My first pass at this fixed the label by making the previous window `windowDays` WHOLE days,
+  // and that broke the symmetry the card depends on: the current window is 6 whole days plus
+  // today-so-far, so a 7-whole-day comparison makes every restaurant look like it lost a day's
+  // orders and inflates every percentage on the card. The two numbers stay separate for that
+  // reason — do not collapse them again.
   const spanMs = to.getTime() - from.getTime();
-  const windowDays = Math.max(1, Math.round(spanMs / 86400000));
+  const spanDays = Math.max(1 / 24, spanMs / 86400000);
   const quietOn = !hourly && range !== "today" && windowDays >= 2;
   const prevFromIso = new Date(from.getTime() - spanMs).toISOString();
 
@@ -262,7 +305,9 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
           silent: now === 0 && before > 0,
         };
       })
-      .filter((r) => r.before / windowDays >= QUIET_MIN_PREV_PER_DAY && (r.silent || r.dropPct >= QUIET_DROP * 100))
+      // `spanDays`, not `windowDays` — the previous window is exactly as long as this one, and that
+      // is the length this average is over. See the note above for why the two are different.
+      .filter((r) => r.before / spanDays >= QUIET_MIN_PREV_PER_DAY && (r.silent || r.dropPct >= QUIET_DROP * 100))
       // Gone-silent first, then by how far it fell — the order someone would want to read them in.
       .sort((a, b) => Number(b.silent) - Number(a.silent) || b.dropPct - a.dropPct || b.before - a.before);
   }

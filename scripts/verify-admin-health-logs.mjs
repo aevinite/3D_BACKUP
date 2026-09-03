@@ -304,7 +304,17 @@ ok(/const BROKEN_3D_LIMIT = 200;/.test(HEALTH_ROUTE), "P23610",
   "health route: BROKEN_3D_LIMIT is gone — the cap and the count can now disagree");
 ok(/\.limit\(BROKEN_3D_LIMIT\)/.test(HEALTH_ROUTE), "P23611",
   "health route: the 3D read no longer uses the named limit, so `capped` can be computed against the wrong number");
-ok(/capped: \(broken3dQ\.data \|\| \[\]\)\.length >= BROKEN_3D_LIMIT/.test(HEALTH_ROUTE), "P23612",
+// Matched on the RULE, not on the expression that happened to implement it (re-pinned 2026-09-02).
+// This was `capped: (broken3dQ.data || []).length >= BROKEN_3D_LIMIT` — the exact text of the old
+// code. The read was later moved onto the shared ReadSet helper, so it now reads
+// `capped: reads.rows<…>("broken3d").length >= BROKEN_3D_LIMIT`: the same comparison, the same
+// answer, a different way of getting the rows. The guard went red for a refactor that kept its
+// behaviour, and had been red on `main` for some time — which is worse than not existing, because
+// a permanently-red guard is one nobody reads and it hides the next real regression behind it.
+//
+// What actually has to be true is that `capped` is decided by comparing the number of rows we got
+// against the limit we asked for. Anything narrower breaks again the next time the read is tidied.
+ok(/capped:[\s\S]{0,160}?\.length >= BROKEN_3D_LIMIT/.test(HEALTH_ROUTE), "P23612",
   "health route: the 3D answer no longer reports whether it was capped");
 ok(/h\.broken3d\.capped \? "\+" : ""/.test(HEALTH), "P23613",
   "health: the 3D check row prints a bare number again for a capped answer");

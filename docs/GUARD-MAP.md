@@ -248,6 +248,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | you touched | run | needs | writes |
 |---|---|---|---|
 | a rulebook that states a COUNT (guards, routes, docs), or you added a `verify:*`/`test:*` script | `verify:doc-counts` ← also chained into `verify:push`, because it lives in `.github/scripts/` and for months nothing ran it locally, so CI went red for everyone | nothing | no |
+| anything on an `/aevinite` page or an `/api/admin/*` route | `verify:admin-sweep -- --base http://localhost:4000` | the app running | no |
 | an activity-log or audit line a person will read, or an alert's action button | `verify:plain-logs` | nothing | no |
 | `CLAUDE.md`, `AGENTS.md`, or any doc CLAUDE.md points at | `verify:pointers` | nothing | no |
 | **`.vercelignore`** — adding or removing an exclusion | `npm run build` **with the folder moved out of the tree**, then move it back. Nothing else proves it: an unanchored `/editor` line once 404'd the whole manager panel on every deploy, and a grep finding no reader is not the same as a build succeeding. `/supabase` (371 files) was added this way on 2026-08-22. | nothing | no |

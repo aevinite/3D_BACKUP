@@ -183,7 +183,13 @@ function quotedStrings(src) {
   const missing = [];
   const named = new Set();
   for (const [k, cmd] of entries) {
-    for (const m of String(cmd).matchAll(/scripts\/[A-Za-z0-9_.\/-]+\.(?:mjs|ts)/g)) {
+    // MATCH THE WHOLE PATH, including a directory in front of `scripts/` (2026-09-02).
+    // This started at "scripts/", so `node .github/scripts/verify-doc-counts.mjs` matched only
+    // the tail — `scripts/verify-doc-counts.mjs` — and existsSync then looked for it in the wrong
+    // folder and reported a guard that is right there as missing. That made this check red on
+    // clean `main`, and because it runs in the PostToolUse hook it refused Write/Edit in every
+    // session in the folder until someone worked out it was the guard and not the repo.
+    for (const m of String(cmd).matchAll(/(?:[A-Za-z0-9_.-]+\/)*scripts\/[A-Za-z0-9_.\/-]+\.(?:mjs|ts)/g)) {
       named.add(m[0]);
       if (!existsSync(join(ROOT, m[0]))) missing.push(`${k} → ${m[0]}`);
     }
