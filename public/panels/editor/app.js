@@ -4413,6 +4413,12 @@ async function restoreBill(orders) {
       // every try in this function, so a successful restore ended with no sentence at all: the
       // bill came back on the floor and the person was told nothing, which is the one thing
       // this codebase does not allow a tap to do.
+      // FOUND TWICE, INDEPENDENTLY, IN THE SAME SWEEP (2026-09-03): terminal 7 by reading this
+      // function, terminal 6 by running ESLint's no-undef over every panel script and then driving
+      // it on the real panel with api() stubbed — the PATCH goes out, the bill IS restored, and
+      // zero toasts appear. Same fix from both sides, so the code below is one version, not two.
+      // verify:panel-scope now runs that no-undef pass on every change, which is what makes a third
+      // one of these impossible to ship quietly.
       anyQueued = wasQueued(await api("PATCH", "/orders/" + o.id, patch)) || anyQueued;
       if (patch.archived === false) o.archived = false;
       if (patch.status) o.status = patch.status;
@@ -4424,6 +4430,9 @@ async function restoreBill(orders) {
   }
   renderEditor();
   if (failCount) toast(`Restored ${okCount} of ${okCount + failCount} orders — ${failCount} failed, please retry`, "err");
+  // A restore where every order was already on the floor changed nothing, and says so rather
+  // than claiming success (sweep #8 T6).
+  else if (!okCount) toast("Nothing on this bill needed restoring.", "ok");
   else okToast(anyQueued ? { queued: true } : null, "Bill restored to the live floor");
 }
 
