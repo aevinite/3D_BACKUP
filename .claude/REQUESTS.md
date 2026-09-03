@@ -1054,4 +1054,23 @@ is kept in full above.**
       card and its "Open its menu" button were driven in Chrome (it opens that restaurant's manager
       panel, where the file is uploaded), and the row was deleted again by its exact id.
 
+- [x] **"See if this is failing, fix that"** (2026-09-03) — a pasted guard report listing 7 failures.
+      Re-ran every one. **Two were not failing at all:** `verify:audit` passes 89/89 and
+      `verify:pointers` passes (docs/GUARD-MAP.md:53 does carry the `verify:accent-ink` row), so
+      nothing was changed for those. The other five were real and are fixed:
+      · `verify:ui` + `verify:panel-cache` were ONE fault — `editor/index.html` still pointed
+        app.js at the hash from *before* 5dfa7ab3, so /manager and /editor could serve that
+        commit's fix stale for up to 24h. Re-stamped.
+      · `verify:admin-restaurants` #26 was asserting the `.limit()` shape that `lib/pageAll`
+        deliberately replaced on 2026-08-31, while `verify-read-guards.mjs:353` praised the same
+        reads for paging. `.range(` now counts — and the check could not have caught a real one
+        anyway: its 400-char window ran to the first `;`, which a `Promise.all` of reads does not
+        have until the last one closes, so each read borrowed its neighbour's ceiling. Sabotage-
+        tested both ways.
+      · `verify:tablet`'s two failures (the restaurant name cut to "little Fren…" at 390px and
+        360px) had three measured causes: the connection pill spent 25px saying "Live" through a
+        span the phone rule could not target, `.lfh-conn-n` held a 7px gap open while empty, and
+        the `@media (max-width:430px)` rule for the name pill was dead — same specificity as the
+        base rule below it. All three fixed; "Offline" still prints its word at 360px.
+
 Nothing left over from this run.
