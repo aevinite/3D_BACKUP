@@ -19,6 +19,8 @@
 //     node scripts/sweep/t9/round2-states.mjs   --base=http://localhost:4309   #  70 rows
 //     node scripts/sweep/t9/round2-overlays.mjs --base=http://localhost:4309   #  49 rows
 //     node scripts/sweep/t9/live.mjs            --base=http://localhost:4309   #  46 rows
+//     node scripts/sweep/t9/replay-t6-driven.mjs  --base=http://localhost:4309 # 170 rows (item 10)
+//     node scripts/sweep/t9/replay-t6-driven2.mjs --base=http://localhost:4309 # 132 rows (item 10)
 // Round 2's STATIC blocks (D and E, 115 rows) ARE in here and run with everything else.
 //
 // It is a STATIC guard on purpose — it takes about a second and needs no server, so it can run in
@@ -37,7 +39,8 @@ import { runRows, report, row, APP, APPC, hasRe } from "./sweep/t9/lib.mjs";
 for (const m of ["replay-block1", "replay-block1b", "replay-block2", "replay-contracts",
                  "new-a-blocked-and-menu", "new-c-printing", "new-e-route-and-rest",
                  "replay-other-ledgers", "new-f-items789",
-                 "round2-contracts", "round2-crosspanel"]) {
+                 "round2-contracts", "round2-crosspanel",
+                 "replay-t6-b1", "replay-t6-b2", "replay-t6-b3", "replay-t6-b4", "replay-t6-b5"]) {
   await import("./sweep/t9/" + m + ".mjs");
 }
 
