@@ -92,6 +92,16 @@ export function runRows({ only } = {}) {
   return { pass, fail, failures, total: rows.length };
 }
 
+/** Emit every row of the last runRows() as a ledger line (for --ledger). */
+export function ledgerLines(how) {
+  return rows.map((r) => {
+    let out; try { out = r.fn(); } catch (e) { out = "threw: " + (e && e.message); }
+    const ok = out === true;
+    const note = ok ? "mechanical, re-runnable by id" : String(out).replace(/\|/g, "\\|").slice(0, 150);
+    return `| ${r.id} | ${r.label.replace(/\|/g, "\\|")} | ${how} | ${ok ? "✅" : "❌"} | ${note} |`;
+  });
+}
+
 export function report(title, res) {
   console.log(`\n${title}`);
   console.log(`  ${res.pass} passed · ${res.fail} failed  (of ${res.total} rows in this guard)`);

@@ -13,6 +13,14 @@
 //     npm run verify:kitchen -- --only P02534      # exactly one ledger row, forever
 //     npm run verify:kitchen -- --only P62701,P62740
 //
+// ROUND 2's DRIVEN blocks are NOT in here, on purpose — they need a browser and a running server,
+// which a PostToolUse hook cannot have. Run them yourself against your own port:
+//     node scripts/sweep/t9/round2-values.mjs   --base=http://localhost:4309   # 266 rows
+//     node scripts/sweep/t9/round2-states.mjs   --base=http://localhost:4309   #  70 rows
+//     node scripts/sweep/t9/round2-overlays.mjs --base=http://localhost:4309   #  49 rows
+//     node scripts/sweep/t9/live.mjs            --base=http://localhost:4309   #  46 rows
+// Round 2's STATIC blocks (D and E, 115 rows) ARE in here and run with everything else.
+//
 // It is a STATIC guard on purpose — it takes about a second and needs no server, so it can run in
 // the PostToolUse hook on a kitchen edit. The rows that need a running browser live in
 // `scripts/sweep/t9/live.mjs` (headless, `--base=http://localhost:<port>`), and the rows that need
@@ -28,7 +36,8 @@ import { runRows, report, row, APP, APPC, hasRe } from "./sweep/t9/lib.mjs";
 
 for (const m of ["replay-block1", "replay-block1b", "replay-block2", "replay-contracts",
                  "new-a-blocked-and-menu", "new-c-printing", "new-e-route-and-rest",
-                 "replay-other-ledgers", "new-f-items789"]) {
+                 "replay-other-ledgers", "new-f-items789",
+                 "round2-contracts", "round2-crosspanel"]) {
   await import("./sweep/t9/" + m + ".mjs");
 }
 

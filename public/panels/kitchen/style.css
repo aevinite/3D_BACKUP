@@ -360,7 +360,10 @@ html:not([data-theme="light"]) .ltitle small .alg { color: #fbbf24; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .drawer-head h3 { margin: 0; font-size: 17px; }
 .drawer-head .sub { color: var(--muted); font-weight: 500; font-size: 13px; }
-.dish-search { padding: 11px 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 15px; margin-bottom: 10px; }
+/* The 86 board's search box is a TAP TARGET before it is a text field — a cook opens the drawer to
+   find one dish mid-service. It measured 41px tall at every width (T9 sweep #8 round 2), the same
+   3px short as the two ✕ buttons above, and for the same reason: nothing ever set it. */
+.dish-search { padding: 11px 13px; min-height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 15px; margin-bottom: 10px; }
 .dish-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
 /* "Sold out only" — one tap to answer "what have we 86'd tonight?" instead of scrolling the menu
    hunting for red (owner, 2026-08-26). Full width and 44px, because it is pressed with a wet hand
@@ -384,8 +387,17 @@ html:not([data-theme="light"]) .outfilter.on { color: #fca5a5; }
    hit it). These are the controls a cook uses mid-service on a greasy tablet to say "we're out of
    that", and a mis-tap here puts a dish back on sale. Applies at every width: a phone is touch
    too, and nothing here was ever mouse-only. */
+/*   …AND THE WIDTH, WHICH THIS RULE MISSED (T9 sweep #8 round 2, measured at 360 / 768 / 820 /
+     1280px — all four). The comment above already says "applies at every width: a phone is touch
+     too", and only the HEIGHT was ever set. So the 86 board's ✕ and the printer sheet's ✕ measured
+     41 × 44 on every screen: 3px short in one dimension, which is the shape the comment above calls
+     "a control that only ALMOST reaches it is the one that gets missed mid-service".
+     THIS IS NOT R41. R41 refused a min-width on `.top-actions .btn` — the TOP BAR — because
+     widening those is exactly what brings back the four-row bar at 360px. These two live inside
+     OVERLAYS: there is no bar to re-wrap, the sheets are 320-360px wide with one control on the
+     row, and 3px changes no layout. Measured after: 44 × 44, nothing else moved. */
 .dish-row .btn, .drawer-head .btn, .prsheet-head .btn {
-  min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center;
 }
 .dtitle { font-size: 14.5px; font-weight: 600; }
 .dtitle small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
