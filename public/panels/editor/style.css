@@ -1567,6 +1567,54 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
   @media (max-width: 599px) { body:not(.floor-preview) .ftile-grid { --per-row: 3; } }
   @media (min-width: 600px) { body:not(.floor-preview) .ftile-grid { --per-row: 4; } }
 }
+/* ── THE PHONE HEADER GETS OUT OF THE WAY (owner, 2026-09-03) ─────────────────────────────────
+   His words: *"there si too much space almiost 40 percent of space taken on live ms thing
+   notification and table view written and 4/31 occupidide ... make thiings small so that it ovly
+   should cover 20 percent of screen of mobile"*.
+   Measured on his A35 (360x780) before this: the first table began at **227px — 31% of the screen**,
+   spent on two bands that each WRAPPED to two rows:
+     · the top bar, 113px: the brand line "Manager · little French house" in 34px Georgia took the
+       whole width, so the Live pill and the bell were pushed onto a second row with the left half
+       of it empty;
+     · the floor head, 114px: "Table view" in 30px Georgia beside the KOT and QO/P buttons, with the
+       three stat pills (2/31 OCCUPIED · 0 TO PAY · 2 NEEDS YOU) wrapped underneath at ~50px tall.
+   Nothing is removed — a manager still gets the restaurant's name, the connection, the bell, both
+   buttons and all three numbers. They are simply sized for a phone so each band fits on ONE row.
+   Phone only: a laptop and an iPad are untouched. */
+@media (pointer: coarse) and (max-width: 599px) and (max-height: 1149px) {
+  /* ── the top bar, one row ── */
+  /* ONE ROW, WHICH IS THE WHOLE SAVING. Measured before: the burger (44px) plus the brand (225px)
+     filled the width, so `.top-actions` — the connection pill and the bell — wrapped onto a second
+     row 156px wide with the left half of it empty. That empty half was most of the 113px this bar
+     cost. Two changes let all three sit on one line: the actions get narrower, and the brand is
+     allowed to SHRINK and ellipse instead of pushing them off. Nothing is removed. */
+  body:not(.floor-preview) .topbar { padding: 5px 8px; gap: 6px; min-height: 0; flex-wrap: nowrap; }
+  body:not(.floor-preview) .brand { font-size: 16px; gap: 4px; flex: 1 1 auto; min-width: 0;
+    overflow: hidden; white-space: nowrap; }
+  body:not(.floor-preview) .brand .brand-ico { width: 18px; height: 18px; flex: none; }
+  /* The restaurant's name STAYS — it is the one thing here that says which tenant you are looking
+     at — and truncates with an ellipsis if the width runs out, rather than shoving the bell to a
+     second row. Wrapping is what cost the height; a shortened name costs nothing. */
+  body:not(.floor-preview) #brandRest { font-size: 11.5px; font-weight: 700; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body:not(.floor-preview) .top-actions { flex: none; gap: 5px; }
+  body:not(.floor-preview) .lfh-conn { font-size: 10.5px; padding: 3px 7px; }
+  body:not(.floor-preview) .topbar .bell-btn, body:not(.floor-preview) .topbar .icon-btn,
+  body:not(.floor-preview) .top-actions .btn { padding: 4px 6px; }
+  body:not(.floor-preview) .nav-burger { padding: 0; width: 38px; height: 38px; flex: none; }
+
+  /* ── the floor head, one row ── */
+  body:not(.floor-preview) .ed-head { padding: 7px 9px; gap: 7px; row-gap: 6px; }
+  body:not(.floor-preview) .ed-head h2 { font-size: 17px; }
+  body:not(.floor-preview) .ed-head h2 .sub { font-size: 11px; }
+  body:not(.floor-preview) .ed-head .btn { padding: 5px 9px; font-size: 12px; min-height: 30px; }
+
+  /* ── the three numbers, one short row ── */
+  body:not(.floor-preview) .fstat { padding: 3px 9px; font-size: 11px; min-height: 0; border-radius: 999px; }
+  body:not(.floor-preview) .fstat-n { font-size: 14px; }
+  body:not(.floor-preview) .fstat-l { font-size: 9.5px; letter-spacing: .02em; }
+  body:not(.floor-preview) .floor-stats, body:not(.floor-preview) .fstats { gap: 5px; margin: 0; }
+}
 /* ── A PHONE TILE IS WIDE, NOT SQUARE (owner, 2026-09-03) ─────────────────────────────────────
    His words, after seeing three per row land: *"make sure you make it the size small, the text size
    and all that so that vertically also more number of table can be there"*.
@@ -1599,8 +1647,13 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
   body:not(.floor-preview) .ftile .ft-take,
   body:not(.floor-preview) .ftile .ft-bill { min-height: 22px; padding: 1px 4px; font-size: 10.5px; }
   body:not(.floor-preview) .ft-strip { margin-top: 1px; height: 3px; }
-  body:not(.floor-preview) .ft-ribbon { font-size: 8px; padding: 0 3px; letter-spacing: .02em; }
-  body:not(.floor-preview) .ftile.ft-tag { padding-bottom: 12px; }
+  /* THE BANNER SCALES WITH THE TILE. Its stock size — 10px text, 36px of side padding, offset
+     -32px — is drawn for a 177px desktop square; on a 107x71 phone tile that same banner is wider
+     than the tile and covers it, which is what he called trash. Sized in cqw here, it stays the
+     small corner flag it looks like on a laptop. */
+  body:not(.floor-preview) .ft-ribbon { font-size: clamp(5.6px, 5.2cqw, 7.5px); letter-spacing: .2px;
+    padding: 0 clamp(8px, 9.5cqw, 13px); top: clamp(8px, 11cqw, 14px); right: clamp(-12px, -9.5cqw, -8px);
+    box-shadow: 0 1px 4px rgba(0,0,0,.4); }
 }
 /* The faint chair watermark on a free/off table — top-right, subtle, premium. Carries
    the table's seat count (migration 111) alongside the icon, so "free" also answers
