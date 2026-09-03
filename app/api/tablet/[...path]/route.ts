@@ -494,9 +494,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const cats = (must(cat) || []) as { slug: string; name: unknown; sort_order: unknown; active: unknown }[];
       const h = createHash("sha1");
       h.update(String(rows.length) + "|");
-      for (const r of rows) h.update(`${r.id}${r.title ?? ""}${String(r.price ?? "")}${(r.tags || []).join(",")}`);
+      // \u0001 / \u0002 as ESCAPES, not as literal bytes (sweep #8 T10, 2026-09-03). They are field
+      // and record separators — "ab"+"c" must not hash the same as "a"+"bc" — and that is right. But
+      // they were written as the raw control characters, which made this .ts file classify as binary
+      // ("file" reports it as `data`, not text), and one editor, formatter or copy-paste that strips
+      // or normalises a control byte silently changes the digest. The escapes produce the byte-for-byte
+      // SAME string, so the digest is unchanged (checked against the live /menu-sig answer either
+      // side of this edit), and the file is plain text again.
+      for (const r of rows) h.update(`${r.id}\u0001${r.title ?? ""}\u0001${String(r.price ?? "")}\u0001${(r.tags || []).join(",")}\u0002`);
       h.update("||" + String(cats.length) + "|");
-      for (const c of cats) h.update(`${c.slug}${JSON.stringify(c.name ?? "")}${String(c.sort_order ?? "")}${String(c.active)}`);
+      for (const c of cats) h.update(`${c.slug}\u0001${JSON.stringify(c.name ?? "")}\u0001${String(c.sort_order ?? "")}\u0001${String(c.active)}\u0002`);
       // 16 hex chars is plenty: this only has to differ when the menu differs, and a collision
       // would cost one skipped self-heal, which the realtime breadcrumb covers anyway.
       return ok({ sig: h.digest("hex").slice(0, 16), dishes: rows.length });
