@@ -1645,7 +1645,15 @@ function renderKitchenSettings() {
         ? "Tickets are coming out of this screen's printer, and they keep coming when this window is minimised or covered."
         : heldByOther
           ? `Tickets are coming out at <b>${holder}</b>.`
-          : "No screen has taken the printer yet. Aevidine chooses which screen prints, on the Printing screen."}</p>
+          // A STALE STATION IS NOT "NOBODY" (T9 sweep #8, watched on the running board). `st.stale`
+          // makes heldByOther false, so this note used to fall through to "No screen has taken the
+          // printer yet." while the row directly above it named that very screen and said "(gone
+          // quiet)". A cook reading the two lines together gets opposite answers about the same
+          // printer. Say what is actually true: it held the printer, it stopped answering, and a
+          // quiet station is taken over by itself.
+          : (st && st.active)
+            ? `<b>${holder}</b> was printing and has stopped answering. Another screen takes over by itself after a few minutes; the tickets are waiting, not lost.`
+            : "No screen has taken the printer yet. Aevidine chooses which screen prints, on the Printing screen."}</p>
       `}
     </div>`;
   box.innerHTML = `
