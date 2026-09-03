@@ -1167,6 +1167,40 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+
+// ── A STYLE RULE FOR SOMETHING NOTHING CAN DRAW (sweep #8 T10, 2026-09-03) ────────────────────
+//
+// Six rules in this panel's stylesheet styled classes no file could put on the screen, and each one
+// was a feature that had been REPLACED rather than removed with its old path — which is the rule
+// CLAUDE.md states as "a new way replaces the old one, never leave both". The clearest was
+// `.t-waiting`, the bright yellow "open but nobody seated yet" tile: the owner ruled on 2026-07-31
+// that a party with nothing ordered is an available table, summaryTile() re-presents that state as
+// `free` AT THE SOURCE, and from that day tileState() could never return it. The rule sat there
+// looking like live styling for a state this panel does not have.
+//
+// A class can be BUILT rather than written — tileHtml() emits `t-${st.cls}` — so every prefix the
+// panel constructs is read out of the panel rather than typed here. Counting those as dead is how
+// this check would cry wolf, and a guard that cries wolf is how a real one comes to be ignored.
+{
+  const cssTxt = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  const cssBare = cssTxt.replace(/\/\*[\s\S]*?\*\//g, " ");
+  const defined = [...new Set([...cssBare.matchAll(/\.([a-z][a-z0-9-]{2,})(?=[\s,:.{\[>]|$)/gm)].map((m) => m[1]))];
+  const dir = path.join(ROOT, "public", "panels");
+  let surface = src + (() => { try { return fs.readFileSync(path.join(ROOT, HTML), "utf8"); } catch { return ""; } })();
+  try { for (const f of fs.readdirSync(dir)) if (f.endsWith(".js")) surface += fs.readFileSync(path.join(dir, f), "utf8"); } catch {}
+  const builtPrefixes = [...new Set([...surface.matchAll(/([a-z][a-z0-9-]*-)\$\{/g)].map((m) => m[1]))];
+  const orphan = defined.filter((c) => !surface.includes(c) && !cssBare.includes("--" + c)
+    && !builtPrefixes.some((pre) => c.startsWith(pre)) && !/googleapis|gstatic/.test(c));
+  check(
+    "tablet: every class the stylesheet defines is one some file can actually put on the screen",
+    orphan.length === 0,
+    `${CSS} styles ${orphan.length} class(es) nothing renders: ${orphan.join(", ")}\n    ` +
+    `Either the markup that used them was replaced and the rule was left behind (delete it, with an\n    ` +
+    `obituary saying what it was — that is the house rule), or a prefix is built dynamically and this\n    ` +
+    `check needs to learn it. It already learns every `+"`x-${…}`"+` prefix the panel writes.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

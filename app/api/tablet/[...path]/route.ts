@@ -480,10 +480,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "menu-sig") {
       const [mi, cat] = await Promise.all([
         sb.from("menu_items").select("id,title,price,tags").eq("restaurant_id", rid).order("id").limit(2000),
-        // .limit(500) to match the manager panel's twin (editor route, GET /all). It is the only
-        // read in this territory that was scoped and column-named but UNBOUNDED — about ten rows on
-        // a real restaurant, so this changes nothing today and closes the one exception to
-        // CLAUDE.md's "column list AND .limit()". (owner picked it, 2026-08-28)
+        // .limit(500) to match the manager panel's twin (editor route, GET /all). About ten rows on
+        // a real restaurant, so this changes nothing today and closes one exception to CLAUDE.md's
+        // "column list AND .limit()". (owner picked it, 2026-08-28)
+        // ⚠️ THIS USED TO SAY "the ONLY read in this territory that was scoped and column-named but
+        // UNBOUNDED", and that was wrong on the day it was written: the dish list in the /summary
+        // branch below was unbounded too, and it is roughly fifty times the size. Both carry a
+        // ceiling now. (sweep #8 T10, 2026-09-03 — a counted claim in a comment goes stale, which
+        // is why this one is corrected rather than quietly deleted.)
         sb.from("categories").select("slug,name,sort_order,active").eq("restaurant_id", rid).order("slug").limit(500),
       ]);
       const rows = (must(mi) || []) as { id: string; title: string | null; price: unknown; tags: unknown[] | null }[];
@@ -558,9 +562,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Full floor: attach the small table-agnostic collections in ONE round-trip. The dishes
       // query is STARTED here only on a full load (so it runs in parallel with the rest); on a
       // slim (nomenu) load it's never issued at all.
+      // .limit(2000) — the SAME ceiling the menu-sig digest above uses, and for the same reason.
+      // This is the heaviest read in the file (~50 kB of the ~77 kB full load) and it was the one
+      // scoped, column-named read here with no ceiling at all. CLAUDE.md's module checklist is
+      // explicit: a scoped read carries a column list AND a .limit(). It changes nothing today —
+      // a real restaurant has tens of dishes, not thousands — and 2000 is not a fresh guess: a menu
+      // bigger than that already outruns the digest that tells this panel the menu changed, so the
+      // two ceilings have to be the same number or the backstop would go quiet before the payload
+      // did. (The note on the menu-sig read used to claim the categories read was "the only" read
+      // in this territory that was unbounded. It was not: this one was, four lines below it.
+      // Corrected there in the same pass.)
       const dishesP = nomenu
         ? null
-        : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price,tax_mode").eq("restaurant_id", rid).order("category");
+        : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price,tax_mode").eq("restaurant_id", rid).order("category").limit(2000);
       const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order").limit(500),   // bounded like its twin — see the note on the menu-sig read above
