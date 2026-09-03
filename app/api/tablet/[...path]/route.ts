@@ -1476,8 +1476,42 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
       { const gsh = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gsh.allow) return gsh.resp; }
       const to = String((body && body.to) || "").trim();
-      // lfh_staff_shift_table derives the restaurant from the session itself and
-      // checks the target table within that same restaurant — no rid needed here.
+      // ── THE TWO CHECKS ITS MANAGER TWIN HAS AND THIS ONE DID NOT (sweep #8 T10, 2026-09-03) ───
+      //
+      // The comment that used to sit here said the RPC "derives the restaurant from the session
+      // itself and checks the target table within that same restaurant — no rid needed here". Half
+      // of that is true and it is the wrong half. `lfh_staff_shift_table(p_session, p_to)` reads
+      // `SELECT * FROM sessions WHERE id = p_session` with no tenant argument at all, then works
+      // inside whatever restaurant THAT ROW belongs to (mig 217, line 33). So it does not check the
+      // session against the caller's restaurant — nothing did.
+      //
+      // Every sibling on this route already asks. sessions/:id/invoice pre-reads the row and says so
+      // ("mirroring the editor invoice guard"); merge, unmerge, orders/:id/move and
+      // order-items/:id/move all hand the RPC `p_rid: rid` so SQL enforces it; bill-discount
+      // pre-reads. Shift was the one left out — and lib/sessionClose.ts's own header asserts, in
+      // writing, that "the neighbouring invoice/void/shift actions already do this same pre-check",
+      // which for this route was simply not so. The waiter-section gate above is not a substitute:
+      // waiterTables() returns null — no narrowing at all — for an unsectioned waiter, for a
+      // manager or owner looking in, and for every restaurant with sections switched off.
+      //
+      // AND THE DESTINATION HAS TO BE A TABLE THIS FLOOR HAS. The RPC refuses a non-numeric
+      // (`bad_table`) and refuses an occupied one, and stops there — it has never known the floor
+      // plan. So "Move table" was the ONE destination on this panel with no 1..table_count check:
+      // place-order, sessions/open, merge, move-a-KOT, move-a-dish and banquet/place all carry it
+      // and all say the same sentence. A party shifted onto a table the plan does not have lands as
+      // an off-plan tile — the shape lib/planTable.ts exists to stop ("20 orders on tables like
+      // 9,754,262 … their money sits in the books with no tile to serve or settle it from").
+      //
+      // Both reads are issued together, so this costs one round trip, on a tap that happens a
+      // handful of times a service. Word for word the manager's, including its wording.
+      const [ownsShift, shiftSet] = await Promise.all([
+        sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle(),
+      ]);
+      if (!must(ownsShift)) return err("That table isn't for this restaurant.", 404);
+      if (!/^\d+$/.test(to) || Number(to) < 1) return err("Pick a valid table to move to.", 400);
+      const shiftCount = Number((must(shiftSet) || {}).table_count) || 0;
+      if (shiftCount > 0 && Number(to) > shiftCount) return err(`Table ${to} doesn't exist (this place has ${shiftCount} tables).`, 400);
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
       // The RPC signals a refused move (target occupied / session closed / bad table) as
