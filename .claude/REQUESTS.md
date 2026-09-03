@@ -1021,3 +1021,37 @@ is kept in full above.**
   - **THE TOGGLE MOVES THE PAPER LINES WITH IT**, which is the part a screenshot cannot show. If the mode changed on its own, a restaurant switched to Chrome would keep three routes pointing at a computer — the board would say one thing and the paper would do another. So every answered line is rewritten into the new mode's shape, a line set to **Nobody** is left alone (the decision outlives the mechanism), going back to a computer does **not** invent a printer nobody chose, and auto-print is re-asserted so a mode change can never silently stop printing. All four of those are sweep phases now.
   - **BOTH BOARDS ARE STILL ONE BOARD.** Same toggle, same two choices, same words, same order, same progressive disclosure — and the two launcher cards share ONE component on each side, because two copies of that markup is exactly how the screens became "not identical" the first time.
   - **Checked:** typecheck clean · lint **0 errors** · `verify:static` **33/33** · `verify:print-helper` **106 → 132 checks** · `verify:printing-sweep` **118 → 125 phases, 0 failed** · `verify:print-queue` · `verify-doc-counts`. Driven on screen in **both modes and both skins on both boards**, zero console errors, and the real generated launcher run on this Mac in a sandboxed home so it touched nothing of yours.
+
+## 2026-09-02 — logs in human language, alerts that land on the switch, the night-audit clock
+
+- [x] **Every log a person reads is in plain English, not the app's own words.** Admin → Audit &
+      logs → Errors printed the browser's sentence ("Failed to execute 'removeChild' on 'Node'…").
+      `lib/plainError.ts` translates on DISPLAY from 27 rules, each written against a real row
+      measured in the dev database. The exact text is never rewritten — the list line is plain, the
+      opened card carries both under "Exact message", because that is what Send-to-Claude and the
+      repeat-grouping read. Covers admin logs, owner logs, the detail card, the Dashboard's Latest
+      activity, the notification drawer, an owner's activity trail, the Repair board, the manager
+      panel (sent the sentence by /oplog) and both phone alerts. VERIFIED in Chrome.
+- [x] **The raw JSON on the Dashboard is gone.** Two writers stringified their patch object into a
+      log detail; both write sentences now, and rows already stored the old way are translated to
+      the SAME wording so a mixed list reads as one thing. `/aevinite/owners` was also printing raw
+      action codes.
+- [x] **A Fix now door on Audit & logs**, carrying the restaurant he is filtered to, landing on the
+      board itself. The `?focus=` it sends was given a reader in the same change.
+- [x] **Every alert lands on the control that ends the problem, not the page it lives on.**
+      `lib/adminJump.ts`. The maintenance banner (a button per restaurant), Fix problems, and System
+      health's two checks that said "needs you" and offered nothing at all.
+- [x] **The night-audit clock explained itself.** The schedules are right (2:30/4:00/6:00 IST);
+      macOS runs a MISSED job when the Mac next wakes, which is the 09:27 pair on 1 Sept. The row
+      now says which of the two it is. Also surfaced: the owner audit had failed 8 of its last 12
+      nights and nothing said so.
+- [x] **500-phase admin-console sweep** — 527 checks, all green (`npm run verify:admin-sweep`).
+      Found one real product fault (the Going-quiet card's window was off by one and changed with
+      the time of day) and four guards that were red or blind on clean `main`.
+
+- [x] **The broken-3D door on System health was SEEN, not claimed.** No restaurant on the dev
+      database had a dish marked 4D with no model file, so one was inserted on French House, the
+      card and its "Open its menu" button were driven in Chrome (it opens that restaurant's manager
+      panel, where the file is uploaded), and the row was deleted again by its exact id.
+
+Nothing left over from this run.
