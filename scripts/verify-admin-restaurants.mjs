@@ -616,6 +616,23 @@ console.log("\n26. Every platform-wide read behind these screens has a ceiling")
   // makes it small today, but it grows with exactly the number this product is built to increase".
   // Four reads in the restaurants route were left without one. Egress is this product's cost.
   // (item 17.)
+  // ── TWO FAULTS IN THIS CHECK ITSELF, BOTH FOUND 2026-09-03 ──────────────────────────────────
+  // (a) `.range()` IS A CEILING. This was written when every bounded read here ended in `.limit()`.
+  //     On 2026-08-31 the four reads in restaurants/route.ts moved onto lib/pageAll (the long note
+  //     at that call site records it: T16 wanted `.limit(2000)`, T20 wanted paging, PAGING WON), so
+  //     the check went red over code that is MORE bounded than what it demanded — pageAll caps at
+  //     PAGE_ALL_MAX (50,000) and REFUSES past it, where `.limit()` silently truncates. All the
+  //     while verify-read-guards.mjs:353 was praising those same reads for paging, so two guards
+  //     disagreed about one file and the product was right either way. The rule is "has a ceiling",
+  //     not "spells it `.limit(`" — so `.range(` counts, the vocabulary verify-scoped-reads.mjs
+  //     already settled on (its BOUND, line 161). Paging cannot work without `.range()`, so naming
+  //     the helpers too would add nothing: `pageAll` sits BEFORE `.from(` and never lands in `q`.
+  // (b) THE WINDOW USED TO BORROW THE NEXT READ'S CEILING, which is how (a) stayed hidden. `q` ran
+  //     to the first `;`, and a Promise.all of reads has none until the last one closes — so one
+  //     read's 400 characters swallowed its neighbours. Deleting `.limit(2000)` from billing's
+  //     `plans` read was invisible: the window picked up the `.limit(5000)` on the `yearPayments`
+  //     line below it and called plans bounded. Stopping at the next `.from("` keeps each read
+  //     answering for itself. Re-check by DELETING a `.limit()` here — this must go red.
   const unbounded = [];
   for (const f of [
     "app/api/admin/restaurants/route.ts", "app/api/admin/restaurants/settings/route.ts",
@@ -624,10 +641,10 @@ console.log("\n26. Every platform-wide read behind these screens has a ceiling")
     "app/api/admin/billing/route.ts", "app/api/admin/floor/route.ts",
   ]) {
     const src = read(f);
-    for (const m of src.matchAll(/\.from\("([a-z_]+)"\)([\s\S]{0,400}?)(?=;|\n\s*(?:const|let|if|return|await|\}))/g)) {
+    for (const m of src.matchAll(/\.from\("([a-z_]+)"\)([\s\S]{0,400}?)(?=;|\.from\("|\n\s*(?:const|let|if|return|await|\}))/g)) {
       const q = m[2];
       if (!/\.select\(/.test(q)) continue;
-      if (/\.limit\(|maybeSingle\(\)|\.single\(\)|count:|head: true/.test(q)) continue;
+      if (/\.limit\(|\.range\(|maybeSingle\(\)|\.single\(\)|count:|head: true/.test(q)) continue;
       if (/\.update\(|\.insert\(|\.upsert\(|\.delete\(/.test(q)) continue;
       unbounded.push(f.split("/").slice(-2).join("/") + " · " + m[1]);
     }
