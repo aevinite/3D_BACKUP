@@ -915,7 +915,14 @@ check("P61329", "the printer strip's dead hooks are gone from the whole file", (
   && hasNot(codeOf(APP), /querySelectorAll\("\[data-prok\]"\)/) === true);
 check("P61330", "…and their obituary says where the live readout is now", () =>
   has(A, /The live readout is the 🔔 bell/));
-check("P61331", "…and printJobHere went with its only caller", () => hasNot(codeOf(APP), /function printJobHere/));
+check("P61331", "…and printJobHere has a LIVE caller again — it is back on the bell, where the obituary said it belonged", () =>
+  // Re-worded 2026-09-03 on the owner's word ("for 16th we can do in notification we can keep that
+  // option"). The rule this row defends has not changed — no function may sit here without a
+  // caller — only the answer has: it was deleted with the dead band, and it is back with a real
+  // one. The check is now the rule, not the answer, so it holds either way round.
+  has(AC, /async function printJobHere\(id, btn\)/) === true
+  && has(AC, /run: \(\) => printJobHere\(a\.id\)/) === true
+  && eq(countOf(AC, /printJobHere\(/g), 2));
 check("P61332", "printerAlerts still feeds the toasts, which is why it stayed", () =>
   has(ACT, /const list = printerAlerts\(\);/));
 check("P61333", "a missing printer payload never clears the seen-set — no crying wolf", () =>
@@ -998,5 +1005,169 @@ check("P61369", "the activity log turns a tap trail into a sentence, not raw JSO
   has(ACT, /if \(action !== "ui_taps"\) return String\(detail\)\.replace\(\/_\/g, " "\)/));
 check("P61370", "…and repeated taps are collapsed with a count rather than listed", () =>
   ACT.includes('counts.get(l) > 1 ? l + " \\u00d7" + counts.get(l) : l') || "the tap trail is not collapsed");
+
+/* ══════════ G · the owner's round two — items 12–16 (P61371–P61440) ═════════════════════════ */
+
+const BELL = read("public/panels/guestbell.js");
+const BELLC = codeOf(BELL);
+const EDROUTE = read("app/api/editor/[...path]/route.ts");
+const PQ = read("lib/printQueue.ts");
+const LEDGUARD = read("scripts/verify-ledger-index.mjs");
+
+// ── 12 · the split sheet's stepper keeps its unit ──────────────────────────────────────────────
+check("P61371", "the − number + and its unit are ONE group that cannot wrap apart", () =>
+  has(ACT, /<span style="display:inline-flex;align-items:center;gap:12px;flex-wrap:nowrap">[\s\S]{0,400}?<span class="muted">people<\/span>\s*<\/span>/));
+check("P61372", "…and the outer row may still wrap, so the label can drop to its own line on a phone", () =>
+  has(ACT, /display:flex;align-items:center;gap:12px;margin:14px 0;flex-wrap:wrap[\s\S]{0,120}?Split between/));
+check("P61373", "…and the reason is written at the site, so nobody 'tidies' the wrapper away", () =>
+  has(A, /"− 5 \+ people" IS ONE THING AND WRAPS AS ONE/));
+
+// ── 13 · the server closes the ₹0 expense door too ─────────────────────────────────────────────
+check("P61374", "the expenses route refuses zero as well as negative", () =>
+  has(INVAPI, /if \(!Number\.isFinite\(amount\) \|\| amount <= 0 \|\| amount > 10_000_000\) return err\("Enter a valid amount\."\)/));
+check("P61375", "…and it still refuses an absurd amount", () => has(INVAPI, /amount > 10_000_000/));
+check("P61376", "…and the panel and the route now agree, so neither can be the only guard", () =>
+  has(INVC, /if \(!\(amount > 0\)\) return toastMsg\("Enter the amount"\)/) === true
+  && has(INVAPI, /amount <= 0/) === true);
+
+// ── 15 · a ledger may grow, never shrink ───────────────────────────────────────────────────────
+check("P61377", "the ledger guard keeps a per-file row-count floor beside the ledgers", () =>
+  exists(".claude/sweep/LEDGER/ROW-COUNTS.json") === true && has(LEDGUARD, /ROW-COUNTS\.json/) === true);
+check("P61378", "…and it FAILS when a ledger loses rows", () => has(LEDGUARD, /has SHRUNK/));
+check("P61379", "…and when a whole ledger file disappears", () => has(LEDGUARD, /is GONE\./));
+check("P61380", "…and the floor can only be moved down by a person typing --bless", () =>
+  has(LEDGUARD, /const BLESS = process\.argv\.includes\("--bless"\)/));
+check("P61381", "…and the baseline is only ever written on a run that is otherwise passing", () =>
+  has(LEDGUARD, /if \(!problems\.length\) \{[\s\S]{0,400}?writeFileSync\(COUNTS, text\)/));
+check("P61382", "…so re-running the guard after the damage cannot lower the floor", () => {
+  const write = LEDGUARD.indexOf("writeFileSync(COUNTS");
+  const shrink = LEDGUARD.indexOf("has SHRUNK");
+  return (shrink > 0 && write > shrink) || "the write happens before the shrink test";
+});
+check("P61383", "the counts file really lists every ledger on disk", () => {
+  const counts = JSON.parse(read(".claude/sweep/LEDGER/ROW-COUNTS.json"));
+  const n = Object.keys(counts).length;
+  return atLeast(n, 30, "ledgers recorded");
+});
+check("P61384", "…and no recorded floor is above what the file actually holds right now", () => {
+  const counts = JSON.parse(read(".claude/sweep/LEDGER/ROW-COUNTS.json"));
+  const bad = [];
+  for (const [f, was] of Object.entries(counts)) {
+    const rows = read(`.claude/sweep/LEDGER/${f}`).split("\n").filter((l) => /^\|\s*P\d{5}\s*\|/.test(l) && l.split(/(?<!\\)\|/).length >= 6).length;
+    if (rows < was) bad.push(`${f}: ${rows} < ${was}`);
+  }
+  return bad.length === 0 || bad.join(", ");
+});
+
+// ── 16a · a bell row may carry ONE action ──────────────────────────────────────────────────────
+check("P61385", "the bell can render one action on a row", () =>
+  has(BELLC, /if \(r\.action && typeof r\.action\.run === "function"\)/));
+check("P61386", "…and that action's tap never also fires the row's own handler", () =>
+  has(BELLC, /e\.stopPropagation\(\);/));
+check("P61387", "…and one tap is one action, even on a slow phone", () => has(BELLC, /act\.disabled = true;/));
+check("P61388", "…and a throw puts the button back rather than leaving a dead '…'", () =>
+  has(BELLC, /catch \(err\) \{ act\.disabled = false; act\.textContent = String\(r\.action\.label \|\| "Do it"\); \}/));
+check("P61389", "…and the row's own body stays inert, so a stray tap cannot act by accident", () =>
+  has(BELLC, /node\.disabled = false;/) === true && has(BELLC, /node\.style\.cursor = "default";/) === true);
+check("P61390", "…and the action is a finger's size, at the panel's own 44px floor", () =>
+  has(BELL, /\.lfh-bell-act\{[^"]*min-height:44px/));
+check("P61391", "the file's 'a row is a doorway' rule now RECORDS the exception instead of contradicting it", () =>
+  has(BELL, /THE EXCEPTION \(owner, 2026-09-03\)/) === true
+  && has(BELL, /Do not grow this into buttons on the call \/ order \/ join rows/) === true);
+check("P61392", "…and the contract at the top of the file documents `action`", () => has(BELL, /may carry\s*\n \* one `action`/));
+
+// ── 16b · a stuck bill is a notification too ───────────────────────────────────────────────────
+check("P61393", "the floor read asks for stuck BILLS as well as stuck kitchen slips", () =>
+  has(EDROUTE, /\.eq\("restaurant_id", rid\)\.in\("kind", \["kot", "bill"\]\)/));
+check("P61394", "…and carries `kind` back, so the sentence can name which it is", () =>
+  has(EDROUTE, /select\("id, order_id, kind, status, attempts, created_at, requested_by, error"\)/));
+check("P61395", "…and the read is still scoped, column-listed and capped", () =>
+  has(EDROUTE, /\.or\(`status\.eq\.failed[\s\S]{0,200}?\.order\("created_at"\)\.limit\(5\)/));
+check("P61396", "…and it still rides the ONE shared 1.5s floor read, not a new one", () =>
+  has(EDROUTE, /sharedFloorSummary\(`printer:\$\{rid\}`/));
+check("P61397", "a stuck bill's sentence does not send anyone to the kitchen", () =>
+  has(ACT, /A bill\$\{j\.table_number != null \? " for " \+ tableLabel\(j\.table_number\) : ""\}/) === true
+  && has(ACT, /the customer is probably standing at the counter waiting for it/) === true);
+check("P61398", "…and a kitchen slip still says the kitchen", () => has(ACT, /hasn't printed\$\{isBill \? "" : " in the kitchen"\}/));
+check("P61399", "…and the bell reads the SAME list the toasts are built from", () =>
+  has(AC, /alerts = printerAlerts\(\);/));
+check("P61400", "…so one printer problem can never be worded two ways", () =>
+  eq(countOf(ACT, /function printerAlerts\(\)/g), 1));
+check("P61401", "a printerAlerts() failure can never stop the bell rendering", () =>
+  has(AC, /try \{ alerts = printerAlerts\(\); \} catch \(e\) \{ alerts = \[\]; \}/));
+check("P61402", "Print it here is offered on a kitchen slip and NOT on a bill", () =>
+  has(AC, /if \(a\.kind === "job" && a\.jobKind !== "bill" && a\.id\)/));
+check("P61403", "…and it runs the panel's own function, not a second copy of one", () =>
+  has(AC, /run: \(\) => printJobHere\(a\.id\)/));
+check("P61404", "printJobHere is back, and this time it has a caller", () =>
+  has(AC, /async function printJobHere\(id, btn\)/) === true && eq(countOf(AC, /printJobHere\(/g), 2));
+check("P61405", "…and it prints with the DUPLICATE banner, then closes the kitchen job", () =>
+  has(ACT, /reprint: r\.job \? r\.job\.reprint !== false : true/) === true
+  && has(ACT, /await api\("POST", `\/print-jobs\/\$\{id\}\/dismiss`, \{\}\)/) === true);
+check("P61406", "…and a failure says so rather than leaving a spinner", () =>
+  has(A, /Couldn't print it here: /));
+
+// ── 16c · an order only rings once it has been waiting ─────────────────────────────────────────
+check("P61407", "the waiting time is a NAMED constant, not a number buried in a route", () =>
+  has(PQ, /export const SLOW_ACCEPT_MS = 180_000/));
+check("P61408", "…and its note records whose number it is and why it is not the printer's", () =>
+  has(PQ, /order not accepted for more than 3 to 4 min/) === true
+  && has(PQ, /deliberately NOT[\s\S]{0,20}the same number as STUCK_AFTER_MS/) === true);
+check("P61409", "the slow-order read is restaurant-scoped, column-listed, capped and time-filtered", () =>
+  has(EDROUTE, /\.eq\("restaurant_id", rid\)\.eq\("status", "received"\)\.eq\("archived", false\)/) === true
+  && has(EDROUTE, /select\("id, table_number, kot_no, created_at"\)/) === true
+  && has(EDROUTE, /\.order\("created_at"\)\.limit\(5\)/) === true);
+check("P61410", "…and it rides the shared 1.5s window, so ten devices cost one read", () =>
+  has(EDROUTE, /sharedFloorSummary\(`slow-orders:\$\{rid\}`/));
+check("P61411", "…and a targeted ?table= refetch never pays for it", () => has(EDROUTE, /const slowOrders = tbl \? null :/));
+check("P61412", "…and it is only added to the answer when it was actually read", () =>
+  has(EDROUTE, /\.\.\.\(slowOrders \? \{ slowOrders \} : \{\}\)/));
+check("P61413", "…and the index it needs exists", () =>
+  has(read("supabase/migrations/104_scale_indexes_orders.sql"), /idx_orders_rest_active ON orders \(restaurant_id, status\)/));
+check("P61414", "the bell no longer walks the tiles to raise an order row", () =>
+  hasNot(AC, /if \(!tile \|\| !tile\.hasNew\) continue;/));
+check("P61415", "…it reads the server's aged list instead", () => has(AC, /const slow = state\.summary\.slowOrders \|\| \{\};/));
+check("P61416", "…and says how long, in the server's own minutes", () =>
+  has(AC, /waiting to be accepted for over \$\{slowMin\} minute/));
+check("P61417", "…with the right plural", () => has(AC, /\$\{slowMin === 1 \? "" : "s"\}/));
+check("P61418", "…and each row is keyed by the ORDER, so two at one table are two rows", () =>
+  has(AC, /key: "order-slow:" \+ o\.id/));
+check("P61419", "…and it carries a real timestamp, so its age survives a reload", () =>
+  has(AC, /at: at\(o\.created_at\)/));
+check("P61420", "…and a row with no table is skipped rather than rendered as 'Table undefined'", () =>
+  has(AC, /if \(!o \|\| o\.table_number == null\) continue;/));
+check("P61421", "waiter calls, joiners and requests are UNTOUCHED — they were not what he ruled on", () =>
+  has(AC, /kind: "call", table: c\.table_number/) === true
+  && has(AC, /kind: "join", table: j\.table_number/) === true
+  && has(AC, /kind: "request", table: r\.table_number/) === true);
+
+// ── the bell's own heading has to be true of what is in it ─────────────────────────────────────
+check("P61422", "the sheet no longer claims every row came from the guest menu", () =>
+  hasNot(BELLC, /From the guest menu/) === true && has(BELLC, /"Needs you"/) === true);
+check("P61423", "…and only offers 'tap to go to that table' when a row HAS a table", () =>
+  has(BELLC, /var anyTable = last\.rows\.some\(function \(r\) \{ return r && r\.table != null; \}\)/));
+check("P61424", "…and says something true when nothing in the list has one", () =>
+  has(BELL, /Nothing from the tables — these are things to look at\./));
+check("P61425", "…and the empty state no longer talks only about tables either", () =>
+  has(BELL, /Nothing needs you right now\./));
+
+check("P61426", "the shared-plumbing guard accepts the published deadline helper as a deadline", () =>
+  has(read("scripts/verify-panel-plumbing.mjs"), /signal:\\s\*\(deadline\\\(\|window\\\.LFH_PANEL_DEADLINE\\\(\)/));
+check("P61427", "…and it records that it was blind to the scope half of that fault", () =>
+  has(read("scripts/verify-panel-plumbing.mjs"), /was BLIND to/) === true
+  && has(read("scripts/verify-panel-plumbing.mjs"), /verify:panel-names/) === true);
+check("P61428", "every fetch in maint.js still carries a ceiling, in one spelling or the other", () => {
+  const src = read("public/panels/maint.js").replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
+  const calls = [];
+  for (let i = src.indexOf("fetch("); i >= 0; i = src.indexOf("fetch(", i + 1)) {
+    let d = 0, j = i + 5;
+    for (; j < src.length; j++) { if (src[j] === "(") d++; else if (src[j] === ")") { d--; if (!d) break; } }
+    calls.push(src.slice(i, j + 1));
+  }
+  const bare = calls.filter((c) => !/signal:\s*(deadline\(|window\.LFH_PANEL_DEADLINE\()/.test(c));
+  return bare.length === 0 || `${bare.length} of ${calls.length} have none`;
+});
+check("P61429", "…and there is still exactly ONE definition of it in that file", () =>
+  eq(countOf(codeOf(read("public/panels/maint.js")), /function deadline\(ms\)/g), 1));
 
 process.exit(report("sweep #8 · T7 · static") ? 1 : 0);

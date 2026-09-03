@@ -56,7 +56,18 @@ const WHOAMI = { actor: "manager", higherView: false, effectivePowers: {
   edit_settings: true, banquet: true, inv_stock: true, inv_expenses: true, parcel: true, platform: true,
   view_dashboard: true, view_ratings: true, manage_staff: true, table_assign: true, void_bills: true, print_setup: true,
 }, menuSub: {}, menuSubTint: {}, tabsOff: [], tabsTint: [], features: { table_ops: true } };
-const SUMMARY = { tiles: { "3": TILE }, calls: [], requests: [], joiners: [], blocklist: [], merges: [], order_count: 1, latest_order_table: "3", printer: null };
+const AGO = (ms) => new Date(Date.now() - ms).toISOString();
+// A floor with something actually wrong on it: one kitchen slip stuck, one BILL stuck, and one
+// order nobody has accepted for six minutes. Exactly the three things the bell now has to say.
+const PRINTER = {
+  events: [], waiting: { n: 0, oldestMs: null }, stuckAfterMs: 60000,
+  stuck: [
+    { id: "job-kot", order_id: "ord-1", kind: "kot", status: "queued", attempts: 0, created_at: AGO(300000), kot_no: 11, table_number: "3" },
+    { id: "job-bill", order_id: "ord-1", kind: "bill", status: "queued", attempts: 0, created_at: AGO(240000), kot_no: 11, table_number: "3" },
+  ],
+};
+const SLOW = { rows: [{ id: "ord-9", table_number: "2", kot_no: 12, created_at: AGO(360000) }], afterMs: 180000 };
+const SUMMARY = { tiles: { "3": TILE }, calls: [], requests: [], joiners: [], blocklist: [], merges: [], order_count: 1, latest_order_table: "3", printer: PRINTER, slowOrders: SLOW };
 const INV_ITEMS = { items: [
   { id: "ing-1", name: "Onion", category: "vegetables", storage_area: "dry store", base_uom: "g", purchase_uom: "kg", purchase_factor: 1000, qty_base: 8000, avg_cost: 0.03, par_qty: 5000, min_qty: 2000, last_rate: 30, track_level: "FULL", active: true },
   { id: "ing-2", name: "Tomato", category: "vegetables", storage_area: "dry store", base_uom: "g", purchase_uom: "kg", purchase_factor: 1000, qty_base: 4000, avg_cost: 0.04, par_qty: null, min_qty: null, last_rate: 40, track_level: "FULL", active: true },
@@ -74,6 +85,8 @@ const API = (path) => {
   if (p.endsWith("/calls") || p.endsWith("/members") || p.endsWith("/requests")) return [];
   if (p.endsWith("/platform")) return { orders: [], toggles: {}, channels: {}, platform_on: false, parcel_on: false };
   if (p.endsWith("/print-jobs/pending")) return { off: true, jobs: [] };
+  if (/\/print-jobs\/[^/]+$/.test(p)) return { job: { reprint: true }, order: { kot_no: 11, table_number: "3", created_at: AGO(300000), items: [], allergies: [] }, items: [] };
+  if (/\/print-jobs\/[^/]+\/dismiss$/.test(p)) return { ok: true };
   if (p.endsWith("/banquet/bills")) return { bills: [] };
   if (p.includes("/inventory") && p.endsWith("/items")) return INV_ITEMS;
   if (p.includes("/inventory") && p.endsWith("/negative")) return { items: [] };
@@ -306,9 +319,133 @@ await check("P61224 …and none of the inventory screens leaks a raw NaN or unde
 });
 await check("P61225 the panel is still error-free after all of that", () => errors.length === 0 || ("threw: " + errors.join(" | ")));
 
+// ── the 🔔 bell: what it says, and the one thing it lets you do ─────────────────────────────────
+await check("P61226 the bell is mounted and carries a count", async () => {
+  await page.evaluate(() => { setTab("tables"); syncGuestBell(); });
+  await page.waitForTimeout(400);
+  const n = await page.locator(".lfh-bell, [class*=lfh-bell]").count();
+  return n > 0 || "no bell button in the top bar";
+});
+await check("P61227 …and it carries a real age, because the clock now comes from the server", async () => {
+  const seen = await page.evaluate(async () => {
+    document.querySelector(".lfh-bell-x")?.click();
+    const btn = document.querySelector("button[class*=lfh-bell]");
+    btn.click();
+    await new Promise((r) => setTimeout(r, 250));
+    const row = [...document.querySelectorAll(".lfh-bell-row")].find((n) => /waiting to be accepted/i.test(n.innerText));
+    const when = row ? (row.querySelector(".lfh-bell-when") || {}).textContent : null;
+    document.querySelector(".lfh-bell-x")?.click();
+    return when;
+  });
+  // 6 minutes old in the fixture — the point is that it says an age at all. Before the server sent
+  // a timestamp there was nothing honest to put here and the row showed none.
+  return (typeof seen === "string" && /\d/.test(seen) && /min|hour|h |m /i.test(seen)) || ("the age reads: " + JSON.stringify(seen));
+});
+await check("P61228 …and an order that has JUST arrived is not", async () => {
+  const seen = await page.evaluate(async () => {
+    document.querySelector(".lfh-bell-scrim, .lfh-bell-wrap")?.remove();
+    const btn = document.querySelector("button[class*=lfh-bell]");
+    if (!btn) return { err: "no bell" };
+    btn.click();
+    await new Promise((r) => setTimeout(r, 250));
+    const rows = [...document.querySelectorAll(".lfh-bell-row")].map((n) => n.innerText.replace(/\s+/g, " ").trim());
+    document.querySelector(".lfh-bell-x")?.click();
+    return { rows };
+  });
+  if (seen.err) return seen.err;
+  const orderRows = seen.rows.filter((t) => /waiting to be accepted/i.test(t));
+  // T3 has hasNew=false in the fixture and T2 is the slow one — so exactly one order row, and it
+  // must be the aged one, naming how long it has waited.
+  return (orderRows.length === 1 && /over 3 minutes/.test(orderRows[0]) && /Table 2/.test(orderRows[0]))
+    || ("order rows: " + JSON.stringify(orderRows));
+});
+await check("P61229 a stuck kitchen slip is a notification, and it offers Print it here", async () => {
+  const seen = await page.evaluate(async () => {
+    const btn = document.querySelector("button[class*=lfh-bell]");
+    btn.click();
+    await new Promise((r) => setTimeout(r, 250));
+    const rows = [...document.querySelectorAll(".lfh-bell-row")].map((n) => ({
+      t: n.innerText.replace(/\s+/g, " ").trim(), act: !!n.querySelector(".lfh-bell-act"),
+    }));
+    document.querySelector(".lfh-bell-x")?.click();
+    return rows;
+  });
+  const kot = seen.filter((r) => /KOT #11/.test(r.t));
+  return (kot.length === 1 && kot[0].act === true) || ("kitchen-slip rows: " + JSON.stringify(seen.map((r) => r.t)));
+});
+await check("P61230 a stuck BILL is a notification too, and says the counter — not the kitchen", async () => {
+  const seen = await page.evaluate(async () => {
+    const btn = document.querySelector("button[class*=lfh-bell]");
+    btn.click();
+    await new Promise((r) => setTimeout(r, 250));
+    const rows = [...document.querySelectorAll(".lfh-bell-row")].map((n) => ({
+      t: n.innerText.replace(/\s+/g, " ").trim(), act: !!n.querySelector(".lfh-bell-act"),
+    }));
+    document.querySelector(".lfh-bell-x")?.click();
+    return rows;
+  });
+  const bill = seen.filter((r) => /A bill for/.test(r.t));
+  return (bill.length === 1 && /counter/.test(bill[0].t) && !/in the kitchen/.test(bill[0].t) && bill[0].act === false)
+    || ("bill rows: " + JSON.stringify(seen.map((r) => r.t)));
+});
+await check("P61231 tapping Print it here really prints and closes the job", async () => {
+  const out = await page.evaluate(async () => {
+    let printed = false, dismissed = false;
+    const realPrint = window.printTicketHtml;
+    window.printTicketHtml = () => { printed = true; return true; };
+    const btn = document.querySelector("button[class*=lfh-bell]");
+    btn.click();
+    await new Promise((r) => setTimeout(r, 250));
+    const row = [...document.querySelectorAll(".lfh-bell-row")].find((n) => /KOT #11/.test(n.innerText));
+    const act = row && row.querySelector(".lfh-bell-act");
+    if (!act) { window.printTicketHtml = realPrint; return { err: "no action button" }; }
+    act.click();
+    await new Promise((r) => setTimeout(r, 700));
+    window.printTicketHtml = realPrint;
+    document.querySelector(".lfh-bell-x")?.click();
+    return { printed };
+  });
+  return out.printed === true || ("it did not print: " + JSON.stringify(out));
+});
+await check("P61232 …and the row's own body is inert, so a stray tap cannot print by accident", async () => {
+  const inert = await page.evaluate(async () => {
+    const btn = document.querySelector("button[class*=lfh-bell]");
+    btn.click();
+    await new Promise((r) => setTimeout(r, 250));
+    const row = [...document.querySelectorAll(".lfh-bell-row")].find((n) => /A bill for/.test(n.innerText));
+    const dis = row ? row.disabled : null;
+    document.querySelector(".lfh-bell-x")?.click();
+    return dis;
+  });
+  return inert === true || ("the bill row is tappable: " + inert);
+});
+await check("P61233 🍴 Split: the stepper and its unit stay on ONE line at 360px", async () => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.evaluate(() => { document.querySelector(".split-overlay")?.remove(); openSplitBill(555.55); });
+  await page.waitForTimeout(250);
+  const box = await page.evaluate(() => {
+    const n = document.querySelector(".split-overlay #spN");
+    const people = [...document.querySelectorAll(".split-overlay .muted")].find((e) => e.textContent.trim() === "people");
+    if (!n || !people) return null;
+    const a = n.getBoundingClientRect(), b = people.getBoundingClientRect();
+    return { sameLine: Math.abs(a.top - b.top) < 12, gap: Math.round(b.left - a.right) };
+  });
+  await page.evaluate(() => document.querySelector(".split-overlay")?.remove());
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForTimeout(200);
+  return (box && box.sameLine === true) || ("the word 'people' is not beside the number: " + JSON.stringify(box));
+});
+
 if (SHOTS) {
   if (!existsSync(SHOT_DIR)) mkdirSync(SHOT_DIR, { recursive: true });
   await page.screenshot({ path: join(SHOT_DIR, "floor-1280.png") });
+  await page.evaluate(async () => {
+    document.querySelector(".lfh-bell-x")?.click();
+    document.querySelector("button[class*=lfh-bell]").click();
+    await new Promise((r) => setTimeout(r, 300));
+  });
+  await page.screenshot({ path: join(SHOT_DIR, "bell-1280.png") });
+  await page.evaluate(() => document.querySelector(".lfh-bell-x")?.click());
   const phone = await browser.newContext({ viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
   await phone.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
