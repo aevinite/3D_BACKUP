@@ -14339,12 +14339,20 @@ function openSplitBill(total) {
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split the bill</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body">
       <div class="disc-bill-row"><span>Bill total</span><b>${inrExact(total)}</b></div>
+      <!-- "− 5 + people" IS ONE THING AND WRAPS AS ONE (owner, 2026-09-03, from the screenshot).
+           The row was five loose items in a wrapping flex line, so on a 360px phone it broke after
+           the ＋ and left the single word "people" stranded on its own line, left-aligned, away
+           from the number it belongs to. The stepper and its unit now sit in one nowrap group, so
+           the only thing that can ever move to a second line is the "Split between" label — and
+           the number keeps its word. -->
       <div style="display:flex;align-items:center;gap:12px;margin:14px 0;flex-wrap:wrap">
         <label class="dish-edit-lbl" style="margin:0">Split between</label>
-        <button class="btn" id="spMinus" type="button" style="min-width:44px">−</button>
-        <b id="spN" style="font-size:18px;min-width:24px;text-align:center">2</b>
-        <button class="btn" id="spPlus" type="button" style="min-width:44px">+</button>
-        <span class="muted">people</span>
+        <span style="display:inline-flex;align-items:center;gap:12px;flex-wrap:nowrap">
+          <button class="btn" id="spMinus" type="button" style="min-width:44px">−</button>
+          <b id="spN" style="font-size:18px;min-width:24px;text-align:center">2</b>
+          <button class="btn" id="spPlus" type="button" style="min-width:44px">+</button>
+          <span class="muted">people</span>
+        </span>
       </div>
       <div id="spBody"></div>
       <div class="muted small" style="margin-top:10px">A helper only — collect each share, then tap “Mark paid” to settle the whole bill.</div>
