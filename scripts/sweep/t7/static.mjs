@@ -1017,6 +1017,11 @@ check("P61370", "…and repeated taps are collapsed with a count rather than lis
 /* ══════════ G · the owner's round two — items 12–16 (P61371–P61440) ═════════════════════════ */
 
 const BELL = read("public/panels/guestbell.js");
+// syncGuestBell() sits at ~6,700, in terminal 6's half of editor/app.js, so the `A`/`ACT` tails
+// this terminal owns do not contain it. Every assertion about the bell's rows reads THIS instead —
+// the function itself, comments and all — which is both correct and more precise than the file.
+const BELLFN = (APP.match(/function syncGuestBell\(\)[\s\S]*?\n\}/) || [""])[0];
+const BELLFNC = codeOf(BELLFN);
 const BELLC = codeOf(BELL);
 const EDROUTE = read("app/api/editor/[...path]/route.ts");
 const PQ = read("lib/printQueue.ts");
@@ -1134,20 +1139,26 @@ check("P61413", "…and the index it needs exists", () =>
   has(read("supabase/migrations/104_scale_indexes_orders.sql"), /idx_orders_rest_active ON orders \(restaurant_id, status\)/));
 check("P61414", "the bell no longer walks the tiles to raise an order row", () =>
   hasNot(AC, /if \(!tile \|\| !tile\.hasNew\) continue;/));
-check("P61415", "…it reads the server's aged list instead", () => has(AC, /const slow = state\.summary\.slowOrders \|\| \{\};/));
+check("P61415", "…it reads the server's aged list instead", () => has(BELLFNC, /\(state\.summary\.slowOrders \|\| \{\}\)\.rows/));
 check("P61416", "…and says how long, in the server's own minutes", () =>
-  has(AC, /waiting to be accepted for over \$\{slowMin\} minute/));
-check("P61417", "…with the right plural", () => has(AC, /\$\{slowMin === 1 \? "" : "s"\}/));
+  has(BELLFNC, /waited\("not accepted"\)/) === true && has(BELLFNC, /for over \$\{overdueMin\} minute/) === true);
+check("P61417", "…with the right plural", () => has(BELLFNC, /\$\{overdueMin === 1 \? "" : "s"\}/));
 check("P61418", "…and each row is keyed by the ORDER, so two at one table are two rows", () =>
   has(AC, /key: "order-slow:" \+ o\.id/));
 check("P61419", "…and it carries a real timestamp, so its age survives a reload", () =>
   has(AC, /at: at\(o\.created_at\)/));
 check("P61420", "…and a row with no table is skipped rather than rendered as 'Table undefined'", () =>
   has(AC, /if \(!o \|\| o\.table_number == null\) continue;/));
-check("P61421", "waiter calls, joiners and requests are UNTOUCHED — they were not what he ruled on", () =>
+check("P61421", "waiter calls, joiners and requests STAY in the bell — and wait the same 3 minutes", () =>
+  // RE-WORDED 2026-09-03 on his second ruling: "it should not leave — it should come when for
+  // 3 min if the waiter has not attended". Round two left these three firing instantly because he
+  // had only named the ORDER row; asked directly, he settled the shape of the whole list. The row
+  // keeps its id: the rule it defends ("these three belong in the bell") is unchanged, and what
+  // moved is when they arrive.
   has(AC, /kind: "call", table: c\.table_number/) === true
   && has(AC, /kind: "join", table: j\.table_number/) === true
-  && has(AC, /kind: "request", table: r\.table_number/) === true);
+  && has(AC, /kind: "request", table: r\.table_number/) === true
+  && eq(countOf(BELLFNC, /if \(!overdue\(ts\)\) continue;/g), 3));
 
 // ── the bell's own heading has to be true of what is in it ─────────────────────────────────────
 check("P61422", "the sheet no longer claims every row came from the guest menu", () =>
@@ -1177,5 +1188,81 @@ check("P61428", "every fetch in maint.js still carries a ceiling, in one spellin
 });
 check("P61429", "…and there is still exactly ONE definition of it in that file", () =>
   eq(countOf(codeOf(read("public/panels/maint.js")), /function deadline\(ms\)/g), 1));
+
+/* ══════════ H · ONE RULE FOR THE WHOLE BELL — his second ruling (P61430–P61462) ═════════════ */
+
+check("P61430", "the bell has ONE overdue rule, not one per kind of thing", () =>
+  has(BELLFNC, /const overdue = \(ts\) => Date\.now\(\) - ts >= overdueMs;/) === true
+  && eq(countOf(BELLFNC, /if \(!overdue\(ts\)\) continue;/g), 3));
+check("P61431", "…and ONE number governs all four rows", () =>
+  has(BELLFNC, /const overdueMs = Number\(\(state\.summary\.slowOrders \|\| \{\}\)\.afterMs\) \|\| 180000;/));
+check("P61432", "…taken from the SERVER's number, so the two halves cannot drift", () =>
+  has(read("lib/printQueue.ts"), /export const SLOW_ACCEPT_MS = 180_000/) === true
+  && has(read("app/api/editor/[...path]/route.ts"), /afterMs: SLOW_ACCEPT_MS/) === true);
+check("P61433", "…and it falls back to the same three minutes when a targeted refetch omits it", () =>
+  has(BELLFNC, /\|\| 180000;/));
+check("P61434", "…and every row says how long it has waited, in one shared sentence", () =>
+  has(BELLFNC, /const waited = \(word\) => `\$\{word\} for over \$\{overdueMin\} minute\$\{overdueMin === 1 \? "" : "s"\}`;/));
+check("P61435", "…with the right plural at one minute", () => has(BELLFNC, /overdueMin === 1 \? "" : "s"/));
+check("P61436", "…and the minutes come from the number, never typed twice", () =>
+  has(BELLFNC, /const overdueMin = Math\.max\(1, Math\.round\(overdueMs \/ 60000\)\);/));
+check("P61437", "a waiter call says it has NOT BEEN ATTENDED, which is the thing that is wrong", () =>
+  has(BELLFNC, /waited\("not attended"\)/));
+check("P61438", "…and keeps what the guest actually asked for beside it", () =>
+  has(BELLFNC, /note \? `\$\{note\} · \$\{waited\("not attended"\)\}` : waited\("not attended"\)/));
+check("P61439", "…and a resolved call never reaches the bell at all", () => has(BELLFNC, /if \(!c \|\| c\.resolved\) continue;/));
+check("P61440", "someone waiting to be let in says WAITING, and names them when it can", () =>
+  has(BELLFNC, /who \? `\$\{who\} · \$\{waited\("waiting"\)\}` : waited\("waiting"\)/));
+check("P61441", "…and any other request says the same", () =>
+  has(BELLFNC, /what \? `\$\{what\} · \$\{waited\("waiting"\)\}` : waited\("waiting"\)/));
+check("P61442", "an unaccepted order says NOT ACCEPTED, through the same helper", () =>
+  has(BELLFNC, /`\$\{waited\("not accepted"\)\}\$\{o\.kot_no != null \? " · KOT #" \+ o\.kot_no : ""\}`/));
+check("P61443", "…and it still names the KOT, which is what a manager looks for", () => has(BELLFNC, /" · KOT #" \+ o\.kot_no/));
+check("P61444", "a row with NO timestamp is shown, not hidden — an alarm fails open", () =>
+  has(BELLFN, /A row with NO timestamp is shown rather than hidden/) === true
+  && has(BELLFNC, /const at = \(v\) => \{ const t = v \? new Date\(v\)\.getTime\(\) : 0; return Number\.isFinite\(t\) \? t : 0; \};/) === true);
+check("P61445", "…and that choice is written down at the site, so nobody tidies it away", () =>
+  has(BELLFN, /fail-open is deliberate, not an accident/));
+check("P61446", "his own words are recorded at the code, both rulings", () =>
+  has(BELLFN, /it should not leave — it should come when for/) === true
+  && has(BELLFN, /waiter has not attended/) === true
+  && has(BELLFN, /order not accepted for more than 3 to 4 min/) === true);
+check("P61463", "…and that rule is explained ONCE, not once per row", () =>
+  eq(countOf(BELLFN, /order not accepted for more than 3 to 4 min/g), 1));
+check("P61447", "…and the reason the floor keeps showing them instantly is written down too", () =>
+  has(BELLFN, /the tile turns amber, wears its 💧\/🙋 badge and a one-tap ✓/));
+check("P61448", "the FLOOR still badges a call the moment it is rung — the live queue is untouched", () =>
+  has(ACT, /calls\.slice\(0, 3\)\.forEach\(\(c\) => \{ badges \+= `<span class="ftb call">\$\{callEmoji\(c\.note\)\}<\/span>`; \}\)/));
+check("P61449", "…in BOTH tile paths, so a selected table cannot disagree with an unselected one", () =>
+  eq(countOf(ACT, /calls\.slice\(0, 3\)\.forEach/g), 2));
+check("P61450", "…and 'Needs you' still counts a table the moment it wants something", () =>
+  has(ACT, /if \(hasNew \|\| hasCall\) needy\.add\(String\(i\)\);/));
+check("P61451", "…and a new order still gets its one-tap ✓ on the tile immediately", () =>
+  has(ACT, /data-quick-accept="\$\{i\}"/));
+check("P61452", "so the bell and the floor answer two DIFFERENT questions, deliberately", () =>
+  has(BELLFN, /the FLOOR is where they belong/));
+check("P61453", "the bell's four kinds all still have an icon and a headline", () => {
+  const m = codeOf(BELL).match(/var KINDS = \{[\s\S]*?\n  \};/)[0];
+  return ["call:", "order:", "join:", "request:", "printer:"].every((k) => m.includes(k)) || "a kind lost its wording";
+});
+check("P61454", "…and the call headline still reads as a person doing something", () =>
+  has(BELL, /call:    \{ icon: "🔔", what: "rang for a waiter" \}/));
+check("P61455", "nothing in the overdue gate can throw on a missing row", () =>
+  has(BELLFNC, /if \(!c \|\| c\.resolved\) continue;/) === true && has(BELLFNC, /if \(!o \|\| o\.table_number == null\) continue;/) === true);
+check("P61456", "…and a name or note is trimmed before it is drawn, so a blank one reads as blank", () =>
+  eq(countOf(BELLFNC, /\|\| ""\)\.trim\(\)/g), 3));
+check("P61457", "the overdue rule needs no new server read for three of the four", () =>
+  has(BELLFNC, /state\.summary\.calls/) === true && has(BELLFNC, /state\.summary\.joiners/) === true && has(BELLFNC, /state\.summary\.requests/) === true);
+check("P61458", "…because the summary already carries their times", () =>
+  eq(countOf(BELLFNC, /const ts = at\([cjr]\.created_at\);/g), 3));
+check("P61459", "…and only the ORDER needed a read adding, for the reason written at the site", () =>
+  has(BELLFN, /the floor summary reports an unaccepted order as a STATE with no time on it/));
+check("P61460", "…and that read is still scoped, capped and shared", () =>
+  has(read("app/api/editor/[...path]/route.ts"), /sharedFloorSummary\(`slow-orders:\$\{rid\}`/) === true
+  && has(read("app/api/editor/[...path]/route.ts"), /\.order\("created_at"\)\.limit\(5\)/) === true);
+check("P61461", "the bell still writes nothing — the one action is the print fallback, and only that", () =>
+  eq(countOf(BELLFNC, /row\.action = \{/g), 1));
+check("P61462", "…and no call, order or join row was given a button", () =>
+  has(BELLFNC, /if \(a\.kind === "job" && a\.jobKind !== "bill" && a\.id\)/));
 
 process.exit(report("sweep #8 · T7 · static") ? 1 : 0);

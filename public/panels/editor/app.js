@@ -6695,34 +6695,69 @@ function syncGuestBell() {
     if (!menuOn) { window.LFH_BELL.sync({ menuOn: false, rows: [], onOpen: null }); return; }
     const at = (v) => { const t = v ? new Date(v).getTime() : 0; return Number.isFinite(t) ? t : 0; };
     const rows = [];
-    // A raised hand, with what they actually said — the note is the useful half.
+    // ── NOTHING RINGS UNTIL NOBODY HAS DEALT WITH IT FOR THREE MINUTES ─────────────────────────
+    // The owner, 2026-09-03, asked twice and the second time settled the shape of this whole
+    // list. First: "order not accepted for more than 3 to 4 min only get you notification — it
+    // should not give notification just when order arrive; that will be in request queue, that's a
+    // whole separate queue for waiter call and all." Then, asked whether calls should therefore
+    // leave the bell entirely: **"it should not leave — it should come when for 3 min if the
+    // waiter has not attended, at that time it should work like that."**
+    //
+    // So the bell has ONE rule, and it is not "what kind of thing is this": it is **has anybody
+    // dealt with this in three minutes**. An order arriving, a hand going up and somebody asking
+    // to be let in are all ordinary work — the FLOOR is where they belong, and it already shows
+    // them the instant they happen: the tile turns amber, wears its 💧/🙋 badge and a one-tap ✓,
+    // and is counted in "Needs you". That is the live queue he means. This bell is the thing that
+    // says nobody answered.
+    //
+    // The same number governs all four, so a person only ever has to learn one: it comes from the
+    // server with the overdue orders (SLOW_ACCEPT_MS, lib/printQueue.ts) so the two halves can
+    // never drift, and falls back to the same three minutes when a targeted ?table= refetch has
+    // not carried it.
+    //
+    // A row with NO timestamp is shown rather than hidden. This is an alarm: being told about
+    // something that turns out to be fresh costs a glance, and staying silent about something old
+    // costs a guest. `at()` answers 0 for a missing date, which makes its age enormous — that
+    // fail-open is deliberate, not an accident, and it is written down here so nobody "tidies" it.
+    const overdueMs = Number((state.summary.slowOrders || {}).afterMs) || 180000;
+    const overdueMin = Math.max(1, Math.round(overdueMs / 60000));
+    const overdue = (ts) => Date.now() - ts >= overdueMs;
+    const waited = (word) => `${word} for over ${overdueMin} minute${overdueMin === 1 ? "" : "s"}`;
+    // A raised hand nobody has answered, with what they actually said — the note is the useful half.
     for (const c of (state.summary.calls || [])) {
-      if (c && !c.resolved) rows.push({ kind: "call", table: c.table_number, text: c.note || "", at: at(c.created_at) });
+      if (!c || c.resolved) continue;
+      const ts = at(c.created_at);
+      if (!overdue(ts)) continue;
+      const note = (c.note || "").trim();
+      rows.push({ kind: "call", table: c.table_number, at: ts,
+        text: note ? `${note} · ${waited("not attended")}` : waited("not attended") });
     }
-    // Someone waiting to be let in to a table, and anything else a table asked for.
-    for (const j of (state.summary.joiners || [])) rows.push({ kind: "join", table: j.table_number, text: j.name || "", at: at(j.created_at) });
-    for (const r of (state.summary.requests || [])) rows.push({ kind: "request", table: r.table_number, text: r.note || r.kind || "", at: at(r.created_at) });
-    // ── AN ORDER ONLY RINGS ONCE IT HAS BEEN WAITING (owner, 2026-09-03) ───────────────────────
-    // "order not accepted for more than 3 to 4 min only get you notification — it should not give
-    // notification just when order arrive; that will be in request queue, that's a whole separate
-    // queue for waiter call and all."
-    //
-    // This used to walk every tile and raise a row the MOMENT one carried an unaccepted order, so
-    // the bell rang for something that was about to be answered in ten seconds by the person
-    // standing at the till. A notification is for something that has gone wrong; an order arriving
-    // is the job. The floor already shows arrivals — the tile turns amber, wears a one-tap ✓ and is
-    // counted in "Needs you" — and that live queue is where an arrival belongs.
-    //
-    // The clock comes from the SERVER (`slowOrders`, three minutes, riding the shared floor read),
-    // because the summary reports an unaccepted order as a STATE with no time on it (mig 238) —
-    // which is exactly why this could not be done here before. A real timestamp also means the row
-    // keeps its true age across a reload instead of restarting whenever somebody refreshes.
-    const slow = state.summary.slowOrders || {};
-    const slowMin = Math.max(1, Math.round(Number(slow.afterMs || 180000) / 60000));
-    for (const o of (slow.rows || [])) {
+    // Someone waiting to be let in, and anything else a table asked for — same rule, same number.
+    // (He named the waiter call; these two are the same shape — a person waiting on staff — and a
+    // bell that waited three minutes for one and rang instantly for the others would teach nobody
+    // anything. Named in the report so it can be undone on its own if he wants only the call.)
+    for (const j of (state.summary.joiners || [])) {
+      const ts = at(j.created_at);
+      if (!overdue(ts)) continue;
+      const who = (j.name || "").trim();
+      rows.push({ kind: "join", table: j.table_number, at: ts,
+        text: who ? `${who} · ${waited("waiting")}` : waited("waiting") });
+    }
+    for (const r of (state.summary.requests || [])) {
+      const ts = at(r.created_at);
+      if (!overdue(ts)) continue;
+      const what = (r.note || r.kind || "").trim();
+      rows.push({ kind: "request", table: r.table_number, at: ts,
+        text: what ? `${what} · ${waited("waiting")}` : waited("waiting") });
+    }
+    // The order half of the same rule. It is the one of the four whose clock has to come from the
+    // SERVER — the floor summary reports an unaccepted order as a STATE with no time on it
+    // (mig 238), so the panel has nothing to measure. The other three carry their own created_at
+    // in the summary already, which is why only this one needed a read adding.
+    for (const o of ((state.summary.slowOrders || {}).rows || [])) {
       if (!o || o.table_number == null) continue;
       rows.push({ kind: "order", table: o.table_number, key: "order-slow:" + o.id,
-        text: `waiting to be accepted for over ${slowMin} minute${slowMin === 1 ? "" : "s"}${o.kot_no != null ? " · KOT #" + o.kot_no : ""}`,
+        text: `${waited("not accepted")}${o.kot_no != null ? " · KOT #" + o.kot_no : ""}`,
         at: at(o.created_at) });
     }
     // ── PRINTING (owner, 2026-08-30) ────────────────────────────────────────────────────────
