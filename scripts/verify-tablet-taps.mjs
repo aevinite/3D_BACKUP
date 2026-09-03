@@ -301,7 +301,11 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   }
   check(
     "tablet: the split confirm refuses to guess when the party's rows could not be read",
-    /const readOk = await ensurePartySlices\(child, true\)/.test(un) && /if \(!readOk\)[\s\S]{0,200}?toast\(/.test(un),
+    // The anchor dropped the dead second argument with the call sites (sweep #8 T10, 2026-09-03) —
+    // ensurePartySlices() has never declared a `force` parameter and there is no non-forced mode, so
+    // the `true` was a word that only misled a reader. The ASSERTION is unchanged and is the part
+    // that matters: the answer must be READ and refused on, not thrown away.
+    /const readOk = await ensurePartySlices\(child\)/.test(un) && /if \(!readOk\)[\s\S]{0,200}?toast\(/.test(un),
     `${TABLET}: unmergeTable() must know whether the slices actually landed. ensureTableSlice swallows\n    a fetch blip on purpose, so without this the confirm reads an empty cache and announces "nothing\n    was ordered at it" about a table that is holding food — talking someone into a split by\n    understating it. Same rule closeTableAndFree already follows for "already free" vs "couldn't ask".`,
   );
   check(

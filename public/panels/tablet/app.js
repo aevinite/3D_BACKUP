@@ -1199,7 +1199,7 @@ async function selectTable(t) {
   if (window.matchMedia("(max-width: 760px)").matches) {
     document.getElementById("panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  await ensurePartySlices(t, true);     // FORCE a fresh pull — never trust up-to-60s-stale cached detail (M10);
+  await ensurePartySlices(t);           // always a fresh pull — never trust up-to-60s-stale cached detail (M10);
                                         // a merged table needs its whole PARTY's slices, not just its own
   if (String(state.table) !== String(t)) return; // the waiter already moved on — don't clobber
   lastSig = boardSig(state);            // adopt as baseline so the next poll doesn't re-flicker the detail
@@ -1595,7 +1595,7 @@ function bindFloorDelegation() {
     // Quick "Accept" — load the table's orders first (grid has only the slim summary), then accept.
     if ((q = e.target.closest(".tacc[data-quick='accept']"))) {
       const qt = q.dataset.qt;
-      await ensurePartySlices(qt, true); // FORCE — the tile's summary can be fresh while the cached
+      await ensurePartySlices(qt);       // always fresh — the tile's summary can be fresh while the cached
                                          // slice is up to 60s stale, so a just-arrived order would be
                                          // missed and silently accept nothing (audit 2026-07-09).
                                          // Party-wide: a merged party accepts as ONE bill.
@@ -1619,7 +1619,7 @@ function bindFloorDelegation() {
     // without opening it.
     if ((q = e.target.closest(".tpay[data-quick='pay']"))) {
       const t = q.dataset.qt;
-      await ensurePartySlices(t, true); // FORCE fresh rows so billNo/due + optimisticPay reflect the
+      await ensurePartySlices(t);       // always fresh rows, so billNo/due + optimisticPay reflect the
                                         // PARTY's real current bill, not an up-to-60s-stale slice.
       const a = tableAgg(t);
       await payBillWithMethod(t, a);
@@ -2312,7 +2312,7 @@ async function unmergeTable(child, opts = {}) {
   // device can end the merge between the paint and the finger.
   if (!parent) { toast(`${tableLabel(child)} isn't merged with another table any more.`, false); load().catch(() => {}); return; }
   if (!opts.silent) {
-    const readOk = await ensurePartySlices(child, true);   // both halves, so the sums below are real
+    const readOk = await ensurePartySlices(child);         // both halves, so the sums below are real
     // COULDN'T ASK IS NOT THE SAME AS NOTHING THERE (the rule closeTableAndFree already follows). If
     // a slice did not land, the lines below would read the empty cache and announce "nothing was
     // ordered at it" about a table that may be holding food — a confirm that talks someone into a
@@ -3456,6 +3456,13 @@ function bumpItemQty(itemId, delta) {
 // The shape itself is not a guess: loadImpl and loadTables already read the members in parallel and
 // merge them in a sequential loop, so this makes the panel do it one way in three places instead of
 // two ways in three places.
+// There is no non-forced mode, and there has not been one since ensureTableSlice() was deleted on
+// 2026-08-28 — its cache short-circuit went with it. Four call sites went on passing a second
+// `true` argument this function does not declare, and the comments beside them shouted FORCE, so a
+// reader would reasonably believe there was an opt-out to reach for. There is not: every call
+// re-reads the whole party. The argument is dropped rather than added, because adding a parameter
+// nothing needs is how a cache short-circuit gets re-introduced by accident on a whole-party read
+// that must never see half a bill. (sweep #8 T10, 2026-09-03)
 async function ensurePartySlices(t) {
   const tables = partyTablesOf(t);
   const slices = await Promise.all(tables.map((x) => api("GET", "/state?table=" + encodeURIComponent(x)).catch(() => null)));
