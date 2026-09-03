@@ -4358,7 +4358,7 @@ async function restoreBill(orders) {
     revertReason = ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true, presets: REASONS_REVERT })) || "").trim();
     if (!revertReason) { toast("Restore cancelled — a reason is required.", "err"); return; }
   }
-  let okCount = 0, failCount = 0;
+  let okCount = 0, failCount = 0, anyQueued = false;
   for (const o of orders) {
     const patch = {};
     if (o.archived) patch.archived = false;
@@ -4369,7 +4369,13 @@ async function restoreBill(orders) {
     }
     if (!Object.keys(patch).length) continue;
     try {
-      const _wq = await api("PATCH", "/orders/" + o.id, patch);
+      // The saved-not-sent answer is kept in a name that still exists at the toast below
+      // (sweep #8 T7). It used to be a `const` declared inside THIS try, inside the loop, and
+      // read after the loop had ended — a name nothing can see there. The throw landed outside
+      // every try in this function, so a successful restore ended with no sentence at all: the
+      // bill came back on the floor and the person was told nothing, which is the one thing
+      // this codebase does not allow a tap to do.
+      anyQueued = wasQueued(await api("PATCH", "/orders/" + o.id, patch)) || anyQueued;
       if (patch.archived === false) o.archived = false;
       if (patch.status) o.status = patch.status;
       if (patch.payment_status) o.payment_status = patch.payment_status;
@@ -4380,7 +4386,7 @@ async function restoreBill(orders) {
   }
   renderEditor();
   if (failCount) toast(`Restored ${okCount} of ${okCount + failCount} orders — ${failCount} failed, please retry`, "err");
-  else okToast(_wq, "Bill restored to the live floor");
+  else okToast(anyQueued ? { queued: true } : null, "Bill restored to the live floor");
 }
 
 // setOrderStatus: move one order to a new status (e.g. Accept → preparing).
