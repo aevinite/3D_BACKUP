@@ -63,7 +63,14 @@
       <button class="tab" data-tab="log" title="Audit &amp; logs"><i class="tab-ico" aria-hidden="true">🗂</i><span class="tab-lbl">Audit &amp; logs</span></button>
       
       <button class="tab" data-tab="general" title="Settings"><i class="tab-ico" aria-hidden="true">⚙️</i><span class="tab-lbl">Settings</span></button>
-        <button id="railToggle" class="rail-toggle" type="button" aria-label="Expand menu" aria-expanded="false" title="Expand menu"><i class="tab-ico" aria-hidden="true">»</i><span class="tab-lbl">Collapse</span></button>
+      <!-- SHIPPED IN THE COLLAPSED STATE, and every part of the row has to agree with that
+           (T8 sweep #8, 2026-09-03). The rail starts collapsed (app.js RAIL_KEY defaults off), and
+           app.js's syncNavRail() words a collapsed row "Keep open" / » / aria "Expand menu". This
+           markup shipped the EXPANDED word "Collapse" beside the collapsed aria-label, so until
+           app.js finished downloading — a megabyte, on a restaurant's wifi — the one button whose
+           job is to open the rail read "Collapse". That is the exact fault app.js's own note says
+           it fixed; the fix never reached the shipped markup. -->
+      <button id="railToggle" class="rail-toggle" type="button" aria-label="Expand menu" aria-expanded="false" title="Expand menu"><i class="tab-ico" aria-hidden="true">»</i><span class="tab-lbl">Keep open</span></button>
     </nav>
     <!-- Right-side actions cluster. The shared connbadge.js mounts the 🟢/🟡/🔴 connection
          light as the FIRST child of .top-actions (kitchen/tablet have this wrapper too); without
