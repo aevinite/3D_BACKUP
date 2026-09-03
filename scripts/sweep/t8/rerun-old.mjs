@@ -3,7 +3,7 @@
 // and its `result` column is updated in place from this run's output.
 //
 //     node scripts/sweep/t8/rerun-old.mjs
-import { read, exists, check, report, has, hasNot, countOf, before, ROOT } from "./lib.mjs";
+import { read, exists, check, report, has, hasNot, countOf, before, htmlCodeOf, ROOT } from "./lib.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -11,6 +11,10 @@ const mgrLayout = read("app/manager/layout.tsx");
 const mgrPage   = read("app/manager/page.tsx");
 const edPage    = read("app/editor/page.tsx");
 const html      = read("public/panels/editor/index.html");
+// ORDERING IS READ OFF THE MARKUP, never the notes. index.html's obituaries name "editor/app.js"
+// hundreds of lines above the tag, so a bare indexOf on the raw text reads a NOTE as the load
+// position — which is exactly how four of these rows went red on a file whose order never moved.
+const htmlCode  = htmlCodeOf(html);
 const PF        = read("components/PanelFrame.tsx");
 const SAB       = read("lib/safeAreaBridge.ts");
 
@@ -21,11 +25,11 @@ check("P02003", "manager page forwards ?as= into the iframe", () => has(mgrPage,
 check("P02004", "the manager tab has its own browser-tab title", () => has(mgrPage, /metadata = \{ title: "Manager — Aevidine" \}/));
 check("P02005", "/editor still redirects to /manager (back-compat)", () => has(edPage, /redirect\("\/manager"/));
 check("P02006", "…and keeps ?rid through the redirect", () => has(edPage, /rid \? `\?rid=\$\{encodeURIComponent\(rid\)\}` : ""/));
-check("P02011", "billdoc.js loads BEFORE app.js", () => before(html, "billdoc.js", "editor/app.js"));
-check("P02012", "backstack.js loads before app.js", () => before(html, "backstack.js", "editor/app.js"));
-check("P02013", "outbox.js loads before offline.js", () => before(html, "outbox.js", "offline.js"));
+check("P02011", "billdoc.js loads BEFORE app.js", () => before(htmlCode, "billdoc.js", "editor/app.js"));
+check("P02012", "backstack.js loads before app.js", () => before(htmlCode, "backstack.js", "editor/app.js"));
+check("P02013", "outbox.js loads before offline.js", () => before(htmlCode, "outbox.js", "offline.js"));
 check("P02014", "guestbell.js is loaded (the 🔔 in the top bar)", () => has(html, /guestbell\.js\?v=/));
-check("P02015", "inventory.js loads before app.js (LFH_INV)", () => before(html, "editor/inventory.js", "editor/app.js"));
+check("P02015", "inventory.js loads before app.js (LFH_INV)", () => before(htmlCode, "editor/inventory.js", "editor/app.js"));
 check("P02016", "auditsort.js is loaded", () => has(html, /auditsort\.js\?v=/));
 check("P02017", "every panel asset carries a ?v= cache-bust", () => countOf(html, /src="\/panels\/[^"]+\.js\?v=/g) >= 12 || "fewer than 12");
 check("P02018", "Font Awesome + Chart.js are self-hosted, not a CDN", () => hasNot(html, /(?:src|href)="https?:\/\//));
@@ -40,7 +44,7 @@ check("P02475", "the three panels each carry their own ?v= cache-busting index.h
 check("P17239", "the phone gets a drawer, and the drawer has a way out", () => (has(html, /id="navBurger"/) === true && has(html, /id="navClose"/) === true) || "one of the two is gone");
 check("P17240", "…with a scrim that lives inside the top bar", () => has(html, /Lives INSIDE the topbar so/));
 check("P17400", "the ?as= person pin reaches the panel from the admin's console", () => has(mgrPage, /panelIframeSrc\("\/panels\/editor\/index\.html", adminRid, \{ as, view \}\)/));
-check("P17451", "backstack.js is loaded before app.js", () => before(html, "backstack.js", "editor/app.js"));
+check("P17451", "backstack.js is loaded before app.js", () => before(htmlCode, "backstack.js", "editor/app.js"));
 check("P17479", "/editor still redirects to /manager and keeps ?rid", () => (has(edPage, /redirect\("\/manager"/) === true && has(edPage, /rid \? `\?rid=\$\{encodeURIComponent\(rid\)\}` : ""/) === true) || "one half is gone");
 check("P17480", "the manager route gates through requirePanel('manager')", () => has(mgrLayout, /requirePanel\("manager", "\/manager"\)/));
 check("P17482", "every panel asset carries a ?v= cache-bust", () => countOf(html, /src="\/panels\/[^"]+\.js\?v=/g) >= 12 || "fewer than 12");

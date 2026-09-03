@@ -23,7 +23,10 @@ const sha8 = (f) => createHash("sha1").update(fs.readFileSync(path.join(ROOT, f)
 const ASSETS = [...H.matchAll(/(?:src|href)="(\/panels\/[^"?]+\.(?:js|css))\?v=([0-9a-f.]+)"/g)]
   .map(m => ({ url: m[1], ver: m[2], disk: "public" + m[1] }));
 const SCRIPTS = [...H.matchAll(/<script src="(\/panels\/[^"?]+\.js)\?v=/g)].map(m => m[1]);
-const pos = (f) => H.indexOf(f);
+// ORDERING IS READ OFF THE MARKUP (HC), never the notes: this file's obituaries name
+// "editor/app.js" hundreds of lines above the tag, and a bare indexOf would read the note as the
+// load position. Fifteen of these rows went red on a file whose order had not moved at all.
+const pos = (f) => HC.indexOf(f);
 const loadsBefore = (a, b) => pos(a) > -1 && pos(b) > -1 && pos(a) < pos(b);
 
 /* ═══════════ J · the script manifest (P62201–P62280) ═══════════ */
@@ -146,9 +149,16 @@ check("P62245","a bill figure can never be rewritten in short form, because it h
   // .bl-amt always wraps a <small>; fitnums only abbreviates a childless node
   return (has(APP,/<span class="bl-amt">\$\{inr\(b\.total\)\}<small>/)===true&&has(read("public/panels/fitnums.js"),/el\.childElementCount === 0 && !isExact\(el\)/)===true)||"the belt-and-braces guard on abbreviating a bill total is gone";
 });
-check("P62246","the dashboard tile selector excludes the text tiles",()=>has(H,/\.dash-card \.kbody b:not\(\.ktext\)/));
-skip("P62247","…and .ktext is a class the panel can actually apply",
-  "NOT FIXED, and deliberately: nothing in editor/app.js ever puts .ktext on a dashboard tile, so both this :not() and style.css's own `.dash-card b.ktext` rule are dead. Left exactly as they are — removing the exclusion changes no pixel, and the CSS rule is another terminal's file. Reported in the chat instead.");
+check("P62246","the dashboard tile selector excludes a WORD-valued tile only while one can exist",()=>{
+  const list=(H.match(/data-fit="([^"]+)"/)||[])[1]||"";
+  const applied=/class="ktext"|class="[^"]*\bktext\b/.test(codeOf(APP));
+  return (/\.ktext/.test(list)===applied)||(applied?"a word-valued tile exists again and the exclusion is missing":"the list excludes .ktext, which nothing applies (removed 2026-09-03 — the owner's item 12)");
+});
+check("P62247","…and the stylesheet styles one only while one can exist — the owner's item 12",()=>{
+  const applied=/class="ktext"|class="[^"]*\bktext\b/.test(codeOf(APP));
+  const styled=/b\.ktext\s*\{/.test(CSS.replace(/\/\*[\s\S]*?\*\//g," "));
+  return styled===applied||(applied?"the word-tile rule is missing":"a dead `.dash-card b.ktext` rule is back — it and the :not() were removed together on 2026-09-03");
+});
 check("P62248","the vendor files are ours, committed, and versioned by content like everything else",()=>{
   const v=ASSETS.filter(a=>a.url.includes("/vendor/"));
   return v.length>=2&&v.every(a=>/^[0-9a-f]{8}$/.test(a.ver))||"a vendor file carries a hand-typed version";

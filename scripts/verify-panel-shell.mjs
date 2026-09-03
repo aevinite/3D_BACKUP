@@ -40,6 +40,15 @@ const PAGE = rd("app/manager/page.tsx");
 const GATE = rd("lib/panelGate.ts");
 const GO = rd("app/api/admin/act-as/go/route.ts");
 const SAB = rd("lib/safeAreaBridge.ts");
+// CODE, not notes. Both traps this repo has scars from: a check asserting a string is ABSENT
+// passes/fails on the file's own comment quoting it (the obituaries below quote every line they
+// removed), and LINE comments must be stripped BEFORE block comments or one `/*` inside a `//`
+// swallows everything to the next `*/`.
+const codeOf = (b) => b
+  .split("\n").map((l) => l.replace(/(^|[^:"'`\\])\/\/.*$/, "$1")).join("\n")
+  .replace(/\/\*[\s\S]*?\*\//g, " ");
+const APPC = codeOf(APP);
+const CSSC = CSS.replace(/\/\*[\s\S]*?\*\//g, " ");
 
 let pass = 0; const fails = [];
 const ok = (what, cond, why) => { if (cond === true) { pass++; console.log(`  ✅ ${what}`); } else fails.push(`${what} — ${cond === false ? why : cond}`); };
@@ -149,7 +158,7 @@ console.log("\n→ the manager panel's shell still agrees with the code it descr
 
 /* 6 ─ the shell's notes describe the shell that shipped ───────────────────────────────────── */
 {
-  const at = (f) => H.indexOf(f);
+  const at = (f) => HC.indexOf(f);
   const claimsAfter = /After backstack\.js, because its sheet registers a back layer/.test(H);
   ok("no note claims guestbell.js loads after backstack.js while it loads before it",
     !(claimsAfter && at("/panels/guestbell.js") < at("/panels/backstack.js")),
@@ -185,7 +194,9 @@ console.log("\n→ the manager panel's shell still agrees with the code it descr
 
 /* 7 ─ the ordering rules the notes state are the ordering the file has ────────────────────── */
 {
-  const before = (a, b) => H.indexOf(a) > -1 && H.indexOf(b) > -1 && H.indexOf(a) < H.indexOf(b);
+  // HC, not H: the obituaries in this file name "editor/app.js" hundreds of lines above the tag,
+  // so a bare indexOf on the raw text reads a NOTE as the load position.
+  const before = (a, b) => HC.indexOf(a) > -1 && HC.indexOf(b) > -1 && HC.indexOf(a) < HC.indexOf(b);
   const rules = [
     ["/panels/billdoc.js", "editor/app.js", "printing a bill would throw"],
     ["/panels/backstack.js", "editor/app.js", "phone BACK would leave the panel mid-action"],
@@ -206,8 +217,47 @@ console.log("\n→ the manager panel's shell still agrees with the code it descr
     "something now loads after the panel's own code");
 }
 
+/* 9 ─ ONE connection indicator, one writer (the owner's items 9 + 11 + 12, 2026-09-03) ───── */
+{
+  const CB = rd("public/panels/connbadge.js");
+  ok("the shell ships no second, legacy connection indicator",
+    !/id="conn"/.test(HC), "the old text pill is back — connbadge.js hides it and app.js writes to it, so a manager gets two indicators, one invisible");
+  ok("…and the panel's own code writes to no such element",
+    !/\$\("#conn"\)/.test(APPC), "app.js is writing words into an element nobody can see");
+  ok("…and the pill no longer carries code to hide one",
+    !/getElementById\("conn"\)/.test(CB), "connbadge.js is hiding a legacy element again instead of it being removed");
+  ok("…and the stylesheet no longer styles one",
+    !/^\.conn[\s.{]/m.test(CSSC), "the dead `.conn` rules are back");
+  ok("…so exactly one thing paints the connection light, and it is the pill",
+    /badge\.id = "lfhConnBadge"/.test(CB), "connbadge.js no longer mounts the pill — the panel would have NO indicator at all");
+}
+{
+  // the console reaches the manager panel at its real address; /editor stays, for old links only
+  const consoleFiles = ["app/aevinite/page.tsx", "app/aevinite/recycle/page.tsx",
+    "app/aevinite/restaurants/page.tsx", "app/aevinite/analytics/page.tsx"];
+  const via = consoleFiles.filter((f) => /["']\/editor["']/.test(rd(f).replace(/\/\/.*$/gm, "")));
+  ok("no admin-console link opens the manager panel through the retired /editor address",
+    via.length === 0, `still going the long way round: ${via.join(", ")}`);
+  ok("…and the recycle bin offers the manager panel ONCE, not twice under two names",
+    (rd("app/aevinite/recycle/page.tsx").match(/label: "Manager"|label: "Menu editor"/g) || []).length === 1,
+    "two rows in the recycle bin open the same screen");
+  ok("…while /editor itself still answers, for links taped up before the rename",
+    /redirect\("\/manager"/.test(ED), "the back-compat door is gone — an old bookmark would 404");
+}
+{
+  const list = (H.match(/data-fit="([^"]+)"/) || [])[1] || "";
+  const applied = /class="ktext"|class="[^"]*\bktext\b/.test(APPC);
+  ok("the auto-fit list excludes .ktext only while something can apply it",
+    /\.ktext/.test(list) === applied,
+    applied ? "a word-valued dashboard tile exists again and the exclusion is missing — a sentence would be shrunk like a number"
+            : "the list excludes .ktext, which nothing has applied since dashCard() stopped writing it");
+  ok("…and the stylesheet styles .ktext only while something can apply it",
+    /b\.ktext\s*\{/.test(CSSC) === applied,
+    applied ? "the word-tile rule is missing" : "a dead `.dash-card b.ktext` rule is back");
+}
+
 /* 8 ─ this guard actually looked at something ─────────────────────────────────────────────── */
-if (pass + fails.length < 20) {
+if (pass + fails.length < 30) {
   console.error(`\n✗ verify:panel-shell ran only ${pass + fails.length} checks — the shell parsed to nothing, so nothing was checked.`);
   process.exit(1);
 }

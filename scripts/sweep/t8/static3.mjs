@@ -58,8 +58,10 @@ check("P62061","…because a bare `hidden` loses to an author display rule",()=>
 check("P62062","…and myprofile.js is what reveals it",()=>has(read("public/panels/myprofile.js"),/myProfileBtn/));
 check("P62063","the profile button's glyph is a CARD, not a second person icon",()=>has(H,/id="myProfileBtn"[^>]*>💳</));
 check("P62064","…and the reason two person glyphs were confusing is recorded",()=>has(H,/two IDENTICAL person\s*\n *glyphs sat side by side/));
-check("P62065","the connection pill has its own element with an honest starting word",()=>has(H,/<div class="conn" id="conn">connecting…<\/div>/));
-check("P62066","…so the panel never claims to be live before it is",()=>hasNot(H,/id="conn">Live/));
+check("P62065","the shell ships NO connection element of its own — connbadge.js mounts the only one",()=>{   // EXPECTATION CHANGED by the owner's item 9, 2026-09-03: the legacy text pill was removed. Asserted against HC (comments stripped), because the obituary quotes the very tag it removed
+  return hasNot(HC,/id="conn"/);
+});
+check("P62066","…and nothing in the panel writes to one any more",()=>hasNot(codeOf(APP),/\$\("#conn"\)/));   // four writes into a hidden element, removed with it
 check("P62067","every button in the top bar is type=\"button\", so none can submit a form",()=>{
   const bar=H.slice(H.indexOf('<div class="top-actions">'),H.indexOf("</header>"));
   const btns=[...bar.matchAll(/<button([^>]*)>/g)];
@@ -84,7 +86,7 @@ check("P62071","the top bar declares no width or height inline — the sheet own
   return !/style="[^"]*(?:width|height)/.test(bar)||"an inline size is set in the top bar";
 });
 check("P62072","the only inline style in the whole document is the profile button's display:none",()=>eq(countOf(HC,/ style="/g),1));
-check("P62073","the top bar holds exactly four action buttons plus the pill",()=>{
+check("P62073","the top bar holds exactly three action buttons; the pill is injected, not authored",()=>{
   const bar=H.slice(H.indexOf('<div class="top-actions">'),H.indexOf("</header>"));
   return eq(countOf(bar,/<button/g),3);
 });

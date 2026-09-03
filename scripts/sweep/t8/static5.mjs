@@ -25,7 +25,9 @@ check("P62551","…and the choice is remembered per device, which is what a mana
 check("P62552","JUDGMENT — the sidebar shows skeleton rows instantly rather than a white column, so the panel never looks broken on a slow connection",()=>countOf(HC,/lrow-skel/g)===6);
 check("P62553","…and they are styled by a real <link>, so the placeholder itself cannot flash unstyled",()=>has(H,/<link rel="stylesheet" href="\/panels\/editor\/style\.css/));
 check("P62554","JUDGMENT — the empty right-hand pane TELLS the manager what to do next instead of sitting blank",()=>has(H,/Pick something on the left, or hit <b>\+ New<\/b>/));
-check("P62555","JUDGMENT — the connection light says 'connecting…' before it knows, never 'Live'",()=>has(H,/id="conn">connecting…</));
+check("P62555","JUDGMENT — there is ONE connection light, and the panel does not keep a hidden second one",()=>{   // EXPECTATION CHANGED by the owner's item 9, 2026-09-03
+  return (hasNot(htmlCodeOf(H),/id="conn"/)===true && hasNot(codeOf(APP),/\$\("#conn"\)/)===true)||"the legacy indicator or one of its four writes is back";
+});
 check("P62556","JUDGMENT — a manager can pinch-zoom a figure; the panel never locks the viewport",()=>hasNot(H,/user-scalable=no|maximum-scale/));
 skip("P62557","JUDGMENT — every icon in the shell has a word beside it or a title on it",
   "ONE exception, REPORTED not fixed: #themeToggle ships as an empty <button> with no title and no aria-label — theme.js writes both the glyph and the name once the DOM is ready, because the wording depends on the saved skin. Until then it is a blank square a screen reader calls \"button\". The kitchen and tablet shells ship the identical empty tag, so the one-line fix belongs in all three at once and two of them are another terminal's files. Every other control in this shell carries a word, a title or an aria-label.");

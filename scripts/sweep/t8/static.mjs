@@ -161,15 +161,18 @@ check("P61802","…and warns that dropping ?rid would unpin an admin tab",()=>ha
 check("P61803","it makes no database read",()=>hasNot(codeOf(ED),/supabase|fetch\(/));
 check("P61804","it exports no metadata (the destination owns the tab title)",()=>hasNot(codeOf(ED),/export const metadata/));
 check("P61805","the admin console's quick-open really does allow /editor as a target",()=>has(read("app/api/admin/act-as/go/route.ts"),/ALLOWED_PATHS = new Set\(\["\/manager", "\/editor"/));
-check("P61806","…and the console's own home row still points at /editor",()=>has(read("app/aevinite/page.tsx"),/label: "Manager", path: "\/editor"/));
+check("P61806","…and the console's own home row points at the REAL manager address",()=>has(read("app/aevinite/page.tsx"),/label: "Manager", path: "\/manager"/));   // EXPECTATION CHANGED by the owner's item 11, 2026-09-03: it pointed at /editor, the retired address, so every admin panel-open paid an extra hop
 check("P61807","the quick-open appends &as= whenever it is given a person",()=>has(read("app/api/admin/act-as/go/route.ts"),/const asPin = uid \? `&as=\$\{encodeURIComponent\(uid\)\}` : "";/));
 check("P61808","the person pin survives the /editor hop (it used to be dropped)",()=>has(ED,/q \+= `&as=\$\{encodeURIComponent\(as\)\}`/));
 check("P61809","…and so does the real-view pin, matched as the exact word",()=>has(ED,/if \(q && view === "real"\) q \+= "&view=real";/));
 check("P61810","…without ever inventing a pin the caller did not send",()=>hasNot(codeOf(ED),/"&as=" \+ ""/));
 check("P61811","the redirect still builds a relative path, never an absolute url",()=>hasNot(codeOf(ED),/https?:\/\//));
 check("P61812","'Visit their panel' targets /manager directly, so it never depended on this hop",()=>has(read("components/admin/StaffProfile.tsx"),/manager: "\/manager"/));
-check("P61813","the recycle bin's panel row still points at /editor",()=>has(read("app/aevinite/recycle/page.tsx"),/to: "\/editor"/));
-check("P61814","the restaurants detail page still points at /editor",()=>has(read("app/aevinite/restaurants/page.tsx"),/\["\/editor", "Manager panel"/));
+check("P61813","the recycle bin offers the manager panel ONCE, at its real address",()=>{   // EXPECTATION CHANGED by the owner's item 11: it listed the same screen twice, as "Manager" and as "Menu editor"
+  const doors=read("app/aevinite/recycle/page.tsx");
+  return (has(doors,/to: "\/manager", label: "Manager"/)===true && hasNot(codeOf(doors),/to: "\/editor"/)===true)||"the duplicate door is back";
+});
+check("P61814","the restaurants detail page points at the real manager address",()=>has(read("app/aevinite/restaurants/page.tsx"),/\["\/manager", "Manager panel"/));   // EXPECTATION CHANGED by the owner's item 11
 check("P61815","the floor screen's quick-open points at /manager (no hop)",()=>has(read("app/aevinite/floor/page.tsx"),/encodeURIComponent\("\/manager"\)/));
 check("P61816","the redirect uses Next's redirect(), which throws — nothing runs after it",()=>{
   const i = ED.indexOf("redirect(");

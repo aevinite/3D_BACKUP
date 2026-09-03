@@ -25,6 +25,19 @@ const ONSCREEN = `(el)=>{ if(!el) return false; const cs=getComputedStyle(el);
   return r.right>0 && r.bottom>0 && r.left<innerWidth && r.top<innerHeight; }`;
 
 const browser = await chromium.launch();
+// ONE admin sign-in for the whole run, cached the same way loginAs caches a staff role — the
+// console's password door is rate-limited too, and a sweep must never be the thing that trips it.
+let adminCookies = null;
+async function adminSignIn(ctx) {
+  if (adminCookies) { await ctx.addCookies(adminCookies); return; }
+  const pg = await ctx.newPage();
+  await pg.goto(BASE + "/aevinite", { waitUntil: "domcontentloaded", timeout: 60000 });
+  const pw = process.env.ADMIN_PASSWORD || "";
+  const box = pg.locator('input[type="password"]').first();
+  if (await box.count()) { await box.fill(pw); await pg.keyboard.press("Enter"); await pg.waitForTimeout(2500); }
+  adminCookies = await ctx.cookies();
+  await pg.close();
+}
 const errors = [];
 async function open(vp, extra = {}) {
   const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: vp.dpr, ...extra });
@@ -45,7 +58,7 @@ async function panelFrame(page) {
 
 const { ctx: dctx, page: D } = await open(DESKTOP);
 await D.goto(BASE + "/manager", { waitUntil: "networkidle", timeout: 60000 });
-const DF = await panelFrame(D);
+let DF = await panelFrame(D);
 await DF.waitForFunction(() => !document.querySelector(".lrow-skel"), null, { timeout: 30000 }).catch(() => {});
 
 /* ── the host page itself (P62391–P62420) ── */
@@ -160,14 +173,16 @@ await checkA("P62418","…and it is not another tenant's name",async()=>{
   const t=(await DF.locator("#brandRest").innerText().catch(()=>""))||"";
   return !/Aangan|Pizza Palace/i.test(t)||`the manager panel shows "${t}"`;
 });
-await checkA("P62419","the connection light mounted, and it is the badge, not the legacy text pill",async()=>{
-  const s=await DF.evaluate(()=>{const b=document.getElementById("lfhConnBadge");const l=document.getElementById("conn");
-    return {badge:!!b,legacyShown:l?getComputedStyle(l).display!=="none":null};});
-  return (s.badge===true&&s.legacyShown===false)||JSON.stringify(s);
+await checkA("P62419","the connection light mounted, and the legacy text pill is not in the document at all",async()=>{
+  // EXPECTATION CHANGED by the owner's item 9, 2026-09-03: the old pill used to be present and
+  // hidden; it is now removed, so the honest assertion is that it does not exist.
+  const s=await DF.evaluate(()=>({badge:!!document.getElementById("lfhConnBadge"),legacy:!!document.getElementById("conn")}));
+  return (s.badge===true&&s.legacy===false)||JSON.stringify(s);
 });
-await checkA("P62420","…so a manager sees ONE connection indicator, not two",async()=>{
-  const n=await DF.evaluate(()=>[...document.querySelectorAll("#lfhConnBadge, #conn")].filter(e=>e.offsetParent!==null).length);
-  return n===1||`${n} connection indicators are visible at once`;
+await checkA("P62420","…so a manager sees ONE connection indicator, and there is only one to see",async()=>{
+  const s=await DF.evaluate(()=>({total:document.querySelectorAll("#lfhConnBadge, #conn, .conn").length,
+    txt:(document.getElementById("lfhConnBadge")||{}).innerText||""}));
+  return (s.total===1&&s.txt.trim().length>0)||JSON.stringify(s);
 });
 
 /* ── the nav, desktop (P62421–P62445) ── */
@@ -626,7 +641,7 @@ await checkA("P62519","…and the panel went back to the floor without a reload"
   return /Table view/.test(t)||`the floor did not come back: "${t.slice(0,50)}"`;
 });
 await checkA("P62520","the phone panel still has exactly one connection indicator after all that",async()=>{
-  const n=await PFR.evaluate((src)=>{const on=eval(src);return [...document.querySelectorAll("#lfhConnBadge, #conn")].filter(on).length;},ONSCREEN);
+  const n=await PFR.evaluate((src)=>{const on=eval(src);return [...document.querySelectorAll("#lfhConnBadge, #conn, .conn")].filter(on).length;},ONSCREEN);
   return n===1||`${n} connection indicators`;
 });
 
@@ -675,6 +690,115 @@ await checkA("P62499","/editor with no query lands on a bare /manager, not '/man
 });
 check("P62500","nothing in the whole live pass threw an uncaught error",()=>errors.length===0||`${errors.length}: ${errors.slice(0,4).join(" · ")}`);
 
+
+/* ── the owner's items 9, 11 and 12, driven (P62581–P62604) ── */
+// The /editor block above navigated this page, so the frame handle from the top of the file is
+// detached. Re-open the panel and take a fresh one — a stale frame reports "Frame was detached",
+// which reads like a product fault and is not one.
+await D.goto(BASE + "/manager", { waitUntil: "networkidle", timeout: 60000 });
+DF = await panelFrame(D);
+await DF.waitForFunction(() => !document.querySelector(".lrow-skel"), null, { timeout: 30000 }).catch(() => {});
+await checkA("P62581","the manager panel paints exactly one connection light on the desktop",async()=>{
+  const s=await DF.evaluate(()=>({badge:document.querySelectorAll("#lfhConnBadge").length,legacy:document.querySelectorAll("#conn, .conn").length}));
+  return (s.badge===1&&s.legacy===0)||JSON.stringify(s);
+});
+await checkA("P62582","…and it says a real word, not an empty pill",async()=>{
+  const t=(await DF.locator("#lfhConnBadge").innerText())||"";
+  return t.trim().length>1||`the pill reads "${t}"`;
+});
+await checkA("P62583","…and it has an accessible name that describes the connection",async()=>{
+  const a=await DF.locator("#lfhConnBadge").getAttribute("aria-label");
+  return /^Connection: /.test(a||"")||`aria-label is "${a}"`;
+});
+await checkA("P62584","…and nothing else in the top bar is a leftover indicator",async()=>{
+  const kids=await DF.evaluate(()=>[...document.querySelectorAll(".top-actions > *")].map(e=>e.id||e.className));
+  return !kids.some(k=>/^conn$|(^| )conn( |$)/.test(k))||`the actions row holds ${kids.join(", ")}`;
+});
+await checkA("P62585","removing it did not break the panel's own boot — the floor still drew",async()=>{
+  const t=(await DF.locator("#editor").innerText())||"";
+  return /Table view/.test(t)||`the panel shows "${t.slice(0,50)}"`;
+});
+await checkA("P62586","…and the boot threw nothing (the four removed writes were inside boot and its catch)",()=>{
+  const e=errors.filter(x=>/conn|null|undefined/i.test(x));
+  return e.length===0||e.slice(0,2).join(" · ");
+});
+await checkA("P62587","…including the FAILED-load path, which held two of the four writes",async()=>{
+  // make /api/editor/all fail for one fresh load and check the panel still says so out loud
+  const c=await browser.newContext({viewport:{width:1280,height:800}});
+  await loginAs(c,"manager",BASE);
+  const pg=await c.newPage();
+  const errs=[];
+  pg.on("pageerror",(e)=>errs.push(String(e.message).slice(0,140)));
+  await pg.route("**/api/editor/all*",(r)=>r.fulfill({status:500,contentType:"application/json",body:'{"error":"forced for this check"}'}));
+  await pg.goto(BASE+"/manager",{waitUntil:"domcontentloaded",timeout:60000});
+  const fr=await (await pg.$("iframe"))?.contentFrame();
+  await fr?.waitForSelector("#editor",{timeout:30000}).catch(()=>{});
+  // A toast auto-hides, so WATCH for it rather than reading the page once, three seconds later.
+  let said="";
+  for (let i=0;i<40;i++){
+    said=await fr?.evaluate(()=>{const t=document.getElementById("toast");
+      return [(t&&!t.hidden)?t.innerText:"", document.body.innerText.slice(0,4000)].join(" ¦ ");}).catch(()=>"")||"";
+    if (/Couldn't load|no internet|showing saved|offline|can't reach/i.test(said)) break;
+    await pg.waitForTimeout(250);
+  }
+  await c.close();
+  const told=/Couldn't load|no internet|showing saved|offline|can't reach/i.test(said);
+  return (errs.length===0&&told)||`${errs.length} error(s): ${errs.slice(0,2).join(" · ")} · never told the person; screen said "${said.slice(0,140)}"`;
+});
+await checkA("P62588","the console's home command table opens the manager panel at its real address",async()=>{
+  const c=await browser.newContext({viewport:{width:1440,height:900}});
+  await adminSignIn(c);
+  const pg=await c.newPage();
+  await pg.goto(BASE+"/aevinite",{waitUntil:"networkidle",timeout:90000});
+  const hrefs=await pg.evaluate(()=>document.body.innerHTML.match(/to=%2F[a-z]+/g)||[]);
+  await c.close();
+  const editor=hrefs.filter(h=>h==="to=%2Feditor");
+  return editor.length===0||`${editor.length} link(s) still go via the retired address`;
+});
+await checkA("P62589","…and /manager is what that link resolves to",async()=>{
+  const c=await browser.newContext({viewport:{width:1280,height:800}});
+  await loginAs(c,"manager",BASE);
+  const pg=await c.newPage();
+  const r=await pg.goto(BASE+"/manager",{waitUntil:"domcontentloaded",timeout:60000});
+  const ok=r&&r.status()<400&&new URL(pg.url()).pathname==="/manager";
+  await c.close();
+  return ok||`/manager answered ${r&&r.status()} at ${pg.url()}`;
+});
+await checkA("P62590","…while the retired address still answers, for links taped up before the rename",async()=>{
+  const c=await browser.newContext({viewport:{width:1280,height:800}});
+  await loginAs(c,"manager",BASE);
+  const pg=await c.newPage();
+  await pg.goto(BASE+"/editor",{waitUntil:"domcontentloaded",timeout:60000});
+  const path=new URL(pg.url()).pathname;
+  await c.close();
+  return path==="/manager"||`the old door landed on ${path}`;
+});
+await checkA("P62591","the dashboard tiles still fit their boxes with the .ktext exclusion gone",async()=>{
+  await DF.evaluate(()=>document.querySelector('.tab[data-tab="dash"]').click());
+  await D.waitForTimeout(4000);
+  const bad=await DF.evaluate(()=>[...document.querySelectorAll(".dash-card .kbody b")]
+    .filter(e=>e.scrollWidth-e.clientWidth>1)
+    .map(e=>`${e.textContent.trim().slice(0,18)} (${e.scrollWidth}>${e.clientWidth})`));
+  const n=await DF.locator(".dash-card .kbody b").count();
+  return (n>0&&bad.length===0)||`${n} tile(s), clipped: ${bad.join(", ")||"none"}`;
+});
+await checkA("P62592","…and none of them was rewritten into a rounded figure it should not be",async()=>{
+  const bad=await DF.evaluate(()=>[...document.querySelectorAll(".dash-card .kbody b")]
+    .filter(e=>e.dataset.lfhShort&&!/^[₹\d]/.test(e.dataset.lfhFull||""))
+    .map(e=>e.dataset.lfhFull));
+  return bad.length===0||`a non-numeric tile was abbreviated: ${bad.join(", ")}`;
+});
+await checkA("P62593","…and no dashboard tile now holds WORDS, which is what the exclusion existed for",async()=>{
+  const wordy=await DF.evaluate(()=>[...document.querySelectorAll(".dash-card .kbody b")]
+    .map(e=>e.textContent.trim()).filter(t=>t&&!/[\d₹%]/.test(t)));
+  return wordy.length===0||`word-valued tile(s) are back: ${wordy.join(", ")} — the exclusion must come back too`;
+});
+await checkA("P62594","…and the panel came back to the floor afterwards",async()=>{
+  await DF.evaluate(()=>document.querySelector('.tab[data-tab="tables"]').click());
+  await D.waitForTimeout(1200);
+  const t=(await DF.locator("#editor").innerText())||"";
+  return /Table view/.test(t)||`the floor did not come back: "${t.slice(0,40)}"`;
+});
 
 /* ── two PRE-EXISTING ledger rows that need the live app (T29 P14325, T30 P14868) ── */
 await checkA("P14325","all six panel doors host the panel through PanelFrame's iframe, never a blank shell",async()=>{
