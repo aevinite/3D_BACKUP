@@ -5,7 +5,7 @@
 // sessions.
 //
 //     a mouse / trackpad (a laptop, at ANY window size) → the admin's number, exactly
-//     a touchscreen under ~10.5" (long edge < 1150px)   → 3 upright, 4 turned      fixed
+//     a touchscreen under ~10.5" (long edge < 1150px)   → 4 upright, 4 turned      fixed
 //     a touchscreen ~10.5" and over                     → the admin's number, CAPPED AT 6
 //     and NOWHERE does the floor scroll sideways — "there should be only be vertical scroll"
 //
@@ -101,13 +101,17 @@ for (const [name, css] of [["manager", mgrCss], ["waiter tablet", tabCss]]) {
   check(`${name}: …and only under ~10.5 inches, measured on BOTH edges`,
     /\(max-width:\s*1149px\)\s*and\s*\(max-height:\s*1149px\)/.test(band),
     "one edge only would drop a big tablet to 4 per row the moment it was turned");
-  // THREE UPRIGHT since 2026-09-03. The owner was shown 2, 3 and 4 side by side as real screenshots
-  // of his own A35 and picked three: *"i like 3 one"*. Two showed six tables and made the floor
-  // mostly scrolling; three shows twelve and loses nothing — measured on all 31 tiles at 360px and
-  // 390px, the number, the seat count, the state word and the tag band are all still there. Four was
-  // offered and refused: it drops the order button off busy tiles and cuts "0/2 served".
-  check(`${name}: a touchscreen upright gets 3 per row`, /@media\s*\(max-width:\s*599px\)[\s\S]{0,300}--per-row:\s*3/.test(band),
-    "the owner picked three on 2026-09-03 after seeing 2, 3 and 4 on his own phone");
+  // FOUR UPRIGHT since 2026-09-03. The number moved twice that day and both moves were his, from
+  // real screenshots of his own A35: two was the old rule (six tables on screen, mostly scrolling),
+  // he picked THREE off a side-by-side ("i like 3 one"), then asked for the tile to get smaller so
+  // more would fit down the screen. That was first tried by making the tile WIDE (3:2), which he
+  // turned down — "kepp square format only if require make 4 colum in a row" — so the density comes
+  // from the column count with the square intact. Counted with the compressed header and the
+  // shrunken tile contents: 3 square = 15 tables on screen, 4 = 28, 5 = 31. Four is the last size
+  // that keeps an order button on the tile (79px of tile holds the action row, 62px does not), and
+  // at all three the number, the seat count, the state word and the tag ribbon survive on every tile.
+  check(`${name}: a touchscreen upright gets 4 per row`, /@media\s*\(max-width:\s*599px\)[\s\S]{0,900}--per-row:\s*4/.test(band),
+    "the owner picked four on 2026-09-03: 'kepp square format only if require make 4 colum in a row'");
   check(`${name}: turned sideways gets 4`, /@media\s*\(min-width:\s*600px\)[\s\S]{0,300}--per-row:\s*4/.test(band));
   check(`${name}: nothing overrides the set number on a fine pointer`,
     !/@media\s*\(pointer:\s*fine\)[\s\S]{0,200}--per-row:\s*\d/.test(css),
@@ -186,6 +190,6 @@ check("…and promises a computer keeps it even in a small window", /even with t
   "that promise IS the rule he asked for on 2026-08-16");
 
 console.log(pass
-  ? "\n✅ PASS — a laptop gets his number at any size, a touchscreen gets 3/4, nothing scrolls sideways"
+  ? "\n✅ PASS — a laptop gets his number at any size, a touchscreen gets 4, nothing scrolls sideways"
   : "\n❌ FAIL — the floor is not drawing the number the owner's rule says it should");
 process.exit(pass ? 0 : 1);
