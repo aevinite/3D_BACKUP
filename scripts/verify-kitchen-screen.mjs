@@ -40,7 +40,8 @@ for (const m of ["replay-block1", "replay-block1b", "replay-block2", "replay-con
                  "new-a-blocked-and-menu", "new-c-printing", "new-e-route-and-rest",
                  "replay-other-ledgers", "new-f-items789",
                  "round2-contracts", "round2-crosspanel",
-                 "replay-t6-b1", "replay-t6-b2", "replay-t6-b3", "replay-t6-b4", "replay-t6-b5"]) {
+                 "replay-t6-b1", "replay-t6-b2", "replay-t6-b3", "replay-t6-b4", "replay-t6-b5",
+                 "round3-branches", "round3-paths"]) {
   await import("./sweep/t9/" + m + ".mjs");
 }
 
