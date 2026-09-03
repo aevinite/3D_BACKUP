@@ -853,8 +853,16 @@ check("P98917", "…and it says a plan alone does not switch anything on", () =>
 check("P98918", "…and it names exactly what finishing the tablet half would take", () =>
   has(FL, /TO FINISH IT: add this file to public\/panels\/tablet\/index\.html/));
 check("P98919", "the manager page really loads it", () => has(HTML, /floor-layouts\.js\?v=/));
-check("P98920", "…before app.js, which reads it", () =>
-  (HTML.indexOf("floor-layouts.js") < HTML.indexOf("editor/app.js")) || "load order is wrong");
+check("P98920", "…before app.js, which reads it", () => {
+  // The position of the `<script src>` tag, not of the first time the filename is mentioned:
+  // a comment naming "editor/app.js" sits above the tags and makes a raw indexOf answer backwards.
+  const at = (f) => {
+    const m = HTML.match(new RegExp('<script[^>]*src="/panels/' + f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '[^"]*"', "i"));
+    return m ? HTML.indexOf(m[0]) : -1;
+  };
+  const a = at("floor-layouts.js"), b = at("editor/app.js");
+  return (a > 0 && b > 0 && a < b) || `floor-layouts at ${a}, app at ${b}`;
+});
 
 check("P98921", "sliceLoaded() asks about the order list as well as the sessions", () =>
   has(ACT, /\(state\.data\.orders \|\| \[\]\)\.some\(\(o\) => !o\.archived && String\(o\.table_number\) === String\(x\)\)/));

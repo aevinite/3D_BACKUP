@@ -401,8 +401,16 @@ check("P60926", "…and the owner's inventory-only embed is exempt, because the 
   has(AC, /if \(INV_ONLY\) return;/));
 check("P60927", "the tab is granted by EITHER inventory power, not only by stock", () =>
   has(AC, /xrayGrantedForManager\("inv_stock"\) \|\| xrayGrantedForManager\("inv_expenses"\)/));
-check("P60928", "inventory.js is loaded BEFORE app.js, which calls into it", () =>
-  (HTML.indexOf("editor/inventory.js") < HTML.indexOf("editor/app.js")) || "load order is wrong");
+// A `<script src>` position, never a raw indexOf: another lane's COMMENT mentioning
+// "editor/app.js" sits above the tags and made the naive compare answer backwards.
+const scriptAt = (html, file) => {
+  const m = html.match(new RegExp('<script[^>]*src="/panels/' + file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '[^"]*"', "i"));
+  return m ? html.indexOf(m[0]) : -1;
+};
+check("P60928", "inventory.js is loaded BEFORE app.js, which calls into it", () => {
+  const a = scriptAt(HTML, "editor/inventory.js"), b = scriptAt(HTML, "editor/app.js");
+  return (a > 0 && b > 0 && a < b) || `inventory at ${a}, app at ${b}`;
+});
 check("P60929", "…and both carry a content-hash cache-bust", () =>
   has(HTML, /editor\/inventory\.js\?v=[0-9a-f]{8}/) === true && has(HTML, /editor\/app\.js\?v=[0-9a-f]{8}/) === true);
 check("P60930", "nothing in this file writes to the DOM outside its own root or a popup", () =>
@@ -1151,8 +1159,8 @@ check("P61424", "…and says something true when nothing in the list has one", (
 check("P61425", "…and the empty state no longer talks only about tables either", () =>
   has(BELL, /Nothing needs you right now\./));
 
-check("P61426", "the shared-plumbing guard accepts the published deadline helper as a deadline", () =>
-  has(read("scripts/verify-panel-plumbing.mjs"), /signal:\\s\*\(deadline\\\(\|window\\\.LFH_PANEL_DEADLINE\\\(\)/));
+check("P61426", "the shared-plumbing guard accepts the published deadline helper however it is spelled", () =>
+  has(read("scripts/verify-panel-plumbing.mjs"), /signal:\[\^,\}\]\*\\b\(deadline\|LFH_PANEL_DEADLINE\)\\b/));
 check("P61427", "…and it records that it was blind to the scope half of that fault", () =>
   has(read("scripts/verify-panel-plumbing.mjs"), /was BLIND to/) === true
   && has(read("scripts/verify-panel-plumbing.mjs"), /verify:panel-names/) === true);
@@ -1164,7 +1172,7 @@ check("P61428", "every fetch in maint.js still carries a ceiling, in one spellin
     for (; j < src.length; j++) { if (src[j] === "(") d++; else if (src[j] === ")") { d--; if (!d) break; } }
     calls.push(src.slice(i, j + 1));
   }
-  const bare = calls.filter((c) => !/signal:\s*(deadline\(|window\.LFH_PANEL_DEADLINE\()/.test(c));
+  const bare = calls.filter((c) => !/signal:[^,}]*\b(deadline|LFH_PANEL_DEADLINE)\b/.test(c));
   return bare.length === 0 || `${bare.length} of ${calls.length} have none`;
 });
 check("P61429", "…and there is still exactly ONE definition of it in that file", () =>

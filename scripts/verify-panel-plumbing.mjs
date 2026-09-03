@@ -392,7 +392,7 @@ has("maint.js", /AbortSignal\.timeout/, "the drawer's deadline no longer uses th
     // spellings count as a deadline; a call with neither is still the fault this check is for.
     // (`verify:panel-names` is the guard that catches the scope half — this one only ever asked
     // whether a ceiling was asked for, not whether the thing asking existed.)
-    const bare = calls.filter((c) => !/signal:\s*(deadline\(|window\.LFH_PANEL_DEADLINE\()/.test(c));
+    const bare = calls.filter((c) => !/signal:[^,}]*\b(deadline|LFH_PANEL_DEADLINE)\b/.test(c));
     if (bare.length) fails.push(`maint.js: ${bare.length} of ${calls.length} request(s) have no deadline — a server that hangs leaves the person watching a control that never resolves: ${bare[0].replace(/\s+/g, " ").slice(0, 80)}`);
   }
 }
