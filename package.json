@@ -104,6 +104,7 @@
     "sweep:t3c": "node scripts/sweep/t3/s7c-checks.mjs",
     "sweep:t3c-live": "node scripts/sweep/t3/s7c-live.mjs",
     "load:ramp": "node scripts/load-ramp-orders.mjs",
+    "verify:panel-shell": "node scripts/verify-panel-shell.mjs",
     "verify:panel-cache": "node scripts/verify-panel-cache.mjs",
     "verify:panel-canvas": "node scripts/verify-panel-canvas.mjs",
     "verify:panel-dialogs": "node scripts/verify-panel-dialogs.mjs",
