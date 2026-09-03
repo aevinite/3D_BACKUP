@@ -518,7 +518,7 @@ function ticketHtml(o, rows) {
   // device platform tickets have always used for their channel.
   const phase = orderPhase(o, rows);
   return `<div class="ticket st-${esc(o.status)} ph-${esc(phase)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageTitle(o.created_at) ? ` title="${esc(ageTitle(o.created_at))}"` : ""}>${ageMinutes(o.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="thead-r"><span class="age${ageClass(o.created_at)}"${ageTitle(o.created_at) ? ` title="${esc(ageTitle(o.created_at))}"` : ""}>${ageMinutes(o.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(o.created_at))}</span>${reprintBtn}</span></div>
     ${orderNoteHtml}${lines}${action}</div>`;
 }
 
@@ -599,7 +599,7 @@ function platTicketHtml(p) {
   // only difference is which row it reads (platform tickets live in aggregator_orders, not orders).
   const platReprintBtn = `<button class="reprint" data-plat-reprint="${esc(p.id)}" title="Print this kitchen ticket" aria-label="Print kitchen ticket">🖨</button>`;
   return `<div class="ticket plat plat-${esc(meta.cls)} st-plat-${esc(p.status)}" data-ticket="plat-${esc(p.id)}">
-    <div class="thead"><span class="src-badge ${esc(meta.cls)}">${esc(meta.label)}</span><span class="kot">#${esc(p.kot_no ?? "—")}</span><span class="age${ageClass(p.created_at)}"${ageTitle(p.created_at) ? ` title="${esc(ageTitle(p.created_at))}"` : ""}>${ageMinutes(p.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(p.created_at))}</span>${platReprintBtn}</div>
+    <div class="thead"><span class="src-badge ${esc(meta.cls)}">${esc(meta.label)}</span><span class="kot">#${esc(p.kot_no ?? "—")}</span><span class="thead-r"><span class="age${ageClass(p.created_at)}"${ageTitle(p.created_at) ? ` title="${esc(ageTitle(p.created_at))}"` : ""}>${ageMinutes(p.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(p.created_at))}</span>${platReprintBtn}</span></div>
     ${p.customer_name ? `<div class="plat-cust-line">${esc(p.customer_name)}</div>` : ""}
     ${lines}${action}</div>`;
 }

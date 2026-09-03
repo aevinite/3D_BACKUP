@@ -146,10 +146,24 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
    "scrolling one side must never move the other", owner 2026-07-04): the board fills the viewport
    under the top bar, the three lanes are EQUAL and never wrap, each owns its own scroll, and each
    heading sits OUTSIDE its lane's scroll region so it can never scroll away.
-   Gated at 820px, not 761px: that is the narrowest real tablet in portrait (834px), and three
-   equal lanes below it would be ~230px each, which crushes a ticket head. Phones and narrow
-   windows keep the plain page scroll they have today, untouched. */
-@media (min-width: 820px) {
+   GATED AT 768px SINCE 2026-09-03 (owner picked item 7 of the T9 sweep #8 report). It was 820px,
+   on the reasoning that three equal lanes below that are ~230px each and "crushes a ticket head".
+   That reasoning was never measured, and the cost of it was real: an iPad 9.7"/10.2" held PORTRAIT
+   (768-819px) fell back to the two-column auto-fit board, so the whole Ready lane wrapped
+   underneath a tall Cooking column. Measured on the running board at 768x1024: Ready's top edge
+   sat at y=1725 on a 1024px screen — a screen and a half of scrolling past blank space — and the
+   PAGE scrolled instead of each lane scrolling itself. A cook could not see finished food at all.
+   768px is a real kitchen screen.
+   Then measured the thing the old comment assumed: at 768px the three lanes are 235px each,
+   NOTHING is clipped (scrollWidth === clientWidth on every ticket), the narrowest control is still
+   44px, and there is no page scroll. The ticket head does not "crush" — it WRAPS, and it only wraps
+   safely because the age chip is white-space: nowrap (item 1 of the same report). Without that fix
+   this change would have broken the clock at this width, which is why it went first.
+   The cost, stated plainly: a stale ticket's header takes two rows at 235px (81px instead of 44px),
+   so cards are taller and fewer are visible at once. That is a slightly worse board than at 820px
+   and a far better one than a Ready lane nobody can reach.
+   Phones and narrow windows (<768px) keep the plain page scroll they have today, untouched. */
+@media (min-width: 768px) {
   html, body { height: 100%; }
   body { display: flex; flex-direction: column; overflow: hidden; }
   .cols, .wall { flex: 1 1 auto; min-height: 0; }
@@ -233,13 +247,26 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
    Both tickets on the renamed table, every time. Truncating either value is the wrong trade —
    the table is the field a cook must not misread and the age is the one they scan — so the ROW
    wraps instead and both stay whole. Above ~760px there is room and nothing wraps at all. */
+/*   …AND THE CLOCK AND THE 🖨 WRAP TOGETHER, as one right-hand group (added with item 7, 2026-09-03).
+     Once the lane layout reached 768px this header wraps on EVERY ticket at that width, and the
+     print button ended up alone at the left edge of its own row, which reads as a mistake.
+     TWO OBVIOUS FIXES WERE TRIED AND BOTH ARE WRONG, measured, so nobody repeats them:
+       · `.reprint { margin-left: auto }` — two auto margins SPLIT the free space, so the desktop
+         age slid 62px left (measured: left 242 -> left 180 at 1280px).
+       · `.thead { justify-content: flex-end }` — it right-aligns any line with no auto-margin item,
+         and on a ticket whose badge pushes the clock to line two that is LINE ONE: the KOT number,
+         the one loud thing on the card, moved to the right (seen on #332 at 768px).
+     So the age and the button are one group with its own `margin-left: auto`. Line one keeps the KOT
+     number hard left, the group stays hard right, and when there is no room the group wraps whole. */
 .thead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; row-gap: 4px; }
+/* the right-hand group: the clock and the print button, together or not at all */
+.thead-r { margin-left: auto; display: inline-flex; align-items: baseline; gap: 10px; flex: 0 0 auto; }
 /* THE ONE LOUD THING. Bigger and tighter than before, in tabular figures so a board full of numbers
    never jitters as the ages tick over. */
 .kot { font-size: 26px; font-weight: 900; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
 /* the table and the age STEP BACK — they are context for the number, not competitors to it */
 .tbl { font-size: 14px; font-weight: 700; color: var(--muted); }
-.age { margin-left: auto; color: var(--muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.age { color: var(--muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* A TICKET THAT HAS BEEN SITTING SAYS SO (T4 sweep, 2026-08-04). A 44-hour-old Cooking ticket
    rendered in the same small grey text as "5m", so nothing on the board flagged a stuck order.
    Amber past 30 min, red-and-bold past 2 h. Both skins get a value — the light skin's --muted is
