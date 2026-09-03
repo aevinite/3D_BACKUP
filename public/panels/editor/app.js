@@ -10682,30 +10682,18 @@ function bindFloor() {
   //  binding outlived the button by five weeks; removed in the T3 sweep, 2026-08-06.)
   // (No Open all / Close all bindings — the buttons no longer exist; see bulkCard.)
   { const kb = ed.querySelector("#floorKot"); if (kb) kb.onclick = () => openKotTablePicker(); }
-  // Printer-trouble strip (mig 269): ✓ Resolved closes the event/job; "Print here instead"
-  // prints a stuck reprint on THIS device and dismisses the kitchen job. Both refetch the
-  // floor so the strip reflects the truth it just changed.
-  ed.querySelectorAll("[data-prok]").forEach((b) => (b.onclick = async () => {
-    if (b.disabled) return;
-    b.disabled = true;
-    const i = b.dataset.prok.indexOf(":"), kind = b.dataset.prok.slice(0, i), id = b.dataset.prok.slice(i + 1);
-    try {
-      const _wq = await api("POST", kind === "event" ? `/printer-events/${id}/resolve` : `/print-jobs/${id}/dismiss`, {});
-      okToast(_wq, "Marked resolved ✓");
-      await pollOrders();
-    } catch (e) { b.disabled = false; toast("Failed: " + e.message, "err"); }
-  }));
-  ed.querySelectorAll("[data-prhere]").forEach((b) => (b.onclick = () => printJobHere(b.dataset.prhere, b)));
-  // The pile-up row's one button: it takes the manager to the screen that says where the paper is
-  // supposed to come out, which is the only useful next move from the floor. A tap must never do
-  // nothing (verify:taps), so it is bound in the same place as its siblings.
-  ed.querySelectorAll("[data-prsetup]").forEach((b) => (b.onclick = () => {
-    setTab("general");
-    state.settingsSection = "printing";
-    renderEditor();
-  }));
-  // "Should this screen print the kitchen tickets?" — the print-station strip beside the printer-
-  // problem one (mig 336). Bound on the same pass so a repaint never leaves a dead button.
+  // (The printer-trouble strip's three bindings lived here — [data-prok] "✓ Resolved",
+  // [data-prhere] "Print here instead" and [data-prsetup] "where does the paper come out".
+  // DELETED sweep #8 T7. The bands came off the floor on 2026-08-31 with their builders
+  // (printerStripHtml / printStationStripHtml / bindPrintStationStrip — see the obituary above
+  // noticePrinterNews), but these three querySelectorAll calls stayed, and NOTHING in the
+  // product has emitted data-prok / data-prhere / data-prsetup since. Twenty-two lines that
+  // read as live wiring for a strip that does not exist, which is exactly what the owner's
+  // "there is two printing things, one is working and one is just showing" rule forbids.
+  // printJobHere() went with them — it had one caller, the dead [data-prhere] line.
+  // The live readout is the 🔔 bell (syncGuestBell's `kind: "printer"` rows); a stuck ticket
+  // is still printable by hand from 🧾 KOT ▾ → Print / reprint a KOT → Print KOT.
+  // Do not put a band back above the table grid.
   // (No Blocked-card / docked-detail / resizer / float-out bindings — the right-hand panel
   // and everything that lived in it are gone. A table opens as a popup, full stop.)
   // Every floating card: wire its own detail actions (through the SAME bindTablePanel every
@@ -13646,33 +13634,13 @@ function noticePrinterNews() {
   if (seenPrinterKeys) for (const a of list) if (!seenPrinterKeys.has(a.key)) toast(a.icon + " " + a.text, "err");
   seenPrinterKeys = keys;
 }
-// "Print here instead" — the honest fallback when the kitchen can't print: fetch the job's
-// order fresh (it may have left the live board long ago), print it on THIS device with the
-// DUPLICATE banner, and dismiss the kitchen job so it stops being offered there.
-async function printJobHere(id, btn) {
-  if (btn) btn.disabled = true;
-  try {
-    const r = await api("GET", `/print-jobs/${id}`);
-    const o = r.order || {};
-    const rows = (r.items && r.items.length) ? r.items : (Array.isArray(o.items) ? o.items : []);
-    printTicketHtml(kotTicketHtml({
-      title: `KOT ${o.kot_no ?? "—"}`,
-      rname: (state.data.restaurant || {}).name || "Kitchen",
-      head: "KITCHEN TICKET",
-      kot: o.kot_no ?? "—",
-      tableLabel: tablePrintLabel(o.table_number),
-      // Shared with the kitchen (LFH_BILLDOC.kotWhen): carries the DAY when the ticket is not
-      // from today, because a thermal head is black and white and cannot say it any other way.
-      when: LFH_BILLDOC.kotWhen(o.created_at),
-      lines: rows,
-      allergies: Array.isArray(o.allergies) ? o.allergies : [],
-      reprint: r.job ? r.job.reprint !== false : true,
-    }));
-    const _wq = await api("POST", `/print-jobs/${id}/dismiss`, {});
-    okToast(_wq, "Printed here ✓ — the kitchen job is closed.");
-    await pollOrders();
-  } catch (e) { if (btn) btn.disabled = false; toast("Couldn't print it here: " + e.message, "err"); }
-}
+// (printJobHere() lived here — "Print here instead", the honest fallback when the kitchen
+// printer could not take a stuck reprint. DELETED sweep #8 T7 with its only caller, the
+// [data-prhere] binding in bindFloor: the strip that rendered that button was removed on
+// 2026-08-31 and nothing has emitted the attribute since. A stuck ticket is still printable
+// by hand from 🧾 KOT ▾ → Print / reprint a KOT → Print KOT, which prints on this device
+// with the DUPLICATE banner and is the same document. If the shortcut is wanted again it
+// belongs on the 🔔 bell's printer row, not on a new band above the floor.)
 
 // ── THIS SCREEN CAN BE THE PRINTER (owner, 2026-08-17) ──────────────────────────────────────────
 // "In the kitchen they can't keep a PC… if you minimize, or open another app on the same PC, the KOT
