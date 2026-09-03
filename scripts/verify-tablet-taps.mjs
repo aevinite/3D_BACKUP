@@ -1205,6 +1205,152 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+
+// ── A SESSION COLUMN THE PANEL READS HAS TO BE ONE THE ROUTE SENDS (owner's item 12, 2026-09-03) ─
+//
+// The /state?table=N read used to ask for `*` — all 27 columns of `sessions`, on the most frequent
+// read this panel makes, including the guest's own basket and two heartbeats. It now names 14. The
+// saving is real (7,166 → 3,232 bytes for ten rows, measured) and so is the risk: a hand-typed
+// column list is how a field silently goes missing, which is exactly what item 3 of this same sweep
+// was — `logo_url` read by the panel and never sent, failing quietly because an absent column is
+// `undefined` and every guard on it says "no". So the list does not stand on care. Both sides are
+// grepped, including the fields the shared bill document reads off a session row it is HANDED, which
+// no scan of this panel alone would see.
+{
+  const routeRel = "app/api/tablet/[...path]/route.ts";
+  const route = (() => { try { return fs.readFileSync(path.join(ROOT, routeRel), "utf8"); } catch { return ""; } })();
+  const sel = (route.match(/const SESSION_COLS = "([^"]+)"/) || [])[1] || "";
+  const sent = new Set(sel.split(",").map((x) => x.trim()).filter(Boolean));
+  // Every column `sessions` really has, so a typo in the list is caught as well as an omission.
+  const ALL = new Set(["id","table_number","status","auto_approve","opened_by","opened_at","closed_at",
+    "last_activity_at","created_at","cart","cart_updated_at","bill_no","invoice_no","invoice_at",
+    "invoice_voided","void_reason","void_at","restaurant_id","discount","discount_note","deleted_at",
+    "deleted_by","deleted_by_id","delete_reason","cust_name","cust_phone","bill_printed_at"]);
+  // What the panel reads off a session. The variables a session lands in, in this file:
+  const read = new Set();
+  const bare = APPSRC.replace(/(^|[^:"'`])\/\/[^\n]*/g, (m, p1) => p1).replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const m of bare.matchAll(/\b(?:sess|openSess|capSess|rawSess|s)\.([a-z_]+)\b/g)) if (ALL.has(m[1])) read.add(m[1]);
+  for (const m of bare.matchAll(/\bsession\.([a-z_]+)\b/g)) if (ALL.has(m[1])) read.add(m[1]);
+  // …and what billdoc.js reads off the session row this panel hands it (printTableBill → billData).
+  const bd = (() => { try { return fs.readFileSync(path.join(ROOT, "public/panels/billdoc.js"), "utf8"); } catch { return ""; } })()
+    .replace(/(^|[^:"'`])\/\/[^\n]*/g, (m, p1) => p1).replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const m of bd.matchAll(/\b(?:sess|session|b)\.([a-z_]+)\b/g)) if (ALL.has(m[1])) read.add(m[1]);
+  const missing = [...read].filter((k) => !sent.has(k)).sort();
+  const bogus = [...sent].filter((k) => !ALL.has(k)).sort();
+  check(
+    "tablet route: every session column the panel (or the bill it builds) reads is in the payload",
+    sel !== "" && missing.length === 0 && bogus.length === 0,
+    sel === ""
+      ? `${routeRel}: SESSION_COLS is gone. If the read went back to select("*") that is a decision, not\n    a bug — but say so here, because this check is the only thing standing between a hand-typed\n    column list and a field that vanishes in silence.`
+      : (bogus.length
+        ? `${routeRel}: SESSION_COLS names ${bogus.length} column(s) `+"`sessions`"+` does not have: ${bogus.join(", ")}\n    A typo here is an error at the database, not a quiet miss — but it is still worth naming.`
+        : `${TABLET} (and billdoc.js, for the bill it builds) reads session column(s) that\n    ${routeRel} never sends: ${missing.join(", ")}\n    Sent: ${[...sent].join(", ")}\n    ` +
+          `An absent column arrives as undefined and every guard on it fails SILENTLY — which is how\n    every bill printed from a waiter's handheld lost its logo (item 3 of this same sweep). Add the\n    column to SESSION_COLS, or stop reading it.`),
+  );
+}
+
+
+// ── A RULE THAT CANNOT WIN, part two: TWO CLASSES ON ONE ELEMENT (sweep #8 T10, 2026-09-03) ─────
+//
+// The @media check above catches a phone rule sitting above the rule it overrides. This catches the
+// other half of the same trap, and I walked into it AN HOUR LATER while building the owner's item 11.
+//
+// The panel writes `class="btn shiftpick-off"`. I styled `.shiftpick-off` — one class, same
+// specificity as `.btn` — and `.btn` sits LOWER in the stylesheet, so it won and the dimmed tile
+// rendered byte-identical to a live one: both measured rgb(242,233,218) on rgb(20,17,13). Nothing
+// was red; the rule was simply ignored. `.btn.shiftpick-off` fixed it.
+//
+// So: every pair of classes this panel puts on ONE element is read out of the panel's own markup,
+// and if a single-class rule for one of them is overridden by a LATER single-class rule for the
+// other setting the same property to a different value, the earlier one can never win and is named.
+// A variant class must out-specify the base class it modifies — that is the whole rule.
+{
+  const cssTxt = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  const spaces = (n) => " ".repeat(n);
+  const bare = cssTxt.replace(/\/\*[\s\S]*?\*\//g, (m) => spaces(m.length));
+  // Blank @media bodies: a responsive override of a base rule is the design, not this fault.
+  const flat = (() => {
+    let i = 0, res = "";
+    while (i < bare.length) {
+      const re = /@media[^{]*\{/g; re.lastIndex = i;
+      const hit = re.exec(bare);
+      if (!hit) { res += bare.slice(i); break; }
+      res += bare.slice(i, hit.index);
+      let d = 1, j = re.lastIndex;
+      while (j < bare.length && d > 0) { if (bare[j] === "{") d++; else if (bare[j] === "}") d--; j++; }
+      res += spaces(j - hit.index);
+      i = j;
+    }
+    return res;
+  })();
+  // Single-class rules only — `.a` with nothing else. Those are the ones that tie.
+  const single = new Map();  // class -> [{ prop, value, at }]
+  for (const m of flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const sel = m[1].replace(/\s+/g, " ").trim();
+    const one = /^\.([a-z][a-z0-9-]*)$/.exec(sel);
+    if (!one) continue;
+    for (const decl of m[2].split(";")) {
+      const c = decl.indexOf(":");
+      if (c < 0) continue;
+      if (/!important/i.test(decl)) continue;      // an !important genuinely wins
+      const prop = decl.slice(0, c).replace(/\s+/g, "").toLowerCase();
+      const value = decl.slice(c + 1).replace(/\s+/g, " ").trim().toLowerCase();
+      if (!single.has(one[1])) single.set(one[1], []);
+      single.get(one[1]).push({ prop, value, at: m.index });
+    }
+  }
+  // Class PAIRS the panel really puts on one element, read from its own markup.
+  const pairs = new Set();
+  for (const m of APPSRC.matchAll(/class="([a-z0-9 _-]{3,120})"/g)) {
+    const cs = m[1].split(/\s+/).filter((x) => /^[a-z][a-z0-9-]*$/.test(x));
+    for (let i = 0; i < cs.length; i++) for (let j = 0; j < cs.length; j++) if (i !== j) pairs.add(cs[i] + "|" + cs[j]);
+  }
+  const dead = [];
+  for (const pair of pairs) {
+    const [a, b] = pair.split("|");
+    const A = single.get(a), Bd = single.get(b);
+    if (!A || !Bd) continue;
+    for (const da of A) for (const db of Bd) {
+      if (da.prop !== db.prop || da.value === db.value) continue;
+      if (db.at <= da.at) continue;
+      // A VARIANT WINNING OVER ITS BASE IS THE DESIGN, and it is how nearly all of this file works:
+      // `.ldot-call` after `.ldot`, `.skel-kot` after `.skel`, `.ordctl-edit` after `.ordctl`. The
+      // later class EXTENDS the earlier one's name, so it is meant to override it and its position
+      // says so. The fault is the other way round — a BASE class further down the file beating a
+      // variant that was written to modify it (`.btn` beating `.shiftpick`), which is silent
+      // because the variant simply never applies. Only that direction is named.
+      if (b.startsWith(a + "-")) continue;
+      dead.push(`.${a} { ${da.prop} } loses to the later .${b} on class="${a} ${b}"`);
+    }
+  }
+  const uniq = [...new Set(dead)];
+  check(
+    "tablet: no single-class rule is beaten by a later single-class rule on an element that wears both",
+    uniq.length === 0,
+    `${CSS}: ${uniq.length} rule(s) can never win:\n      ${uniq.join("\n      ")}\n    ` +
+    `Same specificity, later wins. A variant has to out-specify the base it modifies — write\n    ` +
+    `\`.base.variant { … }\`. This is the fault that rendered a dimmed "can't take a party" tile\n    ` +
+    `byte-identical to a live one, and the same trap in a different costume as the @media one above.`,
+  );
+  // …and the three things the measurement taught about that one tile in particular.
+  check(
+    "tablet: the dimmed destination tile out-specifies .btn, so its own look really applies",
+    /\.btn\.shiftpick-off\s*\{/.test(bare),
+    `${CSS}: the dimmed tile must be styled as \`.btn.shiftpick-off\` — \`.shiftpick-off\` alone ties\n    with \`.btn\`, which sits lower and wins.`,
+  );
+  check(
+    "tablet: …and it is dimmed by its fill and border, never by `opacity`",
+    !/\.btn\.shiftpick-off\s*\{[^}]*opacity:/.test(bare),
+    `${CSS}: \`opacity\` on that tile multiplies the REASON WORD too — the one thing the tile exists\n    to say. Measured at .42 it came out 2.16:1 on the dark skin. Dim the fill and the border.`,
+  );
+  check(
+    "tablet: …and the reason word keeps the panel's real text colour",
+    /\.btn\.shiftpick-off small\s*\{[^}]*color:\s*var\(--text\)/.test(bare),
+    `${CSS}: the reason word ("taken" / "joined" / "wants in") is why the tile is drawn at all. It\n    must not be muted twice. Measured after: 7.78:1 light, 10.66:1 dark.`,
+  );
+}
+
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

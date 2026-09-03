@@ -3256,6 +3256,22 @@ function renderMergePicker(t, s) {
   }));
 }
 
+// WHY NOT THIS TABLE — one definition, used to decide the list AND to label the dimmed ones, so the
+// two can never disagree. The four reasons and their exact words are the manager panel's
+// (shiftBlocked in public/panels/editor/app.js): a party can't move onto itself, onto a table joined
+// to another, onto a table that already has a party row (even the invisible empty one the floor draws
+// as Free — see canTakeAParty), or onto one a guest has already asked to be seated at.
+// `not yours` is this panel's fifth, and only this panel has it: the tablet is the one screen with
+// waiter sections.
+function shiftBlockedWhy(i, from) {
+  if (String(i) === String(from)) return "this one";
+  if (mergeParentOf(i) || mergeChildrenOf(i).length) return "joined";
+  if (tableHasAnyParty(i)) return "taken";
+  if ((state.summary.requests || []).some((r) => String(r.table_number) === String(i))
+      || ((state.summary.tiles || {})[String(i)] || {}).hasReq) return "wants in";
+  if (!inMySection(i)) return "not yours";
+  return "";
+}
 function renderShiftPicker(t, s) {
   const n = tableCount();
   const free = [];
@@ -3266,11 +3282,46 @@ function renderShiftPicker(t, s) {
   // only possible outcome was "That table is already taken — pick a free one". See the long note by
   // canTakeAParty for the measurement and for the manager panel's identical rule.
   for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && canTakeAParty(i)) free.push(i); }
-  const btns = free.length
-    ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">T${i}</button>`).join("")
-    : `<div class="muted">No free table to move this party to — every other table in your section already has a party on it, even if it has ordered nothing yet.</div>`;
-  const body = `<div class="muted small" style="margin-bottom:10px">Move this party — orders &amp; calls included — to a free table:</div><div class="shiftgrid">${btns}</div>`;
-  const { dropLayer } = renderPickerShell(`Move T${esc(t)} →`, body, "tablet-shift-picker", renderPanel);
+  // ── THE WHOLE FLOOR, WITH THE ONES THAT CAN'T TAKE IT DIMMED AND LABELLED (owner picked it as
+  // item 11, 2026-09-03) ──────────────────────────────────────────────────────────────────────────
+  // Until now this grid listed only the tables that COULD take the party, so after the free-table
+  // rule was made honest it got shorter and a waiter had no way to tell whether a table was missing
+  // because someone was sitting at it, because it was joined to another, because a guest had asked
+  // for it, or because it simply isn't in their section. The manager panel has shown the whole floor
+  // with a one-word reason on each unavailable tile for a while; this is the same thing, in the same
+  // four words, so the two doors read alike.
+  //
+  // ONE DELIBERATE DIFFERENCE FROM THE MANAGER, and it is this panel's own rule: the manager renders
+  // its dimmed tiles `disabled`, and on a touch screen a disabled button SWALLOWS the tap — the exact
+  // fault "💳 Mark bill paid" was fixed for here (T7 improvement I1) and the reason style.css says
+  // "Never `disabled` — a disabled tab on a touch panel swallows the tap". So a dimmed tile here
+  // stays tappable and SAYS its reason out loud. A waiter carrying plates has no hover.
+  const cell = (i) => {
+    const why = shiftBlockedWhy(i, t);
+    const label = esc(tname(i) || "T" + i);
+    return why
+      ? `<button class="btn shiftpick shiftpick-off" data-shiftwhy="${esc(why)}" data-shiftlabel="${label}">${label}<small>${esc(why)}</small></button>`
+      : `<button class="btn shiftpick" data-shiftto="${i}">${label}<small>free</small></button>`;
+  };
+  const all = [];
+  for (let i = 1; i <= n; i++) all.push(cell(i));
+  const btns = all.join("")
+    + (free.length ? "" : `<div class="muted" style="grid-column:1/-1;padding:10px 2px;line-height:1.5">No free table to move this party to — every other table is taken, joined, waiting on a guest, or outside your section.</div>`);
+  const body = `<div class="muted small" style="margin-bottom:10px">Move this party — orders &amp; calls included — to a free table. Dimmed tables can't take it:</div><div class="shiftgrid">${btns}</div>`;
+  const { dropLayer } = renderPickerShell(`Move ${esc(tname(t) || "T" + t)} →`, body, "tablet-shift-picker", renderPanel);
+  // A DIMMED TILE STILL ANSWERS. Never a silent return — the words are the same four the tile itself
+  // carries, said as a sentence a waiter can act on.
+  const WHY_SAYS = {
+    "this one": "That's the table this party is already on.",
+    joined: "That table is joined with another and shares its bill — unmerge it first.",
+    taken: "There's already a party on that table. Move them off it first, or pick another.",
+    "wants in": "A guest has asked to be seated there — answer their request first.",
+    "not yours": "That table isn't in your section — ask your manager to add it.",
+  };
+  document.querySelectorAll("[data-shiftwhy]").forEach((b) => (b.onclick = () => {
+    const why = b.dataset.shiftwhy;
+    toast(`${b.dataset.shiftlabel}: ${WHY_SAYS[why] || "That table can't take this party."}`, false);
+  }));
   document.querySelectorAll("[data-shiftto]").forEach((b) => (b.onclick = () => {
     const to = b.dataset.shiftto;
     dropLayer();

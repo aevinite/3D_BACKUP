@@ -502,7 +502,35 @@ html[data-theme="light"] .tile .tmerge { color: var(--merge-ink); }
 
 /* shift-to-table picker: a grid of free-table buttons */
 .shiftgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
-.shiftpick { padding: 16px 8px; font-size: 16px; font-weight: 800; }
+/* `.btn.shiftpick`, NOT `.shiftpick` — found by the new two-class check the moment it was written,
+   and it is an OLD fault, not one of mine: this rule has asked for 16px text and its own padding
+   since it was written, and `.btn` (lower in the file, same specificity) has been answering 14.5px
+   and 11px/16px the whole time. Measured on the running app before the fix: fontSize 14.5px,
+   padding "11px 16px". The `display:flex` half DID apply, because `.btn` sets no display — which is
+   exactly why nobody noticed: the rule looked like it was working. */
+.btn.shiftpick { padding: 14px 8px 12px; font-size: 16px; font-weight: 800; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.shiftpick small { font-size: 10.5px; font-weight: 600; color: var(--muted); letter-spacing: .01em; }
+/* A table that cannot take the party (owner's item 11, 2026-09-03): dimmed and labelled, but NOT
+   `disabled` — on a touch panel a disabled button swallows the tap, which is the fault
+   "💳 Mark bill paid" was fixed for. It stays tappable and says why (see WHY_SAYS in app.js). */
+/* DIMMED WITH COLOUR, NOT WITH `opacity` — because opacity multiplies the WORD too.
+   Measured with the tile's own opacity folded in (which getComputedStyle does not do): at .42 the
+   reason word came out at 2.16:1 on the dark skin, i.e. the one thing this tile exists to say was
+   the least readable thing on it. The tile is faded by its own fill and border instead, and the
+   word keeps the panel's real text colour, so both skins are MEASURED rather than multiplied. */
+/* `.btn.shiftpick-off`, NOT `.shiftpick-off` — AND I WALKED INTO THE FAULT I HAD JUST FIXED.
+   `.btn` sets background and color, `.shiftpick-off` alone is the same specificity (one class), and
+   `.btn` sits LOWER in this file — so my first version of this rule was overridden and a dimmed
+   tile rendered byte-identical to a live one. Measured, not spotted: both came back
+   rgb(242,233,218) on rgb(20,17,13). Exactly the trap that made the restaurant's name never fit on
+   a phone, one rule apart, an hour later. Two classes wins, and the new live check below asserts a
+   dimmed tile really looks different rather than trusting this comment. */
+.btn.shiftpick-off { background: none; border-color: color-mix(in srgb, var(--muted) 55%, transparent);
+  border-style: dashed; color: var(--muted); font-weight: 700; }
+/* The reason word keeps the panel's REAL text colour, because it is the one thing this tile exists
+   to say. Dimmed by its fill and its border, never by `opacity` — opacity multiplies the word too,
+   and at .42 it measured 2.16:1 on the dark skin. */
+.btn.shiftpick-off small { color: var(--text); opacity: .82; font-weight: 700; }
 /* dish options picker (size / extras…) + customised cart lines */
 .optgroup { margin: 14px 0; }
 .optgroup h4 { margin: 0 0 8px; font-size: 14px; }
