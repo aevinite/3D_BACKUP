@@ -23,9 +23,13 @@
 // still encoded, which is the only moment at which the question "can this even be read?" can be
 // asked without throwing.
 //
-// SCOPED TO THE TWO GUEST DOORS AND NOTHING ELSE (see `config.matcher` below). It does not run on
-// the panels, the APIs, the assets, or anything a member of staff touches. On a good address it
-// does one `decodeURIComponent` and gets out of the way.
+// SCOPED TO THE TWO ADDRESS FAMILIES THAT CARRY A RESTAURANT OR A TABLE CODE (see
+// `config.matcher` below): `/r/*` and `/q/*`. It does not run on the APIs or the assets. It DOES
+// run on the three staff doors that live under `/r/<slug>/…` — manager, kitchen, tablet — and on
+// `/r/<slug>/login`, because they share that prefix; an earlier version of this line claimed
+// otherwise and a damaged staff address was answered with the diner's screen (T8 round 2,
+// 2026-09-03). Who is at the door now decides where a broken one goes. On a good address it does
+// one `decodeURIComponent` and gets out of the way.
 //
 // WHAT THE PERSON GETS INSTEAD: the guest screen that already exists for "this menu isn't
 // available right now — please ask a member of staff", rather than a wordless error page. That is
@@ -51,11 +55,32 @@ import { NextResponse, type NextRequest } from "next/server";
 // way back is the QR on their table: short, printed, and always valid.
 const DEAD_END = "/r/zz-unreadable-address/menu";
 
+// A MEMBER OF STAFF IS NOT A DINER, AND MUST NOT BE SENT TO A DINER'S SCREEN
+// (T8 sweep #8 round 2, 2026-09-03). `/r/:path*` matches more than the guest menu: the three
+// STAFF doors live under the same prefix — /r/<slug>/manager, /kitchen, /tablet — and so does
+// /r/<slug>/login. Driven on all four with a damaged address, every one of them landed on
+// `/r/zz-unreadable-address/menu`: a manager whose taped-up bookmark got cut short was shown the
+// diner's "please ask a member of staff" line, which is the one sentence that cannot be true of
+// the person reading it. (The note above this file's config said it "does not run on the panels";
+// the matcher always did.)
+//
+// The honest answer differs by who is at the door, so it is chosen by the LAST path segment —
+// which is a fixed word, never the damaged part. A diner keeps the guest screen and the QR on
+// their table; a member of staff gets the ordinary staff sign-in, which is the door they know and
+// which names no restaurant, because a broken address cannot say which one was meant.
+const STAFF_DOORS = new Set(["manager", "kitchen", "tablet", "login", "owner"]);
+const STAFF_DEAD_END = "/login";
+
 export function middleware(req: NextRequest) {
+  const path = req.nextUrl.pathname;
   try {
-    decodeURIComponent(req.nextUrl.pathname);
+    decodeURIComponent(path);
   } catch {
-    return NextResponse.redirect(new URL(DEAD_END, req.nextUrl.origin), 307);
+    // The segments are read off the RAW path on purpose: it is only the restaurant's name that is
+    // unreadable, and the door word after it is plain text either way.
+    const last = path.replace(/\/+$/, "").split("/").pop() || "";
+    const to = STAFF_DOORS.has(last) ? STAFF_DEAD_END : DEAD_END;
+    return NextResponse.redirect(new URL(to, req.nextUrl.origin), 307);
   }
   return NextResponse.next();
 }
