@@ -256,6 +256,41 @@ console.log("\n→ the manager panel's shell still agrees with the code it descr
     applied ? "the word-tile rule is missing" : "a dead `.dash-card b.ktext` rule is back");
 }
 
+/* 10 ─ a member of staff at a BROKEN tenant address is not sent to a diner's screen ───────── */
+{
+  // The middleware added on 2026-09-02 turns an address whose percent-escapes are damaged into
+  // the guest "this menu isn't available" screen. Its matcher is `/r/:path*`, which is also where
+  // /r/<slug>/manager, /kitchen, /tablet and /login live — so a manager with a mangled bookmark
+  // was handed the diner's "please ask a member of staff" line, which is the one sentence that
+  // cannot be true of the person reading it. Driven on all four doors, T8 round 2, 2026-09-03.
+  let MW = "";
+  try { MW = rd("middleware.ts"); } catch { MW = null; }
+  if (MW === null) {
+    ok("there is no middleware, so nothing can re-route a staff door", true);
+  } else {
+    const code = codeOf(MW);
+    const guest = /\/r\/:path\*/.test(MW);
+    ok("the middleware still covers the tenant addresses, so this question still applies", guest,
+      "its matcher changed — re-read whether the staff doors are inside it before trusting this section");
+    ok("…and it tells a member of staff apart from a diner", /STAFF_DOORS/.test(code),
+      "a damaged /r/<slug>/manager would be answered with the diner's menu screen again");
+    ok("…and the door words it knows are the four staff ones", /"manager", "kitchen", "tablet", "login"/.test(code),
+      "a staff door is missing from the list and would fall through to the guest screen");
+    ok("…and a staff address goes to the staff sign-in, not the menu", /STAFF_DEAD_END = "\/login"/.test(code),
+      "the staff dead end is no longer the staff sign-in");
+    ok("…and a diner still gets the guest screen they always got", /DEAD_END = "\/r\/zz-unreadable-address\/menu"/.test(code),
+      "the guest dead end moved — the diner's honest screen is what that redirect is for");
+    ok("…and the door word is read off the RAW path, which is never the damaged part",
+      /split\("\/"\)\.pop\(\)/.test(code), "the segment is no longer read off the raw path, so a damaged name could hide the door word");
+    ok("…and the middleware still holds no gate at all",
+      !/tokenIsValid|requireRole|ownerScope|userFromCookie|AUTH_COOKIE|supabase|cookies/.test(code),
+      "it now reads a session or a permission — the gate stays per-route, per CLAUDE.md");
+    ok("…and its own note no longer claims it skips the panels",
+      !/It does not run on\s*\n\s*\/\/ the panels/.test(MW),
+      "the note says it skips the panels and the matcher does not — the exact mismatch this guard exists for");
+  }
+}
+
 /* 8 ─ this guard actually looked at something ─────────────────────────────────────────────── */
 if (pass + fails.length < 30) {
   console.error(`\n✗ verify:panel-shell ran only ${pass + fails.length} checks — the shell parsed to nothing, so nothing was checked.`);
