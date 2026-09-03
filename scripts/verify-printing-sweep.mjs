@@ -1516,8 +1516,25 @@ await phase("…and a print on ITS printer closes it", async () => {
   };
   const claim = async (tok) => { const r = await agentCall("/next", {}, tok); return r.status === 200 ? r.json() : null; };
 
+  // ESTABLISH THE PRECONDITION, DO NOT ASSUME IT (2026-09-03). This drained and then asserted 204.
+  // `drain()` is CUTOFF-based on purpose (`created_at < the moment it was called`), so a ticket the
+  // auto-queue trigger writes a heartbeat later survives it — and the helper is then CORRECTLY handed
+  // that ticket and correctly answers 200. The phase failed on a product that was right.
+  //
+  // It only ever showed up with the virtual printers READY, because the paper-geometry section above
+  // is the one that creates real orders, and it is skipped without them: two full runs, identical
+  // code, one red. So the fix is to prove the queue is empty before asking what an empty queue
+  // returns — drain until nothing live is left, then assert.
   await phase("nothing queued → the helper is told 204, not an empty answer with a body", async () => {
-    await drain();
+    let live = -1;
+    for (let i = 0; i < 6; i++) {
+      await drain();
+      const rows = await db(`print_jobs?restaurant_id=eq.${RID}&status=in.(queued,printing)&select=id`);
+      live = Array.isArray(rows) ? rows.length : -1;
+      if (live === 0) break;
+      await new Promise((r) => setTimeout(r, 400));      // let a trigger-queued straggler land, then drain it too
+    }
+    if (live !== 0) return `could not empty the queue to ask the question — ${live} ticket(s) still live, so 204 is not the right answer anyway`;
     const r = await agentCall("/next");
     return (r.status === 204 && (await r.text()) === "") || `it answered ${r.status} with a body — a helper polling all day pays for every byte of that`;
   });
@@ -2922,8 +2939,28 @@ if (!browser) {
   await phase("…and the bell knows how to draw a printer row", () =>
     /printer: \{ icon: "🖨"/.test(bell) && /r\.kind === "printer"/.test(bell)
     || "a printer row would render as 'Table  asked for something', which is nonsense");
-  await phase("…and an open printer problem becomes one of those rows", () =>
-    /printer-problem:/.test(code) || "a filed printer problem never reaches the bell");
+  // ⚠️ THIS ASSERTED THE SPELLING OF A KEY, AND THE KEY LEGITIMATELY CHANGED (2026-09-03).
+  // It required the literal `printer-problem:` — the bell-row key I hand-built when the strips came
+  // off the floor (PR #1198). Sweep #8's "item 16" then REPLACED that row with a better one: the bell
+  // now reads `printerAlerts()`, the same list the toasts are already built from, so one printer is
+  // described once instead of twice — and that list also carries stuck TICKETS, which my version
+  // never showed at all. The key became `printer:` + the alert's own key.
+  //
+  // So the guard went red on an improvement, which is this file's own header warning ("assert the
+  // rule, not the wording") happening to the person who wrote it.
+  //
+  // THE RULE, asserted as a CHAIN rather than a string: a problem filed by the server
+  // (`state.summary.printer.events`) is turned into an alert by printerAlerts(), and every alert
+  // becomes a `kind: "printer"` bell row. Rename anything you like; break either link and this fails.
+  await phase("…and an open printer problem becomes one of those rows", () => {
+    const fn = code.slice(code.indexOf("function printerAlerts"));
+    const sourcesEvents = /state\.summary && state\.summary\.printer/.test(fn) && /\.events \|\| \[\]/.test(fn);
+    if (!sourcesEvents) return "printerAlerts() no longer reads the problems the server filed — the bell cannot know about them";
+    const bellUses = /printerAlerts\(\)/.test(code.slice(code.indexOf("LFH_BELL.sync") - 4000, code.indexOf("LFH_BELL.sync")))
+      || /alerts = printerAlerts\(\)/.test(code);
+    if (!bellUses) return "the bell no longer builds its rows from printerAlerts() — a filed problem reaches nobody";
+    return true;
+  });
   await phase("…and so does where the paper actually comes out", () =>
     /printer-where:/.test(code) || "nobody can find out which screen or computer is printing");
 }
