@@ -63,19 +63,29 @@ first time, the nav still fitting them, the two module tabs in the phone drawer,
 Inventory embed. Claimed by editing this line and pushing it before a row was written; highest id
 actually on disk re-checked in the same breath (`P99915`).)* *(T9 of sweep #8 took `P99801`–`P99920` on 2026-09-03 — 120 ids, not 500, and only what it needed. Round 2 of the kitchen screen is 500 rows; blocks A+B filed 336 in T9's own block (`P63313`–`P63649`), 51 of that block remain (`P63650`–`P63700`), so 113 were short. **This is T9's SECOND attempt at a claim, and the first one is the collision this file keeps warning about:** T9 wrote `P99301`–`P99800` and opened a PR for it, and T8 claimed the same range in the same window and reached `main` first. **T9 renumbered, not T8** — a claim only counts once it is ON `main` — and nothing had to be re-run, because T9 had written zero rows there. Checked against the highest id actually on disk in the same breath: `P98727`.)*
 
-> ### ⚠️ THE ID SPACE IS ALMOST GONE — 79 ids left after this claim, and the format cannot grow
+> ### ✅ THE ID SPACE WAS ALMOST GONE — WIDENED 2026-09-03 (owner picked it as item 15)
 >
-> `scripts/verify-ledger-index.mjs` matches a phase row with **`/^\|\s*(P\d{5})\s*\|/` — exactly
-> five digits.** So `P99999` is the last id this scheme can express, and a `P100000` would not be
-> recognised as a phase row at all: it would silently vanish from every count this file makes, which
-> is the one failure mode a ledger cannot survive. After `P99920` there are **79** ids left in the
-> entire registry.
+> `scripts/verify-ledger-index.mjs` matched a phase row with **exactly five digits** in three
+> places, so `P99999` was the last id the scheme could express — and this registry had reached
+> `P99921`, leaving **79**.
 >
-> **The next terminal that needs a block has to widen the format first, not claim from this line.**
-> That means `FIRST_COL_ID`, `isPhaseRow` and the `next free ID` matcher in
-> `scripts/verify-ledger-index.mjs` (three regexes, all `\d{5}`), and then every other guard or
-> script that greps `P[0-9]\{5\}` — `grep -rl "P\[0-9\]\\{5\\}\|P\\d{5}" scripts/` finds them.
-> Widening to `\d{5,6}` keeps every existing id valid and costs nothing. Found by T9 while claiming.
+> **Running out was never the danger.** A six-digit id would not have been rejected, it would have
+> been **silently ignored**: `isPhaseRow` answers false, so the row disappears from the phase
+> count, from the duplicate check, from this registry, and from the row-count snapshot §5 uses to
+> prove no ledger has lost a row. A sweep could have filed 500 checks, the guard would have gone
+> GREEN, and those ids would have been handed to somebody else later. **Proved before changing
+> anything:** two six-digit rows, one of them a deliberate duplicate, were added to a ledger and
+> the old guard reported no collision and no extra rows at all.
+>
+> **Now `P\d{5,6}`, in all three places, plus the two sweep-T7 helpers that hard-coded the same
+> width** (`scripts/sweep/t7/static.mjs`, `scripts/sweep/t7/rerun-t5.mjs`). Every existing id stays
+> valid — they are all five digits. Deliberately NOT `{5,}`: an unbounded run of digits would
+> swallow a typo'd twelve-digit id as legitimate. The failure message's zero-padding follows the
+> width the registry actually declares, so a six-digit mark prints correctly too.
+>
+> **Proved after, three ways:** a six-digit row is COUNTED (59,412 → 59,413) · a duplicate
+> six-digit id is CAUGHT · a six-digit id above the mark is CAUGHT. So the next block can be
+> claimed past `P99999` without anything going quiet.
 
 **Previously: `P99801`.** *(T8 of sweep #8 took `P99301`–`P99800` on 2026-09-03 for a SECOND, freshly
 planned 500 over the manager panel's host page and shell, on the owner's word after round 1 was merged

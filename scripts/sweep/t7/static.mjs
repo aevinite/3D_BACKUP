@@ -1066,7 +1066,7 @@ check("P61384", "…and no recorded floor is above what the file actually holds 
   const counts = JSON.parse(read(".claude/sweep/LEDGER/ROW-COUNTS.json"));
   const bad = [];
   for (const [f, was] of Object.entries(counts)) {
-    const rows = read(`.claude/sweep/LEDGER/${f}`).split("\n").filter((l) => /^\|\s*P\d{5}\s*\|/.test(l) && l.split(/(?<!\\)\|/).length >= 6).length;
+    const rows = read(`.claude/sweep/LEDGER/${f}`).split("\n").filter((l) => /^\|\s*P\d{5,6}\s*\|/.test(l) && l.split(/(?<!\\)\|/).length >= 6).length;
     if (rows < was) bad.push(`${f}: ${rows} < ${was}`);
   }
   return bad.length === 0 || bad.join(", ");

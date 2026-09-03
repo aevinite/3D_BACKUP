@@ -48,7 +48,7 @@ let ran = 0, pass = 0, fail = 0, err = 0;
 const results = [];
 for (let i = 0; i < lines.length; i++) {
   const L = lines[i];
-  const m = L.match(/^\| (P\d{5}) \| (.*?) \| read the shipped files? · (.*?) \| (✅|❌|⏭|[^|]*) \|(.*)\|\s*$/);
+  const m = L.match(/^\| (P\d{5,6}) \| (.*?) \| read the shipped files? · (.*?) \| (✅|❌|⏭|[^|]*) \|(.*)\|\s*$/);
   if (!m) continue;
   const [, id, title, exprRaw, prev] = m;
   if (!/\bapp\b/.test(exprRaw)) continue;           // only rows asserting against app.js
