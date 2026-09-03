@@ -230,9 +230,11 @@ body.nav-compact .tab {
   animation: badgePulse 1.4s ease-in-out infinite;
 }
 @keyframes badgePulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); } }
-.conn { margin-left: auto; font-size: 12px; color: var(--muted); }
-.conn.ok { color: var(--green); }
-.conn.err { color: var(--red); }
+/* OBITUARY (2026-09-03): `.conn`, `.conn.ok` and `.conn.err` styled this panel's ORIGINAL text
+   connection indicator. connbadge.js's pill replaced it and its own `.lfh-conn*` rules are what
+   paint the light you see now; these three, and the phone override further down, were left
+   styling an element that was being hidden. Element, writes, hide-branch and rules all removed
+   in one change — see the obituary in public/panels/editor/index.html. */
 
 /* ---------- layout ---------- */
 /* --ribbon-h: height of the injected admin/owner "view" ribbon (#xrayRibbon), set by
@@ -2260,7 +2262,7 @@ body {
     padding: calc(10px + var(--sat)) calc(12px + var(--sar)) 10px calc(12px + var(--sal));
   }
   .brand { font-size: 18px; }
-  .conn { margin-left: auto; }              /* stays top-right, on the brand's row */
+  /* (the `.conn` phone override that was here went with the element — see the obituary above) */
 
   /* THE ACTIONS ROW MUST FIT ON ONE LINE AT 360px (T12 phone sweep, 2026-08-05).
      Measured on the owner's A35: the row wanted 373px of a 348px inner width, so its LAST child

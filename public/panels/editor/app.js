@@ -702,8 +702,11 @@ async function loadAll() {
   syncBanquetTab(); // Banquet tab follows the admin entitlement (mig 130)
   syncPlatformTab(); // Platform tab follows the platform/parcel modules (mig 209)
   syncInventoryTab(); // Inventory tab follows the inventory module (mig 221)
-  $("#conn").textContent = "connected";
-  $("#conn").className = "conn ok";
+  // OBITUARY (2026-09-03): `$("#conn").textContent = "connected"` was here, and in three more
+  // places below. It wrote into the panel's ORIGINAL text connection indicator, which
+  // connbadge.js's pill replaced and then hid — so these were four writes into an element
+  // nobody could see. The pill reads the live channel itself (LFH_RT) and needs nothing from
+  // here. The element, its CSS and connbadge's hide-it branch went in the same change.
   renderList();
 }
 
@@ -18717,8 +18720,7 @@ loadAll()
     // even that is missing (first ever load on this device), we still paint the panel,
     // keep the live poll running, and let the offline bar do the explaining.
     if (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e)) {
-      $("#conn").textContent = "offline";
-      $("#conn").className = "conn err";
+      // (the two `#conn` writes that were here are gone — see the obituary in bootPaint)
       try { bootPaint(); } catch (paintErr) { /* nothing saved yet → the shell stays empty, the bar explains why */ }
       // The moment the connection is back, load for real.
       window.addEventListener("online", function retry() {
@@ -18727,7 +18729,5 @@ loadAll()
       });
       return;
     }
-    $("#conn").textContent = "connection failed";
-    $("#conn").className = "conn err";
     toast("Couldn't load: " + e.message, "err");
   });

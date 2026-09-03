@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=b6e55516" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=390a1a04" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=3e94bfd1" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=7aaf299f"></script>
 </head>
@@ -74,7 +74,8 @@
     </nav>
     <!-- Right-side actions cluster. The shared connbadge.js mounts the 🟢/🟡/🔴 connection
          light as the FIRST child of .top-actions (kitchen/tablet have this wrapper too); without
-         it the pill was inserted at the far LEFT of the topbar, before the brand. -->
+         it the pill was inserted at the far LEFT of the topbar, before the brand. That pill is
+         now the ONLY connection indicator this panel has — see the obituary below. -->
     <div class="top-actions">
       <button id="themeToggle" class="theme-toggle" type="button"></button>
       <button id="reportIssueBtn" class="theme-toggle" type="button" title="Report an issue to the owner" aria-label="Report an issue">🚩</button>
@@ -87,7 +88,17 @@
            Same crowding the tablet panel solved by suppressing one; here both are reachable, so
            they just need to look different. -->
       <button id="myProfileBtn" class="theme-toggle" type="button" title="My profile &amp; pay" aria-label="My profile and pay" hidden style="display:none">💳</button>
-      <div class="conn" id="conn">connecting…</div>
+      <!-- OBITUARY: `<div class="conn" id="conn">connecting…</div>` lived here until 2026-09-03.
+           It was this panel's ORIGINAL connection indicator — a line of text that said
+           "connecting…", then "connected" / "offline" / "connection failed". connbadge.js's
+           🟢/🟡/🔴 pill replaced it, and the manager panel was the only one of the three that
+           never had the old one removed: the new pill carried code to HIDE it on sight, and
+           editor/app.js went on writing three different words into a hidden element in four
+           places. Two things doing one job, one of them invisible — the owner's standing rule
+           (2026-08-29) is that the new way REPLACES the old one. The kitchen and waiter shells
+           never shipped it. Removed here together with app.js's four writes, connbadge.js's
+           hide-the-legacy branch and style.css's four `.conn` rules — the whole path, in one
+           change, because deleting only the markup would make those four writes throw. -->
     </div>
   </header>
 
@@ -146,7 +157,7 @@
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=79344a64"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=50636b84"></script>
+  <script src="/panels/connbadge.js?v=1f05c828"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
@@ -207,6 +218,6 @@
   <script src="/panels/auditsort.js?v=1da861b5"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=69b50e19"></script>
+  <script src="/panels/editor/app.js?v=628af60d"></script>
 </body>
 </html>

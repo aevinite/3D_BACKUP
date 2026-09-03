@@ -202,8 +202,11 @@
   function mount() {
     if (badge) return badge;
     injectStyles();
-    var legacy = document.getElementById("conn");
-    if (legacy && legacy.classList.contains("conn")) legacy.style.display = "none";
+    // OBITUARY (2026-09-03): two lines here hid the manager panel's ORIGINAL text connection
+    // indicator (`#conn`), the one this pill replaced. It was the last panel still shipping it,
+    // and hiding a thing instead of removing it is what left the manager with two indicators —
+    // one working, one invisible, and app.js still writing to the invisible one. The element,
+    // its four writes and its CSS were all removed on that date, so there is nothing to hide.
 
     badge = el("button", "lfh-conn"); badge.id = "lfhConnBadge"; badge.type = "button";
     badge.setAttribute("aria-haspopup", "dialog");
