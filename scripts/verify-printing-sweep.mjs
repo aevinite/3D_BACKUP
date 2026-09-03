@@ -2922,8 +2922,28 @@ if (!browser) {
   await phase("…and the bell knows how to draw a printer row", () =>
     /printer: \{ icon: "🖨"/.test(bell) && /r\.kind === "printer"/.test(bell)
     || "a printer row would render as 'Table  asked for something', which is nonsense");
-  await phase("…and an open printer problem becomes one of those rows", () =>
-    /printer-problem:/.test(code) || "a filed printer problem never reaches the bell");
+  // ⚠️ THIS ASSERTED THE SPELLING OF A KEY, AND THE KEY LEGITIMATELY CHANGED (2026-09-03).
+  // It required the literal `printer-problem:` — the bell-row key I hand-built when the strips came
+  // off the floor (PR #1198). Sweep #8's "item 16" then REPLACED that row with a better one: the bell
+  // now reads `printerAlerts()`, the same list the toasts are already built from, so one printer is
+  // described once instead of twice — and that list also carries stuck TICKETS, which my version
+  // never showed at all. The key became `printer:` + the alert's own key.
+  //
+  // So the guard went red on an improvement, which is this file's own header warning ("assert the
+  // rule, not the wording") happening to the person who wrote it.
+  //
+  // THE RULE, asserted as a CHAIN rather than a string: a problem filed by the server
+  // (`state.summary.printer.events`) is turned into an alert by printerAlerts(), and every alert
+  // becomes a `kind: "printer"` bell row. Rename anything you like; break either link and this fails.
+  await phase("…and an open printer problem becomes one of those rows", () => {
+    const fn = code.slice(code.indexOf("function printerAlerts"));
+    const sourcesEvents = /state\.summary && state\.summary\.printer/.test(fn) && /\.events \|\| \[\]/.test(fn);
+    if (!sourcesEvents) return "printerAlerts() no longer reads the problems the server filed — the bell cannot know about them";
+    const bellUses = /printerAlerts\(\)/.test(code.slice(code.indexOf("LFH_BELL.sync") - 4000, code.indexOf("LFH_BELL.sync")))
+      || /alerts = printerAlerts\(\)/.test(code);
+    if (!bellUses) return "the bell no longer builds its rows from printerAlerts() — a filed problem reaches nobody";
+    return true;
+  });
   await phase("…and so does where the paper actually comes out", () =>
     /printer-where:/.test(code) || "nobody can find out which screen or computer is printing");
 }
