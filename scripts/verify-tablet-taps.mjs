@@ -50,6 +50,8 @@ import vm from "node:vm";
 const ROOT = repoRootFrom(import.meta.url);
 const TABLET = "public/panels/tablet/app.js";
 const src = fs.readFileSync(path.join(ROOT, TABLET), "utf8");
+// The same text under a name the later blocks can use without shadowing their own local `src`.
+const APPSRC = src;
 const HTML = "public/panels/tablet/index.html";
 const CSS = "public/panels/tablet/style.css";
 
@@ -226,7 +228,12 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     `safe; the floor behind already explains this state in the same sentence.`,
   );
   for (const [fn, phrase] of [
-    ["renderShiftPicker", "No free tables"],
+    // Reworded 2026-09-03 (sweep #8 T10) and the anchor moved with it, NOT relaxed. The picker's
+    // free-table rule changed in the same pass — a table with an open-but-empty session is drawn
+    // Free by the owner's own rule and is refused by the server as taken, so it is no longer
+    // offered — which means this empty state now appears on a floor of open-but-empty tables and
+    // has to say WHY there is nothing rather than only that there is nothing.
+    ["renderShiftPicker", "No free table to move this party to"],
     ["renderMergePicker", "No other open tables"],
     ["renderMoveOrderPicker", "No movable orders"],
     ["renderMoveItemPicker", "No movable dishes"],
@@ -294,7 +301,11 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   }
   check(
     "tablet: the split confirm refuses to guess when the party's rows could not be read",
-    /const readOk = await ensurePartySlices\(child, true\)/.test(un) && /if \(!readOk\)[\s\S]{0,200}?toast\(/.test(un),
+    // The anchor dropped the dead second argument with the call sites (sweep #8 T10, 2026-09-03) —
+    // ensurePartySlices() has never declared a `force` parameter and there is no non-forced mode, so
+    // the `true` was a word that only misled a reader. The ASSERTION is unchanged and is the part
+    // that matters: the answer must be READ and refused on, not thrown away.
+    /const readOk = await ensurePartySlices\(child\)/.test(un) && /if \(!readOk\)[\s\S]{0,200}?toast\(/.test(un),
     `${TABLET}: unmergeTable() must know whether the slices actually landed. ensureTableSlice swallows\n    a fetch blip on purpose, so without this the confirm reads an empty cache and announces "nothing\n    was ordered at it" about a table that is holding food — talking someone into a split by\n    understating it. Same rule closeTableAndFree already follows for "already free" vs "couldn't ask".`,
   );
   check(
@@ -931,6 +942,450 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     `${CSS}: .idel is sized by padding again. A padded glyph changes size with its font; the − and + ` +
     `beside it are a fixed square, and a delete should not be the odd one out.`,
   );
+}
+
+
+// ── A PHONE RULE THAT SITS ABOVE THE RULE IT OVERRIDES IS NOT A RULE (sweep #8 T10, 2026-09-03) ──
+//
+// The fault this was written for. On 2026-08-04 the tablet's top bar was measured to the pixel and
+// the restaurant's own name was given room on a phone:
+//
+//     @media (max-width: 430px) { .brand .rest-name { font-size: 12.5px; padding: 2px 8px; } }
+//     ...
+//     .brand .rest-name { ... font-size: 13px; ... padding: 2px 10px; ... }
+//
+// Two rules, the SAME selector, therefore the same specificity — and the plain one comes LATER in
+// the file, so document order gives it the win at every width. The phone rule never applied once:
+// measured 13px / "2px 10px" at both 390px and 360px, a month after it was written. Nothing was
+// red, because a CSS rule that does nothing looks exactly like a CSS rule that is not needed.
+//
+// A media query does NOT add specificity. That is the whole trap, and it will be walked into again
+// on a 1,500-line stylesheet, so it gets a guard rather than a comment: for every declaration
+// inside an `@media` block, if an UNCONDITIONAL rule with the identical selector text appears
+// further down the file and sets the same property, the phone rule is dead and is named here.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  // Comments first, and line comments before block comments — a `//` line holding a `/*` has hidden
+  // 190 lines from two shipped guards before (see docs/CLAUDE-DETAIL.md). CSS has no line comments,
+  // so only block comments are stripped, but the order is stated so nobody "tidies" it into a bug.
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  // Split into top-level chunks: text outside any @media, and each @media body with its offset.
+  const inMedia = [];      // { selector, prop, at }
+  const unconditional = []; // { selector, prop, at }
+  let i = 0;
+  while (i < bare.length) {
+    const m = /@media[^{]*\{/g;
+    m.lastIndex = i;
+    const hit = m.exec(bare);
+    const end = hit ? hit.index : bare.length;
+    harvest(bare.slice(i, end), i, unconditional);
+    if (!hit) break;
+    // Walk to the matching close brace of the @media block (rules inside carry their own braces).
+    let depth = 1, j = m.lastIndex;
+    while (j < bare.length && depth > 0) { if (bare[j] === "{") depth++; else if (bare[j] === "}") depth--; j++; }
+    harvest(bare.slice(m.lastIndex, j - 1), m.lastIndex, inMedia);
+    i = j;
+  }
+  function harvest(text, base, into) {
+    const rule = /([^{}]+)\{([^{}]*)\}/g;
+    let r;
+    while ((r = rule.exec(text))) {
+      const selector = r[1].replace(/\s+/g, " ").trim();
+      if (!selector || selector.startsWith("@")) continue;
+      for (const decl of r[2].split(";")) {
+        const colon = decl.indexOf(":");
+        if (colon < 0) continue;
+        const prop = decl.slice(0, colon).replace(/\s+/g, "").toLowerCase();
+        // The VALUE matters as much as the property: an override that sets the same value changes
+        // nothing on screen, so naming it would be crying wolf — and a guard that cries wolf is
+        // how a real one comes to be ignored. (The tablet has one of those: a 760px `.layout {
+        // grid-template-columns: 1fr }` that the "no side panel anywhere" rule at the bottom of
+        // the file sets identically. Dead, yes; wrong on screen, no.)
+        const value = decl.slice(colon + 1).replace(/!important/gi, "").replace(/\s+/g, " ").trim().toLowerCase();
+        if (!prop) continue;
+        into.push({ selector, prop, value, at: base + r.index, important: /!important/i.test(decl) });
+      }
+    }
+  }
+  const dead = [];
+  for (const q of inMedia) {
+    if (q.important) continue; // an !important in the query still beats a later plain rule
+    const killer = unconditional.find((u) => u.selector === q.selector && u.prop === q.prop && u.at > q.at && !u.important && u.value !== q.value);
+    if (killer) dead.push(`${q.selector} { ${q.prop}: ${q.value} } — the same selector sets ${q.prop}: ${killer.value} later, at char ${killer.at}`);
+  }
+  check(
+    "tablet: no @media rule is silently overridden by a later plain rule with the same selector",
+    dead.length === 0,
+    `${CSS}: ${dead.length} declaration(s) inside an @media block can never apply, because an ` +
+    `identical selector later in the file sets the same property and a media query adds NO ` +
+    `specificity:\n      ${dead.join("\n      ")}\n    ` +
+    `Move the @media block BELOW the rule it is meant to override (that is the fix that finally ` +
+    `let the restaurant's own name fit on a 360px bar), or raise its specificity on purpose.`,
+  );
+}
+
+
+// ── EVERY DOOR THE PANEL KNOCKS ON HAS TO EXIST (sweep #8 T10, 2026-09-03) ────────────────────
+//
+// The fault this was written for. `printTableBill()` has posted `/sessions/<id>/bill-printed` since
+// the day this panel learned to print a bill. That branch only ever existed on /api/editor, so
+// every one of those posts fell through to the route's "unknown POST endpoint" 404 — and the
+// `.catch(() => {})` beside the call swallowed it silently. The visible cost: the owner's rule
+// (2026-08-19) that a printed bill's button reads "Reprint" from then on held on the manager's till
+// and NOT from the waiter's handheld, because the stamp that carries the fact between panels
+// (sessions.bill_printed_at, mig 333) was never written.
+//
+// verify:twins could not see it: that guard compares the branches the three routes DO have against
+// each other. Nothing compared the calls the PANEL makes against the branches its own route
+// answers. This does, and it is the cheap half of the pair — a static read of both files.
+//
+// Every path is normalised to its shape (`${...}` → :id, query string dropped) and matched against
+// the dispatcher's own conditions, which are read out of the route rather than typed here, so a
+// branch renamed tomorrow moves this check with it.
+{
+  const routeRel = "app/api/tablet/[...path]/route.ts";
+  const route = (() => { try { return fs.readFileSync(path.join(ROOT, routeRel), "utf8"); } catch { return ""; } })();
+  const shape = (raw) => raw.replace(/\?.*$/, "").replace(/\$\{[^}]*\}/g, ":id").replace(/^\//, "").split("/").filter(Boolean);
+  // What the panel asks for — through api(), actGated() and runOptimistic() alike.
+  const calls = [];
+  for (const m of APPSRC.matchAll(/(?:api|actGated)\(\s*"(GET|POST|PUT|PATCH|DELETE)"\s*,\s*(`[^`]*`|"[^"]*")/g)) {
+    calls.push({ method: m[1], raw: m[2].slice(1, -1) });
+  }
+  // The dispatcher's own conditions. GET matches on the whole joined path; POST on [a, b, c].
+  const gets = [...route.matchAll(/path\.join\("\/"\) === "([^"]+)"/g)].map((m) => m[1]);
+  const posts = [];
+  for (const m of route.matchAll(/if \(\(?a === "([a-z-]+)"[^)\n]*?\)?\s*&&\s*([bc]) === "([a-z-]+)"/g)) posts.push({ a: m[1], pos: m[2], v: m[3] });
+  for (const m of route.matchAll(/if \(a === "([a-z-]+)" && path\.length === 1\)/g)) posts.push({ a: m[1], pos: "len1", v: "" });
+  for (const m of route.matchAll(/\(a === "order" \|\| \(a === "sessions" && b === "open"\)\)/g)) posts.push({ a: "sessions", pos: "b", v: "open" });
+  const missing = [];
+  for (const c of calls) {
+    const segs = shape(c.raw);
+    if (!segs.length) continue;
+    if (c.method === "GET") {
+      if (!gets.includes(segs.join("/"))) missing.push(`GET /${segs.join("/")}`);
+      continue;
+    }
+    const [a, b, cc] = segs;
+    const ok2 = posts.some((p2) => {
+      if (p2.a !== a) return false;
+      if (p2.pos === "len1") return segs.length === 1;
+      if (p2.pos === "b") return b === p2.v;
+      return cc === p2.v;
+    });
+    if (!ok2) missing.push(`${c.method} /${segs.join("/")}`);
+  }
+  const uniq = [...new Set(missing)];
+  check(
+    "tablet: every endpoint the panel calls exists on the tablet route",
+    uniq.length === 0,
+    `${TABLET} calls ${uniq.length} path(s) that ${routeRel} has no branch for, so each one answers\n    404 "unknown endpoint":\n      ${uniq.join("\n      ")}\n    ` +
+    `A call with a .catch() beside it fails in total silence — which is how /sessions/:id/bill-printed\n    ` +
+    `went a fortnight posting into nothing. Add the branch (mirror the manager's, word for word), or\n    remove the call.`,
+  );
+}
+
+
+// ── A COLUMN THE PANEL READS HAS TO BE A COLUMN THE ROUTE SENDS (sweep #8 T10, 2026-09-03) ─────
+//
+// The fault this was written for. `printTableBill()` passes `state.data.restaurant.logo_url` into
+// billdoc.js as the bill's `logo`, and billdoc prints an <img class="logo"> for any http(s) value.
+// The tablet route's `restaurants` select did not include that column, so the expression evaluated
+// to "" every single time: a bill printed from the WAITER's handheld came out with no logo, while
+// the identical bill printed at the manager's till carried it (the editor route's twin of the same
+// read does select it). One document, two different papers depending on which panel produced it —
+// and nothing could tell you: an absent column arrives as `undefined`, which the panel's own
+// /^https?:/ test quietly rejects. There is no error, no empty state, no log line.
+//
+// So both sides get grepped. Every field the panel reads off `state.data.restaurant` must appear in
+// the route's restaurants select, and the three the shared bill document resolves the restaurant's
+// IDENTITY from are named explicitly, because they are read inside billdoc.js off a parameter and a
+// scan of this panel alone would never see them.
+{
+  const routeRel = "app/api/tablet/[...path]/route.ts";
+  const route = (() => { try { return fs.readFileSync(path.join(ROOT, routeRel), "utf8"); } catch { return ""; } })();
+  // The select that feeds `restaurant` into the tablet payload: the one that names `slug`, since the
+  // route's other restaurants reads fetch access_config alone.
+  const sel = (route.match(/from\("restaurants"\)\.select\("([^"]*slug[^"]*)"\)/) || [])[1] || "";
+  const sent = new Set(sel.split(",").map((x) => x.trim()).filter(Boolean));
+  const read = new Set();
+  for (const m of APPSRC.matchAll(/state\.data\.restaurant\s*(?:\|\|\s*\{\}\s*\))?\s*\.\s*([a-z_]+)/g)) read.add(m[1]);
+  for (const m of APPSRC.matchAll(/\(state\.data\.restaurant\s*\|\|\s*\{\}\)\.([a-z_]+)/g)) read.add(m[1]);
+  // billdoc.js → billIdentity(settings, restaurant) reads these off the row it is handed. Named
+  // here rather than scanned, because they are read through a parameter in ANOTHER file.
+  for (const k of ["logo_text", "name", "slug"]) read.add(k);
+  const missing = [...read].filter((k) => !sent.has(k)).sort();
+  check(
+    "tablet route: every restaurant column the panel reads is in the payload",
+    sel !== "" && missing.length === 0,
+    sel === ""
+      ? `${routeRel}: could not find the restaurants select that feeds the tablet payload (the one naming\n    slug). If it was renamed, point this check at it — do not delete the check.`
+      : `${TABLET} (and billdoc.js, for the bill's identity) reads restaurant column(s) that\n    ${routeRel} never sends: ${missing.join(", ")}\n    ` +
+        `Sent: ${[...sent].join(", ")}\n    ` +
+        `An absent column arrives as undefined and every guard on it fails SILENTLY — which is how\n    every bill printed from a waiter's handheld lost the restaurant's logo. Add the column to that\n    select (it costs nothing: the read already happens), or stop reading it.`,
+  );
+}
+
+
+// ── A DESTINATION LIST MAY NOT BE BUILT FROM THE FLOOR'S WORD "FREE" (sweep #8 T10, 2026-09-03) ─
+//
+// The fault this was written for, measured on the dev floor: five of the six on-plan tables had an
+// OPEN session with nothing ordered on them. summaryTile() re-presents that state as **Free** — the
+// owner's own decision (2026-07-31), and right for a tile, a filter chip and a count. The "Move this
+// party" picker built its list from the same re-presented answer, so it offered all five; and
+// lfh_staff_shift_table's occupancy test reads the session row, so the server refused every one of
+// them with "That table is already taken — pick a free one" about a table the same screen had just
+// called free. Driven, not reasoned: POST /sessions/<id>/shift {to:1} answered 409 on a tile the
+// picker was offering.
+//
+// The manager panel has had the honest rule for a while — `tableHasAnyParty()` in
+// public/panels/editor/app.js reads the RAW tile state, and its comment describes this exact fault.
+// This is the check that keeps the two panels answering it the same way.
+{
+  const shift = fnBody("renderShiftPicker");
+  check(
+    "tablet: the shift picker asks whether a table can really TAKE a party, not whether the floor calls it free",
+    /canTakeAParty\(i\)/.test(shift) && !/!tileIsOpen\(i\)/.test(shift),
+    `${TABLET}: renderShiftPicker() must build its list with canTakeAParty(), which reads the RAW\n    ` +
+    `summary tile. !tileIsOpen() goes through summaryTile(), which turns an open-but-empty table\n    ` +
+    `("waiting") into "free" — so the picker offers exactly the tables the server refuses as taken.`,
+  );
+  // COMMENTS STRIPPED BEFORE THE NEGATIVE TEST, line ones before block ones. The helper's own
+  // comment reads "// RAW — never summaryTile()", so a raw scan for summaryTile( inside it matched
+  // the sentence explaining why it is not there — a guard failing against its own documentation,
+  // which this repo has recorded before (docs/CLAUDE-DETAIL.md, and memory a-guard-can-pass-against-
+  // its-own-comment). Judge the CODE.
+  const appBare = APPSRC.replace(/(^|[^:"'`])\/\/[^\n]*/g, (m, p1) => p1).replace(/\/\*[\s\S]*?\*\//g, "");
+  check(
+    "tablet: …and that helper reads the RAW tile, never the re-presented one",
+    /function tableHasAnyParty\([\s\S]{0,300}?state\.summary\.tiles/.test(appBare)
+      && !/function tableHasAnyParty\([\s\S]{0,300}?summaryTile\(/.test(appBare),
+    `${TABLET}: tableHasAnyParty() must read state.summary.tiles directly. Going through\n    ` +
+    `summaryTile() re-introduces the very re-presentation it exists to see past.`,
+  );
+  check(
+    "tablet: a table somebody has asked to be seated at is not offered as a destination either",
+    /canTakeAParty\([\s\S]{0,500}?(requests|hasReq)/.test(APPSRC),
+    `${TABLET}: the manager's shiftBlocked() dims a "Wants in" table ("wants in"). Moving a party\n    ` +
+    `onto a table another guest has already asked for is not ours to do, and the two panels must\n    ` +
+    `not answer it differently.`,
+  );
+}
+
+
+// ── A STYLE RULE FOR SOMETHING NOTHING CAN DRAW (sweep #8 T10, 2026-09-03) ────────────────────
+//
+// Six rules in this panel's stylesheet styled classes no file could put on the screen, and each one
+// was a feature that had been REPLACED rather than removed with its old path — which is the rule
+// CLAUDE.md states as "a new way replaces the old one, never leave both". The clearest was
+// `.t-waiting`, the bright yellow "open but nobody seated yet" tile: the owner ruled on 2026-07-31
+// that a party with nothing ordered is an available table, summaryTile() re-presents that state as
+// `free` AT THE SOURCE, and from that day tileState() could never return it. The rule sat there
+// looking like live styling for a state this panel does not have.
+//
+// A class can be BUILT rather than written — tileHtml() emits `t-${st.cls}` — so every prefix the
+// panel constructs is read out of the panel rather than typed here. Counting those as dead is how
+// this check would cry wolf, and a guard that cries wolf is how a real one comes to be ignored.
+{
+  const cssTxt = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  const cssBare = cssTxt.replace(/\/\*[\s\S]*?\*\//g, " ");
+  const defined = [...new Set([...cssBare.matchAll(/\.([a-z][a-z0-9-]{2,})(?=[\s,:.{\[>]|$)/gm)].map((m) => m[1]))];
+  const dir = path.join(ROOT, "public", "panels");
+  let surface = src + (() => { try { return fs.readFileSync(path.join(ROOT, HTML), "utf8"); } catch { return ""; } })();
+  try { for (const f of fs.readdirSync(dir)) if (f.endsWith(".js")) surface += fs.readFileSync(path.join(dir, f), "utf8"); } catch {}
+  const builtPrefixes = [...new Set([...surface.matchAll(/([a-z][a-z0-9-]*-)\$\{/g)].map((m) => m[1]))];
+  const orphan = defined.filter((c) => !surface.includes(c) && !cssBare.includes("--" + c)
+    && !builtPrefixes.some((pre) => c.startsWith(pre)) && !/googleapis|gstatic/.test(c));
+  check(
+    "tablet: every class the stylesheet defines is one some file can actually put on the screen",
+    orphan.length === 0,
+    `${CSS} styles ${orphan.length} class(es) nothing renders: ${orphan.join(", ")}\n    ` +
+    `Either the markup that used them was replaced and the rule was left behind (delete it, with an\n    ` +
+    `obituary saying what it was — that is the house rule), or a prefix is built dynamically and this\n    ` +
+    `check needs to learn it. It already learns every `+"`x-${…}`"+` prefix the panel writes.`,
+  );
+}
+
+
+// ── A SESSION COLUMN THE PANEL READS HAS TO BE ONE THE ROUTE SENDS (owner's item 12, 2026-09-03) ─
+//
+// The /state?table=N read used to ask for `*` — all 27 columns of `sessions`, on the most frequent
+// read this panel makes, including the guest's own basket and two heartbeats. It now names 14. The
+// saving is real (7,166 → 3,232 bytes for ten rows, measured) and so is the risk: a hand-typed
+// column list is how a field silently goes missing, which is exactly what item 3 of this same sweep
+// was — `logo_url` read by the panel and never sent, failing quietly because an absent column is
+// `undefined` and every guard on it says "no". So the list does not stand on care. Both sides are
+// grepped, including the fields the shared bill document reads off a session row it is HANDED, which
+// no scan of this panel alone would see.
+{
+  const routeRel = "app/api/tablet/[...path]/route.ts";
+  const route = (() => { try { return fs.readFileSync(path.join(ROOT, routeRel), "utf8"); } catch { return ""; } })();
+  const sel = (route.match(/const SESSION_COLS = "([^"]+)"/) || [])[1] || "";
+  const sent = new Set(sel.split(",").map((x) => x.trim()).filter(Boolean));
+  // Every column `sessions` really has, so a typo in the list is caught as well as an omission.
+  const ALL = new Set(["id","table_number","status","auto_approve","opened_by","opened_at","closed_at",
+    "last_activity_at","created_at","cart","cart_updated_at","bill_no","invoice_no","invoice_at",
+    "invoice_voided","void_reason","void_at","restaurant_id","discount","discount_note","deleted_at",
+    "deleted_by","deleted_by_id","delete_reason","cust_name","cust_phone","bill_printed_at"]);
+  // What the panel reads off a session. The variables a session lands in, in this file:
+  const read = new Set();
+  const bare = APPSRC.replace(/(^|[^:"'`])\/\/[^\n]*/g, (m, p1) => p1).replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const m of bare.matchAll(/\b(?:sess|openSess|capSess|rawSess|s)\.([a-z_]+)\b/g)) if (ALL.has(m[1])) read.add(m[1]);
+  for (const m of bare.matchAll(/\bsession\.([a-z_]+)\b/g)) if (ALL.has(m[1])) read.add(m[1]);
+  // …and what billdoc.js reads off the session row this panel hands it (printTableBill → billData).
+  const bd = (() => { try { return fs.readFileSync(path.join(ROOT, "public/panels/billdoc.js"), "utf8"); } catch { return ""; } })()
+    .replace(/(^|[^:"'`])\/\/[^\n]*/g, (m, p1) => p1).replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const m of bd.matchAll(/\b(?:sess|session|b)\.([a-z_]+)\b/g)) if (ALL.has(m[1])) read.add(m[1]);
+  const missing = [...read].filter((k) => !sent.has(k)).sort();
+  const bogus = [...sent].filter((k) => !ALL.has(k)).sort();
+  check(
+    "tablet route: every session column the panel (or the bill it builds) reads is in the payload",
+    sel !== "" && missing.length === 0 && bogus.length === 0,
+    sel === ""
+      ? `${routeRel}: SESSION_COLS is gone. If the read went back to select("*") that is a decision, not\n    a bug — but say so here, because this check is the only thing standing between a hand-typed\n    column list and a field that vanishes in silence.`
+      : (bogus.length
+        ? `${routeRel}: SESSION_COLS names ${bogus.length} column(s) `+"`sessions`"+` does not have: ${bogus.join(", ")}\n    A typo here is an error at the database, not a quiet miss — but it is still worth naming.`
+        : `${TABLET} (and billdoc.js, for the bill it builds) reads session column(s) that\n    ${routeRel} never sends: ${missing.join(", ")}\n    Sent: ${[...sent].join(", ")}\n    ` +
+          `An absent column arrives as undefined and every guard on it fails SILENTLY — which is how\n    every bill printed from a waiter's handheld lost its logo (item 3 of this same sweep). Add the\n    column to SESSION_COLS, or stop reading it.`),
+  );
+}
+
+
+// ── A RULE THAT CANNOT WIN, part two: TWO CLASSES ON ONE ELEMENT (sweep #8 T10, 2026-09-03) ─────
+//
+// The @media check above catches a phone rule sitting above the rule it overrides. This catches the
+// other half of the same trap, and I walked into it AN HOUR LATER while building the owner's item 11.
+//
+// The panel writes `class="btn shiftpick-off"`. I styled `.shiftpick-off` — one class, same
+// specificity as `.btn` — and `.btn` sits LOWER in the stylesheet, so it won and the dimmed tile
+// rendered byte-identical to a live one: both measured rgb(242,233,218) on rgb(20,17,13). Nothing
+// was red; the rule was simply ignored. `.btn.shiftpick-off` fixed it.
+//
+// So: every pair of classes this panel puts on ONE element is read out of the panel's own markup,
+// and if a single-class rule for one of them is overridden by a LATER single-class rule for the
+// other setting the same property to a different value, the earlier one can never win and is named.
+// A variant class must out-specify the base class it modifies — that is the whole rule.
+{
+  const cssTxt = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  const spaces = (n) => " ".repeat(n);
+  const bare = cssTxt.replace(/\/\*[\s\S]*?\*\//g, (m) => spaces(m.length));
+  // Blank @media bodies: a responsive override of a base rule is the design, not this fault.
+  const flat = (() => {
+    let i = 0, res = "";
+    while (i < bare.length) {
+      const re = /@media[^{]*\{/g; re.lastIndex = i;
+      const hit = re.exec(bare);
+      if (!hit) { res += bare.slice(i); break; }
+      res += bare.slice(i, hit.index);
+      let d = 1, j = re.lastIndex;
+      while (j < bare.length && d > 0) { if (bare[j] === "{") d++; else if (bare[j] === "}") d--; j++; }
+      res += spaces(j - hit.index);
+      i = j;
+    }
+    return res;
+  })();
+  // Single-class rules only — `.a` with nothing else. Those are the ones that tie.
+  const single = new Map();  // class -> [{ prop, value, at }]
+  for (const m of flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const sel = m[1].replace(/\s+/g, " ").trim();
+    const one = /^\.([a-z][a-z0-9-]*)$/.exec(sel);
+    if (!one) continue;
+    for (const decl of m[2].split(";")) {
+      const c = decl.indexOf(":");
+      if (c < 0) continue;
+      if (/!important/i.test(decl)) continue;      // an !important genuinely wins
+      const prop = decl.slice(0, c).replace(/\s+/g, "").toLowerCase();
+      const value = decl.slice(c + 1).replace(/\s+/g, " ").trim().toLowerCase();
+      if (!single.has(one[1])) single.set(one[1], []);
+      single.get(one[1]).push({ prop, value, at: m.index });
+    }
+  }
+  // Class PAIRS the panel really puts on one element, read from its own markup.
+  const pairs = new Set();
+  for (const m of APPSRC.matchAll(/class="([a-z0-9 _-]{3,120})"/g)) {
+    const cs = m[1].split(/\s+/).filter((x) => /^[a-z][a-z0-9-]*$/.test(x));
+    for (let i = 0; i < cs.length; i++) for (let j = 0; j < cs.length; j++) if (i !== j) pairs.add(cs[i] + "|" + cs[j]);
+  }
+  const dead = [];
+  for (const pair of pairs) {
+    const [a, b] = pair.split("|");
+    const A = single.get(a), Bd = single.get(b);
+    if (!A || !Bd) continue;
+    for (const da of A) for (const db of Bd) {
+      if (da.prop !== db.prop || da.value === db.value) continue;
+      if (db.at <= da.at) continue;
+      // A VARIANT WINNING OVER ITS BASE IS THE DESIGN, and it is how nearly all of this file works:
+      // `.ldot-call` after `.ldot`, `.skel-kot` after `.skel`, `.ordctl-edit` after `.ordctl`. The
+      // later class EXTENDS the earlier one's name, so it is meant to override it and its position
+      // says so. The fault is the other way round — a BASE class further down the file beating a
+      // variant that was written to modify it (`.btn` beating `.shiftpick`), which is silent
+      // because the variant simply never applies. Only that direction is named.
+      if (b.startsWith(a + "-")) continue;
+      dead.push(`.${a} { ${da.prop} } loses to the later .${b} on class="${a} ${b}"`);
+    }
+  }
+  const uniq = [...new Set(dead)];
+  check(
+    "tablet: no single-class rule is beaten by a later single-class rule on an element that wears both",
+    uniq.length === 0,
+    `${CSS}: ${uniq.length} rule(s) can never win:\n      ${uniq.join("\n      ")}\n    ` +
+    `Same specificity, later wins. A variant has to out-specify the base it modifies — write\n    ` +
+    `\`.base.variant { … }\`. This is the fault that rendered a dimmed "can't take a party" tile\n    ` +
+    `byte-identical to a live one, and the same trap in a different costume as the @media one above.`,
+  );
+  // …and the three things the measurement taught about that one tile in particular.
+  check(
+    "tablet: the dimmed destination tile out-specifies .btn, so its own look really applies",
+    /\.btn\.shiftpick-off\s*\{/.test(bare),
+    `${CSS}: the dimmed tile must be styled as \`.btn.shiftpick-off\` — \`.shiftpick-off\` alone ties\n    with \`.btn\`, which sits lower and wins.`,
+  );
+  check(
+    "tablet: …and it is dimmed by its fill and border, never by `opacity`",
+    !/\.btn\.shiftpick-off\s*\{[^}]*opacity:/.test(bare),
+    `${CSS}: \`opacity\` on that tile multiplies the REASON WORD too — the one thing the tile exists\n    to say. Measured at .42 it came out 2.16:1 on the dark skin. Dim the fill and the border.`,
+  );
+  check(
+    "tablet: …and the reason word keeps the panel's real text colour",
+    /\.btn\.shiftpick-off small\s*\{[^}]*color:\s*var\(--text\)/.test(bare),
+    `${CSS}: the reason word ("taken" / "joined" / "wants in") is why the tile is drawn at all. It\n    must not be muted twice. Measured after: 7.78:1 light, 10.66:1 dark.`,
+  );
+}
+
+
+// ── A VERB lib/tableOfAction DOES NOT KNOW MUST ASK THE SECTION QUESTION ITSELF, ABOVE THE SHARED
+//    GATE (sweep #8 T10, 2026-09-03) ────────────────────────────────────────────────────────────
+//
+// The tablet route asks the waiter-section question ONCE, for every table-scoped write, from the
+// [a, b, c] segments the dispatcher already has — and lib/tableOfAction's rule for a verb it does
+// not recognise is `unknown: true` ⇒ refuse. That default is right ("a new table-scoped endpoint is
+// protected on the day it is added") and it is wrong for a verb whose table it simply cannot see:
+// `print/send` documents exactly this and sits ABOVE the shared gate with its own check.
+//
+// `print-jobs` (the owner's item 15) is the second such verb, and it spent an hour BELOW the gate:
+// a sectioned waiter asking the kitchen to reprint their OWN table 6's ticket was answered "That
+// table isn't in your section". The code read correctly; only driving it found the 403. So the fact
+// gets a check rather than a comment.
+{
+  const routeRel = "app/api/tablet/[...path]/route.ts";
+  const route = (() => { try { return fs.readFileSync(path.join(ROOT, routeRel), "utf8"); } catch { return ""; } })();
+  const gateAt = route.indexOf("const sectionLimit = await waiterTables(actor, rid)");
+  const toa = (() => { try { return fs.readFileSync(path.join(ROOT, "lib/tableOfAction.ts"), "utf8"); } catch { return ""; } })();
+  for (const [verb, needle] of [["print/send", 'a === "print" && b === "send"'], ["print-jobs", 'a === "print-jobs" && path.length === 1']]) {
+    const at = route.indexOf(needle);
+    const known = new RegExp(`a === "${verb.split("/")[0].replace("-", "\\-")}"`).test(toa);
+    const body = at < 0 ? "" : route.slice(at, at + 3000);
+    check(
+      `tablet route: ${verb} — a verb lib/tableOfAction cannot resolve sits ABOVE the shared section gate`,
+      at >= 0 && gateAt >= 0 && at < gateAt,
+      `${routeRel}: the ${verb} branch is at ${at} and the shared waiter-section gate is at ${gateAt}.\n    ` +
+      `lib/tableOfAction does not recognise this verb (${known ? "it does now — then move the branch back down" : "confirmed: no rule for it"}),\n    ` +
+      `so the shared gate answers "unknown ⇒ refuse" and a sectioned waiter is told their OWN table is\n    not theirs. Keep the branch above the gate, with its own section check.`,
+    );
+    check(
+      `tablet route: ${verb} — …and it really does ask the section question itself`,
+      /waiterTables\(actor, rid\)/.test(body) && /notYoursMessage\(/.test(body),
+      `${routeRel}: sitting above the shared gate means this branch OWES the section check. Without\n    it, moving the branch up quietly removed the protection instead of fixing the refusal.`,
+    );
+  }
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────

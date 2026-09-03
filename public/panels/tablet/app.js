@@ -1073,6 +1073,38 @@ function tileIsOpen(i) {
 // child can never be a destination (it has no bill of its own to join). Since tileIsOpen() now
 // tells the truth about a joined table, the merge picker has to say this part explicitly.
 const canHostAParty = (i) => tileIsOpen(i) && !mergeParentOf(i);
+// ── "FREE" ON THE FLOOR IS NOT "FREE" AS A DESTINATION (sweep #8 T10, 2026-09-03) ─────────────
+// A table with an OPEN session and nothing ordered on it is drawn as **Free**, and that is the
+// owner's own decision (2026-07-31: a party with nothing ordered is an available table) —
+// summaryTile() re-presents the RPC's `waiting` state as free at the source so the tiles, the
+// Free/Active chips and tileIsOpen() cannot tell three different stories. Keep that.
+//
+// But it is the wrong answer for a DESTINATION. The session row is still there, so
+// lfh_staff_shift_table's occupancy test (`status = 'open'`, mig 217) refuses it, and the waiter
+// gets "That table is already taken — pick a free one" about a table the same screen just called
+// free. Measured on the dev floor: five of the six on-plan tables were in that state, and every
+// one of them was offered by the "Move this party" picker and refused by the server.
+//
+// The MANAGER panel has had the honest rule for a while and its helper's comment describes this
+// exact fault — `tableHasAnyParty()` in public/panels/editor/app.js, which reads the RAW tile
+// state rather than the re-presented one: *"the floor calls it free, but shifting another party
+// onto it would land two sessions on one table. It is offered in neither list, which is the honest
+// answer for a state the floor deliberately no longer shows."* This is that rule, on this panel.
+//
+// A "Wants in" table (`req`) is excluded for the manager's other reason: somebody has already
+// asked to be seated there, so it is not ours to move a party onto.
+function tableHasAnyParty(i) {
+  const tile = (state.summary.tiles || {})[String(i)];      // RAW — never summaryTile()
+  return !!tile && tile.state !== "free" && tile.state !== "req";
+}
+// Can this party be MOVED onto table i? Not itself, not a member of a merged party, no session row
+// of any kind, and nobody waiting to be let in.
+function canTakeAParty(i) {
+  if (mergeParentOf(i) || mergeChildrenOf(i).length) return false;
+  if (tableHasAnyParty(i)) return false;
+  return !((state.summary.requests || []).some((r) => String(r.table_number) === String(i)))
+      && !((state.summary.tiles || {})[String(i)] || {}).hasReq;
+}
 // Does this restaurant use dining sessions? OFF means there is no "Open table" step at all
 // (Access → Menu → Dining sessions, owner 2026-07-31): the floor goes straight to taking an
 // order, and the server attaches it without a session. The manager panel has always gated its
@@ -1167,7 +1199,7 @@ async function selectTable(t) {
   if (window.matchMedia("(max-width: 760px)").matches) {
     document.getElementById("panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  await ensurePartySlices(t, true);     // FORCE a fresh pull — never trust up-to-60s-stale cached detail (M10);
+  await ensurePartySlices(t);           // always a fresh pull — never trust up-to-60s-stale cached detail (M10);
                                         // a merged table needs its whole PARTY's slices, not just its own
   if (String(state.table) !== String(t)) return; // the waiter already moved on — don't clobber
   lastSig = boardSig(state);            // adopt as baseline so the next poll doesn't re-flicker the detail
@@ -1563,7 +1595,7 @@ function bindFloorDelegation() {
     // Quick "Accept" — load the table's orders first (grid has only the slim summary), then accept.
     if ((q = e.target.closest(".tacc[data-quick='accept']"))) {
       const qt = q.dataset.qt;
-      await ensurePartySlices(qt, true); // FORCE — the tile's summary can be fresh while the cached
+      await ensurePartySlices(qt);       // always fresh — the tile's summary can be fresh while the cached
                                          // slice is up to 60s stale, so a just-arrived order would be
                                          // missed and silently accept nothing (audit 2026-07-09).
                                          // Party-wide: a merged party accepts as ONE bill.
@@ -1587,7 +1619,7 @@ function bindFloorDelegation() {
     // without opening it.
     if ((q = e.target.closest(".tpay[data-quick='pay']"))) {
       const t = q.dataset.qt;
-      await ensurePartySlices(t, true); // FORCE fresh rows so billNo/due + optimisticPay reflect the
+      await ensurePartySlices(t);       // always fresh rows, so billNo/due + optimisticPay reflect the
                                         // PARTY's real current bill, not an up-to-60s-stale slice.
       const a = tableAgg(t);
       await payBillWithMethod(t, a);
@@ -2280,7 +2312,7 @@ async function unmergeTable(child, opts = {}) {
   // device can end the merge between the paint and the finger.
   if (!parent) { toast(`${tableLabel(child)} isn't merged with another table any more.`, false); load().catch(() => {}); return; }
   if (!opts.silent) {
-    const readOk = await ensurePartySlices(child, true);   // both halves, so the sums below are real
+    const readOk = await ensurePartySlices(child);         // both halves, so the sums below are real
     // COULDN'T ASK IS NOT THE SAME AS NOTHING THERE (the rule closeTableAndFree already follows). If
     // a slice did not land, the lines below would read the empty cache and announce "nothing was
     // ordered at it" about a table that may be holding food — a confirm that talks someone into a
@@ -2693,6 +2725,9 @@ function renderKotMenu(t, s) {
   // popup right behind the menu, with its ₹ due on the tile. Same filter as renderSplitBill,
   // deliberately duplicated rather than approximated, so the row and the screen it opens agree.
   const splittable = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received");
+  // …and REPRINTING includes a paid one: a guest can ask for the kitchen ticket again after the
+  // bill is settled, and nothing about a reprint touches money. Same filter as the picker.
+  const reprintable = ordersOf(t).filter((o) => o.status !== "cancelled");
   const row = (id, icon, label, sub, on) => `<button class="kotm-row" data-kotop="${id}" ${on ? "" : "disabled"}>
     <span class="kotm-ico">${icon}</span><span class="kotm-txt"><b>${label}</b><small>${sub}</small></span><span class="kotm-chev">›</span></button>`;
   let occupiedOthers = 0;
@@ -2717,7 +2752,12 @@ function renderKotMenu(t, s) {
     // waiter and the manager must not be offered a different set of operations for one table.
     (splitBillOn()
       ? row("split", "🍴", "Split the bill", "Equal, a custom amount, by dish or by kitchen ticket — each part pays its own way", tshow("tablet_mark_paid") && splittable.length > 0)
-      : "");
+      : "") +
+    // 🖨 LAST, matching the manager's own list — the waiter and the manager must not be offered a
+    // different set of operations for one table (owner's item 15, 2026-09-03). Enabled only when
+    // there is a ticket to print: `reprintable` is the same filter renderReprintKotPicker uses, so
+    // the row can never be enabled onto an empty picker.
+    row("reprint", "🖨", "Print / reprint a KOT", "In the kitchen, marked DUPLICATE — or here on this device", reprintable.length > 0);
   const { dropLayer } = renderPickerShell(`T${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
   document.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
     dropLayer(); // drop this step's back layer before advancing (same rule as move-order's step 1)
@@ -2726,6 +2766,7 @@ function renderKotMenu(t, s) {
     if (b.dataset.kotop === "movekot") renderMoveOrderPicker(t);
     if (b.dataset.kotop === "moveitem") renderMoveItemPicker(t);
     if (b.dataset.kotop === "split") renderSplitBill(t);
+    if (b.dataset.kotop === "reprint") renderReprintKotPicker(t);
   }));
 }
 
@@ -3224,17 +3265,72 @@ function renderMergePicker(t, s) {
   }));
 }
 
+// WHY NOT THIS TABLE — one definition, used to decide the list AND to label the dimmed ones, so the
+// two can never disagree. The four reasons and their exact words are the manager panel's
+// (shiftBlocked in public/panels/editor/app.js): a party can't move onto itself, onto a table joined
+// to another, onto a table that already has a party row (even the invisible empty one the floor draws
+// as Free — see canTakeAParty), or onto one a guest has already asked to be seated at.
+// `not yours` is this panel's fifth, and only this panel has it: the tablet is the one screen with
+// waiter sections.
+function shiftBlockedWhy(i, from) {
+  if (String(i) === String(from)) return "this one";
+  if (mergeParentOf(i) || mergeChildrenOf(i).length) return "joined";
+  if (tableHasAnyParty(i)) return "taken";
+  if ((state.summary.requests || []).some((r) => String(r.table_number) === String(i))
+      || ((state.summary.tiles || {})[String(i)] || {}).hasReq) return "wants in";
+  if (!inMySection(i)) return "not yours";
+  return "";
+}
 function renderShiftPicker(t, s) {
   const n = tableCount();
   const free = [];
-  // FREE = not open, read from the summary (tileIsOpen) — works for every tile, not just the
+  // FREE = can really TAKE a party, read from the summary — works for every tile, not just the
   // selected one whose slice is cached. (Two-tier: the grid no longer holds every table's session.)
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && !tileIsOpen(i)) free.push(i); }
-  const btns = free.length
-    ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">T${i}</button>`).join("")
-    : `<div class="muted">No free tables to shift to.</div>`;
-  const body = `<div class="muted small" style="margin-bottom:10px">Move this party — orders &amp; calls included — to a free table:</div><div class="shiftgrid">${btns}</div>`;
-  const { dropLayer } = renderPickerShell(`Move T${esc(t)} →`, body, "tablet-shift-picker", renderPanel);
+  // canTakeAParty(), NOT !tileIsOpen(): a table with an open-but-empty session is drawn Free by the
+  // owner's own rule and is refused by the server as taken, so listing it here was a button whose
+  // only possible outcome was "That table is already taken — pick a free one". See the long note by
+  // canTakeAParty for the measurement and for the manager panel's identical rule.
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && canTakeAParty(i)) free.push(i); }
+  // ── THE WHOLE FLOOR, WITH THE ONES THAT CAN'T TAKE IT DIMMED AND LABELLED (owner picked it as
+  // item 11, 2026-09-03) ──────────────────────────────────────────────────────────────────────────
+  // Until now this grid listed only the tables that COULD take the party, so after the free-table
+  // rule was made honest it got shorter and a waiter had no way to tell whether a table was missing
+  // because someone was sitting at it, because it was joined to another, because a guest had asked
+  // for it, or because it simply isn't in their section. The manager panel has shown the whole floor
+  // with a one-word reason on each unavailable tile for a while; this is the same thing, in the same
+  // four words, so the two doors read alike.
+  //
+  // ONE DELIBERATE DIFFERENCE FROM THE MANAGER, and it is this panel's own rule: the manager renders
+  // its dimmed tiles `disabled`, and on a touch screen a disabled button SWALLOWS the tap — the exact
+  // fault "💳 Mark bill paid" was fixed for here (T7 improvement I1) and the reason style.css says
+  // "Never `disabled` — a disabled tab on a touch panel swallows the tap". So a dimmed tile here
+  // stays tappable and SAYS its reason out loud. A waiter carrying plates has no hover.
+  const cell = (i) => {
+    const why = shiftBlockedWhy(i, t);
+    const label = esc(tname(i) || "T" + i);
+    return why
+      ? `<button class="btn shiftpick shiftpick-off" data-shiftwhy="${esc(why)}" data-shiftlabel="${label}">${label}<small>${esc(why)}</small></button>`
+      : `<button class="btn shiftpick" data-shiftto="${i}">${label}<small>free</small></button>`;
+  };
+  const all = [];
+  for (let i = 1; i <= n; i++) all.push(cell(i));
+  const btns = all.join("")
+    + (free.length ? "" : `<div class="muted" style="grid-column:1/-1;padding:10px 2px;line-height:1.5">No free table to move this party to — every other table is taken, joined, waiting on a guest, or outside your section.</div>`);
+  const body = `<div class="muted small" style="margin-bottom:10px">Move this party — orders &amp; calls included — to a free table. Dimmed tables can't take it:</div><div class="shiftgrid">${btns}</div>`;
+  const { dropLayer } = renderPickerShell(`Move ${esc(tname(t) || "T" + t)} →`, body, "tablet-shift-picker", renderPanel);
+  // A DIMMED TILE STILL ANSWERS. Never a silent return — the words are the same four the tile itself
+  // carries, said as a sentence a waiter can act on.
+  const WHY_SAYS = {
+    "this one": "That's the table this party is already on.",
+    joined: "That table is joined with another and shares its bill — unmerge it first.",
+    taken: "There's already a party on that table. Move them off it first, or pick another.",
+    "wants in": "A guest has asked to be seated there — answer their request first.",
+    "not yours": "That table isn't in your section — ask your manager to add it.",
+  };
+  document.querySelectorAll("[data-shiftwhy]").forEach((b) => (b.onclick = () => {
+    const why = b.dataset.shiftwhy;
+    toast(`${b.dataset.shiftlabel}: ${WHY_SAYS[why] || "That table can't take this party."}`, false);
+  }));
   document.querySelectorAll("[data-shiftto]").forEach((b) => (b.onclick = () => {
     const to = b.dataset.shiftto;
     dropLayer();
@@ -3243,6 +3339,111 @@ function renderShiftPicker(t, s) {
       () => api("POST", `/sessions/${s.id}/shift`, { to }),
     );
   }));
+}
+
+// ── 🖨 PRINT / REPRINT A KITCHEN TICKET, FROM THE WAITER'S HANDHELD (owner's item 15, 2026-09-03) ─
+//
+// The waiter tablet could do everything with a ticket except ask for it again. Reprinting a KOT
+// lived only on the manager panel, so a waiter standing at the pass with a ticket the printer ate
+// had to walk to the till — on the device that is always in the room where the problem is. Put to
+// the owner with the two things I would NOT move (a credit note, and restoring a bill settled more
+// than 30 minutes ago — both a manager's by his own rule) and he picked it.
+//
+// The SAME two destinations the manager offers, in the same words, because one action must not mean
+// two things depending on which screen asked:
+//   · "in the kitchen" — the real answer on a handheld. It becomes a durable job (mig 269) the
+//     kitchen screen claims and prints with the big DUPLICATE banner, and if the kitchen never
+//     picks it up the manager's floor strip says so. Nothing prints on the waiter's own device,
+//     which usually has no printer at all.
+//   · "here, on this device" — the fallback, for a tablet that IS plugged into something. Through
+//     a hidden iframe rather than a pop-up window, exactly like the manager's, so there is no
+//     pop-up to allow and nothing left on screen.
+//
+// The DOCUMENT is not written here. LFH_BILLDOC.kotDocHtml is the one kitchen ticket in this
+// product ("One bill, one KOT, ONE file"), and it is handed `lines` rather than ready-made markup
+// so it applies its own shared-note rule — the manager's call pre-renders and misses that. Its
+// `reprint: true` flag is what brands the paper DUPLICATE; the wording lives in billdoc so every
+// panel's reprint looks identical.
+function printTicketHere(html) {
+  // A hidden iframe, and it is removed only AFTER the browser says it finished — the manager's own
+  // comment explains why a blind timer is wrong: it deletes the frame while the print preview is
+  // still open and Chrome logs a dead-callback error.
+  try {
+    const ifr = document.createElement("iframe");
+    ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    document.body.appendChild(ifr);
+    const d = ifr.contentWindow.document; d.open(); d.write(html); d.close();
+    setTimeout(() => {
+      const w = ifr.contentWindow;
+      let done = false;
+      const cleanup = () => { if (done) return; done = true; try { ifr.remove(); } catch (e) {} };
+      try { w.onafterprint = cleanup; } catch (e) {}
+      try { w.focus(); w.print(); } catch (e) { cleanup(); return; }
+      setTimeout(cleanup, 60000);   // a preview somebody walked away from
+    }, 60);
+    return true;
+  } catch (e) { return false; }
+}
+function kotTicketFor(o) {
+  return LFH_BILLDOC.kotDocHtml({
+    title: `KOT ${o.kot_no != null ? o.kot_no : "—"}`,
+    rname: (state.data.restaurant || {}).name || "Kitchen",
+    head: "KITCHEN TICKET",
+    kot: o.kot_no != null ? o.kot_no : "—",
+    tableLabel: tname(o.table_number) || ("T" + String(o.table_number ?? "?")),
+    when: LFH_BILLDOC.kotWhen(o.created_at),
+    lines: dishRowsOf(o),
+    allergies: Array.isArray(o.allergies) ? o.allergies : [],
+    // THE BIG DUPLICATE BANNER, not just a word in the header. This is a reprint whichever
+    // destination was chosen, and "here" is the fallback used exactly when the kitchen printer may
+    // already have produced it once.
+    reprint: true,
+  });
+}
+async function sendKotToKitchen(o) {
+  try {
+    const r = await api("POST", "/print-jobs", { order_id: o.id });
+    if (isQueued(r)) { toast(savedMsg(r)); return; }
+    toast(`KOT #${o.kot_no ?? "—"} sent to the kitchen printer — it comes out marked DUPLICATE.`);
+  } catch (e) { toast("Couldn't send it to the kitchen: " + errText(e), false); }
+}
+function renderReprintKotPicker(t) {
+  // The table's OWN tickets — a ticket belongs to the table it was rung at, the same rule the
+  // move-a-KOT picker follows. A cancelled one is excluded: the server refuses it too, and a button
+  // whose only outcome is a refusal is the thing this panel's guard exists to stop.
+  const os = ordersOf(t).filter((o) => o.status !== "cancelled");
+  const list = os.map((o, i) => {
+    const nd = dishRowsOf(o).reduce((n, r) => n + (parseInt(r.qty, 10) || 1), 0);
+    return `<button class="btn" style="text-align:left" data-pickprint="${esc(o.id)}">#${esc(o.kot_no ?? "—")} · Order ${i + 1} · ${nd} dish${nd === 1 ? "" : "es"}</button>`;
+  }).join("");
+  const body = `<div class="muted small" style="margin-bottom:10px">Which kitchen ticket?</div><div class="pactions">${list || `<div class="muted">No kitchen tickets on this table yet.</div>`}</div>`;
+  const { dropLayer } = renderPickerShell("Print a KOT", body, "tablet-reprint-picker", renderPanel);
+  document.querySelectorAll("[data-pickprint]").forEach((b) => (b.onclick = () => {
+    const o = os.find((x) => x.id === b.dataset.pickprint);
+    dropLayer();
+    if (o) renderReprintWhere(t, o);
+  }));
+}
+function renderReprintWhere(t, o) {
+  const body = `<div class="muted small" style="margin-bottom:10px">KOT #${esc(o.kot_no ?? "—")} — print it where?</div><div class="pactions">
+      <button class="btn" style="text-align:left" data-printkitchen>👨‍🍳 <b>Reprint in the kitchen</b><br><small class="muted">Comes out of the kitchen's printer, marked DUPLICATE</small></button>
+      <button class="btn" style="text-align:left" data-printhere>🖨 <b>Print here</b><br><small class="muted">On this device, if it has a printer</small></button>
+    </div>`;
+  const { dropLayer } = renderPickerShell("Print it where?", body, "tablet-reprint-where", () => renderReprintKotPicker(t));
+  document.querySelector("[data-printkitchen]").onclick = () => { dropLayer(); sendKotToKitchen(o); };
+  document.querySelector("[data-printhere]").onclick = () => {
+    dropLayer();
+    // NEVER A SILENT TAP. billdoc missing after a bad deploy, or a blocked iframe, both end here —
+    // and the kitchen is still one tap away, so the message says so instead of just failing.
+    if (typeof LFH_BILLDOC === "undefined" || !LFH_BILLDOC.kotDocHtml) { toast("Can't print just now — reload the panel, or send it to the kitchen instead.", false); return; }
+    // The result is read ONCE into a variable. Writing `printTicketHere ? …` for the second argument
+    // asks whether the FUNCTION exists, which it always does — so a print that failed would have
+    // been announced in green. Caught on review before this shipped.
+    const started = printTicketHere(kotTicketFor(o));
+    toast(started
+      ? `KOT #${o.kot_no ?? "—"} sent to print`
+      : "This device couldn't start a print — send it to the kitchen instead.", started);
+  };
 }
 
 // Move a SINGLE order to another table's bill. Two taps: pick the order, pick the
@@ -3420,6 +3621,13 @@ function bumpItemQty(itemId, delta) {
 // The shape itself is not a guess: loadImpl and loadTables already read the members in parallel and
 // merge them in a sequential loop, so this makes the panel do it one way in three places instead of
 // two ways in three places.
+// There is no non-forced mode, and there has not been one since ensureTableSlice() was deleted on
+// 2026-08-28 — its cache short-circuit went with it. Four call sites went on passing a second
+// `true` argument this function does not declare, and the comments beside them shouted FORCE, so a
+// reader would reasonably believe there was an opt-out to reach for. There is not: every call
+// re-reads the whole party. The argument is dropped rather than added, because adding a parameter
+// nothing needs is how a cache short-circuit gets re-introduced by accident on a whole-party read
+// that must never see half a bill. (sweep #8 T10, 2026-09-03)
 async function ensurePartySlices(t) {
   const tables = partyTablesOf(t);
   const slices = await Promise.all(tables.map((x) => api("GET", "/state?table=" + encodeURIComponent(x)).catch(() => null)));
@@ -4833,7 +5041,15 @@ function openQuickDest() {
     // its bill — live on the table it is joined to, and that is where this order would land.
     // Saying "free" here would be the same lie the floor tiles were fixed for (mig 249).
     const parent = mergeParentOf(i);
-    const busy = !!parent || tileIsOpen(i);
+    // ONE MEANING OF "FREE", ON BOTH PICKERS (owner picked it as item 14, 2026-09-03).
+    // tileIsOpen() goes through summaryTile(), which turns a seated-but-empty table ("waiting") into
+    // "free" — the owner's own rule, and right for a tile. This label then called such a table free
+    // while the order placed on it joins that seating's own bill, and after the move picker was made
+    // honest the two pickers were one screen apart using two meanings of the same word.
+    // Nothing goes wrong either way here — the bill is empty — so this is a WORD, not a gate: every
+    // table stays tappable, because taking an order for a seated-but-empty table is perfectly
+    // normal and is not the same question as moving a whole party onto it.
+    const busy = !!parent || tableHasAnyParty(i);
     const what = parent ? `joins ${esc(tname(parent) || "T" + parent)}'s bill` : busy ? "joins its bill" : "free";
     tiles.push(`<button class="qdest-t${busy ? " busy" : ""}" data-qdest="${i}"><b>${esc(tname(i) || "T" + i)}</b><small>${what}</small></button>`);
   }

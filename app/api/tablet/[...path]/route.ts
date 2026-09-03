@@ -480,19 +480,30 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "menu-sig") {
       const [mi, cat] = await Promise.all([
         sb.from("menu_items").select("id,title,price,tags").eq("restaurant_id", rid).order("id").limit(2000),
-        // .limit(500) to match the manager panel's twin (editor route, GET /all). It is the only
-        // read in this territory that was scoped and column-named but UNBOUNDED — about ten rows on
-        // a real restaurant, so this changes nothing today and closes the one exception to
-        // CLAUDE.md's "column list AND .limit()". (owner picked it, 2026-08-28)
+        // .limit(500) to match the manager panel's twin (editor route, GET /all). About ten rows on
+        // a real restaurant, so this changes nothing today and closes one exception to CLAUDE.md's
+        // "column list AND .limit()". (owner picked it, 2026-08-28)
+        // ⚠️ THIS USED TO SAY "the ONLY read in this territory that was scoped and column-named but
+        // UNBOUNDED", and that was wrong on the day it was written: the dish list in the /summary
+        // branch below was unbounded too, and it is roughly fifty times the size. Both carry a
+        // ceiling now. (sweep #8 T10, 2026-09-03 — a counted claim in a comment goes stale, which
+        // is why this one is corrected rather than quietly deleted.)
         sb.from("categories").select("slug,name,sort_order,active").eq("restaurant_id", rid).order("slug").limit(500),
       ]);
       const rows = (must(mi) || []) as { id: string; title: string | null; price: unknown; tags: unknown[] | null }[];
       const cats = (must(cat) || []) as { slug: string; name: unknown; sort_order: unknown; active: unknown }[];
       const h = createHash("sha1");
       h.update(String(rows.length) + "|");
-      for (const r of rows) h.update(`${r.id}${r.title ?? ""}${String(r.price ?? "")}${(r.tags || []).join(",")}`);
+      // \u0001 / \u0002 as ESCAPES, not as literal bytes (sweep #8 T10, 2026-09-03). They are field
+      // and record separators — "ab"+"c" must not hash the same as "a"+"bc" — and that is right. But
+      // they were written as the raw control characters, which made this .ts file classify as binary
+      // ("file" reports it as `data`, not text), and one editor, formatter or copy-paste that strips
+      // or normalises a control byte silently changes the digest. The escapes produce the byte-for-byte
+      // SAME string, so the digest is unchanged (checked against the live /menu-sig answer either
+      // side of this edit), and the file is plain text again.
+      for (const r of rows) h.update(`${r.id}\u0001${r.title ?? ""}\u0001${String(r.price ?? "")}\u0001${(r.tags || []).join(",")}\u0002`);
       h.update("||" + String(cats.length) + "|");
-      for (const c of cats) h.update(`${c.slug}${JSON.stringify(c.name ?? "")}${String(c.sort_order ?? "")}${String(c.active)}`);
+      for (const c of cats) h.update(`${c.slug}\u0001${JSON.stringify(c.name ?? "")}\u0001${String(c.sort_order ?? "")}\u0001${String(c.active)}\u0002`);
       // 16 hex chars is plenty: this only has to differ when the menu differs, and a collision
       // would cost one skipped self-heal, which the realtime breadcrumb covers anyway.
       return ok({ sig: h.digest("hex").slice(0, 16), dishes: rows.length });
@@ -558,13 +569,34 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Full floor: attach the small table-agnostic collections in ONE round-trip. The dishes
       // query is STARTED here only on a full load (so it runs in parallel with the rest); on a
       // slim (nomenu) load it's never issued at all.
+      // .limit(2000) — the SAME ceiling the menu-sig digest above uses, and for the same reason.
+      // This is the heaviest read in the file (~50 kB of the ~77 kB full load) and it was the one
+      // scoped, column-named read here with no ceiling at all. CLAUDE.md's module checklist is
+      // explicit: a scoped read carries a column list AND a .limit(). It changes nothing today —
+      // a real restaurant has tens of dishes, not thousands — and 2000 is not a fresh guess: a menu
+      // bigger than that already outruns the digest that tells this panel the menu changed, so the
+      // two ceilings have to be the same number or the backstop would go quiet before the payload
+      // did. (The note on the menu-sig read used to claim the categories read was "the only" read
+      // in this territory that was unbounded. It was not: this one was, four lines below it.
+      // Corrected there in the same pass.)
       const dishesP = nomenu
         ? null
-        : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price,tax_mode").eq("restaurant_id", rid).order("category");
+        : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price,tax_mode").eq("restaurant_id", rid).order("category").limit(2000);
       const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order").limit(500),   // bounded like its twin — see the note on the menu-sig read above
-        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, access_config").eq("id", rid).maybeSingle(),
+        // `logo_url` IS READ BY THIS PANEL AND WAS NEVER SENT (sweep #8 T10, 2026-09-03).
+        // printTableBill() in public/panels/tablet/app.js passes
+        // `state.data.restaurant.logo_url` into LFH_BILLDOC.billData as the bill's `logo`, and
+        // billdoc.js prints an <img class="logo"> whenever that is a http(s) URL. The column was
+        // simply not in this select, so the expression always evaluated to "" — every bill a
+        // WAITER printed came out with no logo while the same bill printed at the manager's till
+        // carried it (the editor route's twin of this read selects it: app/api/editor line 1137).
+        // One document, two different papers depending on which panel produced it, and the panel's
+        // own read gave no sign: an absent column is `undefined`, which its /^https?:/ test
+        // quietly rejects. Both sides of a field have to be grepped, which is what caught it.
+        // Costs one short text column on a read this panel already makes.
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, logo_url, access_config").eq("id", rid).maybeSingle(),
       ]);
       // KOT ▾ module rung resolved server-side from the settings row itself (canonical
       // ladder, mig 177 — no extra query): when the module isn't effective the tri-state
@@ -670,7 +702,32 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // and the WRITE path (below) does refuse outright.
         if (!allows(limit, tbl)) return ok({ sessions: [], members: [], calls: [], orders: [], items: [], requests: [] });
         const live = await liveOrdersAndItems(rid, [tbl]);
-        const sessions = must(await sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid).eq("table_number", tbl));
+        // ── NAMED COLUMNS, NOT `*` (owner picked it as item 12, 2026-09-03) ──────────────────────
+        //
+        // `sessions` has 27 columns and this read shipped every one of them to every waiter's tablet
+        // on every targeted refetch — which is the most frequent read this panel makes, because one
+        // realtime breadcrumb naming one table fires exactly this. Measured on the dev floor: 7,166
+        // bytes for ten rows against 3,232 for this list — 2.2× — and the columns being dropped are
+        // not neutral ones:
+        //   · `cart` is a GUEST'S OWN BASKET, the order they are still building on their phone. No
+        //     staff screen reads it (migration 299's header says so: it has its own trigger and its
+        //     own topic), and it was being handed to every waiter on the floor.
+        //   · `last_activity_at` and `cart_updated_at` are HEARTBEATS. They tick constantly with no
+        //     visible effect, which is why boardSig has an RT_VOLATILE list to strip them before it
+        //     hashes — not sending them at all is the same win one step earlier.
+        //   · `deleted_*` / `void_*` / `opened_by` / `created_at` / `restaurant_id` are not read by
+        //     any screen this payload reaches (the read is already scoped, so the tenant id is a
+        //     round trip telling us what we asked for).
+        //
+        // THE LIST IS THE RISK, and it is the reason this was put to the owner rather than just
+        // done: a hand-typed column list is how a field silently goes missing later — which is
+        // exactly what caused this sweep's item 3, where `logo_url` was read by the panel and never
+        // sent. So it does not stand on care: `verify:tablet-taps` now greps BOTH sides and fails if
+        // this panel (or the shared bill document it hands rows to) reads a session column that is
+        // not on this list. The settings row a few lines up deliberately keeps `*` for the opposite
+        // reason — that one really is read wholesale, dozens of columns at a time.
+        const SESSION_COLS = "id, table_number, status, opened_at, closed_at, bill_no, invoice_no, invoice_at, invoice_voided, discount, discount_note, cust_name, cust_phone, bill_printed_at";
+        const sessions = must(await sb.from("sessions").select(SESSION_COLS).neq("status", "closed").eq("restaurant_id", rid).eq("table_number", tbl));
         const sids = (sessions || []).map((s: { id: string }) => s.id);
         const [members, calls, requests] = await Promise.all([
           sids.length ? sb.from("session_members").select("id, session_id, phone, phone_verified, name, role, approved, location_ok, removed, joined_at, device_id, restaurant_id").eq("removed", false).eq("restaurant_id", rid).in("session_id", sids) : Promise.resolve({ data: [] }),
@@ -847,6 +904,66 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back` });
     }
 
+    // ── print-jobs — send a kitchen ticket to the KITCHEN'S printer again (owner's item 15, 2026-09-03)
+    //
+    // WHY IT IS HERE. The waiter tablet could do everything with a ticket except ask for it again.
+    // Reprinting a KOT lived only on the manager panel, so a waiter standing at the pass with a
+    // ticket the printer ate had to walk to the till — on the one device that is always in the room
+    // where the problem is. Put to the owner as item 15 with the two things I would NOT move
+    // (issuing a credit note, restoring a bill settled over 30 minutes ago — both a manager's by his
+    // own rule), and he picked it: *"can do 11,12,13,14,15"*.
+    //
+    // A BYTE-FOR-BYTE TWIN of the editor's own print-jobs branch, on purpose, down to its refusals:
+    // the same ownership read, the same "cancelled" guard and the same TOMBSTONE guard (T7 finding
+    // F11 — a soft-deleted order never leaves the table, so `.filter(j => j.order)` on the kitchen
+    // side cannot catch it and both halves have to be asked here), the same `reprint: true` so the
+    // ticket comes out branded DUPLICATE, and the same action code in the log so one question —
+    // "who asked the kitchen to print that again?" — has one answer whichever panel asked.
+    //
+    // GATED LIKE THE REST OF THE KOT ▾ MENU it is drawn in: the module rung
+    // (tableOpsTabletAllowed) AND the tri-state (tabletPerm off/pin/on), with the admin act-as
+    // bypass. That is deliberate rather than ungated — every other row in that menu answers to the
+    // same switch, so an admin who turns Table & KOT operations off for a restaurant turns this off
+    // too, and hiding the row is never the only guard. It is NOT gated on tablet_invoice: a kitchen
+    // ticket is not a bill and not an invoice (WAITER_NEVER is about the invoice).
+    //
+    // NOTHING PRINTS ON THE WAITER'S DEVICE from here. It becomes a durable job (mig 269) the
+    // kitchen screen claims, exactly as the manager's does — so a waiter's tablet, which usually
+    // has no printer at all, is asking the kitchen rather than pretending to print.
+    if (a === "print-jobs" && path.length === 1) {
+      if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      { const gpj = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gpj.allow) return gpj.resp; }
+      const rpOrderId = String((body as Record<string, unknown>)?.order_id || "");
+      if (!rpOrderId) return err("Missing order id — refresh and try again.");
+      const rpo = must(await sb.from("orders").select("id, status, kot_no, table_number, deleted_at").eq("id", rpOrderId).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; status: string; kot_no: number | null; table_number: unknown; deleted_at: string | null } | null;
+      if (!rpo) return err("That KOT isn't on this restaurant's board any more.", 404);
+      if (rpo.status === "cancelled") return err("That KOT was cancelled — there is nothing to reprint.");
+      if (rpo.deleted_at) return err("That KOT was deleted — it can't be sent to the kitchen.");
+      // WAITER SECTIONS (mig 222) — asked here for the same reason print/send asks it itself:
+      // lib/tableOfAction does not recognise ("print-jobs", …) and its rule for an unrecognised verb
+      // is refuse, which would block a sectioned waiter from reprinting their OWN table's ticket.
+      {
+        const pjLimit = await waiterTables(actor, rid);
+        if (pjLimit !== null && !allows(pjLimit, rpo.table_number)) {
+          return err(notYoursMessage(String(rpo.table_number ?? "")), 403);
+        }
+      }
+      must(await sb.from("print_jobs").insert({
+        restaurant_id: rid, kind: "kot", order_id: rpOrderId, reprint: true,
+        requested_by: actor?.name || actor?.username || "Aevidine admin",
+      }));
+      await log("kot_reprint_sent", { order_id: rpOrderId, table_number: rpo.table_number != null ? String(rpo.table_number) : null, detail: `KOT #${rpo.kot_no ?? "—"}`, device_id: dev });
+      return ok({ ok: true, kot_no: rpo.kot_no ?? null });
+    }
+
+    // ⚠️ IT SITS ABOVE THE SECTION GATE FOR THE SAME REASON print/send DOES, and it was BELOW it for
+    // an hour before this was driven (2026-09-03). lib/tableOfAction.affectedTables does not
+    // recognise ("print-jobs", …), and its rule for an unrecognised verb is `unknown: true` ⇒
+    // refuse — so a sectioned waiter was told "That table isn't in your section" about their OWN
+    // table 6. The branch already asks the section question itself, against the table the ticket
+    // really belongs to, so it belongs on this side of the shared gate. Found by driving it, not by
+    // reading it: the code looked right and the answer was a 403.
     // ── WAITER SECTIONS (mig 222) — ONE gate for every table-scoped write ──────
     // Deliberately checked HERE, once, instead of inside each of the ~38 action branches
     // below. Two reasons: a branch is easy to forget (and a forgotten one is a silent
@@ -1373,6 +1490,44 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(Array.isArray(data) ? data[0] : data);
     }
 
+    // sessions/:id/bill-printed — record that this table's bill went to the printer (mig 333).
+    //
+    // THE PANEL HAS BEEN CALLING THIS SINCE THE DAY IT LEARNED TO PRINT, AND IT WAS NOT HERE
+    // (sweep #8 T10, 2026-09-03). `printTableBill()` in public/panels/tablet/app.js posts
+    // `/sessions/<id>/bill-printed` right after it opens the bill — the branch only ever existed on
+    // /api/editor, so every one of those posts fell through to "unknown POST endpoint" and the
+    // `.catch(() => {})` beside it swallowed the 404 without a word.
+    //
+    // What that cost, in the owner's own terms. His rule (2026-08-19) is *"after once print the
+    // button will just show reprint instead of print"*, and the tablet's own comment promises the
+    // fact travels: "the manager printing at the till makes THIS screen say Reprint a minute later".
+    // It only travelled ONE WAY. A waiter printing from the handheld stamped nothing, so the flag
+    // lived in `_billPrintedHere`, an in-memory Set — the label reverted to "Print" on that same
+    // tablet after a reload, and it never said "Reprint" on the manager's till or on a second
+    // waiter's device at all. A guest asking for their bill twice is service, not an incident (that
+    // is why there is no duplicate band and no audit row) — but the two panels have to agree about
+    // whether paper has already been produced, or the till reprints a bill it thinks is the first.
+    //
+    // A BYTE-FOR-BYTE TWIN of the editor's own branch, on purpose: same read, same idempotent
+    // answer when it is already stamped, same 404 wording, same one-way stamp. Two routes writing
+    // one column with two rules is how the panels start disagreeing.
+    //   · NO tri-state gate, exactly like its twin and like `print/send` above — this is a record
+    //     that paper came out, not a permission. The waiter-section gate further up already
+    //     resolved the table from the session (lib/tableOfAction line 120), and `.eq(restaurant_id)`
+    //     is the tenant boundary, since sb is service-role.
+    //   · Stamped ONCE and never moved: the first print stays the first print.
+    //   · Answering ok() when it is already stamped is what lets the panel call it after every
+    //     print with no guard of its own, and makes a retry free.
+    if (a === "sessions" && c === "bill-printed") {
+      const ownsPrint = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
+      if (!ownsPrint) return err("That bill isn't for this restaurant.", 404);
+      if (ownsPrint.bill_printed_at) return ok({ ok: true, id: b, bill_printed_at: ownsPrint.bill_printed_at, reprint: true });
+      const atPrint = new Date().toISOString();
+      const upPrint = await sb.from("sessions").update({ bill_printed_at: atPrint }).eq("id", b).eq("restaurant_id", rid);
+      if (upPrint.error) throw pgError(upPrint.error);
+      return ok({ ok: true, id: b, bill_printed_at: atPrint, reprint: false });
+    }
+
     // tables/:t/restart — clear the round off the floor but KEEP the table open:
     // every active order on the CURRENT party's session becomes served + archived
     // (a completed order kept in records/revenue — NOT cancelled). Mirrors the
@@ -1427,8 +1582,42 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
       { const gsh = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gsh.allow) return gsh.resp; }
       const to = String((body && body.to) || "").trim();
-      // lfh_staff_shift_table derives the restaurant from the session itself and
-      // checks the target table within that same restaurant — no rid needed here.
+      // ── THE TWO CHECKS ITS MANAGER TWIN HAS AND THIS ONE DID NOT (sweep #8 T10, 2026-09-03) ───
+      //
+      // The comment that used to sit here said the RPC "derives the restaurant from the session
+      // itself and checks the target table within that same restaurant — no rid needed here". Half
+      // of that is true and it is the wrong half. `lfh_staff_shift_table(p_session, p_to)` reads
+      // `SELECT * FROM sessions WHERE id = p_session` with no tenant argument at all, then works
+      // inside whatever restaurant THAT ROW belongs to (mig 217, line 33). So it does not check the
+      // session against the caller's restaurant — nothing did.
+      //
+      // Every sibling on this route already asks. sessions/:id/invoice pre-reads the row and says so
+      // ("mirroring the editor invoice guard"); merge, unmerge, orders/:id/move and
+      // order-items/:id/move all hand the RPC `p_rid: rid` so SQL enforces it; bill-discount
+      // pre-reads. Shift was the one left out — and lib/sessionClose.ts's own header asserts, in
+      // writing, that "the neighbouring invoice/void/shift actions already do this same pre-check",
+      // which for this route was simply not so. The waiter-section gate above is not a substitute:
+      // waiterTables() returns null — no narrowing at all — for an unsectioned waiter, for a
+      // manager or owner looking in, and for every restaurant with sections switched off.
+      //
+      // AND THE DESTINATION HAS TO BE A TABLE THIS FLOOR HAS. The RPC refuses a non-numeric
+      // (`bad_table`) and refuses an occupied one, and stops there — it has never known the floor
+      // plan. So "Move table" was the ONE destination on this panel with no 1..table_count check:
+      // place-order, sessions/open, merge, move-a-KOT, move-a-dish and banquet/place all carry it
+      // and all say the same sentence. A party shifted onto a table the plan does not have lands as
+      // an off-plan tile — the shape lib/planTable.ts exists to stop ("20 orders on tables like
+      // 9,754,262 … their money sits in the books with no tile to serve or settle it from").
+      //
+      // Both reads are issued together, so this costs one round trip, on a tap that happens a
+      // handful of times a service. Word for word the manager's, including its wording.
+      const [ownsShift, shiftSet] = await Promise.all([
+        sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle(),
+      ]);
+      if (!must(ownsShift)) return err("That table isn't for this restaurant.", 404);
+      if (!/^\d+$/.test(to) || Number(to) < 1) return err("Pick a valid table to move to.", 400);
+      const shiftCount = Number((must(shiftSet) || {}).table_count) || 0;
+      if (shiftCount > 0 && Number(to) > shiftCount) return err(`Table ${to} doesn't exist (this place has ${shiftCount} tables).`, 400);
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
       // The RPC signals a refused move (target occupied / session closed / bad table) as
