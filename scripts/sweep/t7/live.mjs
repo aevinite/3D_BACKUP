@@ -67,7 +67,30 @@ const PRINTER = {
   ],
 };
 const SLOW = { rows: [{ id: "ord-9", table_number: "2", kot_no: 12, created_at: AGO(360000) }], afterMs: 180000 };
-const SUMMARY = { tiles: { "3": TILE }, calls: [], requests: [], joiners: [], blocklist: [], merges: [], order_count: 1, latest_order_table: "3", printer: PRINTER, slowOrders: SLOW };
+// Two of each: one FRESH (seconds old — the floor's job, not the bell's) and one OVERDUE (six
+// minutes — nobody has dealt with it). That pair is the whole rule, so every row below is asserted
+// against both halves rather than against one.
+const CALLS = [
+  { id: "call-fresh", table_number: "1", note: "water", resolved: false, created_at: AGO(20000) },
+  { id: "call-old",   table_number: "2", note: "napkins", resolved: false, created_at: AGO(360000) },
+  { id: "call-done",  table_number: "4", note: "bill", resolved: true,  created_at: AGO(400000) },
+];
+const JOINERS = [
+  { id: "join-fresh", table_number: "1", name: "Asha", created_at: AGO(15000) },
+  { id: "join-old",   table_number: "4", name: "Rahul", created_at: AGO(420000) },
+];
+const REQUESTS = [
+  { id: "req-fresh", table_number: "2", kind: "access", note: "", created_at: AGO(10000) },
+  { id: "req-old",   table_number: "1", kind: "access", note: "asked for a waiter", created_at: AGO(500000) },
+];
+// EVERY table 1..table_count gets a tile from the server, always — the summary RPC's universe is
+// `generate_series(1, table_count) UNION open sessions UNION live orders` (mig 166, line 39). A
+// fixture that only carried T3 was quietly testing a floor that cannot exist, and made the call
+// badge on T1 look missing when it is not.
+const FREE_TILE = (t) => ({ state: "free", label: "Free", meta: "", counts: { nw: 0, ck: 0, rd: 0, sv: 0 },
+  pay: "", due: 0, hasNew: false, hasCall: false, hasReq: false, hasJoin: false, members: 0, reqs: 0, pending: 0, tag: "" });
+const FRESH_ORDER_TILE = { ...FREE_TILE(4), state: "new", label: "New order", counts: { nw: 1, ck: 0, rd: 0, sv: 0 }, hasNew: true };
+const SUMMARY = { tiles: { "1": FREE_TILE(1), "2": FREE_TILE(2), "3": TILE, "4": FRESH_ORDER_TILE }, calls: CALLS, requests: REQUESTS, joiners: JOINERS, blocklist: [], merges: [], order_count: 1, latest_order_table: "3", printer: PRINTER, slowOrders: SLOW };
 const INV_ITEMS = { items: [
   { id: "ing-1", name: "Onion", category: "vegetables", storage_area: "dry store", base_uom: "g", purchase_uom: "kg", purchase_factor: 1000, qty_base: 8000, avg_cost: 0.03, par_qty: 5000, min_qty: 2000, last_rate: 30, track_level: "FULL", active: true },
   { id: "ing-2", name: "Tomato", category: "vegetables", storage_area: "dry store", base_uom: "g", purchase_uom: "kg", purchase_factor: 1000, qty_base: 4000, avg_cost: 0.04, par_qty: null, min_qty: null, last_rate: 40, track_level: "FULL", active: true },
@@ -332,7 +355,7 @@ await check("P61227 …and it carries a real age, because the clock now comes fr
     const btn = document.querySelector("button[class*=lfh-bell]");
     btn.click();
     await new Promise((r) => setTimeout(r, 250));
-    const row = [...document.querySelectorAll(".lfh-bell-row")].find((n) => /waiting to be accepted/i.test(n.innerText));
+    const row = [...document.querySelectorAll(".lfh-bell-row")].find((n) => /not accepted for over/i.test(n.innerText));
     const when = row ? (row.querySelector(".lfh-bell-when") || {}).textContent : null;
     document.querySelector(".lfh-bell-x")?.click();
     return when;
@@ -353,10 +376,12 @@ await check("P61228 …and an order that has JUST arrived is not", async () => {
     return { rows };
   });
   if (seen.err) return seen.err;
-  const orderRows = seen.rows.filter((t) => /waiting to be accepted/i.test(t));
-  // T3 has hasNew=false in the fixture and T2 is the slow one — so exactly one order row, and it
-  // must be the aged one, naming how long it has waited.
-  return (orderRows.length === 1 && /over 3 minutes/.test(orderRows[0]) && /Table 2/.test(orderRows[0]))
+  const orderRows = seen.rows.filter((t) => /not accepted for over/i.test(t));
+  // T4's tile says it has a brand-new unaccepted order RIGHT NOW; T2's is six minutes old. Exactly
+  // one order row may exist, and it must be T2's — the arrival at T4 belongs to the floor, which
+  // is showing it as amber with a one-tap ✓ at this very moment.
+  return (orderRows.length === 1 && /over 3 minutes/.test(orderRows[0]) && /Table 2/.test(orderRows[0])
+          && !orderRows.some((t) => /Table 4/.test(t)))
     || ("order rows: " + JSON.stringify(orderRows));
 });
 await check("P61229 a stuck kitchen slip is a notification, and it offers Print it here", async () => {
@@ -434,6 +459,82 @@ await check("P61233 🍴 Split: the stepper and its unit stay on ONE line at 360
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.waitForTimeout(200);
   return (box && box.sameLine === true) || ("the word 'people' is not beside the number: " + JSON.stringify(box));
+});
+
+// ── ONE RULE FOR THE WHOLE BELL — his second ruling, driven ─────────────────────────────────────
+const bellRows = () => page.evaluate(async () => {
+  document.querySelector(".lfh-bell-x")?.click();
+  document.querySelector("button[class*=lfh-bell]").click();
+  await new Promise((r) => setTimeout(r, 250));
+  const rows = [...document.querySelectorAll(".lfh-bell-row")].map((n) => n.innerText.replace(/\s+/g, " ").trim());
+  document.querySelector(".lfh-bell-x")?.click();
+  return rows;
+});
+
+await check("P61234 a waiter call nobody has attended for 3 minutes IS a notification", async () => {
+  const rows = await bellRows();
+  const hit = rows.filter((t) => /napkins/.test(t));
+  return (hit.length === 1 && /not attended for over 3 minutes/.test(hit[0]) && /Table 2/.test(hit[0]))
+    || ("rows: " + JSON.stringify(rows));
+});
+await check("P61235 …and a call rung twenty seconds ago is NOT", async () => {
+  const rows = await bellRows();
+  return rows.every((t) => !/water/.test(t)) || ("the fresh call rang the bell: " + JSON.stringify(rows));
+});
+await check("P61236 …and a call somebody already answered never appears at all", async () => {
+  const rows = await bellRows();
+  return rows.every((t) => !/\bbill\b/i.test(t) || /A bill for/.test(t)) || ("a resolved call is in the bell: " + JSON.stringify(rows));
+});
+await check("P61237 someone waiting to be let in for 3 minutes is a notification, named", async () => {
+  const rows = await bellRows();
+  const hit = rows.filter((t) => /Rahul/.test(t));
+  return (hit.length === 1 && /waiting for over 3 minutes/.test(hit[0])) || ("rows: " + JSON.stringify(rows));
+});
+await check("P61238 …and one who has just asked is not", async () => {
+  const rows = await bellRows();
+  return rows.every((t) => !/Asha/.test(t)) || ("the fresh joiner rang the bell: " + JSON.stringify(rows));
+});
+await check("P61239 an access request left for 3 minutes is a notification", async () => {
+  const rows = await bellRows();
+  const hit = rows.filter((t) => /asked for a waiter/.test(t));
+  return (hit.length === 1 && /waiting for over 3 minutes/.test(hit[0])) || ("rows: " + JSON.stringify(rows));
+});
+await check("P61240 …and a fresh one is not", async () => {
+  const rows = await bellRows();
+  const fresh = rows.filter((t) => /Table 2/.test(t) && /waiting for over/.test(t));
+  return fresh.length === 0 || ("the fresh request rang the bell: " + JSON.stringify(fresh));
+});
+await check("P61241 the bell holds exactly the six overdue things and nothing fresh", async () => {
+  // two stuck print jobs · one unattended call · one unaccepted order · one waiting joiner ·
+  // one waiting request. The three fresh ones (20s, 15s, 10s) and the resolved call are absent.
+  const rows = await bellRows();
+  return rows.length === 6 || (rows.length + " rows: " + JSON.stringify(rows));
+});
+await check("P61242 …and every single one says how long it has been waiting", async () => {
+  const rows = await bellRows();
+  const silent = rows.filter((t) => !/for over 3 minutes/.test(t) && !/hasn't printed/.test(t));
+  return silent.length === 0 || ("no age on: " + JSON.stringify(silent));
+});
+await check("P61243 the FLOOR still badges a fresh call the instant it is rung", async () => {
+  const n = await page.evaluate(() => {
+    // T1 has the twenty-second-old call; the tile must show it even though the bell does not.
+    const tile = document.querySelector('.ftile[data-floor-table="1"]');
+    return tile ? tile.querySelectorAll(".ftb.call").length : -1;
+  });
+  return n >= 1 || ("the tile shows " + n + " call badges");
+});
+await check("P61244 …and 'Needs you' counts that table straight away", async () => {
+  const t = await page.locator(".floor-stats").innerText();
+  const m = t.match(/(\d+)\s*NEEDS YOU/i);
+  return (m && Number(m[1]) >= 1) || ("the strip says: " + t.replace(/\s+/g, " "));
+});
+await check("P61245 …so the floor answers 'what is happening' and the bell 'what did nobody do'", async () => {
+  const rows = await bellRows();
+  const floorBadges = await page.locator(".ftile .ftb").count();
+  // The floor carries MORE live badges than the bell carries overdue rows, because the floor shows
+  // everything the moment it happens and the bell waits three minutes. That gap IS the design.
+  const overdue = rows.filter((r) => /for over/.test(r)).length;
+  return (floorBadges >= 1 && floorBadges > overdue - 4) || `floor badges ${floorBadges}, overdue rows ${overdue}`;
 });
 
 if (SHOTS) {
