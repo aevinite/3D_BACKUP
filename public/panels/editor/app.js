@@ -2107,7 +2107,16 @@ async function saveWaiterTables(userId, tables) {
   renderEditor(); repaintSectionPicker(); repaintSectionsModal();
 }
 
-const secTables = (w) => (w.assigned_tables || []).map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+// A TABLE NUMBER STARTS AT 1, SO `Number.isFinite` IS NOT THE TEST (sweep #8 T6 round 2,
+// 2026-09-03). `Number(null)` and `Number("")` are both 0, and 0 is perfectly finite — so a blank
+// or a null anywhere in a stored rota came through this filter as **table 0**. There is no table 0:
+// the floor is 1..table_count. It would have been drawn as a "T0" chip on the rota, counted as a
+// holder by secHolders/secGaps, and — because the pickers build their next save from THIS list
+// (`saveWaiterTables(id, secTables(w).concat(i))`) — written straight back to the server on the
+// next tap. The server re-sanitises and clamps to the real table count, which is why nothing has
+// gone wrong in practice; this is the panel doing its own half of that job properly, in the one
+// filter whose whole purpose is dropping rubbish. Found by driving it with [5, 1, "3", null].
+const secTables = (w) => (w.assigned_tables || []).map(Number).filter((n) => Number.isFinite(n) && n >= 1).sort((a, b) => a - b);
 const secName = (w) => (w.name || w.username || "Waiter").trim();
 // Which waiters hold table i (used by the by-table view and the gap warning).
 function secHolders(i) {
