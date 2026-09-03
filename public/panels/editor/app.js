@@ -7885,11 +7885,22 @@ async function removeRecord() {
     await loadAll();
     renderEditor();
     // Undo — re-creates the record from the snapshot (safety net for a misclick).
+    //
+    // THE RESTORE'S OWN ANSWER, NOT THE DELETE'S (sweep #8 T6, 2026-09-03). The toast below used to
+    // be handed `_wq`, which is what the DELETE returned — so deleting while online and then pressing
+    // Undo after the signal dropped said a plain "Restored ✓" over a write that had only been saved on
+    // this device. The queue line exists precisely so nobody walks away believing a saved write is a
+    // sent one, and it has to be asked of the write it is describing.
+    //
+    // The note lives HERE, above the closure, and not between the payload and the call: the
+    // `payload.__create = true` line is what tells verify:clash-coverage this write is exempt (an undo
+    // re-creating a deleted row has no concurrent edit to overwrite), and that guard reads only the
+    // three lines either side of the call. Comments pushed in between made a covered write look bare.
     const undoRec = async () => {
       try {
         const payload = { ...restored }; delete payload.created_at; delete payload.updated_at; payload.__create = true;
-        await api("POST", "/" + kind, payload);
-        okToast(_wq, "Restored ✓");
+        const _undoQ = await api("POST", "/" + kind, payload);
+        okToast(_undoQ, "Restored ✓");
         if (state.tab === kind) { await loadAll(); renderList(); renderEditor(); }
       } catch (e) { toast("Couldn't undo: " + e.message, "err"); }
     };
