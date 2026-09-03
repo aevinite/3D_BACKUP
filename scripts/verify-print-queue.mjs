@@ -290,9 +290,22 @@ check(/helper: \(r && r\.helper\) \|\| null/.test(epanel) && /helperKey/.test(ep
 check(!/\$\{printStationStripHtml\(\)\}|\$\{printerStripHtml\(\)\}/.test(codeOnly(epanel)),
   "no printing band is painted across the floor — the table grid keeps its space",
   "a printing strip is back above the tables: that is the space he asked for back, twice");
-check(/kind: "printer"/.test(codeOnly(epanel)) && /printer-problem:/.test(codeOnly(epanel)),
+// THE RULE, NOT THE KEY (sweep #8 T7, 2026-09-03). This asserted the literal string
+// `printer-problem:`, which was the key the bell's hand-built event rows used. Those rows are gone
+// — not the feature: the bell now reads printerAlerts(), the SAME list the toasts are built from,
+// so one printer problem can never be worded two ways, and it brings the stuck JOBS in with it
+// (including stuck BILLS, owner 2026-09-03) where before only a REPORTED fault reached the bell.
+// The rule is unchanged and wider, so it is asserted against the mechanism: printer rows exist,
+// and they come from the one alert list rather than from a second description of the same thing.
+check(/kind: "printer"/.test(codeOnly(epanel)) && /printerAlerts\(\)/.test(codeOnly(epanel))
+      && /key: "printer:" \+ a\.key/.test(codeOnly(epanel)),
   "…and printing speaks through the notification bell instead, problems first",
   "printing was taken off the floor and not put anywhere — a printer problem would now be invisible");
+// …and the one action he asked to keep is on that row, not on a band above the tables (owner,
+// 2026-09-03: "for 16th we can do in notification we can keep that option").
+check(/run: \(\) => printJobHere\(a\.id\)/.test(codeOnly(epanel)) && /async function printJobHere/.test(codeOnly(epanel)),
+  "…and a stuck kitchen slip can still be printed on this device, from the bell",
+  "the 'Print it here' fallback has no caller again — a stuck ticket can only be reached through the KOT menu");
 
 // ── 7. the setup guide is IN the app, and reachable from a screen that is not hidden ────────────
 const guide = read("public/print-setup.html");
