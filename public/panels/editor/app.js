@@ -1216,17 +1216,8 @@ function toggle(label, path, val) {
 function lbl(text) {
   return `<label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:8px">${esc(text)}</label>`;
 }
-// triSel: a tri-state permission select (Off / On / On-with-manager-PIN). Saves via
-// data-path like every other settings field. Used for the tablet billing controls.
-function triSel(label, path, val) {
-  const v = val || "off";
-  return `<div class="field"><label>${esc(label)}</label>
-    <select data-path="${path}">
-      <option value="off" ${v === "off" ? "selected" : ""}>Off — hidden from waiter</option>
-      <option value="on"  ${v === "on" ? "selected" : ""}>On — waiter can do it</option>
-      <option value="pin" ${v === "pin" ? "selected" : ""}>On · needs manager PIN</option>
-    </select></div>`;
-}
+// triSel() lived here and went with the access cards above (sweep #8 T6 round 2, 2026-09-03).
+// It built the Off / On / On-needs-manager-PIN dropdown, and those two cards were its only callers.
 
 // taxModeExample(mode, price, settings): the ONE line under the "GST on this price" picker
 // that says, in money, what the choice does — "Guest pays ₹294.00 — ₹280 + ₹14 GST at 5%".
@@ -2107,7 +2098,16 @@ async function saveWaiterTables(userId, tables) {
   renderEditor(); repaintSectionPicker(); repaintSectionsModal();
 }
 
-const secTables = (w) => (w.assigned_tables || []).map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+// A TABLE NUMBER STARTS AT 1, SO `Number.isFinite` IS NOT THE TEST (sweep #8 T6 round 2,
+// 2026-09-03). `Number(null)` and `Number("")` are both 0, and 0 is perfectly finite — so a blank
+// or a null anywhere in a stored rota came through this filter as **table 0**. There is no table 0:
+// the floor is 1..table_count. It would have been drawn as a "T0" chip on the rota, counted as a
+// holder by secHolders/secGaps, and — because the pickers build their next save from THIS list
+// (`saveWaiterTables(id, secTables(w).concat(i))`) — written straight back to the server on the
+// next tap. The server re-sanitises and clamps to the real table count, which is why nothing has
+// gone wrong in practice; this is the panel doing its own half of that job properly, in the one
+// filter whose whole purpose is dropping rubbish. Found by driving it with [5, 1, "3", null].
+const secTables = (w) => (w.assigned_tables || []).map(Number).filter((n) => Number.isFinite(n) && n >= 1).sort((a, b) => a - b);
 const secName = (w) => (w.name || w.username || "Waiter").trim();
 // Which waiters hold table i (used by the by-table view and the gap warning).
 function secHolders(i) {
@@ -2469,116 +2469,32 @@ const SETTINGS_SECTIONS = [
   { id: "sessions", label: "Dining sessions", sub: "QR & location", icon: "fa-qrcode", title: "Dining sessions" },
 ];
 
-// The three tablet capabilities that can be granted per person (Access section).
-// Key = the settings column AND the staff_users.permissions key (same name, so the
-// server's fallback rule is a plain lookup). Label = the human words.
-const ACCESS_CAPS = [
-  { key: "tablet_discount", label: "Apply discount" },
-  { key: "tablet_mark_paid", label: "Mark bill paid" },
-  { key: "tablet_invoice", label: "Generate invoice" },
-  // Banquet module (mig 130) — only meaningful when the admin entitlement is on;
-  // accessCapsFor() drops it from both Access cards otherwise (no dead UI).
-  { key: "tablet_banquet", label: "Banquet billing" },
-  // Table types + khata (mig 166) — the manager→tablet rung of the ladder; dropped
-  // from both Access cards when the feature itself is off (no dead UI).
-  { key: "tablet_table_tags", label: "Mark table types (VIP/Family/Guest)" },
-  { key: "tablet_khata", label: "Park pay-later (khata) bills" },
-  // KOT ▾ menu, the ladder's manager→tablet rung (mig 172) — only shown when the
-  // module itself is effective (canonical ladder, migs 172-177; no dead UI otherwise).
-  { key: "tablet_table_ops", label: "Table & KOT operations" },
-  // Order-taking (mig 178) — the manager→tablet rung for taking orders. Always shown
-  // (not module-gated); defaults 'on' so the tablet keeps taking orders out of the box.
-  { key: "tablet_take_orders", label: "Take orders" },
-  // Parcel / takeaway (mig 197) — the manager→tablet rung for the 🥡 New Parcel button.
-  // Was MISSING here (2026-07-26): the waiter cap is server-enforced (tabletPerm) and both
-  // the admin + owner screens expose it, but the MANAGER's own Access card couldn't set it
-  // or a per-waiter override. Module-gated like table_ops below (no dead UI when off).
-  { key: "tablet_parcel", label: "Parcel orders (counter)" },
-];
-// The Access cards' cap list, minus modules this restaurant doesn't have.
-function accessCapsFor() {
-  const s = state.data.settings || {};
-  const tagsOn = s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
-  return ACCESS_CAPS.filter((c) => {
-    if (c.key === "tablet_banquet") return s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
-    if (c.key === "tablet_table_tags") return tagsOn;
-    // Pay later is its own feature now (mig 235) — it must not ride table types' switch.
-    if (c.key === "tablet_khata") return s.khata_allowed === true && (s.khata_owner_control !== true || s.khata_enabled !== false);
-    if (c.key === "tablet_table_ops") return s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
-    if (c.key === "tablet_take_orders") return s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
-    // The parcel/platform board is PERMANENT (owner, 2026-08-03): there is no module switch left
-    // to consult, so this capability is only ever about the PERSON's grant.
-    if (c.key === "tablet_parcel") return true;
-    return true;
-  });
-}
-const ACCESS_MODE_LABEL = { on: "On", pin: "On — needs PIN", off: "Off" };
+// ACCESS_CAPS, accessCapsFor() and ACCESS_MODE_LABEL lived here and were DELETED on 2026-09-03
+// (sweep #8 T6 round 2), together with the two access cards below them.
+//
+// They listed the tablet powers a person can be granted, dropped the ones this restaurant's modules
+// make meaningless, and named how each mode reads. Their only readers were accessDefaultsCardHtml
+// and accessUsersCardHtml — screens nothing has opened since the 2026-07-31 access rebuild moved
+// every permission to the admin console, and which are deleted in this same pass. The `[data-perm-user]`
+// handler that saved from them has gone too; without it there was a live-looking write path
+// (staffCall set_permissions) that no tap on any screen could reach.
+//
+// The list that MATTERS is `lib/staffCaps.ts` on the server: one permission list feeding the profile,
+// the Access tab and the write allow-list, with unknown keys refused. This was the panel's private
+// copy of it, for a screen that no longer exists. Do not re-add a copy here — read it from there.
 
-// accessDefaultsCardHtml: the restaurant-wide defaults — the same three tri-states
-// that used to live in "Tablet panel access", now framed as what EVERYONE inherits
-// unless a per-user override (card below) says otherwise.
-// data-mgr-hide (2026-07-30): this section is now reachable by a manager who only has
-// table_assign (Who-serves-which-table lives here too), so the two staff-power cards need
-// their OWN gate instead of relying on the sidebar row being manage_staff-only.
-function accessDefaultsCardHtml(s) {
-  return `<div class="card" data-mgr-hide="access_defaults"><h3>Defaults for everyone</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      What a waiter can do with a bill on the tablet, unless a person below has their own
-      setting. Each starts <b>Off</b> (hidden). <b>On</b> = allowed directly;
-      <b>On · needs manager PIN</b> = allowed but a manager PIN is asked each time.
-    </p>
-    <div class="grid cols-3">
-      ${accessCapsFor().map((c) => triSel(c.label, c.key, s[c.key])).join("")}
-    </div>
-  </div>`;
-}
+// accessDefaultsCardHtml and accessUsersCardHtml lived here and were DELETED on 2026-09-03
+// (sweep #8 T6 round 2): both were declared and called from nowhere in the repo.
+//
+// They were the tablet-permission cards — the restaurant-wide tri-state defaults and the per-waiter
+// overrides. The 2026-07-31 access rebuild moved every permission to the admin console ("only the
+// ADMIN holds permissions"), and this panel's Settings > Sections section has returned
+// tableSectionsCardHtml() alone ever since. So these two built two full permission screens that
+// nothing could open. That is worse than dead weight: each carried the owner's own words about how
+// permissions should read, in a card no permission is set from any more, which is exactly how the
+// next person comes to "fix" a screen nobody can reach.
+// Permissions are set in /aevinite. If a manager ever needs one of these back, it belongs there.
 
-// accessUsersCardHtml: PER-USER overrides (owner, 2026-07-03 — "what access is granted
-// to a particular user, like he can mark as paid"). One row per TABLET login; each
-// capability is Default (inherit the card above) / On / On·PIN / Off. Saved instantly
-// per change via /api/owner/staff set_permissions; the server's tabletPerm enforces it.
-function accessUsersCardHtml(s) {
-  if (!state.staffLoaded) {
-    return `<div class="card" data-mgr-hide="access_users"><h3>Per-user access</h3><p class="muted" style="font-size:13px;margin:0">Loading…</p></div>`;
-  }
-  if (state.staffDenied) {
-    return `<div class="card" data-mgr-hide="access_users"><h3>Per-user access</h3><p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.staffDenied)}</p></div>`;
-  }
-  const waiters = state.staffTeam.filter((u) => u.role === "tablet");
-  const selFor = (u, cap) => {
-    const cur = (u.permissions || {})[cap.key] || "";
-    const defNow = ACCESS_MODE_LABEL[s[cap.key]] || "Off"; // what Default resolves to right now
-    return `<div class="field" style="margin:0">
-      <label style="font-size:11px">${cap.label}</label>
-      <select data-perm-user="${esc(u.id)}" data-perm-key="${cap.key}" style="font-size:12px;font-weight:600;padding:6px 8px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text)">
-        <option value="" ${cur === "" ? "selected" : ""}>Default (${defNow})</option>
-        <option value="on" ${cur === "on" ? "selected" : ""}>On</option>
-        <option value="pin" ${cur === "pin" ? "selected" : ""}>On — needs PIN</option>
-        <option value="off" ${cur === "off" ? "selected" : ""}>Off</option>
-      </select>
-    </div>`;
-  };
-  const rows = waiters.length
-    ? waiters.map((u) => `
-      <div style="padding:10px 12px;border-radius:9px;background:var(--panel-2)${u.active ? "" : ";opacity:.6"}">
-        <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
-          <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:3px 8px;border-radius:999px;background:color-mix(in srgb, var(--text) 8%, transparent);color:var(--text)">${esc(u.role)}</span>
-          <span style="font-weight:700;font-size:13.5px">${esc(u.name || u.username)}</span>
-          ${u.active ? "" : `<span style="font-size:10.5px;color:var(--red);font-weight:700">disabled</span>`}
-          ${Object.keys(u.permissions || {}).length ? `<span style="font-size:10.5px;color:var(--text);font-weight:700" title="This person has their own settings">· custom</span>` : ""}
-        </div>
-        <div class="grid cols-3" style="gap:8px">${accessCapsFor().map((c) => selFor(u, c)).join("")}</div>
-      </div>`).join("")
-    : `<div class="sx-empty">No tablet logins yet — add one in <b>Users</b>.</div>`;
-  return `<div class="card" data-mgr-hide="access_users"><h3>Per-user access</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
-      Give a specific waiter more (or less) than the defaults above. <b>Default</b> follows
-      the defaults card; a person's own <b>On / On·PIN / Off</b> wins over it. Changes save
-      instantly and apply on their very next tap — no re-login needed.
-    </p>
-    <div style="display:flex;flex-direction:column;gap:8px">${rows}</div>
-  </div>`;
-}
 
 // formGeneral: the site-wide Settings form, now split into SECTIONS (see
 // SETTINGS_SECTIONS). Every card is unchanged in behaviour — the split is purely
@@ -3915,83 +3831,15 @@ function parcelReceiptHtml(b, st) {
   </div>`;
 }
 
-// A settled bill as the SAME receipt card the Live view draws — items, money rows, pills —
-// with the record's own mood: a Paid / Unpaid / Cancelled pill instead of cooking stages,
-// and Print + open-for-actions instead of accept/serve. Clicking the card opens the bill.
-function billRecordCardHtml(b) {
-  const g = b.g, o0 = g[0];
-  const m = billMath(g);
-  const cls = b.cancelled ? "ord-cancelled" : "ord-served";
-  const statusPill = b.cancelled ? `<span class="ord-pill cancelled">Cancelled</span>` : `<span class="ord-pill served">Settled</span>`;
-  const payPill = b.cancelled ? "" : `<span class="pay-pill ${b.paid ? "paid" : "pending"}">${b.paid ? "💳 Paid" : "⏳ Unpaid"}</span>`;
-  const kots = g.map((o) => o.kot_no).filter((x) => x != null);
-  const when = fmtWhen(o0.created_at);
-  const voided = !!o0.invoice_voided;
-  // A FULLY-CANCELLED bill must not show priced dish lines next to a ₹0 total — the exact
-  // contradiction the bill modal fixed after the owner's 2026-07-03 screenshot ("Litchi
-  // Cooler ₹229 … Total ₹0"). The lines shown are the ones the money rows count; a
-  // cancelled bill says so in words and shows only its total (nothing to charge).
-  const liveOrders = g.filter((o) => o.status !== "cancelled");
-  const itemsHtml = liveOrders.length ? ordItemsHtml(liveOrders)
-    : `<div class="ord-line"><span class="ol-name ord-cancel-note">This bill was cancelled — no charge.</span></div>`;
-  const moneyRows = liveOrders.length ? ordTotalsRows(m) : "";
-  return `<div class="card ord-card ${cls} ${b.paid ? "is-paid" : ""} ord-record" data-bill-open="${esc(b.key)}" role="button" tabindex="0" title="Open this bill">
-    <div class="ord-top">
-      ${kots.length ? `<span class="kot-chip" title="Kitchen tickets">#${esc(kots[0])}${kots.length > 1 ? ` +${kots.length - 1}` : ""}</span>` : ""}
-      <b>${b.table ? "T" + esc(b.table) : "Walk-in"}${b.billNo != null ? ` · #${esc(b.billNo)}` : ""}</b>
-      ${statusPill}${payPill}
-      ${b.invNo != null && !voided ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(b.invNo, b.invoiceAt))}</span>` : (voided ? `<span class="inv-chip voided">invoice voided</span>` : "")}
-    </div>
-    <small class="ord-when">${esc(when)}${b.customer ? ` · ${esc(b.customer)}` : ""}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
-    <div class="ord-items">${itemsHtml}</div>
-    ${moneyRows}
-    <div class="ord-total"><span>Total</span><span>${inr(m.total)}</span></div>
-    <div class="ord-actions"><button class="ord-btn" data-bill-print="${esc(b.key)}">🖨 Print</button><button class="ord-btn ghost" data-bill-open-btn="${esc(b.key)}">⤢ Open bill</button></div>
-  </div>`;
-}
-// A finished PARCEL bill in the same receipt-card clothes, wearing its own PARCEL badge so
-// nobody mistakes it for a table (owner, 2026-08-03: "it should be named or something UI
-// should be changed for the particular parcel"). Its money comes from its own lines: the
-// stored total is tax-INCLUSIVE and net of any counter discount (see printParcelReceipt),
-// so the rows are derived the same way the printed parcel bill derives them.
-function parcelRecordCardHtml(p) {
-  const items = Array.isArray(p.items) ? p.items : [];
-  const lines = items.map((i) =>
-    `<div class="ord-line"><span class="ol-name">${esc(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span></div>`).join("");
-  const lineSum = items.reduce((a, i) => a + (parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 1), 0);
-  const total = Number(p.total) || 0;
-  const disc = Math.min(Math.max(0, Number(p.discount) || 0), lineSum);
-  const sub = lineSum > 0 ? lineSum : total;
-  const taxable = Math.max(0, sub - disc);
-  const tax = Math.max(0, Math.round((total - taxable) * 100) / 100);
-  const cancelled = p.status === "cancelled";
-  const cls = cancelled ? "ord-cancelled" : "ord-served";
-  const when = fmtWhen(p.created_at);
-  const who = (p.customer_name && !/^parcel$/i.test(String(p.customer_name).trim())) ? p.customer_name : "";
-  // Same rule as the dine-in record: a cancelled parcel says "no charge" in words instead
-  // of showing priced lines and money rows that contradict what was actually taken (₹0).
-  const itemsHtml = cancelled
-    ? `<div class="ord-line"><span class="ol-name ord-cancel-note">This parcel was cancelled — no charge.</span></div>`
-    : (lines || '<div class="ord-line"><span class="ol-name">no items recorded</span></div>');
-  const moneyRows = cancelled ? "" : `
-    <div class="ord-sub"><span>Subtotal</span><span>${inr(sub)}</span></div>
-    ${disc > 0 ? `<div class="ord-disc">Discount${discPct(sub, disc) ? ` (${discPct(sub, disc)})` : ""}<span>− ${inr(disc)}</span></div>` : ""}
-    ${tax > 0.004 ? `<div class="ord-sub"><span>${esc(taxLabel())}</span><span>${inr(tax)}</span></div>` : ""}`;
-  return `<div class="card ord-card ${cls} ${p.paid && !cancelled ? "is-paid" : ""} ord-record">
-    <div class="ord-top">
-      ${p.kot_no != null ? `<span class="kot-chip" title="Kitchen ticket">#${esc(p.kot_no)}</span>` : ""}
-      <span class="parcel-badge">📦 PARCEL</span>
-      <b>${p.bill_no != null ? `#${esc(p.bill_no)}` : ""}</b>
-      ${cancelled ? `<span class="ord-pill cancelled">Cancelled</span>` : `<span class="ord-pill served">Handed over</span><span class="pay-pill ${p.paid ? "paid" : "pending"}">${p.paid ? "💳 Paid" : "⏳ Unpaid"}</span>`}
-      ${p.invoice_no != null && !cancelled ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(p.invoice_no, p.invoice_at))}</span>` : ""}
-    </div>
-    <small class="ord-when">${esc(when)}${who ? ` · ${esc(who)}` : ""}</small>
-    <div class="ord-items">${itemsHtml}</div>
-    ${moneyRows}
-    <div class="ord-total"><span>Total</span><span>${inr(cancelled ? 0 : total)}</span></div>
-    <div class="ord-actions">${cancelled ? "" : `<button class="ord-btn" data-parcel-print="${esc(p.id)}">🖨 Print</button>`}</div>
-  </div>`;
-}
+// billRecordCardHtml and parcelRecordCardHtml lived here and were DELETED on 2026-09-03
+// (sweep #8 T6 round 2): both were declared and called from nowhere in the repo.
+//
+// They were the OLD Previous-bills design — one full receipt card per settled bill, in a grid. The
+// owner replaced that on 2026-08-22 with the layout he chose himself: a slim line per bill on the
+// left and one receipt beside it (billLineHtml + billReceiptHtml, both a few hundred lines up).
+// "A new way replaces the old one" — the old pair should have gone with it. They still carried real
+// rules in their comments (a cancelled bill must not show priced lines against a zero total, the
+// parcel badge), and both of those rules live on in the pair that IS rendered.
 // The orders a bill modal can open from = the locally-cached board PLUS any server-side
 // history search results (bills OLDER than the local 200-row window), deduped by id.
 // Without the union, tapping a bill you FOUND by searching did nothing — openBillModal
@@ -7526,22 +7374,13 @@ function bindEditor() {
       for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, []);
     }; }
 
-  // ---- Access section: per-user permission selects (owner, 2026-07-03) ----
-  // Each change saves IMMEDIATELY via /api/owner/staff set_permissions ("" = back to
-  // Default → the server deletes the key). staffCall reloads nothing itself, so we
-  // patch the local row and re-render for instant feedback.
-  ed.querySelectorAll("[data-perm-user]").forEach((sel) => (sel.onchange = async () => {
-    const id = sel.dataset.permUser, key = sel.dataset.permKey;
-    const value = sel.value === "" ? null : sel.value;
-    try {
-      const d = await staffCall({ method: "PATCH", body: JSON.stringify({ id, action: "set_permissions", permissions: { [key]: value } }) });
-      const u = state.staffTeam.find((x) => x.id === id);
-      if (u) u.permissions = d.permissions || {};
-      const cap = ACCESS_CAPS.find((c) => c.key === key);
-      toast(`${u ? (u.name || u.username) : "User"} — ${cap ? cap.label : key}: ${value ? ACCESS_MODE_LABEL[value] : "Default"}`, "ok");
-      renderEditor(); // refresh the "· custom" marker + Default(...) labels
-    } catch (e) { toast("Failed: " + e.message, "err"); renderEditor(); }
-  }));
+  // THE PER-USER PERMISSIONS HANDLER WENT WITH ITS SCREEN (sweep #8 T6 round 2, 2026-09-03).
+  // It wired the `[data-perm-user]` dropdowns, and the only thing that ever wrote one was
+  // accessUsersCardHtml — deleted in this same pass, because nothing had called it since the
+  // 2026-07-31 access rebuild moved every permission to the admin console. A handler waiting for an
+  // element no screen builds is the other half of the same dead feature, and leaving it would have
+  // left a live-looking write (staffCall set_permissions) that no tap could reach.
+  // Per-person powers are set in /aevinite; the server enforces them either way.
   // The table picker only makes sense for a WAITER, so it follows the role dropdown.
   const nwSync = () => {
     const box = $("#usrNewTables");
@@ -7964,7 +7803,9 @@ function previewSampleKOT() {
 // membersOf / itemsOf: pull just the members (or ordered items) that belong to a
 // given session id, out of the whole board we loaded.
 const membersOf = (sid) => (state.board.members || []).filter((m) => m.session_id === sid);
-const itemsOf = (sid) => (state.board.items || []).filter((i) => i.session_id === sid);
+// itemsOf lived here and was DELETED on 2026-09-03 (sweep #8 T6 round 2): declared, called nowhere.
+// membersOf beside it is used; this twin was written for a board that reads its items per session,
+// and every screen that needs them now filters state.board.items where it stands.
 // timeAgo: turn a timestamp into friendly text like "just now" / "5m ago" / "2h ago".
 function timeAgo(ts) {
   if (!ts) return "";
