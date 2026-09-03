@@ -3638,9 +3638,29 @@ function ordersPreviousHtml(today, previous) {
  *  (No backticks in a block comment in this file: the panel's stylesheet is injected through a
  *  template literal, so one would END it and take the panel down. verify:ui guards that.) */
 function billsCapped() {
+  // IT MUST COUNT THE FIELD THE READ ACTUALLY RETURNS (sweep #8 T6, 2026-09-03).
+  // This asked `state.billsRec.today` and `.previous`, and the bills read has never carried either:
+  // loadBillsRecord stores { rows, parcels, reach, at } (the route answers { rows, parcels, reach }).
+  // Both were therefore always undefined, the sum was always 0, and this function always answered
+  // "no". Measured on the real panel: a window forced to a full 500 rows still returned false.
+  //
+  // WHAT THAT COST. This is the ONE thing that decides whether a search asks the server for help
+  // (its only caller is the Previous-bills search box), so the whole `type=any` branch written for
+  // exactly this case in app/api/editor/[...path]/route.ts was unreachable. On a day past the
+  // route's 500-row cap, a manager searching for a bill that had aged out of the window was told
+  // "Nothing matches" and the server was never asked; the sentence explaining how far the record
+  // reaches could not appear either.
+  //
+  // `rows` is the dine-in window and `parcels` rides in the same read under the same bound, so a
+  // day whose two together fill it is a day memory may not hold whole.
   const r = state.billsRec || {};
-  return (Array.isArray(r.today) ? r.today.length : 0) + (Array.isArray(r.previous) ? r.previous.length : 0) >= 500;
+  const rows = Array.isArray(r.rows) ? r.rows.length : 0;
+  const parcels = Array.isArray(r.parcels) ? r.parcels.length : 0;
+  return rows + parcels >= BILLS_WINDOW_CAP;
 }
+// The route's own bound on the bills window (`.limit(billsMode ? 500 : 200)`). Named here so the
+// number has one home and the comparison above reads as what it is.
+const BILLS_WINDOW_CAP = 500;
 
 // ════════════════════════════════════════════════════════════════════════════════════════════
 // ONE LINE PER BILL — the left column of the owner's chosen design (2026-08-22).
