@@ -1133,7 +1133,13 @@
         const amount = Number($("#epAmt", pop).value);
         if (!category) return toastMsg("Pick a category");
         if (!title) return toastMsg("Say what it was");
-        if (!Number.isFinite(amount) || amount < 0) return toastMsg("Enter the amount");
+        // A BLANK AMOUNT IS NOT ₹0 (sweep #8 T7). `Number("")` is 0, and 0 is both finite and
+        // not negative — so leaving the amount box empty passed this gate, posted an expense of
+        // ₹0 and answered "Expense recorded". The manager saw a success, the owner's monthly
+        // total gained a meaningless row, and the real figure was never captured. Every other
+        // quantity box in this file already asks the same question the right way round
+        // (`if (!(qty > 0))` in the waste and batch popups); this one now matches them.
+        if (!(amount > 0)) return toastMsg("Enter the amount");
         try {
           await inv("POST", "/expenses", { category, title, amount, expense_date: $("#epDate", pop).value, note: $("#epNote", pop).value.trim() || null }, $("#epPhoto", pop).files[0] || null);
           toastMsg("Expense recorded");
