@@ -1692,9 +1692,9 @@ function openDishEditModal(itemId) {
   const labelFor = (slug) => { const a = ALLERGENS.find((x) => x.slug === slug); return a ? a.label : "🚫 " + slug; };
   const owTag = (slug) => orderWide.has(slug) ? ` <sup class="alg-ow" title="Set for the whole order — removing it affects every dish">all</sup>` : "";
   const chipsHtml = () => {
-    const std = ALLERGENS.map((a) => `<span class="chip talg ${working.has(a.slug) ? "on" : ""}" data-slug="${esc(a.slug)}"${orderWide.has(a.slug) ? ' data-orderwide="1"' : ""}>${esc(a.label)}${owTag(a.slug)}</span>`).join("");
+    const std = ALLERGENS.map((a) => `<span class="chip talg ${working.has(a.slug) ? "on" : ""}" data-slug="${esc(a.slug)}">${esc(a.label)}${owTag(a.slug)}</span>`).join("");
     // Custom allergens are their own chips — tap one to REMOVE it (same as a standard chip).
-    const cust = [...working].filter((s) => !STD.includes(s)).map((s) => `<span class="chip talg on" data-slug="${esc(s)}"${orderWide.has(s) ? ' data-orderwide="1"' : ""}>${esc(labelFor(s))}${owTag(s)}</span>`).join("");
+    const cust = [...working].filter((s) => !STD.includes(s)).map((s) => `<span class="chip talg on" data-slug="${esc(s)}">${esc(labelFor(s))}${owTag(s)}</span>`).join("");
     // ＋ Other instead of a text box always sitting there (owner, 2026-08-04: "I don't want
     // an allergy box, I want an Other option in the listed allergies").
     return std + cust + `<span class="chip talg alg-other" data-alg-other="1" title="Type an allergy that isn't listed">＋ Other</span>`;
@@ -1964,7 +1964,7 @@ function renderPanel() {
       : r.status === "served"
         ? `<span class="iedit"><button class="qbtn" data-edit-dish="${esc(r.id)}" title="Edit or send this dish back to the kitchen">✎ Edit</button></span>`
       : r.status !== "ready"
-        ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" data-qty="${r.qty}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" data-qty="${r.qty}" title="More">＋</button><button class="qbtn" data-edit-dish="${esc(r.id)}" title="Edit allergens & note for this dish">✎ Edit</button></span>`
+        ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" title="More">＋</button><button class="qbtn" data-edit-dish="${esc(r.id)}" title="Edit allergens & note for this dish">✎ Edit</button></span>`
       : "";
     // The trailing status/serve/edit/delete cluster is ONE .iacts container so narrow
     // phones can wrap it to its own right-aligned second row (the name + price keep the
@@ -3768,9 +3768,6 @@ function openPaymentMethodModal(due, label, opts = {}) {
           ${opts.khata ? `<button type="button" class="pay-method-btn" data-special="khata" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #0ea5e9;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">📒</span>Pay Later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none;margin-top:12px">
-          <div class="pay-other-pick" style="display:flex;flex-direction:column;gap:8px">
-            <button type="button" class="btn pay-other-choice" data-oc="write" style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 14px;border-radius:12px;line-height:1.35"><b style="font-size:14px">✎ Another way to pay</b><small style="font-size:11.5px;color:var(--muted);font-weight:400">Wallet, bank transfer, cheque — type what it was</small></button>
-          </div>
           <div class="pay-other-write" style="display:none">
             <div style="font-size:13px;font-weight:700;margin:0 0 8px">What kind?</div>
             <input type="text" class="pay-other-input" maxlength="60" placeholder="e.g. wallet, bank transfer" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;margin-bottom:10px">
@@ -3898,7 +3895,6 @@ function openPaymentMethodModal(due, label, opts = {}) {
         // Straight to the box. This used to open a chooser of two — "type another way" or
         // "split the payment" — and Split is its own button now, so the chooser held one option.
         ov.querySelector(".pay-other-field").style.display = "";
-        ov.querySelector(".pay-other-pick").style.display = "none";
         ov.querySelector(".pay-other-write").style.display = "";
         ov.querySelector(".pay-other-input").focus();
         return;

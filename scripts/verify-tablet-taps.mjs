@@ -1388,6 +1388,54 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   }
 }
 
+
+// ── A CONTROL THE PANEL WRITES MUST BE A CONTROL SOMETHING READS (sweep #8 T10 round 2) ─────────
+//
+// Round 2 was planned by measuring what nothing had ever named, and it found THREE dead controls in
+// this panel — all the same shape, all left behind when the thing that read them was replaced:
+//
+//   · `data-qty` on the two quantity steppers. bumpItemQty was rewritten in July to read the LIVE
+//     quantity from state — its own comment says "never the button's data-qty attribute", because
+//     the stale attribute lost one of two fast taps — and the attribute stayed on the buttons.
+//   · `data-orderwide="1"` on the allergy chips: a THIRD copy of a fact the `<sup class="alg-ow">`
+//     shows and the handler checks with `orderWide.has()`. Nothing read it and nothing styled it.
+//   · `.pay-other-pick` and its one `data-oc="write"` button — a whole step of the payment sheet
+//     that was collapsed into one, still rendered into the DOM on every settle and permanently
+//     hidden by the flow that replaced it. Removing it then left a LIVE line reaching for it
+//     (`querySelector(".pay-other-pick").style.display`), which would have thrown on the first tap
+//     of "Other". That half was found by driving it, not by reading it.
+//
+// A reader can be a value selector or a stylesheet — `closest(".tacc[data-quick='accept']")` is how
+// the tile quick-actions are read — so both count here. The first version of this check did not know
+// that and called four live attributes dead, which is how a guard starts crying wolf.
+{
+  const written = [...new Set([...src.matchAll(/\sdata-([a-z][a-z0-9-]*)=/g)].map((m) => m[1]))].sort();
+  const camel = (k) => k.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  const cssTxt = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  const dead = written.filter((k) => !new RegExp(`\\[data-${k}[\\]=~|^$*]|dataset\\.${camel(k)}\\b|getAttribute\\("data-${k}"\\)`).test(src + cssTxt));
+  check(
+    "tablet: every data- attribute the panel writes is one something READS",
+    dead.length === 0 && written.length >= 20,
+    `${TABLET} writes data-${dead.join(", data-")} and nothing reads them — the control renders, it\n    ` +
+    `looks live, and the tap goes nowhere. Either wire it, or take it off: a leftover attribute is how\n    ` +
+    `a later session reaches for the stale value the last fix stopped reading.`,
+  );
+  // …and the other direction: a selector that reaches for markup this panel never builds throws the
+  // moment its line runs. That is the half that only showed up when the picker was driven.
+  const selectors = [...new Set([...src.matchAll(/querySelector(?:All)?\("\.([a-z][a-z0-9-]*)"/g)].map((m) => m[1]))];
+  const htmlTxt = (() => { try { return fs.readFileSync(path.join(ROOT, HTML), "utf8"); } catch { return ""; } })();
+  const built = (c) => new RegExp(`class="[^"]*\\b${c}\\b|className = "[^"]*\\b${c}\\b|classList\\.add\\("${c}"`).test(src)
+    || new RegExp(`\\bclass="[^"]*\\b${c}\\b`).test(htmlTxt);
+  const missing = selectors.filter((c) => !built(c));
+  check(
+    "tablet: every class the panel reaches for is one it (or the page) really builds",
+    missing.length === 0,
+    `${TABLET} calls querySelector(".${missing.join('"), querySelector(".')}") and nothing builds that\n    ` +
+    `markup. The line throws the moment it runs — which is exactly what removing the collapsed\n    ` +
+    `"Other" payment step nearly shipped, because the line that HID the step outlived it.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
