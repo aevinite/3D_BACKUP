@@ -2725,6 +2725,9 @@ function renderKotMenu(t, s) {
   // popup right behind the menu, with its ₹ due on the tile. Same filter as renderSplitBill,
   // deliberately duplicated rather than approximated, so the row and the screen it opens agree.
   const splittable = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received");
+  // …and REPRINTING includes a paid one: a guest can ask for the kitchen ticket again after the
+  // bill is settled, and nothing about a reprint touches money. Same filter as the picker.
+  const reprintable = ordersOf(t).filter((o) => o.status !== "cancelled");
   const row = (id, icon, label, sub, on) => `<button class="kotm-row" data-kotop="${id}" ${on ? "" : "disabled"}>
     <span class="kotm-ico">${icon}</span><span class="kotm-txt"><b>${label}</b><small>${sub}</small></span><span class="kotm-chev">›</span></button>`;
   let occupiedOthers = 0;
@@ -2749,7 +2752,12 @@ function renderKotMenu(t, s) {
     // waiter and the manager must not be offered a different set of operations for one table.
     (splitBillOn()
       ? row("split", "🍴", "Split the bill", "Equal, a custom amount, by dish or by kitchen ticket — each part pays its own way", tshow("tablet_mark_paid") && splittable.length > 0)
-      : "");
+      : "") +
+    // 🖨 LAST, matching the manager's own list — the waiter and the manager must not be offered a
+    // different set of operations for one table (owner's item 15, 2026-09-03). Enabled only when
+    // there is a ticket to print: `reprintable` is the same filter renderReprintKotPicker uses, so
+    // the row can never be enabled onto an empty picker.
+    row("reprint", "🖨", "Print / reprint a KOT", "In the kitchen, marked DUPLICATE — or here on this device", reprintable.length > 0);
   const { dropLayer } = renderPickerShell(`T${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
   document.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
     dropLayer(); // drop this step's back layer before advancing (same rule as move-order's step 1)
@@ -2758,6 +2766,7 @@ function renderKotMenu(t, s) {
     if (b.dataset.kotop === "movekot") renderMoveOrderPicker(t);
     if (b.dataset.kotop === "moveitem") renderMoveItemPicker(t);
     if (b.dataset.kotop === "split") renderSplitBill(t);
+    if (b.dataset.kotop === "reprint") renderReprintKotPicker(t);
   }));
 }
 
@@ -3330,6 +3339,111 @@ function renderShiftPicker(t, s) {
       () => api("POST", `/sessions/${s.id}/shift`, { to }),
     );
   }));
+}
+
+// ── 🖨 PRINT / REPRINT A KITCHEN TICKET, FROM THE WAITER'S HANDHELD (owner's item 15, 2026-09-03) ─
+//
+// The waiter tablet could do everything with a ticket except ask for it again. Reprinting a KOT
+// lived only on the manager panel, so a waiter standing at the pass with a ticket the printer ate
+// had to walk to the till — on the device that is always in the room where the problem is. Put to
+// the owner with the two things I would NOT move (a credit note, and restoring a bill settled more
+// than 30 minutes ago — both a manager's by his own rule) and he picked it.
+//
+// The SAME two destinations the manager offers, in the same words, because one action must not mean
+// two things depending on which screen asked:
+//   · "in the kitchen" — the real answer on a handheld. It becomes a durable job (mig 269) the
+//     kitchen screen claims and prints with the big DUPLICATE banner, and if the kitchen never
+//     picks it up the manager's floor strip says so. Nothing prints on the waiter's own device,
+//     which usually has no printer at all.
+//   · "here, on this device" — the fallback, for a tablet that IS plugged into something. Through
+//     a hidden iframe rather than a pop-up window, exactly like the manager's, so there is no
+//     pop-up to allow and nothing left on screen.
+//
+// The DOCUMENT is not written here. LFH_BILLDOC.kotDocHtml is the one kitchen ticket in this
+// product ("One bill, one KOT, ONE file"), and it is handed `lines` rather than ready-made markup
+// so it applies its own shared-note rule — the manager's call pre-renders and misses that. Its
+// `reprint: true` flag is what brands the paper DUPLICATE; the wording lives in billdoc so every
+// panel's reprint looks identical.
+function printTicketHere(html) {
+  // A hidden iframe, and it is removed only AFTER the browser says it finished — the manager's own
+  // comment explains why a blind timer is wrong: it deletes the frame while the print preview is
+  // still open and Chrome logs a dead-callback error.
+  try {
+    const ifr = document.createElement("iframe");
+    ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    document.body.appendChild(ifr);
+    const d = ifr.contentWindow.document; d.open(); d.write(html); d.close();
+    setTimeout(() => {
+      const w = ifr.contentWindow;
+      let done = false;
+      const cleanup = () => { if (done) return; done = true; try { ifr.remove(); } catch (e) {} };
+      try { w.onafterprint = cleanup; } catch (e) {}
+      try { w.focus(); w.print(); } catch (e) { cleanup(); return; }
+      setTimeout(cleanup, 60000);   // a preview somebody walked away from
+    }, 60);
+    return true;
+  } catch (e) { return false; }
+}
+function kotTicketFor(o) {
+  return LFH_BILLDOC.kotDocHtml({
+    title: `KOT ${o.kot_no != null ? o.kot_no : "—"}`,
+    rname: (state.data.restaurant || {}).name || "Kitchen",
+    head: "KITCHEN TICKET",
+    kot: o.kot_no != null ? o.kot_no : "—",
+    tableLabel: tname(o.table_number) || ("T" + String(o.table_number ?? "?")),
+    when: LFH_BILLDOC.kotWhen(o.created_at),
+    lines: dishRowsOf(o),
+    allergies: Array.isArray(o.allergies) ? o.allergies : [],
+    // THE BIG DUPLICATE BANNER, not just a word in the header. This is a reprint whichever
+    // destination was chosen, and "here" is the fallback used exactly when the kitchen printer may
+    // already have produced it once.
+    reprint: true,
+  });
+}
+async function sendKotToKitchen(o) {
+  try {
+    const r = await api("POST", "/print-jobs", { order_id: o.id });
+    if (isQueued(r)) { toast(savedMsg(r)); return; }
+    toast(`KOT #${o.kot_no ?? "—"} sent to the kitchen printer — it comes out marked DUPLICATE.`);
+  } catch (e) { toast("Couldn't send it to the kitchen: " + errText(e), false); }
+}
+function renderReprintKotPicker(t) {
+  // The table's OWN tickets — a ticket belongs to the table it was rung at, the same rule the
+  // move-a-KOT picker follows. A cancelled one is excluded: the server refuses it too, and a button
+  // whose only outcome is a refusal is the thing this panel's guard exists to stop.
+  const os = ordersOf(t).filter((o) => o.status !== "cancelled");
+  const list = os.map((o, i) => {
+    const nd = dishRowsOf(o).reduce((n, r) => n + (parseInt(r.qty, 10) || 1), 0);
+    return `<button class="btn" style="text-align:left" data-pickprint="${esc(o.id)}">#${esc(o.kot_no ?? "—")} · Order ${i + 1} · ${nd} dish${nd === 1 ? "" : "es"}</button>`;
+  }).join("");
+  const body = `<div class="muted small" style="margin-bottom:10px">Which kitchen ticket?</div><div class="pactions">${list || `<div class="muted">No kitchen tickets on this table yet.</div>`}</div>`;
+  const { dropLayer } = renderPickerShell("Print a KOT", body, "tablet-reprint-picker", renderPanel);
+  document.querySelectorAll("[data-pickprint]").forEach((b) => (b.onclick = () => {
+    const o = os.find((x) => x.id === b.dataset.pickprint);
+    dropLayer();
+    if (o) renderReprintWhere(t, o);
+  }));
+}
+function renderReprintWhere(t, o) {
+  const body = `<div class="muted small" style="margin-bottom:10px">KOT #${esc(o.kot_no ?? "—")} — print it where?</div><div class="pactions">
+      <button class="btn" style="text-align:left" data-printkitchen>👨‍🍳 <b>Reprint in the kitchen</b><br><small class="muted">Comes out of the kitchen's printer, marked DUPLICATE</small></button>
+      <button class="btn" style="text-align:left" data-printhere>🖨 <b>Print here</b><br><small class="muted">On this device, if it has a printer</small></button>
+    </div>`;
+  const { dropLayer } = renderPickerShell("Print it where?", body, "tablet-reprint-where", () => renderReprintKotPicker(t));
+  document.querySelector("[data-printkitchen]").onclick = () => { dropLayer(); sendKotToKitchen(o); };
+  document.querySelector("[data-printhere]").onclick = () => {
+    dropLayer();
+    // NEVER A SILENT TAP. billdoc missing after a bad deploy, or a blocked iframe, both end here —
+    // and the kitchen is still one tap away, so the message says so instead of just failing.
+    if (typeof LFH_BILLDOC === "undefined" || !LFH_BILLDOC.kotDocHtml) { toast("Can't print just now — reload the panel, or send it to the kitchen instead.", false); return; }
+    // The result is read ONCE into a variable. Writing `printTicketHere ? …` for the second argument
+    // asks whether the FUNCTION exists, which it always does — so a print that failed would have
+    // been announced in green. Caught on review before this shipped.
+    const started = printTicketHere(kotTicketFor(o));
+    toast(started
+      ? `KOT #${o.kot_no ?? "—"} sent to print`
+      : "This device couldn't start a print — send it to the kitchen instead.", started);
+  };
 }
 
 // Move a SINGLE order to another table's bill. Two taps: pick the order, pick the

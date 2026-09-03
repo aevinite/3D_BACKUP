@@ -904,6 +904,66 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back` });
     }
 
+    // ── print-jobs — send a kitchen ticket to the KITCHEN'S printer again (owner's item 15, 2026-09-03)
+    //
+    // WHY IT IS HERE. The waiter tablet could do everything with a ticket except ask for it again.
+    // Reprinting a KOT lived only on the manager panel, so a waiter standing at the pass with a
+    // ticket the printer ate had to walk to the till — on the one device that is always in the room
+    // where the problem is. Put to the owner as item 15 with the two things I would NOT move
+    // (issuing a credit note, restoring a bill settled over 30 minutes ago — both a manager's by his
+    // own rule), and he picked it: *"can do 11,12,13,14,15"*.
+    //
+    // A BYTE-FOR-BYTE TWIN of the editor's own print-jobs branch, on purpose, down to its refusals:
+    // the same ownership read, the same "cancelled" guard and the same TOMBSTONE guard (T7 finding
+    // F11 — a soft-deleted order never leaves the table, so `.filter(j => j.order)` on the kitchen
+    // side cannot catch it and both halves have to be asked here), the same `reprint: true` so the
+    // ticket comes out branded DUPLICATE, and the same action code in the log so one question —
+    // "who asked the kitchen to print that again?" — has one answer whichever panel asked.
+    //
+    // GATED LIKE THE REST OF THE KOT ▾ MENU it is drawn in: the module rung
+    // (tableOpsTabletAllowed) AND the tri-state (tabletPerm off/pin/on), with the admin act-as
+    // bypass. That is deliberate rather than ungated — every other row in that menu answers to the
+    // same switch, so an admin who turns Table & KOT operations off for a restaurant turns this off
+    // too, and hiding the row is never the only guard. It is NOT gated on tablet_invoice: a kitchen
+    // ticket is not a bill and not an invoice (WAITER_NEVER is about the invoice).
+    //
+    // NOTHING PRINTS ON THE WAITER'S DEVICE from here. It becomes a durable job (mig 269) the
+    // kitchen screen claims, exactly as the manager's does — so a waiter's tablet, which usually
+    // has no printer at all, is asking the kitchen rather than pretending to print.
+    if (a === "print-jobs" && path.length === 1) {
+      if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      { const gpj = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gpj.allow) return gpj.resp; }
+      const rpOrderId = String((body as Record<string, unknown>)?.order_id || "");
+      if (!rpOrderId) return err("Missing order id — refresh and try again.");
+      const rpo = must(await sb.from("orders").select("id, status, kot_no, table_number, deleted_at").eq("id", rpOrderId).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; status: string; kot_no: number | null; table_number: unknown; deleted_at: string | null } | null;
+      if (!rpo) return err("That KOT isn't on this restaurant's board any more.", 404);
+      if (rpo.status === "cancelled") return err("That KOT was cancelled — there is nothing to reprint.");
+      if (rpo.deleted_at) return err("That KOT was deleted — it can't be sent to the kitchen.");
+      // WAITER SECTIONS (mig 222) — asked here for the same reason print/send asks it itself:
+      // lib/tableOfAction does not recognise ("print-jobs", …) and its rule for an unrecognised verb
+      // is refuse, which would block a sectioned waiter from reprinting their OWN table's ticket.
+      {
+        const pjLimit = await waiterTables(actor, rid);
+        if (pjLimit !== null && !allows(pjLimit, rpo.table_number)) {
+          return err(notYoursMessage(String(rpo.table_number ?? "")), 403);
+        }
+      }
+      must(await sb.from("print_jobs").insert({
+        restaurant_id: rid, kind: "kot", order_id: rpOrderId, reprint: true,
+        requested_by: actor?.name || actor?.username || "Aevidine admin",
+      }));
+      await log("kot_reprint_sent", { order_id: rpOrderId, table_number: rpo.table_number != null ? String(rpo.table_number) : null, detail: `KOT #${rpo.kot_no ?? "—"}`, device_id: dev });
+      return ok({ ok: true, kot_no: rpo.kot_no ?? null });
+    }
+
+    // ⚠️ IT SITS ABOVE THE SECTION GATE FOR THE SAME REASON print/send DOES, and it was BELOW it for
+    // an hour before this was driven (2026-09-03). lib/tableOfAction.affectedTables does not
+    // recognise ("print-jobs", …), and its rule for an unrecognised verb is `unknown: true` ⇒
+    // refuse — so a sectioned waiter was told "That table isn't in your section" about their OWN
+    // table 6. The branch already asks the section question itself, against the table the ticket
+    // really belongs to, so it belongs on this side of the shared gate. Found by driving it, not by
+    // reading it: the code looked right and the answer was a 403.
     // ── WAITER SECTIONS (mig 222) — ONE gate for every table-scoped write ──────
     // Deliberately checked HERE, once, instead of inside each of the ~38 action branches
     // below. Two reasons: a branch is easy to forget (and a forgotten one is a silent

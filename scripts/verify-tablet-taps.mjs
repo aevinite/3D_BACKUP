@@ -1351,6 +1351,43 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
 }
 
 
+// ── A VERB lib/tableOfAction DOES NOT KNOW MUST ASK THE SECTION QUESTION ITSELF, ABOVE THE SHARED
+//    GATE (sweep #8 T10, 2026-09-03) ────────────────────────────────────────────────────────────
+//
+// The tablet route asks the waiter-section question ONCE, for every table-scoped write, from the
+// [a, b, c] segments the dispatcher already has — and lib/tableOfAction's rule for a verb it does
+// not recognise is `unknown: true` ⇒ refuse. That default is right ("a new table-scoped endpoint is
+// protected on the day it is added") and it is wrong for a verb whose table it simply cannot see:
+// `print/send` documents exactly this and sits ABOVE the shared gate with its own check.
+//
+// `print-jobs` (the owner's item 15) is the second such verb, and it spent an hour BELOW the gate:
+// a sectioned waiter asking the kitchen to reprint their OWN table 6's ticket was answered "That
+// table isn't in your section". The code read correctly; only driving it found the 403. So the fact
+// gets a check rather than a comment.
+{
+  const routeRel = "app/api/tablet/[...path]/route.ts";
+  const route = (() => { try { return fs.readFileSync(path.join(ROOT, routeRel), "utf8"); } catch { return ""; } })();
+  const gateAt = route.indexOf("const sectionLimit = await waiterTables(actor, rid)");
+  const toa = (() => { try { return fs.readFileSync(path.join(ROOT, "lib/tableOfAction.ts"), "utf8"); } catch { return ""; } })();
+  for (const [verb, needle] of [["print/send", 'a === "print" && b === "send"'], ["print-jobs", 'a === "print-jobs" && path.length === 1']]) {
+    const at = route.indexOf(needle);
+    const known = new RegExp(`a === "${verb.split("/")[0].replace("-", "\\-")}"`).test(toa);
+    const body = at < 0 ? "" : route.slice(at, at + 3000);
+    check(
+      `tablet route: ${verb} — a verb lib/tableOfAction cannot resolve sits ABOVE the shared section gate`,
+      at >= 0 && gateAt >= 0 && at < gateAt,
+      `${routeRel}: the ${verb} branch is at ${at} and the shared waiter-section gate is at ${gateAt}.\n    ` +
+      `lib/tableOfAction does not recognise this verb (${known ? "it does now — then move the branch back down" : "confirmed: no rule for it"}),\n    ` +
+      `so the shared gate answers "unknown ⇒ refuse" and a sectioned waiter is told their OWN table is\n    not theirs. Keep the branch above the gate, with its own section check.`,
+    );
+    check(
+      `tablet route: ${verb} — …and it really does ask the section question itself`,
+      /waiterTables\(actor, rid\)/.test(body) && /notYoursMessage\(/.test(body),
+      `${routeRel}: sitting above the shared gate means this branch OWES the section check. Without\n    it, moving the branch up quietly removed the protection instead of fixing the refusal.`,
+    );
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
