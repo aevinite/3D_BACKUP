@@ -30,10 +30,23 @@
  *    owns on the Access screen — so the feature is admin-controlled through a switch that already
  *    exists, rather than growing a second toggle for the same decision.
  *
- * 3. IT NEVER WRITES ANYTHING. Accepting an order, approving a guest and answering a call all have
- *    one home each already. A second set of buttons here would be a second write path to keep in
- *    step with the first — the twin-panel drift this codebase has been bitten by repeatedly. A row
- *    is a doorway, not a duplicate control.
+ * 3. A ROW IS A DOORWAY, NOT A DUPLICATE CONTROL — with ONE named exception, granted by the owner.
+ *    Accepting an order, approving a guest and answering a call all have one home each already,
+ *    and a second set of buttons here would be a second write path to keep in step with the first
+ *    — the twin-panel drift this codebase has been bitten by repeatedly. So a row still just
+ *    takes you to the table.
+ *
+ *    THE EXCEPTION (owner, 2026-09-03): "for 16th we can do in notification we can keep that
+ *    option". A STUCK PRINT JOB has no table to be taken to, and the one useful answer — print it
+ *    on this device instead — used to live on a band above the floor that he removed on
+ *    2026-08-31. He asked for that one option to live here instead. So a row may carry ONE
+ *    `action`, and the panel that supplies it owns what it does:
+ *
+ *        { kind: "printer", key, title, text, at, action: { label: "Print it here", run: fn } }
+ *
+ *    It is one action, not a set; it is opt-in per row; and it is still the panel's own function,
+ *    not a second copy of one. Do not grow this into buttons on the call / order / join rows —
+ *    those have a home and this is not it.
  *
  * HOW A PANEL WIRES IT UP — one call, at the bottom of its own render:
  *
@@ -44,7 +57,8 @@
  *   });
  *
  * 'kind' is one of "call" | "order" | "join" | "request" | "printer" — it picks the icon and the
- * wording. A "printer" row has no table and carries its whole sentence in `text`.
+ * wording. A "printer" row has no table and carries its whole sentence in `text`, and may carry
+ * one `action` (see 3 above).
  */
 (function () {
   var mounted = null;      // the <button> in the top bar, once there is something to mount it in
@@ -186,6 +200,14 @@
       ".lfh-bell-tx b{display:block;font-size:13.5px;font-weight:800}",
       ".lfh-bell-tx small{display:block;font-size:12px;opacity:.8;font-weight:500;margin-top:2px}",
       ".lfh-bell-when{font-size:11.5px;opacity:.6;font-weight:700;flex:0 0 auto}",
+      // The one action a row may carry. 44px tall — the same tappable floor the KOT picker refuses
+      // to shrink below (KOTP_MIN_PX) — and it borrows the row's own ink rather than shouting in a
+      // colour of its own: it is an offer, not a second alarm.
+      ".lfh-bell-act{flex:0 0 auto;min-height:44px;padding:7px 12px;border-radius:9px;",
+      "  border:1px solid currentColor;background:transparent;color:inherit;font:inherit;",
+      "  font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap}",
+      ".lfh-bell-act:hover:not(:disabled){background:rgba(127,127,127,.18)}",
+      ".lfh-bell-act:disabled{opacity:.55;cursor:default}",
       ".lfh-bell-empty{margin-top:14px;padding:16px;border-radius:12px;text-align:center;",
       "  background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.32);color:#16a34a;font-weight:800}",
     ].join("\n");
@@ -261,6 +283,26 @@
       if (r.title && r.text) tx.appendChild(el("small", null, r.text));
       node.appendChild(tx);
       node.appendChild(el("span", "lfh-bell-when", r.at ? fmtAgo(r.at) : ""));
+      // THE ONE ACTION A ROW MAY CARRY (see rule 3 at the top of this file). A printer row has no
+      // table to open, so without this it is a dead-end button that says something is wrong and
+      // offers nothing — which is why the outer <button> is disabled below. When the panel hands
+      // one over, it renders as its own control INSIDE the row: the row itself stays inert, so a
+      // stray tap anywhere else on it cannot print anything by accident.
+      if (r.action && typeof r.action.run === "function") {
+        var act = el("button", "lfh-bell-act", String(r.action.label || "Do it"));
+        act.type = "button";
+        act.addEventListener("click", function (e) {
+          e.stopPropagation();                    // never let the row's own handler see this tap
+          act.disabled = true;                    // one tap is one action, even on a slow phone
+          act.textContent = "…";
+          try { r.action.run(); } catch (err) { act.disabled = false; act.textContent = String(r.action.label || "Do it"); }
+          closeSheet();
+        });
+        node.appendChild(act);
+        node.disabled = false;                    // the row hosts a live control now
+        node.style.cursor = "default";
+        return node;
+      }
       node.disabled = true;                       // it is a readout, not a place to tap through to
       return node;
     }
@@ -282,10 +324,18 @@
     body.innerHTML = "";
     var hd = el("div", "lfh-bell-hd");
     var wrap = el("div"); wrap.style.flex = "1";
-    wrap.appendChild(el("h3", null, "From the guest menu"));
-    wrap.appendChild(el("p", null, last.rows.length
-      ? "Tap one to go to that table."
-      : "Nothing is waiting from the tables right now."));
+    // THE HEADING HAS TO BE TRUE OF WHAT IS IN THE LIST (sweep #8 T7, read off a screenshot).
+    // It said "From the guest menu" and "Tap one to go to that table" — written when every row WAS
+    // a guest asking for something. It is not any more: printer trouble goes here (owner,
+    // 2026-08-30, when the bands came off the floor) and a stuck bill or a stuck kitchen slip comes
+    // from the printer, not from a guest, and has no table to be taken to. A heading that describes
+    // two of the five rows is the kind of small lie that teaches people not to read headings.
+    var anyTable = last.rows.some(function (r) { return r && r.table != null; });
+    wrap.appendChild(el("h3", null, "Needs you"));
+    wrap.appendChild(el("p", null, !last.rows.length
+      ? "Nothing needs you right now."
+      : anyTable ? "Tap a row with a table on it to go there."
+      : "Nothing from the tables — these are things to look at."));
     hd.appendChild(wrap);
     var x = el("button", "lfh-bell-x", "✕"); x.type = "button";
     x.addEventListener("click", closeSheet);

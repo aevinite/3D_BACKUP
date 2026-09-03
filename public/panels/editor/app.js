@@ -6778,18 +6778,28 @@ function syncGuestBell() {
     // Someone waiting to be let in to a table, and anything else a table asked for.
     for (const j of (state.summary.joiners || [])) rows.push({ kind: "join", table: j.table_number, text: j.name || "", at: at(j.created_at) });
     for (const r of (state.summary.requests || [])) rows.push({ kind: "request", table: r.table_number, text: r.note || r.kind || "", at: at(r.created_at) });
-    // A NEW GUEST ORDER NOBODY HAS ACCEPTED YET. Read off the same tile state the floor draws
-    // from, so the bell can never disagree with the tile beside it.
+    // ── AN ORDER ONLY RINGS ONCE IT HAS BEEN WAITING (owner, 2026-09-03) ───────────────────────
+    // "order not accepted for more than 3 to 4 min only get you notification — it should not give
+    // notification just when order arrive; that will be in request queue, that's a whole separate
+    // queue for waiter call and all."
     //
-    // The summary carries no timestamp for this (mig 238 returns a STATE, not a time), so there is
-    // nothing honest to show as "when" — `key` is what tells the bell whether this is the same
-    // waiting order it has already been shown or another one on top of it. It folds in how many
-    // are waiting, so a second order at the same table counts as new again.
-    for (const t of Object.keys(state.summary.tiles || {})) {
-      const tile = (state.summary.tiles || {})[t];
-      if (!tile || !tile.hasNew) continue;
-      const n = Number((tile.counts || {}).nw) || 1;
-      rows.push({ kind: "order", table: t, text: n > 1 ? n + " waiting to be accepted" : "waiting to be accepted", at: 0, key: "order:" + t + ":" + n });
+    // This used to walk every tile and raise a row the MOMENT one carried an unaccepted order, so
+    // the bell rang for something that was about to be answered in ten seconds by the person
+    // standing at the till. A notification is for something that has gone wrong; an order arriving
+    // is the job. The floor already shows arrivals — the tile turns amber, wears a one-tap ✓ and is
+    // counted in "Needs you" — and that live queue is where an arrival belongs.
+    //
+    // The clock comes from the SERVER (`slowOrders`, three minutes, riding the shared floor read),
+    // because the summary reports an unaccepted order as a STATE with no time on it (mig 238) —
+    // which is exactly why this could not be done here before. A real timestamp also means the row
+    // keeps its true age across a reload instead of restarting whenever somebody refreshes.
+    const slow = state.summary.slowOrders || {};
+    const slowMin = Math.max(1, Math.round(Number(slow.afterMs || 180000) / 60000));
+    for (const o of (slow.rows || [])) {
+      if (!o || o.table_number == null) continue;
+      rows.push({ kind: "order", table: o.table_number, key: "order-slow:" + o.id,
+        text: `waiting to be accepted for over ${slowMin} minute${slowMin === 1 ? "" : "s"}${o.kot_no != null ? " · KOT #" + o.kot_no : ""}`,
+        at: at(o.created_at) });
     }
     // ── PRINTING (owner, 2026-08-30) ────────────────────────────────────────────────────────
     // Two strips used to sit across the top of the floor, above the table grid, on every manager
@@ -6800,11 +6810,26 @@ function syncGuestBell() {
     // A PROBLEM comes first and carries its own words; the STATUS line is only worth saying when
     // this screen is the one printing, or when a computer owns the paper and somebody wondering
     // where their slip went should be told it is not coming out here.
-    for (const e of ((state.summary.printer || {}).events || [])) {
-      if (!e || e.status === "resolved") continue;
-      rows.push({ kind: "printer", key: "printer-problem:" + e.id,
-        title: e.printer ? `${e.printer} needs looking at` : "A printer needs looking at",
-        text: e.note || e.kind || "", at: at(e.created_at) });
+    // ONE LIST, WORDED ONCE. printerAlerts() is what the toasts are already built from, so the bell
+    // reads the same list instead of wording the same problems a second time — two descriptions of
+    // one printer is how they drift. It also brings the stuck JOBS in, which the bell never showed
+    // before: a reported fault was a notification and a ticket that simply never came out was not.
+    // That now includes a stuck BILL (owner, 2026-09-03: "stuck bill will also give notification"),
+    // which the server read was widened for on the same day.
+    let alerts = [];
+    try { alerts = printerAlerts(); } catch (e) { alerts = []; }
+    for (const a of alerts) {
+      const row = { kind: "printer", key: "printer:" + a.key, title: a.text, text: "", at: at(a.at) };
+      // THE ONE ACTION A BELL ROW MAY CARRY (owner, 2026-09-03: "we can do in notification, we can
+      // keep that option"). Only on a stuck KITCHEN slip: that is the option he asked to keep, and
+      // it is the one this panel can honestly offer — printJobHere prints that exact ticket on this
+      // device with the DUPLICATE banner and closes the job. A stuck BILL gets the same
+      // notification and no button, because printing a bill from here is a different document and
+      // a different decision; it is named in the report rather than guessed at.
+      if (a.kind === "job" && a.jobKind !== "bill" && a.id) {
+        row.action = { label: "Print it here", run: () => printJobHere(a.id) };
+      }
+      rows.push(row);
     }
     const pt = printTargetSays;
     if (pt && pt.helper && pt.helper.owned) {
@@ -13602,11 +13627,24 @@ function printerAlerts() {
   // instead". So the manager still has a way to get that ticket onto paper.
   const pileUp = out.length > 0;
   const named = pileUp ? (pr.stuck || []).slice(0, 1) : (pr.stuck || []);
-  for (const j of named) out.push({
-    key: "job:" + j.id, id: j.id, kind: "job", icon: "🧾",
-    text: `${pileUp ? "The oldest of them" : "A reprint"} (KOT #${j.kot_no ?? "—"}${j.table_number != null ? " · " + tableLabel(j.table_number) : ""}) hasn't printed in the kitchen${j.status === "failed" ? ` — it failed ${j.attempts} times` : pileUp ? " — print it here if it is needed now" : " — is the kitchen screen open?"}`,
-    at: j.created_at,
-  });
+  for (const j of named) {
+    // A STUCK BILL IS NOT A STUCK KITCHEN TICKET, AND THE SENTENCE MUST NOT SAY IT IS (owner,
+    // 2026-09-03: "stuck bill will also give notification"). The server read was widened from
+    // kitchen slips only to slips AND bills, so `kind` now decides both the noun and where to go
+    // and look — a bill printer stands at the counter, not in the kitchen, and sending somebody to
+    // the wrong room is the same fault mig 351 fixed for the printer NAME.
+    const isBill = j.kind === "bill";
+    const what = isBill ? `A bill${j.table_number != null ? " for " + tableLabel(j.table_number) : ""}`
+      : `${pileUp ? "The oldest of them" : "A reprint"} (KOT #${j.kot_no ?? "—"}${j.table_number != null ? " · " + tableLabel(j.table_number) : ""})`;
+    const why = j.status === "failed" ? ` — it failed ${j.attempts} times`
+      : isBill ? " — the customer is probably standing at the counter waiting for it"
+      : pileUp ? " — print it here if it is needed now" : " — is the kitchen screen open?";
+    out.push({
+      key: "job:" + j.id, id: j.id, kind: "job", jobKind: isBill ? "bill" : "kot", icon: isBill ? "🧾" : "🧾",
+      text: `${what} hasn't printed${isBill ? "" : " in the kitchen"}${why}`,
+      at: j.created_at,
+    });
+  }
   return out;
 }
 // Toast NEW problems the moment a floor read carries them (realtime makes that near-instant);
@@ -13634,13 +13672,40 @@ function noticePrinterNews() {
   if (seenPrinterKeys) for (const a of list) if (!seenPrinterKeys.has(a.key)) toast(a.icon + " " + a.text, "err");
   seenPrinterKeys = keys;
 }
-// (printJobHere() lived here — "Print here instead", the honest fallback when the kitchen
-// printer could not take a stuck reprint. DELETED sweep #8 T7 with its only caller, the
-// [data-prhere] binding in bindFloor: the strip that rendered that button was removed on
-// 2026-08-31 and nothing has emitted the attribute since. A stuck ticket is still printable
-// by hand from 🧾 KOT ▾ → Print / reprint a KOT → Print KOT, which prints on this device
-// with the DUPLICATE banner and is the same document. If the shortcut is wanted again it
-// belongs on the 🔔 bell's printer row, not on a new band above the floor.)
+// "Print it here" — the honest fallback when the kitchen printer cannot take a stuck ticket:
+// fetch the job's order fresh (it may have left the live board long ago), print it on THIS device
+// with the DUPLICATE banner, and dismiss the kitchen job so it stops being offered there.
+//
+// ITS HOME IS THE 🔔 BELL, NOT A BAND ABOVE THE FLOOR (owner, 2026-09-03: "for 16th we can do in
+// notification we can keep that option"). This function was deleted earlier in this same sweep,
+// because the band that used to call it was removed on 2026-08-31 and nothing had called it since;
+// the obituary said in as many words that if the shortcut were ever wanted again it belonged on
+// the bell. He has now said it is. Same function, same document, one live caller — syncGuestBell
+// hands it to the row as that row's single `action`.
+async function printJobHere(id, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api("GET", `/print-jobs/${id}`);
+    const o = r.order || {};
+    const rows = (r.items && r.items.length) ? r.items : (Array.isArray(o.items) ? o.items : []);
+    printTicketHtml(kotTicketHtml({
+      title: `KOT ${o.kot_no ?? "—"}`,
+      rname: (state.data.restaurant || {}).name || "Kitchen",
+      head: "KITCHEN TICKET",
+      kot: o.kot_no ?? "—",
+      tableLabel: tablePrintLabel(o.table_number),
+      // Shared with the kitchen (LFH_BILLDOC.kotWhen): carries the DAY when the ticket is not
+      // from today, because a thermal head is black and white and cannot say it any other way.
+      when: LFH_BILLDOC.kotWhen(o.created_at),
+      lines: rows,
+      allergies: Array.isArray(o.allergies) ? o.allergies : [],
+      reprint: r.job ? r.job.reprint !== false : true,
+    }));
+    const _wq = await api("POST", `/print-jobs/${id}/dismiss`, {});
+    okToast(_wq, "Printed here ✓ — the kitchen job is closed.");
+    await pollOrders();
+  } catch (e) { if (btn) btn.disabled = false; toast("Couldn't print it here: " + e.message, "err"); }
+}
 
 // ── THIS SCREEN CAN BE THE PRINTER (owner, 2026-08-17) ──────────────────────────────────────────
 // "In the kitchen they can't keep a PC… if you minimize, or open another app on the same PC, the KOT
