@@ -6132,7 +6132,10 @@ function billPrintedBefore(sess, os) {
 // data-bill-print-btn is what lets the label flip the instant paper comes out, without a
 // re-render that would rebuild the card under the finger that just tapped it.
 function billPrintLabel(sess, os, suffix) {
-  return `<span data-bill-print-btn>🖨 ${billPrintedBefore(sess, os) ? "Reprint" : "Print"}${suffix ? " " + suffix : ""}</span>`;
+  // WHICH bill this label is about, so markBillPrintedLocally relabels this button and no other
+  // (see its note). Absent for a bill with no session yet, which is right: nothing can relabel it.
+  const _lblSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean) || "";
+  return `<span data-bill-print-btn${_lblSid ? ` data-bill-print-sid="${esc(_lblSid)}"` : ""}>🖨 ${billPrintedBefore(sess, os) ? "Reprint" : "Print"}${suffix ? " " + suffix : ""}</span>`;
 }
 // First print just happened → say so on the buttons already on screen, and on the rows this
 // panel is holding, so nothing waits for the next refresh to catch up.
@@ -6142,7 +6145,13 @@ function markBillPrintedLocally(sid) {
   const at = new Date().toISOString();
   (state.data.orders || []).forEach((o) => { if (o && o.session_id === sid && !o.bill_printed_at) o.bill_printed_at = at; });
   ((state.board && state.board.sessions) || []).forEach((s) => { if (s && s.id === sid && !s.bill_printed_at) s.bill_printed_at = at; });
-  document.querySelectorAll("[data-bill-print-btn]").forEach((b) => {
+  // ONLY THIS BILL'S BUTTON (sweep #8 T6, 2026-09-03). This relabelled EVERY print button on the
+  // page, and Bills -> Live draws one per running table: printing T5's bill turned T9's untouched
+  // "Print" into "Reprint" until the next repaint. "Reprint" is a claim about one specific bill
+  // ("paper for this one already exists"), so saying it over a bill nobody has printed is simply
+  // false -- and it is the button a manager reads to decide whether the guest already has a copy.
+  // The buttons carry the session they belong to now, so the relabel can find its own.
+  document.querySelectorAll(`[data-bill-print-btn][data-bill-print-sid="${CSS.escape(sid)}"]`).forEach((b) => {
     // \b before Print, so a button that already reads "Reprint" is left alone.
     b.textContent = b.textContent.replace(/\bPrint\b/, "Reprint");
   });
