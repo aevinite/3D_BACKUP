@@ -33,7 +33,23 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P99801`.** *(T8 of sweep #8 took `P99301`–`P99800` on 2026-09-03 for a SECOND, freshly
+**Next free ID: `P99921`.** *(T9 of sweep #8 took `P99801`–`P99920` on 2026-09-03 — 120 ids, not 500, and only what it needed. Round 2 of the kitchen screen is 500 rows; blocks A+B filed 336 in T9's own block (`P63313`–`P63649`), 51 of that block remain (`P63650`–`P63700`), so 113 were short. **This is T9's SECOND attempt at a claim, and the first one is the collision this file keeps warning about:** T9 wrote `P99301`–`P99800` and opened a PR for it, and T8 claimed the same range in the same window and reached `main` first. **T9 renumbered, not T8** — a claim only counts once it is ON `main` — and nothing had to be re-run, because T9 had written zero rows there. Checked against the highest id actually on disk in the same breath: `P98727`.)*
+
+> ### ⚠️ THE ID SPACE IS ALMOST GONE — 79 ids left after this claim, and the format cannot grow
+>
+> `scripts/verify-ledger-index.mjs` matches a phase row with **`/^\|\s*(P\d{5})\s*\|/` — exactly
+> five digits.** So `P99999` is the last id this scheme can express, and a `P100000` would not be
+> recognised as a phase row at all: it would silently vanish from every count this file makes, which
+> is the one failure mode a ledger cannot survive. After `P99920` there are **79** ids left in the
+> entire registry.
+>
+> **The next terminal that needs a block has to widen the format first, not claim from this line.**
+> That means `FIRST_COL_ID`, `isPhaseRow` and the `next free ID` matcher in
+> `scripts/verify-ledger-index.mjs` (three regexes, all `\d{5}`), and then every other guard or
+> script that greps `P[0-9]\{5\}` — `grep -rl "P\[0-9\]\\{5\\}\|P\\d{5}" scripts/` finds them.
+> Widening to `\d{5,6}` keeps every existing id valid and costs nothing. Found by T9 while claiming.
+
+**Previously: `P99801`.** *(T8 of sweep #8 took `P99301`–`P99800` on 2026-09-03 for a SECOND, freshly
 planned 500 over the manager panel's host page and shell, on the owner's word after round 1 was merged
 and deployed: *"after making it live and merging plan 500 phases test within your boundaries make sure
 it cover everthing within your boundries and test everything again if any error left"*. Its own
