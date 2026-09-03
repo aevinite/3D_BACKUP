@@ -4358,7 +4358,7 @@ async function restoreBill(orders) {
     revertReason = ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true, presets: REASONS_REVERT })) || "").trim();
     if (!revertReason) { toast("Restore cancelled — a reason is required.", "err"); return; }
   }
-  let okCount = 0, failCount = 0;
+  let okCount = 0, failCount = 0, anyQueued = false;
   for (const o of orders) {
     const patch = {};
     if (o.archived) patch.archived = false;
@@ -4369,7 +4369,13 @@ async function restoreBill(orders) {
     }
     if (!Object.keys(patch).length) continue;
     try {
-      const _wq = await api("PATCH", "/orders/" + o.id, patch);
+      // The saved-not-sent answer is kept in a name that still exists at the toast below
+      // (sweep #8 T7). It used to be a `const` declared inside THIS try, inside the loop, and
+      // read after the loop had ended — a name nothing can see there. The throw landed outside
+      // every try in this function, so a successful restore ended with no sentence at all: the
+      // bill came back on the floor and the person was told nothing, which is the one thing
+      // this codebase does not allow a tap to do.
+      anyQueued = wasQueued(await api("PATCH", "/orders/" + o.id, patch)) || anyQueued;
       if (patch.archived === false) o.archived = false;
       if (patch.status) o.status = patch.status;
       if (patch.payment_status) o.payment_status = patch.payment_status;
@@ -4380,7 +4386,7 @@ async function restoreBill(orders) {
   }
   renderEditor();
   if (failCount) toast(`Restored ${okCount} of ${okCount + failCount} orders — ${failCount} failed, please retry`, "err");
-  else okToast(_wq, "Bill restored to the live floor");
+  else okToast(anyQueued ? { queued: true } : null, "Bill restored to the live floor");
 }
 
 // setOrderStatus: move one order to a new status (e.g. Accept → preparing).
@@ -6772,18 +6778,28 @@ function syncGuestBell() {
     // Someone waiting to be let in to a table, and anything else a table asked for.
     for (const j of (state.summary.joiners || [])) rows.push({ kind: "join", table: j.table_number, text: j.name || "", at: at(j.created_at) });
     for (const r of (state.summary.requests || [])) rows.push({ kind: "request", table: r.table_number, text: r.note || r.kind || "", at: at(r.created_at) });
-    // A NEW GUEST ORDER NOBODY HAS ACCEPTED YET. Read off the same tile state the floor draws
-    // from, so the bell can never disagree with the tile beside it.
+    // ── AN ORDER ONLY RINGS ONCE IT HAS BEEN WAITING (owner, 2026-09-03) ───────────────────────
+    // "order not accepted for more than 3 to 4 min only get you notification — it should not give
+    // notification just when order arrive; that will be in request queue, that's a whole separate
+    // queue for waiter call and all."
     //
-    // The summary carries no timestamp for this (mig 238 returns a STATE, not a time), so there is
-    // nothing honest to show as "when" — `key` is what tells the bell whether this is the same
-    // waiting order it has already been shown or another one on top of it. It folds in how many
-    // are waiting, so a second order at the same table counts as new again.
-    for (const t of Object.keys(state.summary.tiles || {})) {
-      const tile = (state.summary.tiles || {})[t];
-      if (!tile || !tile.hasNew) continue;
-      const n = Number((tile.counts || {}).nw) || 1;
-      rows.push({ kind: "order", table: t, text: n > 1 ? n + " waiting to be accepted" : "waiting to be accepted", at: 0, key: "order:" + t + ":" + n });
+    // This used to walk every tile and raise a row the MOMENT one carried an unaccepted order, so
+    // the bell rang for something that was about to be answered in ten seconds by the person
+    // standing at the till. A notification is for something that has gone wrong; an order arriving
+    // is the job. The floor already shows arrivals — the tile turns amber, wears a one-tap ✓ and is
+    // counted in "Needs you" — and that live queue is where an arrival belongs.
+    //
+    // The clock comes from the SERVER (`slowOrders`, three minutes, riding the shared floor read),
+    // because the summary reports an unaccepted order as a STATE with no time on it (mig 238) —
+    // which is exactly why this could not be done here before. A real timestamp also means the row
+    // keeps its true age across a reload instead of restarting whenever somebody refreshes.
+    const slow = state.summary.slowOrders || {};
+    const slowMin = Math.max(1, Math.round(Number(slow.afterMs || 180000) / 60000));
+    for (const o of (slow.rows || [])) {
+      if (!o || o.table_number == null) continue;
+      rows.push({ kind: "order", table: o.table_number, key: "order-slow:" + o.id,
+        text: `waiting to be accepted for over ${slowMin} minute${slowMin === 1 ? "" : "s"}${o.kot_no != null ? " · KOT #" + o.kot_no : ""}`,
+        at: at(o.created_at) });
     }
     // ── PRINTING (owner, 2026-08-30) ────────────────────────────────────────────────────────
     // Two strips used to sit across the top of the floor, above the table grid, on every manager
@@ -6794,11 +6810,26 @@ function syncGuestBell() {
     // A PROBLEM comes first and carries its own words; the STATUS line is only worth saying when
     // this screen is the one printing, or when a computer owns the paper and somebody wondering
     // where their slip went should be told it is not coming out here.
-    for (const e of ((state.summary.printer || {}).events || [])) {
-      if (!e || e.status === "resolved") continue;
-      rows.push({ kind: "printer", key: "printer-problem:" + e.id,
-        title: e.printer ? `${e.printer} needs looking at` : "A printer needs looking at",
-        text: e.note || e.kind || "", at: at(e.created_at) });
+    // ONE LIST, WORDED ONCE. printerAlerts() is what the toasts are already built from, so the bell
+    // reads the same list instead of wording the same problems a second time — two descriptions of
+    // one printer is how they drift. It also brings the stuck JOBS in, which the bell never showed
+    // before: a reported fault was a notification and a ticket that simply never came out was not.
+    // That now includes a stuck BILL (owner, 2026-09-03: "stuck bill will also give notification"),
+    // which the server read was widened for on the same day.
+    let alerts = [];
+    try { alerts = printerAlerts(); } catch (e) { alerts = []; }
+    for (const a of alerts) {
+      const row = { kind: "printer", key: "printer:" + a.key, title: a.text, text: "", at: at(a.at) };
+      // THE ONE ACTION A BELL ROW MAY CARRY (owner, 2026-09-03: "we can do in notification, we can
+      // keep that option"). Only on a stuck KITCHEN slip: that is the option he asked to keep, and
+      // it is the one this panel can honestly offer — printJobHere prints that exact ticket on this
+      // device with the DUPLICATE banner and closes the job. A stuck BILL gets the same
+      // notification and no button, because printing a bill from here is a different document and
+      // a different decision; it is named in the report rather than guessed at.
+      if (a.kind === "job" && a.jobKind !== "bill" && a.id) {
+        row.action = { label: "Print it here", run: () => printJobHere(a.id) };
+      }
+      rows.push(row);
     }
     const pt = printTargetSays;
     if (pt && pt.helper && pt.helper.owned) {
@@ -10676,30 +10707,18 @@ function bindFloor() {
   //  binding outlived the button by five weeks; removed in the T3 sweep, 2026-08-06.)
   // (No Open all / Close all bindings — the buttons no longer exist; see bulkCard.)
   { const kb = ed.querySelector("#floorKot"); if (kb) kb.onclick = () => openKotTablePicker(); }
-  // Printer-trouble strip (mig 269): ✓ Resolved closes the event/job; "Print here instead"
-  // prints a stuck reprint on THIS device and dismisses the kitchen job. Both refetch the
-  // floor so the strip reflects the truth it just changed.
-  ed.querySelectorAll("[data-prok]").forEach((b) => (b.onclick = async () => {
-    if (b.disabled) return;
-    b.disabled = true;
-    const i = b.dataset.prok.indexOf(":"), kind = b.dataset.prok.slice(0, i), id = b.dataset.prok.slice(i + 1);
-    try {
-      const _wq = await api("POST", kind === "event" ? `/printer-events/${id}/resolve` : `/print-jobs/${id}/dismiss`, {});
-      okToast(_wq, "Marked resolved ✓");
-      await pollOrders();
-    } catch (e) { b.disabled = false; toast("Failed: " + e.message, "err"); }
-  }));
-  ed.querySelectorAll("[data-prhere]").forEach((b) => (b.onclick = () => printJobHere(b.dataset.prhere, b)));
-  // The pile-up row's one button: it takes the manager to the screen that says where the paper is
-  // supposed to come out, which is the only useful next move from the floor. A tap must never do
-  // nothing (verify:taps), so it is bound in the same place as its siblings.
-  ed.querySelectorAll("[data-prsetup]").forEach((b) => (b.onclick = () => {
-    setTab("general");
-    state.settingsSection = "printing";
-    renderEditor();
-  }));
-  // "Should this screen print the kitchen tickets?" — the print-station strip beside the printer-
-  // problem one (mig 336). Bound on the same pass so a repaint never leaves a dead button.
+  // (The printer-trouble strip's three bindings lived here — [data-prok] "✓ Resolved",
+  // [data-prhere] "Print here instead" and [data-prsetup] "where does the paper come out".
+  // DELETED sweep #8 T7. The bands came off the floor on 2026-08-31 with their builders
+  // (printerStripHtml / printStationStripHtml / bindPrintStationStrip — see the obituary above
+  // noticePrinterNews), but these three querySelectorAll calls stayed, and NOTHING in the
+  // product has emitted data-prok / data-prhere / data-prsetup since. Twenty-two lines that
+  // read as live wiring for a strip that does not exist, which is exactly what the owner's
+  // "there is two printing things, one is working and one is just showing" rule forbids.
+  // printJobHere() went with them — it had one caller, the dead [data-prhere] line.
+  // The live readout is the 🔔 bell (syncGuestBell's `kind: "printer"` rows); a stuck ticket
+  // is still printable by hand from 🧾 KOT ▾ → Print / reprint a KOT → Print KOT.
+  // Do not put a band back above the table grid.
   // (No Blocked-card / docked-detail / resizer / float-out bindings — the right-hand panel
   // and everything that lived in it are gone. A table opens as a popup, full stop.)
   // Every floating card: wire its own detail actions (through the SAME bindTablePanel every
@@ -11089,18 +11108,26 @@ function openDishEditModal(itemId, rerender) {
       // Each save carries the value this modal OPENED with. If another device changed the
       // same thing while it was open, the server refuses and says what it holds now, instead
       // of one person's "more spicy" silently wiping another's "less spicy".
+      // SAVED-NOT-SENT IS ANSWERED BY WHICHEVER CALL RAN, and it has to be a name that still
+      // EXISTS at the toast (sweep #8 T7). This block used to declare `const _wq` INSIDE the
+      // note branch and read it eleven lines below, outside that block — a name nothing can see
+      // there. So every successful dish edit saved, closed, refreshed, and THEN threw
+      // "_wq is not defined" into the catch, which told the person "Couldn't save: …" about an
+      // edit that had already gone through. Same shape as attendTableCalls(): one flag, set by
+      // whichever of the three writes actually ran.
+      let anyQueued = false;
       if (note !== String(item.note || "").trim()) {
-        const _wq = await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
+        anyQueued = wasQueued(await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } })) || anyQueued;
       }
       if (!same(newItemRemoved, itemRemoved)) {
-        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
+        anyQueued = wasQueued(await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } })) || anyQueued;
       }
       if (order.id && !same(newOrderAllergies, orderAllergies)) {
-        await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } });
+        anyQueued = wasQueued(await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } })) || anyQueued;
       }
       close();
       await loadSessions(); if (rerender) rerender();
-      okToast(_wq, "Dish updated");
+      okToast(anyQueued ? { queued: true } : null, "Dish updated");
     } catch (e) {
       // SOMEONE ELSE GOT THERE FIRST. Close, refresh, and hold the message on screen long
       // enough to be read — this person's edit did NOT save and they need to know why.
@@ -13600,11 +13627,24 @@ function printerAlerts() {
   // instead". So the manager still has a way to get that ticket onto paper.
   const pileUp = out.length > 0;
   const named = pileUp ? (pr.stuck || []).slice(0, 1) : (pr.stuck || []);
-  for (const j of named) out.push({
-    key: "job:" + j.id, id: j.id, kind: "job", icon: "🧾",
-    text: `${pileUp ? "The oldest of them" : "A reprint"} (KOT #${j.kot_no ?? "—"}${j.table_number != null ? " · " + tableLabel(j.table_number) : ""}) hasn't printed in the kitchen${j.status === "failed" ? ` — it failed ${j.attempts} times` : pileUp ? " — print it here if it is needed now" : " — is the kitchen screen open?"}`,
-    at: j.created_at,
-  });
+  for (const j of named) {
+    // A STUCK BILL IS NOT A STUCK KITCHEN TICKET, AND THE SENTENCE MUST NOT SAY IT IS (owner,
+    // 2026-09-03: "stuck bill will also give notification"). The server read was widened from
+    // kitchen slips only to slips AND bills, so `kind` now decides both the noun and where to go
+    // and look — a bill printer stands at the counter, not in the kitchen, and sending somebody to
+    // the wrong room is the same fault mig 351 fixed for the printer NAME.
+    const isBill = j.kind === "bill";
+    const what = isBill ? `A bill${j.table_number != null ? " for " + tableLabel(j.table_number) : ""}`
+      : `${pileUp ? "The oldest of them" : "A reprint"} (KOT #${j.kot_no ?? "—"}${j.table_number != null ? " · " + tableLabel(j.table_number) : ""})`;
+    const why = j.status === "failed" ? ` — it failed ${j.attempts} times`
+      : isBill ? " — the customer is probably standing at the counter waiting for it"
+      : pileUp ? " — print it here if it is needed now" : " — is the kitchen screen open?";
+    out.push({
+      key: "job:" + j.id, id: j.id, kind: "job", jobKind: isBill ? "bill" : "kot", icon: isBill ? "🧾" : "🧾",
+      text: `${what} hasn't printed${isBill ? "" : " in the kitchen"}${why}`,
+      at: j.created_at,
+    });
+  }
   return out;
 }
 // Toast NEW problems the moment a floor read carries them (realtime makes that near-instant);
@@ -13632,9 +13672,16 @@ function noticePrinterNews() {
   if (seenPrinterKeys) for (const a of list) if (!seenPrinterKeys.has(a.key)) toast(a.icon + " " + a.text, "err");
   seenPrinterKeys = keys;
 }
-// "Print here instead" — the honest fallback when the kitchen can't print: fetch the job's
-// order fresh (it may have left the live board long ago), print it on THIS device with the
-// DUPLICATE banner, and dismiss the kitchen job so it stops being offered there.
+// "Print it here" — the honest fallback when the kitchen printer cannot take a stuck ticket:
+// fetch the job's order fresh (it may have left the live board long ago), print it on THIS device
+// with the DUPLICATE banner, and dismiss the kitchen job so it stops being offered there.
+//
+// ITS HOME IS THE 🔔 BELL, NOT A BAND ABOVE THE FLOOR (owner, 2026-09-03: "for 16th we can do in
+// notification we can keep that option"). This function was deleted earlier in this same sweep,
+// because the band that used to call it was removed on 2026-08-31 and nothing had called it since;
+// the obituary said in as many words that if the shortcut were ever wanted again it belonged on
+// the bell. He has now said it is. Same function, same document, one live caller — syncGuestBell
+// hands it to the row as that row's single `action`.
 async function printJobHere(id, btn) {
   if (btn) btn.disabled = true;
   try {
@@ -14356,13 +14403,21 @@ function openSplitBill(total) {
   const wrap = el(`<div class="sx-modal-overlay split-overlay"><div class="sx-modal" style="max-width:420px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split the bill</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body">
-      <div class="disc-bill-row"><span>Bill total</span><b>${inr(total)}</b></div>
+      <div class="disc-bill-row"><span>Bill total</span><b>${inrExact(total)}</b></div>
+      <!-- "− 5 + people" IS ONE THING AND WRAPS AS ONE (owner, 2026-09-03, from the screenshot).
+           The row was five loose items in a wrapping flex line, so on a 360px phone it broke after
+           the ＋ and left the single word "people" stranded on its own line, left-aligned, away
+           from the number it belongs to. The stepper and its unit now sit in one nowrap group, so
+           the only thing that can ever move to a second line is the "Split between" label — and
+           the number keeps its word. -->
       <div style="display:flex;align-items:center;gap:12px;margin:14px 0;flex-wrap:wrap">
         <label class="dish-edit-lbl" style="margin:0">Split between</label>
-        <button class="btn" id="spMinus" type="button" style="min-width:44px">−</button>
-        <b id="spN" style="font-size:18px;min-width:24px;text-align:center">2</b>
-        <button class="btn" id="spPlus" type="button" style="min-width:44px">+</button>
-        <span class="muted">people</span>
+        <span style="display:inline-flex;align-items:center;gap:12px;flex-wrap:nowrap">
+          <button class="btn" id="spMinus" type="button" style="min-width:44px">−</button>
+          <b id="spN" style="font-size:18px;min-width:24px;text-align:center">2</b>
+          <button class="btn" id="spPlus" type="button" style="min-width:44px">+</button>
+          <span class="muted">people</span>
+        </span>
       </div>
       <div id="spBody"></div>
       <div class="muted small" style="margin-top:10px">A helper only — collect each share, then tap “Mark paid” to settle the whole bill.</div>
@@ -14374,10 +14429,21 @@ function openSplitBill(total) {
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   const paint = () => {
     wrap.querySelector("#spN").textContent = n;
-    const base = Math.floor((total / n) * 100) / 100;        // each share, floored to paise
+    // NUDGE BEFORE THE FLOOR, or a share loses a whole paisa (sweep #8 T7 — the same fault, and
+    // the same repair, as the split-PAYMENT sheet's `Math.floor((due / n) * 100 + 1e-6)` above).
+    // ₹555.55 ÷ 5 is exactly ₹111.11, but in binary the division lands on 11110.999999999998, so
+    // a bare floor made it 111.10 — and the last person, who absorbs the remainder, was asked for
+    // 111.15. Four people underpaying by a paisa each and one overpaying by four is not a
+    // rounding detail on a screen a waiter reads out loud.
+    const base = Math.floor((total / n) * 100 + 1e-6) / 100;   // each share, floored to paise
     const shares = Array(n).fill(base);
     shares[n - 1] = Math.round((total - base * (n - 1)) * 100) / 100; // last absorbs the remainder → exact sum
-    wrap.querySelector("#spBody").innerHTML = `<div class="tp-bill">` + shares.map((s, i) => `<div class="tp-bl"><span>Person ${i + 1}</span><b>${inr(s)}</b></div>`).join("") + `</div>`;
+    // inrExact, NOT inr — this sheet is the one place the note above inr() names: "a figure the
+    // person has to MATCH". inr() rounds to whole rupees, so the five shares of a ₹555.55 bill all
+    // printed "₹111" and a waiter reading them out collected ₹555 for a ₹555.55 bill; four shares
+    // of ₹1,234.50 printed "₹309" four times and asked for ₹1.50 too much. inrExact shows the
+    // paise only when there are any, so an ordinary round bill still reads exactly as before.
+    wrap.querySelector("#spBody").innerHTML = `<div class="tp-bill">` + shares.map((s, i) => `<div class="tp-bl"><span>Person ${i + 1}</span><b>${inrExact(s)}</b></div>`).join("") + `</div>`;
   };
   wrap.querySelector("#spMinus").onclick = () => { if (n > 2) { n--; paint(); } };
   wrap.querySelector("#spPlus").onclick = () => { if (n < 20) { n++; paint(); } };
@@ -15742,13 +15808,30 @@ function platformHtml() {
       ${newCol}${col("prep", "🍳 Preparing")}${col("ready", "✅ Ready")}${col("done", "📦 Handed over")}
     </div>`;
 }
+let platSimOutsideBound = false;   // the document-level "click away to close" is added once
 function bindPlatform() {
   const rf = document.getElementById("platRefresh"); if (rf) rf.onclick = loadPlatform;
   // Simulate-order menu (demo mode): toggle the channel picker; a pick fires POST /platform/test.
   const sim = document.getElementById("platSim"); const simMenu = document.getElementById("platSimMenu");
   if (sim && simMenu) {
     sim.onclick = (e) => { e.stopPropagation(); simMenu.hidden = !simMenu.hidden; };
-    document.addEventListener("click", () => { simMenu.hidden = true; }, { once: true });
+    // CLOSE-ON-OUTSIDE-CLICK HAS TO SURVIVE THE FIRST CLICK (sweep #8 T7). This was
+    // `{ once: true }`, registered when the tab binds — so the very first click anywhere spent
+    // it, and from the second time the menu was opened nothing outside it closed it any more.
+    // The menu then sat over the board until the next full repaint. A live listener that simply
+    // asks whether the click was inside the menu costs nothing and cannot run out.
+    // Registered ONCE for the life of the page, on the document, and it re-finds the menu each
+    // time — bindPlatform() runs on every repaint of this tab, and one listener per repaint is
+    // how a long shift ends up with hundreds of them.
+    if (!platSimOutsideBound) {
+      platSimOutsideBound = true;
+      document.addEventListener("click", (e) => {
+        const m = document.getElementById("platSimMenu");
+        if (!m || m.hidden) return;
+        if (e.target.closest && e.target.closest("#platSimMenu, #platSim")) return;
+        m.hidden = true;
+      });
+    }
     simMenu.querySelectorAll("[data-plat-sim]").forEach((b) => b.onclick = async (e) => {
       e.stopPropagation(); simMenu.hidden = true; b.disabled = true;
       try { const _wq = await api("POST", "/platform/test", { channel: b.dataset.platSim }); okToast(_wq, "Demo order added ✓"); await loadPlatform(); }
@@ -17210,13 +17293,22 @@ function bqNewHtml() {
   const pkgSel = bqOn("dish")
     ? fld("Package / dish", "bqPkg", `<select class="sx-input" id="bqPkg">${active.map((p, i) => `<option value="${i}"${i === Math.min(f.pkg, active.length - 1) ? " selected" : ""}>${esc(p.title)} — ${Number(p.price) ? inr(p.price) + " " + esc(p.unit || "") : "price typed on the bill"}</option>`).join("")}</select>`)
     : "";
+  // EVERY MONEY BOX ON THIS SCREEN ACCEPTS ITS OWN NUMBERS (sweep #8 T7 — the other half of the
+  // 2026-08-30 repair whose comment sits on the Packages screen above). Six boxes here declared
+  // `type="number"` with no `step`, which means whole rupees only: the per-plate rate, its
+  // discount %, an extra line's rate and discount, a payment amount and the advance received.
+  // The rate box is FILLED BY THIS SCREEN from the stored package price — the same price the
+  // Packages screen was fixed to accept at ₹249.50 — so it was handed a value it then declared
+  // invalid, the hardware ↑/↓ snapped it to a whole rupee, and an advance of ₹5,000.50 could not
+  // be stepped to. Plates, extra-line quantity and the table number stay whole numbers, because
+  // those really are counted in ones.
   const pkg = active[Math.min(f.pkg, active.length - 1)];
   const openPkg = pkg && Number(pkg.price) === 0;
   const plates = [pkgSel];
   if (bqOn("pax")) plates.push(fld("No. of plates", "bqPax", `<input class="sx-input" id="bqPax" type="number" min="1" max="5000" value="${esc(String(f.pax))}" style="font-size:18px;font-weight:700" />`));
   if (bqOn("rate")) plates.push(fld(openPkg ? "Price per plate ₹" : "Price per plate ₹ (set by the package)", "bqRate",
-    `<input class="sx-input" id="bqRate" type="number" min="0" value="${esc(String(openPkg ? f.rate : (pkg ? pkg.price : 0)))}" ${openPkg ? "" : "readonly"} style="font-size:18px;font-weight:700" />`));
-  if (bqOn("disc")) plates.push(fld("Discount %", "bqDisc", `<input class="sx-input" id="bqDisc" type="number" min="0" max="100" value="${esc(String(f.disc))}" />`));
+    `<input class="sx-input" id="bqRate" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(String(openPkg ? f.rate : (pkg ? pkg.price : 0)))}" ${openPkg ? "" : "readonly"} style="font-size:18px;font-weight:700" />`));
+  if (bqOn("disc")) plates.push(fld("Discount %", "bqDisc", `<input class="sx-input" id="bqDisc" type="number" inputmode="decimal" min="0" max="100" step="0.01" value="${esc(String(f.disc))}" />`));
   let extrasHtml = "";
   if (bqOn("extras")) {
     const rows = f.extras.map((ex, i) => {
@@ -17226,8 +17318,8 @@ function bqNewHtml() {
       return `<div style="display:grid;grid-template-columns:1fr 80px 100px ${bqOn("disc") ? "74px " : ""}96px 30px;gap:8px;align-items:center;margin-bottom:8px" data-bqex="${i}">
         <select class="sx-input" data-exf="id">${active.map((p) => `<option value="${esc(p.id)}"${p.id === ex.id ? " selected" : ""}>${esc(p.title)}</option>`).join("")}</select>
         <input class="sx-input" data-exf="qty" type="number" min="1" value="${esc(String(ex.qty))}" />
-        <input class="sx-input" data-exf="price" type="number" min="0" value="${esc(String(open ? ex.price : (it ? it.price : 0)))}" ${open ? "" : "readonly"} />
-        ${bqOn("disc") ? `<input class="sx-input" data-exf="disc" type="number" min="0" max="100" value="${esc(String(ex.disc || 0))}" />` : ""}
+        <input class="sx-input" data-exf="price" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(String(open ? ex.price : (it ? it.price : 0)))}" ${open ? "" : "readonly"} />
+        ${bqOn("disc") ? `<input class="sx-input" data-exf="disc" type="number" inputmode="decimal" min="0" max="100" step="0.01" value="${esc(String(ex.disc || 0))}" />` : ""}
         <div style="text-align:right;font-weight:700">${bq0(amt)}</div>
         <button class="btn small" data-exdel="${i}" title="Remove">✕</button></div>`;
     }).join("");
@@ -17256,14 +17348,14 @@ function bqNewHtml() {
       <input class="sx-input" data-pf="date" type="date" value="${esc(p.date || "")}" />
       <select class="sx-input" data-pf="mode">${["Cash", "Online", "Card", "Cheque", "Other"].map((x) => `<option${x === p.mode ? " selected" : ""}>${x}</option>`).join("")}</select>
       <input class="sx-input" data-pf="ref" value="${esc(p.ref || "")}" placeholder="reference" />
-      <input class="sx-input" data-pf="amt" type="number" min="0" value="${esc(String(p.amt || 0))}" />
+      <input class="sx-input" data-pf="amt" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(String(p.amt || 0))}" />
       <button class="btn small" data-paydel="${i}">✕</button></div>`).join("");
     payCard = card("What they have paid", `${rows}<button class="btn small" id="bqAddPay">＋ Add a payment</button>`,
       "Each payment prints on the bill and the balance is worked out for you.");
   } else if (bqOn("advance")) {
     payCard = card("What they have paid",
       `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
-        ${fld("Amount received ₹", "bqAdv", `<input class="sx-input" id="bqAdv" type="number" min="0" value="${esc(String(f.advance))}" style="font-size:18px;font-weight:700" />`)}
+        ${fld("Amount received ₹", "bqAdv", `<input class="sx-input" id="bqAdv" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(String(f.advance))}" style="font-size:18px;font-weight:700" />`)}
         ${fld("How", "bqAdvMode", `<select class="sx-input" id="bqAdvMode">${["Cash", "Online", "Card", "Cheque"].map((x) => `<option${x === f.advMode ? " selected" : ""}>${x}</option>`).join("")}</select>`)}
       </div>`);
   }
@@ -17457,7 +17549,7 @@ function bindBanquet() {
         f.extras[i][k] = k === "id" ? inp.value : Number(inp.value) || 0;
         renderEditor();
       };
-      if (k === "id") inp.onchange = apply; else inp.onchange = apply;
+      inp.onchange = apply;   // (was an if/else whose two branches were the same line)
     });
     const del = row.querySelector("[data-exdel]");
     if (del) del.onclick = () => { f.extras.splice(i, 1); renderEditor(); };

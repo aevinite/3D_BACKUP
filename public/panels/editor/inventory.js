@@ -348,6 +348,10 @@
   }
   function stockListHtml(active, cats, q) {
     const match = (i) => !q || i.name.toLowerCase().includes(q);
+    // THE EMPTY SHELF AND THE EMPTY SEARCH ARE TWO DIFFERENT SENTENCES (sweep #8 T7). Both fell
+    // through to "No ingredients yet — add your first one.", so a manager with 60 ingredients who
+    // mistyped one name was told the store room was empty and invited to add a first ingredient.
+    // Say which of the two it actually is.
     return cats.map((c) => {
       const rows = active.filter((i) => i.category === c && match(i));
       if (!rows.length) return "";
@@ -360,7 +364,9 @@
           <span class="inv-row-val">${inr(Math.max(0, Number(i.qty_base)) * Number(i.avg_cost))}</span>
         </button>`;
       }).join("");
-    }).join("") || `<div class="empty">No ingredients yet — add your first one.</div>`;
+    }).join("") || (q
+      ? `<div class="empty">No ingredient matches “${esc(q)}”. Check the spelling, or clear the search to see all ${active.length}.</div>`
+      : `<div class="empty">No ingredients yet — add your first one.</div>`);
   }
   const bindStockRows = () => S.root.querySelectorAll(".inv-row[data-item]").forEach((r) => { r.onclick = () => itemPop(itemById(r.dataset.item)); });
 
@@ -1133,7 +1139,13 @@
         const amount = Number($("#epAmt", pop).value);
         if (!category) return toastMsg("Pick a category");
         if (!title) return toastMsg("Say what it was");
-        if (!Number.isFinite(amount) || amount < 0) return toastMsg("Enter the amount");
+        // A BLANK AMOUNT IS NOT ₹0 (sweep #8 T7). `Number("")` is 0, and 0 is both finite and
+        // not negative — so leaving the amount box empty passed this gate, posted an expense of
+        // ₹0 and answered "Expense recorded". The manager saw a success, the owner's monthly
+        // total gained a meaningless row, and the real figure was never captured. Every other
+        // quantity box in this file already asks the same question the right way round
+        // (`if (!(qty > 0))` in the waste and batch popups); this one now matches them.
+        if (!(amount > 0)) return toastMsg("Enter the amount");
         try {
           await inv("POST", "/expenses", { category, title, amount, expense_date: $("#epDate", pop).value, note: $("#epNote", pop).value.trim() || null }, $("#epPhoto", pop).files[0] || null);
           toastMsg("Expense recorded");
@@ -1176,8 +1188,14 @@
   // Public surface for app.js
   window.LFH_INV = {
     render,
-    reset() { S.loaded = false; S.count = null; },   // admin switches restaurant → refetch
     // Called from app.js's realtime `ops` handler — see liveBump above.
     live: liveBump,
+    // (reset() lived here — `S.loaded = false; S.count = null;`, commented "admin switches
+    // restaurant → refetch". DELETED sweep #8 T7: NOTHING in the repo has ever called it, and the
+    // situation it described cannot happen in this panel — the admin's restaurant is pinned from
+    // the URL at load (PANEL_RID / ridQ), so every way of changing it reloads the page and this
+    // module with it. A public function nobody calls, carrying a comment that describes a path
+    // that does not exist, is the thing a later session trusts instead of checking. If an
+    // in-page restaurant switch is ever built, bring it back WITH its caller.)
   };
 })();

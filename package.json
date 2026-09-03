@@ -109,6 +109,7 @@
     "verify:panel-dialogs": "node scripts/verify-panel-dialogs.mjs",
     "verify:panel-plumbing": "node scripts/verify-panel-plumbing.mjs",
     "verify:panel-scope": "node scripts/verify-panel-scope.mjs",
+    "verify:panel-names": "node scripts/verify-panel-names.mjs",
     "verify:queued-truth": "node scripts/verify-queued-truth.mjs",
     "verify:panel-plumbing-live": "node scripts/verify-panel-plumbing-live.mjs",
     "verify:deps": "node scripts/verify-deps.mjs",

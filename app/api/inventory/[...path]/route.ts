@@ -404,7 +404,11 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       const amount = num(body.amount);
       if (!EXPENSE_CATS.has(category)) return err("Pick a category.");
       if (!title) return err("Say what it was (e.g. “Bar lamp broken”).");
-      if (!Number.isFinite(amount) || amount < 0 || amount > 10_000_000) return err("Enter a valid amount.");
+      // ZERO IS NOT AN AMOUNT (sweep #8 T7, owner asked for the door behind the screen closed too).
+      // `amount < 0` let 0 through, and `Number("")` is 0 — so an empty amount box posted a ₹0
+      // expense and the panel said "Expense recorded". The panel refuses it now; this refuses it
+      // for anything else that ever asks, which is where a rule belongs.
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 10_000_000) return err("Enter a valid amount.");
       const photo_url = await savePhoto(rid, photo);
       const ins = await sb.from("expenses").insert({
         restaurant_id: rid, category, title, amount,

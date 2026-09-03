@@ -46,7 +46,7 @@ import { PAYMENT_METHODS } from "@/lib/payments";
 // The kitchen-ticket print queue (mig 269 + 335). Shared with the kitchen route: two panels now
 // claim from the same rows, and one implementation is what stops them drifting into two ideas of
 // "claimed" — which would be a ticket printed twice.
-import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, releaseStation, mayClaim, touchStation, waitingToPrint, STUCK_AFTER_MS} from "@/lib/printQueue";
+import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, releaseStation, mayClaim, touchStation, waitingToPrint, STUCK_AFTER_MS, SLOW_ACCEPT_MS} from "@/lib/printQueue";
 // A COMPUTER (a helper) can own the paper now — mig 341. When one does, no screen prints that kind:
 // a helper prints on the printer the address book names, a screen prints on whatever its own machine
 // defaults to, and both printing means the same ticket in two rooms.
@@ -2064,8 +2064,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           // hard-coded word "kitchen" it used to print beside every complaint.
           sb.from("printer_events").select("id, kind, note, count, reported_by, last_at, printer")
             .eq("restaurant_id", rid).eq("status", "open").order("last_at", { ascending: false }).limit(5),
-          sb.from("print_jobs").select("id, order_id, status, attempts, created_at, requested_by, error")
-            .eq("restaurant_id", rid).eq("kind", "kot")
+          // A STUCK BILL IS A STUCK JOB TOO (owner, 2026-09-03: "stuck bill will also give
+          // notification"). This asked for `kind = 'kot'` only, so a bill that never came out of
+          // the printer was invisible everywhere — no strip, no bell, no toast — while the
+          // customer stood at the counter waiting for it. Same query, same index, same shared
+          // 1.5s read; `kind` now rides along so the sentence can say WHICH kind is stuck.
+          sb.from("print_jobs").select("id, order_id, kind, status, attempts, created_at, requested_by, error")
+            .eq("restaurant_id", rid).in("kind", ["kot", "bill"])
             .or(`status.eq.failed,and(status.eq.queued,created_at.lt.${staleIso}),and(status.eq.printing,created_at.lt.${staleIso})`)
             .order("created_at").limit(5),
         ]);
@@ -2083,6 +2088,27 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // two-second blip from an emergency. It rides the read the floor already shares.
         const waiting = await waitingToPrint(rid, "kot");
         return { events: ev.data || [], stuck: jobs, waiting, stuckAfterMs: STUCK_AFTER_MS };
+      });
+      // ── AN ORDER NOBODY HAS ACCEPTED FOR THREE MINUTES (owner, 2026-09-03) ────────────────────
+      // "order not accepted for more than 3 to 4 min only get you notification — it should not
+      // give notification just when order arrive; that will be in request queue."
+      //
+      // The bell used to raise a row the moment a tile carried an unaccepted order, because the
+      // floor summary reports that as a STATE with no time on it (mig 238), so the panel had no
+      // way to tell a ten-second-old order from a ten-minute-old one. This is the missing clock,
+      // and it is the smallest read that can carry it: the ids and times of the orders that are
+      // still waiting, restaurant-scoped, five at most, and only the four columns the sentence
+      // needs. It rides the SAME shared 1.5s window as `printer` above, so ten manager devices
+      // cost one read and a targeted ?table= refetch never pays for it at all. No new poll, no
+      // new subscription, and `idx_orders_rest_active (restaurant_id, status) WHERE NOT archived`
+      // (mig 104) is exactly the index for it.
+      const slowOrders = tbl ? null : await sharedFloorSummary(`slow-orders:${rid}`, async () => {
+        const slowIso = new Date(Date.now() - SLOW_ACCEPT_MS).toISOString();
+        const r = await sb.from("orders").select("id, table_number, kot_no, created_at")
+          .eq("restaurant_id", rid).eq("status", "received").eq("archived", false)
+          .lt("created_at", slowIso)
+          .order("created_at").limit(5);
+        return { rows: r.data || [], afterMs: SLOW_ACCEPT_MS };
       });
       // WHICH TABLES ARE SERVED AS ONE PARTY (mig 249). A handful of rows, restaurant-scoped, live
       // ones only — small enough to ride along with every floor read, and the floor needs it on
@@ -2108,6 +2134,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         ...(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] }),
         merges,
         ...(printer ? { printer } : {}),
+        ...(slowOrders ? { slowOrders } : {}),
       });
     }
 

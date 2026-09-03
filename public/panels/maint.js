@@ -23,12 +23,38 @@
 // It resolves the PARSED body, never the Response: a body can only be read once, so handing the
 // same Response to two callers would let whichever parsed first starve the other.
 // Shape: { ok, status, json }.
+/* ── THE DEADLINE HELPER IS DEFINED BEFORE ITS FIRST USER (sweep #8 T7, 2026-09-03) ──────────
+   It was not. `deadline()` was a function declaration inside the big drawer IIFE 130 lines below,
+   while the two shared helpers at the TOP of this file — LFH_PROFILE_GET and LFH_PROFILE_SAVE —
+   called it by that bare name. A function declared inside a function is invisible outside it, so
+   `window.LFH_PROFILE_GET()` threw **ReferenceError: deadline is not defined** on every call, on
+   every panel that loads this file (manager, kitchen, waiter tablet).
+
+   That is the shared single-flight read of /api/panel-profile — the one myprofile.js awaits to
+   build "💳 My profile & pay", and it takes the branch that USES this helper precisely
+   because the helper exists on `window`, so its own fallback read could never run instead.
+
+   It arrived with 462442a2 (2026-08-30), a fix that gave this drawer the deadlines it was missing
+   and, in these two places, put them where the helper could not be seen. ONE definition,
+   published before anything reads it; the drawer below points at this same one.
+   Guarded by `npm run verify:panel-names`. */
+(function () {
+  const PANEL_DEADLINE_MS = 8000;
+  function deadline(ms) {
+    try { if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms || PANEL_DEADLINE_MS); } catch (e) { /* fall through */ }
+    try { const c = new AbortController(); setTimeout(() => c.abort(), ms || PANEL_DEADLINE_MS); return c.signal; } catch (e) { return undefined; }
+  }
+  // myprofile.js loads beside this file and makes the same fallback read; one deadline, decided
+  // here, rather than a second copy of the helper drifting from this one.
+  window.LFH_PANEL_DEADLINE = window.LFH_PANEL_DEADLINE || deadline;
+})();
+
 window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
   var inflight = null;
   return function profileGet() {
     if (inflight) return inflight;
     inflight = (async function () {
-      var r = await fetch("/api/panel-profile", { cache: "no-store", signal: deadline() });
+      var r = await fetch("/api/panel-profile", { cache: "no-store", signal: window.LFH_PANEL_DEADLINE() });
       var j = await r.json().catch(function () { return {}; });
       return { ok: r.ok, status: r.status, json: j };
     })();
@@ -68,7 +94,7 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   }
   var headers = { "Content-Type": "application/json" };
   if (expect) headers["X-LFH-Expect"] = JSON.stringify(expect);
-  var r = await fetch("/api/panel-profile", { method: "POST", headers: headers, body: JSON.stringify(body), signal: deadline() });
+  var r = await fetch("/api/panel-profile", { method: "POST", headers: headers, body: JSON.stringify(body), signal: window.LFH_PANEL_DEADLINE() });
   var d = await r.json().catch(function () { return {}; });
   if (!r.ok) { var e = new Error(d.error || "Couldn't save."); e.status = r.status; e.data = d; throw e; }
   return { ok: true, json: d, queued: false };
@@ -193,18 +219,15 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
      caller's existing catch does what it always did — says so, instead of waiting for ever.
      signOut() keeps its own 4s ceiling as well: leaving is the one action that must happen whether
      or not the server ever answers. */
-  const PANEL_DEADLINE_MS = 8000;
+  // The SAME helper the top of this file publishes — not a second copy. (It used to be declared
+  // here, which is exactly what put it out of reach of the two shared helpers above.)
+  const deadline = window.LFH_PANEL_DEADLINE;
   // What a person is told when the deadline above fires. AbortSignal.timeout rejects with a
   // DOMException reading "signal timed out" — the browser's words, and the manager saw them.
   function whyFailed(e) {
     if (e && (e.name === "TimeoutError" || e.name === "AbortError")) return "the server didn't answer in time";
     return (e && e.message) || "the server didn't answer";
   }
-  function deadline(ms) {
-    try { if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms || PANEL_DEADLINE_MS); } catch (e) { /* fall through */ }
-    try { const c = new AbortController(); setTimeout(() => c.abort(), ms || PANEL_DEADLINE_MS); return c.signal; } catch (e) { return undefined; }
-  }
-
   function el(tag, props, kids) {
     const n = document.createElement(tag);
     if (props) for (const k in props) {
@@ -383,9 +406,8 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     text: askText,
   };
   window.LFH_ASK = window.LFH_ASK || LFH_ASK;
-  // myprofile.js loads beside this file and makes the same fallback read; one deadline, decided
-  // here, rather than a second copy of the helper drifting from this one.
-  window.LFH_PANEL_DEADLINE = window.LFH_PANEL_DEADLINE || deadline;
+  // (LFH_PANEL_DEADLINE was published from HERE. It is published at the top of this file now —
+  // the two shared profile helpers up there call it, and this line ran far too late for them.)
 
   let profile = null; // {username, role, name, phone, hasPin, needsProfile, canSelfReset}
   let overlay = null;

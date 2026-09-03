@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **171** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **173** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 171 names in their head, so in practice a person runs none of them, or reaches for
+can hold 173 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -238,6 +238,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | any of the SHARED panel files every staff panel loads (`public/panels/*.js` — the write queue, the connection pill, the back-button manager, the undo card, the guest bell, the settings drawer, the issue modal, the theme, the error log) | `verify:panel-plumbing` | nothing | no |
 | …and AFTER DEPLOYING any of those shared panel files | `verify:panel-plumbing-live -- --base <url>` ← runs the same checks against the bytes the SITE is really serving, and prints the served content hash beside the local one. A green guard on a laptop proves the source is right, not that the site is: the panels are static assets behind a cache `vercel.json` lets go stale for up to 24h, and a device has twice run a weeks-old panel whose bug was already fixed. GET requests for static files only — signs in to nothing, writes nothing | app running | no |
 | moved, renamed or deleted a panel HELPER function | `verify:panel-scope` ← a helper must exist where the code that calls it can see it; a panel that throws on load is a blank screen for staff | nothing | no |
+| ANY edit to a `public/panels/**/*.js` file | `verify:panel-names` ← every name a panel READS has to exist where it is read. The panels are plain `<script>` files, so nothing else looks: no bundler, no import graph, and `npm run typecheck` does not read them. Scope-resolves each script properly and reports any identifier that resolves to no declaration — a block-scoped `const` read outside its block, a typo, a helper deleted from under its caller. Found `okToast(_wq, "Dish updated")` telling a manager "Couldn't save" about an edit that HAD saved, and `LFH_PROFILE_GET()` throwing "deadline is not defined" on every panel. `typeof x` is skipped: that read cannot throw, and this codebase uses it on purpose | nothing | no |
 | a WRITE in a staff panel that shows a success message, or anything that PRINTS a bill / invoice / banquet sheet / credit note | `verify:queued-truth` ← with no signal `api()` hands the write to the offline outbox, which resolves `{ ok:true, queued:true }` instead of throwing, so a plain try/catch sees a SUCCESS. Two sites once printed on the strength of it — a bill with no invoice number, and a banquet sheet numbered `undefined` at ₹0. Also holds the four "Reopen puts the TABLE back" rules (mig 365) | nothing | no |
 | a `background` on `html` or `body` in a panel stylesheet | `verify:panel-canvas` ← `background: <image>` resets background-color to TRANSPARENT, so past the fold on a phone the page BEHIND the frame shows through — the dark band under the tiles the owner photographed on 2026-08-26 | nothing | no |
 | a payload that hands a `settings` row to a panel, or `lib/panelSettings.ts` | `verify:panel-secrets` ← the row carries the delivery apps' connection keys; a panel must never receive them (T17 finding F1) | nothing | no |

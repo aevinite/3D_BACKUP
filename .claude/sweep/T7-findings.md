@@ -169,3 +169,32 @@ Two more cost false reds through timing alone, and both are worth knowing:
 `verify:busy` (33) · `verify:access` (50) · `verify:ui` · `verify:ledger-index` (14,820 rows).
 `npm run typecheck` passes; `npm run lint` has 0 errors and the same 630 warnings as `origin/main`
 (none in my files).
+
+---
+---
+
+# ══ SWEEP #8 · TERMINAL 7 — the manager panel, part B ══
+
+*(Everything above is sweep #7's waiter-tablet findings and was not touched. Sweep #8 re-cut the
+territories from the real file tree, so "terminal 7" now means a different part of the product —
+see the banner at the top of `.claude/sweep/LEDGER/T7.md`.)*
+
+Territory: `public/panels/editor/app.js` lines 9,300→end · `public/panels/editor/inventory.js` ·
+`public/panels/floor-layouts.js`. Rows: `.claude/sweep/LEDGER/T7.md`, sweep-#8 section.
+Every item below is ONE commit, with its number in the message, so a single one can be dropped.
+
+| # | what was wrong | where a person meets it | how it was proved |
+|---|---|---|---|
+| 1 | a dish edit SAVED and then said **"Couldn't save: _wq is not defined"** | manager → a table → ✎ Edit → ✎ Edit on a dish → Save | scope-resolved the file (acorn + eslint-scope), then drove the toast in a real browser (`P61205`/`P61206`) |
+| 2 | restoring a binned bill worked and said **nothing at all** — the same `_wq` shape, thrown outside every `try` | manager → Bills → a deleted bill → Restore | same scope resolution; the throw is on the success path |
+| 3 | `LFH_PROFILE_GET()` threw **"deadline is not defined"** on every call, on every panel that loads `maint.js` | any panel → 💳 My profile & pay | ran the file's head in a Node sandbox: `REJECTED: ReferenceError: deadline is not defined` before, `RESOLVED` with an 8s signal after |
+| 4 | 🍴 Split the bill showed **₹111 five times for a ₹555.55 bill** (₹0.55 short), and its shares had lost a paisa before that | manager → a table → 🍴 Split | driven and screenshotted at 360px (`P61207`/`P61208`) |
+| 5 | an expense with a **blank amount** was saved as ₹0 and answered "Expense recorded" | manager → 📦 Inventory → 💸 Expenses → + Add expense | driven: the card now stays open and says "Enter the amount" (`P61213`) |
+| 6 | a stock search that matched nothing said **"No ingredients yet — add your first one."** | manager → 📦 Inventory → 📦 Stock → search | driven with 2 ingredients loaded (`P61211`/`P61212`) |
+| 7 | 45 lines of dead wiring for a printer strip the owner deleted on 2026-08-31 | backend only, nothing on screen | nothing emits `data-prok` / `data-prhere` / `data-prsetup`; `printJobHere()` had one caller, that dead line (`P61214`) |
+| 8 | the ＋ Simulate order menu stopped closing on an outside click after the first time | manager → 🛵 Platform → ＋ Simulate order | `{ once: true }` on a document listener registered at bind time |
+| 9 | six money boxes on the banquet bill declared **whole rupees only** | manager → 🎪 Banquet → ＋ New bill | read off the rendered inputs; the rate box is filled with `249.5` (`P61209`/`P61210`) |
+| 10 | `LFH_INV.reset()` was a public function **nothing in the repo called** | backend only, nothing on screen | repo-wide grep; deleted with an obituary |
+
+**The guard left behind:** `npm run verify:panel-names` — every name a panel READS must exist where
+it is read. Sabotage-tested against both the `_wq` and the `deadline` shapes; both go red.

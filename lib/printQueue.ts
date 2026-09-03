@@ -102,6 +102,16 @@ export async function waitingToPrint(
  *  every 20s at worst, so a minute of silence is not a slow moment — it is nothing happening. */
 export const STUCK_AFTER_MS = 60_000;
 
+/** HOW LONG AN ORDER MAY SIT UNACCEPTED BEFORE THE BELL SAYS SO (owner, 2026-09-03:
+ *  "order not accepted for more than 3 to 4 min only get you notification — it should not give
+ *  notification just when order arrive").
+ *
+ *  Three minutes, the lower end of the number he gave, because the cost of being told a minute
+ *  early is nothing and the cost of being told late is a guest waiting. It is deliberately NOT
+ *  the same number as STUCK_AFTER_MS above: a printer that has said nothing for a minute is
+ *  already broken, while an order accepted in ninety seconds is an ordinary busy service. */
+export const SLOW_ACCEPT_MS = 180_000;
+
 /**
  * Tickets waiting to print for this restaurant, with the order + item rows joined on so the
  * caller can print without trusting its own board (a reprint is usually for a KOT that has long
