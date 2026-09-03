@@ -33,7 +33,18 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P99921`.** *(T9 of sweep #8 took `P99801`–`P99920` on 2026-09-03 — 120 ids, not 500, and only what it needed. Round 2 of the kitchen screen is 500 rows; blocks A+B filed 336 in T9's own block (`P63313`–`P63649`), 51 of that block remain (`P63650`–`P63700`), so 113 were short. **This is T9's SECOND attempt at a claim, and the first one is the collision this file keeps warning about:** T9 wrote `P99301`–`P99800` and opened a PR for it, and T8 claimed the same range in the same window and reached `main` first. **T9 renumbered, not T8** — a claim only counts once it is ON `main` — and nothing had to be re-run, because T9 had written zero rows there. Checked against the highest id actually on disk in the same breath: `P98727`.)*
+**Next free ID: `P99951`.** *(T8 of sweep #8 took `P99921`–`P99950` — THIRTY ids, not 500 — on
+2026-09-03. Its round 2 skipped 13 rows for one honest reason: the Banquet and Inventory modules
+are admin entitlements and both were OFF for this restaurant, and "Rating review" is a manager
+permission the diag manager did not hold, so the tabs were correctly not on screen and
+`/owner/inventory` forwarded to `/owner`. The owner said *"do whats left"*, so the three switches
+were turned on inside one run, the 13 rows were driven properly, and every switch was put back and
+VERIFIED back. Those 13 keep their original ids (`P99466`–`P99472`, `P99567`, `P99568`, `P99576`,
+`P99577`, `P99579`, `P99580`) and were updated in place — never renumbered. This small block is
+only for what the switched-on state made newly checkable: all ten tabs on screen at once for the
+first time, the nav still fitting them, the two module tabs in the phone drawer, and the owner's
+Inventory embed. Claimed by editing this line and pushing it before a row was written; highest id
+actually on disk re-checked in the same breath (`P99915`).)* *(T9 of sweep #8 took `P99801`–`P99920` on 2026-09-03 — 120 ids, not 500, and only what it needed. Round 2 of the kitchen screen is 500 rows; blocks A+B filed 336 in T9's own block (`P63313`–`P63649`), 51 of that block remain (`P63650`–`P63700`), so 113 were short. **This is T9's SECOND attempt at a claim, and the first one is the collision this file keeps warning about:** T9 wrote `P99301`–`P99800` and opened a PR for it, and T8 claimed the same range in the same window and reached `main` first. **T9 renumbered, not T8** — a claim only counts once it is ON `main` — and nothing had to be re-run, because T9 had written zero rows there. Checked against the highest id actually on disk in the same breath: `P98727`.)*
 
 > ### ⚠️ THE ID SPACE IS ALMOST GONE — 79 ids left after this claim, and the format cannot grow
 >
