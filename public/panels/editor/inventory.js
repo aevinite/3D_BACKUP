@@ -1188,8 +1188,14 @@
   // Public surface for app.js
   window.LFH_INV = {
     render,
-    reset() { S.loaded = false; S.count = null; },   // admin switches restaurant → refetch
     // Called from app.js's realtime `ops` handler — see liveBump above.
     live: liveBump,
+    // (reset() lived here — `S.loaded = false; S.count = null;`, commented "admin switches
+    // restaurant → refetch". DELETED sweep #8 T7: NOTHING in the repo has ever called it, and the
+    // situation it described cannot happen in this panel — the admin's restaurant is pinned from
+    // the URL at load (PANEL_RID / ridQ), so every way of changing it reloads the page and this
+    // module with it. A public function nobody calls, carrying a comment that describes a path
+    // that does not exist, is the thing a later session trusts instead of checking. If an
+    // in-page restaurant switch is ever built, bring it back WITH its caller.)
   };
 })();
