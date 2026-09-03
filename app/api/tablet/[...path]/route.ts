@@ -702,7 +702,32 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // and the WRITE path (below) does refuse outright.
         if (!allows(limit, tbl)) return ok({ sessions: [], members: [], calls: [], orders: [], items: [], requests: [] });
         const live = await liveOrdersAndItems(rid, [tbl]);
-        const sessions = must(await sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid).eq("table_number", tbl));
+        // ── NAMED COLUMNS, NOT `*` (owner picked it as item 12, 2026-09-03) ──────────────────────
+        //
+        // `sessions` has 27 columns and this read shipped every one of them to every waiter's tablet
+        // on every targeted refetch — which is the most frequent read this panel makes, because one
+        // realtime breadcrumb naming one table fires exactly this. Measured on the dev floor: 7,166
+        // bytes for ten rows against 3,232 for this list — 2.2× — and the columns being dropped are
+        // not neutral ones:
+        //   · `cart` is a GUEST'S OWN BASKET, the order they are still building on their phone. No
+        //     staff screen reads it (migration 299's header says so: it has its own trigger and its
+        //     own topic), and it was being handed to every waiter on the floor.
+        //   · `last_activity_at` and `cart_updated_at` are HEARTBEATS. They tick constantly with no
+        //     visible effect, which is why boardSig has an RT_VOLATILE list to strip them before it
+        //     hashes — not sending them at all is the same win one step earlier.
+        //   · `deleted_*` / `void_*` / `opened_by` / `created_at` / `restaurant_id` are not read by
+        //     any screen this payload reaches (the read is already scoped, so the tenant id is a
+        //     round trip telling us what we asked for).
+        //
+        // THE LIST IS THE RISK, and it is the reason this was put to the owner rather than just
+        // done: a hand-typed column list is how a field silently goes missing later — which is
+        // exactly what caused this sweep's item 3, where `logo_url` was read by the panel and never
+        // sent. So it does not stand on care: `verify:tablet-taps` now greps BOTH sides and fails if
+        // this panel (or the shared bill document it hands rows to) reads a session column that is
+        // not on this list. The settings row a few lines up deliberately keeps `*` for the opposite
+        // reason — that one really is read wholesale, dozens of columns at a time.
+        const SESSION_COLS = "id, table_number, status, opened_at, closed_at, bill_no, invoice_no, invoice_at, invoice_voided, discount, discount_note, cust_name, cust_phone, bill_printed_at";
+        const sessions = must(await sb.from("sessions").select(SESSION_COLS).neq("status", "closed").eq("restaurant_id", rid).eq("table_number", tbl));
         const sids = (sessions || []).map((s: { id: string }) => s.id);
         const [members, calls, requests] = await Promise.all([
           sids.length ? sb.from("session_members").select("id, session_id, phone, phone_verified, name, role, approved, location_ok, removed, joined_at, device_id, restaurant_id").eq("removed", false).eq("restaurant_id", rid).in("session_id", sids) : Promise.resolve({ data: [] }),
