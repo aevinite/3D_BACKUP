@@ -1575,6 +1575,44 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
   @media (max-width: 599px) { body:not(.floor-preview) .ftile-grid { --per-row: 4; } }
   @media (min-width: 600px) { body:not(.floor-preview) .ftile-grid { --per-row: 4; } }
 }
+/* ── THE THREE FLOOR NUMBERS: SMALLER, AND EACH ONE OPENS ITS TABLES (owner, 2026-09-03) ──────
+   *"change the name of occupied to something else or just keep 4 out of 31 and also to pay. Also,
+   can you click on it? It should show ... the tables which you need to pay ... you can just keep NY
+   when you over it, it should tell its need you ... in between the table view and KOT and Q op"*.
+   They were already between the heading and the buttons; spelled out as OCCUPIED / TO PAY /
+   NEEDS YOU they were simply too wide to stay on that line and wrapped to a row of their own.
+   So: the counts keep their size, the words shrink to nothing (occupied), "pay" and "NY" — and the
+   full sentence lives in the tooltip and again as the popup's own heading, so nothing rests on
+   remembering an abbreviation. They are BUTTONS now, on laptop and phone alike. */
+.floor-stats { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.fstat { display: inline-flex; align-items: baseline; gap: 4px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 11px; font: inherit; color: var(--text); line-height: 1;
+  transition: border-color .15s ease, background .15s ease, transform .12s ease; }
+.fstat:hover { border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); background: var(--panel-2); }
+.fstat:active { transform: scale(.97); }
+.fstat:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.fstat-n { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.fstat-l { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.fstat.warn .fstat-n { color: var(--gold-strong); }
+.fstat.alert .fstat-n { color: #c2410c; }
+html[data-theme="dark"] .fstat.alert .fstat-n { color: #fb923c; }
+/* The sheet a number opens: the tables it counted, each a way straight to that table. */
+.fstat-modal { max-width: 420px; }
+/* The shared modal heading is a display serif sized for a page title. In this popup the heading is
+   the least interesting thing on screen — the list of tables is what you opened it for — so it is
+   capped and allowed to sit on one line. */
+.fstat-modal h3 { font-size: 19px; line-height: 1.25; }
+.fstat-body { padding: 6px 10px 12px; max-height: 62vh; overflow-y: auto; }
+.fstat-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 11px 12px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 11px;
+  background: var(--panel-2); color: var(--text); cursor: pointer; font: inherit;
+  min-height: 44px; /* a finger target, per this panel's own floor */ }
+.fstat-row:hover { border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); }
+.fstat-row-t { font-size: 16px; font-weight: 800; min-width: 46px; }
+.fstat-row-s { font-size: 13px; color: var(--muted); flex: 1; }
+.fstat-row-go { font-size: 19px; color: var(--muted); }
+
 /* ── THE PHONE HEADER GETS OUT OF THE WAY (owner, 2026-09-03) ─────────────────────────────────
    His words: *"there si too much space almiost 40 percent of space taken on live ms thing
    notification and table view written and 4/31 occupidide ... make thiings small so that it ovly
@@ -1597,16 +1635,20 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
      cost. Two changes let all three sit on one line: the actions get narrower, and the brand is
      allowed to SHRINK and ellipse instead of pushing them off. Nothing is removed. */
   body:not(.floor-preview) .topbar { padding: 5px 8px; gap: 6px; min-height: 0; flex-wrap: nowrap; }
-  body:not(.floor-preview) .brand { font-size: 16px; gap: 4px; flex: 1 1 auto; min-width: 0;
+  body:not(.floor-preview) .brand { font-size: 14px; gap: 4px; flex: 1 1 auto; min-width: 0;
     overflow: hidden; white-space: nowrap; }
-  body:not(.floor-preview) .brand .brand-ico { width: 18px; height: 18px; flex: none; }
+  body:not(.floor-preview) .brand .brand-ico { width: 16px; height: 16px; flex: none; }
   /* The restaurant's name STAYS — it is the one thing here that says which tenant you are looking
      at — and truncates with an ellipsis if the width runs out, rather than shoving the bell to a
      second row. Wrapping is what cost the height; a shortened name costs nothing. */
   body:not(.floor-preview) #brandRest { font-size: 11.5px; font-weight: 700; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   body:not(.floor-preview) .top-actions { flex: none; gap: 5px; }
-  body:not(.floor-preview) .lfh-conn { font-size: 10.5px; padding: 3px 7px; }
+  /* "live also can be a bit thin" — the pill loses height and side padding, not its meaning. */
+  body:not(.floor-preview) .lfh-conn { font-size: 10px; padding: 2px 7px; }
+  /* "make notification a bit small" — the bell, and the count on it. */
+  body:not(.floor-preview) .top-actions .bell-btn, body:not(.floor-preview) #bellBtn { font-size: 15px; }
+  body:not(.floor-preview) .bell-dot, body:not(.floor-preview) .bell-count { font-size: 9px; min-width: 15px; height: 15px; }
   body:not(.floor-preview) .topbar .bell-btn, body:not(.floor-preview) .topbar .icon-btn,
   body:not(.floor-preview) .top-actions .btn { padding: 4px 6px; }
   body:not(.floor-preview) .nav-burger { padding: 0; width: 38px; height: 38px; flex: none; }
@@ -1617,11 +1659,32 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
   body:not(.floor-preview) .ed-head h2 .sub { font-size: 11px; }
   body:not(.floor-preview) .ed-head .btn { padding: 5px 9px; font-size: 12px; min-height: 30px; }
 
-  /* ── the three numbers, one short row ── */
-  body:not(.floor-preview) .fstat { padding: 3px 9px; font-size: 11px; min-height: 0; border-radius: 999px; }
-  body:not(.floor-preview) .fstat-n { font-size: 14px; }
-  body:not(.floor-preview) .fstat-l { font-size: 9.5px; letter-spacing: .02em; }
-  body:not(.floor-preview) .floor-stats, body:not(.floor-preview) .fstats { gap: 5px; margin: 0; }
+  /* ── the three numbers, ON the heading's line ── */
+  body:not(.floor-preview) .fstat { padding: 3px 8px; min-height: 0; }
+  body:not(.floor-preview) .fstat-n { font-size: 13px; }
+  body:not(.floor-preview) .fstat-l { font-size: 9px; letter-spacing: .02em; }
+  body:not(.floor-preview) .floor-stats { gap: 4px; margin: 0; }
+  /* The heading gives way first: it is the one thing on this line whose words a manager already
+     knows, so it shrinks and the numbers and the two buttons keep their size. */
+  body:not(.floor-preview) .floor-head h2 { font-size: 15px; flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* ONE LINE, AND THE HEADING IS WHAT GIVES WAY. Measured at 360px: "Table view" (73px) + the two
+     buttons (153px) already fill the row, so the three numbers (175px) wrapped underneath and then
+     stretched to the full width — which is the second row he was looking at. With `nowrap` the row
+     cannot break, so the only flexible thing left shrinks: the heading. It is the right one to lose
+     — the tab rail and the ☰ drawer both say Tables, and the tiles are self-evident — while the
+     numbers and the buttons are the things you came here to use. Below ~340px it disappears
+     entirely rather than becoming two clipped letters. */
+  body:not(.floor-preview) .floor-head { flex-wrap: nowrap; align-items: center; }
+  body:not(.floor-preview) .floor-head h2 { flex: 0 1 auto; }
+  body:not(.floor-preview) .floor-head-acts { flex: none; margin-left: auto; }
+  body:not(.floor-preview) .floor-stats { flex: none; }
+  /* Hidden on EVERY phone, not just the narrowest. At 390px there is room for the heading OR the
+     three numbers, not both, and he asked for the numbers on that line. Doing it at one width and
+     not the other would mean the same screen has two different headers depending on the handset —
+     harder to describe and harder to support than simply not having a heading on a phone. The tab
+     rail and the ☰ drawer both say Tables; a grid of table tiles does not need a caption. */
+  body:not(.floor-preview) .floor-head h2 { display: none; }
 }
 /* ── A PHONE TILE IS WIDE, NOT SQUARE (owner, 2026-09-03) ─────────────────────────────────────
    His words, after seeing three per row land: *"make sure you make it the size small, the text size
@@ -2747,9 +2810,14 @@ html[data-theme="light"] .fstat.warn .fstat-n { color: var(--gold-ink); }
   .floor-head h2 .sub { display: none; } /* the topbar's Live badge already says it */
   /* WRAPS, never scrolls sideways (owner, 2026-08-15: "there shouldn't be horizontal scroll
      anywhere"). Three chips fit a 360px phone on one line; a fourth would drop to a second line
-     rather than hide off the right edge, which is the failure mode a hidden x-scroll has. */
-  .floor-head .floor-stats { order: 3; flex: 0 0 100%; flex-wrap: wrap; }
+     rather than hide off the right edge, which is the failure mode a hidden x-scroll has.
+     `order` puts the numbers BETWEEN the heading and the two buttons (owner, 2026-09-03: "in
+     between the table view and KOT and Q op option"). They used to be `order: 3; flex: 0 0 100%`
+     — their own full-width row UNDER the buttons — which was right when each one was a wide
+     labelled card. They are compact buttons now, so they belong on the line itself. */
+  .floor-head .floor-stats { order: 2; flex: 0 1 auto; flex-wrap: wrap; }
   .floor-head .fstat { flex: 0 0 auto; }
+  .floor-head-acts { order: 3; }
   .floor-head .floor-legend { order: 4; flex: 0 0 100%; }
   /* (the grid's 72px minimum tile + sideways scroll live in their own <=1040px block just below
      this one — they are needed at TABLET widths too, not only on a phone.) */
