@@ -174,8 +174,18 @@
   <script src="/panels/undobar.js?v=e5a33483"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
   <script src="/panels/billcustomer.js?v=78df0b22"></script>
-  <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
-  <script src="/panels/fitnums.js?v=49e195eb" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.bill-amt,.ks-val,.ord-total span:last-child"></script>
+  <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping.
+       `.bill-amt` was REMOVED from this list on 2026-09-03 (T8 sweep #8). It was the Bills tab's
+       bill-amount class until the 2026-08-03 Bills rebuild renamed it `.bl-amt`, and the list was
+       never updated — so for a month this selector matched nothing at all. It is deleted rather
+       than re-pointed, and that is the deliberate half: measured on a 360px phone with the row as
+       it is built today, a total of ₹12,34,567.89 beside a "₹6,00,000 in · ₹6,34,567.89 left"
+       sub-line overflows its box by ZERO pixels, because `.bl-mid` carries `min-width:0` and gives
+       way first. There is nothing for the helper to do there, and a bill figure is the one number
+       fitnums.js says in capitals must never end up in a net that can abbreviate it. If the row is
+       ever redesigned so the amount can clip, add `.bl-amt` here AND to EXACT_SEL in fitnums.js —
+       both, in the same change. -->
+  <script src="/panels/fitnums.js?v=49e195eb" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
   <script src="/panels/editor/inventory.js?v=aabfc336"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC) and shared with
