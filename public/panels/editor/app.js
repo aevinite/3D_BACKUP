@@ -1090,6 +1090,15 @@ async function bulkDeleteDishes() {
   // "Deleted 5 dishes" could appear over 5 dishes that are all still on the menu. The undo bar is
   // still offered for whatever DID go, because that part is real.
   if (failed) toast(`Deleted ${done} — ${failed} could NOT be deleted. They are still on the menu.`, "err", undefined, 9000);
+  // NO UNDO BAR OVER A DELETE THAT DELETED NOTHING (sweep #8 T6, 2026-09-03). With every write
+  // refused — a manager without the power, or the signal gone mid-loop — `done` is 0, and the screen
+  // showed BOTH a red "Deleted 0 — 5 could NOT be deleted. They are still on the menu." and, under
+  // it, a bar reading "Deleted 0 dishes · Tap undo to bring them back". Two messages contradicting
+  // each other about the same tap, one of them offering to undo nothing: pressing it would have
+  // re-created the five dishes that were never removed. The 2026-08-17 pass fixed the toast's own
+  // wording and left the bar behind it. Nothing was deleted, so there is nothing to take back, and
+  // the red line above already says what happened.
+  if (!done) return;
   if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted ${done} dish${done === 1 ? "" : "es"}`, sub: "Tap undo to bring them back", icon: "🗑️", seconds: 5, onUndo: undoDelete });
   else toast(`Deleted ${done} dish${done === 1 ? "" : "es"}`, "ok", { label: "Undo", fn: undoDelete }, 8000);
 }
