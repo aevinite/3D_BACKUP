@@ -14370,7 +14370,7 @@ function openSplitBill(total) {
   const wrap = el(`<div class="sx-modal-overlay split-overlay"><div class="sx-modal" style="max-width:420px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split the bill</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body">
-      <div class="disc-bill-row"><span>Bill total</span><b>${inr(total)}</b></div>
+      <div class="disc-bill-row"><span>Bill total</span><b>${inrExact(total)}</b></div>
       <div style="display:flex;align-items:center;gap:12px;margin:14px 0;flex-wrap:wrap">
         <label class="dish-edit-lbl" style="margin:0">Split between</label>
         <button class="btn" id="spMinus" type="button" style="min-width:44px">−</button>
@@ -14388,10 +14388,21 @@ function openSplitBill(total) {
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   const paint = () => {
     wrap.querySelector("#spN").textContent = n;
-    const base = Math.floor((total / n) * 100) / 100;        // each share, floored to paise
+    // NUDGE BEFORE THE FLOOR, or a share loses a whole paisa (sweep #8 T7 — the same fault, and
+    // the same repair, as the split-PAYMENT sheet's `Math.floor((due / n) * 100 + 1e-6)` above).
+    // ₹555.55 ÷ 5 is exactly ₹111.11, but in binary the division lands on 11110.999999999998, so
+    // a bare floor made it 111.10 — and the last person, who absorbs the remainder, was asked for
+    // 111.15. Four people underpaying by a paisa each and one overpaying by four is not a
+    // rounding detail on a screen a waiter reads out loud.
+    const base = Math.floor((total / n) * 100 + 1e-6) / 100;   // each share, floored to paise
     const shares = Array(n).fill(base);
     shares[n - 1] = Math.round((total - base * (n - 1)) * 100) / 100; // last absorbs the remainder → exact sum
-    wrap.querySelector("#spBody").innerHTML = `<div class="tp-bill">` + shares.map((s, i) => `<div class="tp-bl"><span>Person ${i + 1}</span><b>${inr(s)}</b></div>`).join("") + `</div>`;
+    // inrExact, NOT inr — this sheet is the one place the note above inr() names: "a figure the
+    // person has to MATCH". inr() rounds to whole rupees, so the five shares of a ₹555.55 bill all
+    // printed "₹111" and a waiter reading them out collected ₹555 for a ₹555.55 bill; four shares
+    // of ₹1,234.50 printed "₹309" four times and asked for ₹1.50 too much. inrExact shows the
+    // paise only when there are any, so an ordinary round bill still reads exactly as before.
+    wrap.querySelector("#spBody").innerHTML = `<div class="tp-bill">` + shares.map((s, i) => `<div class="tp-bl"><span>Person ${i + 1}</span><b>${inrExact(s)}</b></div>`).join("") + `</div>`;
   };
   wrap.querySelector("#spMinus").onclick = () => { if (n > 2) { n--; paint(); } };
   wrap.querySelector("#spPlus").onclick = () => { if (n < 20) { n++; paint(); } };
