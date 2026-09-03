@@ -1567,6 +1567,41 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
   @media (max-width: 599px) { body:not(.floor-preview) .ftile-grid { --per-row: 3; } }
   @media (min-width: 600px) { body:not(.floor-preview) .ftile-grid { --per-row: 4; } }
 }
+/* ── A PHONE TILE IS WIDE, NOT SQUARE (owner, 2026-09-03) ─────────────────────────────────────
+   His words, after seeing three per row land: *"make sure you make it the size small, the text size
+   and all that so that vertically also more number of table can be there"*.
+   The tile has always been a SQUARE (aspect-ratio 1/1), and on a phone that is what wasted the
+   screen: three across at 360px made each one 107px tall, so only TWELVE tables were on screen and
+   the rest was scrolling. A phone is tall and narrow — the floor should use that.
+   Measured on his A35 (360x780), counting tiles FULLY on screen: square 12 · 4:3 18 · 3:2 21.
+   3:2 it is, and every internal measurement comes down with it, because squashing the box alone
+   just clips the contents — the tile sizes its own text off its WIDTH (cqw), which does not change
+   when only the height does. At 4:3 and at 3:2 without this block, three tiles overflowed by 5-21px.
+   With it: nothing clips, and all 31 tiles still carry the number, the seat count, the state word
+   and the tag band. The take-order button even keeps its full "Take order" label, because the tile
+   is now wide relative to its height rather than narrow.
+   Scoped to the phone band only — a laptop and an iPad keep the square tile they have. */
+@media (pointer: coarse) and (max-width: 599px) and (max-height: 1149px) {
+  body:not(.floor-preview) .ftile { aspect-ratio: 3 / 2; padding: 3px 6px; }
+  body:not(.floor-preview) .ft-num { font-size: clamp(9px, 12cqw, 17px); }
+  body:not(.floor-preview) .ft-line,
+  body:not(.floor-preview) .ft-free,
+  body:not(.floor-preview) .ft-linenum { font-size: clamp(7.5px, 7cqw, 10px); line-height: 1.15; }
+  body:not(.floor-preview) .ft-seats,
+  body:not(.floor-preview) .ft-seats i,
+  body:not(.floor-preview) .ft-chair { font-size: clamp(7.5px, 7cqw, 10px); }
+  body:not(.floor-preview) .ft-badges { margin-top: 1px; gap: 2px; }
+  body:not(.floor-preview) .ft-act { gap: 3px; margin-top: 2px; }
+  /* The action row shrinks with everything else. R31 allows this in his own words — "I don't care
+     if you increase the size of or maybe whatever you do" — what may NOT change is the button
+     having a third, differently-worded face. It still has exactly two: "＋ Take order" and a bare ＋. */
+  body:not(.floor-preview) .ft-act .btn,
+  body:not(.floor-preview) .ftile .ft-take,
+  body:not(.floor-preview) .ftile .ft-bill { min-height: 22px; padding: 1px 4px; font-size: 10.5px; }
+  body:not(.floor-preview) .ft-strip { margin-top: 1px; height: 3px; }
+  body:not(.floor-preview) .ft-ribbon { font-size: 8px; padding: 0 3px; letter-spacing: .02em; }
+  body:not(.floor-preview) .ftile.ft-tag { padding-bottom: 12px; }
+}
 /* The faint chair watermark on a free/off table — top-right, subtle, premium. Carries
    the table's seat count (migration 111) alongside the icon, so "free" also answers
    "how many can sit here" without opening the tile. */
