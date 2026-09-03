@@ -15735,13 +15735,30 @@ function platformHtml() {
       ${newCol}${col("prep", "🍳 Preparing")}${col("ready", "✅ Ready")}${col("done", "📦 Handed over")}
     </div>`;
 }
+let platSimOutsideBound = false;   // the document-level "click away to close" is added once
 function bindPlatform() {
   const rf = document.getElementById("platRefresh"); if (rf) rf.onclick = loadPlatform;
   // Simulate-order menu (demo mode): toggle the channel picker; a pick fires POST /platform/test.
   const sim = document.getElementById("platSim"); const simMenu = document.getElementById("platSimMenu");
   if (sim && simMenu) {
     sim.onclick = (e) => { e.stopPropagation(); simMenu.hidden = !simMenu.hidden; };
-    document.addEventListener("click", () => { simMenu.hidden = true; }, { once: true });
+    // CLOSE-ON-OUTSIDE-CLICK HAS TO SURVIVE THE FIRST CLICK (sweep #8 T7). This was
+    // `{ once: true }`, registered when the tab binds — so the very first click anywhere spent
+    // it, and from the second time the menu was opened nothing outside it closed it any more.
+    // The menu then sat over the board until the next full repaint. A live listener that simply
+    // asks whether the click was inside the menu costs nothing and cannot run out.
+    // Registered ONCE for the life of the page, on the document, and it re-finds the menu each
+    // time — bindPlatform() runs on every repaint of this tab, and one listener per repaint is
+    // how a long shift ends up with hundreds of them.
+    if (!platSimOutsideBound) {
+      platSimOutsideBound = true;
+      document.addEventListener("click", (e) => {
+        const m = document.getElementById("platSimMenu");
+        if (!m || m.hidden) return;
+        if (e.target.closest && e.target.closest("#platSimMenu, #platSim")) return;
+        m.hidden = true;
+      });
+    }
     simMenu.querySelectorAll("[data-plat-sim]").forEach((b) => b.onclick = async (e) => {
       e.stopPropagation(); simMenu.hidden = true; b.disabled = true;
       try { const _wq = await api("POST", "/platform/test", { channel: b.dataset.platSim }); okToast(_wq, "Demo order added ✓"); await loadPlatform(); }
