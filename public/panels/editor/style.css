@@ -1564,7 +1564,15 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
      the table anyway. FOUR was offered and turned down — it shows twenty, but busy tiles lose the
      order button and "0/2 served" is cut to "0/2 ser…", which is the one number that says a table
      is waiting on you. */
-  @media (max-width: 599px) { body:not(.floor-preview) .ftile-grid { --per-row: 3; } }
+  /* FOUR, SQUARE (owner, 2026-09-03: "kepp square format only if require make 4 colum in a row").
+     The tile went briefly to 3:2 to win vertical room; he wants the square back, so the density
+     comes from the COLUMN COUNT instead. Counted on his A35 (360x780) with the compressed header
+     and the shrunken tile contents, tiles FULLY on screen:
+       3 square = 15 · 4 square = 28 · 5 square = 31 (the whole floor)
+     Four is the last one that keeps the take-order button: at five the action row is shed entirely
+     (79px of tile holds it, 62px does not). Nothing clips at any of the three, and the number, the
+     seat count, the state word and the tag ribbon are on all 31 tiles at every one. */
+  @media (max-width: 599px) { body:not(.floor-preview) .ftile-grid { --per-row: 4; } }
   @media (min-width: 600px) { body:not(.floor-preview) .ftile-grid { --per-row: 4; } }
 }
 /* ── THE PHONE HEADER GETS OUT OF THE WAY (owner, 2026-09-03) ─────────────────────────────────
@@ -1630,7 +1638,7 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    is now wide relative to its height rather than narrow.
    Scoped to the phone band only — a laptop and an iPad keep the square tile they have. */
 @media (pointer: coarse) and (max-width: 599px) and (max-height: 1149px) {
-  body:not(.floor-preview) .ftile { aspect-ratio: 3 / 2; padding: 3px 6px; }
+  body:not(.floor-preview) .ftile { padding: 3px 6px; }
   body:not(.floor-preview) .ft-num { font-size: clamp(9px, 12cqw, 17px); }
   body:not(.floor-preview) .ft-line,
   body:not(.floor-preview) .ft-free,
