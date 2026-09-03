@@ -1603,10 +1603,27 @@ function renderKitchenSettings() {
   const holder = st && st.active
     ? `${esc(st.active.label || (st.active.panel === "editor" ? "A counter screen" : "A kitchen screen"))}${st.active.claimed_by ? " · " + esc(st.active.claimed_by) : ""}`
     : "";
-  const where = tgt === "counter" ? "the counter screen" : tgt === "both" ? "the kitchen screen, counter as backup" : "the kitchen screen";
+  // A COMPUTER MAY OWN THE PAPER, AND THIS SHEET HAS TO SAY SO (T9 sweep #8).
+  // With a print helper named for kitchen slips the route answers autoPrintKot:false and
+  // kotPrintTarget:"kitchen" — so `auto` was false, `tgt` was not "counter", and the whole Printing
+  // section below disappeared. A cook opening ⚙️ Settings beside a perfectly good printer read
+  // NOTHING about printing and would conclude it was switched off, while the 🖨 sheet two taps away
+  // said "Printer_POS_80 — from Shop's computer". Two screens in one panel, one silent and one
+  // truthful, is worse than either answer alone. Same source (`state.helper`), same words.
+  const hlp = state.helper && state.helper.owned ? state.helper : null;
+  // RAW here, escaped ONCE at the render site below. The first version of this fix pre-escaped
+  // these two values as well, and an apostrophe then reached the sheet as the literal
+  // "Shop&#39;s computer" — caught by driving the screen, not by reading it.
+  // (printerStatusHtml() does the OPPOSITE: it pre-escapes its pieces and inserts `where` raw.
+  // Two functions, two conventions, so do not copy one into the other without checking which end
+  // does the escaping.)
+  const where = hlp ? `${hlp.printer} — from ${hlp.agent}`
+    : tgt === "counter" ? "the counter screen"
+    : tgt === "both" ? "the kitchen screen, counter as backup"
+    : "the kitchen screen";
   // PRINTING IS ABSENT, NOT GREYED, WHEN IT IS OFF FOR THE RESTAURANT (owner's rule). `auto` is
   // already "on AND this room prints", so a counter-only restaurant sees the explanation once, not a
-  // set of controls it can never use.
+  // set of controls it can never use. A helper owning the paper is NOT "off" — see the note above.
   // ── FACTS ONLY (owner, 2026-08-29) ────────────────────────────────────────────────────────
   // This used to carry the same "take the printer over / stop printing here / setup guide" controls
   // as the manager panel's strip — the model from BEFORE the Printing board, where a restaurant
@@ -1615,10 +1632,12 @@ function renderKitchenSettings() {
   // and one is just showing."
   //
   // The admin names one person on Printing. This screen states where the paper comes out and stops.
-  const printSection = (!auto && tgt !== "counter") ? "" : `
+  const printSection = (!auto && tgt !== "counter" && !hlp) ? "" : `
     <div class="kset-sec">
       <h4>🖨 Printing</h4>
-      ${tgt === "counter" && !auto ? `<p class="kset-note">Kitchen tickets print on <b>the counter screen</b> for this restaurant, so this screen prints nothing automatically. The 🖨 button on a ticket still prints here if this screen has a printer of its own.</p>` : `
+      ${hlp ? `<div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
+      <p class="kset-note">A printer program on <b>${esc(hlp.agent)}</b> prints this restaurant's kitchen slips, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : " It has not been heard from for a while — tickets are waiting, and print the moment it is back."}</p>`
+      : tgt === "counter" && !auto ? `<p class="kset-note">Kitchen tickets print on <b>the counter screen</b> for this restaurant, so this screen prints nothing automatically. The 🖨 button on a ticket still prints here if this screen has a printer of its own.</p>` : `
       <div class="kset-line"><span>Automatic printing</span><b>${auto ? "ON" : "OFF"}</b></div>
       <div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
       <div class="kset-line"><span>Printing right now</span><b>${printingHere ? "THIS screen" : st && st.active ? (st.stale ? holder + " (gone quiet)" : holder) : "no screen yet"}</b></div>
