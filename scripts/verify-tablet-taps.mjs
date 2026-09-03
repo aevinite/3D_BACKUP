@@ -228,7 +228,12 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     `safe; the floor behind already explains this state in the same sentence.`,
   );
   for (const [fn, phrase] of [
-    ["renderShiftPicker", "No free tables"],
+    // Reworded 2026-09-03 (sweep #8 T10) and the anchor moved with it, NOT relaxed. The picker's
+    // free-table rule changed in the same pass — a table with an open-but-empty session is drawn
+    // Free by the owner's own rule and is refused by the server as taken, so it is no longer
+    // offered — which means this empty state now appears on a floor of open-but-empty tables and
+    // has to say WHY there is nothing rather than only that there is nothing.
+    ["renderShiftPicker", "No free table to move this party to"],
     ["renderMergePicker", "No other open tables"],
     ["renderMoveOrderPicker", "No movable orders"],
     ["renderMoveItemPicker", "No movable dishes"],
@@ -1113,6 +1118,52 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
       : `${TABLET} (and billdoc.js, for the bill's identity) reads restaurant column(s) that\n    ${routeRel} never sends: ${missing.join(", ")}\n    ` +
         `Sent: ${[...sent].join(", ")}\n    ` +
         `An absent column arrives as undefined and every guard on it fails SILENTLY — which is how\n    every bill printed from a waiter's handheld lost the restaurant's logo. Add the column to that\n    select (it costs nothing: the read already happens), or stop reading it.`,
+  );
+}
+
+
+// ── A DESTINATION LIST MAY NOT BE BUILT FROM THE FLOOR'S WORD "FREE" (sweep #8 T10, 2026-09-03) ─
+//
+// The fault this was written for, measured on the dev floor: five of the six on-plan tables had an
+// OPEN session with nothing ordered on them. summaryTile() re-presents that state as **Free** — the
+// owner's own decision (2026-07-31), and right for a tile, a filter chip and a count. The "Move this
+// party" picker built its list from the same re-presented answer, so it offered all five; and
+// lfh_staff_shift_table's occupancy test reads the session row, so the server refused every one of
+// them with "That table is already taken — pick a free one" about a table the same screen had just
+// called free. Driven, not reasoned: POST /sessions/<id>/shift {to:1} answered 409 on a tile the
+// picker was offering.
+//
+// The manager panel has had the honest rule for a while — `tableHasAnyParty()` in
+// public/panels/editor/app.js reads the RAW tile state, and its comment describes this exact fault.
+// This is the check that keeps the two panels answering it the same way.
+{
+  const shift = fnBody("renderShiftPicker");
+  check(
+    "tablet: the shift picker asks whether a table can really TAKE a party, not whether the floor calls it free",
+    /canTakeAParty\(i\)/.test(shift) && !/!tileIsOpen\(i\)/.test(shift),
+    `${TABLET}: renderShiftPicker() must build its list with canTakeAParty(), which reads the RAW\n    ` +
+    `summary tile. !tileIsOpen() goes through summaryTile(), which turns an open-but-empty table\n    ` +
+    `("waiting") into "free" — so the picker offers exactly the tables the server refuses as taken.`,
+  );
+  // COMMENTS STRIPPED BEFORE THE NEGATIVE TEST, line ones before block ones. The helper's own
+  // comment reads "// RAW — never summaryTile()", so a raw scan for summaryTile( inside it matched
+  // the sentence explaining why it is not there — a guard failing against its own documentation,
+  // which this repo has recorded before (docs/CLAUDE-DETAIL.md, and memory a-guard-can-pass-against-
+  // its-own-comment). Judge the CODE.
+  const appBare = APPSRC.replace(/(^|[^:"'`])\/\/[^\n]*/g, (m, p1) => p1).replace(/\/\*[\s\S]*?\*\//g, "");
+  check(
+    "tablet: …and that helper reads the RAW tile, never the re-presented one",
+    /function tableHasAnyParty\([\s\S]{0,300}?state\.summary\.tiles/.test(appBare)
+      && !/function tableHasAnyParty\([\s\S]{0,300}?summaryTile\(/.test(appBare),
+    `${TABLET}: tableHasAnyParty() must read state.summary.tiles directly. Going through\n    ` +
+    `summaryTile() re-introduces the very re-presentation it exists to see past.`,
+  );
+  check(
+    "tablet: a table somebody has asked to be seated at is not offered as a destination either",
+    /canTakeAParty\([\s\S]{0,500}?(requests|hasReq)/.test(APPSRC),
+    `${TABLET}: the manager's shiftBlocked() dims a "Wants in" table ("wants in"). Moving a party\n    ` +
+    `onto a table another guest has already asked for is not ours to do, and the two panels must\n    ` +
+    `not answer it differently.`,
   );
 }
 

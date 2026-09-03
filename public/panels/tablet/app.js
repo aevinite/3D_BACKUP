@@ -1073,6 +1073,38 @@ function tileIsOpen(i) {
 // child can never be a destination (it has no bill of its own to join). Since tileIsOpen() now
 // tells the truth about a joined table, the merge picker has to say this part explicitly.
 const canHostAParty = (i) => tileIsOpen(i) && !mergeParentOf(i);
+// ── "FREE" ON THE FLOOR IS NOT "FREE" AS A DESTINATION (sweep #8 T10, 2026-09-03) ─────────────
+// A table with an OPEN session and nothing ordered on it is drawn as **Free**, and that is the
+// owner's own decision (2026-07-31: a party with nothing ordered is an available table) —
+// summaryTile() re-presents the RPC's `waiting` state as free at the source so the tiles, the
+// Free/Active chips and tileIsOpen() cannot tell three different stories. Keep that.
+//
+// But it is the wrong answer for a DESTINATION. The session row is still there, so
+// lfh_staff_shift_table's occupancy test (`status = 'open'`, mig 217) refuses it, and the waiter
+// gets "That table is already taken — pick a free one" about a table the same screen just called
+// free. Measured on the dev floor: five of the six on-plan tables were in that state, and every
+// one of them was offered by the "Move this party" picker and refused by the server.
+//
+// The MANAGER panel has had the honest rule for a while and its helper's comment describes this
+// exact fault — `tableHasAnyParty()` in public/panels/editor/app.js, which reads the RAW tile
+// state rather than the re-presented one: *"the floor calls it free, but shifting another party
+// onto it would land two sessions on one table. It is offered in neither list, which is the honest
+// answer for a state the floor deliberately no longer shows."* This is that rule, on this panel.
+//
+// A "Wants in" table (`req`) is excluded for the manager's other reason: somebody has already
+// asked to be seated there, so it is not ours to move a party onto.
+function tableHasAnyParty(i) {
+  const tile = (state.summary.tiles || {})[String(i)];      // RAW — never summaryTile()
+  return !!tile && tile.state !== "free" && tile.state !== "req";
+}
+// Can this party be MOVED onto table i? Not itself, not a member of a merged party, no session row
+// of any kind, and nobody waiting to be let in.
+function canTakeAParty(i) {
+  if (mergeParentOf(i) || mergeChildrenOf(i).length) return false;
+  if (tableHasAnyParty(i)) return false;
+  return !((state.summary.requests || []).some((r) => String(r.table_number) === String(i)))
+      && !((state.summary.tiles || {})[String(i)] || {}).hasReq;
+}
 // Does this restaurant use dining sessions? OFF means there is no "Open table" step at all
 // (Access → Menu → Dining sessions, owner 2026-07-31): the floor goes straight to taking an
 // order, and the server attaches it without a session. The manager panel has always gated its
@@ -3227,12 +3259,16 @@ function renderMergePicker(t, s) {
 function renderShiftPicker(t, s) {
   const n = tableCount();
   const free = [];
-  // FREE = not open, read from the summary (tileIsOpen) — works for every tile, not just the
+  // FREE = can really TAKE a party, read from the summary — works for every tile, not just the
   // selected one whose slice is cached. (Two-tier: the grid no longer holds every table's session.)
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && !tileIsOpen(i)) free.push(i); }
+  // canTakeAParty(), NOT !tileIsOpen(): a table with an open-but-empty session is drawn Free by the
+  // owner's own rule and is refused by the server as taken, so listing it here was a button whose
+  // only possible outcome was "That table is already taken — pick a free one". See the long note by
+  // canTakeAParty for the measurement and for the manager panel's identical rule.
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && canTakeAParty(i)) free.push(i); }
   const btns = free.length
     ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">T${i}</button>`).join("")
-    : `<div class="muted">No free tables to shift to.</div>`;
+    : `<div class="muted">No free table to move this party to — every other table in your section already has a party on it, even if it has ordered nothing yet.</div>`;
   const body = `<div class="muted small" style="margin-bottom:10px">Move this party — orders &amp; calls included — to a free table:</div><div class="shiftgrid">${btns}</div>`;
   const { dropLayer } = renderPickerShell(`Move T${esc(t)} →`, body, "tablet-shift-picker", renderPanel);
   document.querySelectorAll("[data-shiftto]").forEach((b) => (b.onclick = () => {
