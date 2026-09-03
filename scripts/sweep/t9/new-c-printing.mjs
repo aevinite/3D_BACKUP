@@ -112,7 +112,11 @@ row("P62850", "a report saved with no signal says the manager is told when the s
 
 // ══ D1 · printKot — THE ONE PLACE PAPER COMES OUT — P62851–P62890 ══
 row("P62851", "printKot never lets the restaurant name be blank on paper", () => hasRe(PK(), /restDisplayName\(restaurant\)\.replace\(\/\\\*\/g, ""\) \|\| "Kitchen"/));
-row("P62852", "printKot prints the table as the FLOOR knows it, not the raw number", () => hasRe(PK(), /const tlab = whereFor\(order, true\);/));
+// EXPECTATION CHANGED by item 9 (the owner's pick): printKot now takes an explicit label when the
+// caller has one, because a DELIVERY has no table at all. A dine-in order passes none and still
+// reads the table exactly as before — asserted at P63283/P63284.
+row("P62852", "printKot prints the table as the FLOOR knows it, unless the caller names its own label", () =>
+  hasRe(PK(), /const tlab = \(opts && opts\.tableLabel\) \|\| whereFor\(order, true\);/));
 row("P62853", "printKot prints an em-dash for a missing KOT number, never \"undefined\"", () => hasRe(PK(), /const kot = order\.kot_no != null \? order\.kot_no : "—";/));
 row("P62854", "printKot's date line goes through the shared kotWhen(), which prints the DAY for an old ticket", () => has(PK(), "LFH_BILLDOC.kotWhen(order.created_at)"));
 row("P62855", "printKot falls back to the order's own items JSON when no rows were handed to it", () =>

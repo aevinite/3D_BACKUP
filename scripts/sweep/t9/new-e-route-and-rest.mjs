@@ -1,7 +1,7 @@
 // SWEEP #8 · T9 · NEW CHECKS, block E — P62951–P63200.
 // The route's own endpoints end to end, the ⋯ menu machinery, the "Sold out only" filter, the
 // whole-table note, the guest chime contract, and the card-forget path.
-import { row, APP, APPC, HTML, CSS, ROUTE, ROUTEC, PAGE, has, hasRe, lacks, lacksRe, P, src, contentHash } from "./lib.mjs";
+import { row, APP, APPC, HTML, CSS, CSSC, ROUTE, ROUTEC, PAGE, has, hasRe, lacks, lacksRe, P, src, contentHash } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };
@@ -618,8 +618,9 @@ row("P63216", "no fix in this run reopened a rejected idea", () => {
 });
 row("P63217", "the header wrap costs nothing above the phone/wall widths where it is needed", () => {
   // flex-wrap only ever engages when the row cannot fit; there is no width-specific rule to drift.
-  const c = CSS();
-  const theadRules = [...c.matchAll(/\.thead\s*\{[^}]*\}/g)].length;
+  // CSSC(), not CSS(): the stylesheet documents the two rejected fixes in prose, so the raw text
+  // contains a `.thead { … }` that is a comment, not a rule.
+  const theadRules = [...CSSC().matchAll(/\.thead\s*\{[^}]*\}/g)].length;
   return theadRules === 1 || `${theadRules} .thead rules — a second one can disagree with the first`;
 });
 row("P63218", "the age chip's nowrap is declared once, so a later rule cannot quietly undo it", () => {

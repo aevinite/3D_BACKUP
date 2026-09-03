@@ -53,6 +53,16 @@ export function code(text) {
   return noLine.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 export const APPC = () => code(APP());
+/**
+ * The stylesheet with its block comments removed.
+ *
+ * WHY THIS IS NEEDED, and it bit this guard three times: this file DOCUMENTS the answers that were
+ * tried and rejected, so the raw text contains lines like `.thead { justify-content: flex-end }`
+ * inside a comment explaining why that is wrong. A detector reading the raw CSS then counts two
+ * `.thead` rules and reports the rejected answer as shipped. Judge the CODE, never the prose about
+ * it — the same rule `code()` exists for above.
+ */
+export const CSSC = () => CSS().replace(/\/\*[\s\S]*?\*\//g, "");
 export const ROUTEC = () => code(ROUTE());
 
 /** The 8-hex content hash `index.html` is supposed to carry for each asset (matches build tooling). */

@@ -28,7 +28,7 @@ import { runRows, report, row, APP, APPC, hasRe } from "./sweep/t9/lib.mjs";
 
 for (const m of ["replay-block1", "replay-block1b", "replay-block2", "replay-contracts",
                  "new-a-blocked-and-menu", "new-c-printing", "new-e-route-and-rest",
-                 "replay-other-ledgers"]) {
+                 "replay-other-ledgers", "new-f-items789"]) {
   await import("./sweep/t9/" + m + ".mjs");
 }
 
@@ -52,8 +52,10 @@ row("P63223", "neither can emit the literal string \"null\", \"undefined\" or \"
 });
 row("P63224", "the ticket header's title attribute is guarded against the same value", () =>
   hasRe(APPC(), /o\.table_number == null \|\| o\.table_number === "" \? "" : ` title=/));
-row("P63225", "the printed KOT takes its table label from the same guarded helper", () =>
-  hasRe(APPC(), /const tlab = whereFor\(order, true\);/));
+// EXPECTATION CHANGED by item 9: a DINE-IN ticket still takes its label from the guarded helper,
+// and a DELIVERY passes its own (it has no table). Both halves matter, so both are asserted.
+row("P63225", "the printed KOT still takes a dine-in table label from the same guarded helper", () =>
+  hasRe(APPC(), /const tlab = \(opts && opts\.tableLabel\) \|\| whereFor\(order, true\);/));
 
 const only = (process.argv.find((a) => a.startsWith("--only")) || "").replace(/^--only=?/, "").trim()
   || (process.argv[process.argv.indexOf("--only") + 1] || "").trim();
