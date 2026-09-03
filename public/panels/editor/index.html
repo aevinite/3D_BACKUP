@@ -137,7 +137,11 @@
   <!-- Chart.js powers the Dashboard graphs. SELF-HOSTED (was a jsdelivr CDN link) so the
        Dashboard still draws when an external CDN hiccups. File in /panels/vendor/. -->
   <script src="/panels/vendor/chart.umd.min.js?v=9db14121"></script>
+  <!-- maint.js: the shared staff drawer (name, phone, PIN, panel password), the panel's own
+       yes/no + reason cards (LFH_ASK, used by inventory.js), and the write deadline. -->
   <script src="/panels/maint.js?v=0ea7b68f"></script>
+  <!-- realtime.js: the ONE live-update channel every panel shares (LFH_RT). Must load before
+       outbox.js, connbadge.js, offline.js and errlog.js, which all reach for it. -->
   <script src="/panels/realtime.js?v=122c17eb"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=79344a64"></script>
@@ -151,7 +155,12 @@
   <!-- What the GUEST MENU is waiting for (owner, 2026-08-13): the 🔔 in the top bar + its sheet.
        Reads NOTHING of its own — the panel hands it rows off the board it already has — and it
        renders nothing at all when the guest menu is switched off for the restaurant.
-       After backstack.js, because its sheet registers a back layer. -->
+       IT LOADS BEFORE backstack.js, and that is fine — this note used to claim the opposite
+       (T8 sweep #8, 2026-09-03). The sheet asks for its back layer when it OPENS, guarded
+       (`window.LFH_BACK && window.LFH_BACK.layer`), never at parse time, so backstack.js has
+       been loaded for a long while by then. The waiter tablet loads the pair in this same
+       order. A note that states a rule the file does not follow is how the next reader
+       "fixes" a working order. -->
   <script src="/panels/guestbell.js?v=aa4653da"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
@@ -167,10 +176,10 @@
   <script src="/panels/issue-raise.js?v=2a56fffc"></script>
   <!-- My profile & pay (mig 220) — shared with the waiter tablet -->
   <script src="/panels/myprofile.js?v=e194a3d8"></script>
-  <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
   <!-- "there is more this way" on any row that scrolls sideways (T12, 2026-08-13): a soft edge
        fade plus a "-> N more" chip, driven by measurement. Marked rows carry data-swipe-hint. -->
   <script src="/panels/swipehint.js?v=da7e0a29"></script>
+  <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
   <script src="/panels/undobar.js?v=e5a33483"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
   <script src="/panels/billcustomer.js?v=78df0b22"></script>
@@ -193,6 +202,8 @@
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —
        without it, printing a bill throws "LFH_BILLDOC is not defined" and nothing prints. -->
   <script src="/panels/billdoc.js?v=981b775d"></script>
+  <!-- auditsort: the plain-English words and the sort order for Audit & logs, shared with the
+       owner console's Audit screen so the same event can never be worded two ways. -->
   <script src="/panels/auditsort.js?v=1da861b5"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->

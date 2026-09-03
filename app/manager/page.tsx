@@ -14,6 +14,10 @@
 // ?as=<staff id> (ADMIN only): open this panel as ONE NAMED MANAGER — their menus,
 // their per-person permissions (owner, 2026-08-02, the profile's "Visit their panel").
 // Carried into the iframe by panelIframeSrc; re-checked on every API call.
+// ?view=real (ADMIN only): the ribbon's toggle — render the panel as the role REALLY gets
+// it instead of the admin X-ray. Forwarded here for completeness; it is INDEPENDENT of ?as=
+// (naming a person changes whose permissions the cyan marks describe, it never strips the
+// panel), and panelIframeSrc accepts only the exact word "real".
 import { panelAdminRid, panelIframeSrc } from "@/lib/panelGate";
 import PanelFrame from "@/components/PanelFrame";
 
