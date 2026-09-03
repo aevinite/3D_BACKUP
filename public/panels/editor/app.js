@@ -519,11 +519,17 @@ function promptDialog(message, opts = {}) {
   });
 }
 
-// Quick-pick reason chips for bill-affecting actions (owner 2026-07-23). Free text still
-// allowed; these just save typing for the common cases. Kept short so they fit on a phone.
+// Quick-pick reason chips for reverting a payment (owner 2026-07-23). Free text still allowed;
+// these just save typing for the common cases. Kept short so they fit on a phone.
 const REASONS_REVERT = ["Mis-tap / misclick", "Wrong amount", "Refund to customer", "Paid by mistake", "Redo the bill"];
-const REASONS_DELETE = ["Mis-tap / misclick", "Duplicate bill", "Test order", "Order cancelled", "Wrong table"];
-const REASONS_CLOSE = ["Customer left unpaid", "Mis-tap / misclick", "On the house", "Staff meal", "Moved to another bill"];
+// REASONS_DELETE and REASONS_CLOSE lived here and were DELETED on 2026-09-03 (sweep #8 T6): each was
+// declared, and mentioned nowhere else in the file. Deleting a bill has asked through
+// askRemovalReason() and its shared REMOVAL_REASONS since migration 251, which is the same six
+// reasons every removal in the app now uses; and there is no "close a table" at all since
+// 2026-07-31 (a walk-out is dealt with by voiding what was not paid for), so nothing was left to
+// offer REASONS_CLOSE to. A list of words that reaches no screen is worse than none: it reads as
+// the wording a screen uses, so the next person edits it and nothing changes.
+// Put either back only alongside the screen that would show it.
 
 // Manager (or any staff) raises an operational issue → the owner sees it on their
 // Issues page and the admin sees it as a platform complaint. The modal (subject +
@@ -1084,6 +1090,15 @@ async function bulkDeleteDishes() {
   // "Deleted 5 dishes" could appear over 5 dishes that are all still on the menu. The undo bar is
   // still offered for whatever DID go, because that part is real.
   if (failed) toast(`Deleted ${done} — ${failed} could NOT be deleted. They are still on the menu.`, "err", undefined, 9000);
+  // NO UNDO BAR OVER A DELETE THAT DELETED NOTHING (sweep #8 T6, 2026-09-03). With every write
+  // refused — a manager without the power, or the signal gone mid-loop — `done` is 0, and the screen
+  // showed BOTH a red "Deleted 0 — 5 could NOT be deleted. They are still on the menu." and, under
+  // it, a bar reading "Deleted 0 dishes · Tap undo to bring them back". Two messages contradicting
+  // each other about the same tap, one of them offering to undo nothing: pressing it would have
+  // re-created the five dishes that were never removed. The 2026-08-17 pass fixed the toast's own
+  // wording and left the bar behind it. Nothing was deleted, so there is nothing to take back, and
+  // the red line above already says what happened.
+  if (!done) return;
   if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted ${done} dish${done === 1 ? "" : "es"}`, sub: "Tap undo to bring them back", icon: "🗑️", seconds: 5, onUndo: undoDelete });
   else toast(`Deleted ${done} dish${done === 1 ? "" : "es"}`, "ok", { label: "Undo", fn: undoDelete }, 8000);
 }
@@ -1647,9 +1662,21 @@ function bindPrintingBoard(ed) {
         if (d) { toast(`This screen now manages “${d.name}”.`); await loadPrintBoard(); }
         return;
       }
+      // THESE TWO ASK IN THE PANEL, NOT WITH THE BROWSER'S OWN DIALOG (sweep #8 T6, 2026-09-03).
+      // They were the last bare prompt() and confirm() left in this file, and this panel already owns
+      // a themed replacement for each (promptDialog / confirmDialog, right at the top).
+      // A kiosk browser, an embedded webview, and Chrome after somebody ticks "prevent this page from
+      // creating additional dialogs" all return NULL from prompt() and FALSE from confirm() having
+      // shown nothing at all, and both call sites below `return` on a falsy answer. So on the very
+      // devices a restaurant runs, "Rename this computer" did nothing and "Unlink" quietly refused,
+      // with not one word on screen: a tap vanishing in silence, which is the rule this product does
+      // not break. Same reasoning, same fix and the same wording as editor/inventory.js's four
+      // (2026-08-31) and maint.js's two (2026-08-30).
+      // verify:panel-dialogs now covers this file too, so they cannot come back.
       if (what === "rename") {
         const cur = (B().thisComputer || {}).name || "";
-        const name = prompt("What should this computer be called?", cur);
+        const name = await promptDialog("What should this computer be called?",
+          { confirmLabel: "Rename", placeholder: "e.g. Front till", defaultValue: cur, required: true, danger: false });
         if (!name || !name.trim() || name === cur) return;
         const d = await post("this-computer", { name: name.trim() });
         if (d) { toast("Renamed."); await loadPrintBoard(); }
@@ -1657,7 +1684,10 @@ function bindPrintingBoard(ed) {
       }
       if (what === "unlink") {
         const nm = (B().thisComputer || {}).name || "this computer";
-        if (!confirm("Unlink \u201c" + nm + "\u201d?\n\nIt stops printing at once, and anything routed to it needs a printer choosing again.\n\nTo bring it back: double-click the helper file on this computer and press Allow.")) return;
+        if (!(await confirmDialog(
+          `Unlink \u201c${nm}\u201d? It stops printing at once, and anything routed to it needs a printer choosing again. `
+          + "To bring it back: double-click the helper file on that computer and press Allow.",
+          "Unlink"))) return;
         const d = await post("unlink", {});
         if (d) { toast("Unlinked."); await loadPrintBoard(); }
         return;
@@ -2736,20 +2766,21 @@ function formGeneral(s) {
   </div>`;
 }
 
-// STATUS_META: how each order status looks on screen — its badge label and the
-// CSS class that colours it.
-const STATUS_META = {
-  received: { label: "🔔 New", cls: "received" },
-  // "Preparing" is the ONE word for this status on every screen a guest or a manager sees — the
-  // floor tile (built by the database), this pill, the progress legend and the dish badge. Only
-  // the KITCHEN board says "Cooking", deliberately: it is the cook's own word on the cook's own
-  // screen. Don't change one of these without the others (T15 sweep, 2026-08-05).
-  preparing: { label: "👨‍🍳 Preparing", cls: "preparing" },
-  served: { label: "✓ Served", cls: "served" },
-  cancelled: { label: "✕ Cancelled", cls: "cancelled" },
-};
-// STATUS_RANK: a sort order so the Orders list shows New first, then Preparing, etc.
-const STATUS_RANK = { received: 0, preparing: 1, served: 2, cancelled: 3 };
+// STATUS_META and STATUS_RANK lived here and were DELETED on 2026-09-03 (sweep #8 T6): both were
+// declared and mentioned nowhere else in this file or any other.
+//
+// STATUS_META was the badge label + CSS class per order status. The bill cards have built their own
+// pill for a long time (see mergedOrderCardHtml: `anyReceived ? "New order" : ...` with
+// `ord-pill ${cls}`), so this map coloured and labelled nothing. It mattered that it went, rather
+// than sitting quietly: its comment carried a real cross-panel RULE — "Preparing" is the one word
+// every screen but the kitchen board uses — attached to a map nothing read. A person sent here to
+// change that wording would have changed it, seen no difference anywhere, and had no way to tell
+// whether the rule was wrong or their edit was. The rule itself is true and still lives where it is
+// enforced: verify:manager-behaviour and the ledger's own five-status-word checks compare the
+// panels' literals directly.
+//
+// STATUS_RANK sorted the old Orders list New-first. That list is grouped by table number now
+// (ordersLiveHtml sorts by table_number, numeric), so there was nothing to rank.
 
 // itemDetailLine: the small sub-line under a dish showing EVERYTHING the guest
 // chose — picked options ("Large · Oat milk · Extra shot"), removed/allergen
@@ -3623,9 +3654,29 @@ function ordersPreviousHtml(today, previous) {
  *  (No backticks in a block comment in this file: the panel's stylesheet is injected through a
  *  template literal, so one would END it and take the panel down. verify:ui guards that.) */
 function billsCapped() {
+  // IT MUST COUNT THE FIELD THE READ ACTUALLY RETURNS (sweep #8 T6, 2026-09-03).
+  // This asked `state.billsRec.today` and `.previous`, and the bills read has never carried either:
+  // loadBillsRecord stores { rows, parcels, reach, at } (the route answers { rows, parcels, reach }).
+  // Both were therefore always undefined, the sum was always 0, and this function always answered
+  // "no". Measured on the real panel: a window forced to a full 500 rows still returned false.
+  //
+  // WHAT THAT COST. This is the ONE thing that decides whether a search asks the server for help
+  // (its only caller is the Previous-bills search box), so the whole `type=any` branch written for
+  // exactly this case in app/api/editor/[...path]/route.ts was unreachable. On a day past the
+  // route's 500-row cap, a manager searching for a bill that had aged out of the window was told
+  // "Nothing matches" and the server was never asked; the sentence explaining how far the record
+  // reaches could not appear either.
+  //
+  // `rows` is the dine-in window and `parcels` rides in the same read under the same bound, so a
+  // day whose two together fill it is a day memory may not hold whole.
   const r = state.billsRec || {};
-  return (Array.isArray(r.today) ? r.today.length : 0) + (Array.isArray(r.previous) ? r.previous.length : 0) >= 500;
+  const rows = Array.isArray(r.rows) ? r.rows.length : 0;
+  const parcels = Array.isArray(r.parcels) ? r.parcels.length : 0;
+  return rows + parcels >= BILLS_WINDOW_CAP;
 }
+// The route's own bound on the bills window (`.limit(billsMode ? 500 : 200)`). Named here so the
+// number has one home and the comparison above reads as what it is.
+const BILLS_WINDOW_CAP = 500;
 
 // ════════════════════════════════════════════════════════════════════════════════════════════
 // ONE LINE PER BILL — the left column of the owner's chosen design (2026-08-22).
@@ -4378,6 +4429,12 @@ async function restoreBill(orders) {
       // every try in this function, so a successful restore ended with no sentence at all: the
       // bill came back on the floor and the person was told nothing, which is the one thing
       // this codebase does not allow a tap to do.
+      // FOUND TWICE, INDEPENDENTLY, IN THE SAME SWEEP (2026-09-03): terminal 7 by reading this
+      // function, terminal 6 by running ESLint's no-undef over every panel script and then driving
+      // it on the real panel with api() stubbed — the PATCH goes out, the bill IS restored, and
+      // zero toasts appear. Same fix from both sides, so the code below is one version, not two.
+      // verify:panel-scope now runs that no-undef pass on every change, which is what makes a third
+      // one of these impossible to ship quietly.
       anyQueued = wasQueued(await api("PATCH", "/orders/" + o.id, patch)) || anyQueued;
       if (patch.archived === false) o.archived = false;
       if (patch.status) o.status = patch.status;
@@ -4389,6 +4446,9 @@ async function restoreBill(orders) {
   }
   renderEditor();
   if (failCount) toast(`Restored ${okCount} of ${okCount + failCount} orders — ${failCount} failed, please retry`, "err");
+  // A restore where every order was already on the floor changed nothing, and says so rather
+  // than claiming success (sweep #8 T6).
+  else if (!okCount) toast("Nothing on this bill needed restoring.", "ok");
   else okToast(anyQueued ? { queued: true } : null, "Bill restored to the live floor");
 }
 
@@ -5904,7 +5964,11 @@ async function loadDashboard(useCache) {
     const chTotal = chRows.reduce((a, c) => a + c.rev, 0);
     document.getElementById("chanCenter").innerHTML = `<b>${inr(chTotal)}</b><small>${esc(rangeLabel)}</small>`;
     document.getElementById("chanLegend").innerHTML = chRows.map((c) => `
-      <div class="pay-row togglable" data-ch="${c.k}">
+      ${""/* No data-ch here any more (sweep #8 T6, 2026-09-03): it was written and never read.
+             The legend's rows are wired by their INDEX below, matched to the chart's own dataset
+             order, so the channel key on the element was a second, unused way of saying which row
+             this is -- and two ways of naming the same thing is how they drift apart. */}
+      <div class="pay-row togglable">
         <span class="dot" style="background:${c.color}"></span>
         <span class="m">${esc(c.name)}</span><span class="amt">${inr(c.rev)}</span>
         <span class="meta">${pctOf(c.rev, chTotal)}% · ${c.count} order${c.count === 1 ? "" : "s"}${c.count ? ` · avg ${inr(c.rev / c.count)}` : ""}</span>
@@ -6088,7 +6152,10 @@ function billPrintedBefore(sess, os) {
 // data-bill-print-btn is what lets the label flip the instant paper comes out, without a
 // re-render that would rebuild the card under the finger that just tapped it.
 function billPrintLabel(sess, os, suffix) {
-  return `<span data-bill-print-btn>🖨 ${billPrintedBefore(sess, os) ? "Reprint" : "Print"}${suffix ? " " + suffix : ""}</span>`;
+  // WHICH bill this label is about, so markBillPrintedLocally relabels this button and no other
+  // (see its note). Absent for a bill with no session yet, which is right: nothing can relabel it.
+  const _lblSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean) || "";
+  return `<span data-bill-print-btn${_lblSid ? ` data-bill-print-sid="${esc(_lblSid)}"` : ""}>🖨 ${billPrintedBefore(sess, os) ? "Reprint" : "Print"}${suffix ? " " + suffix : ""}</span>`;
 }
 // First print just happened → say so on the buttons already on screen, and on the rows this
 // panel is holding, so nothing waits for the next refresh to catch up.
@@ -6098,7 +6165,13 @@ function markBillPrintedLocally(sid) {
   const at = new Date().toISOString();
   (state.data.orders || []).forEach((o) => { if (o && o.session_id === sid && !o.bill_printed_at) o.bill_printed_at = at; });
   ((state.board && state.board.sessions) || []).forEach((s) => { if (s && s.id === sid && !s.bill_printed_at) s.bill_printed_at = at; });
-  document.querySelectorAll("[data-bill-print-btn]").forEach((b) => {
+  // ONLY THIS BILL'S BUTTON (sweep #8 T6, 2026-09-03). This relabelled EVERY print button on the
+  // page, and Bills -> Live draws one per running table: printing T5's bill turned T9's untouched
+  // "Print" into "Reprint" until the next repaint. "Reprint" is a claim about one specific bill
+  // ("paper for this one already exists"), so saying it over a bill nobody has printed is simply
+  // false -- and it is the button a manager reads to decide whether the guest already has a copy.
+  // The buttons carry the session they belong to now, so the relabel can find its own.
+  document.querySelectorAll(`[data-bill-print-btn][data-bill-print-sid="${CSS.escape(sid)}"]`).forEach((b) => {
     // \b before Print, so a button that already reads "Reprint" is left alone.
     b.textContent = b.textContent.replace(/\bPrint\b/, "Reprint");
   });
@@ -7832,11 +7905,22 @@ async function removeRecord() {
     await loadAll();
     renderEditor();
     // Undo — re-creates the record from the snapshot (safety net for a misclick).
+    //
+    // THE RESTORE'S OWN ANSWER, NOT THE DELETE'S (sweep #8 T6, 2026-09-03). The toast below used to
+    // be handed `_wq`, which is what the DELETE returned — so deleting while online and then pressing
+    // Undo after the signal dropped said a plain "Restored ✓" over a write that had only been saved on
+    // this device. The queue line exists precisely so nobody walks away believing a saved write is a
+    // sent one, and it has to be asked of the write it is describing.
+    //
+    // The note lives HERE, above the closure, and not between the payload and the call: the
+    // `payload.__create = true` line is what tells verify:clash-coverage this write is exempt (an undo
+    // re-creating a deleted row has no concurrent edit to overwrite), and that guard reads only the
+    // three lines either side of the call. Comments pushed in between made a covered write look bare.
     const undoRec = async () => {
       try {
         const payload = { ...restored }; delete payload.created_at; delete payload.updated_at; payload.__create = true;
-        await api("POST", "/" + kind, payload);
-        okToast(_wq, "Restored ✓");
+        const _undoQ = await api("POST", "/" + kind, payload);
+        okToast(_undoQ, "Restored ✓");
         if (state.tab === kind) { await loadAll(); renderList(); renderEditor(); }
       } catch (e) { toast("Couldn't undo: " + e.message, "err"); }
     };
@@ -11107,6 +11191,18 @@ function openDishEditModal(itemId, rerender) {
     const added = [...working].filter((s) => !initial.has(s));    // new avoids → this dish only
     const newItemRemoved = [...new Set([...itemRemoved.filter((s) => !removed.includes(s)), ...added])];
     const newOrderAllergies = orderAllergies.filter((s) => !removed.includes(s));
+    // DECLARED OUT HERE, WHERE THE TOAST READS IT (sweep #8 T6, 2026-09-03).
+    // The identical fault restoreBill carried, in the same file: `const _wq` was declared inside the
+    // `if (note !== ...)` block below and read from outside it, so "Dish updated" threw
+    // "_wq is not defined" EVERY time — the writes had already gone through, the modal had already
+    // closed, and the person editing a guest's allergy note was told nothing at all. Found by running
+    // ESLint's no-undef over this panel, which is what the new verify:panel-scope guard now does on
+    // every change so a third one cannot appear.
+    //
+    // It also has to answer for THREE writes, not one: a save can change the note, the dish's own
+    // avoid-list and the whole order's allergies in one press. If any of them only reached this
+    // device, the whole save is a queued one and the sentence has to say so.
+    let anyQueued = false;
     try {
       // Each save carries the value this modal OPENED with. If another device changed the
       // same thing while it was open, the server refuses and says what it holds now, instead

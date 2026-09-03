@@ -163,6 +163,50 @@ for (const [needle, what] of [
   }
 }
 
+// ── 6b · THE MANAGER PANEL ITSELF, WHICH THIS GUARD USED TO WALK STRAIGHT PAST ──────────
+// Block 1 above reads `readdirSync(public/panels)` — the TOP LEVEL only — and block 6 names
+// editor/inventory.js by hand. Nothing named editor/app.js, the biggest panel file in the repo at
+// ~18,600 lines and the whole of the manager panel. So on 2026-09-03 it still held the last two bare
+// browser dialogs in the folder, both in Settings → Printing: prompt("What should this computer be
+// called?") and confirm("Unlink …"). Both call sites returned on a falsy answer, which on a kiosk
+// browser, an embedded webview, or Chrome after "prevent this page from creating additional dialogs"
+// is EVERY time and with nothing shown — the silent vanished tap this guard exists to stop.
+//
+// It is checked as its own block rather than by folding it into block 1, because this file has its
+// own themed pair (confirmDialog / promptDialog, defined at the top of it) rather than LFH_ASK, and
+// a guard that demanded LFH_ASK here would be asking for the wrong thing.
+{
+  const app = existsSync(join(DIR, "editor/app.js")) ? strip(readFileSync(join(DIR, "editor/app.js"), "utf8")) : "";
+  if (!app) console.log("  ok   editor/app.js not in this checkout — skipping");
+  else {
+    // window.prompt / window.confirm are spelled out where they are a deliberate last resort
+    // elsewhere in this repo; neither is used here, and a BARE one is the fault.
+    const bare = [...app.replace(/window\.(prompt|confirm|alert)/g, "SAFE_$1")
+      .matchAll(/(?:^|[^.\w$])(alert|confirm|prompt)\s*\(/g)].map((m) => m[1]);
+    if (bare.length === 0) ok("editor/app.js raises no bare browser dialog");
+    else bad(`editor/app.js raises ${bare.length} bare browser dialog(s)`,
+      `${bare.join(", ")} — on a device that hides them prompt() answers null and confirm() answers false, and the call sites here return on a falsy answer: the tap vanishes`);
+    // …and its own replacements are really there, so the fix cannot be "delete the question".
+    for (const [re, what] of [
+      [/function confirmDialog\(/, "it has its own yes/no card"],
+      [/function promptDialog\(/, "…and its own card for typing an answer"],
+      [/wrap\.__lfhClose = \(\) => close\(false\)/, "the yes/no card is answered NO by the phone's BACK, never yes"],
+      [/wrap\.__lfhClose = \(\) => close\(null\)/, "…and the typing card answers \"nothing typed\", never an empty string"],
+    ]) {
+      if (re.test(app)) ok(`editor/app.js: ${what}`);
+      else bad(`editor/app.js: ${what} — not found`, String(re).slice(0, 70));
+    }
+    // The two that were fixed on 2026-09-03, named so a revert is visible rather than inferred.
+    for (const [re, what] of [
+      [/await promptDialog\("What should this computer be called\?"/, "renaming the printing computer asks in the panel"],
+      [/await confirmDialog\(\s*\n?\s*`Unlink /, "…and unlinking it does too"],
+    ]) {
+      if (re.test(app)) ok(`editor/app.js: ${what}`);
+      else bad(`editor/app.js: ${what} — not found`, "Settings → Printing went back to a browser dialog");
+    }
+  }
+}
+
 // ── 7 · the card that asks for a sentence ───────────────────────────────────────────────────
 for (const [needle, what] of [
   [/text:\s*askText/, "LFH_ASK can ask for a REASON, not only yes/no"],
