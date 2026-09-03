@@ -54,7 +54,7 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
   return function profileGet() {
     if (inflight) return inflight;
     inflight = (async function () {
-      var r = await fetch("/api/panel-profile", { cache: "no-store", signal: window.LFH_PANEL_DEADLINE() });
+      var r = await fetch("/api/panel-profile", { cache: "no-store", signal: window.LFH_PANEL_DEADLINE ? window.LFH_PANEL_DEADLINE() : undefined });
       var j = await r.json().catch(function () { return {}; });
       return { ok: r.ok, status: r.status, json: j };
     })();
@@ -94,7 +94,7 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   }
   var headers = { "Content-Type": "application/json" };
   if (expect) headers["X-LFH-Expect"] = JSON.stringify(expect);
-  var r = await fetch("/api/panel-profile", { method: "POST", headers: headers, body: JSON.stringify(body), signal: window.LFH_PANEL_DEADLINE() });
+  var r = await fetch("/api/panel-profile", { method: "POST", headers: headers, body: JSON.stringify(body), signal: window.LFH_PANEL_DEADLINE ? window.LFH_PANEL_DEADLINE() : undefined });
   var d = await r.json().catch(function () { return {}; });
   if (!r.ok) { var e = new Error(d.error || "Couldn't save."); e.status = r.status; e.data = d; throw e; }
   return { ok: true, json: d, queued: false };
