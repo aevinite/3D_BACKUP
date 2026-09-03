@@ -4057,39 +4057,35 @@ html[data-theme="light"] .badge-hidden{ color:#b45309; }
 .ftile.tag-vip    { --tagc: var(--tag-vip); border-color: var(--gold); box-shadow: 0 0 20px color-mix(in srgb, var(--tag-vip) 30%, transparent); }
 .ftile.tag-family { --tagc: var(--tag-family); }
 .ftile.tag-guest  { --tagc: var(--tag-guest); }
-/* ── THE TAG IS A WORD ALONG THE BOTTOM, NOT A BANNER ACROSS THE CORNER (owner, 2026-09-03) ────
-   His words: "make it red colour as it's theme colour is red and at bottom below card can write
-   family in red same theme".
-   WHY IT HAD TO MOVE, measured on the running panel at four sizes: the rotated banner sat at
-   `top:9px; right:-32px` — exactly where the seat badge lives — and covered it on EVERY screen,
-   not just a phone (laptop 1440: 22x18px of overlap · iPad: 21x17 · phone 390: 22x18 · A35 360:
-   20x16). So a table marked VIP, Family or Guest silently lost the one thing a manager seating a
-   party of six needs: how many fit there.
-   A word in the tag's own colour says the same thing, keeps the corner free, and still satisfies
-   "never colour alone" — the WORD is the marker, the colour reinforces it. The 2px coloured
-   border, the tint and the glow are all untouched, so a tagged table still reads across a room. */
-.ft-ribbon { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
-  text-align: center; background: none; box-shadow: none; transform: none;
-  /* The tag colour pulled toward the theme's own ink, so one rule reads in both skins. */
-  color: color-mix(in srgb, var(--tagc) 62%, var(--text));
-  font-size: clamp(8.5px, 8cqw, 12px); font-weight: 900; letter-spacing: .08em;
-  padding: clamp(2px, 2.5cqw, 5px) 4px; text-transform: uppercase; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
-  /* A hairline in the tag colour, so the word reads as a label belonging to this tile rather than
-     as free-floating text sitting on the pattern behind it. */
-  border-top: 1px solid color-mix(in srgb, var(--tagc) 45%, transparent);
-  /* A SOLID band, not a see-through one. The tile's tag tint is a repeating diagonal stripe, so a
-     transparent band left the word sitting on alternating light and dark bars — measured worst-case
-     contrast 3.1 (Family, light) and 2.1 (VIP, light), both under the 4.5 this project holds text
-     to. Mixing the tag colour into the panel surface gives one predictable backdrop, so the word
-     reads the same over every stripe. */
-  background: color-mix(in srgb, var(--tagc) 15%, var(--panel)); }
-/* VIP is the one tag whose own colour is too light to read as text on the tinted surface, so it
-   borrows the gold the rest of this panel uses for emphasis. Guest is metallic and needs the ink
-   the theme is NOT — dark ink in dark mode's light-metal tag, and the reverse in light mode. */
-.ftile.tag-vip .ft-ribbon { color: color-mix(in srgb, var(--gold-strong) 62%, var(--text));
-  border-top-color: color-mix(in srgb, var(--gold) 55%, transparent);
-  background: color-mix(in srgb, var(--gold) 15%, var(--panel)); }
+/* ── THE CORNER RIBBON, AS IT ALWAYS WAS (owner, 2026-09-03: "i told you old style") ──────────
+   For a few hours this was a word along the bottom of the card, built from his earlier sentence
+   ("at bottom below card can write family in red"). His later word — "keep family and like previous
+   one", then "i told you old style so make sure of that" — replaces it, so the rotated corner
+   banner is back exactly as it was: same position, same rotation, same padding, same colours.
+   WHAT DOES NOT COME BACK is the banner sitting on top of the seat count, which is what he objected
+   to first ("if one is set to family it cover everything"). Measured before: the ribbon overlapped
+   the seat badge on EVERY screen — laptop 22x18px, iPad 21x17, phone 22x18, A35 20x16. The fix is
+   to move the badge, not the banner: on a TAGGED tile only, the seat count sits at the BOTTOM,
+   where a corner banner cannot reach it. An untagged tile keeps it top-right, unchanged. */
+.ft-ribbon { position: absolute; top: 9px; right: -32px; transform: rotate(38deg); z-index: 2;
+  background: var(--tagc); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: .6px;
+  padding: 3px 36px; text-transform: uppercase; box-shadow: 0 2px 8px rgba(0,0,0,.45); white-space: nowrap; }
+.ftile.tag-vip .ft-ribbon { color: #2a1d0c; background: linear-gradient(90deg, var(--gold-strong), #f2d29a); }
+/* Guest ribbon — DARK default = silver/white metallic (pops on the dark surface). */
+.ftile.tag-guest .ft-ribbon { color: #1c2230; background: linear-gradient(135deg, #ffffff, #c9ced6 52%, #ffffff); border: 1px solid #e5eaf2; }
+/* A TAGGED TILE KEEPS ITS SEAT COUNT, AT THE BOTTOM. The badge normally lives top-right, which is
+   exactly where the banner is. On a tagged tile it drops to the bottom-right, beside the state word
+   (which sits bottom-LEFT), so the two share one line and the tile gains no height. */
+/* THE BADGE MOVES NEXT TO THE NUMBER, out of the corner the banner crosses. Two simpler-looking
+   fixes were tried and rejected by measurement first: absolutely positioning it at the tile's
+   bottom does not work, because `.ft-top` is itself positioned (it has to be, to paint above the
+   tag tint) and so becomes the containing block — `bottom` measured from the top ROW and the badge
+   never moved; and pushing the tint behind the content with `z-index: -1` DID free the badge, but
+   put the tint behind the tile's own background, so the diagonal stripes disappeared altogether.
+   The top row is a flex line with the number left and the badge pushed right. Stop pushing it: it
+   sits beside the number, on the same line, well clear of the far corner. Nothing is repositioned,
+   nothing is re-layered, and the tint, the border and the glow are all untouched. */
+.ftile.ft-tag .ft-top { justify-content: flex-start; gap: clamp(5px, 5cqw, 9px); }
 .ft-tagbadge { position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
   margin: 4px 0 2px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
   max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -4126,20 +4122,6 @@ html[data-theme="light"] .ftile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb
 html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in srgb, #6d28d9 18%, #fff); color: #5b21b6; border-color: #6d28d9; }
 /* keep the tile's inner content above the tint overlay */
 .ftile.ft-tag .ft-top, .ftile.ft-tag .ft-badges, .ftile.ft-tag .ft-status, .ftile.ft-tag .ft-act, .ftile.ft-tag .ft-strip, .ftile.ft-tag .ft-line { position: relative; z-index: 1; }
-/* The tag word now occupies the bottom edge, so everything the tile stacks upward is given that
-   much room back. Without this the state word ("Free", "Preparing") and the tag word would sit on
-   the same pixels — swapping one collision for another, which is not a fix. */
-.ftile.ft-tag { padding-bottom: calc(clamp(2px, 2.5cqw, 5px) * 2 + clamp(8.5px, 8cqw, 12px) + 2px); }
-/* A DENSE FLOOR GETS A THINNER BAND. Measured at 4 tiles per row on a 390px phone (86px tiles): a
-   tagged tile that is ALSO busy — a table with food cooking and a Family mark — overflowed its own
-   square by 3-8px, because the band's reserved height plus the state word plus the take-order
-   button no longer fit. The band is the newest thing on the tile, so the band gives way: at small
-   tile widths it drops to a hairline of text with almost no padding, which still reads (it is the
-   only thing on that line) and costs the tile nothing. */
-@container (max-width: 104px) {
-  .ft-ribbon { font-size: clamp(7.5px, 8.5cqw, 10px); letter-spacing: .04em; padding: 1px 3px; }
-  .ftile.ft-tag { padding-bottom: calc(clamp(7.5px, 8.5cqw, 10px) + 5px); }
-}
 
 /* the "Mark table" popup options */
 .tag-opt { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; margin-bottom: 8px;
