@@ -384,7 +384,15 @@ has("maint.js", /AbortSignal\.timeout/, "the drawer's deadline no longer uses th
       }
       calls.push(src.slice(i, j + 1));
     }
-    const bare = calls.filter((c) => !/signal:\s*deadline\(/.test(c));
+    // EITHER SPELLING OF THE ONE HELPER (sweep #8 T7, 2026-09-03). The two shared helpers at the
+    // TOP of this file cannot see the drawer's local `deadline` — that is a real bug this guard
+    // was BLIND to: it matched the WORDS `signal: deadline(` and was perfectly happy with two
+    // calls where that name did not exist in scope and threw ReferenceError on every use. They now
+    // call the published `window.LFH_PANEL_DEADLINE()`, which is the same single definition. Both
+    // spellings count as a deadline; a call with neither is still the fault this check is for.
+    // (`verify:panel-names` is the guard that catches the scope half — this one only ever asked
+    // whether a ceiling was asked for, not whether the thing asking existed.)
+    const bare = calls.filter((c) => !/signal:\s*(deadline\(|window\.LFH_PANEL_DEADLINE\()/.test(c));
     if (bare.length) fails.push(`maint.js: ${bare.length} of ${calls.length} request(s) have no deadline — a server that hangs leaves the person watching a control that never resolves: ${bare[0].replace(/\s+/g, " ").slice(0, 80)}`);
   }
 }
