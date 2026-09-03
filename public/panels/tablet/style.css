@@ -74,13 +74,33 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 @media (max-width: 430px) {
   .qo-top .qo-word { display: none; }
   .qo-top { min-width: 44px; justify-content: center; padding: 10px; font-size: 17px; }
-  .brand .rest-name { font-size: 12.5px; padding: 2px 8px; }
+  /* THE LAST 8px, AND WHY IT COMES OFF THE CHEVRON (2026-09-03). On a 360px A35 the restaurant
+     name still needed 132px in 124px after the pill gave up its resting wording. What is left in
+     that pill is: the coloured bars (the whole point of it), and this 10px 50%-opacity ˅ that says
+     "tappable". The bars are the signal, the chevron is the decoration around it, and this file's
+     own rule is that decoration goes first — so the ˅ drops and the bars stay. The pill is still a
+     full-height button, still `aria-haspopup="dialog"`, and its aria-label still ends "Tap for
+     details", so nothing about reaching the detail popover changes for anyone.
+     Worth 17px, not 10: it is a flex item, so its `gap` leaves with it. That takes the name from
+     8px short to 9px spare — a margin, rather than the exact fit that gaps-and-padding tuning
+     would have given, which is what let a 9px cascade slip go unnoticed here in the first place. */
+  .top-actions .lfh-conn .lfh-conn-chev { display: none; }
 }
 /* Which restaurant this panel is scoped to (multi-tenant). Truncates so it can
    never push the top-bar actions off-screen at narrow (~390px) widths. Hidden
    when empty (name not loaded yet). */
 .brand .rest-name { display: inline-block; vertical-align: middle; max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; margin-left: 8px; }
 .brand .rest-name:empty { display: none; }
+/* THE PHONE'S SMALLER NAME PILL — AND WHY IT SITS HERE, BELOW THE BASE RULE (2026-09-03).
+   These two declarations lived in the `@media (max-width: 430px)` block ABOVE, which reads as
+   though it works and did nothing at all: the media query and the base rule have the SAME
+   specificity (0,2,0), so the plain `.brand .rest-name` that followed it simply won on source
+   order, and the phone kept the 13px font and the 10px padding. It stayed invisible because the
+   symptom is only ~9px of width, and the name was being truncated for other reasons too. A media
+   query is not a specificity boost — an override has to come after what it overrides. */
+@media (max-width: 430px) {
+  .brand .rest-name { font-size: 12.5px; padding: 2px 8px; }
+}
 /* On a phone the theme toggle moves INTO the ☰ menu, leaving only ⚡ Quick order, the
    connection light and 🚩 on the bar so a long restaurant name has room. #themeToggle stays
    in the DOM (just hidden) because the drawer's "Theme" button proxies a .click() to it.
@@ -905,9 +925,20 @@ html[data-theme="light"] .dw-btn.danger { border-color: #b91c1c; color: #b91c1c;
      restaurant's name needs, and on a phone a healthy number tells a waiter nothing. Only
      that number hides: the coloured bars stay, and so does the WORDING — which the shared
      badge only ever prints for a problem ("Reconnecting", "Offline"). Never hide a warning,
-     only the decoration around it. */
+     only the decoration around it.
+     -- AND THE SENTENCE ABOVE WAS WRONG ABOUT THE WORDING (measured 2026-09-03) --------------
+     The badge prints "Live" through that same wording span whenever it has no fresh latency to
+     show, which on this panel is most of the time -- so 25px of a 360px top bar said "Live" while
+     the restaurant's own name was cut to "little Fren...", the one thing this bar may never lose.
+     The two hidden classes below could not catch it either: connbadge.js reuses ONE span for both
+     jobs and swaps its class -- `.lfh-conn-ms` with a number, `.lfh-conn-txt` without -- so hiding
+     `.lfh-conn-ms` hides the pill's wording exactly when there IS a number, and never otherwise.
+     The fix keeps the original principle honestly: the shared badge now marks the resting healthy
+     view (`data-rest="1"`, set in connbadge.js's render), and ONLY that view's wording drops.
+     "Offline", "Reconnecting" and "Connecting..." all still print their words, at every width. */
   .top-actions .lfh-conn { padding: 5px 7px; }
   .top-actions .lfh-conn-ms, .top-actions .lfh-conn-unit { display: none !important; }
+  .top-actions .lfh-conn[data-rest="1"] .lfh-conn-txt { display: none !important; }
   .qo-top { padding: 9px 11px; font-size: 12.5px; }
   /* Every pixel above the tiles is floor space: the filter chips and the legend each become
      ONE horizontally-scrollable line instead of wrapping to two rows (which pushed the first

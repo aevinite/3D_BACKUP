@@ -55,7 +55,12 @@
     var fresh = lat.at > 0 && (Date.now() - lat.at) < LATENCY_FRESH_MS;
     var tier = fresh ? latencyTier(lat.ms) : null;
     if (tier) return { level: level, color: tier.color, text: tier.text, tint: tier.tint, bars: tier.bars, label: tier.label, ms: lat.ms, pulse: false };
-    return { level: level, color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)", bars: 3, label: "Live", ms: null, pulse: false };
+    // `rest: true` = THE RESTING HEALTHY STATE, and the only view whose wording a panel may drop.
+    // A narrow panel needs the room this pill takes (the waiter tablet's top bar: see its
+    // stylesheet's [data-rest="1"] rule), but "Offline", "Reconnecting" and "Connecting…" are
+    // warnings and must never be the thing that hides. Naming it HERE rather than letting each
+    // panel test the label keeps that judgement in one place — and a CSS rule cannot read text.
+    return { level: level, rest: true, color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)", bars: 3, label: "Live", ms: null, pulse: false };
   }
   function statusLine(v) {
     if (v.level === "offline") return "No internet connection";
@@ -102,6 +107,12 @@
       // lfh_theme=dark + aevidine_skin=light combination that exposed this.
       'html [data-skin="light"] .lfh-conn-txt,html [data-skin="light"] .lfh-conn-ms{color:var(--ink-light)!important}',
       ".lfh-conn-n{font-weight:800;opacity:.9}",
+      // NOTHING TO SAY MUST COST NOTHING. This span is empty whenever the outbox is clear, but it
+      // stayed a flex item, so the pill kept paying the 7px `gap` on either side of a span with no
+      // width — 7px of a phone's top bar spent on the absence of a message. (Measured 2026-09-03
+      // while the waiter tablet's restaurant name was being truncated for want of exactly this
+      // kind of pixel.) Same `:empty` guard the panels already use on the restaurant-name pill.
+      ".lfh-conn-n:empty{display:none}",
       ".lfh-conn-n.warn{color:#ef4444}",
       ".lfh-conn-chev{opacity:.5;flex:0 0 auto}",
       /* popover */
@@ -238,6 +249,8 @@
     var v = computeView();
     badge.style.background = v.tint;
     badge.classList.toggle("is-pulse", !!v.pulse);
+    // Read by a panel that has to choose between this pill's wording and its own content.
+    badge.setAttribute("data-rest", v.rest ? "1" : "0");
     // bars
     var newBars = barsHtml(v.bars, v.color, false);
     badge.replaceChild(newBars, barsEl); barsEl = newBars;
