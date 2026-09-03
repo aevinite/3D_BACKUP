@@ -77,7 +77,8 @@ export function row(id, label, fn) { rows.push({ id, label, fn }); }
 
 export function runRows({ only } = {}) {
   const want = only ? new Set(only) : null;
-  let pass = 0, fail = 0;
+  let pass = 0, fail = 0, skip = 0;
+  const skipped = [];
   const failures = [];
   const seen = new Set();
   for (const r of rows) {
@@ -87,9 +88,13 @@ export function runRows({ only } = {}) {
     let out;
     try { out = r.fn(); } catch (e) { out = "threw: " + (e && e.message); }
     if (out === true) { pass++; }
+    // ⏭ IS AN HONEST RESULT, NOT A FAILURE (sweep rules §8). A predicate that returns a string
+    // starting with ⏭ says "this cannot be settled by reading a file, and here is why" — counting
+    // it green would be a lie and counting it red would train people to ignore a red suite.
+    else if (typeof out === "string" && out.startsWith("⏭")) { skip++; skipped.push({ id: r.id, label: r.label, why: out.slice(1).trim() }); }
     else { fail++; failures.push({ id: r.id, label: r.label, why: typeof out === "string" ? out : "returned " + out }); }
   }
-  return { pass, fail, failures, total: rows.length };
+  return { pass, fail, skip, failures, skipped, total: rows.length };
 }
 
 /** Emit every row of the last runRows() as a ledger line (for --ledger). */
@@ -97,15 +102,17 @@ export function ledgerLines(how) {
   return rows.map((r) => {
     let out; try { out = r.fn(); } catch (e) { out = "threw: " + (e && e.message); }
     const ok = out === true;
-    const note = ok ? "mechanical, re-runnable by id" : String(out).replace(/\|/g, "\\|").slice(0, 150);
-    return `| ${r.id} | ${r.label.replace(/\|/g, "\\|")} | ${how} | ${ok ? "✅" : "❌"} | ${note} |`;
+    const isSkip = typeof out === "string" && out.startsWith("⏭");
+    const note = ok ? "mechanical, re-runnable by id" : String(out).replace(/⏭\s*/, "").replace(/\|/g, "\\|").slice(0, 150);
+    return `| ${r.id} | ${r.label.replace(/\|/g, "\\|")} | ${how} | ${ok ? "✅" : isSkip ? "⏭" : "❌"} | ${note} |`;
   });
 }
 
 export function report(title, res) {
   console.log(`\n${title}`);
-  console.log(`  ${res.pass} passed · ${res.fail} failed  (of ${res.total} rows in this guard)`);
+  console.log(`  ${res.pass} passed · ${res.fail} failed${res.skip ? ` · ${res.skip} skipped` : ""}  (of ${res.total} rows in this guard)`);
   for (const f of res.failures) console.log(`  ✗ ${f.id}  ${f.label}\n      → ${f.why}`);
+  if (process.argv.includes("--skips")) for (const s of res.skipped) console.log(`  ⏭ ${s.id}  ${s.label}\n      → ${s.why}`);
   return res.fail === 0;
 }
 

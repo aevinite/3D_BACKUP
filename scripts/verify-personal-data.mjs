@@ -94,7 +94,15 @@ for (const t of declared.keys()) {
 
 // ── the route must USE the list, not its own memory ──────────────────────────────────────────────
 const route = readFileSync(join(root, "app/api/owner/customers/route.ts"), "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1");
+// ⚠️ LINE COMMENTS FIRST, THEN BLOCK COMMENTS — and the order is the whole bug (T9, sweep #8,
+// 2026-09-03). Stripping `/*…*/` FIRST means a `/*` that appears inside a `//` line opens a block
+// comment that never closes, and everything up to the next `*/` vanishes. Measured on the files
+// this guard reads: 341 lines of public/panels/editor/app.js, 249 of app/api/editor/route.ts and
+// 97 of the waiter tablet were INVISIBLE to it — every check grepping those regions was asserting
+// nothing while printing ok. The culprit here is one real comment: `// This read `catch { /* tip
+// is non-critical */ }`…`. This is the same trap the project note "Strip line comments BEFORE
+// block comments" records after it hid 190 lines from two other guards. Do not swap these back.
+  .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
 if (/from "@\/lib\/personalData"/.test(route)) ok("the erase is driven by the declared list");
 else fail("app/api/owner/customers no longer imports lib/personalData — it is back to a hand-typed list of tables");
 if (/ERASABLE/.test(route)) ok("…and walks ERASABLE rather than naming tables inline");

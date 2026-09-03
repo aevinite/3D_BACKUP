@@ -35,7 +35,15 @@ const fail = (m) => { console.log("  FAIL " + m); failed++; };
 // JUDGE THE CODE, NOT THE NOTE ABOUT IT. Every "this is gone" check below would otherwise match
 // the obituary comment explaining WHY it is gone — which is exactly how this file went red the
 // minute the backup printer was removed. Same stripper verify-print-helper.mjs uses.
-const codeOnly = (src) => String(src).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "");
+// ⚠️ LINE COMMENTS FIRST, THEN BLOCK COMMENTS — and the order is the whole bug (T9, sweep #8,
+// 2026-09-03). Stripping `/*…*/` FIRST means a `/*` that appears inside a `//` line opens a block
+// comment that never closes, and everything up to the next `*/` vanishes. Measured on the files
+// this guard reads: 341 lines of public/panels/editor/app.js, 249 of app/api/editor/route.ts and
+// 97 of the waiter tablet were INVISIBLE to it — every check grepping those regions was asserting
+// nothing while printing ok. The culprit here is one real comment: `// This read `catch { /* tip
+// is non-critical */ }`…`. This is the same trap the project note "Strip line comments BEFORE
+// block comments" records after it hid 190 lines from two other guards. Do not swap these back.
+const codeOnly = (src) => String(src).replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
 
 const check = (cond, good, bad) => (cond ? pass(good) : fail(bad));
 
@@ -185,7 +193,7 @@ check(/backupPanel/.test(mig369) && /lfh_already_applied/.test(mig369),
     ["the owner settings route", read("app/api/owner/settings/route.ts")],
     ["the Printing board", read("app/aevinite/printing/page.tsx")],
   ];
-  const strip = (t) => String(t).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const strip = (t) => String(t).replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
   const guilty = readers.filter(([, t]) => /kot_print_target/.test(strip(t))).map(([n]) => n);
   check(guilty.length === 0,
     "…and no code reads or writes it any more — the route is the only answer",

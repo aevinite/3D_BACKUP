@@ -33,7 +33,43 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P99983`.** *(T10 of sweep #8 took `P99951`–`P99982` — THIRTY-TWO ids, not 500 — on
+**Next free ID: `P100483`.** *(T9 of sweep #8 took `P99983`–`P100482` on 2026-09-03 for a THIRD freshly planned 500, on the owner's word after items 10/15/16 were built. **These are six-digit ids, and they are only possible because item 15 widened the format earlier in this same session** — `P99999` was the last id the old scheme could express, and a six-digit one would not have been refused, it would have been SILENTLY IGNORED. `verify:ledger-index` now counts all 500 of them.
+
+**Superseded mark, kept for the record:** *(T10 of sweep #8 took `P99951`–`P99982` — THIRTY-TWO ids, not 500 — on
+2026-09-03, for a SECOND freshly planned 500 after round 1 was merged and deployed. His word:
+*"after making it live and merging plan 500 phases test within your boundaries make sure it cover
+everthing within your boundries and test everything again if any error left"*. Thirty-two and not
+500 because **468 of this terminal's own pre-allocated block are still free** (`P64233`–`P64700`,
+counted against every ledger on disk, not against this line), so the round is 468 + 32 = 500 and
+only the shortfall is claimed here. Taking a fresh 500 from the mark would have been taking ids this
+terminal did not need. Claimed by editing THIS LINE and **pushing it to `main` on its own before a
+single row was written** — the half of the rule this file has recorded six collisions over.*
+
+> ⚠️ **THE FIVE-DIGIT SPACE IS NEARLY FULL, and the next sweep has to decide what to do about it.**
+> Every id in this registry is `P` + exactly five digits, and after this claim there are **17 left**
+> (`P99983`–`P99999`). `verify:ledger-index` matches `^| P[0-9]{5}` — a six-digit id would not be
+> counted, so it would not collide with anything and would not be *protected* from a collision
+> either. Whoever needs the next block: widen the guard's pattern in the same act as taking a
+> six-digit range, or start a second letter (`Q00001`). Do not quietly file a `P100001` and hope.
+
+**Previously: `P99951`.** *(T8 of sweep #8 took `P99921`–`P99950` — THIRTY ids, not 500 — on
+2026-09-03. Its round 2 skipped 13 rows for one honest reason: the Banquet and Inventory modules
+are admin entitlements and both were OFF for this restaurant, and "Rating review" is a manager
+permission the diag manager did not hold, so the tabs were correctly not on screen and
+`/owner/inventory` forwarded to `/owner`. The owner said *"do whats left"*, so the three switches
+were turned on inside one run, the 13 rows were driven properly, and every switch was put back and
+VERIFIED back. Those 13 keep their original ids (`P99466`–`P99472`, `P99567`, `P99568`, `P99576`,
+`P99577`, `P99579`, `P99580`) and were updated in place — never renumbered. This small block is
+only for what the switched-on state made newly checkable: all ten tabs on screen at once for the
+first time, the nav still fitting them, the two module tabs in the phone drawer, and the owner's
+Inventory embed. Claimed by editing this line and pushing it before a row was written; highest id
+actually on disk re-checked in the same breath (`P99915`).)* *(T9 of sweep #8 took `P99801`–`P99920` on 2026-09-03 — 120 ids, not 500, and only what it needed. Round 2 of the kitchen screen is 500 rows; blocks A+B filed 336 in T9's own block (`P63313`–`P63649`), 51 of that block remain (`P63650`–`P63700`), so 113 were short. **This is T9's SECOND attempt at a claim, and the first one is the collision this file keeps warning about:** T9 wrote `P99301`–`P99800` and opened a PR for it, and T8 claimed the same range in the same window and reached `main` first. **T9 renumbered, not T8** — a claim only counts once it is ON `main` — and nothing had to be re-run, because T9 had written zero rows there. Checked against the highest id actually on disk in the same breath: `P98727`.)*
+
+> **THIS IS T9's SECOND RENUMBER TODAY, and the second time the same rule decided it.** T9 first claimed `P99301`–`P99800`; T8 took the same range in the same window and reached `main` first, so T9 moved. T9 then claimed `P99921`–`P100420` and wrote all 500 rows locally — and **T10 claimed `P99951`–`P99982` from the mark and reached `main` first again**, putting 32 ids inside T9's block. **T9 renumbered both times, because a claim only counts once it is ON `main`** — and both times nothing had to be re-run, only relabelled. The lesson this file already records is the one that keeps costing: editing this line is not the claim; PUSHING it is. T9 had the rows ready before the push both times, which is the half it kept getting wrong.
+>
+> One mechanical trap worth naming for whoever renumbers next: a `for (let i = 100367; …)` loop that builds ids as `"P" + i` has no `P` prefix in the source, so a search-and-replace over `P\d{5,6}` misses it. `verify:kitchen`'s own duplicate-id check caught all 44 of those immediately.*
+
+**Previously: `P99983`.** *(T10 of sweep #8 took `P99951`–`P99982` — THIRTY-TWO ids, not 500 — on
 2026-09-03, for a SECOND freshly planned 500 after round 1 was merged and deployed. His word:
 *"after making it live and merging plan 500 phases test within your boundaries make sure it cover
 everthing within your boundries and test everything again if any error left"*. Thirty-two and not

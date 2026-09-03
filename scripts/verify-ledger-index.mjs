@@ -45,7 +45,23 @@ const ledgers = readdirSync(DIR).filter((f) => /^T\d+\.md$/.test(f))
 if (!ledgers.length) { console.error("\n❌ verify:ledger-index — no ledger files at all in " + DIR + "\n"); process.exit(1); }
 
 const cellsOf = (line) => line.split(/(?<!\\)\|/);
-const FIRST_COL_ID = /^\|\s*(P\d{5})\s*\|/;
+// ── FIVE **OR SIX** DIGITS (T9 of sweep #8, 2026-09-03 — the owner picked it as item 15) ───────
+//
+// This file matched a phase id with exactly `P\d{5}` in three places, so `P99999` was the last id
+// the whole scheme could express — and the registry had reached `P99921`, leaving **79**.
+//
+// Running out was not the danger. A six-digit id would not have been REJECTED, it would have been
+// **silently ignored**: `isPhaseRow` would answer false, the row would vanish from `phaseRows`,
+// from the duplicate check, from the registry, and from the row-count snapshot that §5 uses to
+// prove no ledger has lost a row. A sweep would file 500 checks, this guard would go green, and
+// the ids would be handed to somebody else later. That is the one failure mode a ledger cannot
+// survive — the whole point of an id is that it means one check, forever.
+//
+// `{5,6}` keeps every existing id valid (they are all five digits) and costs nothing. It is
+// deliberately NOT `{5,}`: an unbounded run of digits would swallow a typo'd twelve-digit id as a
+// legitimate one, and the padStart below assumes a known width.
+const ID_DIGITS = "\\d{5,6}";
+const FIRST_COL_ID = new RegExp(`^\\|\\s*(P${ID_DIGITS})\\s*\\|`);
 // A PHASE ROW IS DECIDED BY ITS OWN TABLE'S HEADER, NOT BY A FIXED WIDTH (sweep #7 / T28,
 // 2026-08-29).
 //
@@ -60,7 +76,8 @@ const FIRST_COL_ID = /^\|\s*(P\d{5})\s*\|/;
 // So: a row is a phase row if it starts with an id and has AT LEAST four cells, and the id, result
 // and note are read by position from the header that introduced it. Assert the property (an id, a
 // verdict, a place to say why), never one particular column count.
-const isPhaseRow = (line) => /^\|\s*P\d{5}\s*\|/.test(line) && cellsOf(line).length >= 6;
+const PHASE_ROW_START = new RegExp(`^\\|\\s*P${ID_DIGITS}\\s*\\|`);
+const isPhaseRow = (line) => PHASE_ROW_START.test(line) && cellsOf(line).length >= 6;
 
 // ── 1 · one ID, one check, forever ─────────────────────────────────────────────────────────────
 const owner = new Map();      // id -> file, for PHASE rows only
@@ -133,13 +150,14 @@ for (const [re, what] of [
 ]) if (!re.test(index)) fail(`INDEX.md no longer states ${what}`);
 
 // ── 4 · the next free ID really is free ────────────────────────────────────────────────────────
-const declared = index.match(/next free ID[^P]*P(\d{5})/i);
+const declared = index.match(new RegExp(`next free ID[^P]*P(${ID_DIGITS})`, "i"));
 if (declared) {
   const next = Number(declared[1]);
   const taken = [...owner.keys()].map((i) => Number(i.slice(1))).filter((n) => n >= next);
-  if (taken.length) fail(`INDEX.md says the next free ID is P${String(next).padStart(5, "0")}, but ` +
+  const pad = (n) => "P" + String(n).padStart(declared[1].length, "0");
+  if (taken.length) fail(`INDEX.md says the next free ID is ${pad(next)}, but ` +
     `${taken.length} phase row(s) already use that id or higher (lowest: ` +
-    `P${String(Math.min(...taken)).padStart(5, "0")}). Move the registry forward, or the next ` +
+    `${pad(Math.min(...taken))}). Move the registry forward, or the next ` +
     `sweep collides on its very first new phase.`);
 }
 
