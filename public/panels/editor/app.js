@@ -11089,18 +11089,26 @@ function openDishEditModal(itemId, rerender) {
       // Each save carries the value this modal OPENED with. If another device changed the
       // same thing while it was open, the server refuses and says what it holds now, instead
       // of one person's "more spicy" silently wiping another's "less spicy".
+      // SAVED-NOT-SENT IS ANSWERED BY WHICHEVER CALL RAN, and it has to be a name that still
+      // EXISTS at the toast (sweep #8 T7). This block used to declare `const _wq` INSIDE the
+      // note branch and read it eleven lines below, outside that block — a name nothing can see
+      // there. So every successful dish edit saved, closed, refreshed, and THEN threw
+      // "_wq is not defined" into the catch, which told the person "Couldn't save: …" about an
+      // edit that had already gone through. Same shape as attendTableCalls(): one flag, set by
+      // whichever of the three writes actually ran.
+      let anyQueued = false;
       if (note !== String(item.note || "").trim()) {
-        const _wq = await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
+        anyQueued = wasQueued(await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } })) || anyQueued;
       }
       if (!same(newItemRemoved, itemRemoved)) {
-        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
+        anyQueued = wasQueued(await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } })) || anyQueued;
       }
       if (order.id && !same(newOrderAllergies, orderAllergies)) {
-        await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } });
+        anyQueued = wasQueued(await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } })) || anyQueued;
       }
       close();
       await loadSessions(); if (rerender) rerender();
-      okToast(_wq, "Dish updated");
+      okToast(anyQueued ? { queued: true } : null, "Dish updated");
     } catch (e) {
       // SOMEONE ELSE GOT THERE FIRST. Close, refresh, and hold the message on screen long
       // enough to be read — this person's edit did NOT save and they need to know why.
