@@ -1184,21 +1184,14 @@ function tf(label, path, val, opts = {}) {
     ${opts.hint ? `<span class="hint">${esc(opts.hint)}</span>` : ""}
   </div>`;
 }
-// numSel: PICK a whole number from a list instead of typing one. Same data-path plumbing as
-// every other settings field, so saving is unchanged — but a number outside the range simply
-// isn't offered, which is the point (owner, 2026-08-02: "don't keep a number where I can add
-// anything"). A typing box has to be argued with afterwards — clamped, corrected on blur, and
-// refused by the database if any of that is missed; a list of the real choices can't be wrong.
-// data-num tells bindEditor to store a NUMBER, not the select's string value.
-function numSel(label, path, val, lo, hi, opts = {}) {
-  const cur = Math.min(Math.max(Math.round(Number(val)) || lo, lo), hi);
-  let out = "";
-  for (let n = lo; n <= hi; n++) out += `<option value="${n}" ${n === cur ? "selected" : ""}>${n}</option>`;
-  return `<div class="field"><label>${esc(label)}</label>
-    <select data-path="${path}" data-num="1">${out}</select>
-    ${opts.hint ? `<span class="hint">${esc(opts.hint)}</span>` : ""}
-  </div>`;
-}
+// OBITUARY — numSel() (a 2..12 pick-list instead of a typing box) was DELETED 2026-09-03.
+// Built for "Tables per row" on 2026-08-02 ("don't keep a number where I can add anything",
+// PR #725). HOURS LATER the owner moved that setting to the admin alone — "in the manager panel
+// there shouldn't be option of number of table per row … That will be only set by admin" — and
+// PR #730 removed the card that called it. It had no caller from that day to this. The pick-list
+// itself is alive and well where he asked for it: components/admin/RestaurantSettings.tsx →
+// pickNumber("Tables per row", …), which is React and never used this helper. Nothing in the
+// manager panel needs a bounded number picker; if one is ever asked for, copy the admin's.
 
 // ta: a multi-line text area (for longer descriptions, review text, etc).
 function ta(label, path, val, opts = {}) {
@@ -2066,7 +2059,7 @@ async function saveWaiterTables(userId, tables) {
   const w = (state.sections?.waiters || []).find((x) => x.id === userId);
   const before = w ? (w.assigned_tables || []).slice() : null;
   if (w) w.assigned_tables = tables.slice();           // optimistic — the grid feels instant
-  renderEditor(); repaintSectionPicker(); repaintSectionsModal();
+  renderEditor(); repaintSectionPicker();
   try {
     // Through the panel's own api() (→ LFH_OUTBOX), like every other write here. As a bare fetch
     // this was the one change a manager could make with no signal and simply lose: the grid
@@ -2095,7 +2088,7 @@ async function saveWaiterTables(userId, tables) {
     toast(clash ? clash.plain : (errText(e) || "Couldn't save that change."), "err", undefined, clash ? 9000 : undefined);
     if (clash) await loadTableSections();
   }
-  renderEditor(); repaintSectionPicker(); repaintSectionsModal();
+  renderEditor(); repaintSectionPicker();
 }
 
 // A TABLE NUMBER STARTS AT 1, SO `Number.isFinite` IS NOT THE TEST (sweep #8 T6 round 2,
@@ -2261,53 +2254,16 @@ function secEscOff(ov) {
 // Uses the .sx-modal-overlay class, which the panel's overlay watcher (wireOverlayBack)
 // already registers with LFH_BACK — so the phone's hardware Back closes the picker
 // instead of leaving the panel, with no hand-rolled history here.
-// The SAME card, opened as a modal from the live Table view — because the Settings tab it
-// otherwise lives in is gated by `edit_settings`, a power a section-granting manager may not
-// have. One builder, two doors.
-let sectionsModalOpen = false;
-function repaintSectionsModal() {
-  const host = document.querySelector("[data-sec-card]");
-  if (host && sectionsModalOpen) host.innerHTML = tableSectionsCardHtml();
-}
-function openSectionsModal() {
-  const ov = document.createElement("div");
-  ov.className = "sx-modal-overlay";
-  ov.innerHTML = `<div class="sx-modal sec-modal sec-modal-wide">
-      <div class="sx-modal-head"><h3>Who serves which table</h3><button class="sx-x" type="button" data-sec-close>✕</button></div>
-      <div class="sx-modal-body" data-sec-card>${tableSectionsCardHtml()}</div>
-    </div>`;
-  const close = () => { sectionsModalOpen = false; secEscOff(ov); ov.remove(); };
-  ov.__lfhClose = close;
-  secEscOn(ov, close);
-  sectionsModalOpen = true;
-  ov.addEventListener("click", (e) => {
-    if (e.target === ov || e.target.closest("[data-sec-close]")) return close();
-    const v = e.target.closest("[data-sec-view]");
-    if (v) { state.sectionsView = v.dataset.secView; return repaintSectionsModal(); }
-    const ed2 = e.target.closest("[data-sec-edit]");
-    if (ed2) return openSectionPicker(ed2.dataset.secEdit);
-    const tc = e.target.closest("[data-sec-table]");
-    if (tc) return openTableHolderPicker(Number(tc.dataset.secTable));
-    if (e.target.closest("[data-sec-fixgaps]")) return (async () => {
-      const gaps = secGaps(); if (!gaps.length) return;
-      for (const w of secActiveWaiters()) {
-        await saveWaiterTables(w.id, Array.from(new Set(secTables(w).concat(gaps))).sort((a, b) => a - b));
-      }
-      toast(`${gaps.length} table${gaps.length === 1 ? "" : "s"} now covered.`);
-    })();
-    if (e.target.closest("[data-sec-all]")) return (async () => {
-      if (!(await confirmDialog("Give every table to every waiter? They'll each see the whole floor again — you can then take tables away one by one.", "Give all"))) return;
-      const all = Array.from({ length: state.sections?.tableCount || 0 }, (_, k) => k + 1);
-      for (const w of secActiveWaiters()) await saveWaiterTables(w.id, all);
-    })();
-    if (e.target.closest("[data-sec-clear]")) return (async () => {
-      if (!(await confirmDialog("Clear every section? Every waiter will be left with NO tables — while sections are switched on, their tablets will be empty until you give them tables again.", "Clear all", { floorwide: true }))) return;
-      for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, []);
-    })();
-  });
-  document.body.appendChild(ov);
-  if (!state.sectionsLoaded && !state.sectionsLoading) loadTableSections().then(repaintSectionsModal);
-}
+// OBITUARY — openSectionsModal() (a SECOND door to "Who serves which table", opened as a popup
+// from the live Table view) was DELETED 2026-09-03, unreferenced from the day it was written.
+// It existed for one reason: Settings was gated by `edit_settings`, so a manager granted only
+// `table_assign` had no way to reach the rota. That was fixed properly instead — the Settings tab
+// now opens for "edit_settings|table_assign|print_setup" and every card inside keeps its own gate
+// (see XRAY_TABS), so a table_assign manager gets in and sees that one card. The popup solved a
+// problem that no longer exists.
+// AND he refused the floor door on its own merits — REJECTED (owner, 2026-07-31): "I do not want
+// this option completely on top". Its ONE home is Settings → Access. Do not re-add it to the
+// floor, the header or the drawer. See docs/REJECTED-IDEAS.md → R53.
 
 let sectionPickerId = null;
 function repaintSectionPicker() {
@@ -7281,7 +7237,6 @@ function bindEditor() {
       let v;
       if (node.type === "checkbox") v = node.checked;
       else if (node.type === "number") v = node.value === "" ? null : Number(node.value);
-      else if (node.dataset.num) v = Number(node.value); // a numSel dropdown — store 8, not "8"
       else v = node.value;
       setPath(state.sel, path, v); // save it into the working copy at its dotted path
       if (path === "image" || path === "icon" || path === "color") updatePreviews(); // refresh the live preview
