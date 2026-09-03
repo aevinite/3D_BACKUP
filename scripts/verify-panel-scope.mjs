@@ -29,6 +29,7 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Linter } from "eslint";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 let pass = 0, fail = 0;
@@ -176,6 +177,144 @@ for (const file of PANELS) {
     }
   }
   if (!bugs) ok(`${short}: ${checked} inner helper${checked === 1 ? "" : "s"} checked, none reached from another function`);
+}
+
+// ── THE SAME BUG, THE TWO SHAPES THE SCAN ABOVE CANNOT SEE (sweep #8 T6, 2026-09-03) ─────────
+//
+// The hand-written scan above answers ONE question — "is a helper declared inside function A being
+// called from function B?" — which is exactly the `ordersInGroup` fault it was built for. It is a
+// good check and it stays. But "a name that isn't there" has other shapes, and this file's own
+// opening paragraph promises to catch them. Two live ones were sitting in the panels on 2026-09-03,
+// and this guard was green over both:
+//
+//   · SAME function, INNER BLOCK. restoreBill() in editor/app.js declared `const _wq` inside a try
+//     block and read it after the loop, in the same function. The scan above never looks below the
+//     function level, so it saw nothing. Driven on the real panel with the network stubbed: the
+//     PATCH goes out, the bill IS restored, and then it throws "_wq is not defined" — on the ONE
+//     path where every write had worked. The FAILURE branch toasted correctly, so it spoke up when
+//     it went wrong and went silent when it went right. openDishEditModal() had the identical fault.
+//
+//   · A DIFFERENT TOP-LEVEL IIFE. maint.js — the settings drawer EVERY staff panel loads — calls
+//     `deadline()` from two helpers that sit outside the IIFE where `deadline` is declared. Live
+//     since 2026-08-30. Symptom, proved on the running panel: the server answered with a real
+//     profile and profileModule:true, LFH_ME.available() still returned false (so "My profile & pay"
+//     hides itself), and opening it anyway told a signed-in manager "You are not signed in as a
+//     staff member, so there is no profile to show."
+//
+// So: run ESLint's `no-undef` — the rule that answers this question completely — over every panel
+// script. The panels are plain browser <script> files and have never been inside this repo's
+// TypeScript or ESLint fences, which is why nothing had ever looked. Still no server, no browser,
+// no database. `eslint` is already a devDependency of this repo.
+console.log("\nEVERY NAME A PANEL READS IS ACTUALLY THERE\n");
+{
+  const DIR = join(ROOT, "public/panels");
+  // Top level AND one folder down. verify:panel-dialogs read only the top level for a year and
+  // walked straight past editor/app.js, the 18,600-line manager panel — the same miss twice.
+  // `vendor/` is third-party and minified; Chart.js is a UMD bundle that legitimately reads
+  // `module`/`define`, and holding it to this rule would fail forever for no gain.
+  const files = [];
+  if (existsSync(DIR)) {
+    for (const e of readdirSync(DIR, { withFileTypes: true })) {
+      if (e.isFile() && e.name.endsWith(".js")) files.push(e.name);
+      else if (e.isDirectory() && e.name !== "vendor") {
+        for (const f of readdirSync(join(DIR, e.name))) if (f.endsWith(".js")) files.push(`${e.name}/${f}`);
+      }
+    }
+  }
+  files.sort();
+  // The browser's own names, plus what these files genuinely share. Every LFH_*/XRAY_* below is
+  // published by a real file in this folder (grep `window.LFH_` there) and read behind a
+  // `window.LFH_x &&` guard at its call sites, which is the panels' convention for "may be absent".
+  const BROWSER = ["window","document","navigator","location","history","screen","localStorage","sessionStorage","console",
+    "fetch","Headers","Request","Response","FormData","File","FileReader","Blob","URL","URLSearchParams","AbortController",
+    "AbortSignal","setTimeout","clearTimeout","setInterval","clearInterval","requestAnimationFrame","cancelAnimationFrame",
+    "queueMicrotask","alert","confirm","prompt","print","open","close","focus","blur","postMessage","addEventListener",
+    "removeEventListener","getComputedStyle","matchMedia","structuredClone","performance","crypto","CSS","Intl",
+    "Notification","Audio","Image","Event","CustomEvent","MessageEvent","MutationObserver","PerformanceObserver",
+    "IntersectionObserver","ResizeObserver","ResizeObserverEntry","Element","HTMLElement","Node","NodeList","DOMParser",
+    "XMLHttpRequest","WebSocket","EventSource","Worker","Range","TextEncoder","TextDecoder","btoa","atob","scrollTo",
+    "scrollBy","getSelection","top","parent","self","frames","name","innerWidth","innerHeight","devicePixelRatio",
+    "visualViewport","caches","indexedDB","BroadcastChannel","MediaRecorder","MediaStream","OffscreenCanvas","Path2D",
+    "ClipboardItem"];
+  const VENDOR = ["Chart", "QRCode", "html2canvas"];
+  const LFH = ["LFH_ASK","LFH_AUDITSORT","LFH_BACK","LFH_BELL","LFH_BILLCUST","LFH_BILLDOC","LFH_INV","LFH_ISSUE",
+    "LFH_OFF","LFH_OUTBOX","LFH_RT","LFH_UNDO","LFH_WARM","LFH_TAPS","LFH_PRINT","LFH_KOT","LFH_SW","LFH_DEV",
+    "XRAY_WHO","XRAY_CONTROLS"];
+  // Names that are DELIBERATELY feature-detected, so a bare mention is not a fault:
+  // `module`/`exports` — billdoc.js and auditsort.js each end with
+  //   `if (typeof module !== "undefined" && module.exports) module.exports = API;`
+  //   so a Node guard can import the SAME money and sort rules the browser runs.
+  // `confirmDialog`/`promptDialog` — declared by editor/app.js and reached from editor/inventory.js
+  //   (which loads first) behind `typeof confirmDialog === "function"`, with a fallback either way.
+  const FEATURE_DETECTED = ["module","exports","require","confirmDialog","promptDialog"];
+  const globals = Object.fromEntries([...BROWSER, ...VENDOR, ...LFH, ...FEATURE_DETECTED].map((g) => [g, "readonly"]));
+  const linter = new Linter();
+  let clean = 0;
+  for (const f of files) {
+    let msgs;
+    try {
+      msgs = linter.verify(readFileSync(join(DIR, f), "utf8"), {
+        languageOptions: { ecmaVersion: 2023, sourceType: "script", globals },
+        rules: { "no-undef": "error" },
+      });
+    } catch (e) {
+      // A parse error is a different fault (verify:ui and node --check own it). Say so rather than
+      // counting the file as clean — a guard that skips a file it named is the fault this repo has
+      // already recorded twice.
+      bad(`${f} could not be parsed, so nothing in it was checked`, String(e.message).slice(0, 140));
+      continue;
+    }
+    const undef = msgs.filter((m) => m.ruleId === "no-undef");
+    if (!undef.length) { clean++; continue; }
+    bad(`${f} reads ${undef.length} name(s) that are not in scope`,
+      undef.map((m) => `line ${m.line}: ${m.message}`).join(" · ")
+      + "  |  a `const` inside a block is invisible outside it, and reading it throws at RUN time, which no parse check sees");
+  }
+  if (files.length) ok(`all ${clean} of ${files.length} panel script(s) read only names that are really there`);
+  else bad("no panel scripts found at all", DIR);
+}
+
+// ── A FIELD READ OFF AN OBJECT NOTHING EVER WRITES TO IT ──────────────────────────────────────
+// The narrower half of the same moral, and the second fault found on 2026-09-03. `billsCapped()`
+// asked `state.billsRec.today` and `.previous`; loadBillsRecord stores `{ rows, parcels, reach, at }`
+// (the route answers `{ rows, parcels, reach }`). Both were undefined every time, so the function
+// always answered "no" — and it is the ONE thing that decides whether the Previous-bills search asks
+// the server for help. The whole `type=any` branch written for exactly that case in
+// app/api/editor/[...path]/route.ts was therefore unreachable: on a day past the route's 500-row
+// cap a manager searching for an older bill was told "Nothing matches" and the server was never
+// asked. No name is undefined here and nothing throws — which is why it needs its own check.
+console.log("\nA PANEL DOES NOT READ A FIELD NOTHING PUTS THERE\n");
+{
+  const appPath = join(ROOT, "public/panels/editor/app.js");
+  if (!existsSync(appPath)) ok("editor/app.js is not in this checkout — nothing to check");
+  else {
+    const rawApp = readFileSync(appPath, "utf8");
+    // The one-pass stripper above blanks comments AND strings, which is right for "who reads this
+    // field" (a name in a sentence is not a reference) and wrong for "is this exact line still
+    // here" — a string literal is the whole point of that one. So both are kept, and each check
+    // reads the one it actually needs.
+    const app = strip(rawApp);
+    const assign = app.match(/state\.billsRec\s*=\s*\{([^}]*)\}/);
+    if (!assign) bad("nothing assigns state.billsRec any more", "the shape check has nothing to compare against");
+    else {
+      const written = new Set([...assign[1].matchAll(/(^|[,{\s])([A-Za-z_$][\w$]*)\s*:/g)].map((m) => m[2]));
+      const read = new Set([...app.matchAll(/\bstate\.billsRec\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+      const bc = (app.match(/function billsCapped\(\)[\s\S]*?\n\}/) || [""])[0];
+      for (const m of bc.matchAll(/\br\.([A-Za-z_$][\w$]*)/g)) read.add(m[1]);   // read through its local alias
+      const ghosts = [...read].filter((k) => !written.has(k));
+      if (ghosts.length) {
+        bad(`the panel reads ${ghosts.length} field(s) off state.billsRec that nothing puts there: ${ghosts.join(", ")}`,
+          `the one assignment carries { ${[...written].join(", ")} } — anything outside that list is undefined every time, silently`);
+      } else {
+        ok(`every field read off state.billsRec is one the read really returns (${[...written].join(", ")})`);
+      }
+    }
+    // …and the answer it exists to give must stay reachable.
+    if (/BILLS_WINDOW_CAP\s*=\s*500/.test(app)) ok("the bills window's row cap is named once, at the route's own 500");
+    else bad("the bills window cap is not declared as 500 any more", "the route limits the bills read to 500 rows");
+    if (/ordersViewKey\(\) === "previous" && billsCapped\(\)/.test(rawApp)) ok("the Previous-bills search still asks it before falling back to the server");
+    else bad("the Previous-bills search no longer consults billsCapped()", "the route's type=any branch would be unreachable again");
+  }
 }
 
 // ── the guards' own trap: a bare [data-tab=…] now matches <body> ──────────────────────────────
