@@ -4876,7 +4876,15 @@ function openQuickDest() {
     // its bill — live on the table it is joined to, and that is where this order would land.
     // Saying "free" here would be the same lie the floor tiles were fixed for (mig 249).
     const parent = mergeParentOf(i);
-    const busy = !!parent || tileIsOpen(i);
+    // ONE MEANING OF "FREE", ON BOTH PICKERS (owner picked it as item 14, 2026-09-03).
+    // tileIsOpen() goes through summaryTile(), which turns a seated-but-empty table ("waiting") into
+    // "free" — the owner's own rule, and right for a tile. This label then called such a table free
+    // while the order placed on it joins that seating's own bill, and after the move picker was made
+    // honest the two pickers were one screen apart using two meanings of the same word.
+    // Nothing goes wrong either way here — the bill is empty — so this is a WORD, not a gate: every
+    // table stays tappable, because taking an order for a seated-but-empty table is perfectly
+    // normal and is not the same question as moving a whole party onto it.
+    const busy = !!parent || tableHasAnyParty(i);
     const what = parent ? `joins ${esc(tname(parent) || "T" + parent)}'s bill` : busy ? "joins its bill" : "free";
     tiles.push(`<button class="qdest-t${busy ? " busy" : ""}" data-qdest="${i}"><b>${esc(tname(i) || "T" + i)}</b><small>${what}</small></button>`);
   }
