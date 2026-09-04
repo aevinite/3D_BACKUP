@@ -22,6 +22,10 @@ import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import OwnerManagerMode from "@/components/owner/OwnerManagerMode";
+// ONE ORDER for every restaurant list in this console (T17 sweep, 2026-09-04): the launcher's two
+// cards MEASURABLY swapped places between loads, because the read below has no `order by` and this
+// page used whatever row order it was handed. See components/owner/ownerRestaurantSort.
+import { byName } from "@/components/owner/ownerRestaurantSort";
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
   const { rid: qRid } = await searchParams;
@@ -43,7 +47,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
     if (ids.length) {
       const rows = (await sb.from("restaurants").select("id, name").in("id", ids)).data || [];
       const byId = new Map(rows.map((r) => [r.id as string, r]));
-      restaurants = ids.map((id) => ({ id, name: (byId.get(id)?.name as string) || "Restaurant" }));
+      restaurants = byName(ids.map((id) => ({ id, name: (byId.get(id)?.name as string) || "Restaurant" })));
       // Honour ?rid only when the owner actually owns it. ONE restaurant → straight in;
       // several → selected stays "" so the client shows the pick-a-restaurant launcher
       // (owner, 2026-08-02: "first screen to select the restaurant").
@@ -75,7 +79,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
       }
     }
     const rows = (await sb.from("restaurants").select("id, name").in("id", [...estateIds]).is("deleted_at", null)).data || [];
-    restaurants = rows.map((r) => ({ id: r.id as string, name: r.name as string }));
+    restaurants = byName(rows.map((r) => ({ id: r.id as string, name: r.name as string })));
     // The console named THIS restaurant, so land on its floor (never on the launcher);
     // switching to a sibling is then one tap, same as for the real owner.
     if (restaurants.some((r) => r.id === rid)) selected = rid;

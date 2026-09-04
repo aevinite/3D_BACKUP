@@ -13,6 +13,7 @@ import ConnectionBadge from "@/components/ConnectionBadge";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { asSuffix } from "@/lib/ownerPin";
 import { portfolioColor } from "@/lib/restaurantColor";
+import { byName } from "./ownerRestaurantSort";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean; ent?: string };
 type NavGroup = { label: string; quiet?: boolean; items: NavItem[] };
@@ -246,10 +247,13 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
       .then((j) => {
         const list = (j as { restaurants?: unknown })?.restaurants;
         if (!Array.isArray(list)) return;
-        setMyRests(list.map((r: { id: string; name: string; revenueToday?: number; reportsOff?: boolean }) => ({
+        // SORTED BY NAME (T17 sweep, 2026-09-04): the overview RPC promises no order, and this same
+        // estate is listed by /owner/menu's picker and /owner/manager's launcher too. One order
+        // everywhere, or the owner counts his restaurants three times to be sure the lists match.
+        setMyRests(byName(list.map((r: { id: string; name: string; revenueToday?: number; reportsOff?: boolean }) => ({
           id: r.id, name: r.name, revenueToday: r.revenueToday || 0,
           reportsOff: r.reportsOff === true,
-        })));
+        }))));
       })
       .catch(() => {});
   }, [ridPin]);
