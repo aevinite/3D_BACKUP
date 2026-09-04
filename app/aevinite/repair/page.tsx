@@ -756,6 +756,16 @@ export default function AdminRepair() {
   // this stack and the board was one flat list. It now narrows the problems and the limit hits too
   // (both act on rows already fetched — no extra request, no extra data).
   const groups = groupErrors(rid ? errors.filter((a) => (a.restaurant_id || "") === rid) : errors);
+  // ── WHAT THE PICKER IS HOLDING BACK (item 15, owner 2026-09-04) ─────────────────────────────
+  // Measured on this platform: 24 of the 27 open reports carry NO restaurant at all — they are
+  // platform-wide crashes, and hiding them under a one-restaurant view is correct, because they
+  // genuinely are not that restaurant's. What was not correct was going GREEN and saying nothing:
+  // "All clear — no unresolved problems at Demo Bistro" is true, and it is also not the whole
+  // picture when two dozen reports are sitting one control away.
+  // The queue section below has done this properly for a while ("2 more are queued at other
+  // restaurants"); this is the problem board learning the same manners. A count over rows already
+  // in hand — no extra request, so choosing a restaurant still fires nothing.
+  const hiddenByPicker = rid ? groupErrors(errors).length - groups.length : 0;
   const shownRlHits = rid ? rlHits.filter((h) => h.restaurant_id === rid) : rlHits;
   // A problem already handed to Claude must not offer "Fix now" again after a refresh (T20 sweep,
   // 2026-08-16). `sent` is only this page-load's memory, so a reload re-offered the button and a
@@ -973,7 +983,18 @@ export default function AdminRepair() {
           <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={loadHub}>Retry</button>
         </div>
       ) : groups.length === 0 ? (
-        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> All clear — no unresolved problems{scopedName ? ` at ${scopedName}` : ""}.</div>
+        <div className="rp-clear" style={{ display: "block" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <i className="fas fa-circle-check" aria-hidden="true" /> All clear — no unresolved problems{scopedName ? ` at ${scopedName}` : ""}.
+          </div>
+          {/* A GREEN BOARD MUST NOT BE THE WHOLE STORY WHEN IT IS ONLY PART OF IT (item 15). */}
+          {hiddenByPicker > 0 && (
+            <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 8, paddingLeft: 26, lineHeight: 1.55 }}>
+              {hiddenByPicker} other problem{hiddenByPicker === 1 ? " is" : "s are"} open, none of them tied to a restaurant — they are platform-wide.{" "}
+              <button className="rp-link" onClick={() => setRid("")}>Show every restaurant</button>
+            </div>
+          )}
+        </div>
       ) : (
         <div style={{ marginBottom: 6 }}>
           {groups.map((g) => {
@@ -1090,6 +1111,17 @@ export default function AdminRepair() {
               </div>
             );
           })}
+          {/* Not only on an empty board: with two tiles shown and twenty-four hidden, "2" is just
+              as misleading as "0". Same sentence, under the list (item 15). */}
+          {hiddenByPicker > 0 && (
+            <p className="adm-muted" style={{ fontSize: 12.5, margin: "2px 0 8px", display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+              <i className="fas fa-filter" aria-hidden="true" style={{ opacity: 0.7 }} />
+              <span>
+                {hiddenByPicker} more problem{hiddenByPicker === 1 ? " is" : "s are"} open but tied to no restaurant, so {hiddenByPicker === 1 ? "it is" : "they are"} not shown here.{" "}
+                <button className="rp-link" onClick={() => setRid("")}>Show every restaurant</button>
+              </span>
+            </p>
+          )}
           {errors.length >= ERROR_FEED_LIMIT && (
             <p className="adm-muted" style={{ fontSize: 12, margin: "2px 0 8px" }}>
               <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />
