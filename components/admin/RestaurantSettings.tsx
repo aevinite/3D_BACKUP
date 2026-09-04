@@ -1164,10 +1164,19 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             This block used to be three radio cards ("kitchen screen / counter screen / both", mig 336).
             Since mig 341 the Printing board answers the same question far better — a computer running
             the helper, or a named panel/person/PC, per kind of paper — and two screens answering one
-            question differently is exactly what the owner asked to end. The radios are gone; the coarse
-            setting still exists underneath for restaurants with no route, and the route now wins when
-            there is one (see the kitchen/manager routes). What is left here is the one line worth
-            knowing, and the door to the board that owns it. */}
+            question differently is exactly what the owner asked to end. The radios are gone, and so is
+            the setting they wrote.
+            ── CORRECTED (T19 sweep #8, 2026-09-04): this note used to end "the coarse setting still
+            exists underneath for restaurants with no route, and the route now wins when there is one".
+            That was true for the two days between this block landing and migration 369, and it has been
+            wrong ever since — `kot_print_target` is RETIRED. `KEYS` above says so, the admin save route
+            refuses to write it, and a grep of app/, lib/, components/ and public/ finds seven mentions,
+            every one of them an obituary comment. There is no fallback underneath. The Printing board is
+            the only thing that decides where a kitchen ticket comes out, and a restaurant with no route
+            set falls back inside that board (docs/PRINT-HELPER.md), not to a column here. Two comments in
+            ONE file disagreeing about whether a retired setting still decides something is how a dead
+            path gets revived by the next person to read the friendlier sentence.
+            What is left here is the one line worth knowing, and the door to the board that owns it. */}
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: "var(--border)" }}>
           <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Where the paper comes out</h3>
           <div className="adm-elsewhere">
