@@ -33,7 +33,20 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P100591`.** *(T20 of sweep #8 took `P100483`–`P100590` — ONE HUNDRED AND EIGHT ids,
+**Next free ID: `P100614`.** *(T19 of sweep #8 took `P100591`–`P100613` — TWENTY-THREE ids, not 500 —
+on 2026-09-04, for a SECOND freshly planned 500 over the admin's Restaurants and Owners after round 1
+was merged and deployed. His word: *"after making it live and merging plan 500 phases test within your
+boundaries make sure it cover everthing within your boundries and test everything again if any error
+left"*.
+
+Twenty-three and not 500 because **477 of this terminal's own pre-allocated block are still free**
+(`P73224`–`P73700`, counted against every ledger on disk rather than against this line), so the round
+is 477 + 23 = 500 and only the shortfall is claimed here. Taking a fresh 500 from the mark would have
+been taking ids this terminal does not need — the same reasoning T8 (30), T10 (32) and T20 (108) used.
+Highest id actually on disk re-checked in the same breath: `P100482`. Claimed by editing THIS LINE and
+pushing it to `main` on its own before a single row was written.)*
+
+**Previously: `P100591`.** *(T20 of sweep #8 took `P100483`–`P100590` — ONE HUNDRED AND EIGHT ids,
 not 500 — on 2026-09-04, for a SECOND freshly planned 500 after round 1 was merged and deployed to
 backup. His word: *"after making it live and merging plan 500 phases test within your boundaries
 make sure it cover everthing within your boundries and test everything again if any error left"*.
