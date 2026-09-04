@@ -347,8 +347,25 @@ export async function GET(req: NextRequest) {
   // interpolate sp.get("from")/sp.get("to") straight in — but windowFor() validates those and
   // silently falls back to 30d, so every distinct junk value minted its own cache row holding
   // the identical 30-day payload (T5 sweep, 2026-08-11). `from`/`to` are already validated.
+  // ── AND THE CUSTOM KEY HAS TO BE STABLE, NOT MERELY VALIDATED (T13 sweep, 2026-09-04) ────────
+  // The 2026-08-11 change above was right to stop keying on the RAW query values. It left half
+  // the fault standing, because the resolved `to` for a custom range that includes today is
+  // `now` — Math.min(requested end, now) in windowFor — so the key carried a MILLISECOND
+  // timestamp and no two requests could ever share it. Measured on this route:
+  //   custom 1 Aug → 7 Aug (wholly past)   two requests, one snapshot   ✅ cached
+  //   custom 1 Aug → TODAY                 two requests 0.5s apart, two different `to` values,
+  //                                        two different keys, two full recomputes  ❌
+  // So the compute-on-view cache did nothing at all for the one custom range a person actually
+  // asks for — the one ending today — and each open also left another row behind in the cache
+  // table under a key nothing can ever hit again.
+  //
+  // Keyed to the DAY, exactly as the eight fixed ranges already are. That is safe rather than
+  // merely cheaper: two custom requests that share a `from` and a `to`-day differ only in the
+  // seconds between them, so they ARE the same window, and `fingerprint()` is what notices new
+  // orders inside that day — the key's job is identity, not freshness. `from` is always an IST
+  // midnight and `to` either a day boundary or now, so slicing cannot merge two real windows.
   const rangeKey = range === "custom"
-    ? `custom:${from}:${to}`
+    ? `custom:${from.slice(0, 10)}:${to.slice(0, 10)}`
     : `${range}:${from.slice(0, 10)}`;
   const prevWin = compare ? prevWindowFor(range, from, to) : null;
   const prevTsWin = compare ? prevTsWindowFor(range, from, to) : null;
