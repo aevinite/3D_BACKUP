@@ -557,6 +557,22 @@ const RULES = [
     ],
   },
   {
+    item: "s8·T16·7", file: KHATA,
+    // Sweep 7 · T14 item 10 fixed exactly this inside the guest record. MEASURED at 360px on the
+    // tiles: "Collected today"'s ₹0 at y=261 and "Collected this month"'s ₹0 at y=275, because the
+    // longer label wraps and pushes its own number down. After: both at y=269.
+    say: "the four Pay Later figures share a baseline even when a label wraps",
+    must: [
+      /<div className="adm-stats" style=\{\{ marginBottom: 14, alignItems: "stretch" \}\}>/,
+      // all four tiles are columns with the number pinned to the bottom
+      /className="adm-stat" style=\{\{ display: "flex", flexDirection: "column" \}\}/,
+      /className="v" style=\{\{ marginTop: "auto" \}\}>\{summary \? inr\(summary\.totalOutstanding\)/,
+      /className="v" style=\{\{ marginTop: "auto" \}\}>\{summary \? summary\.peopleCount/,
+      /className="v" style=\{\{ marginTop: "auto" \}\}>\{!summary \? "…" : summary\.collectedToday/,
+      /className="v" style=\{\{ marginTop: "auto" \}\}>\{!summary \? "…" : summary\.collectedMonth/,
+    ],
+  },
+  {
     item: "s8·T16·6", file: ISSUES,
     // MEASURED at 360px BEFORE the fix: the pill was capped at 298px of content width and held
     // three flex children, so all three shrank below their content and every label wrapped —

@@ -126,13 +126,22 @@ export default function OwnerKhata() {
       <h1 className="adm-page-h">Pay Later</h1>
       <p className="adm-page-sub">Money guests still owe on a tab, and how much you&apos;ve collected. Staff collect a tab from the manager panel; this is your live view of what&apos;s outstanding.</p>
 
-      <div className="adm-stats" style={{ marginBottom: 14 }}>
-        <div className="adm-stat"><div className="k">Outstanding now</div><div className="v">{summary ? inr(summary.totalOutstanding) : "…"}</div></div>
-        <div className="adm-stat"><div className="k">People who owe</div><div className="v">{summary ? summary.peopleCount.toLocaleString("en-IN") : "…"}</div></div>
+      {/* ── THE FOUR FIGURES LINE UP, EVEN WHEN A LABEL WRAPS (sweep 8 · T16, 2026-09-04) ──────────
+          Same fault the guest record already had fixed as sweep 7 · T14 item 10, on the tiles this
+          time. "Collected this month" is the longest of the four labels, so on a phone it wraps to
+          two lines and pushes its own number down. MEASURED at 360px: "Collected today"'s ₹0 sat at
+          y=261 and "Collected this month"'s ₹0 at y=275 — 14px apart, on the row the eye reads
+          across. The boxes were always the same height (they are grid cells); it was the NUMBERS
+          that did not line up. Each tile is now a column with the label on top and the number
+          pinned to the bottom, so the figures share a baseline whether a label wraps or not.
+          Inline on these four tiles only — `.adm-stats` is shared with half the panel. */}
+      <div className="adm-stats" style={{ marginBottom: 14, alignItems: "stretch" }}>
+        <div className="adm-stat" style={{ display: "flex", flexDirection: "column" }}><div className="k">Outstanding now</div><div className="v" style={{ marginTop: "auto" }}>{summary ? inr(summary.totalOutstanding) : "…"}</div></div>
+        <div className="adm-stat" style={{ display: "flex", flexDirection: "column" }}><div className="k">People who owe</div><div className="v" style={{ marginTop: "auto" }}>{summary ? summary.peopleCount.toLocaleString("en-IN") : "…"}</div></div>
         {/* A figure that could NOT be read shows a dash, not ₹0 — and the note below says which
             one and offers Refresh. `inr(0)` and "we didn't read it" must never look the same. */}
-        <div className="adm-stat"><div className="k">Collected today</div><div className="v">{!summary ? "…" : summary.collectedToday === null ? "—" : inr(summary.collectedToday)}</div></div>
-        <div className="adm-stat"><div className="k">Collected this month</div><div className="v">{!summary ? "…" : summary.collectedMonth === null ? "—" : inr(summary.collectedMonth)}</div></div>
+        <div className="adm-stat" style={{ display: "flex", flexDirection: "column" }}><div className="k">Collected today</div><div className="v" style={{ marginTop: "auto" }}>{!summary ? "…" : summary.collectedToday === null ? "—" : inr(summary.collectedToday)}</div></div>
+        <div className="adm-stat" style={{ display: "flex", flexDirection: "column" }}><div className="k">Collected this month</div><div className="v" style={{ marginTop: "auto" }}>{!summary ? "…" : summary.collectedMonth === null ? "—" : inr(summary.collectedMonth)}</div></div>
       </div>
 
       {/* Not a warning — a plain statement of what the list holds, so the tiles above and the rows
