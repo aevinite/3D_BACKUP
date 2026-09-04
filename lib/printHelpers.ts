@@ -604,7 +604,12 @@ export type HelperOwner = {
   printer?: string;
   connected?: boolean;
   secondsAgo?: number | null;
-  backup?: { agent: string; printer: string } | null;
+  // NO `backup` (T11 sweep #8, 2026-09-04). It was declared here and SET BY NOTHING — neither
+  // helperFor() nor helpersFor() ever wrote it — for four days after the backup printer itself was
+  // deleted (owner, 2026-08-30: "if there is a backup printer, remove it"). A field nobody assigns
+  // is not harmless: the kitchen screen read it and drew a sentence off it ("If it prints nothing
+  // for a minute, X takes over"), so a dead branch about a removed feature sat in the one sheet a
+  // cook reads when the paper stops. Do not re-add it — there is no second machine.
 };
 
 /**
@@ -654,9 +659,9 @@ export type PrintTarget =
   | { kind: "off" }
   | { kind: "computer"; agent: string; printer: string; connected: boolean; secondsAgo: number | null;
     }
-  | { kind: "screen"; panel: RoutePanel; person: string | null; personName: string | null; device: string | null;
-      /** A second screen allowed to take what the first has left sitting, and how long it must wait. */
-};
+  // (No second screen, and no wait before one takes over: the backup was deleted on 2026-08-30. A
+  //  doc comment describing that field survived here with no field under it until 2026-09-04.)
+  | { kind: "screen"; panel: RoutePanel; person: string | null; personName: string | null; device: string | null };
 
 export async function targetFor(rid: string, kind: PrintKind): Promise<PrintTarget> {
   const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
@@ -705,14 +710,20 @@ function resolveTarget(r: PrintRoute | undefined, agents: AgentView[], kind?: Pr
  *   · a COMPUTER is routed     → no. A screen must never race a helper: two printers, one ticket.
  *   · a SCREEN is routed       → only the named panel, and only the named person, and only the named
  *                                device. Any part left blank means "anyone on that side".
- *   · a BACKUP screen is named → yes, but only for tickets older than `afterMs` (mig 369). The
- *                                caller gets `backup: true` and must apply that window; the first
- *                                screen always has first refusal.
+ *
+ * THERE IS NO FIFTH ANSWER (T11 sweep #8, 2026-09-04). A fifth bullet used to promise one — "a
+ * BACKUP screen is named → yes, but only for tickets older than `afterMs`; the caller gets
+ * `backup: true`" — and the return type carried `backup` and `afterMs` to match. Neither was ever
+ * SET by any path in this function, because the backup screen was deleted on 2026-08-30 (owner:
+ * "we don't even need the backup printer"). So the promise outlived the feature, and a caller in the
+ * manager panel's route was still reading it: `backup: !!may.backup`, which could only ever be
+ * false. Both fields are gone rather than left declared-and-never-written — a field that silently
+ * does nothing is how the next person wires it back up.
  */
 export function screenMayPrint(
   t: PrintTarget,
   who: { panel: RoutePanel; personId?: string | null; deviceId?: string | null },
-): { ok: boolean; backup?: boolean; afterMs?: number; why?: "off" | "computer" | "other_panel" | "other_person" | "other_device" } {
+): { ok: boolean; why?: "off" | "computer" | "other_panel" | "other_person" | "other_device" } {
   if (t.kind === "none") return { ok: true };
   if (t.kind === "off") return { ok: false, why: "off" };
   if (t.kind === "computer") return { ok: false, why: "computer" };

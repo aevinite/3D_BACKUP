@@ -1813,7 +1813,7 @@ function printerStatusHtml() {
       <div><span>Printing right now</span><b>${nowPrinting}</b></div>
       <div class="prsheet-wait ${w.cls}"><span>Tickets waiting</span><b>${esc(w.text)}</b></div>
       ${w.stuck ? `<p class="prsheet-stuck"><b>Nothing has printed for a while.</b> ${w.n} ticket${w.n === 1 ? " is" : "s are"} stacked up behind the printer — <b>read the orders off this screen</b> and cook from it while somebody looks at the paper. Nothing is lost: every one of them still prints, in order, the moment the printer is working.</p>` : ""}
-      ${hlp ? `<p>A printer program on <b>${esc(hlp.agent)}</b> prints these tickets, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : ` It has not been heard from for ${hlp.secondsAgo == null ? "a while" : Math.round(hlp.secondsAgo / 60) + " min"} — tickets are waiting, and print the moment it is back.`}${hlp.backup ? ` If it prints nothing for a minute, ${esc(hlp.backup.printer)} takes over.` : ""}</p>` : ""}
+      ${hlp ? `<p>A printer program on <b>${esc(hlp.agent)}</b> prints these tickets, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : ` It has not been heard from for ${hlp.secondsAgo == null ? "a while" : Math.round(hlp.secondsAgo / 60) + " min"} — tickets are waiting, and print the moment it is back.`}</p>` : ""}
       ${!hlp && !state.autoPrintKot && tgt !== "counter" ? `<p>Nothing prints by itself yet — the manager or your admin turns it on.</p>` : ""}
       ${!hlp && tgt === "counter" ? `<p>This screen is not the printer: tickets come out at the counter. The 🖨 button on a ticket still prints here if this screen has a printer.</p>` : ""}`;
 }

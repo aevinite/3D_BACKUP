@@ -2,8 +2,10 @@
 //
 // A helper is a ~40-line script on a computer that has printers (docs/PRINT-HELPER.md). It knows
 // nothing: it asks this route what to print, is handed the finished document, sends it to the named
-// printer, and says whether paper came out. Every rule — which printer, what the paper says, when a
-// backup takes over — stays here, which is why the machine is set up once and never revisited.
+// printer, and says whether paper came out. Every rule — which printer, what the paper says, what
+// happens when it will not print — stays here, which is why the machine is set up once and never
+// revisited. (It used to say "when a backup takes over". There is no backup: a sheet that gives up
+// files a printer problem and pings the owner instead — owner, 2026-08-30.)
 //
 // AUTHENTICATION: an `X-LFH-Agent` token, minted per machine, stored only as a sha-256 hash
 // (mig 341). It is a printing-only credential scoped to ONE restaurant: the three verbs below and
@@ -106,8 +108,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       // What this machine is expected to print, so a helper can say so in its own log and a person
       // reading that log can tell "not my job" from "something is broken".
       mine: PRINT_KINDS.filter((k) => routes[k].agent === agent.id),
-      // `backupFor` is gone: a helper is never a second machine's fallback (owner, 2026-08-30).
-      backupFor: [] as string[],
+      // NOT EVEN AN EMPTY `backupFor` (T11 sweep #8, 2026-09-04). It was left answering a constant
+      // [] after the backup was deleted on 2026-08-30, and the guard that exempted it said a helper
+      // already installed on a restaurant's PC reads it. NO HELPER EVER HAS — the string appears in
+      // no version of lib/printHelperScript.ts in the whole history of that file. A field kept for a
+      // reader that does not exist is a promise waiting to be believed, so it is gone.
       // Two machines sharing one code: no paper is duplicated (the claim prevents it) but half the
       // tickets would come out in the wrong room, so the helper is told and the admin screen shows
       // it. Copying the file to a second computer is the way this happens.
