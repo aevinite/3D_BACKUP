@@ -91,6 +91,28 @@ export default function AdminOwners() {
   useEffect(() => { load(); }, [load]);
 
   const unowned = useMemo(() => rests.filter((r) => !r.hasOwner && r.active), [rests]);
+  // ── TWO PEOPLE, ONE LOGIN NAME (T19 sweep #8, 2026-09-04 — the owner picked it as item 8) ─────
+  //
+  // Every route a person can reach already refuses this: /api/admin/owners checks the name GLOBALLY
+  // on create and on rename, /api/admin/restaurants' create-and-assign box does the same, and
+  // /api/admin/users refuses to touch an owner at all ("Owners are managed on the Owners page").
+  // So this cannot be MADE any more — and it still exists, because the database's own rule is
+  // per-restaurant (`idx_staff_users_username_live` on `(restaurant_id, lower(username))`, mig 245)
+  // and every restaurant used to be minted with a starter login literally called `owner`. That
+  // stopped on 2026-08-20; the rows it already made did not go anywhere.
+  //
+  // Measured on the backup stack: two accounts both signing in as `@owner`, made eleven weeks
+  // apart. On screen they were two rows reading "@owner · 0 restaurants" with nothing saying they
+  // collide — and the delete dialog asks you to type the username to confirm, which identifies
+  // neither of them. The account it deletes is right (it goes by id), but the ritual that is
+  // supposed to make you certain tells you nothing.
+  //
+  // So the screen SAYS it. No new rule, no refusal — the refusals are all already there.
+  const sharedLogins = useMemo(() => {
+    const count = new Map<string, number>();
+    for (const o of owners) count.set(o.username, (count.get(o.username) || 0) + 1);
+    return new Set([...count.entries()].filter(([, n]) => n > 1).map(([u]) => u));
+  }, [owners]);
   const kpis = useMemo(() => ({
     owners: owners.filter((o) => o.active).length,
     covered: rests.filter((r) => r.hasOwner).length,
@@ -209,7 +231,13 @@ export default function AdminOwners() {
                   <span aria-hidden className="own-av" style={{ ["--hue" as string]: chipColor(o.id), background: `${chipColor(o.id)}33` }}>{initials(o.name)}</span>
                   <span style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
                     <span className="own-nm">{o.name}{!o.active && <span className="hue-ink" style={{ fontSize: 10.5, ["--hue" as string]: "#fca5a5", fontWeight: 600 }}> · off</span>}</span>
-                    <span className="own-sub">@{o.username} · {o.restaurants.length} restaurant{o.restaurants.length === 1 ? "" : "s"}</span>
+                    <span className="own-sub">
+                      @{o.username}
+                      {sharedLogins.has(o.username) && (
+                        <span className="own-dup" title={`Another account signs in as “${o.username}” too. Nothing new can be created with a name that is taken — these are older rows. Rename one so they can be told apart.`}>shared name</span>
+                      )}
+                      {" · "}{o.restaurants.length} restaurant{o.restaurants.length === 1 ? "" : "s"}
+                    </span>
                     {match && <span className="own-match"><i className="fas fa-store" style={{ fontSize: 8.5, marginRight: 4 }} aria-hidden="true" />owns {match}</span>}
                   </span>
                   <span className={`own-cnt${!o.active ? " off" : ""}`}>{o.restaurants.length}</span>
@@ -225,7 +253,7 @@ export default function AdminOwners() {
                 <div><i className="fas fa-hand-pointer" style={{ fontSize: 22, opacity: .5, marginBottom: 10 }} aria-hidden="true" /><div>Pick an owner on the left to manage them.</div></div>
               </div>
             ) : (
-              <OwnerDetail key={selected.id} owner={selected} rests={rests}
+              <OwnerDetail key={selected.id} owner={selected} rests={rests} sharedName={sharedLogins.has(selected.username)}
                 onBack={() => setSelId(null)}
                 busy={busy} setBusy={setBusy}
                 onChanged={load}
@@ -267,6 +295,12 @@ export default function AdminOwners() {
         .own-match { display: block; font-size: 11px; color: var(--accent); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
         .own-cnt { font-size: 12px; font-weight: 800; color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); border-radius: 8px; padding: 3px 9px; flex: none; }
         .own-cnt.off { color: var(--muted); background: var(--muted2); }
+        /* "Another account signs in as this name too" — see the sharedLogins note above. Amber,
+           not red: nothing is broken and nothing new can be created this way; it is a fact about
+           two old rows that the delete dialog's type-the-username gate cannot tell apart. */
+        .own-dup { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px;
+          font-size: 9.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+          white-space: nowrap; background: rgba(217,119,6,.20); color: #fcd34d; vertical-align: 1px; }
 
         /* Desktop: pinned header, list + detail scroll independently inside the admin
            main scroll-port (which has a definite height: .adm is 100dvh, .adm-main flex:1). */
@@ -453,7 +487,7 @@ function RenameModal({ owner, busy, onSave, onClose }: { owner: Owner; busy: boo
 
 // Permanent-delete dialog — folds the old confirm()+prompt() into one card. The red
 // button stays disabled until the typed text matches the username (case-insensitive).
-function DeleteForeverModal({ owner, busy, onConfirm, onClose }: { owner: Owner; busy: boolean; onConfirm: () => void; onClose: () => void }) {
+function DeleteForeverModal({ owner, sharedName, busy, onConfirm, onClose }: { owner: Owner; sharedName: boolean; busy: boolean; onConfirm: () => void; onClose: () => void }) {
   const [typed, setTyped] = useState("");
   const v = typed.trim().toLowerCase();
   const match = v === owner.username.toLowerCase();
@@ -473,6 +507,17 @@ function DeleteForeverModal({ owner, busy, onConfirm, onClose }: { owner: Owner;
           { i: "fa-store", c: "#34d399", t: <>Their restaurants <b>stay linked</b> and come back if you restore</> },
           { i: "fa-clock-rotate-left", c: "#34d399", t: <><b>Restorable at any time</b> — no deadline; they can also be removed for good from the bin, which can&rsquo;t be undone</> },
         ]} />
+        {/* THE GATE CANNOT TELL TWO ACCOUNTS APART WHEN THEY SHARE A NAME (item 8). The right row is
+            still removed — this dialog goes by id, not by what is typed — but the ritual that is
+            meant to make you certain identifies neither, so it says so instead of pretending. */}
+        {sharedName && (
+          <div style={{ fontSize: 12, lineHeight: 1.5, padding: "8px 11px", borderRadius: 9,
+            border: "1px solid rgba(217,119,6,.45)", background: "rgba(217,119,6,.10)", color: "#fcd34d" }}>
+            <b>Another account signs in as “{owner.username}” too.</b> Typing it confirms <b>this</b> row —
+            the one open on the left, <b>{owner.name}</b> — and not the other. Rename one of them if you want
+            to be able to tell them apart at the sign-in box.
+          </div>
+        )}
         <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Type <b style={{ color: "var(--text)" }}>{owner.username}</b> to confirm:</div>
         <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={owner.username} autoComplete="off" spellCheck={false} aria-label="Type the username to confirm deletion"
           style={{ ...field, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 15, borderColor: match ? "#7f1d1d" : undefined }}
@@ -561,8 +606,8 @@ function AssignRestaurantModal({ owner, attachable, busy, onAssign, onClose }: {
 type ActivityRow = { id: string; panel: string; action: string; actor: string | null; detail: string | null; restaurant: string | null; at: string; level?: "info" | "warn" | "error" | null };
 const PANEL_COLOR: Record<string, string> = { owner: "#34d399", admin: "#60a5fa", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#a78bfa", editor: "#d4a574" };
 
-function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted }: {
-  owner: Owner; rests: Rest[]; onBack: () => void; busy: boolean; setBusy: (b: boolean) => void;
+function OwnerDetail({ owner, rests, sharedName, onBack, busy, setBusy, onChanged, onDeleted }: {
+  owner: Owner; rests: Rest[]; sharedName: boolean; onBack: () => void; busy: boolean; setBusy: (b: boolean) => void;
   onChanged: () => void; onDeleted: () => void;
 }) {
   const [activity, setActivity] = useState<ActivityRow[] | null>(null);
@@ -686,8 +731,8 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 19, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner.name}</div>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            @{owner.username} · {owner.active ? <span className="hue-ink" style={{ ["--hue" as string]: "#34d399", fontWeight: 700 }}>Active</span> : <span className="hue-ink" style={{ ["--hue" as string]: "#f87171", fontWeight: 700 }}>Suspended</span>}
-            · created {created ? new Date(created).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"} · seen {seen(owner.lastSeenAt)}
+            @{owner.username}{sharedName ? <span className="own-dup">shared name</span> : null} · {owner.active ? <span className="hue-ink" style={{ ["--hue" as string]: "#34d399", fontWeight: 700 }}>Active</span> : <span className="hue-ink" style={{ ["--hue" as string]: "#f87171", fontWeight: 700 }}>Suspended</span>}
+            {" · "}created {created ? new Date(created).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"} · seen {seen(owner.lastSeenAt)}
           </div>
         </div>
         {/* An owner fills in the SAME profile as everybody else (owner, 2026-08-01) — one
@@ -873,7 +918,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
           onClose={() => setShowAssign(false)} onAssign={assignRestaurants} />
       )}
       {showDelete && (
-        <DeleteForeverModal owner={owner} busy={busy} onClose={() => setShowDelete(false)} onConfirm={doDelete} />
+        <DeleteForeverModal owner={owner} sharedName={sharedName} busy={busy} onClose={() => setShowDelete(false)} onConfirm={doDelete} />
       )}
 
       <style href="adm-owners-2" precedence="default">{`

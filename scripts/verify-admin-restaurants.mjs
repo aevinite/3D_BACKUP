@@ -855,6 +855,45 @@ want(!/<span style=\{\{ fontWeight: 700, minWidth: 0 \}\}>/.test(REST),
   "the Name cell has no `minWidth: 0` — the row's tracks are bare `fr`, so zeroing the item's " +
   "minimum shrank Name to 66px and spilled a long name 26px into Slug at 360px");
 
+// ── 33 · two accounts, one login name ─────────────────────────────────────────────────────────
+//
+// WHERE THIS BITES: Admin console → Owners → the list, a person's hero line, and the delete dialog.
+//
+// This cannot be MADE any more, and the first three checks are what say so: every route a person
+// can reach refuses a name that is taken. It still EXISTS, because the database's own rule is
+// per-restaurant (mig 245) and every restaurant used to be minted with a starter login literally
+// called `owner`. Two such accounts were on the backup stack, eleven weeks apart, showing as two
+// rows reading "@owner · 0 restaurants" with nothing saying they collide — and the delete dialog
+// asks you to type that username to confirm, which identifies neither.
+console.log("\n33. Owners: a login name held by two accounts is said out loud");
+{
+  const OWNRTE = read("app/api/admin/owners/route.ts");
+  const USERS = read("app/api/admin/users/route.ts");
+  want(/if \(action === "rename"\)[\s\S]{0,400}nameTakenMessage\(key\)/.test(OWNRTE),
+    "renaming an owner still checks the name GLOBALLY before it writes");
+  want(/const takenMsg = await nameTakenMessage\(key\);/.test(OWNRTE) && /nameTakenMessage/.test(RESTRTE),
+    "…and so does every path that MINTS one — the Owners page and the Owner card's create-and-assign box");
+  want(/Owners are managed on the Owners page, not here\./.test(USERS) && /\.neq\("role", "owner"\)/.test(USERS),
+    "…and Admin → Users cannot create or rename an owner at all, so there is no third rule");
+  want(/const sharedLogins = useMemo\(/.test(OWN),
+    "the Owners screen works out which login names are held by more than one account");
+  want(/sharedLogins\.has\(o\.username\) && \(/.test(OWN),
+    "…and marks the rail row, so two identical `@name` lines are not left looking like a duplicate render");
+  want(/\{sharedName \? <span className="own-dup">shared name<\/span> : null\}/.test(OWN),
+    "…and the person's own hero line says it too");
+  want(/\{sharedName && \(/.test(OWN) && /Typing it confirms <b>this<\/b> row/.test(OWN),
+    "…and the delete dialog says WHICH of the two typing the name will confirm");
+  want(/rgba\(217,119,6,\.20\)/.test(OWN),
+    "…in amber, not red — nothing is broken and nothing new can be created this way");
+}
+{
+  // The JSX space this screen lost, and the reason it is easy to lose: a text node that starts on
+  // a new line has its leading whitespace stripped, so `</span>\n            · created` shipped as
+  // "Active· created". Same class as the one already recorded on the tables-per-row card.
+  want(/\{" · "\}created \{created \?/.test(OWN),
+    "the hero's separator is an explicit {\" · \"} — a bare `·` on the next line loses its space");
+}
+
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — an admin screen is claiming something it does not do\n`
   : "\n✓ every admin screen still keeps the promise it prints on itself\n");
