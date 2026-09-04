@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **176** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **177** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 176 names in their head, so in practice a person runs none of them, or reaches for
+can hold 177 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -186,6 +186,8 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | an admin route that DECIDES something — a gate, a lock, or a save that reports back | `verify:admin-refusals` ← two shapes of the same mistake: a refusal must FAIL CLOSED (the banquet bill-number lock read `Number(issued.count) || 0` with the error unchecked, so a passing database hiccup said "no bills issued yet" and let a live series' starting number move after bills had gone out on it), and a save that landed NOWHERE must not say "Saved" (the Access endpoint drops unknown keys, and two of its four branches rewrote the column with its own value and showed a green tick). | nothing | no |
 | **any handler under `app/api/admin/*`** — a new one, or the shape of an old one | `verify:admin-api-a` ← the four rules, handler by handler: the sign-in gate runs BEFORE the first database call (CLAUDE.md counts the routes that grep `tokenIsValid`, and a count says nothing about ORDER), named columns instead of `select("*")` on a console read, a bounded row limit, and an honest failure. | nothing | no |
 | the admin's diagnostics screens — System health, Audit & logs, Repair & support, Rate limits, Staff online, Usage & cost | `verify:admin-health` ← the rule it exists for: **a page that could not ask must not say "all clear"**. Four of these screens drew a green empty state over a failed read. It also refuses a hard-coded feed limit (the "showing the latest N" notice would then disagree with the query), any timer under the 60s backstop, and any money figure on a screen that must show none | nothing | no |
+| the admin's **Repair & support** hub or **System health** (and the two retired URLs that forward into them) | `verify:repair-sweep -- --base <url>` ← 612 phases over the two biggest screens in that pair, in nine bands: the twelve faults sweep #8 fixed and the shapes each could come back as, both pages read for correctness, the retired `/aevinite/issues` and `/aevinite/attention` redirects, this project's own written rules (egress, taps, back button, offline, compliance, both skins), the pages DRIVEN at 1280×900 and at 390px in both skins asserting the RENDERED thing, every word a person reads, and judgment. Companion to `verify:admin-health`, which holds the same fixes as fast static assertions. Writes nothing and signs in zero times — it presents the admin cookie the gate already accepts. | app running + `.env.local` | no |
+| the admin's **Recycle bin**, **Billing & plans** or **Usage & cost** | `verify:bin-billing-usage -- --base <url>` ← sweep #8 T20's 568 re-runnable checks over those three screens (ledger `T20-S8.md`). Registered here by T18 on 2026-09-04: it was added to `package.json` without a row, which made `verify:pointers` red on clean `main` — and that guard runs in the PostToolUse hook, so a red one refuses Write/Edit for every session in this repo, not just its author's. | app running + `.env.local` | no |
 
 ## 8 · Any write endpoint, anywhere (`app/api/**/route.ts`)
 

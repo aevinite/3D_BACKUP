@@ -8,6 +8,9 @@ import Link from "next/link";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
 import { timeAgo } from "@/components/admin/shared";
+// THE ONE LIST of what each limit is called — the same one the phone alert and the diary line
+// read. See labelFor() below for why this page needed it (item 14).
+import { RATE_LABELS } from "@/lib/plainError";
 import { SkelList } from "@/components/admin/Skeleton";
 
 type Rule = { id: string; key: string; label: string; max_count: number; window_seconds: number; enabled: boolean; updated_at: string };
@@ -205,7 +208,29 @@ export default function AdminRateLimits() {
     });
     if (res.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(res.error || "Couldn't send.", "err");
   };
-  const labelFor = (key: string) => rules.find((r) => r.key === key)?.label || key;
+  // ── A RAW DATABASE KEY WAS REACHING THIS SCREEN (item 14, owner 2026-09-04) ─────────────────
+  //
+  // This read `rules.find(...)?.label || key` — and fell through to the KEY, unprettified, for any
+  // limit with no editable rule row. There is exactly one of those and it is the one that fires:
+  // the admin-password wall has no max and no window you can set, deliberately, which this page
+  // says in its own words further down. So the live alert on this platform read:
+  //
+  //     admin_login          ← here
+  //     Admin login          ← the same alert on Repair & support
+  //
+  // Two names for one wall, and one of them a database word with an underscore in it. Found by
+  // sweep #8 T18 as a REGRESSION: ledger rows P08242 and P08253 were green in sweeps #6 and #7
+  // ("no raw rate-limit key reaches the screen", "a rate limit reads the same on both screens")
+  // and had quietly stopped being true.
+  //
+  // The order matters. The rule row wins, because that is the name the admin edits right here and
+  // renaming it must change what he sees. Behind it sits RATE_LABELS in lib/plainError.ts, whose
+  // own header calls it "THE ONE LIST" and which the phone alert already reads. The prettifier is
+  // last, so a key nobody has named yet is still never printed raw.
+  const labelFor = (key: string) =>
+    rules.find((r) => r.key === key)?.label
+    || RATE_LABELS[key]
+    || key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
   // The one block every section shows instead of its empty state when the read failed.
   const unread = (

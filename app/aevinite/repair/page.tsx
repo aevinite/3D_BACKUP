@@ -15,13 +15,13 @@ import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
 import Dropdown from "@/components/admin/Dropdown";
 import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
-import { openRestaurantPanel, PANEL_COLOR, actLabel, timeAgo, type Action } from "@/components/admin/shared";
+import { openRestaurantPanel, PANEL_COLOR, actLabel, timeAgo, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
 import { errorSig, errorGroupKey, errorHeadline } from "@/lib/errorSignature";
 // Every error LINE on this board reads as English; the exact text stays one tap away, because it
 // is what Fix now hands Claude (owner, 2026-09-02). Run TITLES above still use errorHeadline —
 // a title is not an error message, and putting it through the translator would wrap a perfectly
 // good "Owner panel nightly audit" in "the app reported this in its own words".
-import { plainHeadline, plainProblem } from "@/lib/plainError";
+import { plainHeadline, plainProblem, RATE_LABELS } from "@/lib/plainError";
 // An alert / lever lands on the control that ends the problem (owner, 2026-09-02).
 import { jumpUrl } from "@/lib/adminJump";
 
@@ -43,6 +43,22 @@ type RlHit = { id: string; restaurant_id: string; restaurant_name: string | null
 // Rate limits page); it is what stops this screen printing a raw database key.
 type RlRule = { key: string; label: string };
 const rlPer = (s: number) => (s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60} min` : `${s}s`);
+// ── A LIMIT WITH NO NUMBERS MUST NOT PRINT ZERO ONES (item 1, 2026-09-04) ────────────────────────
+// Not every wall on this board has an editable ceiling. The ADMIN password wall deliberately has
+// none — the Rate limits page says so in its own words and refuses to offer it as a rule row — so
+// `rate_limit_events` carries `max_count: 0, window_seconds: 0` for those hits. The chip printed
+// them straight through, and `rlPer(0)` answers "0h" because 0 divides by 3600 cleanly, so the one
+// live alert on this platform read:
+//
+//     Admin login    3 / 0 per 0h
+//
+// which is not a smaller number than the real one, it is a meaningless one — the same class as a
+// NaN or an [object Object] reaching a person's screen. A hit with no configured ceiling now states
+// the only fact it actually has: how many attempts there were.
+const rlChip = (h: { hit_count: number; max_count: number; window_seconds: number }) =>
+  h.max_count > 0 && h.window_seconds > 0
+    ? `${h.hit_count} / ${h.max_count} per ${rlPer(h.window_seconds)}`
+    : `${h.hit_count} attempt${h.hit_count === 1 ? "" : "s"}`;
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
 
@@ -150,20 +166,56 @@ function memoryFor(g: ErrGroup, mem: ErrMemory[]): ErrMemory | null {
 const NIGHT_WINDOW_END_HOUR = 8;
 /** The scheduled hour of each night job, for the "it was due at…" half of the sentence. */
 const SCHEDULED: Record<string, string> = { nightly: "2:30 am", audit: "6:00 am" };
+// ── TWO DIFFERENT JOBS WEAR THE "AUDIT" TAG (item 16, owner 2026-09-04) ─────────────────────────
+// There are three LaunchAgents, not two: the repair run at 02:30, the TABLET audit at 04:00 and the
+// OWNER audit at 06:00. Only two `kind` values exist though — "nightly" and "audit" — so both
+// audits map to the same row above and the catch-up sentence told a 4am job it was "due at 6:00 am".
+// It has not happened yet: every tablet audit on record started within minutes of 04:00. That makes
+// it a trap rather than a fault, and the fix is to read the job's own TITLE, which already says
+// which one it is ("Waiter tablet nightly audit" / "Owner panel nightly audit").
+// A title we do not recognise falls back to the kind, so a NEW night job is never told a wrong
+// time — it just gets the vaguer "the night" until someone adds it here.
+const SCHEDULED_BY_TITLE: { match: RegExp; due: string }[] = [
+  { match: /tablet/i, due: "4:00 am" },
+  { match: /owner/i, due: "6:00 am" },
+  { match: /repair/i, due: "2:30 am" },
+];
+const dueTime = (s: AgentRun): string =>
+  SCHEDULED_BY_TITLE.find((x) => x.match.test(s.title || ""))?.due || SCHEDULED[s.kind] || "the night";
+// ── ONE CLOCK ON THE WHOLE ROW (item 9, 2026-09-04) ─────────────────────────────────────────────
+// Everything else on this board prints its time with an explicit `timeZone: "Asia/Kolkata"` — the
+// restaurants' own clock, deliberately not the laptop's, so the console reads the same wherever it
+// is opened. This function did neither: it decided whether a run was "late" from `getHours()` and
+// printed its two times with no zone, both of which follow whatever the machine happens to be set
+// to. On the office Mac (IST) the answers agree, so nothing is wrong on his screen today. Opened
+// anywhere else the row would print "02:30 am" from the line above and "Started 22:00, not
+// overnight" from this one — two clocks, one row, and the second contradicting the first.
+// So the zone is stated here too, and the hour that decides "late" is read in the SAME zone as the
+// sentence that reports it.
+const IST = "Asia/Kolkata";
+const istTime = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZone: IST, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+const istClock = (d: Date) => d.toLocaleTimeString("en-IN", { timeZone: IST, hour: "2-digit", minute: "2-digit" });
+/** The hour (0–23) and the calendar day, read in the restaurants' own zone rather than the laptop's. */
+function istParts(d: Date): { hour: number; day: string } {
+  const f = new Intl.DateTimeFormat("en-GB", { timeZone: IST, hour: "2-digit", hour12: false, day: "2-digit", month: "2-digit", year: "numeric" });
+  const parts = Object.fromEntries(f.formatToParts(d).map((x) => [x.type, x.value]));
+  return { hour: Number(parts.hour), day: `${parts.year}-${parts.month}-${parts.day}` };
+}
 function lateNightRun(s: AgentRun): string {
   if (s.kind === "live") return "";       // a live fix is started by hand, whenever he asks for it
   const start = new Date(s.started_at);
-  const hour = start.getHours();          // the admin's own clock — the same one the row prints
-  const due = SCHEDULED[s.kind] || "the night";
-  if (hour >= NIGHT_WINDOW_END_HOUR) {
-    return `Started ${start.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}, not overnight — it was due at ${due} and the Mac was asleep, so macOS ran it when you next woke it.`;
+  const startIst = istParts(start);
+  const due = dueTime(s);
+  if (startIst.hour >= NIGHT_WINDOW_END_HOUR) {
+    return `Started ${istClock(start)}, not overnight — it was due at ${due} and the Mac was asleep, so macOS ran it when you next woke it.`;
   }
   // Started on time, but was it still going once the day began? Only worth saying when it really
   // ran past the window — a 40-minute 6am audit is not news.
   if (s.ended_at) {
     const end = new Date(s.ended_at);
-    if (end.getHours() >= NIGHT_WINDOW_END_HOUR && end.getDate() === start.getDate()) {
-      return `Started on time but ran until ${end.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} — so it was still working during the morning.`;
+    const endIst = istParts(end);
+    if (endIst.hour >= NIGHT_WINDOW_END_HOUR && endIst.day === startIst.day) {
+      return `Started on time but ran until ${istClock(end)} — so it was still working during the morning.`;
     }
   } else if (s.status === "running" && Date.now() - start.getTime() > 2 * 3600_000) {
     return "Started overnight and is STILL running — over two hours. It may be stuck.";
@@ -252,10 +304,19 @@ export default function AdminRepair() {
   // rules themselves so a hit can be named the way the Rate limits page names it.
   const [rlHits, setRlHits] = useState<RlHit[]>([]);
   const [rlRules, setRlRules] = useState<RlRule[]>([]);
+  // ── ONE NAME FOR ONE LIMIT (item 11, 2026-09-04) ─────────────────────────────────────────────
+  // The rule row wins, because that is the name the admin edits on the Rate limits page. Behind it
+  // sits RATE_LABELS in lib/plainError.ts — that file’s own header calls it "THE ONE LIST", and
+  // the phone alert and the diary line both read it. This screen did not: it fell back to
+  // prettifying the raw key, which is a SECOND opinion about the same name and exactly the drift
+  // the list exists to prevent. It only bites a key with no rule row — `admin_login` is one,
+  // deliberately, because the admin password wall has no editable numbers — and today the two
+  // answers happen to agree ("Admin login"), so nothing on screen changes. The next key added
+  // without a rule row is where a guess and a name diverge. The prettifier stays last, so an
+  // unknown key is still never printed raw.
   const rlLabel = (key: string) =>
     rlRules.find((r) => r.key === key)?.label
-    // Until the rules arrive (or for a key with no rule row), prettify rather than print the raw
-    // database key — the same rule actLabel() follows for action codes.
+    || RATE_LABELS[key]
     || key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
   useEffect(() => {
@@ -334,6 +395,50 @@ export default function AdminRepair() {
     setErrLoading(false);
   }, []);
   useEffect(() => { loadHub(); }, [loadHub]);
+
+  // ── "REMIND ME LATER" HAS TO ACTUALLY COME BACK (item 19, owner 2026-09-04) ──────────────────
+  //
+  // His words: "I do solve later. So after four hours, it doesn't show. So make sure of that thing."
+  //
+  // The SERVER was right all along, and it was worth proving before changing anything: with one
+  // report's wait moved into the past on the dev database, /api/admin/oplog?unresolved=1 hands it
+  // straight back, stops counting it as waiting, and the row was restored to exactly what it was.
+  // Hidden while waiting ✓, counted while waiting ✓, comes back once passed ✓.
+  //
+  // What was missing is that NOTHING ON THIS PAGE EVER ASKED AGAIN. The board is deliberately
+  // click-to-refresh — no polling at all — so the one screen that honours a wait was also the one
+  // screen that could not notice it ending. Press "in 4 hours", leave the tab open, and four hours
+  // later you are looking at a four-hour-old answer: the problem IS back, and the board still says
+  // "All clear". The feature's whole promise is "it comes back by itself", and on a board left open
+  // that promise was false.
+  //
+  // ── WHY THIS IS ONE REQUEST AND NOT SEVEN ───────────────────────────────────────────────────
+  // loadHub() fires SEVEN feeds. Putting that on a timer to answer one question would be exactly
+  // the whole-board refetch this project's cost rules exist to prevent. Only ONE feed can change
+  // because a wait expired — the problems feed — and the waiting COUNT rides on that same answer,
+  // so the line under the strip stays right too. Everything else (the queue, the history,
+  // complaints, account health, limits, the fixed record) still moves only on arrival or on the
+  // Refresh button, which is unchanged and still re-pulls all seven.
+  //
+  // 120s, not 60: the waits are four hours, a day and a week, so being two minutes late is
+  // nothing, and the shared helper is visible-only + idle-aware + jittered + wake-on-return — a
+  // board nobody is looking at costs zero, and coming back to a parked tab refreshes at once.
+  const loadProblems = useCallback(async () => {
+    const e = await adminFetch<{ actions: Action[]; waiting: number | null }>(`/api/admin/oplog?level=error&limit=${ERROR_FEED_LIMIT}&unresolved=1`);
+    if (e.ok) {
+      setErrors(e.data.actions || []);
+      setWaiting(e.data.waiting ?? null);
+      setProblemsErr("");
+      // Only THIS feed's name may be added or cleared here. A quiet background refresh must never
+      // erase the fact that another feed failed on the last full load.
+      setFeedsFailed((prev) => prev.filter((x) => x !== "problems"));
+    } else {
+      setWaiting(null);
+      setProblemsErr(e.error || "Couldn't load the problem list.");
+      setFeedsFailed((prev) => (prev.includes("problems") ? prev : [...prev, "problems"]));
+    }
+  }, []);
+  useActiveAutoRefresh(loadProblems, 120000);
 
   const refreshAll = () => { setRefreshing(true); Promise.all([loadHub(), load()]).finally(() => setTimeout(() => setRefreshing(false), 500)); };
 
@@ -587,7 +692,9 @@ export default function AdminRepair() {
   const rlFix = async (h: RlHit) => {
     const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
       method: "POST", headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
-      body: JSON.stringify({ note: `Rate limit "${h.key}" reached by ${h.subject_label || h.subject}${h.restaurant_name ? ` at ${h.restaurant_name}` : ""} (${h.hit_count} in ${rlPer(h.window_seconds)}). Is this real abuse or is the limit too tight?`, restaurant_id: h.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? h.restaurant_id : null, mode: "overnight" }),
+      // The SAME sentence the chip shows (item 1) — a ticket that says "3 in 0h" describes a
+      // limit that does not exist, and it is the one line Claude reads first.
+      body: JSON.stringify({ note: `Rate limit "${h.key}" reached by ${h.subject_label || h.subject}${h.restaurant_name ? ` at ${h.restaurant_name}` : ""} (${rlChip(h)}). Is this real abuse or is the limit too tight?`, restaurant_id: h.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? h.restaurant_id : null, mode: "overnight" }),
     });
     if (r.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(r.error || "Couldn't send.", "err");
   };
@@ -665,6 +772,16 @@ export default function AdminRepair() {
   // this stack and the board was one flat list. It now narrows the problems and the limit hits too
   // (both act on rows already fetched — no extra request, no extra data).
   const groups = groupErrors(rid ? errors.filter((a) => (a.restaurant_id || "") === rid) : errors);
+  // ── WHAT THE PICKER IS HOLDING BACK (item 15, owner 2026-09-04) ─────────────────────────────
+  // Measured on this platform: 24 of the 27 open reports carry NO restaurant at all — they are
+  // platform-wide crashes, and hiding them under a one-restaurant view is correct, because they
+  // genuinely are not that restaurant's. What was not correct was going GREEN and saying nothing:
+  // "All clear — no unresolved problems at Demo Bistro" is true, and it is also not the whole
+  // picture when two dozen reports are sitting one control away.
+  // The queue section below has done this properly for a while ("2 more are queued at other
+  // restaurants"); this is the problem board learning the same manners. A count over rows already
+  // in hand — no extra request, so choosing a restaurant still fires nothing.
+  const hiddenByPicker = rid ? groupErrors(errors).length - groups.length : 0;
   const shownRlHits = rid ? rlHits.filter((h) => h.restaurant_id === rid) : rlHits;
   // A problem already handed to Claude must not offer "Fix now" again after a refresh (T20 sweep,
   // 2026-08-16). `sent` is only this page-load's memory, so a reload re-offered the button and a
@@ -749,7 +866,7 @@ export default function AdminRepair() {
         </a>
         <a className={`rp-pill${!attErr && attCount ? " warn" : ""}`} href="#at-risk"
           title={attErr ? "Account health didn't load — this is not an all-clear" : "Jump to at-risk restaurants"}>
-          <i className={`fas ${attErr ? "fa-circle-question" : "fa-heart-pulse"}`} aria-hidden="true" /><span className="n">{attErr ? "—" : att ? attCount : "…"}</span><span>need attention</span>
+          <i className={`fas ${attErr ? "fa-circle-question" : "fa-heart-pulse"}`} aria-hidden="true" /><span className="n">{attErr ? "—" : att ? attCount : "…"}</span><span>need{!attErr && att && attCount === 1 ? "s" : ""} attention</span>
         </a>
         <div className="rp-pill" title={requestsElsewhere > 0 ? `${requestsElsewhere} more ${requestsElsewhere === 1 ? "is" : "are"} queued at other restaurants` : undefined}>
           <i className="fas fa-robot" aria-hidden="true" /><span className="n">{scopedRequests.length}</span><span>waiting for Claude</span>
@@ -795,7 +912,25 @@ export default function AdminRepair() {
 
           {confirmBulk === "resolve" ? (
             <span className="rp-bulk-ask">
-              <span>Mark all {groups.length} {scopePhrase} as handled?</span>
+              {/* REJECTED (owner, 2026-09-04): skipping the waiting ones instead of saying so —
+                  R54 in docs/REJECTED-IDEAS.md. *"resolve all means resolve, you have to one by
+                  one resolve all the problems as simple as that."* The sentence below is the whole
+                  answer; do not turn it into a filter, a checkbox or a second button. */}
+              {/* ── AND THE ONES THAT ARE WAITING (item 8, 2026-09-04) ──────────────────────────
+                  "Resolve all" sends { all: true } and the server clears every unresolved error
+                  report in scope — INCLUDING the ones set to come back later, which are not on
+                  this board and are counted a few lines up as "still open, not fixed". So the
+                  confirm promised 10, the toast afterwards reported a larger number, and a problem
+                  he had deliberately PARKED came back marked handled.
+                  The button is not changed: clearing a whole board after a fix landed is exactly
+                  what it is for, and quietly skipping the parked ones would be its own surprise.
+                  What it did not do was SAY so at the moment it matters — the same rule the scope
+                  phrase in this very sentence was added for. `waiting` is the server’s own
+                  platform-wide count, so it is worded the way the line above words it. */}
+              <span>
+                Mark all {groups.length} {scopePhrase} as handled?
+                {waiting ? ` That also clears ${waiting} report${waiting === 1 ? "" : "s"} set to come back later${scopedName ? " (across all restaurants)" : ""}.` : ""}
+              </span>
               <button className="adm-btn primary" onClick={resolveAllProblems}>Yes, clear the board</button>
               <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
@@ -851,6 +986,10 @@ export default function AdminRepair() {
           <span>
             <b style={{ color: "var(--text)" }}>{waiting}</b> report{waiting === 1 ? "" : "s"}{scopedName ? " across all restaurants" : ""}{waiting === 1 ? " is" : " are"} set to come back later — still open, not fixed, and
             listed in <Link href="/aevinite/logs" style={{ color: "var(--accent)" }}>Audit &amp; logs</Link> the whole time.
+            {/* SAY THAT THE BOARD WATCHES FOR IT (item 19). The sentence promised the tile would
+                come back by itself, and until now nothing on this page ever asked again — so on a
+                tab left open it never did. It does now, so the promise is worth printing. */}
+            {" "}This page checks for {waiting === 1 ? "it" : "them"} every couple of minutes while you&rsquo;re here.
           </span>
         </p>
       )}
@@ -864,7 +1003,18 @@ export default function AdminRepair() {
           <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={loadHub}>Retry</button>
         </div>
       ) : groups.length === 0 ? (
-        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> All clear — no unresolved problems{scopedName ? ` at ${scopedName}` : ""}.</div>
+        <div className="rp-clear" style={{ display: "block" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <i className="fas fa-circle-check" aria-hidden="true" /> All clear — no unresolved problems{scopedName ? ` at ${scopedName}` : ""}.
+          </div>
+          {/* A GREEN BOARD MUST NOT BE THE WHOLE STORY WHEN IT IS ONLY PART OF IT (item 15). */}
+          {hiddenByPicker > 0 && (
+            <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 8, paddingLeft: 26, lineHeight: 1.55 }}>
+              {hiddenByPicker} other problem{hiddenByPicker === 1 ? " is" : "s are"} open, none of them tied to a restaurant — they are platform-wide.{" "}
+              <button className="rp-link" onClick={() => setRid("")}>Show every restaurant</button>
+            </div>
+          )}
+        </div>
       ) : (
         <div style={{ marginBottom: 6 }}>
           {groups.map((g) => {
@@ -981,6 +1131,17 @@ export default function AdminRepair() {
               </div>
             );
           })}
+          {/* Not only on an empty board: with two tiles shown and twenty-four hidden, "2" is just
+              as misleading as "0". Same sentence, under the list (item 15). */}
+          {hiddenByPicker > 0 && (
+            <p className="adm-muted" style={{ fontSize: 12.5, margin: "2px 0 8px", display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+              <i className="fas fa-filter" aria-hidden="true" style={{ opacity: 0.7 }} />
+              <span>
+                {hiddenByPicker} more problem{hiddenByPicker === 1 ? " is" : "s are"} open but tied to no restaurant, so {hiddenByPicker === 1 ? "it is" : "they are"} not shown here.{" "}
+                <button className="rp-link" onClick={() => setRid("")}>Show every restaurant</button>
+              </span>
+            </p>
+          )}
           {errors.length >= ERROR_FEED_LIMIT && (
             <p className="adm-muted" style={{ fontSize: 12, margin: "2px 0 8px" }}>
               <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />
@@ -1116,7 +1277,7 @@ export default function AdminRepair() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                   <b style={{ fontSize: 13.5 }}>{rlLabel(h.key)}</b>
-                  <span className="rp-chip danger">{h.hit_count} / {h.max_count} per {rlPer(h.window_seconds)}</span>
+                  <span className="rp-chip danger">{rlChip(h)}</span>
                   {h.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 5, fontSize: 9.5 }} />{h.restaurant_name}</span> : null}
                   <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(h.last_at)}</span>
                 </div>
@@ -1254,9 +1415,15 @@ export default function AdminRepair() {
         <p className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.5, margin: "0 0 10px" }}>
           Describe what&rsquo;s going wrong in your own words — a printer, a button, a wrong total. {rid ? <>Tagged to <b>{scopedName}</b>.</> : <>Pick a restaurant at the top of this page to tag it, or leave it general.</>}
         </p>
+        {/* fontFamily: "inherit" — a <textarea> falls back to the browser's monospace unless it is
+            told otherwise, and every other input on this console is the console's own face. So the
+            one box on the page where he types a SENTENCE ("the bill button on table 12 does
+            nothing during rush") was the only thing on the screen dressed as a code editor, right
+            under a hint asking for his own words. Measured: computed font-family was "monospace"
+            while the page was Inter (item 5, 2026-09-04). */}
         <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} rows={3}
           placeholder="e.g. The bill button on table 12 does nothing during rush; happens on the waiter tablet."
-          style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13.5, resize: "vertical" }} />
+          style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.5, resize: "vertical" }} />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
           <span className="adm-muted" style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}>
             <i className="fas fa-bolt" aria-hidden="true" style={{ color: "var(--adm-accent, #e8a13c)" }} /> Now = a window on the Mac &nbsp;·&nbsp; <i className="fas fa-moon" aria-hidden="true" style={{ opacity: 0.8 }} /> Overnight = the 2:30 robot
@@ -1300,7 +1467,7 @@ export default function AdminRepair() {
                 <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" title={q.mode === "overnight" ? "Waiting for the 2:30 AM robot" : "Instant — pops on the Mac"} style={{ marginTop: 2, opacity: 0.7 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.summary}</div>
-                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{new Date(q.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>fix ready →</a></> : ""}</div>
+                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{istTime(q.created_at)}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>fix ready →</a></> : ""}</div>
                 </div>
                 <button className="adm-btn" onClick={() => dismissRequest(q.id)} title="Dismiss" style={{ fontSize: 11.5, padding: "3px 9px" }}>Dismiss</button>
               </div>
@@ -1326,9 +1493,13 @@ export default function AdminRepair() {
         {rid && <button className="adm-btn" onClick={load}><i className="fas fa-rotate-right" aria-hidden="true" style={{ marginRight: 6 }} />Reload its tables</button>}
       </div>
 
-      {!rid ? (
-        <div className="adm-empty">Choose a restaurant at the top of the page to unlock its table &amp; order tools.</div>
-      ) : dataErr ? (
+      {/* THE SAME SENTENCE, TWICE, ONE UNDER THE OTHER (item 7, 2026-09-04). The scope card above
+          already says "Choose a restaurant at the top of this page to unlock the table & order
+          tools." — and this empty state said it again in almost the same words, so the section
+          opened by telling him the same thing twice and reading like a stutter. The card is the
+          one that stays: it is the row that also names the chosen restaurant once there IS one,
+          so it can never be blank. */}
+      {!rid ? null : dataErr ? (
         <div className="adm-empty">Couldn&rsquo;t load that restaurant. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>
       ) : data === null ? (
         <div className="adm-empty">Loading…</div>
@@ -1386,8 +1557,20 @@ export default function AdminRepair() {
           {(() => {
             const scheduled = runs.filter((r) => r.kind !== "live");
             const recent = scheduled.slice(0, 12);
-            const failed = recent.filter((r) => r.status === "failed").length;
+            const failedRuns = recent.filter((r) => r.status === "failed");
+            const failed = failedRuns.length;
             if (recent.length < 4 || failed * 2 < recent.length) return null;
+            // ── DON'T SEND HIM TO A DOOR THAT ISN'T THERE (item 2, 2026-09-04) ──────────────────
+            // This ended with "Open any red row below and read what it did to see where it
+            // stopped." Measured on this platform: 7 of the last 12 failed and SIX of those seven
+            // saved no report at all — a run that dies before it can write one is exactly the run
+            // that fails, so the emptiest rows are the ones this sentence points at. Following the
+            // instruction meant pressing six rows that answered with nothing.
+            //
+            // So the sentence now says which half is readable. When none of them is, it says that
+            // plainly instead of naming a control that does not exist — the same rule as every
+            // other alert on this board: name the door, or say there isn't one.
+            const withReport = failedRuns.filter((r) => r.report).length;
             return (
               <div className="adm-card" style={{ marginBottom: 8, borderColor: "var(--adm-warn)", background: "color-mix(in srgb, var(--adm-warn) 8%, var(--card))" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, lineHeight: 1.55 }}>
@@ -1397,7 +1580,12 @@ export default function AdminRepair() {
                     <span className="adm-muted">
                       These are the overnight jobs on your Mac. When they fail, nothing looked at the
                       app that night — so problems that would have been found and fixed are still
-                      there. Open any red row below and read what it did to see where it stopped.
+                      there.{" "}
+                      {withReport === 0
+                        ? "None of them saved a report, which usually means the run died before it could start — the jobs themselves are what need a look."
+                        : withReport === failed
+                        ? "Open any red row below and read what it did to see where it stopped."
+                        : `${withReport} of the ${failed} saved a report — open ${withReport === 1 ? "that one" : "those"} to see where it stopped. The rest died before they could write one.`}
                     </span>
                   </div>
                 </div>
@@ -1417,39 +1605,68 @@ export default function AdminRepair() {
               };
               const st = statusInfo[s.status];
               const isOpen = openRun === s.id;
+              // ── A ROW WITH NOTHING TO OPEN IS NOT A BUTTON (item 3, 2026-09-04) ──────────────
+              // Every row in this list was a real <button> that set `openRun` and announced
+              // `aria-expanded`, whether or not there was a report to expand. On this platform that
+              // is 22 of the 30 rows: pressing one moved state, changed nothing on screen, and told
+              // a screen reader the row had just expanded — into nothing. It is the "a tap never
+              // vanishes" rule in its quietest form: the tap did not fail, it succeeded at doing
+              // nothing, and there is no way to tell that apart from a broken button.
+              //
+              // A row that CAN open is exactly what it was. A row that cannot is plain markup and
+              // says so, which is the one thing the old row never did — and it is the row the
+              // failure banner above points at, because a run that dies early is the run that
+              // saves no report.
+              const rowBody = (
+                <>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: "2px 6px", borderRadius: 5, marginTop: 1, background: "color-mix(in srgb, var(--adm-accent, #e8a13c) 18%, transparent)", color: "var(--adm-accent, #e8a13c)" }}>{kindLabel}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {/* A run started before readableError() landed carries the whole gateway page
+                        as its TITLE, so this one line read "<!DOCTYPE html> <!--[if lt IE 7]>…".
+                        Same treatment as the problem rows: a title is a label, never the
+                        evidence — the full report is still printed verbatim below. */}
+                    <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{errorHeadline(s.title)}</span>
+                    <span className="adm-muted" style={{ fontSize: 11.5 }}>
+                      {istTime(s.started_at)}
+                      {mins !== null ? <> · {mins} min</> : null} · <span style={{ color: st.color }}>{st.label}</span>
+                      {s.report ? <> · {isOpen ? "hide" : "read what it did"}</> : null}
+                    </span>
+                    {/* WHY IS A NIGHT JOB STAMPED IN THE MORNING? (owner, 2026-09-02: "why night
+                        audit is going on in afternoon"). The schedules are right — 2:30am, 4am,
+                        6am — but macOS runs a MISSED scheduled job the moment the Mac next
+                        wakes, so a night the laptop was shut produces a "nightly" run stamped
+                        09:27am. On 1 Sept both the repair run and the owner audit fired in the
+                        same second at 09:27 for exactly that reason.
+                        The row showed the true time and no explanation, so the only reading
+                        available was "the night job is running in the daytime". It now says
+                        which of the two it is, in words. */}
+                    {late ? (
+                      <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, color: "var(--adm-warn)" }}>
+                        <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 5, fontSize: 10 }} />{late}
+                      </span>
+                    ) : null}
+                    {/* NOTHING TO OPEN, SAID OUT LOUD. Only for a run that ENDED — a run still
+                        working has not had the chance to write one yet, and calling that "no
+                        report" would be an invented fault. */}
+                    {!s.report && s.ended_at ? (
+                      <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, fontStyle: "italic" }}>
+                        No report was saved{s.status === "failed" ? " — it stopped before it could write one." : "."}
+                      </span>
+                    ) : null}
+                  </span>
+                </>
+              );
               return (
                 <div key={s.id} style={{ padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
-                  <button onClick={() => setOpenRun(isOpen ? "" : s.id)} aria-expanded={isOpen}
-                    style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", background: "none", border: "none", padding: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: s.report ? "pointer" : "default", minHeight: 40 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: "2px 6px", borderRadius: 5, marginTop: 1, background: "color-mix(in srgb, var(--adm-accent, #e8a13c) 18%, transparent)", color: "var(--adm-accent, #e8a13c)" }}>{kindLabel}</span>
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      {/* A run started before readableError() landed carries the whole gateway page
-                          as its TITLE, so this one line read "<!DOCTYPE html> <!--[if lt IE 7]>…".
-                          Same treatment as the problem rows: a title is a label, never the
-                          evidence — the full report is still printed verbatim below. */}
-                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{errorHeadline(s.title)}</span>
-                      <span className="adm-muted" style={{ fontSize: 11.5 }}>
-                        {new Date(s.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-                        {mins !== null ? <> · {mins} min</> : null} · <span style={{ color: st.color }}>{st.label}</span>
-                        {s.report ? <> · {isOpen ? "hide" : "read what it did"}</> : null}
-                      </span>
-                      {/* WHY IS A NIGHT JOB STAMPED IN THE MORNING? (owner, 2026-09-02: "why night
-                          audit is going on in afternoon"). The schedules are right — 2:30am, 4am,
-                          6am — but macOS runs a MISSED scheduled job the moment the Mac next
-                          wakes, so a night the laptop was shut produces a "nightly" run stamped
-                          09:27am. On 1 Sept both the repair run and the owner audit fired in the
-                          same second at 09:27 for exactly that reason.
-                          The row showed the true time and no explanation, so the only reading
-                          available was "the night job is running in the daytime". It now says
-                          which of the two it is, in words. */}
-                      {late ? (
-                        <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, color: "var(--adm-warn)" }}>
-                          <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 5, fontSize: 10 }} />{late}
-                        </span>
-                      ) : null}
-                    </span>
-                    {s.report ? <i className={`fas fa-chevron-${isOpen ? "up" : "down"}`} aria-hidden="true" style={{ marginTop: 4, opacity: 0.5, fontSize: 11 }} /> : null}
-                  </button>
+                  {s.report ? (
+                    <button onClick={() => setOpenRun(isOpen ? "" : s.id)} aria-expanded={isOpen}
+                      style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", background: "none", border: "none", padding: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer", minHeight: 40 }}>
+                      {rowBody}
+                      <i className={`fas fa-chevron-${isOpen ? "up" : "down"}`} aria-hidden="true" style={{ marginTop: 4, opacity: 0.5, fontSize: 11 }} />
+                    </button>
+                  ) : (
+                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", minHeight: 40 }}>{rowBody}</div>
+                  )}
                   {isOpen && s.report ? (
                     <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, lineHeight: 1.55, margin: "8px 0 0", padding: "10px 12px", borderRadius: 8, background: "color-mix(in srgb, var(--card) 60%, transparent)", border: "var(--border)", maxHeight: 320, overflowY: "auto", fontFamily: "inherit" }}>{s.report}</pre>
                   ) : null}
@@ -1522,7 +1739,15 @@ export default function AdminRepair() {
                  color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);
                  border:1px solid color-mix(in srgb,var(--accent) 32%,transparent);
                  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .rp-detail{font-size:12px;line-height:1.5;color:var(--muted);white-space:pre-wrap;word-break:break-word;overflow:hidden;transition:max-height .18s ease;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+        /* THE SENTENCE IS NOT CODE ANY MORE (item 4, 2026-09-04). This class was monospaced when
+           the line it held WAS the raw error text, and that was right. Since 2026-09-02 the closed
+           line is plainHeadline() — "Part of the app didn't finish downloading, so the screen
+           couldn't open." — and the owner's word for that change was that it "should be in the
+           human language". A human sentence in a code face says the opposite of that in the one
+           place he actually reads. The captured text still gets the code face: the open block
+           below sets its own fontFamily inline, and the "Already fixed" rows use this class for a
+           sentence too. Nothing is hidden either way — only the typeface moved. */
+        .rp-detail{font-size:12.5px;line-height:1.55;color:var(--muted);white-space:pre-wrap;word-break:break-word;overflow:hidden;transition:max-height .18s ease}
         .rp-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
         .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}
         .rp-x:hover{opacity:1;background:color-mix(in srgb,var(--text) 8%,transparent)}

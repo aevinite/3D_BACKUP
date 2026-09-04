@@ -100,13 +100,17 @@ function PanelCell({ p }: { p: Panel }) {
   // red "never/quiet" owner cell was a false alarm — render it neutral instead.
   const ownerQuiet = p.role === "owner" && (p.status === "never" || p.status === "offline");
   const s = ownerQuiet ? { c: "var(--muted)", t: p.status === "never" ? "Not signed in" : "Quiet" } : PSTATUS[p.status];
-  // "Never seen" used to be drawn hollow only because "Quiet" already had the same red fill and the
-  // two needed telling apart. Quiet is neutral now, so the one state that really is unfinished gets
-  // the solid dot — the only red in the grid, and the one the check row above actually counts.
-  const hollow = false;
+  // OBITUARY (item 12, 2026-09-04): "Never seen" used to be drawn HOLLOW, only because "Quiet"
+  // already had the same red fill and the two needed telling apart. Quiet went neutral in the
+  // 2026-08-27 fix above, so the one state that really is unfinished takes the solid dot — the
+  // only red in the grid, and the one the check row above actually counts. The hollow option was
+  // left behind as `const hollow = false` feeding two ternaries that could only ever pick one
+  // branch, which reads as a switch somebody might still flip. The decision is made; the dot is
+  // filled, always. Do not re-add a hollow state to tell two things apart — make one of them
+  // neutral instead, which is what that fix was.
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }} title={p.on ? (p.lastSeen ? `Last active ${timeAgo(p.lastSeen)}` : "Never seen active") : "Panel disabled for this restaurant"}>
-      <span style={{ width: 8, height: 8, borderRadius: 999, flex: "0 0 auto", border: hollow ? `1px solid ${s.c}` : undefined, backgroundColor: hollow ? "transparent" : s.c }} aria-hidden="true" />
+      <span style={{ width: 8, height: 8, borderRadius: 999, flex: "0 0 auto", backgroundColor: s.c }} aria-hidden="true" />
       <span style={{ fontSize: 12.5, color: p.status === "off" || ownerQuiet ? "var(--muted)" : "var(--text)" }}>
         {s.t}{p.on && p.lastSeen && (p.status === "idle" || p.status === "offline") ? ` · ${timeAgo(p.lastSeen)}` : ""}
       </span>
@@ -257,9 +261,15 @@ export default function AdminHealth() {
           key: "sw", label: "Offline layer",
           value: ol.behind > 0 ? `${ol.behind} behind` : `all on ${ol.shipped}`,
           tone: ol.behind > 0 ? "warn" : "good",
+          // ── ONE DEVICE "HAVEN'T SAID" (item 6, 2026-09-04) ────────────────────────────────
+          // Both sentences hard-coded the plural verb, and the count in front of it is very often
+          // 1 — a single phone on a browser with no service worker, or one first visit not yet
+          // controlled. Read off the live screen: "Every device used in the last day is on the
+          // current saved copy, except 1 that haven't said." The count beside it is already
+          // pluralised correctly two clauses earlier, which is what makes the mistake stand out.
           means: ol.behind > 0
-            ? `${ol.behind} device${ol.behind === 1 ? "" : "s"} still on an older saved copy of the app (${ol.current} on the current one${ol.unknown ? `, ${ol.unknown} haven't said` : ""}). Reloading that panel picks up the new one.`
-            : `Every device used in the last day is on the current saved copy${ol.unknown ? `, except ${ol.unknown} that haven't said` : ""}.`,
+            ? `${ol.behind} device${ol.behind === 1 ? "" : "s"} still on an older saved copy of the app (${ol.current} on the current one${ol.unknown ? `, ${ol.unknown} ${ol.unknown === 1 ? "hasn't" : "haven't"} said` : ""}). Reloading that panel picks up the new one.`
+            : `Every device used in the last day is on the current saved copy${ol.unknown ? `, except ${ol.unknown} that ${ol.unknown === 1 ? "hasn't" : "haven't"} said` : ""}.`,
           needsYou: ol.behind > 0,
           go: { href: "/aevinite/staff-online", label: "Who's online" },
         });

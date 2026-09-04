@@ -54,6 +54,12 @@ export async function POST(req: NextRequest) {
   // Scoped exactly the way the board is: all restaurants, or the one the picker has chosen. The
   // restaurant-less rows (a platform-wide crash) belong to the "all restaurants" view only, which
   // is the same rule the page's own filter follows.
+  // REJECTED (owner, 2026-09-04): making this SKIP the rows that are waiting — see R54 in
+  // docs/REJECTED-IDEAS.md. Asked directly, answered directly: *"resolve all means resolve, you
+  // have to one by one resolve all the problems as simple as that"*. So the filter below is
+  // deliberately `resolved_at IS NULL` and NOTHING about `snoozed_until`: a parked report is
+  // still an OPEN report, and "all" means all. The screen carries the honesty half — the confirm
+  // says it will also clear the waiting ones and how many. Do not add a snooze filter here.
   if (body.all === true) {
     const scope = typeof body.restaurant_id === "string" && UUID.test(body.restaurant_id) ? body.restaurant_id : null;
     let upd = sb.from("staff_actions")

@@ -40,6 +40,21 @@ if (!existsSync(INDEX)) {
   process.exit(1);
 }
 const index = readFileSync(INDEX, "utf8");
+// ── AND WHY WIDENING THIS LINE WAS NOT ENOUGH ON ITS OWN (T18 of sweep #8, same day) ──────────
+//
+// T18 reached this from the other end — the owner picked it as its item 18 — and hit the half that
+// is not visible from here. Both generated files wrote `| id | check |`, TWO columns, and
+// `isPhaseRow` below needs SIX cells. So widening the pattern by itself did not protect those ids:
+// it reclassified all of them as narrative back-references, and the dangling-reference check a few
+// lines down then failed on every single one. This guard runs in the PostToolUse hook, so that
+// would have blocked Write/Edit for every session in this repo.
+//
+// The generators were therefore fixed FIRST: `scripts/verify-admin-sweep.mjs` and
+// `scripts/verify-repair-health-sweep.mjs` now emit the standard five-column row — including a
+// RESULT column, because a generated ledger with nowhere to record a result cannot converge, which
+// is the entire point of the ledger. If a future generated ledger appears with two columns again,
+// this guard will call its rows narrative and the ids will go unprotected exactly as before. The
+// shape is the requirement, not a nicety.
 // ── A ROUND LEDGER IS STILL A LEDGER (T20 of sweep #8, 2026-09-04) ─────────────────────────────
 //
 // This matched `^T\d+\.md$` only, so a second ROUND filed by the same terminal — `T17-R2.md`

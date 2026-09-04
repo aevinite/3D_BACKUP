@@ -30,6 +30,7 @@ const CUSTLOG = read("app/api/admin/custlog/route.ts");
 const API_A = read("scripts/verify-admin-api-a.mjs");
 const HEALTH_ROUTE = read("app/api/admin/health/route.ts");
 const RESOLVE_ROUTE = read("app/api/admin/resolve-error/route.ts");
+const SHARED_ADMIN = read("components/admin/shared.tsx");
 
 const fails = [];
 const ok = (cond, id, msg) => { if (!cond) fails.push(`${id}  ${msg}`); };
@@ -328,7 +329,13 @@ ok(/the check stops counting at 200/.test(HEALTH), "P23614",
 ok(/const scopePhrase = scopedName \? `at \$\{scopedName\}` : "across every restaurant"/.test(REPAIR), "P23615",
   "repair: the one phrase every bulk confirm uses to name its scope is gone");
 {
-  const asks = [...REPAIR.matchAll(/<span>(?:Mark|Send|Bring|Clear|Resolve|Forget) all [\s\S]{0,120}?<\/span>/g)].map((m) => m[0]);
+  // WIDENED 2026-09-04 (T18, sweep #8) — this asserted a code SHAPE, not the rule. It required
+  // the verb to sit immediately after "<span>" and the whole sentence to fit in 120 characters, so
+  // the moment one confirm grew a second clause onto its own line ("…as handled? That also clears
+  // 3 reports set to come back later.") the guard reported "found 5" — with all six confirms
+  // present and every one of them still naming its scope. A guard that goes red for a line break
+  // is a guard somebody edits out. The rule it defends is unchanged and is asserted one line down.
+  const asks = [...REPAIR.matchAll(/<span>\s*(?:Mark|Send|Bring|Clear|Resolve|Forget) all [\s\S]{0,400}?<\/span>/g)].map((m) => m[0]);
   ok(asks.length >= 6, "P23616", `repair: expected 6 bulk confirm sentences, found ${asks.length}`);
   const silent = asks.filter((a) => !a.includes("scopePhrase"));
   ok(silent.length === 0, "P23617",
@@ -350,10 +357,158 @@ ok(/\.rp-rest\{[^}]*color:var\(--accent\)/.test(REPAIR), "P23623",
   "repair: the restaurant chip lost its own colour");
 ok(!/\.rp-rest\{[^}]*(--adm-danger|--adm-warn|--adm-ok)/.test(REPAIR), "P23624",
   "repair: the restaurant chip is using a SEVERITY colour — a restaurant is an identity, not a status, and a red name on a red tile competes with the alarm");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// SWEEP #8 · TERMINAL 18 — the twelve things this run found on Repair & System health (2026-09-04).
+// Ledger rows: .claude/sweep/LEDGER/T18-S8.md (P71701–P72200). Same discipline as everything
+// above: a static read of the source — no server, no database, no browser.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── item 1 · a limit with no configured ceiling must not print zero ones ─────────────────────
+// LIVE on the board when this run started: the one open alert read "Admin login  3 / 0 per 0h".
+// The admin password wall deliberately has no editable max or window, so its event carries 0/0 —
+// and rlPer(0) answers "0h", because 0 divides by 3600 cleanly.
+ok(/const rlChip = \(h: \{ hit_count: number; max_count: number; window_seconds: number \}\)/.test(REPAIR), "P71701",
+  "repair: rlChip is gone — a rate-limit hit with no configured ceiling will print '3 / 0 per 0h' again");
+ok(/h\.max_count > 0 && h\.window_seconds > 0/.test(REPAIR), "P71702",
+  "repair: rlChip no longer checks that the limit HAS numbers before printing them");
+ok(!/\{h\.hit_count\} \/ \{h\.max_count\} per \{rlPer\(h\.window_seconds\)\}/.test(REPAIR), "P71703",
+  "repair: the raw '{hit_count} / {max_count} per …' chip is back — it prints '/ 0 per 0h' for the admin-login wall");
+ok(/\(\$\{rlChip\(h\)\}\)\. Is this real abuse/.test(REPAIR), "P71704",
+  "repair: the Claude ticket for a limit hit no longer uses the same sentence as the chip — it would say '3 in 0h'");
+
+// ── item 2 · the failure banner must not send him to a door that is not there ────────────────
+// 7 of the last 12 scheduled runs had failed and SIX of the seven saved no report, while the
+// banner said "Open any red row below and read what it did". A run that dies early is exactly the
+// run with nothing to read, so the emptiest rows were the ones it pointed at.
+ok(/const withReport = failedRuns\.filter\(\(r\) => r\.report\)\.length/.test(REPAIR), "P71705",
+  "repair: the run-failure banner no longer counts how many of the failures actually saved a report");
+ok(/None of them saved a report/.test(REPAIR), "P71706",
+  "repair: the banner has no wording for the case where NO failed run left a report — it would name a control that does not exist");
+ok(/saved a report — open/.test(REPAIR), "P71707",
+  "repair: the banner no longer says which of the failures can be opened");
+
+// ── item 3 · a row with nothing to open is not a button ─────────────────────────────────────
+// 22 of the 30 rows were real <button>s that set openRun, announced aria-expanded, and rendered
+// no change at all — a tap that succeeds at doing nothing, which cannot be told apart from one
+// that is broken.
+ok(/const rowBody = \(/.test(REPAIR), "P71708",
+  "repair: the run row's body is no longer shared, so the button and non-button branches can drift");
+ok(/No report was saved/.test(REPAIR), "P71709",
+  "repair: a run that ended with no report no longer says so — the row is silent again");
+ok(/\{!s\.report && s\.ended_at \?/.test(REPAIR), "P71710",
+  "repair: the 'no report' line is not gated on the run having ENDED — a run still working would be accused of losing one");
+ok(/\{s\.report \? \(\s*\n\s*<button onClick=\{\(\) => setOpenRun\(isOpen \? "" : s\.id\)\}/.test(REPAIR), "P71711",
+  "repair: the run row is a <button> again whether or not it has a report — pressing 22 of the 30 rows changes nothing on screen and lies to a screen reader");
+
+// ── item 4 · the plain-English problem line must not wear a code face ───────────────────────
+// .rp-detail was monospaced when it held the RAW error text, and that was right. Since 2026-09-02
+// the closed line is plainHeadline() — a human sentence — and the raw text sets its own monospace.
+ok(!/\.rp-detail\{[^}]*font-family/.test(REPAIR), "P71718",
+  "repair: .rp-detail is monospaced again — the line it holds is now a plain-English sentence");
+ok(/fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"/.test(REPAIR), "P71719",
+  "repair: the OPEN block lost its own monospace — the captured text must still be shown byte for byte in a code face");
+
+// ── item 5 · the box he types a sentence into must not be a code editor ─────────────────────
+// A <textarea> falls back to the browser's monospace unless told otherwise; the measured computed
+// font-family was "monospace" while the console is Inter — under a hint asking for his own words.
+ok(/rows=\{3\}[\s\S]{0,400}?fontFamily: "inherit"/.test(REPAIR), "P71717",
+  "repair: the 'Report a problem' box has lost fontFamily:inherit — it renders in the browser's monospace");
+
+// ── item 6 · "except 1 that haven't said" ─────────────────────────────────────────────────
+{
+  const both = (HEALTH.match(/ol\.unknown === 1 \? "hasn't" : "haven't"/g) || []).length;
+  ok(both === 2, "P71727",
+    `health: ${both} of the two offline-layer sentences pluralise their verb — with one device the other reads "except 1 that haven't said"`);
+}
+
+// ── item 7 · the same sentence must not be printed twice, one under the other ───────────────
+{
+  const unlocks = (REPAIR.match(/unlock (?:the|its) table &amp; order tools/g) || []).length;
+  ok(unlocks === 1, "P71720",
+    `repair: "…unlock the table & order tools" appears ${unlocks} times — the scope card and the empty state said it back to back`);
+}
+
+// ── item 8 · Resolve all must say that it also clears the ones set to come back later ───────
+// { all: true } clears every unresolved report in scope, INCLUDING the snoozed ones the line
+// above calls "still open, not fixed" — so the confirm promised 10 and the toast reported more.
+ok(/That also clears \$\{waiting\} report/.test(REPAIR), "P71721",
+  "repair: the 'Resolve all' confirm no longer says it will also clear the reports set to come back later");
+ok(/\{waiting \? ` That also clears/.test(REPAIR), "P71722",
+  "repair: the waiting clause is unconditional — with nothing waiting it would add a sentence about nothing");
+ok(/scopedName \? " \(across all restaurants\)" : ""\}/.test(REPAIR), "P71723",
+  "repair: the waiting clause no longer says whose reports it means, and that count is platform-wide");
+
+// ── item 9 · one clock on the whole row ─────────────────────────────────────────────────────
+// Every other time on this board is printed with an explicit Asia/Kolkata. lateNightRun decided
+// "late" from getHours() and printed its two times with no zone, so on a laptop outside IST the
+// row would carry two clocks and the second would contradict the first.
+ok(/const IST = "Asia\/Kolkata"/.test(REPAIR), "P71712",
+  "repair: the single IST constant is gone");
+ok(/function istParts\(d: Date\)/.test(REPAIR), "P71713",
+  "repair: istParts is gone — the 'late night run' verdict is back on the laptop's own clock");
+ok(!/const hour = start\.getHours\(\)/.test(REPAIR), "P71714",
+  "repair: lateNightRun reads getHours() again — that is the machine's zone, not the restaurants'");
+ok(!/end\.getHours\(\) >= NIGHT_WINDOW_END_HOUR/.test(REPAIR), "P71715",
+  "repair: the 'ran into the morning' test is back on the laptop's clock");
+{
+  const zoneless = [...REPAIR.matchAll(/toLocale(?:Time|Date)?String\("en-IN",\s*\{[^}]*\}/g)].filter((m) => !m[0].includes("timeZone"));
+  ok(zoneless.length === 0, "P71716",
+    `repair: ${zoneless.length} time(s) printed with no timeZone — the row beside them says Asia/Kolkata`);
+}
+
+// ── item 11 · one name for one limit ────────────────────────────────────────────────────────
+ok(/RATE_LABELS/.test(REPAIR), "P71724",
+  "repair: the shared rate-limit name list is no longer read — this screen is guessing a name lib/plainError.ts already holds");
+ok(/rlRules\.find\(\(r\) => r\.key === key\)\?\.label\s*\n\s*\|\| RATE_LABELS\[key\]/.test(REPAIR), "P71725",
+  "repair: the rule row must still win over the shared list — it is the name the admin edits on the Rate limits page");
+ok(/\|\| key\.replace\(\/_\/g, " "\)/.test(REPAIR), "P71726",
+  "repair: the last-resort prettifier is gone — an unknown limit key would be printed raw");
+
+// ── item 12 · a decision already made must not keep its dead branch ───────────────────────
+// JUDGE THE CODE, NOT THE OBITUARY. The first version of this line searched for the literal
+// "const hollow = false" — and matched it inside the comment three lines above, which QUOTES the
+// retired line on purpose. This repo has the mirror of that scar written down (a guard that passed
+// against its own comment); the same shape can also fail against one. So the assertion looks for
+// the only thing that can exist in CODE and not in prose: the dead constant being read.
+ok(!/hollow \? /.test(HEALTH), "P71728",
+  "health: the hollow-dot ternaries are back in PanelCell — one reachable branch fed by a constant false reads as a switch somebody might flip");
+ok(/backgroundColor: s\.c \}\} aria-hidden="true"/.test(HEALTH), "P71729",
+  "health: the panel dot no longer paints unconditionally — the hollow state was retired when Quiet went neutral");
+ok(/OBITUARY \(item 12, 2026-09-04\)/.test(HEALTH), "P71730",
+  "health: the obituary explaining why there is no hollow dot is gone — the next reader will re-add it");
+
+
+// ── item 19 · "Remind me later" has to actually come back ────────────────────────────────────
+// Owner, 2026-09-04: "I do solve later. So after four hours, it doesn't show." The server was
+// right — proven by moving one report's wait into the past on the dev database and watching
+// /api/admin/oplog?unresolved=1 hand it straight back — but NOTHING ON THE PAGE EVER ASKED AGAIN.
+// The board is click-to-refresh, so the one screen that honours a wait was the one screen that
+// could not notice it ending. Driven end to end afterwards: the tile came back on its own in 120s
+// with no reload and exactly ONE background request.
+ok(/useActiveAutoRefresh\(loadProblems, 120000\)/.test(REPAIR), "P71732",
+  "repair: the board no longer re-asks for the problems feed on its own, so a wait that expires on an open tab never comes back");
+ok(/const loadProblems = useCallback\(/.test(REPAIR), "P71733",
+  "repair: the light single-feed refresh is gone");
+{
+  // IT MUST STAY ONE FEED. Putting loadHub() (seven feeds) on a timer to answer one question is
+  // the whole-board refetch this project's cost rules exist to prevent.
+  const fn = /const loadProblems = useCallback\([\s\S]*?\n  \}, \[\]\);/.exec(REPAIR);
+  ok(fn && (fn[0].match(/adminFetch/g) || []).length === 1, "P71734",
+    "repair: the background refresh fetches more than the one feed that can change — that is a seven-feed poll");
+  ok(fn && /oplog\?level=error/.test(fn[0]), "P71735",
+    "repair: the background refresh no longer reads the problems feed");
+  ok(fn && /setFeedsFailed\(\(prev\) => prev\.filter\(\(x\) => x !== "problems"\)\)/.test(fn[0]), "P71736",
+    "repair: a quiet background refresh can now erase the fact that ANOTHER feed failed on the last full load");
+}
+ok(/This page checks for \{waiting === 1 \? "it" : "them"\} every couple of minutes/.test(REPAIR), "P71737",
+  "repair: the waiting line no longer says the page watches for it — the promise and the behaviour must match");
+ok(/useActiveAutoRefresh/.test(SHARED_ADMIN), "P71738",
+  "the shared active-only refresh helper is gone — a hand-rolled setInterval would poll a hidden tab");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
   console.error("\n   Each line names the ledger phase (.claude/sweep/LEDGER/T17.md) that found it.\n");
   process.exit(1);
 }
-console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes");
+console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 13");
