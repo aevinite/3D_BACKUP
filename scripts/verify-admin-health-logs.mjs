@@ -449,6 +449,14 @@ ok(!/end\.getHours\(\) >= NIGHT_WINDOW_END_HOUR/.test(REPAIR), "P71715",
     `repair: ${zoneless.length} time(s) printed with no timeZone — the row beside them says Asia/Kolkata`);
 }
 
+// ── item 11 · one name for one limit ────────────────────────────────────────────────────────
+ok(/RATE_LABELS/.test(REPAIR), "P71724",
+  "repair: the shared rate-limit name list is no longer read — this screen is guessing a name lib/plainError.ts already holds");
+ok(/rlRules\.find\(\(r\) => r\.key === key\)\?\.label\s*\n\s*\|\| RATE_LABELS\[key\]/.test(REPAIR), "P71725",
+  "repair: the rule row must still win over the shared list — it is the name the admin edits on the Rate limits page");
+ok(/\|\| key\.replace\(\/_\/g, " "\)/.test(REPAIR), "P71726",
+  "repair: the last-resort prettifier is gone — an unknown limit key would be printed raw");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);

@@ -21,7 +21,7 @@ import { errorSig, errorGroupKey, errorHeadline } from "@/lib/errorSignature";
 // is what Fix now hands Claude (owner, 2026-09-02). Run TITLES above still use errorHeadline —
 // a title is not an error message, and putting it through the translator would wrap a perfectly
 // good "Owner panel nightly audit" in "the app reported this in its own words".
-import { plainHeadline, plainProblem } from "@/lib/plainError";
+import { plainHeadline, plainProblem, RATE_LABELS } from "@/lib/plainError";
 // An alert / lever lands on the control that ends the problem (owner, 2026-09-02).
 import { jumpUrl } from "@/lib/adminJump";
 
@@ -288,10 +288,19 @@ export default function AdminRepair() {
   // rules themselves so a hit can be named the way the Rate limits page names it.
   const [rlHits, setRlHits] = useState<RlHit[]>([]);
   const [rlRules, setRlRules] = useState<RlRule[]>([]);
+  // ── ONE NAME FOR ONE LIMIT (item 11, 2026-09-04) ─────────────────────────────────────────────
+  // The rule row wins, because that is the name the admin edits on the Rate limits page. Behind it
+  // sits RATE_LABELS in lib/plainError.ts — that file’s own header calls it "THE ONE LIST", and
+  // the phone alert and the diary line both read it. This screen did not: it fell back to
+  // prettifying the raw key, which is a SECOND opinion about the same name and exactly the drift
+  // the list exists to prevent. It only bites a key with no rule row — `admin_login` is one,
+  // deliberately, because the admin password wall has no editable numbers — and today the two
+  // answers happen to agree ("Admin login"), so nothing on screen changes. The next key added
+  // without a rule row is where a guess and a name diverge. The prettifier stays last, so an
+  // unknown key is still never printed raw.
   const rlLabel = (key: string) =>
     rlRules.find((r) => r.key === key)?.label
-    // Until the rules arrive (or for a key with no rule row), prettify rather than print the raw
-    // database key — the same rule actLabel() follows for action codes.
+    || RATE_LABELS[key]
     || key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
   useEffect(() => {
