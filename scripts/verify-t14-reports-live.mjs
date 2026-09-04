@@ -94,8 +94,16 @@ async function openReports(ctx, qs, expectReport = /[?&]open=/.test(qs)) {
 async function settle(p) {
   await p.waitForTimeout(900);            // the count-up floor: DUR is 460ms and it starts on rAF
   let last = null, same = 0;
-  for (let i = 0; i < 16; i++) {
-    const now = await p.evaluate(() => [...document.querySelectorAll(".rs-stat-v, .rs-ov-val")].map((e) => e.innerText).join("|")).catch(() => "");
+  for (let i = 0; i < 20; i++) {
+    const now = await p.evaluate(() => {
+      const root = document.querySelector(".rs-root");
+      // A screen still showing the four "Loading…" skeleton tiles is STABLE and WRONG: their text
+      // never changes, so a naive stability test returns while the money is still in flight and
+      // reads the report as empty (T14, sweep #8 — it made Payments · last month look like Rs 0
+      // against a Sales report of Rs 5,45,339).
+      if (root && root.textContent.includes("Loading…")) return "";
+      return [...document.querySelectorAll(".rs-stat-v, .rs-ov-val")].map((e) => e.innerText).join("|");
+    }).catch(() => "");
     if (now && now === last) { if (++same >= 2) return; } else same = 0;
     last = now;
     await p.waitForTimeout(300);

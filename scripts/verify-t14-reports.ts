@@ -517,6 +517,14 @@ R("P49092", "the closing note on paper matches the built document's", (() => {
   return !!a && a === b;
 })());
 R("P05265", "…re-stated: PrintFoot is word-for-word sectionHtml()'s note", raw.kit.includes("Generated automatically by the Aevidine owner console."));
+N("the print block lets a sideways-scrolling chart give up its minimum width on paper",
+  /\.owx-scrollx \{ overflow: visible !important; \}/.test(raw.kit));
+N("…and holds the plot to the width of the page, beating the inline width ScrollX sets",
+  /\.owx-scrollx > div \{ width: 100% !important; \}/.test(raw.kit));
+N("…and that rule lives inside @media print, so the screen still scrolls",
+  raw.kit.indexOf(".owx-scrollx { overflow: visible !important; }") > raw.kit.indexOf("@media print {"));
+N("…and ScrollX still sets a per-bar minimum on screen, which is the rule it exists for",
+  /width: `max\(100%, \$\{Math\.round\(count \* per \+ extra\)\}px\)`/.test(code.charts));
 R("P49095", "Panel only stretches its child when asked", /fill = false/.test(code.kit) && /fill \? \{ display: "flex"/.test(code.kit));
 R("P49104", "SearchTable's search is case-insensitive and ignores stray spaces", /q\.trim\(\)\.toLowerCase\(\)/.test(code.st) && /searchKey\(r\)\.toLowerCase\(\)\.includes\(needle\)/.test(code.st));
 R("P49105", "an empty search shows every row rather than none", /needle \? rows\.filter[\s\S]{0,60}: rows\.slice\(\)/.test(code.st));
