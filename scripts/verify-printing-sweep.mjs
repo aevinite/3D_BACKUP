@@ -2475,8 +2475,38 @@ if (!browser) {
     /disabled=\{busy === "routes" \|\| agents\.length === 0\}/.test(admPage)
     || "the dropdown stays live with nothing to choose from");
   await phase("…and it SAYS why, on hover and to a screen reader", () =>
-    /title=\{agents\.length === 0 \? "Set a computer up in step 3 first/.test(admPage) && /aria-describedby/.test(admPage)
+    /title=\{agents\.length === 0 \? "Set a computer up in step \d+ first/.test(admPage) && /aria-describedby/.test(admPage)
     || "it is greyed out with no explanation — which is worse than not being there");
+  // ── …AND THE STEP IT SENDS YOU TO IS THE STEP THE COMPUTER IS ACTUALLY ON ───────────────────
+  // T11 sweep #8, 2026-09-04. The phase above used to pin the WHOLE sentence, "Set a computer up in
+  // step 3 first" — and step 3 is "Which printer gets which paper", the card the dropdown is already
+  // in. The computer is step 2. So the guard was not protecting the rule ("say why"), it was
+  // freezing a wrong number in place: three sentences on that screen sent a beginner to the step
+  // they were standing on, and this check went green over all of them for as long as they were
+  // there. Judge a guard by what it ASSERTS, not by whether it is green.
+  //
+  // So the number is no longer hard-coded here either. It is read out of lib/printBoardWords.ts —
+  // the one place the step headings are declared — and every "step N" the screen quotes has to name
+  // a step that really holds what the sentence claims. This is the check that would have caught it.
+  await phase("…and every 'step N' on the screen names the step that really holds it", () => {
+    const words = read("lib/printBoardWords.ts");
+    const stepNo = (key) => {
+      const m = new RegExp(key + ':\\s*"(\\d+)').exec(words);
+      return m ? m[1] : null;
+    };
+    const computer = stepNo("two"), routes = stepNo("three");
+    if (!computer || !routes) return "lib/printBoardWords.ts no longer numbers its own steps — nothing can be checked against";
+    const bad = [];
+    // "set a/the computer up in step N" must point at the card the COMPUTER is on.
+    for (const m of admPage.matchAll(/[Ss]et (?:a|the) computer up in step (\d+)/g)) {
+      if (m[1] !== computer) bad.push(`"set a computer up in step ${m[1]}" — the computer is step ${computer}`);
+    }
+    // "the dropdowns in step N" must point at the card the printer dropdowns are on.
+    for (const m of admPage.matchAll(/dropdowns in step (\d+)/g)) {
+      if (m[1] !== routes) bad.push(`"the dropdowns in step ${m[1]}" — they are in step ${routes}`);
+    }
+    return bad.length === 0 || bad.join(" · ") + " — a beginner following numbered steps is sent to the wrong card";
+  });
   await phase("…and the manager panel does the same", () =>
     /Set this computer up above first/.test(panel) || "the panel's dropdown greys out silently");
 
