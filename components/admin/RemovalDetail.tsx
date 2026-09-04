@@ -343,8 +343,20 @@ export function RemovalDetail({ r, after, billHtml, canRestore, onRestore, resto
       ) : null}
 
       {/* Only the admin is ever handed this. The owner's route returns canRestore:false and has no
-          write path, so their copy of this panel simply says who to ask. */}
-      {canRestore && onRestore ? (
+          write path, so their copy of this panel simply says who to ask.
+
+          AND IT IS ONLY OFFERED WHEN THERE IS A BILL TO PUT BACK (T20 sweep #8, 2026-09-04).
+          `canRestore` is decided server-side from the KIND and whether the order row is still
+          tombstoned — it says nothing about a session. But putting a bill back goes through
+          /api/admin/bills, which works on a SESSION id, and `deletion_audit.session_id` is the
+          order's own session: nullable at birth (a walk-in or parcel order that never sat at a
+          table) and nulled later by `ON DELETE SET NULL` when the session row goes. On any of
+          those the button rendered, enabled, and its handler returned on `!row?.session_id`
+          without a word — pressed, nothing, no message, no spinner. Measured on the dev database
+          on 2026-09-04: 19 order_deleted records, none of them null-session yet, against 29,649
+          orders that have no session at all. So it had not bitten; it was waiting to.
+          A control that cannot work is not offered, and the reason is written where the button was. */}
+      {canRestore && onRestore && r.session_id ? (
         <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <button className="adm-btn" disabled={restoring} onClick={onRestore}>
             {restoring ? "Putting it back…" : "Put this bill back"}
@@ -352,6 +364,11 @@ export function RemovalDetail({ r, after, billHtml, canRestore, onRestore, resto
           <span className="adm-muted" style={{ fontSize: 11.5 }}>
             Restoring returns it as a record, not onto the live floor. The removal stays on this list either way.
           </span>
+        </div>
+      ) : canRestore && onRestore ? (
+        <div className="adm-muted" style={{ marginTop: 14, fontSize: 11.5 }}>
+          This order was never part of a table bill — a walk-in or a parcel — so there is no bill here to put
+          back. The record above stays exactly as it is either way.
         </div>
       ) : (
         <div className="adm-muted" style={{ marginTop: 14, fontSize: 11.5 }}>
@@ -422,7 +439,11 @@ export function RemovalDetailModal({ id, base, onClose, onRestored }: {
   // never a second one bolted onto the audit view. Only reachable when canRestore came back true,
   // which the owner route never does.
   const restore = useCallback(async () => {
-    if (!row?.session_id || restoring) return;
+    if (restoring) return;
+    // Belt and braces: the button above is not rendered without a session, but a handler that
+    // returns on a missing value with nothing said is the exact shape that makes a control look
+    // dead — so if this is ever reached, it says why rather than doing nothing.
+    if (!row?.session_id) { setErr("This removal has no bill attached to it, so there is nothing to put back."); return; }
     setRestoring(true);
     try {
       const res = await fetch("/api/admin/bills", {

@@ -105,11 +105,18 @@ const COMPARABLE_TABLES: Record<string, string> = {
   // same rating in the owner panel's Feedback tab and type into the same box; without this the
   // table was unknown here, which reads as "nothing to protect" even when the screen asks.
   feedback: "id",
+  // What a restaurant PAYS US (mig 118). Added 2026-09-04 on the owner's word, after sweep #8's
+  // T20 found the admin's Billing & plans card had no gate at all: two cards open on one
+  // restaurant and the second Save silently overwrote the first, with the loser's screen still
+  // showing the values that lost. Its primary key IS the restaurant, exactly like `settings`, so
+  // it joins TENANT_ROW_TABLES below — there is no `restaurant_id` column to scope by because the
+  // id already IS one.
+  restaurant_billing: "restaurant_id",
 };
 
 /** Tables whose own primary key IS the restaurant, so there is no `restaurant_id` to scope by and
  *  the id the caller names must BE the restaurant they are already scoped to. */
-const TENANT_ROW_TABLES = new Set(["settings", "restaurants"]);
+const TENANT_ROW_TABLES = new Set(["settings", "restaurants", "restaurant_billing"]);
 
 /**
  * THE ONE CLASH GATE — "did someone else change this while you had it open?"

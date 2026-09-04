@@ -17,6 +17,10 @@ import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// THE ONE CLASH GATE — "did someone else change this while you had it open?" (lib/clash.ts).
+// It does nothing at all unless the screen SAID what it was editing from (X-LFH-Expect), so a
+// caller that sends no expectation — a script, an older tab — is completely unaffected.
+import { expectClash, clashJson } from "@/lib/clash";
 // ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site. The console's answer is unchanged.
@@ -190,6 +194,19 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     if ("error" in started) return bad(started.error);
     const nextDue = dateOr(body.next_due_on, "the next-due date");
     if ("error" in nextDue) return bad(nextDue.error);
+    // ── FIRST SAVE WINS, AND THE LOSER GETS TOLD (owner, 2026-09-04 — item 13) ─────────────────
+    // Everything above this line is validation of what was SENT. This is the one question about
+    // what is already THERE: does the row still say what the card was showing when it read it? If
+    // not, somebody saved first and this write would wipe their change with nobody told.
+    //
+    // `restaurant_billing`'s primary key IS the restaurant, so the row named is the row being
+    // written — passing `rid` scopes the comparison to exactly that and to nothing else. The gate
+    // fails OPEN on any lookup problem: a clash check breaking must never stop the platform's own
+    // billing being edited.
+    {
+      const overwrite = await expectClash(req, rid);
+      if (overwrite) return clashJson(overwrite);
+    }
     const patch = {
       restaurant_id: rid,
       plan: body.plan ? String(body.plan) : null,

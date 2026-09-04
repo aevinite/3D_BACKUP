@@ -40,8 +40,23 @@ if (!existsSync(INDEX)) {
   process.exit(1);
 }
 const index = readFileSync(INDEX, "utf8");
-const ledgers = readdirSync(DIR).filter((f) => /^T\d+\.md$/.test(f))
-  .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+// ── A ROUND LEDGER IS STILL A LEDGER (T20 of sweep #8, 2026-09-04) ─────────────────────────────
+//
+// This matched `^T\d+\.md$` only, so a second ROUND filed by the same terminal — `T17-R2.md`
+// (527 ids) and `T20-S8.md` (568) — was invisible to every check below it. Not rejected:
+// **invisible**. Their 1,095 ids were absent from the duplicate scan, absent from the registry
+// bounds check, and absent from the row-count snapshot that proves no ledger has lost a row. A
+// later sweep could have been handed one of them a second time and this guard would have said
+// nothing — which is the ONE failure a ledger cannot survive, and the same shape as the six-digit
+// hole T9 closed a day earlier.
+//
+// `T<n>-<round>.md` now counts as a round of ledger `T<n>`. §2 below still asks INDEX.md about the
+// PARENT (`T20.md`), never about the round file, so nothing that was green can go red for this: a
+// round is filed under the terminal that owns it, and its territory is stated in its own header.
+const isLedger = (f) => /^T\d+(-[A-Za-z0-9]+)?\.md$/.test(f);
+const parentOf = (f) => f.replace(/^(T\d+)(-[A-Za-z0-9]+)?\.md$/, "$1.md");
+const ledgers = readdirSync(DIR).filter(isLedger)
+  .sort((a, b) => (Number(a.replace(/^T(\d+).*$/, "$1")) - Number(b.replace(/^T(\d+).*$/, "$1"))) || a.localeCompare(b));
 if (!ledgers.length) { console.error("\n❌ verify:ledger-index — no ledger files at all in " + DIR + "\n"); process.exit(1); }
 
 const cellsOf = (line) => line.split(/(?<!\\)\|/);
@@ -77,7 +92,22 @@ const FIRST_COL_ID = new RegExp(`^\\|\\s*(P${ID_DIGITS})\\s*\\|`);
 // and note are read by position from the header that introduced it. Assert the property (an id, a
 // verdict, a place to say why), never one particular column count.
 const PHASE_ROW_START = new RegExp(`^\\|\\s*P${ID_DIGITS}\\s*\\|`);
-const isPhaseRow = (line) => PHASE_ROW_START.test(line) && cellsOf(line).length >= 6;
+//
+// ── AND A ROUND LEDGER MAY DECLARE ONLY `| id | check |` (T20 of sweep #8, 2026-09-04) ─────────
+// `T17-R2.md` does exactly that, on purpose: its 527 rows are GENERATED from
+// scripts/verify-admin-sweep.mjs, and it keeps the verdict in the run's output rather than in a
+// column a hand could edit. Once the file-name pattern above learned to see round ledgers, those
+// rows arrived here as four cells and were filed as narrative — so 527 real ids read as "an id no
+// phase row carries" and the guard went red on a file that is perfectly well formed.
+//
+// A two-cell row inside a ROUND ledger counts as a phase row for the one purpose that matters
+// most: OWNING ITS ID, so nobody can be handed it twice. It carries no verdict column, and §4's
+// result/note reads below simply find nothing there — which is the truth about that table, not a
+// fault in it. Every other ledger still needs its four cells, so a recap row elsewhere cannot be
+// mistaken for a phase row.
+const isRound = (f) => /^T\d+-[A-Za-z0-9]+\.md$/.test(f);
+const isPhaseRow = (line, file) =>
+  PHASE_ROW_START.test(line) && (cellsOf(line).length >= 6 || (isRound(file || "") && cellsOf(line).length >= 4));
 
 // ── 1 · one ID, one check, forever ─────────────────────────────────────────────────────────────
 const owner = new Map();      // id -> file, for PHASE rows only
@@ -91,7 +121,7 @@ for (const f of ledgers) {
     const m = line.match(FIRST_COL_ID);
     if (!m) continue;
     const id = m[1];
-    if (!isPhaseRow(line)) {                       // a recap / narrative table row
+    if (!isPhaseRow(line, f)) {                    // a recap / narrative table row
       (referenced.get(id) || referenced.set(id, []).get(id)).push(f);
       continue;
     }
@@ -123,7 +153,9 @@ for (const [id, files] of referenced)
 
 // ── 2 · every ledger is in the index, and every index entry is real ────────────────────────────
 for (const f of ledgers) {
-  const t = f.replace(".md", "");
+  // A round file is answered for by its parent's row: `T20-S8.md` is a second round of T20's
+  // ledger, filed under the terminal that owns it, with its own territory in its own header.
+  const t = parentOf(f).replace(".md", "");
   const byName = new RegExp(`\\b${t}\\.md\\b`);
   const byRow = new RegExp(`^\\|\\s*${t.slice(1)}\\s*\\|`, "m");
   if (!byName.test(index) && !byRow.test(index))

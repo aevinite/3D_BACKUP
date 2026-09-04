@@ -29,7 +29,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAdminModal } from "@/components/admin/useAdminModal";
-import { openRestaurantPanel } from "@/components/admin/shared";
+// istDate: the console's ONE reading of a date ("16 Aug 26"), pinned to Indian time.
+import { openRestaurantPanel, istDate } from "@/components/admin/shared";
 
 // `canPurge` used to be here and is GONE (T16 sweep #7, 2026-08-27). The route still answers it,
 // always `true`, because migration 342 removed the 90-day lock — so it was a field that could only
@@ -48,7 +49,15 @@ type OwnerTrashed = {
   daysHeld: number;
 };
 
-const fmtDate = (iso: string) => { try { return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); } catch { return iso; } };
+// ── ITEM 12 · THIS PAGE'S OWN DATE FORMAT IS GONE (owner picked it, 2026-09-04) ───────────────
+// `fmtDate` was a private copy: it took the READER'S locale (so the same row read differently on a
+// computer set to another country) and named no timezone at all (so a restaurant binned near
+// midnight Indian time showed the day before, or after, depending on where you opened it). The
+// console already exports ONE reading of a date — components/admin/shared.tsx → istDate — and
+// Revenue, Customers and Billing all use it. Three copies of "how do we write a date" is how three
+// screens come to write the same day differently, and it is exactly what that helper was made to
+// stop. Same fall-back-to-the-raw-string behaviour for a date that cannot be parsed.
+const fmtDate = istDate;
 const heldFor = (days: number) => days <= 0 ? "In the bin since today" : `In the bin ${days} day${days === 1 ? "" : "s"}`;
 /** A count that couldn't be read draws as "?" — never as a confident 0. This screen decides a
  *  permanent delete, so "0 orders" had better not mean "we didn't manage to ask". */
@@ -202,7 +211,7 @@ const PANEL_DOORS: { to: string; label: string; icon: string }[] = [
   { to: "/owner", label: "Owner", icon: "fa-crown" },
 ];
 
-function InsideCounts({ d }: { d: BinInside }) {
+function InsideCounts({ d, onRetry, busy }: { d: BinInside; onRetry: () => void; busy: boolean }) {
   const i = d.inside;
   const cells: { k: string; v: string }[] = [
     { k: "Dishes", v: num(i.dishes) },
@@ -235,9 +244,21 @@ function InsideCounts({ d }: { d: BinInside }) {
           removing this restaurant deletes the record of <b>who</b> owes them.
         </p>
       )}
+      {/* AN INSTRUCTION THAT DID NOTHING (T20 sweep #8, 2026-09-04). This line used to end
+          "— close and reopen this row to try again", and reopening the row refetched NOTHING:
+          `toggleOpen` only reads when `inside` is still null, and a partly-unread answer IS an
+          answer, so `inside` was set and the reopen was a no-op. The "?" stayed until the whole
+          page was reloaded — on the screen that decides a permanent delete, where a "?" instead
+          of a count is exactly the thing you must not act on. A button that really re-reads is
+          the honest version of the sentence that was already there. */}
       {(d.unread?.length || d.settingsUnread) && (
-        <p className="adm-muted" style={{ margin: 0, fontSize: 12, fontStyle: "italic" }}>
-          Some of these couldn&apos;t be read just now and show as &ldquo;?&rdquo; — close and reopen this row to try again.
+        <p className="adm-muted" style={{ margin: 0, fontSize: 12, display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          <span style={{ fontStyle: "italic" }}>
+            Some of these couldn&apos;t be read just now and show as &ldquo;?&rdquo;.
+          </span>
+          <button className="adm-btn" style={{ fontSize: 11.5, padding: "3px 9px" }} disabled={busy} onClick={onRetry}>
+            <i className="fas fa-rotate-right" style={{ marginRight: 6 }} aria-hidden="true" />{busy ? "Reading…" : "Try again"}
+          </button>
         </p>
       )}
       {d.owners.length > 0 && (
@@ -284,10 +305,14 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
     setInsideBusy(false);
   }, [r.id]);
 
+  // Reopening a row that came back COMPLETE costs nothing and re-reads nothing — that is the
+  // "fetched once and kept" rule, and it stays. Reopening one that came back with a hole in it
+  // now really does try again, which is what the line under the counts always claimed.
+  const insideIncomplete = !!inside && !!(inside.unread?.length || inside.settingsUnread);
   const toggleOpen = () => {
     const next = !open;
     setOpen(next);
-    if (next && !inside && !insideBusy) loadInside();
+    if (next && (!inside || insideIncomplete) && !insideBusy) loadInside();
   };
 
   // resolve = undefined for the plain first attempt; the dialog re-calls with one.
@@ -387,7 +412,7 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
               {insideErr} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={loadInside}>Retry</button>
             </div>
           )}
-          {inside && <InsideCounts d={inside} />}
+          {inside && <InsideCounts d={inside} onRetry={loadInside} busy={insideBusy} />}
           {/* WALK INTO IT. It is still in the bin — its guest menu stays offline and its own staff
               still cannot sign in. This is the admin looking, which is exactly what he asked for. */}
           <div>
@@ -441,12 +466,30 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
             Its <b>bills, invoices, payments and the removals record are kept</b> and stay readable in Bills —
             those have to survive for the years the records rules expect.
           </p>
-          {!!inside?.inside.unpaidPayLaterBills && (
+          {/* ── ITEM 11 · SILENCE HERE USED TO MEAN TWO DIFFERENT THINGS (owner, 2026-09-04) ──────
+              This said nothing at all for BOTH "nobody owes anything" and "we could not ask" — and
+              on the screen that erases a restaurant for good those are not the same fact. Worse,
+              the whole confirm can be opened without ever expanding the row, so the commonest
+              silence was simply that nothing had been read yet. Three states, three sentences, and
+              only a real zero stays quiet. */}
+          {!inside ? (
+            <p className="hint" style={{ margin: "-4px 0 0", color: "var(--adm-warn)" }}>
+              <i className="fas fa-circle-question" style={{ marginRight: 6 }} aria-hidden="true" />
+              You haven&apos;t looked inside this one yet. Open the row above to see what is in there —
+              including whether anyone still owes money on a tab.
+            </p>
+          ) : inside.inside.unpaidPayLaterBills === null || inside.inside.unpaidPayLaterBills === undefined ? (
+            <p className="hint" style={{ margin: "-4px 0 0", color: "var(--adm-warn)" }}>
+              <i className="fas fa-circle-question" style={{ marginRight: 6 }} aria-hidden="true" />
+              Whether anyone still owes money here <b>could not be read</b> just now — it is not a zero.
+              Use <b>Try again</b> on the row above before deciding.
+            </p>
+          ) : inside.inside.unpaidPayLaterBills > 0 ? (
             <p className="hint" style={{ margin: "-4px 0 0", color: "var(--adm-warn)" }}>
               <i className="fas fa-circle-exclamation" style={{ marginRight: 6 }} aria-hidden="true" />
               {inside.inside.unpaidPayLaterBills} pay-later bill{inside.inside.unpaidPayLaterBills === 1 ? "" : "s"} here {inside.inside.unpaidPayLaterBills === 1 ? "is" : "are"} still unpaid.
             </p>
-          )}
+          ) : null}
           <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}>
             <input type="checkbox" checked={wantBackup} onChange={(e) => setWantBackup(e.target.checked)} disabled={busy} />
             Download a backup file of this restaurant&apos;s data first (recommended)

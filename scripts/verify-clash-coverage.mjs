@@ -180,6 +180,22 @@ const REACT_VALUE_EDITS = [
     // file must never do.
     patterns: [{ re: /"X-LFH-Expect":\s*[A-Za-z_$][\w.$]*\(\s*expect\b/, name: "sends what the row said when it was tapped" }],
   },
+  // ── THE PLATFORM'S OWN MONEY (owner, 2026-09-04 — sweep #8 T20's item 13) ────────────────────
+  // Admin → Billing & plans → Manage → Save plan. It had no gate at all: two cards open on the
+  // same restaurant and the second Save overwrote the first in silence, with the loser's screen
+  // still showing the values that lost — nothing on that card refreshes a field while it is open.
+  // This is what every restaurant pays the platform, so a change disappearing without a word is a
+  // figure that stops matching what was agreed.
+  //
+  // Matched on both halves, because either alone is a gate that is not there: the CARD must send
+  // what the row said when it read it, and the ROUTE must ask the one gate about it. Pinned to the
+  // shape ("the header is built FROM an expectation"), never to the name of the function that
+  // builds it — a guard that pins spelling reports a real fix as a regression.
+  {
+    file: "app/aevinite/billing/page.tsx",
+    route: "app/api/admin/billing/route.ts",
+    patterns: [{ re: /"X-LFH-Expect":\s*[A-Za-z_$][\w.$]*\(\s*expect\b/, name: "sends what the row said when the card read it" }],
+  },
   {
     file: "app/owner/issues/page.tsx",
     route: "app/api/owner/ratings/route.ts",

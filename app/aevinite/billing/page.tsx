@@ -5,10 +5,15 @@
 // manually (no payment gateway yet). Backed by /api/admin/billing
 // (migration 118: restaurant_billing + restaurant_payments, additive-only).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useActiveAutoRefresh } from "@/components/admin/shared";
+// istDate: the console's ONE reading of a date ("4 Jul 27"), pinned to IST. Imported rather than
+// re-invented — components/admin/shared.tsx exports it precisely so two admin screens cannot print
+// the same field two different ways, and /aevinite/revenue already prints next-due through it.
+import { useActiveAutoRefresh, istDate } from "@/components/admin/shared";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { useToast } from "@/components/admin/toast";
 import { SkelList } from "@/components/admin/Skeleton";
+// The X-LFH-Expect header value, ASCII-escaped — see lib/accessTree.ts for the trap it exists to kill.
+import { expectHeader } from "@/lib/accessTree";
 
 type Row = {
   id: string; name: string; slug: string; active: boolean;
@@ -33,6 +38,34 @@ const money = (n: number, currency = "INR") => {
 // the other way round. `next_due_on` is a plain date typed in IST, so IST is the only calendar that
 // can answer "is that date past?".
 const today = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+
+// ── WHAT THE SCREEN SAID BACK, AND WHAT KIND OF THING IT WAS (T20 sweep #8, 2026-09-04) ─────────
+// Three kinds, and each one looks like what it is:
+//   ok    the quiet grey confirmation — "Saved.", "Payment recorded."
+//   warn  amber and bold — the server did HALF of it ("the payment saved, the due date did not")
+//   err   red and bold — it did not happen at all
+// The kind is decided where the answer is known, never by reading the words afterwards. Deciding
+// "is this good news?" by searching a sentence for "could not" is a guess, and it was wrong for
+// every refusal that did not happen to contain those words.
+type Said = { kind: "ok" | "warn" | "err"; text: string };
+const SAID_STYLE: Record<Said["kind"], React.CSSProperties> = {
+  ok: { fontSize: 12 },
+  warn: { fontSize: 12, color: "var(--adm-warn)", fontWeight: 600 },
+  err: { fontSize: 12, color: "var(--adm-danger)", fontWeight: 600 },
+};
+function SaidLine({ said }: { said: Said }) {
+  return (
+    <span
+      className={said.kind === "ok" ? "adm-muted" : undefined}
+      style={SAID_STYLE[said.kind]}
+      // A refusal is announced; a confirmation is not shouted at somebody who is still typing.
+      role={said.kind === "ok" ? undefined : "alert"}
+    >
+      {said.kind !== "ok" && <i className={`fas fa-${said.kind === "warn" ? "triangle-exclamation" : "circle-exclamation"}`} style={{ marginRight: 6 }} aria-hidden="true" />}
+      {said.text}
+    </span>
+  );
+}
 
 export default function AdminBilling() {
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -145,7 +178,15 @@ export default function AdminBilling() {
                   <div className="adm-muted">{r.plan || "—"}</div>
                   <div><span className={`adx-billpill ${r.status}`}>{r.status}</span></div>
                   <div className="adm-muted">{r.amount ? `${money(r.amount, r.currency)} /${r.cycle === "monthly" ? "mo" : "yr"}` : "—"}</div>
-                  <div className={overdue ? "adx-overdue" : undefined}>{r.nextDueOn || "—"}{overdue ? " · overdue" : ""}</div>
+                  {/* THE RAW DATABASE DATE USED TO BE PRINTED HERE (T20 sweep #8, 2026-09-04).
+                      `2027-07-04` is how Postgres stores it, not how anybody reads it — and the
+                      admin console's OTHER money screen, /aevinite/revenue, has printed the very
+                      same field through istDate since the T18 sweep. Two admin screens, one field,
+                      two spellings. The stored value stays reachable as the title, exactly as
+                      Revenue does it, so it can still be read off or copied. */}
+                  <div className={overdue ? "adx-overdue" : undefined} title={r.nextDueOn || undefined}>
+                    {r.nextDueOn ? istDate(r.nextDueOn) : "—"}{overdue ? " · overdue" : ""}
+                  </div>
                   <div style={{ textAlign: "right", fontWeight: 700 }}>{money(r.paidThisYear, r.currency)}</div>
                   <div style={{ textAlign: "right" }}>
                     <button className="adm-btn" onClick={() => setEditing(r)}>Manage</button>
@@ -172,7 +213,21 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const [nextDueOn, setNextDueOn] = useState(row.nextDueOn || "");
   const [notes, setNotes] = useState(row.notes || "");
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  // ── A REFUSAL IS NOT A CONFIRMATION, AND MUST NOT LOOK LIKE ONE (T20 sweep #8, 2026-09-04) ────
+  // Both of the lines that report back beside a button on this screen used to be a bare string in
+  // <span className="adm-muted">. So "Saved." and "Couldn't save this restaurant's plan" arrived in
+  // the same 12px grey, in the same place, and the admin's eye could not tell a plan that saved
+  // from one that did not — on the screen that records what every restaurant pays us.
+  //
+  // The payment line below was half-solved: it decided the colour by SNIFFING the words for
+  // "could not / couldn't / not be", which caught the server's one warning sentence and nothing
+  // else. "Failed to fetch", "Pick a payment date." and the route's own "Amount must be a number
+  // greater than 0 (e.g. 12000)." all fell through to the quiet grey — a payment that was NOT
+  // recorded, dressed as one that was.
+  //
+  // The kind is now decided where the answer is KNOWN, and the styling follows the kind. Sniffing
+  // the words of a sentence to work out whether it is good news is a guess; this is not.
+  const [msg, setMsg] = useState<Said | null>(null);
 
   const [payAmount, setPayAmount] = useState("");
   const [payDate, setPayDate] = useState(today());
@@ -181,10 +236,21 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const [payNote, setPayNote] = useState("");
   const [rollDue, setRollDue] = useState(true);
   const [payBusy, setPayBusy] = useState(false);
-  const [payMsg, setPayMsg] = useState<string | null>(null);
+  const [payMsg, setPayMsg] = useState<Said | null>(null);
 
   const toast = useToast();
   const [payments, setPayments] = useState<Payment[] | null>(null);
+  // ── ITEM 13 · WHAT THE ROW SAID WHEN THIS CARD LAST READ IT (owner picked it, 2026-09-04) ─────
+  // The house rule everywhere else in this product is "first save wins, and the loser gets told"
+  // (CLAUDE.md, the 11-point checklist). Saving a plan had no such gate: two cards open on the same
+  // restaurant and the second Save silently overwrote the first, with the loser's screen still
+  // showing the values that lost — and nothing here refreshes a field the person is looking at.
+  //
+  // The gate is ONE line at the call site (lib/clash.ts → expectClash): send what the row said when
+  // we read it, and the server refuses if it no longer says that. This is that value, kept fresh by
+  // loadHistory() — which is what stops recording a payment (it moves next-due server-side) from
+  // looking like somebody else's edit a moment later.
+  const baselineRef = useRef<Record<string, unknown> | null>(null);
   // A refusal on a payment ROW belongs beside the payment rows (T16 sweep #7, 2026-08-27).
   // deletePayment used to write into payMsg, which is rendered next to the "Add payment" button
   // one section up — on a restaurant with a year of history that message can be well off-screen,
@@ -204,6 +270,9 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
       const j = await r.json().catch(() => ({}));
       if (r.ok && !j.error) {
         setPayments(j.payments || []);
+        // The row exactly as the database has it now — the expectation the next Save is judged
+        // against. Null when this restaurant has no billing row yet: there is nothing to clash with.
+        baselineRef.current = (j.billing && typeof j.billing === "object") ? j.billing as Record<string, unknown> : null;
         // Keep the "Next due on" field in sync — recording a payment with "roll due" advances
         // it server-side, and the open editor used to keep showing the OLD date until reopened
         // (audit 2026-07-07). j.billing.next_due_on is the fresh value.
@@ -219,10 +288,31 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const dialogRef = useRef<HTMLDivElement>(null);
   useAdminModal(dialogRef, "admin-billing-editor", onClose);
 
+  // ── ITEM 9 · A WORD ABOUT A SAVE IS ABOUT THE SAVE THAT HAPPENED ─────────────────────────────
+  // "Saved." used to stay on screen while the plan was edited again, so a form full of unsaved
+  // changes sat under the word Saved. Any edit clears it; a save does not (nothing below changes
+  // when savePlan runs), so the confirmation still lands and stays until the next keystroke.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    setMsg(null);
+  }, [plan, status, amount, currency, cycle, startedOn, nextDueOn, notes]);
+
   const savePlan = async () => {
     setSaving(true); setMsg(null);
     try {
-      const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      // Only the fields a second person could have moved. `expectHeader` (not JSON.stringify) because
+      // a header value must be ISO-8859-1 and fetch() throws the WHOLE request away if it is not —
+      // a plan name with a curly apostrophe would otherwise make Save do nothing at all, silently.
+      const was = baselineRef.current;
+      const expect = was ? {
+        table: "restaurant_billing", id: row.id, label: row.name,
+        fields: {
+          plan: was.plan ?? null, status: was.status ?? null, amount: was.amount ?? null,
+          currency: was.currency ?? null, cycle: was.cycle ?? null, next_due_on: was.next_due_on ?? null,
+        },
+      } : null;
+      const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json", ...(expect ? { "X-LFH-Expect": expectHeader(expect) } : {}) }, body: JSON.stringify({
         // The currency goes up TRIMMED AND UPPER-CASED (T16 sweep #7, 2026-08-27): this is a free
         // text box, the route stores what it is given, and every comparison downstream — the
         // platform's "Collected this year" among them — matches on "INR" exactly. Normalising here
@@ -231,9 +321,20 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
         currency: currency.trim().toUpperCase() || "INR", cycle,
         started_on: startedOn || null, next_due_on: nextDueOn || null, notes: notes || null,
       }) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setMsg("Saved."); onChanged();
-    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setSaving(false); }
+      const d = await r.json();
+      // SOMEBODY GOT THERE FIRST. The refusal already says what the row holds NOW, in plain words,
+      // so it is shown as it arrives — and the card re-reads itself, so the fields stop showing the
+      // values that lost. Nothing of the person's typing is thrown away; they can see both and
+      // decide.
+      if (r.status === 409 && d.clash) {
+        setMsg({ kind: "warn", text: `${d.clash.plain} ${d.clash.todo}` });
+        await loadHistory();
+        return;
+      }
+      if (!r.ok) throw new Error(d.error || "Couldn't save.");
+      setMsg({ kind: "ok", text: "Saved." }); onChanged();
+      await loadHistory();   // the expectation for the NEXT save is what the database says now
+    } catch (e) { setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }); } finally { setSaving(false); }
   };
 
   const addPayment = async () => {
@@ -242,8 +343,8 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
     // is legitimately typed AROUND a number, then require what is left to BE one.
     const cleaned = String(payAmount).trim().replace(/[\s,]/g, "").replace(/^[₹$€£]/, "");
     const amt = /^-?\d+(\.\d+)?$/.test(cleaned) ? Number(cleaned) : NaN;
-    if (!(amt > 0)) { setPayMsg("Enter an amount greater than 0 (e.g. 12000)."); return; }
-    if (!payDate) { setPayMsg("Pick a payment date."); return; }
+    if (!(amt > 0)) { setPayMsg({ kind: "err", text: "Enter an amount greater than 0 (e.g. 12000)." }); return; }
+    if (!payDate) { setPayMsg({ kind: "err", text: "Pick a payment date." }); return; }
     if (payingRef.current) return;
     payingRef.current = true;
     if (!payActionIdRef.current) payActionIdRef.current = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
@@ -261,14 +362,27 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
       // the restaurant then reads as due — or overdue — the moment after being paid, and the only
       // way to find out was to notice. This screen threw that sentence away and said "Payment
       // recorded." either way. Now it says which of the two happened.
-      setPayMsg(typeof d?.warning === "string" && d.warning ? d.warning : "Payment recorded.");
+      setPayMsg(typeof d?.warning === "string" && d.warning
+        ? { kind: "warn", text: d.warning }
+        : { kind: "ok", text: "Payment recorded." });
       // loadHistory() re-reads billing and refreshes the "Next due on" field (rolled server-side).
       await loadHistory(); onChanged();
-    } catch (e) { setPayMsg(e instanceof Error ? e.message : String(e)); } finally { setPayBusy(false); payingRef.current = false; }
+    } catch (e) { setPayMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }); } finally { setPayBusy(false); payingRef.current = false; }
   };
 
-  const deletePayment = async (id: string) => {
-    if (!confirm("Delete this payment record?")) return;
+  // ── THE QUESTION NAMES THE PAYMENT (T20 sweep #8, 2026-09-04) ───────────────────────────────
+  // It used to ask "Delete this payment record?" — which of them? A restaurant on a monthly plan
+  // has twelve rows a year that differ only by their date and, often, not even by their amount, and
+  // the row a bin belongs to is decided by which of twelve small icons the mouse landed on. There
+  // is no undo: the row is gone, and the platform's own "Collected this year" drops by that much.
+  // A destructive question that cannot be checked against what you meant is not a confirmation.
+  const deletePayment = async (p: Payment) => {
+    const id = p.id;
+    if (!confirm(
+      `Delete the ${money(p.amount, row.currency)} payment dated ${istDate(p.paid_on)}${p.method ? ` (${p.method})` : ""}?\n\n`
+      + `This restaurant's "paid this year" drops by ${money(p.amount, row.currency)}. Nothing of the restaurant's own — no bill, no invoice — is touched.\n\n`
+      + `It cannot be undone; you would have to add the payment again.`,
+    )) return;
     setHistMsg(null);
     try {
       const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete_payment", payment_id: id }) });
@@ -326,7 +440,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
                 <button className="adm-btn primary" disabled={saving} onClick={savePlan}>{saving ? "Saving…" : "Save plan"}</button>
-                {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
+                {msg && <SaidLine said={msg} />}
               </div>
             </div>
 
@@ -345,22 +459,27 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
               </label>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
                 <button className="adm-btn primary" disabled={payBusy} onClick={addPayment}>{payBusy ? "Recording…" : "Add payment"}</button>
-                {payMsg && (
-                  // A warning is not an aside: the half-done case ("the payment was saved, but the
-                  // next-due date could not be moved") has to read as something to act on, while
-                  // "Payment recorded." stays the quiet confirmation it was.
-                  <span
-                    className={/could not|couldn't|not be/i.test(payMsg) ? undefined : "adm-muted"}
-                    style={/could not|couldn't|not be/i.test(payMsg)
-                      ? { fontSize: 12, color: "var(--adm-danger)", fontWeight: 600 }
-                      : { fontSize: 12 }}
-                  >{payMsg}</span>
-                )}
+                {payMsg && <SaidLine said={payMsg} />}
               </div>
             </div>
 
             <div style={{ borderTop: "var(--border)", paddingTop: 16 }}>
               <h2 style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 800 }}>Payment history</h2>
+              {/* ── ITEM 8 · THESE FIGURES ARE IN TODAY'S CURRENCY, WHATEVER THEY WERE PAID IN ────
+                  A payment row (mig 118) stores an amount and no currency, so every one of them is
+                  drawn in whatever this restaurant is set to NOW. Change a restaurant from rupees to
+                  dollars and last year's ₹12,000 silently re-reads as $12,000 — the same number
+                  wearing the wrong symbol, in the platform's own money record. Giving each payment
+                  its own currency needs a database change; saying plainly what the column means does
+                  not, and it is what stops the figure being misread in the meantime. */}
+              {payments && payments.length > 0 && (
+                <p className="adm-muted" style={{ margin: "-4px 0 10px", fontSize: 11.5, lineHeight: 1.5 }}>
+                  <i className="fas fa-circle-info" style={{ marginRight: 6 }} aria-hidden="true" />
+                  Amounts are shown in <b>{(row.currency || "INR").toUpperCase()}</b>, this restaurant&rsquo;s
+                  current currency. A payment does not carry a currency of its own, so changing it above
+                  re-labels these too.
+                </p>
+              )}
               {histMsg && (
                 <div role="status" style={{ margin: "0 0 10px", padding: "7px 11px", borderRadius: 8, fontSize: 12.5,
                   color: /^Couldn/.test(histMsg) ? "var(--adm-danger)" : "var(--adm-ok, #16a34a)",
@@ -378,12 +497,12 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
                   <div className="adm-logrow head" style={{ gridTemplateColumns: "90px 90px 1fr 1fr 40px" }}><span>Date</span><span>Amount</span><span>Method</span><span>Period / note</span><span /></div>
                   {payments.map((p) => (
                     <div key={p.id} className="adm-logrow" style={{ gridTemplateColumns: "90px 90px 1fr 1fr 40px" }}>
-                      <span>{p.paid_on}</span>
+                      <span title={p.paid_on}>{istDate(p.paid_on)}</span>
                       <span style={{ fontWeight: 700 }}>{money(p.amount, row.currency)}</span>
                       <span className="adm-muted">{p.method || "—"}</span>
                       <span className="adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.period_label || p.note || "—"}</span>
                       <span style={{ textAlign: "right" }}>
-                        <button className="adm-btn danger" style={{ padding: "4px 8px" }} onClick={() => deletePayment(p.id)} aria-label="Delete this payment" title="Delete this payment"><i className="fas fa-trash" aria-hidden="true" /></button>
+                        <button className="adm-btn danger" style={{ padding: "4px 8px" }} onClick={() => deletePayment(p)} aria-label="Delete this payment" title="Delete this payment"><i className="fas fa-trash" aria-hidden="true" /></button>
                       </span>
                     </div>
                   ))}
