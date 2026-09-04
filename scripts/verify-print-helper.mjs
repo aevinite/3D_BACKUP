@@ -806,11 +806,23 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     return out;
   };
   const files = [...walk("lib"), ...walk("app"), ...walk("components"), ...walk("public/panels")];
-  // ONE NAMED EXEMPTION, with its reason. app/api/print-agent still ANSWERS `backupFor: []` because a
-  // helper file already installed on a restaurant's PC reads that field; sending an empty list is what
-  // makes an old helper behave like a new one. It is a transition shim, not the feature — and it must
-  // keep saying so beside itself, which the second check below requires.
-  const SHIM = "app/api/print-agent/[...path]/route.ts";
+  // ── THE NAMED EXEMPTION IS GONE, BECAUSE ITS REASON WAS NEVER TRUE (T11 sweep #8, 2026-09-04) ──
+  //
+  // This block used to exempt ONE name in ONE file: app/api/print-agent could go on answering
+  // `backupFor: []`, "because a helper file already installed on a restaurant's PC reads that field;
+  // sending an empty list is what makes an old helper behave like a new one."
+  //
+  // NO HELPER HAS EVER READ IT. Checked against the whole history of the generated scripts, not
+  // reasoned about: `git log -S backupFor -- lib/printHelperScript.ts` is EMPTY, and the string does
+  // not appear in any of the 40 commits that touched that file — nor in printStationScript.ts. The
+  // field's entire life was three commits: born as a real computed list in the /hello response
+  // (0f6b07cf), cut to a constant [] when the backup printer was deleted (053347c0), and then
+  // exempted here (e8811e40) on a compatibility worry that was plausible and unsourced. The
+  // exemption then kept the dead field alive, which is the opposite of what this block is for.
+  //
+  // So `backupFor` is now treated like the other seven names: gone from the code, obituary in a
+  // comment. If a future helper really does need a field for compatibility, add it back WITH the
+  // reader named — an exemption whose reason nobody can check is a check that has been switched off.
   const alive = [];
   for (const rel of files) {
     const raw = readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
@@ -818,16 +830,17 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     const code0 = raw.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
     for (const d of DEAD) {
       if (!new RegExp(`\\b${d}\\b`).test(code0)) continue;
-      if (rel === SHIM && d === "backupFor") continue;      // the named shim above
       alive.push(`${rel} → ${d}`);
     }
   }
-  // …and the shim keeps its reason beside it, or the exemption above is describing something else.
+  // …and no generated helper script has grown a reader for any of them, which is the only thing that
+  // could ever justify sending one again.
   {
-    const shimSrc = readFileSync(new URL(`../${SHIM}`, import.meta.url), "utf8");
-    check(/`?backupFor`? is gone/.test(shimSrc) && /backupFor: \[\] as string\[\]/.test(shimSrc),
-      "the one remaining `backupFor` is the transition shim, and it still says so",
-      "app/api/print-agent still sends backupFor but no longer explains that it is an empty-list shim for helpers already installed — either restore the note or delete the field");
+    const scripts = ["lib/printHelperScript.ts", "lib/printStationScript.ts"]
+      .map((rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8")).join("\n");
+    check(!/\bbackupFor\b/.test(scripts),
+      "no generated helper reads a `backupFor` field, so the server has no reason to send one",
+      "a helper script now reads backupFor — if that is deliberate, the server has to send it again AND this guard's exemption has to come back with the reader named");
   }
   check(alive.length === 0,
     "the deleted backup printer is gone from every code path (obituary comments are fine)",
