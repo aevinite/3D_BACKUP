@@ -12,6 +12,8 @@ import { useActiveAutoRefresh, istDate } from "@/components/admin/shared";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { useToast } from "@/components/admin/toast";
 import { SkelList } from "@/components/admin/Skeleton";
+// The X-LFH-Expect header value, ASCII-escaped — see lib/accessTree.ts for the trap it exists to kill.
+import { expectHeader } from "@/lib/accessTree";
 
 type Row = {
   id: string; name: string; slug: string; active: boolean;
@@ -238,6 +240,17 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
 
   const toast = useToast();
   const [payments, setPayments] = useState<Payment[] | null>(null);
+  // ── ITEM 13 · WHAT THE ROW SAID WHEN THIS CARD LAST READ IT (owner picked it, 2026-09-04) ─────
+  // The house rule everywhere else in this product is "first save wins, and the loser gets told"
+  // (CLAUDE.md, the 11-point checklist). Saving a plan had no such gate: two cards open on the same
+  // restaurant and the second Save silently overwrote the first, with the loser's screen still
+  // showing the values that lost — and nothing here refreshes a field the person is looking at.
+  //
+  // The gate is ONE line at the call site (lib/clash.ts → expectClash): send what the row said when
+  // we read it, and the server refuses if it no longer says that. This is that value, kept fresh by
+  // loadHistory() — which is what stops recording a payment (it moves next-due server-side) from
+  // looking like somebody else's edit a moment later.
+  const baselineRef = useRef<Record<string, unknown> | null>(null);
   // A refusal on a payment ROW belongs beside the payment rows (T16 sweep #7, 2026-08-27).
   // deletePayment used to write into payMsg, which is rendered next to the "Add payment" button
   // one section up — on a restaurant with a year of history that message can be well off-screen,
@@ -257,6 +270,9 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
       const j = await r.json().catch(() => ({}));
       if (r.ok && !j.error) {
         setPayments(j.payments || []);
+        // The row exactly as the database has it now — the expectation the next Save is judged
+        // against. Null when this restaurant has no billing row yet: there is nothing to clash with.
+        baselineRef.current = (j.billing && typeof j.billing === "object") ? j.billing as Record<string, unknown> : null;
         // Keep the "Next due on" field in sync — recording a payment with "roll due" advances
         // it server-side, and the open editor used to keep showing the OLD date until reopened
         // (audit 2026-07-07). j.billing.next_due_on is the fresh value.
@@ -285,7 +301,18 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const savePlan = async () => {
     setSaving(true); setMsg(null);
     try {
-      const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      // Only the fields a second person could have moved. `expectHeader` (not JSON.stringify) because
+      // a header value must be ISO-8859-1 and fetch() throws the WHOLE request away if it is not —
+      // a plan name with a curly apostrophe would otherwise make Save do nothing at all, silently.
+      const was = baselineRef.current;
+      const expect = was ? {
+        table: "restaurant_billing", id: row.id, label: row.name,
+        fields: {
+          plan: was.plan ?? null, status: was.status ?? null, amount: was.amount ?? null,
+          currency: was.currency ?? null, cycle: was.cycle ?? null, next_due_on: was.next_due_on ?? null,
+        },
+      } : null;
+      const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json", ...(expect ? { "X-LFH-Expect": expectHeader(expect) } : {}) }, body: JSON.stringify({
         // The currency goes up TRIMMED AND UPPER-CASED (T16 sweep #7, 2026-08-27): this is a free
         // text box, the route stores what it is given, and every comparison downstream — the
         // platform's "Collected this year" among them — matches on "INR" exactly. Normalising here
@@ -294,8 +321,19 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
         currency: currency.trim().toUpperCase() || "INR", cycle,
         started_on: startedOn || null, next_due_on: nextDueOn || null, notes: notes || null,
       }) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
+      const d = await r.json();
+      // SOMEBODY GOT THERE FIRST. The refusal already says what the row holds NOW, in plain words,
+      // so it is shown as it arrives — and the card re-reads itself, so the fields stop showing the
+      // values that lost. Nothing of the person's typing is thrown away; they can see both and
+      // decide.
+      if (r.status === 409 && d.clash) {
+        setMsg({ kind: "warn", text: `${d.clash.plain} ${d.clash.todo}` });
+        await loadHistory();
+        return;
+      }
+      if (!r.ok) throw new Error(d.error || "Couldn't save.");
       setMsg({ kind: "ok", text: "Saved." }); onChanged();
+      await loadHistory();   // the expectation for the NEXT save is what the database says now
     } catch (e) { setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }); } finally { setSaving(false); }
   };
 
