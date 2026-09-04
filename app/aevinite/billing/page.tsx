@@ -272,6 +272,16 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const dialogRef = useRef<HTMLDivElement>(null);
   useAdminModal(dialogRef, "admin-billing-editor", onClose);
 
+  // ── ITEM 9 · A WORD ABOUT A SAVE IS ABOUT THE SAVE THAT HAPPENED ─────────────────────────────
+  // "Saved." used to stay on screen while the plan was edited again, so a form full of unsaved
+  // changes sat under the word Saved. Any edit clears it; a save does not (nothing below changes
+  // when savePlan runs), so the confirmation still lands and stays until the next keystroke.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    setMsg(null);
+  }, [plan, status, amount, currency, cycle, startedOn, nextDueOn, notes]);
+
   const savePlan = async () => {
     setSaving(true); setMsg(null);
     try {
