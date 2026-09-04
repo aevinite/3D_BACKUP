@@ -207,7 +207,9 @@
     "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs",
     "verify:owner-live500": "node scripts/verify-owner-live-500.mjs",
     "verify:repair-sweep": "node scripts/verify-repair-health-sweep.mjs",
-    "verify:repair-r2": "node scripts/verify-repair-health-round2.mjs"
+    "verify:repair-r2": "node scripts/verify-repair-health-round2.mjs",
+    "verify:t14": "npx esbuild scripts/verify-t14-reports.ts --bundle --platform=node --format=esm --alias:@=. --external:playwright --outfile=node_modules/.cache/verify-t14-reports.mjs --log-level=warning && node node_modules/.cache/verify-t14-reports.mjs",
+    "verify:t14-live": "node scripts/verify-t14-reports-live.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"
