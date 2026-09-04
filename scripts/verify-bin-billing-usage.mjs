@@ -328,8 +328,16 @@ await phase("Recycle · the object URL is released after the download", () =>
   /URL\.revokeObjectURL\(url\)/.test(R) || "a leaked blob URL holds the whole backup in memory");
 await phase("Recycle · unpaid pay-later tabs are surfaced on the row", () =>
   /still unpaid here/.test(R) || "the one figure that should stop a hand is not shown");
-await phase("Recycle · …and again inside the permanent-delete confirm", () =>
-  /inside\?\.inside\.unpaidPayLaterBills/.test(R) || "the warning is missing where the decision is made");
+await phase("Recycle · …and again inside the permanent-delete confirm, in all three of its states", () => {
+  // Pinned to the QUESTION, not to one spelling of it: does the confirm answer "does anyone still
+  // owe money here?" for every answer that question can have — a real count, an unknown, and
+  // "nothing has been read yet"? Silence is only correct for a real zero.
+  const holes = [];
+  if (!/unpaidPayLaterBills > 0/.test(R)) holes.push("it does not name a real count");
+  if (!/unpaidPayLaterBills === null/.test(R)) holes.push("an unread count is silent, so it reads as 'nobody owes anything'");
+  if (!/haven&apos;t looked inside this one yet/.test(R)) holes.push("the confirm can be opened without reading the row, and says nothing about it");
+  return holes.length === 0 || holes.join(" · ");
+});
 await phase("Recycle · it says the bills survive but the record of WHO owes them does not", () =>
   /removing this restaurant deletes the record of <b>who<\/b> owes them/.test(R)
   || "the asymmetry that actually costs money is not spelled out");
@@ -367,8 +375,14 @@ await phase("Recycle · the owner delete says the restaurants themselves are NOT
   /the restaurants themselves are NOT deleted/.test(R) || "the most frightening misreading is not headed off");
 await phase("Recycle · an owner's panel opens through THEIR eyes, pinned to them", () =>
   /openRestaurantPanel\(rr\.id, "\/owner", o\.id, rr\.binned\)/.test(R) || "the owner door is not pinned to this owner");
-await phase("Recycle · a date that cannot be parsed falls back to what was stored", () =>
-  /catch \{ return iso; \}/.test(R) || "an unparseable date would render as 'Invalid Date'");
+await phase("Recycle · a date that cannot be parsed falls back to what was stored", () => {
+  // The behaviour, wherever the formatter lives. This page used to carry its own copy and the check
+  // was pinned to that copy's `catch` — so moving to the console's shared istDate, which is a
+  // strictly better answer, read as a regression. A guard pinned to a code shape does that.
+  const local = /catch \{ return iso; \}/.test(R);
+  const shared = /\bistDate\b/.test(R) && /if \(Number\.isNaN\(t\)\) return iso;/.test(NCODE.shared);
+  return local || shared || "an unparseable date would render as 'Invalid Date'";
+});
 await phase("Recycle · the suggested web address is capped and stripped at both ends", () =>
   /replace\(\/\^-\+\|-\+\$\/g, ""\)\.slice\(0, 40\)/.test(R) || "slugify no longer bounds the address");
 await phase("Recycle · the address follows the name until the admin edits the address", () =>
@@ -616,8 +630,9 @@ await phase("Usage · the chosen window is printed in words above the table", ()
 await phase("Usage · the phone slide hint exists only where the table actually slides", () =>
   /@media \(max-width: 560px\) \{ \.us-slide \{ display: inline; \} \}/.test(SRC.usage)
   || "a hint about sliding shown on a screen that does not slide");
-await phase("Usage · that hint names the two headings that sit off the edge", () =>
-  /drag it left for <b>Staff<\/b> and <b>Tables<\/b>/.test(U) || "the hint does not say what is out there");
+await phase("Usage · that hint names the two headings that sit off the edge, and the way round them", () =>
+  (/<b>Staff<\/b> and <b>Tables<\/b>/.test(U) && /Sort by/.test(U))
+  || "the hint does not say what is out there, or does not name the picker that reaches it without dragging");
 await phase("Usage · the four headline numbers sit two per row on a phone", () =>
   /\.rev-strip \.cell \{ flex: 1 1 44%/.test(SRC.usage) || "four numbers would take ~380px before the table");
 await phase("Usage · no stray vertical rule floats at the edge of a stacked cell", () =>
@@ -1136,7 +1151,13 @@ if (!ctx) {
         .filter((e) => {
           if (e.disabled || e.tabIndex < 0) return false;
           const cs = getComputedStyle(e);
-          if (cs.display === "none" || cs.visibility === "hidden") return false;   // not reachable
+          // NOT RENDERED AT ALL = NOT REACHABLE, and that includes a control whose PARENT is
+          // display:none. Reading the element's own `display` missed that entirely: the phone-only
+          // sort picker is a plain <select> inside a hidden bar, so on a desktop it reported as
+          // "reachable but unseeable" when the keyboard cannot get to it at all. offsetParent is
+          // null for anything inside a display:none subtree; `fixed` is the one exception.
+          if (e.offsetParent === null && cs.position !== "fixed") return false;
+          if (cs.visibility === "hidden") return false;
           const r = e.getBoundingClientRect();
           return Number(cs.opacity) < 0.05 || (r.width < 2 && r.height < 2);
         })
@@ -2136,6 +2157,211 @@ await judge("Would an operator understand 'Due in 30 days (2 overdue)' at a glan
   "the two counts are separate on purpose — the same restaurant is never in both");
 await judge("Is anything on these three screens a two-tap flow that should be one?", true,
   "checked: Restore is one tap, Manage is one tap, sorting is one tap; the permanent delete is deliberately three");
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// BAND G · P74269– — THE SIX THINGS HE PICKED ON 2026-09-04 (items 8, 9, 11, 12, 13, 14)
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// APPENDED, never inserted. Every id in this file is POSITIONAL — the nth phase is the nth id — so
+// adding a check in the middle would silently renumber every row after it, and "re-run P73912"
+// would stop meaning what the ledger says it means. New work goes on the end.
+band = "G";
+console.log("\nG · the six he picked on 2026-09-04\n");
+
+// ── item 8 · a payment is drawn in TODAY's currency ─────────────────────────────────────────────
+await phase("Item 8 · the payment list says which currency it is drawing in", () =>
+  /Amounts are shown in <b>\{\(row\.currency \|\| "INR"\)\.toUpperCase\(\)\}<\/b>/.test(CODE.billing)
+  || "the list no longer names the currency it is drawing every past payment in");
+await phase("Item 8 · …and says WHY it can re-label an old payment", () =>
+  /A payment does not carry a currency of its own/.test(CODE.billing)
+  || "it names the currency but not the reason a historic figure can change symbol");
+await phase("Item 8 · the note only appears when there are payments to mislabel", () =>
+  /\{payments && payments\.length > 0 && \(/.test(CODE.billing) || "an explanation with nothing to explain");
+await phase("Item 8 · a payment row still has no currency of its own to read", () =>
+  !/payments[\s\S]{0,200}\.currency/.test(NCODE.billingRoute)
+  || "the route now answers a per-payment currency — draw each row in ITS own, and drop the note");
+
+// ── item 9 · a word about a save is about the save that happened ────────────────────────────────
+await phase("Item 9 · editing the plan clears what was said about the last save", () => {
+  // THE BODY, NOT THE SCAFFOLDING. The first version of this asked for a ref and a deps list and
+  // was satisfied by both — so deleting the one line that does the work, `setMsg(null)`, left it
+  // green. Read the effect that watches the fields and check it really clears.
+  const eff = (CODE.billing.match(/useEffect\(\(\) => \{[\s\S]*?\}, \[plan, status, amount, currency, cycle, startedOn, nextDueOn, notes\]\);/) || [""])[0];
+  if (!eff) return "nothing watches the plan fields, so 'Saved.' can sit under unsaved changes";
+  return /setMsg\(null\);/.test(eff) || "the fields are watched and nothing is cleared — the word stays put";
+});
+await phase("Item 9 · …and the confirmation still survives the save that produced it", () =>
+  /if \(firstRender\.current\) \{ firstRender\.current = false; return; \}/.test(CODE.billing)
+  || "the message would be cleared on mount, or by the save itself");
+await phase("Item 9 · every field a person can change is watched", () => {
+  const watched = (CODE.billing.match(/\}, \[(plan[^\]]*)\]\)/) || [])[1] || "";
+  const fields = ["plan", "status", "amount", "currency", "cycle", "startedOn", "nextDueOn", "notes"];
+  const missing = fields.filter((f) => !new RegExp(`\\b${f}\\b`).test(watched));
+  return missing.length === 0 || `an edit to ${missing.join(", ")} would leave "Saved." on screen`;
+});
+
+// ── item 11 · silence on a delete screen must mean one thing only ───────────────────────────────
+await phase("Item 11 · the delete confirm answers 'does anyone still owe money?' in every state", () => {
+  // Both halves of each state: the CONDITION that chooses it and the SENTENCE it draws. A check
+  // that only reads the words is satisfied by dead text — flipping a condition to `false` leaves
+  // every sentence in the file and the screen silent.
+  const holes = [];
+  if (!/\{!inside \? \(/.test(CODE.recycle)) holes.push("nothing read yet (no condition)");
+  if (!/haven&apos;t looked inside this one yet/.test(CODE.recycle)) holes.push("nothing read yet (no sentence)");
+  if (!/inside\.inside\.unpaidPayLaterBills === null \|\| inside\.inside\.unpaidPayLaterBills === undefined/.test(CODE.recycle)) holes.push("count unknown (no condition)");
+  if (!/could not be read<\/b> just now — it is not a zero/.test(CODE.recycle)) holes.push("count unknown (no sentence)");
+  if (!/inside\.inside\.unpaidPayLaterBills > 0/.test(CODE.recycle)) holes.push("a real count (no condition)");
+  return holes.length === 0 || `silent for: ${holes.join(", ")}`;
+});
+await phase("Item 11 · …and stays quiet for a real zero, which is the one honest silence", () =>
+  /\) : null\}/.test(CODE.recycle) || "it would warn about nothing");
+await phase("Item 11 · the unknown case points at the way out rather than just naming the problem", () =>
+  /Use <b>Try again<\/b> on the row above/.test(CODE.recycle) || "it says the count is unknown and offers nothing to do about it");
+
+// ── item 12 · one spelling of a date across the console ─────────────────────────────────────────
+await phase("Item 12 · the recycle bin uses the console's shared date reading", () =>
+  /const fmtDate = istDate;/.test(CODE.recycle) || "this page declares its own date format again");
+await phase("Item 12 · …and no screen in this territory keeps a private one", () => {
+  const own = Object.entries(CODE).filter(([, c]) => /const (fmtDate|dfmt) = \((iso|s|d)[^)]*\) =>/.test(c)).map(([k]) => FILES[k]);
+  return own.length === 0 || `private date formatter(s) in: ${own.join(", ")}`;
+});
+await phase("Item 12 · the shared one is pinned to Indian time, not the reader's computer", () =>
+  /timeZone: IST/.test(NCODE.shared) || "the same row would read a day out on a computer set elsewhere");
+
+// ── item 13 · first save wins, and the loser gets told ──────────────────────────────────────────
+await phase("Item 13 · the billing card says what the row said when it read it", () =>
+  /"X-LFH-Expect": expectHeader\(expect\)/.test(CODE.billing) || "the plan save sends no expectation, so there is no gate");
+await phase("Item 13 · that header is ASCII-escaped, or a curly apostrophe kills the whole request", () =>
+  /import \{ expectHeader \} from "@\/lib\/accessTree"/.test(CODE.billing)
+  || "JSON.stringify is back — fetch() refuses a header that is not ISO-8859-1, silently");
+await phase("Item 13 · the expectation is rebuilt from what the SERVER last said, not from the list row", () =>
+  /baselineRef\.current = \(j\.billing && typeof j\.billing === "object"\)/.test(CODE.billing)
+  || "a payment moving next-due server-side would read as somebody else's edit");
+await phase("Item 13 · it holds every field a second person could move", () => {
+  const blk = (CODE.billing.match(/fields: \{[\s\S]{0,400}?\}/) || [""])[0];
+  const need = ["plan", "status", "amount", "currency", "cycle", "next_due_on"];
+  const miss = need.filter((f) => !blk.includes(f));
+  return miss.length === 0 || `not protected: ${miss.join(", ")}`;
+});
+await phase("Item 13 · a restaurant with no billing row yet sends no expectation", () =>
+  /const expect = was \? \{/.test(CODE.billing) || "it would claim the row said something when there is no row");
+await phase("Item 13 · the route asks the one gate before it writes", () => {
+  const c = NCODE.billingRoute;
+  return (/expectClash\(req, rid\)/.test(c) && c.indexOf("expectClash") < c.indexOf('from("restaurant_billing").upsert'))
+    || "the gate runs after the write, or not at all";
+});
+await phase("Item 13 · …and answers the refusal in the shape every panel already understands", () =>
+  /return clashJson\(overwrite\)/.test(NCODE.billingRoute) || "a bespoke refusal shape");
+await phase("Item 13 · the table is one the gate is allowed to compare", () =>
+  /restaurant_billing: "restaurant_id"/.test(strip(read("lib/clash.ts")))
+  || "the gate would answer 'nothing to protect' even when the card asks");
+await phase("Item 13 · …and is scoped as a tenant row, because its own key IS the restaurant", () =>
+  /TENANT_ROW_TABLES = new Set\(\["settings", "restaurants", "restaurant_billing"\]\)/.test(strip(read("lib/clash.ts")))
+  || "it would be scoped by a restaurant_id column it does not have");
+await phase("Item 13 · a refusal is shown to the person, not swallowed", () =>
+  /res\.status === 409 && d\.clash|r\.status === 409 && d\.clash/.test(CODE.billing) || "the refusal would read as a generic error");
+await phase("Item 13 · …and the card re-reads itself so the fields stop showing what lost", () => {
+  const blk = (CODE.billing.match(/status === 409 && d\.clash\)[\s\S]{0,300}?\n\s{6}\}/) || [""])[0];
+  return /loadHistory\(\)/.test(blk) || "the losing values would stay on screen under the refusal";
+});
+await phase("Item 13 · a successful save refreshes the expectation for the next one", () => {
+  const blk = (CODE.billing.match(/setMsg\(\{ kind: "ok", text: "Saved\." \}\)[\s\S]{0,200}/) || [""])[0];
+  return /loadHistory\(\)/.test(blk) || "the second save in a row would be judged against a stale expectation";
+});
+await phase("Item 13 · the pair is registered with the coverage guard, both halves", () => {
+  const g = read("scripts/verify-clash-coverage.mjs");
+  const blk = (g.match(/file: "app\/aevinite\/billing\/page\.tsx"[\s\S]{0,400}?\},/) || [""])[0];
+  return (blk.includes('route: "app/api/admin/billing/route.ts"') && /X-LFH-Expect/.test(blk))
+    || "verify:clash-coverage does not watch this pair";
+});
+
+// ── item 14 · the phone sort picker ─────────────────────────────────────────────────────────────
+await phase("Item 14 · there is a way to sort by a heading that is off the edge", () =>
+  /id="us-sort"/.test(CODE.usage) || "two of the five sorts are unreachable on a phone again");
+await phase("Item 14 · it drives the SAME sort as the headings, not a second one", () =>
+  /setSort\(e\.target\.value as SortKey\)/.test(CODE.usage) || "a second, private sort");
+await phase("Item 14 · its labels come from the same list the headings read", () =>
+  /const SORTS: \{ k: SortKey; label: string; ranged\?: boolean \}\[\]/.test(CODE.usage)
+  || "the picker and the headings can call one column different things");
+await phase("Item 14 · it offers every column, including the two off the edge", () => {
+  const blk = (CODE.usage.match(/const SORTS[\s\S]*?\];/) || [""])[0];
+  const keys = [...blk.matchAll(/k: "(\w+)"/g)].map((m) => m[1]).sort();
+  return keys.join(",") === "name,orders,orders7d,staff,tables" || `offers ${keys.join(",")}`;
+});
+await phase("Item 14 · the 7-day option disappears while a window is chosen, exactly as its column does", () =>
+  /SORTS\.filter\(\(o\) => !\(ranged && o\.ranged === false\)\)/.test(CODE.usage)
+  || "it would offer a sort on a column that is not on screen");
+await phase("Item 14 · it exists only where the table actually slides", () =>
+  /\.us-sortbar \{ display: none; \}/.test(SRC.usage) && /@media \(max-width: 560px\) \{\s*\.us-sortbar \{ display: flex/.test(SRC.usage)
+  || "a second control on a computer, where every heading is already pressable");
+await phase("Item 14 · the picker has a label a screen reader can read", () =>
+  /<label htmlFor="us-sort"/.test(CODE.usage) || "an unnamed control");
+await phase("Item 14 · the direction button says which way it is sorting, not just which way it points", () =>
+  /aria-label=\{desc \? "Sorted biggest first/.test(CODE.usage) || "a bare arrow with no name");
+await phase("Item 14 · picking a column starts biggest-first for numbers, A→Z for the name", () =>
+  /setDesc\(e\.target\.value !== "name"\)/.test(CODE.usage) || "it would start in the direction nobody meant");
+await phase("Item 14 · the hint names the picker as the way round the drag", () =>
+  /use <b>Sort by<\/b> above to order by them without dragging/.test(CODE.usage)
+  || "the picker exists and nothing points at it");
+if (ctx) {
+  await phase("Item 14 · LIVE at 360px — the picker is on screen and offers all five", async () => {
+    const p = await ctx.newPage();
+    try {
+      await p.setViewportSize({ width: 360, height: 780 });
+      await p.goto(BASE + "/aevinite/usage", { waitUntil: "networkidle", timeout: 45000 });
+      await p.waitForTimeout(800);
+      const opts = await p.evaluate(() => { const s = document.querySelector("#us-sort"); return s && s.offsetParent !== null ? [...s.options].map((o) => o.text) : null; });
+      return (opts && opts.length === 5) || `picker: ${JSON.stringify(opts)}`;
+    } finally { await p.close(); }
+  });
+  await phase("Item 14 · LIVE at 360px — picking Staff really orders by staff, and asks the server for nothing", async () => {
+    const p = await ctx.newPage();
+    let calls = 0;
+    p.on("request", (r) => { if (r.url().includes("/api/admin/usage")) calls++; });
+    try {
+      await p.setViewportSize({ width: 360, height: 780 });
+      await p.goto(BASE + "/aevinite/usage", { waitUntil: "networkidle", timeout: 45000 });
+      await p.waitForTimeout(800);
+      const before = calls;
+      await p.selectOption("#us-sort", "staff");
+      await p.waitForTimeout(700);
+      const v = await p.evaluate(() => [...document.querySelectorAll(".adm-logrow.us-row:not(.head)")]
+        .map((r) => { const s = r.querySelectorAll("span"); return Number(s[s.length - 2].innerText) || 0; }));
+      if (calls > before) return `${calls - before} request(s) for a sort the browser can do`;
+      return JSON.stringify(v) === JSON.stringify([...v].sort((a, b) => b - a)) || `order ${JSON.stringify(v)}`;
+    } finally { await p.close(); }
+  });
+  await phase("Item 14 · LIVE on a computer — there is no picker, only the headings", async () => {
+    const o = await observe("/aevinite/usage");
+    const showing = await o.page.evaluate(() => { const s = document.querySelector("#us-sort"); return s ? s.offsetParent !== null : false; });
+    return !showing || "the phone picker is showing on a desktop, where every heading is already pressable";
+  });
+}
+
+if (ctx) {
+  await phase("Item 9 · LIVE — the word about a save disappears the moment the form is touched", async () => {
+    // Reading the code cannot prove this; only pressing Save and then typing can. The check that
+    // used to stand here read a ref and a deps list, and stayed green over a sabotage that deleted
+    // the one line doing the work.
+    const p = await ctx.newPage();
+    try {
+      await p.goto(BASE + "/aevinite/billing", { waitUntil: "networkidle", timeout: 45000 });
+      await p.waitForTimeout(700);
+      const opened = await p.evaluate(() => { const b = document.querySelector(".adm-logrow:not(.head) button"); if (!b) return false; b.click(); return true; });
+      if (!opened) return "no restaurant row to open";
+      await p.waitForTimeout(1200);
+      await p.evaluate(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => /Save plan/.test(b.innerText))?.click());
+      await p.waitForTimeout(1800);
+      const said = await p.evaluate(() => document.querySelector('[role="dialog"]')?.innerText || "");
+      if (!/Saved\.|Someone else changed/.test(said)) return "the save said nothing at all";
+      // Type something that is definitely different from what is in the box.
+      await p.fill('[role="dialog"] input[placeholder="e.g. Standard"]', `zz-${Date.now()}`);
+      await p.waitForTimeout(600);
+      const after = await p.evaluate(() => document.querySelector('[role="dialog"]')?.innerText || "");
+      return !/Saved\./.test(after) || "'Saved.' is still on screen under a form full of unsaved changes";
+    } finally { await p.close(); }
+  });
+}
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // The verdict
