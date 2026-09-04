@@ -328,7 +328,13 @@ ok(/the check stops counting at 200/.test(HEALTH), "P23614",
 ok(/const scopePhrase = scopedName \? `at \$\{scopedName\}` : "across every restaurant"/.test(REPAIR), "P23615",
   "repair: the one phrase every bulk confirm uses to name its scope is gone");
 {
-  const asks = [...REPAIR.matchAll(/<span>(?:Mark|Send|Bring|Clear|Resolve|Forget) all [\s\S]{0,120}?<\/span>/g)].map((m) => m[0]);
+  // WIDENED 2026-09-04 (T18, sweep #8) — this asserted a code SHAPE, not the rule. It required
+  // the verb to sit immediately after "<span>" and the whole sentence to fit in 120 characters, so
+  // the moment one confirm grew a second clause onto its own line ("…as handled? That also clears
+  // 3 reports set to come back later.") the guard reported "found 5" — with all six confirms
+  // present and every one of them still naming its scope. A guard that goes red for a line break
+  // is a guard somebody edits out. The rule it defends is unchanged and is asserted one line down.
+  const asks = [...REPAIR.matchAll(/<span>\s*(?:Mark|Send|Bring|Clear|Resolve|Forget) all [\s\S]{0,400}?<\/span>/g)].map((m) => m[0]);
   ok(asks.length >= 6, "P23616", `repair: expected 6 bulk confirm sentences, found ${asks.length}`);
   const silent = asks.filter((a) => !a.includes("scopePhrase"));
   ok(silent.length === 0, "P23617",
@@ -470,10 +476,10 @@ ok(/backgroundColor: s\.c \}\} aria-hidden="true"/.test(HEALTH), "P71729",
 ok(/OBITUARY \(item 12, 2026-09-04\)/.test(HEALTH), "P71730",
   "health: the obituary explaining why there is no hollow dot is gone — the next reader will re-add it");
 
-console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 12");if (fails.length) {
+if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
   console.error("\n   Each line names the ledger phase (.claude/sweep/LEDGER/T17.md) that found it.\n");
   process.exit(1);
 }
-console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes");
+console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 12");
