@@ -872,9 +872,13 @@ if (LEDGER) {
   out.push("prevent. Regenerate with `node scripts/verify-admin-sweep.mjs --ledger`.\n");
   for (const [b, list] of byBand) {
     out.push("## " + b + "  ·  `" + list[0].id + "`–`" + list[list.length - 1].id + "` (" + list.length + ")\n");
-    out.push("| id | check |");
-    out.push("|---|---|");
-    for (const r of list) out.push("| " + r.id + " | " + r.title.replace(/\|/g, "\\|") + " |");
+    // FIVE COLUMNS (sweep #8 T18, 2026-09-04, item 18). verify:ledger-index only counts a row as a
+    // PHASE row if it has at least six cells, so a two-column generated table left all 527 of
+    // these ids out of the collision check AND out of the row-count floor — and gave a re-run
+    // nowhere to record a result, which is the one thing a re-run updates. Same ids, same order.
+    out.push("| id | check | how to verify | result | note |");
+    out.push("|---|---|---|---|---|");
+    for (const r of list) out.push("| " + r.id + " | " + r.title.replace(/\|/g, "\\|") + " | `npm run verify:admin-sweep -- --base <url> --from " + (Number(r.id.slice(1)) - FIRST_ID + 1) + " --to " + (Number(r.id.slice(1)) - FIRST_ID + 1) + "` | — |  |");
     out.push("");
   }
   writeFileSync(join(root, ".claude/sweep/LEDGER/T17-R2.md"), out.join("\n") + "\n");

@@ -83,6 +83,13 @@ const BASE = (arg("--base", "http://localhost:4318") || "").replace(/\/$/, "");
 const FROM = Number(arg("--from", 0)) || 0;
 const TO = Number(arg("--to", 0)) || Infinity;
 const LEDGER = process.argv.includes("--ledger");
+// --ledger prints the PLAN; it executes nothing, so it has no results of its own. A run WITH a
+// base leaves them here, and the next --ledger picks them up — so the table carries what actually
+// happened instead of a column of dashes. Absent file = every result reads "—", which is honest:
+// planned, not yet run.
+const RESULT_FILE = ".claude/sweep/T18-S8-RESULT.json";
+let RESULTS = {}, NOTES = {};
+try { const j = JSON.parse(read(RESULT_FILE)); RESULTS = j.results || {}; NOTES = j.notes || {}; } catch { /* first run */ }
 const NOBROWSER = process.argv.includes("--no-browser");
 
 const env = Object.fromEntries(read(".env.local").split("\n")
@@ -573,7 +580,25 @@ for (const [name, code] of [["health", C.healthRoute], ["panels-health", C.panel
     return unbounded.length === 0 || `${unbounded.length} unbounded read(s) in ${name}`;
   });
 }
-await phase("EGRESS · the Repair hub does not poll at all — it is click-to-refresh", () => !/setInterval/.test(C.repair) && !/useActiveAutoRefresh/.test(C.repair) || "a board nobody is looking at would fetch seven feeds a minute");
+// ── THIS EXPECTATION MOVED, AND THE ID STAYED (item 19, owner 2026-09-04) ────────────────────
+// It used to read "the Repair hub does not poll at all — it is click-to-refresh", and that was
+// true and deliberate. Then he reported that a problem parked with "Remind me later" never came
+// back, and the cause WAS the no-polling rule: the one screen that honours a wait was the only one
+// that could not notice it ending. So the board now refreshes — and the rule this row defends is
+// no longer "never" but the one that actually protects the bill: ONE feed, not seven, and no
+// faster than the 60s backstop, through the shared visible-only idle-aware helper.
+// The id is kept and the reason is written here, which is the ledger's rule for a moved
+// expectation. Renumbering it would lose the history of why it changed.
+await phase("EGRESS · the Repair hub's background refresh is ONE feed, not the whole board", () => {
+  if (/setInterval/.test(C.repair)) return "a hand-rolled timer — it would fetch in a hidden tab";
+  const m = /useActiveAutoRefresh\((\w+), (\d+)\)/.exec(C.repair);
+  if (!m) return true;                                     // no refresh at all is still acceptable
+  if (Number(m[2]) < 60000) return `refreshing every ${Number(m[2]) / 1000}s — the backstop is 60s`;
+  const fn = new RegExp(`const ${m[1]} = useCallback\\([\\s\\S]*?\\n  \\}, \\[\\]\\);`).exec(C.repair);
+  if (!fn) return `${m[1]} is refreshed on a timer but its body cannot be read`;
+  const feeds = (fn[0].match(/adminFetch/g) || []).length;
+  return feeds === 1 || `the timed refresh fetches ${feeds} feeds — a whole-board refetch`;
+});
 await phase("EGRESS · System health polls no faster than the 60s backstop", () => /useActiveAutoRefresh\(load, 60000\)/.test(C.health) || "a faster poll than the rule allows");
 await phase("EGRESS · System health's refresh stops when the tab is hidden or he walks away", () => /useActiveAutoRefresh/.test(C.health) || "a blind timer would run all night");
 await phase("EGRESS · System health makes exactly TWO requests per round", () => (C.health.match(/fetch\("\/api\/admin\//g) || []).length === 2 || "the cheap diagnostics page grew a third read");
@@ -1202,11 +1227,20 @@ if (LEDGER) {
   out.push("to prevent. Regenerate with `node scripts/verify-repair-health-sweep.mjs --ledger`.\n");
   out.push("A `?` result is UNANSWERED, never a pass: \"not reachable on the screen I opened\" is a statement");
   out.push("about the screen, not about the product.\n");
+  // ── FIVE COLUMNS, LIKE EVERY OTHER LEDGER (item 18, 2026-09-04) ──────────────────────────────
+  // This table used to be `| id | check |`. Two consequences, both bad and both invisible:
+  //   · `verify:ledger-index` only treats a row as a PHASE row if it has at least six cells, so
+  //     every one of these ids counted as a passing MENTION rather than a claim — they were in no
+  //     collision check and in no row-count floor;
+  //   · and there was nowhere to write a RESULT, which is the whole thing a re-run updates in
+  //     place. A generated ledger nobody can record against cannot converge.
+  // The result column is filled from THIS run, so the file is a record and not just a plan.
+
   for (const [b, list] of byBand) {
     out.push("## " + b + "  ·  `" + list[0].id + "`–`" + list[list.length - 1].id + "` (" + list.length + ")\n");
-    out.push("| id | check |");
-    out.push("|---|---|");
-    for (const r of list) out.push("| " + r.id + " | " + r.title.replace(/\|/g, "\\|") + " |");
+    out.push("| id | check | how to verify | result | note |");
+    out.push("|---|---|---|---|---|");
+    for (const r of list) out.push("| " + r.id + " | " + r.title.replace(/\|/g, "\\|") + " | `npm run verify:repair-sweep -- --base <url> --from " + (Number(r.id.slice(1)) - FIRST_ID + 1) + " --to " + (Number(r.id.slice(1)) - FIRST_ID + 1) + "` | " + (RESULTS[r.id] || "—") + " | " + (NOTES[r.id] || "") + " |");
     out.push("");
   }
   writeFileSync(join(root, ".claude/sweep/LEDGER/T18-S8.md"), out.join("\n") + "\n");
@@ -1231,6 +1265,16 @@ const FLOOR = FROM || TO !== Infinity ? 1 : 380;
 if (total < FLOOR) {
   console.error(`\n✖ only ${total} phases ran, and this suite has ${n}. A run that quietly skips most of itself\n  prints "all clean" and means nothing. Refusing to report a pass.`);
   process.exit(1);
+}
+// Leave the results where --ledger can find them, so the table records what happened rather than
+// a column of dashes (item 18). Only a FULL run may write it — a --from/--to band would blank
+// every row it did not touch.
+if (!FROM && TO === Infinity) {
+  const results = {}, notes = {};
+  for (const id of pass) results[id] = "✅";
+  for (const f of fail) { results[f.id] = "❌"; notes[f.id] = String(f.why).replace(/\|/g, "\\|").slice(0, 300); }
+  for (const u of unanswered) { results[u.id] = "⏭"; notes[u.id] = String(u.why).replace(/\|/g, "\\|").slice(0, 300); }
+  writeFileSync(join(root, RESULT_FILE), JSON.stringify({ at: new Date().toISOString(), base: BASE, planned: n, results, notes }, null, 2) + "\n");
 }
 console.log(`\nre-run one band:  node scripts/verify-repair-health-sweep.mjs --base ${BASE} --from <n> --to <n>`);
 process.exit(fail.length ? 1 : 0);
