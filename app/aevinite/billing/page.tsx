@@ -5,7 +5,10 @@
 // manually (no payment gateway yet). Backed by /api/admin/billing
 // (migration 118: restaurant_billing + restaurant_payments, additive-only).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useActiveAutoRefresh } from "@/components/admin/shared";
+// istDate: the console's ONE reading of a date ("4 Jul 27"), pinned to IST. Imported rather than
+// re-invented — components/admin/shared.tsx exports it precisely so two admin screens cannot print
+// the same field two different ways, and /aevinite/revenue already prints next-due through it.
+import { useActiveAutoRefresh, istDate } from "@/components/admin/shared";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { useToast } from "@/components/admin/toast";
 import { SkelList } from "@/components/admin/Skeleton";
@@ -173,7 +176,15 @@ export default function AdminBilling() {
                   <div className="adm-muted">{r.plan || "—"}</div>
                   <div><span className={`adx-billpill ${r.status}`}>{r.status}</span></div>
                   <div className="adm-muted">{r.amount ? `${money(r.amount, r.currency)} /${r.cycle === "monthly" ? "mo" : "yr"}` : "—"}</div>
-                  <div className={overdue ? "adx-overdue" : undefined}>{r.nextDueOn || "—"}{overdue ? " · overdue" : ""}</div>
+                  {/* THE RAW DATABASE DATE USED TO BE PRINTED HERE (T20 sweep #8, 2026-09-04).
+                      `2027-07-04` is how Postgres stores it, not how anybody reads it — and the
+                      admin console's OTHER money screen, /aevinite/revenue, has printed the very
+                      same field through istDate since the T18 sweep. Two admin screens, one field,
+                      two spellings. The stored value stays reachable as the title, exactly as
+                      Revenue does it, so it can still be read off or copied. */}
+                  <div className={overdue ? "adx-overdue" : undefined} title={r.nextDueOn || undefined}>
+                    {r.nextDueOn ? istDate(r.nextDueOn) : "—"}{overdue ? " · overdue" : ""}
+                  </div>
                   <div style={{ textAlign: "right", fontWeight: 700 }}>{money(r.paidThisYear, r.currency)}</div>
                   <div style={{ textAlign: "right" }}>
                     <button className="adm-btn" onClick={() => setEditing(r)}>Manage</button>
@@ -412,7 +423,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
                   <div className="adm-logrow head" style={{ gridTemplateColumns: "90px 90px 1fr 1fr 40px" }}><span>Date</span><span>Amount</span><span>Method</span><span>Period / note</span><span /></div>
                   {payments.map((p) => (
                     <div key={p.id} className="adm-logrow" style={{ gridTemplateColumns: "90px 90px 1fr 1fr 40px" }}>
-                      <span>{p.paid_on}</span>
+                      <span title={p.paid_on}>{istDate(p.paid_on)}</span>
                       <span style={{ fontWeight: 700 }}>{money(p.amount, row.currency)}</span>
                       <span className="adm-muted">{p.method || "—"}</span>
                       <span className="adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.period_label || p.note || "—"}</span>
