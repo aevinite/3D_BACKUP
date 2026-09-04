@@ -457,7 +457,20 @@ ok(/rlRules\.find\(\(r\) => r\.key === key\)\?\.label\s*\n\s*\|\| RATE_LABELS\[k
 ok(/\|\| key\.replace\(\/_\/g, " "\)/.test(REPAIR), "P71726",
   "repair: the last-resort prettifier is gone — an unknown limit key would be printed raw");
 
-if (fails.length) {
+// ── item 12 · a decision already made must not keep its dead branch ───────────────────────
+// JUDGE THE CODE, NOT THE OBITUARY. The first version of this line searched for the literal
+// "const hollow = false" — and matched it inside the comment three lines above, which QUOTES the
+// retired line on purpose. This repo has the mirror of that scar written down (a guard that passed
+// against its own comment); the same shape can also fail against one. So the assertion looks for
+// the only thing that can exist in CODE and not in prose: the dead constant being read.
+ok(!/hollow \? /.test(HEALTH), "P71728",
+  "health: the hollow-dot ternaries are back in PanelCell — one reachable branch fed by a constant false reads as a switch somebody might flip");
+ok(/backgroundColor: s\.c \}\} aria-hidden="true"/.test(HEALTH), "P71729",
+  "health: the panel dot no longer paints unconditionally — the hollow state was retired when Quiet went neutral");
+ok(/OBITUARY \(item 12, 2026-09-04\)/.test(HEALTH), "P71730",
+  "health: the obituary explaining why there is no hollow dot is gone — the next reader will re-add it");
+
+console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 12");if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
   console.error("\n   Each line names the ledger phase (.claude/sweep/LEDGER/T17.md) that found it.\n");
