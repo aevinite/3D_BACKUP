@@ -641,6 +641,51 @@ for (const [what, ts] of INSTANTS) {
       "he chose option B: no second rule 1.5mm under the TOTAL row's own border — it prints as a stutter");
 }
 
+// ── 3o. A DISCOUNT THAT ROUNDS AWAY TO NOTHING PRINTS NO ROW ──────────────────────────────────
+// T11 sweep #8, 2026-09-04. The Discount row was drawn from the CALLER's raw figure while the
+// rupees beside it come from billRows(), which rounds to whole rupees — so any discount under 50
+// paise printed "Discount − ₹0" over "Taxable value ₹200" on a ₹200 bill, and lost its percentage
+// too (the re-label fires and discPct() of zero is ""). Reachable from the discount modal's own 5%
+// option: 5% of a ₹9 chai is ₹0.45. Same rule as §3l's all-sealed bill, in the owner's own words —
+// "a zero in a labelled money box reads as a mistake even though the column adds up".
+// Pinned in BOTH directions: the row must vanish under half a rupee AND must still be there at
+// half a rupee and above, so this cannot be "fixed" into hiding a real discount.
+{
+  const rowsOf = (discount, total) => {
+    const html = BILLDOC.billDocHtml({
+      name: "R", lines: [{ title: "A", qty: 1, price: 200 }], tableDisp: "5", dateStr: "x",
+      subtotal: 200, discount, discLabel: "0.2%", total,
+      taxRows: [{ label: "CGST", rate: 2.5, amt: 5 }, { label: "SGST", rate: 2.5, amt: 5 }],
+    });
+    const block = html.slice(html.indexOf('class="totals"'), html.indexOf(">TOTAL<"));
+    return [...block.matchAll(/<div class="t[^"]*"><span>([^<]*)<\/span><span>([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
+  };
+  const label = (rows) => rows.map((r) => r[0]);
+  const bads = [];
+  for (const d of [0.01, 0.4, 0.49]) {
+    const rows = rowsOf(d, 210 - d);
+    if (label(rows).some((l) => /^Discount/.test(l))) bads.push(`a ₹${d} discount still prints a row: ${label(rows).join(" / ")}`);
+    if (label(rows).includes("Taxable value")) bads.push(`a ₹${d} discount still restates the taxable value`);
+    const zero = rows.find((r) => /^Discount/.test(r[0]) && /₹0\s*$/.test(r[1]));
+    if (zero) bads.push(`a labelled money box deducts nothing: ${zero.join(" ")}`);
+  }
+  for (const d of [0.5, 0.6, 10]) {
+    const rows = rowsOf(d, 210 - d);
+    if (!label(rows).some((l) => /^Discount/.test(l))) bads.push(`a real ₹${d} discount lost its row: ${label(rows).join(" / ")}`);
+    if (!label(rows).includes("Taxable value")) bads.push(`a real ₹${d} discount lost its Taxable value row`);
+  }
+  // …and the TOTAL is still passed straight through, which is what makes this safe to change.
+  for (const d of [0, 0.4, 0.6, 10]) {
+    const R = BILLDOC.billRows({ subtotal: 200, discount: d, total: 210 - d,
+      taxRows: [{ label: "C", rate: 2.5, amt: 5 }, { label: "S", rate: 2.5, amt: 5 }] });
+    if (R.total !== Math.round(210 - d)) bads.push(`a ₹${d} discount moved the TOTAL to ${R.total}`);
+  }
+  bads.length === 0
+    ? ok("a discount under half a rupee prints no row at all, and a real one still prints both of its rows")
+    : bad(`the sub-rupee discount row is wrong: ${bads.join(" · ")}`,
+      "gate the Discount row on billRows()'s own whole-rupee figure, never on the caller's raw one");
+}
+
 // ── 3n. THE TILL'S CUSTOMER SEARCH — THE CAP IS REAL, AND ONLY ONE SIDE HOLDS IT ──────────────
 // `lfh_customer_phone_search` used to put its LIMIT AFTER a `json_agg`, which caps the one aggregate
 // row and not the array inside it — measured before migration 365: asking for 1 returned 5. And the

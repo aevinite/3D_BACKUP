@@ -75,7 +75,11 @@ import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "
 // and then `backupPanel` itself went (owner, 2026-08-30 — there is no backup printer, a failure is
 // reported instead). Both rungs of mig 107 still gate everything (the admin allowed auto-print
 // AND the restaurant switched it on). Asked on the pending read AND again at the claim.
-async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
+// `backup` LEFT THIS SHAPE on 2026-09-04 (T11 sweep #8). It was `!!may.backup` off
+// screenMayPrint(), which never set `backup` at all once the backup screen was deleted on
+// 2026-08-30 — so it answered false on every request, and no panel read it. Removed with the
+// declaration it came from rather than left as a constant nobody trusts.
+async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
   const [stQ, helper, route] = await Promise.all([
     sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
     helperFor(rid, "kot"),
@@ -94,7 +98,7 @@ async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; bac
     : "kitchen";
   // A named helper takes the kitchen slips off every screen — including this one, and including the
   // backup path. The panel is told WHO has them so it can say so rather than going quiet.
-  if (helper.owned) return { mayPrint: false, backup: false, target, helper };
+  if (helper.owned) return { mayPrint: false, target, helper };
   const may = screenMayPrint(route, { panel: "manager", personId: null, deviceId: null });
   // A person/device narrowing is checked per-request elsewhere (this helper has no request in hand),
   // so "may a manager screen print at all" is the panel-level answer only.
@@ -106,7 +110,7 @@ async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; bac
   // (After mig 369 every existing restaurant HAS a kitchen-slip route, so this branch is only a
   // brand-new one — where "the kitchen prints" is the right thing to assume.)
   const panelOk = route.kind === "screen" ? route.panel === "manager" : false;
-  return { mayPrint: on && panelOk, backup: !!may.backup, target, helper };
+  return { mayPrint: on && panelOk, target, helper };
 }
 
 import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";

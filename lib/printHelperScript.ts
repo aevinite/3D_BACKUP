@@ -400,8 +400,21 @@ if not exist "%SUMATRA%" (
   curl -sL -m 300 -o "%WORK%\\sp.zip" "${SUMATRA.url}" 2>nul
   set "GOT="
   for /f "skip=1 tokens=*" %%h in ('certutil -hashfile "%WORK%\\sp.zip" SHA256 2^>nul') do if not defined GOT set "GOT=%%h"
-  set "GOT=%GOT: =%"
-  if /I not "%GOT%"=="${SUMATRA.sha256}" (
+REM ── !GOT!, NOT %GOT% — AND IT IS NOT A STYLE CHOICE (T11 sweep #8, 2026-09-04) ─────────────
+REM cmd.exe expands every %VAR% when it PARSES a whole parenthesised block, before a single line of
+REM it runs. GOT is set by the for-loop just above, INSIDE this block, so a %GOT% read here saw the
+REM value from before the block started — i.e. nothing. The two lines then became
+REM     set "GOT="                          (%GOT: =% on an undefined var is the empty string)
+REM     if /I not ""=="98b33a…"             (true)
+REM …so the checksum NEVER matched, the zip was deleted every time, and this file printed "The PDF
+REM printer did not download correctly" and exited. Windows has no built-in silent PDF print, so
+REM that means a Windows helper could not print at all unless somebody had already put
+REM SumatraPDF.exe beside the file by hand — the exact manual step this fetch exists to remove.
+REM setlocal enabledelayedexpansion is already on at the top of the file; !VAR! is what reads a
+REM value that was set in the same block. Guarded by verify:print-helper block 8i, which walks the
+REM generated .bat and fails on any %VAR% read inside a block that sets VAR.
+  set "GOT=!GOT: =!"
+  if /I not "!GOT!"=="${SUMATRA.sha256}" (
     del /q "%WORK%\\sp.zip" 2>nul
     echo   The PDF printer did not download correctly. Check the internet and start this again.
     echo %DATE% %TIME%  SumatraPDF checksum mismatch - refused>>"%LOG%"
@@ -585,9 +598,32 @@ HOST="$(hostname)"
 printers_json() {
   first=1; out="["
   for p in $(lpstat -e 2>/dev/null); do
-    desc="$(lpoptions -p "$p" 2>/dev/null | tr ' ' '\\n' | sed -n 's/^printer-make-and-model=//p' | tr -d "'" | head -1)"
+    # THE WHOLE MODEL NAME, not its first word (T11 sweep #8, 2026-09-04). This split the option
+    # line on SPACES, so "Zijiang ZJ-80" arrived as "Zijiang" — measured against real CUPS. The
+    # value is one quoted field, and the Mac branch above already reads it as one; the printer's
+    # model is what a person picks from in the admin's dropdown, so half of it is worse than none.
+    desc="$(lpoptions -p "$p" 2>/dev/null | sed -n "s/.*printer-make-and-model='\\([^']*\\)'.*/\\1/p" | head -1)"
+    # ── AND THE PAPER IT IS LOADED WITH (T11 sweep #8, 2026-09-04) ────────────────────────────
+    # This was the one platform that reported a printer's NAME and not its paper. It matters more
+    # than it looks: a page that is a different size from the paper in the printer is what makes a
+    # driver rotate a ticket or halve it (the fault the owner photographed on 2026-08-19), and with
+    # no size reported a Raspberry Pi's printers had to have one pinned by hand per route — the
+    # question "asking a restaurant to know its own millimetres" was already called the wrong one.
+    # Linux is CUPS, exactly like the Mac: same lpoptions, same /etc/cups/ppd/<queue>.ppd layout,
+    # so this is the Mac's own read, unchanged. PaperDimension is the WHOLE sheet, which is what a
+    # page size must be; the ImageableArea beside it is the smaller area the head can reach.
+    # Verified against this repo's own Mac CUPS on 2026-09-04: two real POS-80 queues reported
+    # {"name":"X70MMY65MM","wMm":79.7,"hMm":64.2} — i.e. 226x182pt, the 80mm roll.
+    media="$(lpoptions -p "$p" -l 2>/dev/null | sed -n 's/^PageSize[^:]*: //p' | tr ' ' '\\n' | sed -n 's/^\\*//p' | head -1)"
+    w=""; h=""
+    if [ -n "$media" ] && [ -f "/etc/cups/ppd/$p.ppd" ]; then
+      dims="$(awk -v m="$media" '$0 ~ "^\\*PaperDimension "m"[/:]" { if (match($0, /"[0-9.]+ [0-9.]+"/)) { s=substr($0, RSTART+1, RLENGTH-2); split(s, a, " "); printf "%.1f %.1f", a[1]*25.4/72, a[2]*25.4/72; exit } }' "/etc/cups/ppd/$p.ppd")"
+      w="\${dims%% *}"; h="\${dims##* }"
+    fi
     [ $first -eq 0 ] && out="$out,"; first=0
-    out="$out{\\"name\\":\\"$p\\",\\"desc\\":\\"$desc\\"}"
+    out="$out{\\"name\\":\\"$p\\",\\"desc\\":\\"$desc\\""
+    [ -n "$w" ] && [ -n "$h" ] && out="$out,\\"paper\\":{\\"name\\":\\"$media\\",\\"wMm\\":$w,\\"hMm\\":$h}"
+    out="$out}"
   done
   echo "$out]"
 }

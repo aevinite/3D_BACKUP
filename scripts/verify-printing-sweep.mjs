@@ -1176,8 +1176,16 @@ await phase("…and a print on ITS printer closes it", async () => {
       // which are legitimate shell parameter expansions the generator escapes ON PURPOSE so they
       // reach the file intact. (Second wrong version of this phase; a TS interpolation cannot
       // survive into the text anyway, because it is evaluated. Only these three markers can.)
-      const bad = texts.filter((t) => /undefined|\[object Object\]|\bNaN\b/.test(t));
-      return bad.length === 0 || `${bad.length} of ${texts.length} generated file(s) contain undefined / [object Object] / an unresolved interpolation — a person would type that into a shop's computer`;
+      // THIRD REFINEMENT, and the same lesson a third time: judge the LINES THAT RUN, not the prose.
+      // These files are half explanation by design — every rule in them carries the measurement that
+      // put it there — so a REM/# line may legitimately contain the word "undefined" while
+      // explaining, say, that cmd.exe expands %GOT% to nothing when the variable is undefined
+      // (which is the comment beside the 2026-09-04 fix to the SumatraPDF checksum). A word in a
+      // comment is not a value that failed to resolve. The concern this phase exists for — a leaked
+      // value reaching an EXECUTED line — is unchanged and still fails.
+      const codeOf = (t) => t.split("\n").filter((l) => !/^\s*(REM\b|::|#)/i.test(l)).join("\n");
+      const bad = texts.filter((t) => /undefined|\[object Object\]|\bNaN\b/.test(codeOf(t)));
+      return bad.length === 0 || `${bad.length} of ${texts.length} generated file(s) contain undefined / [object Object] / an unresolved interpolation on a line that RUNS — a person would type that into a shop's computer`;
     });
   }
 }
@@ -2475,8 +2483,38 @@ if (!browser) {
     /disabled=\{busy === "routes" \|\| agents\.length === 0\}/.test(admPage)
     || "the dropdown stays live with nothing to choose from");
   await phase("…and it SAYS why, on hover and to a screen reader", () =>
-    /title=\{agents\.length === 0 \? "Set a computer up in step 3 first/.test(admPage) && /aria-describedby/.test(admPage)
+    /title=\{agents\.length === 0 \? "Set a computer up in step \d+ first/.test(admPage) && /aria-describedby/.test(admPage)
     || "it is greyed out with no explanation — which is worse than not being there");
+  // ── …AND THE STEP IT SENDS YOU TO IS THE STEP THE COMPUTER IS ACTUALLY ON ───────────────────
+  // T11 sweep #8, 2026-09-04. The phase above used to pin the WHOLE sentence, "Set a computer up in
+  // step 3 first" — and step 3 is "Which printer gets which paper", the card the dropdown is already
+  // in. The computer is step 2. So the guard was not protecting the rule ("say why"), it was
+  // freezing a wrong number in place: three sentences on that screen sent a beginner to the step
+  // they were standing on, and this check went green over all of them for as long as they were
+  // there. Judge a guard by what it ASSERTS, not by whether it is green.
+  //
+  // So the number is no longer hard-coded here either. It is read out of lib/printBoardWords.ts —
+  // the one place the step headings are declared — and every "step N" the screen quotes has to name
+  // a step that really holds what the sentence claims. This is the check that would have caught it.
+  await phase("…and every 'step N' on the screen names the step that really holds it", () => {
+    const words = read("lib/printBoardWords.ts");
+    const stepNo = (key) => {
+      const m = new RegExp(key + ':\\s*"(\\d+)').exec(words);
+      return m ? m[1] : null;
+    };
+    const computer = stepNo("two"), routes = stepNo("three");
+    if (!computer || !routes) return "lib/printBoardWords.ts no longer numbers its own steps — nothing can be checked against";
+    const bad = [];
+    // "set a/the computer up in step N" must point at the card the COMPUTER is on.
+    for (const m of admPage.matchAll(/[Ss]et (?:a|the) computer up in step (\d+)/g)) {
+      if (m[1] !== computer) bad.push(`"set a computer up in step ${m[1]}" — the computer is step ${computer}`);
+    }
+    // "the dropdowns in step N" must point at the card the printer dropdowns are on.
+    for (const m of admPage.matchAll(/dropdowns in step (\d+)/g)) {
+      if (m[1] !== routes) bad.push(`"the dropdowns in step ${m[1]}" — they are in step ${routes}`);
+    }
+    return bad.length === 0 || bad.join(" · ") + " — a beginner following numbered steps is sent to the wrong card";
+  });
   await phase("…and the manager panel does the same", () =>
     /Set this computer up above first/.test(panel) || "the panel's dropdown greys out silently");
 
@@ -2914,6 +2952,50 @@ if (!browser) {
     return (r.ok && row.status === "queued" && row.attempts === 0)
       || `retry answered ${r.status} and the ticket is ${row.status}`;
   });
+
+  // ── AND THE SAME FOR A BILL AND A BANQUET SHEET, which told NOBODY until 2026-09-04 ──────────
+  // T11 sweep #8. Every phase above drives a KITCHEN SLIP, and the kitchen slip is the only kind
+  // that went through finishKotJob — so a BILL that failed five times parked as `failed` in silence:
+  // no printer problem filed, nothing on the manager's floor strip, nothing in the kitchen's 🖨
+  // sheet, no owner ping. The owner's words that deleted the backup printer were "if ANYTHING fails
+  // it should show me or the person, manager, owner, everyone should get a notification"
+  // (2026-08-30), and the helper's own script promises it in a comment on the line that reports the
+  // failure. Driven for real, on the BILL printer, so the two kinds cannot both be "covered" by one.
+  await phase("a BILL that gives up after five tries parks and files a printer problem too", async () => {
+    await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail&printer=eq.${VIRT.counter}`, { method: "DELETE" }).catch(() => {});
+    const [job] = await db("print_jobs", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
+      restaurant_id: RID, kind: "bill", status: "queued", reprint: false,
+      agent_id: AGENT.id, printer: VIRT.counter, payload: {} }) });
+    made.jobs.push(job.id);
+    for (let i = 0; i < 6; i++) {
+      const [row] = await db(`print_jobs?id=eq.${job.id}&select=status`);
+      if (row.status === "failed") break;
+      await agentCall(`/job/${job.id}/failed`, { method: "POST", body: JSON.stringify({ error: "sweep — the bill printer is unplugged" }) });
+    }
+    const [row] = await db(`print_jobs?id=eq.${job.id}&select=status,attempts`);
+    return (row.status === "failed" && row.attempts >= 5) || `the bill job is ${row.status} after ${row.attempts} attempt(s)`;
+  });
+  await phase("…filed against the BILL printer, in words a person can read", async () => {
+    const ev = await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail&printer=eq.${VIRT.counter}&select=id,printer,note&order=created_at.desc&limit=1`);
+    if (!ev.length) return "no printer problem was filed for the bill — it died in silence, which is what the backup printer used to hide";
+    made.events.push(ev[0].id);
+    return /gave up after/.test(String(ev[0].note || ""))
+      || `filed saying "${String(ev[0].note || "").slice(0, 60)}"`;
+  });
+  await phase("…and it says BILL, so a stuck bill printer is not read as a stuck kitchen one", async () => {
+    const ev = await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail&printer=eq.${VIRT.counter}&select=note&order=created_at.desc&limit=1`);
+    if (!ev.length) return "nothing filed to read";
+    return /bill/i.test(String(ev[0].note || ""))
+      || `the note reads "${String(ev[0].note || "").slice(0, 70)}" — it does not say which paper it was`;
+  });
+  await phase("…and 'tell somebody' is written down ONCE, so the kinds cannot drift apart", () => {
+    const q = strip(queue), route = strip(read("app/api/print-agent/[...path]/route.ts"));
+    return (/export async function tellSomebodyItGaveUp/.test(q)
+      && /tellSomebodyItGaveUp\(/.test(route)
+      && (route.match(/printer_events/g) || []).length <= 3)
+      || "the helper route grew its own copy of filing a printer problem — two hand-kept copies is how one of them stops telling anybody";
+  });
+  await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail&printer=eq.${VIRT.counter}`, { method: "DELETE" }).catch(() => {});
   await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail`, { method: "DELETE" }).catch(() => {});
   await drain();
 }

@@ -841,10 +841,10 @@ wait $CHROME_PID</pre>
 
   <h3 class="step">Tell the app that THIS screen is the printer</h3>
   <ol class="steps">
-    <li><b>Ask us to switch printing on</b> for your restaurant, and whether tickets come out on the
-      <b>kitchen screen</b> or the <b>counter screen</b> (<a href="#switches">the switches</a>).</li>
-    <li><b>On this Mac:</b> kitchen screen → <b>☰ → Settings → 🖨 Printing → Print here</b>. Counter
-      screen → <b>Settings → Printing</b>, or the strip above the Tables grid.</li>
+    <li><b>Ask us to switch printing on</b> for your restaurant, and to point each paper at the right
+      printer (<a href="#switches">the switches</a>).</li>
+    <li><b>On this Mac:</b> nothing to answer. Kitchen slips print on the kitchen screen unless a
+      computer is named for them, so just open the screen the printer is attached to.</li>
     <li><b>Send one order.</b> A ticket should come out in a few seconds — then do
       <a href="#test">the real test</a>.</li>
   </ol>
@@ -1019,22 +1019,31 @@ EOF</pre>
 
 <h2 id="switches">The switches in the app</h2>
 <div class="card">
-  <p>Four things decide whether a ticket comes out, and where. Two are ours, one is the restaurant's
-    choice of room, one belongs to the computer with the printer.</p>
+  <p>Four things decide whether a ticket comes out, and where. Three are ours &mdash; we allow it, and we
+    say which printer and which screen &mdash; and one belongs to the computer with the printer.</p>
+  <!-- CORRECTED 2026-09-04 (T11 sweep #8). Switch 2 used to read "Which screen prints — the kitchen
+       screen · the counter (manager) screen · both (counter as a 30-second backup)", living on the
+       restaurant's own 🖨 KOT printing card, and switch 3 pointed at "the strip above the Tables
+       grid". None of the three exists: kot_print_target was retired by migrations 369/376, "both"
+       and every backup went on 2026-08-30 ("if there is a backup printer, remove it"), and the
+       per-device Tables strip went on 2026-08-29. This is the page a RESTAURANT reads while setting
+       a printer up, so it was sending clients hunting for controls that are not there. -->
   <table>
     <tr><th>#</th><th>Switch</th><th>Where it lives</th><th>Who sets it</th></tr>
     <tr><td>1</td><td><b>Auto-print the KOT</b> — the master switch</td>
         <td>Admin console → the restaurant → <b>🖨 KOT printing</b></td><td>Aevidine (us)</td></tr>
-    <tr><td>2</td><td><b>Which screen prints</b> — the kitchen screen · the counter (manager) screen ·
-        both (counter as a 30-second backup)</td>
-        <td>same card, underneath</td><td>Aevidine (us), at your word</td></tr>
-    <tr><td>3</td><td><b>“Print on this screen”</b></td>
-        <td><b>Kitchen screen: ☰ → Settings → 🖨 Printing.</b><br>
-            <b>Counter screen: Settings → Printing</b>, or the strip above the Tables grid.</td>
-        <td>whoever is at that computer</td></tr>
+    <tr><td>2</td><td><b>Which printer gets which paper</b> &mdash; one choice per paper: kitchen
+        slips, bills, banquet sheets. Each lists the printers your own computer reported, plus
+        <b>Nobody</b> for &ldquo;we have decided this does not print&rdquo;.</td>
+        <td>Admin console &rarr; <b>Printing</b> &rarr; step 3</td><td>Aevidine (us), at your word</td></tr>
+    <tr><td>3</td><td><b>Which screen prints the kitchen slips</b> &mdash; leave it alone and anyone
+        signed in on the kitchen screen prints them. Name a person only to send them to that one
+        person&rsquo;s screen.</td>
+        <td>Admin console &rarr; <b>Printing</b> &rarr; step 4</td>
+        <td>Aevidine (us), at your word</td></tr>
     <tr><td>4</td><td><b>The print-station file</b> (<a href="#windows">the Windows menu</a> / <a href="#mac">the Mac menu</a> / <a href="#linux">the Linux menu</a>)</td><td>on that computer</td><td>whoever sets it up</td></tr>
   </table>
-  <div class="plain"><b>In simple words:</b> we allow it and say which room prints, then the computer with
+  <div class="plain"><b>In simple words:</b> we allow it and say which printer gets which paper, then the computer with
     the printer says “that's me”, and the print-station file keeps that window awake.</div>
   <div class="warn"><b>If switch 1 is off, none of this appears anywhere.</b> No printing section on the
     kitchen screen, no Printing row in the manager's Settings, nothing on the owner's Settings page —
@@ -1065,8 +1074,9 @@ EOF</pre>
   <ul>
     <li><b>Kitchen screen</b> — <b>☰ → Settings → 🖨 Printing</b> (and the 🖨 button on the top bar shows
       the same three lines).</li>
-    <li><b>Counter / manager screen</b> — <b>Settings → Printing</b>, and a strip above the Tables grid
-      when another screen holds it.</li>
+    <li><b>Counter / manager screen</b> — <b>Settings → Printing</b>. (There is no longer a strip
+      above the Tables grid: the bands there were removed on 2026-08-30 — printing speaks through the
+      notification bell instead.)</li>
     <li><b>Owner panel</b> — <b>Settings → Kitchen printing</b>: one line per restaurant saying which
       screen is printing. No controls there — an owner is not standing at the printer.</li>
   </ul>

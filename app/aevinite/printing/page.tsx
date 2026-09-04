@@ -377,8 +377,18 @@ const PANEL_GROUPS: [ string, string ][] = [
           <p className="adm-page-sub" style={{ margin: 0, maxWidth: "72ch" }}>
             {/* NEUTRAL NOW. This described the HELPER only ("a small helper program… asks us every two
                 seconds"), which read as the whole truth while the screen offers two ways to print. */}
-            Where this restaurant&apos;s paper comes out. There are two ways to do it — a small program on a
-            computer, or the restaurant&apos;s own Chrome — and the toggle below picks one. {/* A NEW TAB, like the four other places that offer this guide (owner's review, 2026-08-28).
+            {/* …AND IT NO LONGER POINTS AT A TOGGLE THAT IS NOT THERE (T11 sweep #8, 2026-09-04).
+                It said "there are two ways to do it … and the toggle below picks one" — the first
+                sentence an admin reads on this screen, naming a control that was deleted on
+                2026-08-31 (owner: "in admin panel also we don't need toggle"; migration 372 dropped
+                the stored key). This same file says so twice further down, in the past tense, while
+                the header went on telling people to go and use it. Nothing below has picked between
+                the two ways since; each paper line answers for itself. So the header now states
+                what actually decides, which is the one sentence lib/printHelpers.ts already
+                carries: a computer prints if one is set up and named; if none is, the kitchen
+                screen does. */}
+            Where this restaurant&apos;s paper comes out. A computer prints it if one is set up and named
+            below; if none is, the restaurant&apos;s own screen does. {/* A NEW TAB, like the four other places that offer this guide (owner's review, 2026-08-28).
                 It is read WHILE a printer is being set up, so opening it in place threw away the
                 screen you were halfway through — and the guide has no way back to it. */}
             <a href="/print-setup.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>The restaurant&apos;s own guide →</a>
@@ -386,13 +396,30 @@ const PANEL_GROUPS: [ string, string ][] = [
                 links to one place in one screenful is the clutter that made this header hard to read. */}
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {/* ── AND IT ALL FITS ON A PHONE (T11 sweep #8, 2026-09-04) ─────────────────────────────
+            This row could not wrap. The OUTER flex above wraps, so the heading dropped onto its own
+            line and looked fine — but this inner group had no flexWrap and a select with a hard
+            minWidth:180, so at 360px it simply ran off the right-hand edge. Measured on the real
+            page at 360×780:
+
+              the restaurant picker   140 → 373   (13px clipped)
+              ↻ Refresh               381 → 480   (entirely off screen)
+
+            …and `document.documentElement.scrollWidth` was exactly the viewport width, so there was
+            no sideways scroll to reveal them and nothing on screen hinting anything was missing.
+            An admin on a phone had no Refresh button at all. (The "Take it out" / "Print it again"
+            buttons in step 5's table also sit past the edge, and those are FINE — that table is in
+            an overflow-x container, so they are reachable by scrolling it.)
+
+            Two changes, both plain CSS: let this group wrap, and let the picker shrink instead of
+            insisting on 180px. Nothing moves on a desktop. */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "100%" }}>
           {rid ? (
             <>
               <button className="adm-btn" onClick={() => { setRid(""); setSt(null); setLoadErr(""); }}>
                 ← All restaurants
               </button>
-              <select className="adm-input" value={rid} onChange={(e) => { setRid(e.target.value); }} style={{ minWidth: 180 }}>
+              <select className="adm-input" value={rid} onChange={(e) => { setRid(e.target.value); }} style={{ flex: "1 1 180px", minWidth: 0, maxWidth: "100%" }}>
                 {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
             </>
@@ -529,7 +556,7 @@ const PANEL_GROUPS: [ string, string ][] = [
               <div className="adm-card" style={{ marginTop: 14 }}>
                 <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.two}</h2>
                 <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-                  It runs the helper and reports its own printers, so the dropdowns in step 4 are built from
+                  It runs the helper and reports its own printers, so the dropdowns in step 3 are built from
                   what that machine really has — nobody types a printer name.
                 </p>
                 {agents.length === 0 ? (
@@ -610,7 +637,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                 {agents.length === 0 ? (
                   <p style={{ margin: "0 0 4px", fontSize: 12.5, color: "var(--adm-warn, #f5a524)" }}>
                     <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6 }} />
-                    Set the computer up in step 3 first — the printers in these lists come from it.
+                    Set the computer up in step 2 first — the printers in these lists come from it.
                   </p>
                 ) : null}
                 {(st.kinds || []).map((kind) => {
@@ -626,7 +653,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                         </span>
                         <select className="adm-input" style={{ minWidth: 250, flex: "1 1 250px" }}
                           value={val} disabled={busy === "routes" || agents.length === 0}
-                          title={agents.length === 0 ? "Set a computer up in step 3 first — the printers come from it." : undefined}
+                          title={agents.length === 0 ? "Set a computer up in step 2 first — the printers come from it." : undefined}
                           aria-describedby={agents.length === 0 ? "no-computer-yet" : undefined}
                           onChange={(e) => void pickPrinter(kind, e.target.value)}>
                           <option value="off">{KIND_OFF_LABEL[kind] || "Nobody"}</option>
@@ -666,7 +693,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                     </div>
                   );
                 })}
-                {agents.length === 0 ? <span id="no-computer-yet" className="adm-muted" style={{ fontSize: 12 }}>Set a computer up in step 3 first — the printers come from it.</span> : null}
+                {agents.length === 0 ? <span id="no-computer-yet" className="adm-muted" style={{ fontSize: 12 }}>Set a computer up in step 2 first — the printers come from it.</span> : null}
               </div>
 
               {/* ═══ THE KITCHEN SCREEN — ON BY DEFAULT, NOTHING TO SWITCH ═════════════════════
@@ -681,13 +708,40 @@ const PANEL_GROUPS: [ string, string ][] = [
                   nothing else; bills and banquet sheets stay with whoever presses Print. */}
               <div className="adm-card" style={{ marginTop: 14 }}>
                 <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.screen}</h2>
-                <p style={{ margin: "0 0 4px", fontSize: 13 }}>
-                  <i className="fas fa-circle-check" aria-hidden="true" style={{ color: "var(--adm-ok, #30a46c)", marginRight: 7 }} />
-                  Kitchen slips print on the <b>kitchen screen</b> already &mdash; there is nothing to switch on.
-                  {(draft.kot?.agent && draft.kot?.printer)
-                    ? " Right now a computer above is set to print them, so it does that instead."
-                    : " No computer is set to print them, so the kitchen screen is doing it."}
-                </p>
+                {/* ── AND IT SAYS THE TRUE THING WHEN THE SLIPS ARE SWITCHED OFF ────────────────
+                    T11 sweep #8, 2026-09-04. This line was two answers wide — a computer is named,
+                    or the kitchen screen is doing it — and "Nobody" is a third answer the owner
+                    added on purpose (2026-08-27: "I WANT A PROPER OPTION TO ON AND OFF IT"). With
+                    Kitchen slips set to Nobody it fell through to the second branch, so the card
+                    read, under a GREEN TICK:
+
+                      ✓ Kitchen slips print on the kitchen screen already — there is nothing to
+                        switch on. No computer is set to print them, so the kitchen screen is
+                        doing it.
+                        [ Nobody — kitchen slips do not print by themselves ]
+                        Kitchen slips do not print by themselves for this restaurant.
+
+                    — the tick asserting the opposite of the grey line four rows under it, with the
+                    dropdown between them agreeing with the grey line. Driven on French House and
+                    put back. `via:"off"` is exactly what resolveTarget() answers "off" to and what
+                    screenMayPrint() refuses with why:"off", so the screen was the only layer that
+                    had not been told. Three states, three sentences, and the tick only where
+                    something really is printing. */}
+                {draft.kot?.via === "off" ? (
+                  <p style={{ margin: "0 0 4px", fontSize: 13 }}>
+                    <i className="fas fa-circle-minus" aria-hidden="true" style={{ color: "var(--adm-warn, #f5a524)", marginRight: 7 }} />
+                    Kitchen slips are switched <b>off</b> for this restaurant &mdash; no slip comes out by
+                    itself, on any screen or any computer. Orders still reach the kitchen screen to be read.
+                  </p>
+                ) : (
+                  <p style={{ margin: "0 0 4px", fontSize: 13 }}>
+                    <i className="fas fa-circle-check" aria-hidden="true" style={{ color: "var(--adm-ok, #30a46c)", marginRight: 7 }} />
+                    Kitchen slips print on the <b>kitchen screen</b> already &mdash; there is nothing to switch on.
+                    {(draft.kot?.agent && draft.kot?.printer)
+                      ? " Right now a computer above is set to print them, so it does that instead."
+                      : " No computer is set to print them, so the kitchen screen is doing it."}
+                  </p>
+                )}
                 <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
                   Only change this to send the slips to <b>one particular person&apos;s</b> screen instead.
                   Bills and banquet sheets are never affected &mdash; whoever presses Print gets the window.
@@ -824,7 +878,16 @@ const PANEL_GROUPS: [ string, string ][] = [
                             : <span style={{ color: "var(--adm-warn, #f5a524)" }}>{j.status}{j.attempts ? ` · try ${j.attempts + 1}` : ""}</span>}
                           {j.error ? <div className="adm-muted" style={{ fontSize: 11.5 }}>{j.error}</div> : null}
                         </td>
-                        <td style={{ padding: "6px 8px" }} className="adm-muted">{new Date(j.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</td>
+                        {/* IST, NOT THE READER'S OWN CLOCK (T11 sweep #8, 2026-09-04). This asked for
+                            en-IN and then let the machine decide the TIME ZONE, so the "What has
+                            printed" log — the thing you read to answer "why did table 6's slip never
+                            come out" — timestamped every job in whatever zone the admin's laptop is
+                            set to, while the restaurant, its kitchen slips, its bills and its
+                            banquet sheets are all pinned to Asia/Kolkata. It is the same fault the
+                            printed bill had fixed on 2026-08-05, the banquet sheet on 2026-08-06 and
+                            the kitchen ticket on 2026-08-17; this log was the one left on device
+                            time. One time zone everywhere, like the money and the logs. */}
+                        <td style={{ padding: "6px 8px" }} className="adm-muted">{new Date(j.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}</td>
                         {/* ONE TICKET AT A TIME. "Take it out" DISMISSES it — the row and its reason
                             stay, so "why did table 6's slip never come out" still has an answer
                             months later. Nothing here deletes anything. */}

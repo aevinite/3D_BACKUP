@@ -806,11 +806,23 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     return out;
   };
   const files = [...walk("lib"), ...walk("app"), ...walk("components"), ...walk("public/panels")];
-  // ONE NAMED EXEMPTION, with its reason. app/api/print-agent still ANSWERS `backupFor: []` because a
-  // helper file already installed on a restaurant's PC reads that field; sending an empty list is what
-  // makes an old helper behave like a new one. It is a transition shim, not the feature — and it must
-  // keep saying so beside itself, which the second check below requires.
-  const SHIM = "app/api/print-agent/[...path]/route.ts";
+  // ── THE NAMED EXEMPTION IS GONE, BECAUSE ITS REASON WAS NEVER TRUE (T11 sweep #8, 2026-09-04) ──
+  //
+  // This block used to exempt ONE name in ONE file: app/api/print-agent could go on answering
+  // `backupFor: []`, "because a helper file already installed on a restaurant's PC reads that field;
+  // sending an empty list is what makes an old helper behave like a new one."
+  //
+  // NO HELPER HAS EVER READ IT. Checked against the whole history of the generated scripts, not
+  // reasoned about: `git log -S backupFor -- lib/printHelperScript.ts` is EMPTY, and the string does
+  // not appear in any of the 40 commits that touched that file — nor in printStationScript.ts. The
+  // field's entire life was three commits: born as a real computed list in the /hello response
+  // (0f6b07cf), cut to a constant [] when the backup printer was deleted (053347c0), and then
+  // exempted here (e8811e40) on a compatibility worry that was plausible and unsourced. The
+  // exemption then kept the dead field alive, which is the opposite of what this block is for.
+  //
+  // So `backupFor` is now treated like the other seven names: gone from the code, obituary in a
+  // comment. If a future helper really does need a field for compatibility, add it back WITH the
+  // reader named — an exemption whose reason nobody can check is a check that has been switched off.
   const alive = [];
   for (const rel of files) {
     const raw = readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
@@ -818,16 +830,17 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     const code0 = raw.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
     for (const d of DEAD) {
       if (!new RegExp(`\\b${d}\\b`).test(code0)) continue;
-      if (rel === SHIM && d === "backupFor") continue;      // the named shim above
       alive.push(`${rel} → ${d}`);
     }
   }
-  // …and the shim keeps its reason beside it, or the exemption above is describing something else.
+  // …and no generated helper script has grown a reader for any of them, which is the only thing that
+  // could ever justify sending one again.
   {
-    const shimSrc = readFileSync(new URL(`../${SHIM}`, import.meta.url), "utf8");
-    check(/`?backupFor`? is gone/.test(shimSrc) && /backupFor: \[\] as string\[\]/.test(shimSrc),
-      "the one remaining `backupFor` is the transition shim, and it still says so",
-      "app/api/print-agent still sends backupFor but no longer explains that it is an empty-list shim for helpers already installed — either restore the note or delete the field");
+    const scripts = ["lib/printHelperScript.ts", "lib/printStationScript.ts"]
+      .map((rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8")).join("\n");
+    check(!/\bbackupFor\b/.test(scripts),
+      "no generated helper reads a `backupFor` field, so the server has no reason to send one",
+      "a helper script now reads backupFor — if that is deliberate, the server has to send it again AND this guard's exemption has to come back with the reader named");
   }
   check(alive.length === 0,
     "the deleted backup printer is gone from every code path (obituary comments are fine)",
@@ -910,6 +923,78 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     && /setRid\(\(cur\) => cur \|\| /.test(pairPage),
     "…and it asks the door once per open, not once per character typed",
     "app/pair/page.tsx put `name`/`rid` back in load()'s dependencies — every keystroke asks the door again");
+}
+
+// ── 8j · A .bat CANNOT READ A VALUE IT SET IN THE SAME BLOCK (T11 sweep #8, 2026-09-04) ───────────
+//
+// cmd.exe expands every %VAR% when it PARSES a whole parenthesised block — before one line of it
+// runs. So a %VAR% read inside `if ... ( ... )` sees the value from BEFORE the block started, even
+// when `setlocal enabledelayedexpansion` is on. !VAR! is what reads a value set in the same block.
+//
+// THIS WAS NOT HYPOTHETICAL. The Windows helper fetched SumatraPDF (Windows has no built-in silent
+// PDF print), hashed the zip with certutil inside an `if not exist (...)` block, and then compared:
+//
+//     set "GOT="
+//     for /f ... do if not defined GOT set "GOT=%%h"
+//     set "GOT=%GOT: =%"                ← parse-time: %GOT% is undefined, so this CLEARS GOT
+//     if /I not "%GOT%"=="98b33a…" (    ← parse-time: becomes  if /I not ""=="98b33a…"  → true
+//       del the zip · "did not download correctly" · exit /b 1
+//
+// …so the checksum could never match, the download was deleted on every run, and a Windows helper
+// could not print at all unless somebody had already put SumatraPDF.exe beside the file by hand —
+// the one manual step that fetch exists to remove. Fixed to !GOT!; this walks both generated .bat
+// templates so the class cannot come back on the next line somebody adds.
+//
+// It reads the TEMPLATE TEXT rather than the generated file, because this guard takes no TypeScript
+// loader — the .bat lines are verbatim in the source apart from ${…} interpolations.
+{
+  const batOf = (src, name) => {
+    const i = src.indexOf(`const ${name} = (a:`);
+    if (i < 0) return "";
+    const open = src.indexOf("`", i);
+    if (open < 0) return "";
+    // the template ends at the first backtick on its own that closes it: these files end each
+    // template with "\n`;" on its own line.
+    const close = src.indexOf("\n`;", open);
+    return close < 0 ? "" : src.slice(open + 1, close);
+  };
+  const targets = [
+    ["lib/printHelperScript.ts → print-helper.bat", batOf(script, "windows")],
+    ["lib/printStationScript.ts → print-station.bat", batOf(read("lib/printStationScript.ts"), "windows")],
+  ];
+  const trouble = [];
+  for (const [label, txt] of targets) {
+    if (!txt) { trouble.push(`${label}: could not find the windows template to read`); continue; }
+    let depth = 0;
+    const stack = [];
+    txt.split("\n").forEach((raw, n) => {
+      // drop REM/:: comment lines and blank out ${…} interpolations
+      if (/^\s*(REM|::)/i.test(raw)) return;
+      const ln = raw.replace(/\$\{[^}]*\}/g, "X");
+      for (const m of ln.matchAll(/%([A-Za-z_][A-Za-z0-9_]*)(?::[^%]*)?%/g)) {
+        const v = m[1].toUpperCase();
+        if (depth > 0 && stack.some((set) => set.has(v))) {
+          trouble.push(`${label} line ${n + 1}: reads %${m[1]}% inside a block that sets it — use !${m[1]}!  ·  ${raw.trim().slice(0, 80)}`);
+        }
+      }
+      const setM = /(?:^|\s)set\s+"?([A-Za-z_][A-Za-z0-9_]*)\s*=/i.exec(ln);
+      if (setM && depth > 0) stack[stack.length - 1]?.add(setM[1].toUpperCase());
+      const opens = (ln.match(/\(/g) || []).length;
+      const closes = (ln.match(/\)/g) || []).length;
+      for (let k = 0; k < opens; k++) { depth++; stack.push(new Set()); }
+      for (let k = 0; k < closes && depth > 0; k++) { depth--; stack.pop(); }
+    });
+  }
+  check(trouble.length === 0,
+    "no Windows script reads a value with %VAR% inside the block that set it (that value is always the old one)",
+    "a .bat reads a same-block value with %VAR%, which cmd expands before the block runs: " + trouble.join(" | "));
+  // …and delayed expansion is actually switched on, or !VAR! is just literal text.
+  for (const [label, txt] of targets) {
+    if (!txt) continue;
+    check(/setlocal\s+enabledelayedexpansion/i.test(txt) || !/![A-Za-z_][A-Za-z0-9_]*!/.test(txt),
+      `${label.split(" → ")[1]} may use !VAR! — delayed expansion is switched on`,
+      `${label} uses !VAR! without "setlocal enabledelayedexpansion" — the exclamation marks would print literally`);
+  }
 }
 
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────

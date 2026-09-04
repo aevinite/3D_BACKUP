@@ -236,6 +236,11 @@ set "PROFILE=%LOCALAPPDATA%\\AevidinePrintStation"
 set "LOGDIR=%LOCALAPPDATA%\\AevidinePrintHelper"
 if not exist "%PROFILE%" mkdir "%PROFILE%"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+REM ── AND IT WRITES TO THE FOLDER IT JUST MADE (T11 sweep #8, 2026-09-04) ────────────────────
+REM This created a log folder and then never put a line in it, so "did the station ever start on
+REM that PC?" had no answer anywhere on the machine. One line per start is enough to tell "it was
+REM never run" from "it ran and Chrome died", which are the two things a restaurant is asked.
+echo %DATE% %TIME%  print station started, talking to %SITE% as the %PANEL% screen>>"%LOGDIR%\station.log"
 
 set "CHROME=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"
 if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"
@@ -295,7 +300,25 @@ const linux = (a: StationArgs) => `#!/bin/sh
 SITE="${safe(a.origin)}"
 PANEL="${a.panel === "kitchen" ? "kitchen" : "manager"}"
 PROFILE="$HOME/.aevidine-print-station"
-mkdir -p "$PROFILE"
+LOCK="$PROFILE/running.pid"
+LOG="$HOME/.cache/aevidine-print/station.log"
+mkdir -p "$PROFILE" "$(dirname "$LOG")"
+
+# ── ONE AT A TIME (T11 sweep #8, 2026-09-04) ─────────────────────────────────────────────────
+# The Mac station has had this since it was written; this file and the Windows one did not. Two of
+# these are two Chromes on ONE profile: Chrome refuses the second instance and instead opens a
+# window in the one already running — which RAISES it, in front of whatever the person was doing.
+# That is precisely the thing this whole file exists to avoid (owner, 2026-08-28: "runs minimised
+# and doesn't auto-open"). Same pid-lock idiom the Linux print HELPER in this repo already uses.
+if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
+  echo "  The print station is already running on this computer."
+  echo "  Nothing to do — you can close this window."
+  sleep 5; exit 0
+fi
+echo $$ > "$LOCK"
+trap 'rm -f "$LOCK"' EXIT INT TERM
+say() { echo "$(date '+%Y-%m-%d %H:%M:%S')  $1" >> "$LOG"; }
+say "print station started, talking to $SITE as the $PANEL screen"
 
 CHROME=""
 for c in google-chrome google-chrome-stable chromium chromium-browser; do

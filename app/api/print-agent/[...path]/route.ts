@@ -2,8 +2,10 @@
 //
 // A helper is a ~40-line script on a computer that has printers (docs/PRINT-HELPER.md). It knows
 // nothing: it asks this route what to print, is handed the finished document, sends it to the named
-// printer, and says whether paper came out. Every rule — which printer, what the paper says, when a
-// backup takes over — stays here, which is why the machine is set up once and never revisited.
+// printer, and says whether paper came out. Every rule — which printer, what the paper says, what
+// happens when it will not print — stays here, which is why the machine is set up once and never
+// revisited. (It used to say "when a backup takes over". There is no backup: a sheet that gives up
+// files a printer problem and pings the owner instead — owner, 2026-08-30.)
 //
 // AUTHENTICATION: an `X-LFH-Agent` token, minted per machine, stored only as a sha-256 hash
 // (mig 341). It is a printing-only credential scoped to ONE restaurant: the three verbs below and
@@ -19,7 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { agentByToken, helloAgent, claimNext, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
 import { startPairing, pollPairing } from "@/lib/printPair";
-import { finishKotJob } from "@/lib/printQueue";
+import { finishKotJob, tellSomebodyItGaveUp } from "@/lib/printQueue";
 import { kotHtmlForOrder, billHtmlForSession, banquetHtmlForBill, testHtml, withPaper } from "@/lib/printDocs";
 
 export const dynamic = "force-dynamic";
@@ -106,8 +108,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       // What this machine is expected to print, so a helper can say so in its own log and a person
       // reading that log can tell "not my job" from "something is broken".
       mine: PRINT_KINDS.filter((k) => routes[k].agent === agent.id),
-      // `backupFor` is gone: a helper is never a second machine's fallback (owner, 2026-08-30).
-      backupFor: [] as string[],
+      // NOT EVEN AN EMPTY `backupFor` (T11 sweep #8, 2026-09-04). It was left answering a constant
+      // [] after the backup was deleted on 2026-08-30, and the guard that exempted it said a helper
+      // already installed on a restaurant's PC reads it. NO HELPER EVER HAS — the string appears in
+      // no version of lib/printHelperScript.ts in the whole history of that file. A field kept for a
+      // reader that does not exist is a promise waiting to be believed, so it is gone.
       // Two machines sharing one code: no paper is duplicated (the claim prevents it) but half the
       // tickets would come out in the wrong room, so the helper is told and the admin screen shows
       // it. Copying the file to a second computer is the way this happens.
@@ -161,12 +166,32 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       }
       return NextResponse.json({ ok: true });
     }
-    const attempts = ((await sb.from("print_jobs").select("attempts").eq("id", job.id).maybeSingle()).data as { attempts?: number } | null)?.attempts || 0;
+    // Scoped by restaurant like every other statement in this file. The id is a uuid primary key so
+    // it resolves the same row either way, and `job` above was already read scoped — but this was
+    // the one read here without it, and a file whose header says "every function is scoped by
+    // restaurant_id" should not have an exception nobody can see the reason for.
+    const attempts = ((await sb.from("print_jobs").select("attempts").eq("id", job.id).eq("restaurant_id", agent.restaurant_id).maybeSingle()).data as { attempts?: number } | null)?.attempts || 0;
     const parked = attempts + 1 >= 5;
     await sb.from("print_jobs").update({
       status: parked ? "failed" : "queued", attempts: attempts + 1, claimed_at: null,
       error: String(body.error || "print failed").slice(0, 300),
     }).eq("id", job.id).eq("restaurant_id", agent.restaurant_id);
+    // ── AND SOMEBODY IS TOLD, for a bill and a banquet sheet too (T11 sweep #8, 2026-09-04) ─────
+    // The kitchen-slip branch above goes through finishKotJob, which files a printer problem and
+    // pings the owner on the fifth failure. This branch — bills and banquet sheets — did neither, so
+    // a bill that could not print parked silently: nothing on the manager's floor strip, nothing in
+    // the kitchen's 🖨 sheet, no ping, and a guest standing at the till. The owner's words that
+    // deleted the backup printer were "if ANYTHING fails it should show me or the person, manager,
+    // owner, everyone should get a notification" (2026-08-30). Same function, so the two cannot
+    // drift; see lib/printQueue.tellSomebodyItGaveUp.
+    if (parked) {
+      await tellSomebodyItGaveUp(agent.restaurant_id, {
+        what: job.kind === "banquet" ? "A banquet sheet" : job.kind === "bill" ? "A bill" : "A page",
+        alsoCalled: job.kind === "banquet" ? "banquet sheet" : job.kind === "bill" ? "bill" : "page",
+        printer: job.printer ?? null,
+        attempts: attempts + 1,
+      });
+    }
     return NextResponse.json({ ok: true, parked, attempts: attempts + 1 });
   }
 
