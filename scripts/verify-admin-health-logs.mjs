@@ -359,7 +359,7 @@ ok(!/\.rp-rest\{[^}]*(--adm-danger|--adm-warn|--adm-ok)/.test(REPAIR), "P23624",
   "repair: the restaurant chip is using a SEVERITY colour — a restaurant is an identity, not a status, and a red name on a red tile competes with the alarm");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // SWEEP #8 · TERMINAL 18 — the twelve things this run found on Repair & System health (2026-09-04).
-// Ledger rows: .claude/sweep/LEDGER/T18-S8.md (P71701–P72200). Same discipline as everything
+// Ledger rows: .claude/sweep/LEDGER/T18-S8.md. Same discipline as everything
 // above: a static read of the source — no server, no database, no browser.
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -479,30 +479,35 @@ ok(/OBITUARY \(item 12, 2026-09-04\)/.test(HEALTH), "P71730",
 
 
 // ── item 19 · "Remind me later" has to actually come back ────────────────────────────────────
+// RENUMBERED 2026-09-04, same day, before either number was quoted anywhere: these seven were
+// first written as P71732-P71738, which the sweep ledger T18-S8.md had already taken as phase rows
+// (its block starts at P71731). Two different checks answering to one number is the single thing
+// the ledger cannot survive. The GUARD moved, not the ledger — those 612 rows are generated and
+// published, and rewriting all of them for seven ids would be the expensive way round.
 // Owner, 2026-09-04: "I do solve later. So after four hours, it doesn't show." The server was
 // right — proven by moving one report's wait into the past on the dev database and watching
 // /api/admin/oplog?unresolved=1 hand it straight back — but NOTHING ON THE PAGE EVER ASKED AGAIN.
 // The board is click-to-refresh, so the one screen that honours a wait was the one screen that
 // could not notice it ending. Driven end to end afterwards: the tile came back on its own in 120s
 // with no reload and exactly ONE background request.
-ok(/useActiveAutoRefresh\(loadProblems, 120000\)/.test(REPAIR), "P71732",
+ok(/useActiveAutoRefresh\(loadProblems, 120000\)/.test(REPAIR), "P72343",
   "repair: the board no longer re-asks for the problems feed on its own, so a wait that expires on an open tab never comes back");
-ok(/const loadProblems = useCallback\(/.test(REPAIR), "P71733",
+ok(/const loadProblems = useCallback\(/.test(REPAIR), "P72344",
   "repair: the light single-feed refresh is gone");
 {
   // IT MUST STAY ONE FEED. Putting loadHub() (seven feeds) on a timer to answer one question is
   // the whole-board refetch this project's cost rules exist to prevent.
   const fn = /const loadProblems = useCallback\([\s\S]*?\n  \}, \[\]\);/.exec(REPAIR);
-  ok(fn && (fn[0].match(/adminFetch/g) || []).length === 1, "P71734",
+  ok(fn && (fn[0].match(/adminFetch/g) || []).length === 1, "P72345",
     "repair: the background refresh fetches more than the one feed that can change — that is a seven-feed poll");
-  ok(fn && /oplog\?level=error/.test(fn[0]), "P71735",
+  ok(fn && /oplog\?level=error/.test(fn[0]), "P72346",
     "repair: the background refresh no longer reads the problems feed");
-  ok(fn && /setFeedsFailed\(\(prev\) => prev\.filter\(\(x\) => x !== "problems"\)\)/.test(fn[0]), "P71736",
+  ok(fn && /setFeedsFailed\(\(prev\) => prev\.filter\(\(x\) => x !== "problems"\)\)/.test(fn[0]), "P72347",
     "repair: a quiet background refresh can now erase the fact that ANOTHER feed failed on the last full load");
 }
-ok(/This page checks for \{waiting === 1 \? "it" : "them"\} every couple of minutes/.test(REPAIR), "P71737",
+ok(/This page checks for \{waiting === 1 \? "it" : "them"\} every couple of minutes/.test(REPAIR), "P72348",
   "repair: the waiting line no longer says the page watches for it — the promise and the behaviour must match");
-ok(/useActiveAutoRefresh/.test(SHARED_ADMIN), "P71738",
+ok(/useActiveAutoRefresh/.test(SHARED_ADMIN), "P72349",
   "the shared active-only refresh helper is gone — a hand-rolled setInterval would poll a hidden tab");
 
 if (fails.length) {
