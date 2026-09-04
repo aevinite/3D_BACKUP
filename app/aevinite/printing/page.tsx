@@ -861,7 +861,16 @@ const PANEL_GROUPS: [ string, string ][] = [
                             : <span style={{ color: "var(--adm-warn, #f5a524)" }}>{j.status}{j.attempts ? ` · try ${j.attempts + 1}` : ""}</span>}
                           {j.error ? <div className="adm-muted" style={{ fontSize: 11.5 }}>{j.error}</div> : null}
                         </td>
-                        <td style={{ padding: "6px 8px" }} className="adm-muted">{new Date(j.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</td>
+                        {/* IST, NOT THE READER'S OWN CLOCK (T11 sweep #8, 2026-09-04). This asked for
+                            en-IN and then let the machine decide the TIME ZONE, so the "What has
+                            printed" log — the thing you read to answer "why did table 6's slip never
+                            come out" — timestamped every job in whatever zone the admin's laptop is
+                            set to, while the restaurant, its kitchen slips, its bills and its
+                            banquet sheets are all pinned to Asia/Kolkata. It is the same fault the
+                            printed bill had fixed on 2026-08-05, the banquet sheet on 2026-08-06 and
+                            the kitchen ticket on 2026-08-17; this log was the one left on device
+                            time. One time zone everywhere, like the money and the logs. */}
+                        <td style={{ padding: "6px 8px" }} className="adm-muted">{new Date(j.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}</td>
                         {/* ONE TICKET AT A TIME. "Take it out" DISMISSES it — the row and its reason
                             stay, so "why did table 6's slip never come out" still has an answer
                             months later. Nothing here deletes anything. */}
