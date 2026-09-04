@@ -6,6 +6,32 @@ import { useRealtime } from "@/lib/useRealtime";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 // An error row is said in plain words, never in the browser's own — see lib/plainError.ts.
 import { plainHeadline, legacyJsonDetail } from "@/lib/plainError";
+import { plainProblem } from "@/lib/plainError";
+
+/** whyItFailed — the ONE way an admin screen says why a read did not work.
+ *
+ *  FOUND BY FORCING IT (T20 round 2, 2026-09-04). Every failure state was driven on
+ *  /aevinite/billing, /aevinite/recycle and /aevinite/usage and READ off the screen, and all three
+ *  printed whatever they were handed, verbatim, at a person:
+ *
+ *      a sign-in that expired            →  "unauthorized"
+ *      a server that answered a web page →  "Unexpected token '<', \"<html>not \"... is not valid JSON"
+ *      a connection that dropped         →  "Failed to fetch"
+ *
+ *  None of those is a sentence. The first is the commonest of the three — a console left open
+ *  overnight — and it tells nobody that signing in again is all it takes.
+ *
+ *  It translates ONLY what lib/plainError.ts recognises. Our own routes already answer in plain
+ *  words through lib/adminFail, and those come through untouched: running them through the
+ *  translator would wrap a perfectly good sentence in "the app reported this in its own words",
+ *  which is worse than saying nothing.
+ */
+export function whyItFailed(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e ?? "");
+  if (!raw.trim()) return "That didn't work, and the app didn't say why.";
+  const p = plainProblem(raw);
+  return p.translated ? p.headline : raw;
+}
 
 export type Tile = {
   table_number: string;

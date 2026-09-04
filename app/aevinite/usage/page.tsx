@@ -12,7 +12,7 @@
 //   · A WINDOW is a query, so it is bounded on the server (mig 347 + the clamp in the route): one
 //     aggregate round-trip, at most 400 days, counts computed in the database.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useActiveAutoRefresh } from "@/components/admin/shared";
+import { useActiveAutoRefresh, whyItFailed } from "@/components/admin/shared";
 
 type Row = { id: string; name: string; slug: string; orders7d: number; orders30d: number; ordersRange: number | null; staff: number; tables: number };
 type Data = {
@@ -101,7 +101,7 @@ export default function AdminUsage() {
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Couldn't load usage.");
       setD(j);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
+    } catch (e) { setErr(whyItFailed(e)); } finally { setLoading(false); }
     // window_ is rebuilt each render from these three, so they are the real dependencies.
   }, [preset, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);

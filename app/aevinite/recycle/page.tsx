@@ -30,7 +30,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 // istDate: the console's ONE reading of a date ("16 Aug 26"), pinned to Indian time.
-import { openRestaurantPanel, istDate } from "@/components/admin/shared";
+import { openRestaurantPanel, istDate, whyItFailed } from "@/components/admin/shared";
 
 // `canPurge` used to be here and is GONE (T16 sweep #7, 2026-08-27). The route still answers it,
 // always `true`, because migration 342 removed the 90-day lock — so it was a field that could only
@@ -77,13 +77,16 @@ export default function RecycleBin() {
     try {
       const j = await (await fetch("/api/admin/restaurants?deleted=1", { cache: "no-store" })).json();
       if (!j.error) { setList(j.trashed || []); }
-      else { setMsg(j.error); setList([]); } // show the error + Retry, not a perpetual "Loading…" (audit 2026-07-08)
-    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); setList([]); }
+      // …and say it in words. This branch reads `j.error` straight off the body and never went
+      // near the catch below, so a sign-in that expired came out as the bare word "unauthorized"
+      // while the very same failure on Billing and Usage read as a sentence (T20 round 2).
+      else { setMsg(whyItFailed(j.error)); setList([]); } // the error + Retry, not a perpetual "Loading…" (audit 2026-07-08)
+    } catch (e) { setMsg(whyItFailed(e)); setList([]); }
     try {
       const j = await (await fetch("/api/admin/owners?deleted=1", { cache: "no-store" })).json();
       if (!j.error) { setOwners(j.trashed || []); }
-      else { setOwnerMsg(j.error); setOwners([]); }
-    } catch (e) { setOwnerMsg(e instanceof Error ? e.message : String(e)); setOwners([]); }
+      else { setOwnerMsg(whyItFailed(j.error)); setOwners([]); }
+    } catch (e) { setOwnerMsg(whyItFailed(e)); setOwners([]); }
   }, []);
   useEffect(() => { load(); }, [load]);
 

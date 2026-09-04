@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // istDate: the console's ONE reading of a date ("4 Jul 27"), pinned to IST. Imported rather than
 // re-invented — components/admin/shared.tsx exports it precisely so two admin screens cannot print
 // the same field two different ways, and /aevinite/revenue already prints next-due through it.
-import { useActiveAutoRefresh, istDate } from "@/components/admin/shared";
+import { useActiveAutoRefresh, istDate, whyItFailed } from "@/components/admin/shared";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { useToast } from "@/components/admin/toast";
 import { SkelList } from "@/components/admin/Skeleton";
@@ -82,7 +82,7 @@ export default function AdminBilling() {
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Couldn't load billing.");
       setRows(j.restaurants || []); setSummary(j.summary || null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
+    } catch (e) { setErr(whyItFailed(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
@@ -129,7 +129,22 @@ export default function AdminBilling() {
           <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
         </button>
       </div>
-      {err && <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>{err}</p>}
+      {/* ── SAY WHY, AND OFFER THE WAY OUT (T20 round 2, 2026-09-04) ──────────────────────────
+          This printed whatever it was handed, verbatim: an expired sign-in read "unauthorized", a
+          dropped connection read "Failed to fetch", and a server answering a web page read
+          "Unexpected token '<' … is not valid JSON". None of those is a sentence. And unlike
+          Recycle bin and Usage & cost — which have offered a Retry beside their error for a while —
+          this screen offered nothing at all to press, so the only way out of a blip was to know to
+          reload the page. */}
+      {err && (
+        <p role="alert" style={{ color: "var(--adm-danger)", fontSize: 13, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <i className="fas fa-circle-exclamation" aria-hidden="true" />
+          <span style={{ flex: 1, minWidth: 200 }}>{err}</span>
+          <button className="adm-btn" disabled={loading} onClick={load}>
+            <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Retry
+          </button>
+        </p>
+      )}
 
       <div className="adm-stats">
         <div className="adm-stat"><div className="k">Active</div><div className="v">{summary?.statusCounts.active || 0}</div></div>
@@ -334,7 +349,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
       if (!r.ok) throw new Error(d.error || "Couldn't save.");
       setMsg({ kind: "ok", text: "Saved." }); onChanged();
       await loadHistory();   // the expectation for the NEXT save is what the database says now
-    } catch (e) { setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }); } finally { setSaving(false); }
+    } catch (e) { setMsg({ kind: "err", text: whyItFailed(e) }); } finally { setSaving(false); }
   };
 
   const addPayment = async () => {
@@ -367,7 +382,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
         : { kind: "ok", text: "Payment recorded." });
       // loadHistory() re-reads billing and refreshes the "Next due on" field (rolled server-side).
       await loadHistory(); onChanged();
-    } catch (e) { setPayMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }); } finally { setPayBusy(false); payingRef.current = false; }
+    } catch (e) { setPayMsg({ kind: "err", text: whyItFailed(e) }); } finally { setPayBusy(false); payingRef.current = false; }
   };
 
   // ── THE QUESTION NAMES THE PAYMENT (T20 sweep #8, 2026-09-04) ───────────────────────────────
@@ -389,7 +404,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't delete.");
       await loadHistory(); onChanged();
       setHistMsg("Payment record deleted.");
-    } catch (e) { setHistMsg("Couldn't delete that payment — " + (e instanceof Error ? e.message : String(e))); }
+    } catch (e) { setHistMsg("Couldn't delete that payment — " + whyItFailed(e)); }
   };
 
   const inputStyle: React.CSSProperties = { padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, width: "100%" };
