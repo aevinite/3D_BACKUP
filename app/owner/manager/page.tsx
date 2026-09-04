@@ -22,6 +22,10 @@ import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import OwnerManagerMode from "@/components/owner/OwnerManagerMode";
+// ONE ORDER for every restaurant list in this console (T17 sweep, 2026-09-04): the launcher's two
+// cards MEASURABLY swapped places between loads, because the read below has no `order by` and this
+// page used whatever row order it was handed. See components/owner/ownerRestaurantSort.
+import { byName } from "@/components/owner/ownerRestaurantSort";
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
   const { rid: qRid } = await searchParams;
@@ -30,7 +34,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   // Match the owner panel's skin (OwnerShell defaults to dark when no cookie is set).
   const skin: "light" | "dark" = store.get("aevidine_skin")?.value === "light" ? "light" : "dark";
 
-  let restaurants: { id: string; name: string; accentColor?: string }[] = [];
+  // NO `accentColor` (T17 sweep, 2026-09-04) — the launcher colours its dots by restaurant ID
+  // through lib/restaurantColor, exactly as the sidebar, the switcher and the charts already do, so
+  // the brand accent was both a disagreement on screen and one column of egress per row for nothing.
+  let restaurants: { id: string; name: string }[] = [];
   let selected = "";
 
   if (u && u.role === "owner") {
@@ -38,9 +45,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
     // so the admin's "Manager mode" section switch is enforced again (entitledSubset).
     const ids = await entitledSubset(await enabledOwnedRestaurantIds(u.id), "manager_mode");
     if (ids.length) {
-      const rows = (await sb.from("restaurants").select("id, name, accent_color").in("id", ids)).data || [];
+      const rows = (await sb.from("restaurants").select("id, name").in("id", ids)).data || [];
       const byId = new Map(rows.map((r) => [r.id as string, r]));
-      restaurants = ids.map((id) => ({ id, name: (byId.get(id)?.name as string) || "Restaurant", accentColor: (byId.get(id)?.accent_color as string) || undefined }));
+      restaurants = byName(ids.map((id) => ({ id, name: (byId.get(id)?.name as string) || "Restaurant" })));
       // Honour ?rid only when the owner actually owns it. ONE restaurant → straight in;
       // several → selected stays "" so the client shows the pick-a-restaurant launcher
       // (owner, 2026-08-02: "first screen to select the restaurant").
@@ -71,8 +78,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
         if (q.error || batch.length < PAGE) break;
       }
     }
-    const rows = (await sb.from("restaurants").select("id, name, accent_color").in("id", [...estateIds]).is("deleted_at", null)).data || [];
-    restaurants = rows.map((r) => ({ id: r.id as string, name: r.name as string, accentColor: (r.accent_color as string) || undefined }));
+    const rows = (await sb.from("restaurants").select("id, name").in("id", [...estateIds]).is("deleted_at", null)).data || [];
+    restaurants = byName(rows.map((r) => ({ id: r.id as string, name: r.name as string })));
     // The console named THIS restaurant, so land on its floor (never on the launcher);
     // switching to a sibling is then one tap, same as for the real owner.
     if (restaurants.some((r) => r.id === rid)) selected = rid;
@@ -93,9 +100,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   // he is sent back to his dashboard instead. The ADMIN is unaffected: only a real owner can reach
   // this line, because the admin act-as branch above is never module-gated — admin = top power, and
   // its X-ray nav says outright "You can still open it from this view".
-  // The heading that used to sit here was the last user of `adm-page-title`, a class no
-  // stylesheet declares (sweep 6 · T14). It is gone with the screen; `verify:owner-money` still
-  // walks the whole of `app/` to make sure that class never comes back anywhere.
+  // The heading that used to sit here was ONE user of `adm-page-title`, a class no stylesheet
+  // declares (sweep 6 · T14). It is gone with the screen — but it was not the LAST one, and this
+  // comment said it was: the launcher in components/owner/OwnerManagerMode.tsx still carried it,
+  // and `verify:owner-money` item 7 only ever walked `app/`, so the guard stayed green over it.
+  // Both are fixed (T17 sweep, 2026-09-04); the walk now covers `app/` AND `components/`.
   if (!restaurants.length) redirect("/owner");
 
   return <OwnerManagerMode restaurants={restaurants} initial={selected} skin={skin} />;

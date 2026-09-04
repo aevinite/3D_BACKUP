@@ -81,6 +81,7 @@
     "verify:guest-address": "node scripts/verify-guest-address.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
     "verify:owner-money": "node scripts/verify-owner-money-screens.mjs",
+    "verify:owner-shell": "node scripts/verify-owner-shell.mjs",
     "check:current": "node scripts/check-folder-current.mjs",
     "verify:floor": "node scripts/verify-floor-share.mjs",
     "verify:split-payment": "node --experimental-strip-types --no-warnings scripts/verify-split-payment.mjs",

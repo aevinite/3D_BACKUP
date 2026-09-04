@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { attachSafeAreaBridge } from "@/lib/safeAreaBridge";
 import { useBackClose } from "@/lib/backStack";
 import { useOwnerSkin, pushSkinTo } from "./useOwnerSkin";
+import { portfolioColor } from "@/lib/restaurantColor";
 
 // Owner panel → Manager mode (owner, 2026-08-02). Hosts the SAME live manager panel
 // (public/panels/editor, ?ownermode=1) inside the owner cockpit. One engine per
@@ -31,7 +32,10 @@ export default function OwnerManagerMode({
   initial,
   skin: initialSkin,
 }: {
-  restaurants: { id: string; name: string; accentColor?: string }[];
+  // NO `accentColor` (T17 sweep, 2026-09-04): the dot below is keyed by ID through
+  // lib/restaurantColor, so this screen needs nothing from the restaurants table but an id and a
+  // name. app/owner/manager/page.tsx stopped reading `accent_color` in the same commit.
+  restaurants: { id: string; name: string }[];
   initial: string;
   skin: "light" | "dark";
 }) {
@@ -114,12 +118,31 @@ export default function OwnerManagerMode({
   if (!rid) {
     return (
       <div className="omm-launch">
-        <h1 className="adm-page-title">Manager mode</h1>
+        {/* `adm-page-h`, NOT `adm-page-title` (T17 sweep, 2026-09-04). No stylesheet has ever
+            declared `adm-page-title`, so this heading fell through to the browser's own h1 —
+            measured 27px / weight 700 with an 18px margin above AND below, beside a console whose
+            page headings are 22px / weight 800 with no top margin and 4px below (19px on a phone).
+            So the one screen a multi-restaurant owner meets first had the biggest, loosest, least
+            emphatic heading in the whole cockpit, and its own sub-line was pushed 18px away from it.
+            Three PAGES were cleaned of this class on 2026-08-31 and `verify:owner-money` item 7
+            exists for exactly it — but that check's walk only ever entered `app/`, and this file is
+            in `components/`, so it sat green over the fault. The walk now enters `components/` too,
+            and `verify:owner-shell` §1 asserts this file by name. */}
+        <h1 className="adm-page-h">Manager mode</h1>
         <p className="adm-page-sub">Pick the restaurant whose floor you want to run — live tables, orders and bills, exactly like the manager panel.</p>
         <div className="omm-grid">
           {restaurants.map((r) => (
             <button key={r.id} type="button" className="omm-card" onClick={() => setRid(r.id)}>
-              <span className="sw" style={{ background: r.accentColor || "#34d399" }} aria-hidden="true" />
+              {/* THE SAME COLOUR THE REST OF THE COCKPIT GIVES THIS RESTAURANT (T17 sweep,
+                  2026-09-04). This dot used the restaurant's BRAND accent while the sidebar three
+                  inches to the left uses `portfolioColor(id)` — so on ONE screen My Little French
+                  House was gold here and cyan there, and Pizza Palace red here and emerald there
+                  (measured rgb(227,192,111) vs rgb(6,182,212), and rgb(192,57,43) vs
+                  rgb(52,211,153)). That is the exact drift the T5 sweep fixed for the sidebar, the
+                  switcher and the charts on 2026-08-07 — lib/restaurantColor exists to hold the one
+                  answer, and this launcher was simply never converted. Keyed by id, so it is stable
+                  across sorts, reloads and pages. */}
+              <span className="sw" style={{ background: portfolioColor(r.id) }} aria-hidden="true" />
               <span className="nm">{r.name}</span>
               <span className="go">Open the live floor <i className="fas fa-arrow-right" aria-hidden="true" /></span>
             </button>
