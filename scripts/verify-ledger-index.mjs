@@ -204,9 +204,14 @@ for (const f of ledgers) {
     fail(`${DIR}/${f} exists but INDEX.md has no row for it — add its territory and its ID block, ` +
          `or the next sweep will not know it is there.`);
 }
-for (const m of index.matchAll(/\bT(\d+)\.md\b/g)) {
+// The same widening on the way back, so an index row naming a suffixed ledger that is NOT there
+// is still caught.
+for (const m of index.matchAll(/\bT(\d+(?:[.-][\w.-]+)?)\.md\b/g)) {
   const f = `T${m[1]}.md`;
-  if (ledgers.includes(f)) continue;
+  // existsSync, not `ledgers.includes` — a companion file like T17-R2.md is deliberately NOT in
+  // `ledgers` (it carries a two-column recap, not phase rows) but it IS on disk, and the index is
+  // right to name it. Asking the filesystem is what this check was always about.
+  if (ledgers.includes(f) || existsSync(join(DIR, f))) continue;
   const near = index.slice(Math.max(0, m.index - 500), m.index + 500);
   if (!/NEVER FILED|not yet filed|unmerged branch/i.test(near))
     fail(`INDEX.md points at ${DIR}/${f}, which does not exist here — either file it, or say ` +
