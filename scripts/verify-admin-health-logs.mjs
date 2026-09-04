@@ -421,6 +421,16 @@ ok(/rows=\{3\}[\s\S]{0,400}?fontFamily: "inherit"/.test(REPAIR), "P71717",
     `repair: "…unlock the table & order tools" appears ${unlocks} times — the scope card and the empty state said it back to back`);
 }
 
+// ── item 8 · Resolve all must say that it also clears the ones set to come back later ───────
+// { all: true } clears every unresolved report in scope, INCLUDING the snoozed ones the line
+// above calls "still open, not fixed" — so the confirm promised 10 and the toast reported more.
+ok(/That also clears \$\{waiting\} report/.test(REPAIR), "P71721",
+  "repair: the 'Resolve all' confirm no longer says it will also clear the reports set to come back later");
+ok(/\{waiting \? ` That also clears/.test(REPAIR), "P71722",
+  "repair: the waiting clause is unconditional — with nothing waiting it would add a sentence about nothing");
+ok(/scopedName \? " \(across all restaurants\)" : ""\}/.test(REPAIR), "P71723",
+  "repair: the waiting clause no longer says whose reports it means, and that count is platform-wide");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);

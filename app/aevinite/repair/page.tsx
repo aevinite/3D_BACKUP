@@ -813,7 +813,21 @@ export default function AdminRepair() {
 
           {confirmBulk === "resolve" ? (
             <span className="rp-bulk-ask">
-              <span>Mark all {groups.length} {scopePhrase} as handled?</span>
+              {/* ── AND THE ONES THAT ARE WAITING (item 8, 2026-09-04) ──────────────────────────
+                  "Resolve all" sends { all: true } and the server clears every unresolved error
+                  report in scope — INCLUDING the ones set to come back later, which are not on
+                  this board and are counted a few lines up as "still open, not fixed". So the
+                  confirm promised 10, the toast afterwards reported a larger number, and a problem
+                  he had deliberately PARKED came back marked handled.
+                  The button is not changed: clearing a whole board after a fix landed is exactly
+                  what it is for, and quietly skipping the parked ones would be its own surprise.
+                  What it did not do was SAY so at the moment it matters — the same rule the scope
+                  phrase in this very sentence was added for. `waiting` is the server’s own
+                  platform-wide count, so it is worded the way the line above words it. */}
+              <span>
+                Mark all {groups.length} {scopePhrase} as handled?
+                {waiting ? ` That also clears ${waiting} report${waiting === 1 ? "" : "s"} set to come back later${scopedName ? " (across all restaurants)" : ""}.` : ""}
+              </span>
               <button className="adm-btn primary" onClick={resolveAllProblems}>Yes, clear the board</button>
               <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
