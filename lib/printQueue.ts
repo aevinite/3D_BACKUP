@@ -310,29 +310,69 @@ export async function finishKotJob(
   // Only on the FIFTH failure, not on every retry: four quiet retries are the queue doing its job,
   // and a notification per attempt is how an alert becomes something people switch off.
   if (parked) {
-    try {
-      await sb.from("printer_events").insert({
-        restaurant_id: rid,
-        // `auto_fail` is the kind that already means this (mig 269's CHECK allows exactly five).
-        // Inventing "print_failed" would have been refused by the constraint at run time, and the
-        // insert is in a try/catch — so the report would have vanished silently.
-        kind: "auto_fail",
-        printer: printer ?? null,
-        reported_by: "the printing queue",
-        note: ord?.kot_no
-          ? `Kitchen ticket #${ord.kot_no}${ord.table_number ? ` · ${ord.table_number}` : ""} gave up after ${attempts} tries`
-          : `A ticket gave up after ${attempts} tries`,
-      });
-    } catch { /* the ticket is already parked and visible; a missing row must not break the report */ }
-    try {
-      const { sendOwnerAlert } = await import("@/lib/alerts");
-      await sendOwnerAlert(
-        `🖨 A kitchen ticket could not be printed${printer ? ` on ${printer}` : ""} — it gave up after ${attempts} tries and is waiting to be reprinted.`,
-        `print-failed:${rid}:${printer || "any"}`,
-      );
-    } catch { /* an alert is best-effort and must never break a print report */ }
+    await tellSomebodyItGaveUp(rid, {
+      what: ord?.kot_no
+        ? `Kitchen ticket #${ord.kot_no}${ord.table_number ? ` · ${ord.table_number}` : ""}`
+        : "A ticket",
+      alsoCalled: "kitchen ticket",
+      printer: printer ?? null,
+      attempts,
+    });
   }
   return { found: true, orderId: job.order_id ?? null, reprint: job.reprint !== false, attempts, parked, kotNo: ord?.kot_no ?? null, tableNumber: ord?.table_number ?? null };
+}
+
+/**
+ * A PIECE OF PAPER THAT GAVE UP TELLS SOMEBODY — WHICHEVER PIECE OF PAPER IT WAS.
+ *
+ * Owner, 2026-08-30, in the sentence that DELETED the backup printer: *"we don't even need the
+ * backup printer — if anything fails it should show me or the person, manager, owner, everyone
+ * should get a notification that this has failed, and if you want to reprint it."*
+ *
+ * **"Anything", not "a kitchen ticket."** This was written inline inside `finishKotJob`, which only
+ * the kitchen-slip path calls — so a BILL or a BANQUET sheet that failed five times parked as
+ * `failed` and told nobody at all: no printer problem filed, so nothing on the manager's floor
+ * strip (it renders `printer_events`) and nothing in the kitchen's 🖨 sheet, and no owner ping. The
+ * only trace was a red line in the admin's own "What has printed" list, which is a screen somebody
+ * has to already be looking at. A guest standing at the till waiting for a bill is exactly the
+ * person this notification exists for.
+ *
+ * It is worse than a plain gap, because the helper's own script promises otherwise in a comment on
+ * the line that reports the failure: *"The app retries it, and after five tries the manager's
+ * screen says so — a ticket must never quietly disappear."*
+ *
+ * So the telling lives HERE, once, and both finishers call it (T11 sweep #8, 2026-09-04). It is
+ * deliberately NOT a second copy in the helper's route: two hand-kept copies of "tell somebody" is
+ * how one of them stops telling anybody, which is the whole reason this file exists.
+ *
+ * ONLY ON THE LAST TRY, never on every retry: four quiet retries are the queue doing its job, and
+ * a notification per attempt is how an alert becomes something people switch off.
+ */
+export async function tellSomebodyItGaveUp(
+  rid: string,
+  o: { what: string; alsoCalled: string; printer: string | null; attempts: number },
+): Promise<void> {
+  try {
+    await sb.from("printer_events").insert({
+      restaurant_id: rid,
+      // `auto_fail` is the kind that already means this (mig 269's CHECK allows exactly five).
+      // Inventing "print_failed" would have been refused by the constraint at run time, and the
+      // insert is in a try/catch — so the report would have vanished silently.
+      kind: "auto_fail",
+      printer: o.printer ?? null,
+      reported_by: "the printing queue",
+      note: `${o.what} gave up after ${o.attempts} tries`,
+    });
+  } catch { /* the job is already parked and visible; a missing row must not break the report */ }
+  try {
+    const { sendOwnerAlert } = await import("@/lib/alerts");
+    await sendOwnerAlert(
+      `🖨 A ${o.alsoCalled} could not be printed${o.printer ? ` on ${o.printer}` : ""} — it gave up after ${o.attempts} tries and is waiting to be reprinted.`,
+      // Keyed by KIND as well as printer, so a stuck bill printer and a stuck kitchen printer are
+      // two pieces of news rather than one silently swallowing the other.
+      `print-failed:${rid}:${o.alsoCalled}:${o.printer || "any"}`,
+    );
+  } catch { /* an alert is best-effort and must never break a print report */ }
 }
 
 /**

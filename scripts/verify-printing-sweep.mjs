@@ -2914,6 +2914,50 @@ if (!browser) {
     return (r.ok && row.status === "queued" && row.attempts === 0)
       || `retry answered ${r.status} and the ticket is ${row.status}`;
   });
+
+  // ── AND THE SAME FOR A BILL AND A BANQUET SHEET, which told NOBODY until 2026-09-04 ──────────
+  // T11 sweep #8. Every phase above drives a KITCHEN SLIP, and the kitchen slip is the only kind
+  // that went through finishKotJob — so a BILL that failed five times parked as `failed` in silence:
+  // no printer problem filed, nothing on the manager's floor strip, nothing in the kitchen's 🖨
+  // sheet, no owner ping. The owner's words that deleted the backup printer were "if ANYTHING fails
+  // it should show me or the person, manager, owner, everyone should get a notification"
+  // (2026-08-30), and the helper's own script promises it in a comment on the line that reports the
+  // failure. Driven for real, on the BILL printer, so the two kinds cannot both be "covered" by one.
+  await phase("a BILL that gives up after five tries parks and files a printer problem too", async () => {
+    await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail&printer=eq.${VIRT.counter}`, { method: "DELETE" }).catch(() => {});
+    const [job] = await db("print_jobs", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
+      restaurant_id: RID, kind: "bill", status: "queued", reprint: false,
+      agent_id: AGENT.id, printer: VIRT.counter, payload: {} }) });
+    made.jobs.push(job.id);
+    for (let i = 0; i < 6; i++) {
+      const [row] = await db(`print_jobs?id=eq.${job.id}&select=status`);
+      if (row.status === "failed") break;
+      await agentCall(`/job/${job.id}/failed`, { method: "POST", body: JSON.stringify({ error: "sweep — the bill printer is unplugged" }) });
+    }
+    const [row] = await db(`print_jobs?id=eq.${job.id}&select=status,attempts`);
+    return (row.status === "failed" && row.attempts >= 5) || `the bill job is ${row.status} after ${row.attempts} attempt(s)`;
+  });
+  await phase("…filed against the BILL printer, in words a person can read", async () => {
+    const ev = await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail&printer=eq.${VIRT.counter}&select=id,printer,note&order=created_at.desc&limit=1`);
+    if (!ev.length) return "no printer problem was filed for the bill — it died in silence, which is what the backup printer used to hide";
+    made.events.push(ev[0].id);
+    return /gave up after/.test(String(ev[0].note || ""))
+      || `filed saying "${String(ev[0].note || "").slice(0, 60)}"`;
+  });
+  await phase("…and it says BILL, so a stuck bill printer is not read as a stuck kitchen one", async () => {
+    const ev = await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail&printer=eq.${VIRT.counter}&select=note&order=created_at.desc&limit=1`);
+    if (!ev.length) return "nothing filed to read";
+    return /bill/i.test(String(ev[0].note || ""))
+      || `the note reads "${String(ev[0].note || "").slice(0, 70)}" — it does not say which paper it was`;
+  });
+  await phase("…and 'tell somebody' is written down ONCE, so the kinds cannot drift apart", () => {
+    const q = strip(queue), route = strip(read("app/api/print-agent/[...path]/route.ts"));
+    return (/export async function tellSomebodyItGaveUp/.test(q)
+      && /tellSomebodyItGaveUp\(/.test(route)
+      && (route.match(/printer_events/g) || []).length <= 3)
+      || "the helper route grew its own copy of filing a printer problem — two hand-kept copies is how one of them stops telling anybody";
+  });
+  await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail&printer=eq.${VIRT.counter}`, { method: "DELETE" }).catch(() => {});
   await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail`, { method: "DELETE" }).catch(() => {});
   await drain();
 }

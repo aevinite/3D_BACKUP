@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { agentByToken, helloAgent, claimNext, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
 import { startPairing, pollPairing } from "@/lib/printPair";
-import { finishKotJob } from "@/lib/printQueue";
+import { finishKotJob, tellSomebodyItGaveUp } from "@/lib/printQueue";
 import { kotHtmlForOrder, billHtmlForSession, banquetHtmlForBill, testHtml, withPaper } from "@/lib/printDocs";
 
 export const dynamic = "force-dynamic";
@@ -161,12 +161,32 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       }
       return NextResponse.json({ ok: true });
     }
-    const attempts = ((await sb.from("print_jobs").select("attempts").eq("id", job.id).maybeSingle()).data as { attempts?: number } | null)?.attempts || 0;
+    // Scoped by restaurant like every other statement in this file. The id is a uuid primary key so
+    // it resolves the same row either way, and `job` above was already read scoped — but this was
+    // the one read here without it, and a file whose header says "every function is scoped by
+    // restaurant_id" should not have an exception nobody can see the reason for.
+    const attempts = ((await sb.from("print_jobs").select("attempts").eq("id", job.id).eq("restaurant_id", agent.restaurant_id).maybeSingle()).data as { attempts?: number } | null)?.attempts || 0;
     const parked = attempts + 1 >= 5;
     await sb.from("print_jobs").update({
       status: parked ? "failed" : "queued", attempts: attempts + 1, claimed_at: null,
       error: String(body.error || "print failed").slice(0, 300),
     }).eq("id", job.id).eq("restaurant_id", agent.restaurant_id);
+    // ── AND SOMEBODY IS TOLD, for a bill and a banquet sheet too (T11 sweep #8, 2026-09-04) ─────
+    // The kitchen-slip branch above goes through finishKotJob, which files a printer problem and
+    // pings the owner on the fifth failure. This branch — bills and banquet sheets — did neither, so
+    // a bill that could not print parked silently: nothing on the manager's floor strip, nothing in
+    // the kitchen's 🖨 sheet, no ping, and a guest standing at the till. The owner's words that
+    // deleted the backup printer were "if ANYTHING fails it should show me or the person, manager,
+    // owner, everyone should get a notification" (2026-08-30). Same function, so the two cannot
+    // drift; see lib/printQueue.tellSomebodyItGaveUp.
+    if (parked) {
+      await tellSomebodyItGaveUp(agent.restaurant_id, {
+        what: job.kind === "banquet" ? "A banquet sheet" : job.kind === "bill" ? "A bill" : "A page",
+        alsoCalled: job.kind === "banquet" ? "banquet sheet" : job.kind === "bill" ? "bill" : "page",
+        printer: job.printer ?? null,
+        attempts: attempts + 1,
+      });
+    }
     return NextResponse.json({ ok: true, parked, attempts: attempts + 1 });
   }
 
