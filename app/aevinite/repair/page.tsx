@@ -166,6 +166,22 @@ function memoryFor(g: ErrGroup, mem: ErrMemory[]): ErrMemory | null {
 const NIGHT_WINDOW_END_HOUR = 8;
 /** The scheduled hour of each night job, for the "it was due at…" half of the sentence. */
 const SCHEDULED: Record<string, string> = { nightly: "2:30 am", audit: "6:00 am" };
+// ── TWO DIFFERENT JOBS WEAR THE "AUDIT" TAG (item 16, owner 2026-09-04) ─────────────────────────
+// There are three LaunchAgents, not two: the repair run at 02:30, the TABLET audit at 04:00 and the
+// OWNER audit at 06:00. Only two `kind` values exist though — "nightly" and "audit" — so both
+// audits map to the same row above and the catch-up sentence told a 4am job it was "due at 6:00 am".
+// It has not happened yet: every tablet audit on record started within minutes of 04:00. That makes
+// it a trap rather than a fault, and the fix is to read the job's own TITLE, which already says
+// which one it is ("Waiter tablet nightly audit" / "Owner panel nightly audit").
+// A title we do not recognise falls back to the kind, so a NEW night job is never told a wrong
+// time — it just gets the vaguer "the night" until someone adds it here.
+const SCHEDULED_BY_TITLE: { match: RegExp; due: string }[] = [
+  { match: /tablet/i, due: "4:00 am" },
+  { match: /owner/i, due: "6:00 am" },
+  { match: /repair/i, due: "2:30 am" },
+];
+const dueTime = (s: AgentRun): string =>
+  SCHEDULED_BY_TITLE.find((x) => x.match.test(s.title || ""))?.due || SCHEDULED[s.kind] || "the night";
 // ── ONE CLOCK ON THE WHOLE ROW (item 9, 2026-09-04) ─────────────────────────────────────────────
 // Everything else on this board prints its time with an explicit `timeZone: "Asia/Kolkata"` — the
 // restaurants' own clock, deliberately not the laptop's, so the console reads the same wherever it
@@ -189,7 +205,7 @@ function lateNightRun(s: AgentRun): string {
   if (s.kind === "live") return "";       // a live fix is started by hand, whenever he asks for it
   const start = new Date(s.started_at);
   const startIst = istParts(start);
-  const due = SCHEDULED[s.kind] || "the night";
+  const due = dueTime(s);
   if (startIst.hour >= NIGHT_WINDOW_END_HOUR) {
     return `Started ${istClock(start)}, not overnight — it was due at ${due} and the Mac was asleep, so macOS ran it when you next woke it.`;
   }
