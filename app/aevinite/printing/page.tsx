@@ -691,13 +691,40 @@ const PANEL_GROUPS: [ string, string ][] = [
                   nothing else; bills and banquet sheets stay with whoever presses Print. */}
               <div className="adm-card" style={{ marginTop: 14 }}>
                 <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.screen}</h2>
-                <p style={{ margin: "0 0 4px", fontSize: 13 }}>
-                  <i className="fas fa-circle-check" aria-hidden="true" style={{ color: "var(--adm-ok, #30a46c)", marginRight: 7 }} />
-                  Kitchen slips print on the <b>kitchen screen</b> already &mdash; there is nothing to switch on.
-                  {(draft.kot?.agent && draft.kot?.printer)
-                    ? " Right now a computer above is set to print them, so it does that instead."
-                    : " No computer is set to print them, so the kitchen screen is doing it."}
-                </p>
+                {/* ── AND IT SAYS THE TRUE THING WHEN THE SLIPS ARE SWITCHED OFF ────────────────
+                    T11 sweep #8, 2026-09-04. This line was two answers wide — a computer is named,
+                    or the kitchen screen is doing it — and "Nobody" is a third answer the owner
+                    added on purpose (2026-08-27: "I WANT A PROPER OPTION TO ON AND OFF IT"). With
+                    Kitchen slips set to Nobody it fell through to the second branch, so the card
+                    read, under a GREEN TICK:
+
+                      ✓ Kitchen slips print on the kitchen screen already — there is nothing to
+                        switch on. No computer is set to print them, so the kitchen screen is
+                        doing it.
+                        [ Nobody — kitchen slips do not print by themselves ]
+                        Kitchen slips do not print by themselves for this restaurant.
+
+                    — the tick asserting the opposite of the grey line four rows under it, with the
+                    dropdown between them agreeing with the grey line. Driven on French House and
+                    put back. `via:"off"` is exactly what resolveTarget() answers "off" to and what
+                    screenMayPrint() refuses with why:"off", so the screen was the only layer that
+                    had not been told. Three states, three sentences, and the tick only where
+                    something really is printing. */}
+                {draft.kot?.via === "off" ? (
+                  <p style={{ margin: "0 0 4px", fontSize: 13 }}>
+                    <i className="fas fa-circle-minus" aria-hidden="true" style={{ color: "var(--adm-warn, #f5a524)", marginRight: 7 }} />
+                    Kitchen slips are switched <b>off</b> for this restaurant &mdash; no slip comes out by
+                    itself, on any screen or any computer. Orders still reach the kitchen screen to be read.
+                  </p>
+                ) : (
+                  <p style={{ margin: "0 0 4px", fontSize: 13 }}>
+                    <i className="fas fa-circle-check" aria-hidden="true" style={{ color: "var(--adm-ok, #30a46c)", marginRight: 7 }} />
+                    Kitchen slips print on the <b>kitchen screen</b> already &mdash; there is nothing to switch on.
+                    {(draft.kot?.agent && draft.kot?.printer)
+                      ? " Right now a computer above is set to print them, so it does that instead."
+                      : " No computer is set to print them, so the kitchen screen is doing it."}
+                  </p>
+                )}
                 <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
                   Only change this to send the slips to <b>one particular person&apos;s</b> screen instead.
                   Bills and banquet sheets are never affected &mdash; whoever presses Print gets the window.
