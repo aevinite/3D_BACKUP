@@ -532,10 +532,27 @@ ok(/Couldn.t clear that alert/.test(REPAIR), "P100765",
 ok(/Couldn.t hand that limit to Claude/.test(REPAIR), "P100766",
   "repair: the Fix-to-Claude refusal is back to a bare verb");
 
+
+// ── item 21 · a list read must assert it got a list ──────────────────────────────────────────
+// Round 2 fed the problems feed { actions: "boom" } and the board rendered "NaN" — groupErrors()
+// had walked a string character by character, because `|| []` defends against null and undefined
+// and nothing else. No route can send that today; this is the line that keeps it that way.
+{
+  const bare = [...REPAIR.matchAll(/set(?:Errors|Requests|Runs|Issues|RlHits|RlRules|Memories)\((\w+)\.data\.\w+ \|\| \[\]\)/g)];
+  ok(bare.length === 0, "P100767",
+    `repair: ${bare.length} feed(s) still take \`|| []\`, which lets any other truthy answer through`);
+}
+ok(/const list = <T,>\(v: unknown\): T\[\] => \(Array\.isArray\(v\) \? \(v as T\[\]\) : \[\]\)/.test(REPAIR), "P100768",
+  "repair: the one list guard the seven feeds share is gone");
+ok(/setWaiting\(typeof e\.data\.waiting === "number"/.test(REPAIR), "P100769",
+  "repair: the waiting count is back to ?? null, which accepts a string and prints it as a number");
+ok(/setErrors\(Array\.isArray\(e\.data\.actions\) \? e\.data\.actions : \[\]\)/.test(REPAIR), "P100770",
+  "repair: the BACKGROUND refresh reads the same feed without the same guard");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
   console.error("\n   Each line names the ledger phase (.claude/sweep/LEDGER/T17.md) that found it.\n");
   process.exit(1);
 }
-console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 14");
+console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 15");
