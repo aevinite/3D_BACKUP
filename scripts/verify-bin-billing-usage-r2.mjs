@@ -778,8 +778,13 @@ await phase("LIVE · the platform's billing figures still add up after everythin
   if (!j.restaurants) return "the billing read did not answer";
   const canon = (c) => (c || "INR").trim().toUpperCase() || "INR";
   const rupees = Math.round(j.restaurants.filter((r) => canon(r.currency) === "INR").reduce((s, r) => s + (r.paidThisYear || 0), 0) * 100) / 100;
-  const stray = j.restaurants.filter((r) => r.plan && /zz|probe|test/i.test(r.plan)).map((r) => `${r.name}: ${r.plan}`);
-  return stray.length === 0 || `a test value was left on a plan: ${stray.join(", ")} (rupee total ${rupees})`;
+  // MY OWN MARK ONLY. This looked for /zz|probe|test/ and went red once on the live site while
+  // nothing at all was on either database a minute later — it had caught another sweep terminal's
+  // `zz*` fixture mid-life on the database all ten of us share. A guard that reads shared live data
+  // and calls somebody else's in-flight row a fault is a guard that cries wolf; the thing this row
+  // is actually for is "did T20 leave anything behind?", and T20's marks all say so.
+  const stray = j.restaurants.filter((r) => r.plan && /zz-t20|t20-probe/i.test(r.plan)).map((r) => `${r.name}: ${r.plan}`);
+  return stray.length === 0 || `this run left a value on a plan: ${stray.join(", ")} (rupee total ${rupees})`;
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
