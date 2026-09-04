@@ -166,7 +166,17 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
     const [y, m] = month.split("-").map(Number);
     setMonth(new Date(Date.UTC(y, m - 1 + dir, 1)).toISOString().slice(0, 7));
   };
-  const monthLabel = new Date(month + "-01").toLocaleString("en-IN", { month: "long", year: "numeric" });
+  // ── THE MONTH HEADING IS INDIA TIME TOO (sweep 8 · T16, 2026-09-04) ────────────────────────────
+  // `new Date("2026-09-01")` is parsed as UTC midnight, and `toLocaleString` with no `timeZone`
+  // renders it in whatever zone the DEVICE is set to. MEASURED with `TZ=America/New_York`: the
+  // September month reads **"August 2026"**, and because the tile label is built from this same
+  // string (`monthLabel.split(" ")[0]`) the card above it reads **"Bought (August)"** over
+  // September's figures — a wrong month printed on top of the right money.
+  // Every other date on this screen is already pinned (`shortDate` two blocks up sends
+  // `timeZone: IST`, and so does the whole rest of the panel); this one heading was not, so the
+  // fault is invisible on the owner's own phone in India and appears the moment the app is opened
+  // from anywhere west of UTC.
+  const monthLabel = new Date(month + "-01").toLocaleString("en-IN", { month: "long", year: "numeric", timeZone: IST });
   const s = data?.summary;
 
   return (

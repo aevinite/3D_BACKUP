@@ -541,6 +541,20 @@ const RULES = [
       /Math\.max\(0, Math\.round\(\(Date\.now\(\) - new Date\(iso\)\.getTime\(\)\)/,
     ],
   },
+  {
+    item: "s8·T16·3", file: INV_UI,
+    say: "the month heading is read in India time, like every other date on the screen",
+    must: [
+      // The heading and the tile label both come from this one expression, so it names IST once.
+      /monthLabel = new Date\(month \+ "-01"\)\.toLocaleString\("en-IN", \{ month: "long", year: "numeric", timeZone: IST \}\)/,
+    ],
+    mustNot: [
+      // Without a timeZone this parses as UTC midnight and renders in the DEVICE's zone: on any
+      // clock west of UTC the September heading reads "August", and the tile beside it reads
+      // "Bought (August)" over September's money.
+      /new Date\(month \+ "-01"\)\.toLocaleString\("en-IN", \{ month: "long", year: "numeric" \}\)/,
+    ],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
