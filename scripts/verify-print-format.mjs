@@ -250,6 +250,56 @@ const buildBill = (sub, disc, rate, comps) => {
     taxRows: BILLDOC.splitTax(Math.round(tax), comps),
   });
 };
+
+// ── A COMPONENT THAT COLLECTED SOMETHING NEVER PRINTS ₹0 (owner's call, 2026-09-04) ──────────
+// A ₹19 chai at 5% is 95 paise of tax → ₹1 on the total, and ₹1 cannot be split into two whole
+// rupees, so the paper printed "CGST 2.5% ₹1 / SGST 2.5% ₹0". The column footed, which is why it
+// went unnoticed for the life of the feature; a tax invoice naming a component that collected
+// nothing is still wrong to a customer and to an inspector.
+//
+// PINNED IN BOTH DIRECTIONS, because every alternative breaks a decision he has already made:
+// rounding both up prints ₹2 on ₹1 collected, and dropping the empty line shows a two-part tax with
+// one part. So: paise on that block only, and the block must still foot exactly.
+{
+  const CGx = [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }];
+  const foots = (rows, t) => Math.abs(rows.reduce((a, r) => a + Number(r.amt), 0) - t) < 1e-9;
+
+  const one = BILLDOC.splitTax(1, CGx);
+  if (one.every((r) => Number(r.amt) > 0)) ok("₹1 of tax splits with NO ₹0 component");
+  else bad("₹1 of tax still prints a ₹0 component", JSON.stringify(one));
+  if (foots(one, 1)) ok("…and that block still foots to exactly ₹1");
+  else bad("a paise block no longer foots to its tax", JSON.stringify(one));
+  if (one.every((r) => Number(r.amt) <= 1)) ok("…and neither half was rounded UP past the tax collected");
+  else bad("a component now claims more tax than was collected", JSON.stringify(one));
+
+  // THE PART THAT MATTERS MOST: an ordinary bill must be untouched, to the paisa.
+  let moved = 0, unfooted = 0;
+  for (let t = 2; t <= 5000; t++) {
+    const rows = BILLDOC.splitTax(t, CGx);
+    if (rows.some((r) => r.paise)) moved++;
+    if (!foots(rows, t)) unfooted++;
+  }
+  if (!moved) ok("…and no tax from ₹2 to ₹5000 takes the paise path — an ordinary bill is unchanged");
+  else bad(`${moved} ordinary bills changed shape`, "the paise form must only appear where whole rupees cannot represent the split");
+  if (!unfooted) ok("…and every one of those 4,999 blocks foots exactly");
+  else bad(`${unfooted} blocks do not foot`, "the printed tax lines must add up to the tax on the total");
+
+  // three components, and a single one, at the same unrepresentable ₹1
+  const three = BILLDOC.splitTax(1, [{ label: "A", rate: 1 }, { label: "B", rate: 1 }, { label: "C", rate: 1 }]);
+  if (three.every((r) => Number(r.amt) > 0) && foots(three, 1)) ok("three components share ₹1 with none at zero, and still foot");
+  else bad("three components at ₹1 broke", JSON.stringify(three));
+  const solo = BILLDOC.splitTax(1, [{ label: "IGST", rate: 5 }]);
+  if (solo.length === 1 && Number(solo[0].amt) === 1 && !solo[0].paise) ok("a single component keeps whole rupees — there is nothing to share");
+  else bad("a single component took the paise path for no reason", JSON.stringify(solo));
+
+  // and the PAPER says it, not just the numbers
+  const html = BILLDOC.billDocHtml({ name: "T", lines: [{ title: "Chai", qty: 1, price: 19 }],
+    subtotal: 19, discount: 0, taxable: 19, total: 20, taxRows: one });
+  const printed = [...String(html).matchAll(/<div class="t"><span>((?:CGST|SGST)[^<]*)<\/span><span>([^<]*)<\/span><\/div>/g)].map((m) => m[2]);
+  if (printed.length === 2 && !printed.includes("\u20b90")) ok(`the printed chai bill shows ${printed.join(" + ")} — no ₹0 line`);
+  else bad("the printed bill still has a ₹0 tax line", JSON.stringify(printed));
+}
+
 const CG = [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }];
 const HOTEL = [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }];
 const sweeps = [

@@ -103,9 +103,43 @@
     // and callable on its own, and the amounts it hands out are printed as GST.
     var list = ((comps && comps.length) ? comps : []).filter(function (c) { return (Number(c && c.rate) || 0) > 0; });
     var sum = list.reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0) || 1;
+
+    /* A COMPONENT THAT COLLECTED SOMETHING MUST NOT PRINT ₹0 (owner's call, 2026-09-04).
+       A ₹19 chai at 5% is 95 paise of tax. That rounds to ₹1 on the total, and ₹1 cannot be split
+       into two whole rupees — so the remainder rule below printed "CGST 2.5% ₹1 / SGST 2.5% ₹0".
+       The column footed correctly, which is why nothing caught it, but a tax invoice naming a
+       component that collected nothing is wrong to a customer and to an inspector.
+
+       NO ALLOCATION RULE FIXES THIS: whatever order you round in, ₹1 shared between two equal
+       components cannot give both a positive whole rupee. The amount is simply not representable in
+       the unit the sheet prints. So when — and ONLY when — that happens, this block is printed in
+       PAISE instead: 0.50 + 0.50, which names both parts, foots to the same ₹1 on the total, and
+       overstates nothing. Rounding both UP was refused: ₹2 printed on ₹1 collected is the exact
+       thing this function was written to prevent.
+
+       It cannot touch an ordinary bill. Every bill whose components each round to a whole rupee
+       takes the same path it always did, byte for byte — the paise form needs a total tax under
+       about ₹1.50, i.e. roughly a ₹30 bill at 5%. A tea counter sees it; a restaurant never does. */
+    var wholeRun = 0;
+    var whole = list.map(function (c, i) {
+      var amt = i === list.length - 1 ? (taxWhole - wholeRun) : Math.round(taxWhole * ((Number(c.rate) || 0) / sum));
+      wholeRun += amt;
+      return amt;
+    });
+    var exact = list.map(function (c) { return taxWhole * ((Number(c.rate) || 0) / sum); });
+    var needPaise = whole.some(function (amt, i) { return amt <= 0 && exact[i] > 0; });
+    if (needPaise) {
+      var p2 = function (n) { return Math.round((Number(n) || 0) * 100) / 100; };
+      var pRun = 0;
+      return list.map(function (c, i) {
+        var amt = i === list.length - 1 ? p2(taxWhole - pRun) : p2(exact[i]);
+        pRun = p2(pRun + amt);
+        return { label: c.label, rate: c.rate, amt: amt, paise: true };
+      });
+    }
     var run = 0;
     return list.map(function (c, i) {
-      var amt = i === list.length - 1 ? (taxWhole - run) : Math.round(taxWhole * ((Number(c.rate) || 0) / sum));
+      var amt = whole[i];
       run += amt;
       return { label: c.label, rate: c.rate, amt: amt };
     });
@@ -253,7 +287,10 @@
        a paisa. */
     var discount = Math.min(Math.max(0, Math.round(disc)), Math.max(0, subtotalShown));
     var taxable = Math.max(0, subtotalShown - discount);
-    var tax = (d.taxRows || []).reduce(function (a, c) { return a + (Math.round(Number(c.amt)) || 0); }, 0);
+    // SUM THEN ROUND, not round-then-sum. Identical for every whole-rupee bill (rounding an integer
+    // changes nothing), and it is what keeps a paise block footing: 0.50 + 0.50 must read as ₹1, not
+    // as ₹1 + ₹1 = ₹2, which is what per-row rounding would have made of it.
+    var tax = Math.round((d.taxRows || []).reduce(function (a, c) { return a + (Number(c.amt) || 0); }, 0));
     var total = Math.round(parseFloat(d.total) || 0);
     // What the rows above the TOTAL actually add up to, in the order a person reads them.
     // Non-inclusive keeps a "Taxable value" restatement when there is a discount; inclusive has
@@ -326,7 +363,18 @@
 
     var money = function (list) {
       return (list || []).map(function (c) {
-        return '<div class="t"><span>' + esc(c.label) + " " + c.rate + '%</span><span>' + inr(c.amt) + "</span></div>";
+        // inr() ROUNDS, so a paise row printed through it would say ₹1 on both halves and foot to
+        // ₹2 — the fault this fix exists to avoid, reintroduced one line later. A row only prints
+        // paise when splitTax says it must (see its note on the ₹0 component).
+        var shown = c.paise ? "₹" + (Math.round((Number(c.amt) || 0) * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : inr(c.amt);
+        /* THE RATE WAS PRINTED RAW, and it is on a tax invoice. `c.rate` went straight into the
+           string, so a component with no rate configured printed "CGST undefined% ₹0" and a NaN one
+           "CGST NaN% ₹0" — beside a figure the same row had already sanitised to ₹0 through inr().
+           Every other number on this sheet goes through a formatter; this one did not. Same rule as
+           the banquet sheet's bqRate(): no decimal on a whole rate, one where it is needed. */
+        var rateNum = Number(c.rate);
+        var rateTxt = Number.isFinite(rateNum) ? (rateNum % 1 === 0 ? rateNum.toFixed(0) : String(Math.round(rateNum * 100) / 100)) : "";
+        return '<div class="t"><span>' + esc(c.label) + (rateTxt ? " " + rateTxt + "%" : "") + '</span><span>' + shown + "</span></div>";
       }).join("");
     };
     var taxRows = money(d.taxRows);
@@ -871,7 +919,14 @@
     r = r || {};   // one bad line must not cost the whole ticket — see the note in billDocHtml
     var opts = Array.isArray(r.options) ? r.options.map(function (x) { return typeof x === "string" ? x : ((x && x.label) || ""); }).filter(Boolean).join(", ") : "";
     var rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
-    return '<div class="kl"><span class="q">' + (r.qty || 1) + '×</span><span class="n">' + esc(r.title || "")
+    /* THE QUANTITY IS WHAT A COOK COOKS BY, and it went onto the paper unformatted: `(r.qty || 1)`
+       passes a number straight through, so anything that is not one prints itself — an object came
+       out as "[object Object]×". `|| 1` already admits the field can arrive missing; it just did not
+       finish the thought. A quantity that cannot be read as a number is shown as 1, which is what
+       the `|| 1` intended and is the only safe guess on a kitchen ticket. */
+    var qtyNum = Number(r.qty);
+    var qtyTxt = Number.isFinite(qtyNum) && qtyNum > 0 ? String(qtyNum) : "1";
+    return '<div class="kl"><span class="q">' + qtyTxt + '×</span><span class="n">' + esc(r.title || "")
       + (opts ? " <i>(" + esc(opts) + ")</i>" : "")
       + (rem ? " <i>— no " + esc(rem) + "</i>" : "")
       /* the whole-table note prints once, above the dishes — see sharedKotNote */
@@ -912,6 +967,20 @@
       if (n !== first) return "";
     }
     return first;
+  }
+
+  /* THE TICKET'S OWN NUMBER, GUARDED — because the SCREEN already guards it and the PAPER did not.
+     `String(o.kot)` printed "KOT #undefined" for an undefined number and "KOT #NaN" for a NaN one,
+     on the sheet a cook works from. Neither is hypothetical: kot_no is nullable (a ticket queued for
+     an order whose number was never drawn), and billdoc is also called directly with hand-built
+     figures by lib/billPreview.ts, the admin preview and lib/auditDetail.ts. The kitchen panel has
+     used `o.kot_no ?? "—"` for both its boards all along, so this is the paper catching up with the
+     screen rather than a new idea. */
+  function kotNoText(v) {
+    if (v === null || v === undefined || v === "") return "—";
+    if (typeof v === "number" && !Number.isFinite(v)) return "—";
+    if (typeof v === "object") return "—";
+    return String(v);
   }
 
   function kotDocHtml(o) {
@@ -963,7 +1032,7 @@
 // not free text, so every panel's reprint looks identical.
 + (o.reprint ? '      <div class="rp">*** Reprint · Duplicate ***</div>\n' : "")
 + '      <div class="h">' + esc(o.rname || "Kitchen") + "<br>" + esc(o.head || "KITCHEN TICKET") + "</div>\n"
-+ '      <div class="meta"><span>KOT #' + esc(String(o.kot)) + "</span><span>" + esc(o.tableLabel || "") + "</span></div>\n"
++ '      <div class="meta"><span>KOT #' + esc(kotNoText(o.kot)) + "</span><span>" + esc(o.tableLabel || "") + "</span></div>\n"
 + '      <div class="meta"><span>' + esc(o.when || "") + "</span></div>\n"
 + "      " + sharedHtml + "\n"
 + "      " + (linesHtml || "<div>(no items)</div>") + "\n"
@@ -1654,6 +1723,9 @@
   // The banquet sheet's own money formatters: 2dp with Indian grouping, and whole numbers.
   var bq2 = function (n) { return (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
   var bq0 = function (n) { return Math.round(Number(n) || 0).toLocaleString("en-IN"); };
+  // ONE RULE FOR A PERCENTAGE, the same one the money box has always used: no decimal on a whole
+  // rate, one where it is needed. 5 → "5", 2.5 → "2.5", never "2.50".
+  var bqRate = function (n) { var p = Math.round((Number(n) || 0) * 100) / 100; return p % 1 === 0 ? p.toFixed(0) : String(p); };
 
   // bqPaper(settings): the banquet sheet setup — A4/A5, margins, pad mode, the fill rows.
   function bqPaper(settings) {
@@ -1793,7 +1865,13 @@ function banquetDocHtml(a) {
   // 2026-08-05 (see dateStr in billData) and this sheet was left behind — on the product's
   // largest-value document, headed "Tax Invoice", whose date decides which GST period the sale
   // falls in. One time zone everywhere, like the money and the logs.
-  const dstr = when.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }).replace(/\//g, "-");
+  // ONE DATE FORMAT ON ONE SHEET (2026-09-04). This alone stripped the slashes to dashes, so the
+  // sheet printed "Dated 16-08-2026" at the top and "UPI PAY DT.01/08/2026" plus
+  // "Function: Reception · 20/08/2026" in the terms box — two formats on the largest-value document
+  // this product prints. Slashes win because they are what the sheet's OTHER dates already use
+  // (bqDay, below) and what the tax invoice's own dateStr uses, so the whole product now agrees
+  // rather than just this file.
+  const dstr = when.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" });
   const tstr = when.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }).toUpperCase().replace(" ", "");
   const sub = Number(b.subtotal) || 0, disc = Number(b.discount) || 0;
   const taxAmt = Number(b.tax) || 0, total = Number(b.total) || 0;
@@ -1953,7 +2031,10 @@ function banquetDocHtml(a) {
   const rows = L.map((l, i) => {
     const nameCell = `<td class="n">${esc(l.title)}</td>`;
     if (!b2b) return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.gross)}</td></tr>`;
-    const tds = taxRows.map((c, ci) => `<td class="c">${bq2(c.rate)}%</td><td class="r">${bq2(colTax[ci][i])}</td>`).join("");
+    // A RATE IS NOT MONEY, so it is not formatted like money (2026-09-04). bq2() is the 2-decimal
+    // MONEY formatter, and using it on the rate printed "2.50%" in this column while the money box
+    // three inches away printed "2.5%" for the same tax. bqRate() is the money box's own rule.
+    const tds = taxRows.map((c, ci) => `<td class="c">${bqRate(c.rate)}%</td><td class="r">${bq2(colTax[ci][i])}</td>`).join("");
     return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.taxable)}</td>${tds}</tr>`;
   }).join("");
   const fillN = P.fill ? Math.max(0, (isA4 ? 12 : 6) - L.length) : 0;

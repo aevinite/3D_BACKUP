@@ -121,6 +121,7 @@
     "verify:plain-refusals": "node scripts/verify-plain-refusals.mjs",
     "verify:log-visibility": "node scripts/verify-log-visibility.mjs",
     "verify:bills-screen": "node scripts/verify-bills-screen.mjs",
+    "verify:print-documents": "node scripts/verify-print-documents.mjs",
     "verify:print-format": "node scripts/verify-print-format.mjs",
     "verify:print-queue": "node scripts/verify-print-queue.mjs",
     "verify:print-helper": "node scripts/verify-print-helper.mjs",

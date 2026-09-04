@@ -79,6 +79,16 @@ const mac = (a: HelperScriptArgs) => `#!/bin/zsh
 # Leave this running. It has no window and prints nothing by itself; it only does what the
 # restaurant's own address book tells it to.
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  THE ONE LINE YOU MAY CHANGE — and nothing else in this file.
+#
+#   SITE   the web address this helper talks to. Change it to point this same
+#          file at a different site (a test site, a new address) without
+#          remaking it. Keep the https:// and no trailing slash.
+#
+#  Everything below is machinery. If it stops working after an edit, the edit
+#  is the reason.
+# ══════════════════════════════════════════════════════════════════════════════
 SITE="${safe(a.origin)}"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 WORK="$HOME/Library/Caches/aevidine-print"
@@ -347,11 +357,36 @@ done
 // Owner, 2026-08-27, on why this mattered: he was typing paper sizes by hand for every Windows
 // printer, and the paper size is the setting that decides whether a slip prints sideways or at half
 // size. Asking a restaurant to know its own millimetres was always the wrong question.
+// ⚠️ A KNOWN, WRITTEN LIMIT: WINDOWS DOES NOT FOLLOW THE JOB TO COMPLETION.
+//
+// On mac and linux this helper waits for the job to LEAVE the print queue before it reports back,
+// because a print command returns success with the printer unplugged (measured, 2026-08). The
+// Windows branch below has no way to do that here: it trusts the PDF program's exit code, so on
+// Windows the queue's one promise — "nothing says printed unless paper came out" — is not kept, and
+// a ticket can be marked printed with no paper and never come back.
+//
+// IT IS NOT FIXED HERE ON PURPOSE. The fix belongs in the path that decides whether a ticket is
+// reprinted, i.e. paper and money, and there is no Windows machine with a printer on this side to
+// watch it work. Writing it blind and shipping it is the trade this project refuses. What it needs:
+// a Windows PC with a real printer, then follow the job with Get-PrintJob (or wmic printjob) exactly
+// as the other two follow theirs, and retry-and-report on failure instead of recording done.
+//
+// verify:print-documents reads this note and SKIPS rather than passing, so the gap stays visible.
 const windows = (a: HelperScriptArgs) => `@echo off
 REM Aevidine print helper${a.label ? " — " + safe(a.label) : ""}
 REM Leave this running. It has no window of its own and prints nothing by itself.
 setlocal enabledelayedexpansion
 
+REM ══════════════════════════════════════════════════════════════════════════════
+REM  THE ONE LINE YOU MAY CHANGE — and nothing else in this file.
+REM
+REM   SITE   the web address this helper talks to. Change it to point this same
+REM          file at a different site (a test site, a new address) without
+REM          remaking it. Keep the https:// and no trailing slash.
+REM
+REM  Everything below is machinery. If it stops working after an edit, the edit
+REM  is the reason.
+REM ══════════════════════════════════════════════════════════════════════════════
 set "SITE=${safe(a.origin)}"
 set "WORK=%LOCALAPPDATA%\\AevidinePrintHelper"
 set "LOG=%WORK%\\helper.log"
@@ -573,6 +608,16 @@ goto work
 // ── Linux / Raspberry Pi ─────────────────────────────────────────────────────────────────────
 const linux = (a: HelperScriptArgs) => `#!/bin/sh
 # Aevidine print helper${a.label ? " — " + safe(a.label) : ""}
+# ══════════════════════════════════════════════════════════════════════════════
+#  THE ONE LINE YOU MAY CHANGE — and nothing else in this file.
+#
+#   SITE   the web address this helper talks to. Change it to point this same
+#          file at a different site (a test site, a new address) without
+#          remaking it. Keep the https:// and no trailing slash.
+#
+#  Everything below is machinery. If it stops working after an edit, the edit
+#  is the reason.
+# ══════════════════════════════════════════════════════════════════════════════
 SITE="${safe(a.origin)}"
 WORK="$HOME/.cache/aevidine-print"; LOG="$WORK/helper.log"; mkdir -p "$WORK"
 HOME_DIR="$HOME/.aevidine-print"; TOKEN_FILE="$HOME_DIR/token"; LOCK="$HOME_DIR/running.pid"

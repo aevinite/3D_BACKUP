@@ -9,7 +9,7 @@
 //
 // It is the ADMIN's screen because printing is hardware: which computers may print, and what each
 // prints, is granted, not chosen by the restaurant. The owner is shown only what is allowed (R36).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
@@ -17,7 +17,7 @@ import { SkelList } from "@/components/admin/Skeleton";
 // THE WORDS ARE SHARED WITH THE RESTAURANT'S OWN SCREEN (owner, 2026-08-27: "the UI/UX is also not
 // identical"). Four steps, three kinds of paper, one sentence each — declared once in
 // lib/printBoardWords.ts and printed verbatim by both boards, so they cannot drift apart again.
-import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, papersFor, PAPER_ELSEWHERE, paperLabel } from "@/lib/printBoardWords";
+import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, paperLabel } from "@/lib/printBoardWords";
 
 type Rest = { id: string; slug: string; name: string };
 type Paper = { name?: string; wMm: number; hMm: number };
@@ -250,7 +250,6 @@ const PANEL_GROUPS: [ string, string ][] = [
 
   const rest = rests.find((r) => r.id === rid);
   const agents = st?.agents || [];
-  const byId = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
   const post = async (path: string, body: Record<string, unknown>) => {
     setBusy(path);
@@ -263,15 +262,6 @@ const PANEL_GROUPS: [ string, string ][] = [
   };
 
 
-  const saveRoute = async (kind: string) => {
-    const r = draft[kind] || {};
-    const d = await post("routes", { routes: { [kind]: {
-      via: r.via || (r.agent ? "computer" : undefined),
-      agent: r.agent, printer: r.printer, paper: r.paper,
-      panel: r.panel, person: r.person, device: r.device,
-    } } });
-    if (d) { toast(`${KIND_LABEL[kind] || kind} saved.`, "ok"); void load(); }
-  };
 
   // THE ONE TOGGLE'S VALUE. Read from the server, never guessed from the routes — the board has to
 
@@ -344,8 +334,13 @@ const PANEL_GROUPS: [ string, string ][] = [
     if (d) { toast("Saved.", "ok"); void load(); }
   };
 
-  const setR = (kind: string, patch: Partial<Route>) =>
-    setDraft((d) => ({ ...d, [kind]: { ...(d[kind] || { agent: null, printer: null }), ...patch } }));
+  // THE SAVE-BUTTON MACHINERY IS GONE (owner's standing rule: a new way replaces the old one).
+  // When this screen became ONE DROPDOWN PER PAPER that saves on change, six things were left behind
+  // and every one of them still type-checked: `saveRoute` (the Save handler), `setR` (the draft
+  // mutator it needed), `byId` (an agent lookup only it used) and the three paper-preset imports
+  // `PAPER_PRESETS` / `papersFor` / `PAPER_ELSEWHERE` — the paper size is read off the machine now,
+  // never picked from a list. Do not reintroduce a Save button here: a dropdown whose options ARE the
+  // answers has nothing left to confirm, which is the whole reason he asked for it.
 
   const copy = async (text: string) => {
     try { await navigator.clipboard.writeText(text); toast("Copied.", "ok"); }
