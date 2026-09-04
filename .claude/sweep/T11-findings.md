@@ -1,312 +1,68 @@
-# T11 findings — the owner's reports & charts (sweep #7, 2026-08-27)
+# T11 of sweep #8 — printing, the bill document and the numbers on it
 
-Branch `sweep7/t11-owner-reports` · worktree `../wt-s7-t11` · port **4211, a PRODUCTION build**
-(`npm run build` + `next start`, not a dev server — see F0). Restaurant read: **French House**.
-**Nothing was written to any restaurant.** Aangan untouched. Every check is a READ.
+**Branch** `sweep8/t11-printing-and-the-bill-document` · **worktree** `../wt-s8-t11` · **port** 4311
+**Ledger** `LEDGER/T8.md` sections A–J, re-run in place · `LEDGER/T11.md`, 531 new rows
+**Ran** 2026-09-04 against `origin/main` 7c154754
 
-Ledger: `.claude/sweep/LEDGER/T11.md` — all 500 sweep-#6 rows re-run in place, plus 500 new rows
-`P20101`–`P20600`. **No regression.** Six problems found, all six fixed on this branch, each its own
-commit with its item number in the message.
+Every item below is one commit, with its number in the message, so any single one can be dropped
+without unpicking the rest. The four-part report went to the terminal window, as sweep #8 requires.
 
----
+## Re-run first: no regressions
 
-## F0 · The method note that has to come first
+297 inherited rows re-executed BY ID (not re-read): **295 ✅ · 0 ❌ · 2 ⏭.**
+Plus `verify:printing-sweep` 490 phases (486 ✅ · 0 ❌ · 4 ⏭, the four need real CUPS virtual
+printers) and six print guards green. **This territory had no regressions.**
 
-A dev server **never hydrates with the network cut** — the page is a dead SSR snapshot. My first
-offline pass on `npm run dev` therefore "found" a screen with no React at all, and it would have been
-filed as a product fault. Every offline row in this sweep was re-driven against a real production
-build before anything was believed. `public/sw.js` says so in its own comment ("Dev gets network-first
-for everything"); it costs one `npm run build` to obey it.
+## Found and fixed — 13
 
----
-
-## Item 1 · On a phone, the buttons you MOVE with were still small — FIXED
-
-`components/owner/reports/kit.tsx`. The 2026-08-18 pass raised the control strip to 44px and stopped.
-Re-measured on an A35 (360×780), every screen, both skins: `← All reports` **23px** (the only way back
-to the hub), the sub-tab strip **34px**, the day sheet's `Full report →` **22px**, the overlay ✕
-**32px** — under a row of 44px buttons. Nothing was broken; the taps land. It is consistency.
-Raised the four NAVIGATION controls only. The in-chart Bar/Line pill (22px) and the Items
-By revenue / By quantity pill (38px) are deliberately left for the owner — 44px there adds ~26px to
-every chart card on a 780px phone, which is a look decision. Desktop re-measured unchanged (23/34/34).
-Guard: `verify:owner-reports` → "…and so are the controls you MOVE with".
-
-## Item 2 · The Payments report said "1 bills settled" — FIXED
-
-`app/owner/reports/page.tsx`. TOTAL COLLECTED read "1 bills settled" and TOP METHOD "· 1 bills" on any
-period settled by a single bill, while the day sheet's settlement rows one click away read "1 bill".
-The 2026-08-17 pass fixed the same fault on the Busy-times and Times-of-day tiles — it was written for
-the word *orders*, and these two say *bills*. Verified on the rendered screen with the payload held to
-one bill (client side only, nothing written): "1 bill settled".
-
-## Item 3 · The guard that should have caught item 2 watched one word — FIXED
-
-`scripts/verify-owner-reports.mjs`. "no count on the Reports page is followed by a bare 'orders'" now
-has a sibling covering every plural this file counts (orders, bills, days, people, payments, items,
-dishes, months, hours).
-
-## Item 4 · The day sheet's settlement was a DIFFERENT DAY from its own total — FIXED (migration 367)
-
-**The big one.** `supabase/migrations/367_the_settlement_reads_the_same_day_the_money_does.sql`.
-
-A restaurant's day runs 05:00 → 05:00 IST and the whole console agrees. But `orders_daily_agg.day` is
-the IST **calendar** date (mig 190), so the rollup cannot answer a 05:00 window.
-`lfh_owner_sales_report` fences exactly this (rollup only on a month bucket), which is why the day
-sheet's MONEY was right. `lfh_owner_payment_breakdown` had **no fence at all**, so the Settlement panel
-underneath that money silently answered for the calendar day.
-
-Measured on French House, forced recompute each time:
-
-| business day | Total collected tile | Settlement panel | the calendar day |
-|---|---|---|---|
-| 20 Aug | ₹12,558 (13 bills) | ₹9,660 (10) | ₹9,660 (10) |
-| 21 Aug | ₹31,773 (31) | ₹5,796 (6) | ₹5,796 (6) |
-| 22 Aug | ₹94,952 (118) | ₹1,23,386 (145) | ₹1,23,386 (145) |
-| 23 Aug | ₹0 (0) | ₹441 (1) | ₹441 (1) |
-
-The Settlement column is the calendar day **exactly**, all four — that is the mechanism, not a
-coincidence. 23 Aug read worst on screen: a ₹0 sheet with Cash ₹441 listed under it. Today always
-agreed, because today is past the rollup watermark and answered by the live tail — which is why this
-never showed on the day you were looking at while it happened.
-
-Also reached **Reports → Payments on Today / Yesterday** and the **Dashboard's payment-method card**:
-one function, three screens.
-
-After: all four agree to the rupee AND to the bill count. On screen, 22 Aug reads ₹94,952 in the tile,
-₹94,952 at the foot of the money-flow lines and ₹94,952 at the foot of the settlement, over
-90 + 27 + 1 = 118 bills. Every IST-midnight window (7d, 30d, this/last month, 12m, FY, all time, every
-custom range) still reads the rollup, re-verified unchanged. Not one stored bill is rewritten.
-Guards: three new checks in `verify:owner-reports` T11-C.
-
-## Item 5 · The downloaded Payments file listed Cash twice — FIXED
-
-`components/owner/reports/sectionExport.tsx`. The CSV/Excel/Print file carried
-`Cash,274,316864` and `Cash,2,525` two lines apart, where the screen shows one row of ₹3,17,389.
-French House really stores both "Cash" and "cash"; the screen merges, the export ran the raw rows
-through `canonPayMethod` for the **label** and stopped — the exact bug fixed on screen on 2026-08-17,
-still in the file. The totals always reconciled, which is why it survived. The file now also carries
-the % share, the average bill and a Total row, so it is the same report as the screen.
-Guard: four checks in a new `verify:owner-reports` T11-F section.
-
-## Item 6 · With no internet, Reports said the restaurant took ₹0 — FIXED
-
-`app/owner/reports/page.tsx`. On a production build with the network cut, the hub printed
-**₹0 · NET SALES ₹0 · PAID BILLS 0 · AVG BILL ₹0 · GST ₹0 · DISCOUNTS ₹0**, headed
-"ALL RESTAURANTS", with the chart explaining *"Not enough data yet — a trend needs activity on more
-than one point in this period, come back once there's a bit more."* That sentence is about the
-RESTAURANT and it was false. The only admission was "— couldn't load" at the end of a caption.
-
-The real answer — ₹13,42,142 — was in that tab's own storage the whole time. The scope comes from
-`/api/owner/overview`; offline that answers `{ error: "offline" }`, so the restaurant list came back
-empty and the scope stayed blank — and **every cache key on this page carries the restaurant id**. The
-page looked for the figures of "no restaurant".
-
-Fixed by falling back to the scope (and the name) this device last saw, **only** when the restaurant
-list cannot be read — so the owner's "Reports always opens on All restaurants" rule is untouched on a
-good connection. **No second warning bar**: the app's own offline notice was already on screen; a first
-draft added one and there were two bars saying one thing.
-
-After, offline: headline ₹13,42,142, all five tiles real, "MY LITTLE FRENCH HOUSE · 30 DAYS", the chart
-draws, one amber bar, and opening Sales from the hub gives the full report with all 26 rows of the
-by-period table. Online: unchanged.
-Guard: four checks in a new `verify:owner-reports` T11-G section.
-
----
-
-## HANDOFF · not mine to fix, and it is real
-
-**The manager's Z-report calls a Cash bill "Not recorded".** `app/api/editor/[...path]/route.ts`
-(T10's territory). Its day-close query is
-
-```
-.select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,status,payment_status,tip")
-```
-
-— **`payment_method` is not in the list**, and the code below reads `o.payment_method` five times. So
-every bill not settled in parts is labelled "Not recorded" in the till count, and
-`onHouseCount`/`onHouseNet` are permanently 0 (which also means an on-the-house bill falls into
-`paidCount`/`paidNet` — reasoned from the code, not measured, because no on-the-house bill fell on the
-business day I could observe).
-
-**Measured, same business day, same window** (`since` = 2026-08-25T23:30Z = 05:00 IST):
-manager Z-report **"Not recorded" ₹1,932 / 4 bills** · owner day sheet **"Cash" ₹1,932 / 4 bills**.
-The money and the count agree; the NAME does not. For a manager counting the till at close, "Not
-recorded" means "nobody wrote down how this was paid" — an action item that is not real.
-
-One line to fix. It belongs to whoever owns `app/api/editor/**`.
-
----
-
-## Withdrawn, recorded so nobody re-files it
-
-- **"The owner Dashboard is ₹25 lakh above Reports on all time."** It is not. That was a **stale
-  analytics snapshot on my own side**. Forcing a live recompute on both sides gives ₹1,70,52,368.35 on
-  both, and they match on all seven ranges I checked. A cross-panel money comparison MUST pass
-  `refresh=1` to both sides or it is comparing two clocks.
-- **"An inverted custom range invents money."** `windowFor()` documents "bad input falls back to the
-  last 30 days", and the page refuses to fetch an inverted range at all (`customOk`). Deliberate,
-  unreachable from the UI.
-- **"The Payments table's swatch does not match the donut."** The donut deliberately drops a method
-  that collected ₹0 (a zero-width wedge is not a slice). Every method with money in it matches.
-- **"Browser Back does not close the Cancellations overlay."** It does. A **deep link** opens the
-  report and the overlay in one commit, so one Back closes both — and the person-path (Payments →
-  the Cancellations box → Back) closes the overlay and leaves the report open, verified.
-
----
-
-# THE OWNER'S FOLLOW-UP — 2026-08-30
-
-He read the report and answered: *"for the fifth with no internet, you can just say there is no
-internet or if it was loaded previously you can show the previously and write a note on the top. The
-internet is not available. This is not the current data. You can do number seven, you can do number
-nine and I give you permission for number 10."*
-
-**Item 5 — reshaped to his sentence.** The note is now the first element on the Reports page and says
-which of the two situations he is in: *"The internet is not available. This is not the current data —
-these are the figures saved on this device, from 3 min ago."* or *"…Nothing has been saved on this
-device for this period yet, so there is nothing to show."* With nothing saved every figure is a DASH,
-not a ₹0, and the chart draws nothing rather than saying "Not enough data yet — come back once there's
-a bit more", which is a sentence about the restaurant and was untrue. **I had got this wrong the first
-time**: I removed my own note because the app's bar at the bottom already said something similar. His
-correction was right — that bar is about SAVING work, not about the figures, and it is at the bottom.
-
-**Item 7 — done.** The Bar/Line pill (22px) and the Items By-revenue/By-quantity pill (38px) are 44px
-on a phone. Exactly one tappable is left under 44px anywhere on Reports: the dish search box at 36px,
-a text field whose height is set in another component's own styles.
-
-**Item 9 — done, with his permission to touch the manager panel's file.** One column added to the
-Z-report's day-close query. The till list names Cash / UPI / Card / Pay later where it previously said
-only "Not recorded", and bills settled in parts are now correctly left to their own payment legs.
-
-**Item 10 — both tests run, and both of this ledger's long-standing `⏭` rows are closed.**
-Each writes to French House and restores the exact prior value in a `finally` **and** on
-`SIGINT`/`SIGTERM`, then re-reads the row to prove it. Aangan untouched.
-- **Composition scheme (`P05191`)**: the Tax report shows the sentence and two tiles only — no
-  Effective-rate tile, no Taxable-sales tile, no zero-value CGST/SGST table.
-- **Entitlement flip (`P05482`)**: the Inventory card is absent → present → absent, and with the
-  module off the deep link refuses honestly (API 403, a plain sentence on screen, zero tiles, zero ₹,
-  zero rows).
-
-## Two things I found while doing them, and did NOT fix
-
-1. **The manager's till list can total more than the day's takings.** Same block as item 9, a
-   different bug. Measured in one moment: the till list totalled ₹14,301 while the day's takings were
-   ₹12,369. The legs loop adds every non-reversed payment leg with no check that the bill is PAID, so
-   a table that has part-paid and is still open is counted as money collected — I watched one do it
-   (session `7e261230`, three legs on an unpaid bill). Item 9's fix does not touch this and does not
-   make it worse: before the fix the skip could never fire at all. It needs its own decision.
-2. **`verify:ledger-index` is RED on `origin/main`, and it is not mine.** `T12.md` uses `P05992` and
-   `P40435` on two phase rows each. Proven pre-existing by re-running the guard with T11's file
-   replaced by `origin/main`'s copy. Not repaired here — this project's own rule is "never renumber
-   anyone else's". Noted in `INDEX.md` so the next terminal that sees it red does not lose an hour.
-
----
-
-# ROUND 2 — THE WHOLE TERRITORY, 2026-09-01
-
-He asked for a fresh 500 that "should contain every single bit of thing in the boundaries", after
-items 1–11 went live on backup. Round 1 covered the three files the prompt named; **round 2 covers
-all eleven files the Reports Studio is actually made of**, including the six under
-`components/owner/reports/` that no terminal's bullet has ever named (1,856 lines between them).
-
-**609 assertions executed against a production build, condensed into 500 numbered rows
-(`P49001`–`P49500`). All green. One problem found.**
-
-## Item 12 · Four reports downloaded a DIFFERENT report — FIXED
-
-Owner → Reports → Export → CSV / Excel / Print. The file was headed with the report you were
-looking at and filled with another one. Measured on 30 days, French House:
-
-| report | what the screen shows | what the file contained |
+| # | what was wrong | where a person would see it |
 |---|---|---|
-| Times of day | Morning / Afternoon / Evening / Late night | 24 hourly rows |
-| Day of week | Monday…Sunday, days counted, avg/day | dated by-period rows (3 Aug, 4 Aug…) |
-| Which dishes earn | Dish · **Group** · Sold · % units · Sales · % sales | the plain dish list, no grouping at all |
-| Average bill | …Total collected · **Avg bill** · Cancelled | the same table **without** the Avg bill column |
+| 1 | a discount under 50 paise printed **"Discount − ₹0"** over "Taxable value ₹200", and lost its percentage too. Reachable from the discount modal's own 5% option: 5% of a ₹9 chai is ₹0.45 | the guest's printed bill |
+| 2 | the screen's first sentence said "the toggle below picks one" — that toggle was deleted 2026-08-31 | Admin → Printing, the subheading |
+| 3 | three "go to step N" sentences named the wrong step; one sent you to the step you were reading | Admin → Printing, steps 2 and 3 |
+| 4 | a **green tick** claimed kitchen slips print while they were switched off, four rows above the grey line saying they do not | Admin → Printing → 4 · The kitchen screen |
+| 5 | the print log timestamped every job in the reader's clock, not the restaurant's | Admin → Printing → 5 · What has printed |
+| 6 | a **bill or banquet sheet that gave up after five tries told nobody** — no floor strip, no ping. Only kitchen slips did | manager's notification bell, and the owner's phone — by their absence |
+| 8 | the deleted backup printer still had a live sentence on the kitchen screen, off a field nothing ever set | kitchen screen → ☰ → 🖨 Printing |
+| 10 | the kitchen-printing record described **three controls that no longer exist**, and numbered its checklist 1,2,3,4,5,6,6 | `docs/KITCHEN-PRINT-SETUP.md` |
+| 11 | the page a RESTAURANT reads taught the same three deleted controls, as one of "four things that decide whether a ticket comes out" | `/print-setup.html` |
+| 12 | the **Windows helper could never install the PDF printer it needs** — a checksum compared a value cmd.exe expands before the block runs, so it always mismatched and deleted the download | a Windows shop: nothing prints, ever |
+| 13 | on Linux the helper reported **no paper size** and half the model name ("Zijiang", not "Zijiang ZJ-80") | Admin → Printing → step 3's dropdown |
+| 14 | the Windows and Linux print-station files had no one-at-a-time guard and wrote no log; Windows made a log folder it never used | a second Chrome raising itself in front of somebody's work |
+| 15 | at 360px the **↻ Refresh button sat entirely off screen** (381→480 in a 360px viewport) with no scroll to reach it | Admin → Printing on a phone |
 
-One cause: **the export branched on the payload SHAPE, and several reports share one.** By-hour and
-Times-of-day are both `hourly`; Day-of-week and Average-bill are both `money`. So the first report
-of each shape decided what everybody got, under everybody's heading. Nothing looked broken — proper
-title, real numbers, correct totals — which is why it survived every sweep so far.
+## Improvements — 4
 
-Fixed by telling the export which BODY is on screen, and by moving the groupings (`DAYPARTS`, the
-weekday names, the IST weekday helper) out of `page.tsx` and into `kit.tsx` so **one definition**
-feeds both the screen and the file. They were unreachable from the export before, which is precisely
-how the two came to describe different things.
+| # | what |
+|---|---|
+| 7 | `verify:printing-sweep` had the WRONG STEP NUMBER pinned inside it, so it stayed green over item 3 and only went red when item 3 fixed it. Re-pinned to the rule, plus a new phase that checks every "step N" against `printBoardWords.ts` |
+| 9 | `verify:print-helper` exempted `backupFor` "because a helper file already installed on a restaurant's PC reads that field". **No helper has ever read it** — `git log -S` over the whole history of the generated scripts is empty. The exemption was keeping a dead field alive on an unsourced premise |
+| 18 | `verify:printing-sweep` phase 187 failed on a WORD IN A COMMENT — the third time that phase has been too broad, by its own record. Narrowed to executable lines; sabotage-checked |
+| 19 | a harness (`scripts/sweep/t11/`) that makes 297 inherited rows and 531 new ones **re-runnable by id** — `--only P03506` — so the next sweep can converge instead of re-inventing |
 
-Verified by downloading all four and comparing row by row with the screen: Morning 714 / ₹1,00,334 /
-27.2% · Monday 2 / 69 / ₹39,312 / 10.7% / ₹19,656 · Pink Pineapple Smoothie / Star / 717 / 20.3% /
-₹2,10,156 / 57.0% · Avg bill ₹498 on 3 Aug — every one identical.
+## Reported, NOT fixed — 2, and both need a Windows machine
 
-Guard: a new `T11-I` section in `verify:owner-reports` (125 → 133 checks).
+- **16** — the Windows helper reports a ticket **PRINTED** when the printer is switched off: it trusts
+  SumatraPDF's exit code, while the Mac and Linux paths follow the CUPS job to completion (measured
+  and fixed there on 2026-08-20). Needs `Get-PrintJob` and a Windows machine to test.
+- **17** — the Windows print-station has no one-at-a-time guard. A batch file cannot hold a lock
+  across its own exit, so the honest guard is "is a Chrome already on this profile?" — untestable
+  from macOS.
 
-## What round 2 found NOT to be faults
+Ledger rows `P64784`, `P64787` and `P64762` report these rather than passing, each naming its item.
 
-- **`kit.tsx` says its CSS is "scoped to `.rs-root`" but really scopes by the `rs-` class prefix.**
-  Checked what that would actually break: no file outside the studio wears an `rs-` class, and the
-  one component that emits `rs-` markup from outside the folder (`Charts.tsx`) is only ever rendered
-  inside the Reports page. Loosely worded, correct in effect.
-- **The totals row disappears while a search is active in a long list.** Deliberate — a total of
-  everything under a filtered list would be a lie. Drove it: the row returns the moment the search
-  is cleared.
-- **A day-kind export's filename carries the date twice** (`day-summary-2026-08-31-2026-08-31`).
-  That is the period and the generated-on date, both of which belong in the name.
-- **The Times-of-day printed sheet is exactly one page.** It has four rows. A short report is short;
-  what matters is that it is not CLIPPED, and it is not.
+## Every fix left a guard behind
 
----
+`verify:print-paper` §3o (item 1, both directions, sabotage-checked) · `verify:printing-sweep`'s four
+new driven bill-parking phases (item 6) and its "every step N names the step that holds it" phase
+(items 3 and 7) · `verify:print-helper` block 8j, which walks both Windows templates for the
+same-block `%VAR%` class (item 12) · bank A's four DRIVEN printer-discovery rows (item 13) · bank D's
+scroller-aware 360px reachability row (item 15) · `verify:print-helper`'s replacement check for
+item 9. Every one was sabotage-tested: broken, seen to go red, restored, seen to go green.
 
-# ROUND 3 — RE-PLANNED FROM SCRATCH, 2026-09-01
+## What I did not cover, plainly
 
-He asked for a whole new 500 covering everything in the boundary, planned again rather than
-repeated. So it went at what rounds 1 and 2 had **not** reached: Inventory & stock's five views
-(449 lines no sweep had ever opened), the money and tax rules **executed** rather than read, every
-report across all nine periods, the export in **all three** formats, and the printed sheet for all
-17 screens.
-
-**607 assertions, 500 rows (`P51730`–`P52229`), all green at the end. One problem found.**
-
-## Item 17 · A settings change never reached the report — FIXED
-
-Owner → Reports → Tax / GST. Change your GST rate, edit a tax line, or move the restaurant to the
-composition scheme, and **the report kept showing the old configuration** — the old rate, the old
-CGST/SGST split, the old taxable base. On a document people file returns from.
-
-The snapshot cache's change-detectors ask "have the ORDERS moved?". They never asked "has the tax
-CONFIGURATION moved?" — and the Tax report is built from both. So `revalidate()` saw the same
-fingerprint, re-stamped the row's timestamp and returned **without recomputing**. On a quiet
-restaurant that holds the old rate indefinitely; only pressing Refresh cleared it.
-
-**Measured.** `price_tax_mode` read `excl` in the database while the cached report answered
-`composition = true · rate 0 · components 0`, and a forced read answered
-`composition = false · rate 5 · components 2`.
-
-This is the per-restaurant form of a scar already written down as *"the fingerprint watches data,
-not definitions"*. The global cache version cannot fix it, because the definition that moved belongs
-to one restaurant.
-
-Fixed by making both detectors carry the tax configuration, read through the **same**
-`TAX_SETTINGS_COLUMNS` the report itself is built from, sorted by restaurant id so a scope's member
-order cannot move the fingerprint on its own, and wrapped so a configuration that cannot be read
-never fails a request. It costs a few short columns on an indexed primary key, on the paths that
-already recompute — never on a plain cached read.
-
-Verified end to end: change the setting **without touching a single order**, and the report follows
-it — the composition flag, the rate and the CGST/SGST lines — while an unchanged window is still
-served from the snapshot rather than recomputed on every open.
-
-Guard: a new `T11-M` section in `verify:owner-reports` (146 → 150 checks).
-
-## The three faults round 3 caught in ITSELF
-
-Recorded because each one produced a convincing false failure:
-
-1. **A query parameter that does not exist.** `?open=inventory&sub=buy` looked like it picked a
-   sub-tab; there is no `&sub=` deep link. The first pass tested "On the shelf" five times and
-   reported four product failures. *Tap what a person taps.*
-2. **A toggle clicked twice.** The Export control opens and closes. Reading the menu and then
-   clicking an item closed it, so almost every download silently never happened — and it looked
-   exactly like a broken export.
-3. **A branch that never navigated.** The single-restaurant scope checks read whatever page the
-   previous section had left open. **Two of those three were passing on a page that could not have
-   failed them** — worth more than the one that went red.
+T8's sections K–N and its sweep-#7 block (`P03801`–`P03999`, `P18601`–`P19100`) were not re-executed
+row by row — they are the browser/screenshot/cross-panel/judgment rows. A lot of that ground was
+covered by driving the real app this run, but that is not the same as re-running those ids. They are
+the first thing for the next session to pick up.
