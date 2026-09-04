@@ -2478,7 +2478,10 @@ export default function OwnerDashboard() {
           .hq-scroll { overflow: visible; max-height: none; }
           .hq-table :global(thead) { display: none; }
           .hq-table, .hq-table :global(tbody), .hq-table :global(tr), .hq-table :global(td) { display: block; width: auto; }
-          .hq-table :global(tr.hq-row) { border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 10px 12px; margin: 0 12px 10px; }
+          /* position: relative so the visually-hidden rank cell below has a containing block
+             INSIDE this row. See the note on td.rk — without it that cell resolved against the
+             document and gave the whole page 388px of phantom scroll. */
+          .hq-table :global(tr.hq-row) { position: relative; border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 10px 12px; margin: 0 12px 10px; }
           .hq-table :global(tr.hq-row:hover) :global(td) { background: none; }
           /* label on the left, figure on the right — the shape a person reads a list of numbers in,
              and the one the tile popups on this same page already use. */
@@ -2487,6 +2490,22 @@ export default function OwnerDashboard() {
           /* the name line reads as the heading of its own block */
           .hq-table :global(td.l) { display: block; font-size: 15px; font-weight: 800; padding: 0 0 6px; text-align: left; }
           .hq-table :global(td.l) :global(.hq-nm) { max-width: 100%; }
+          /* ── AN ABSOLUTE WITH NO POSITIONED ANCESTOR IS POSITIONED AGAINST THE DOCUMENT
+             (T13 sweep, 2026-09-04) ───────────────────────────────────────────────────────────────
+             This is the visually-hidden pattern — keep the rank in the accessibility tree, take it
+             off the screen — and it was right to prefer it over display:none. But tr.hq-row had
+             no position, so the cell's containing block was the INITIAL one: the document. Its
+             static position sits partway down the estate list, so it stretched
+             documentElement.scrollHeight to 1168px against a 780px viewport.
+             What that looked like on a two-restaurant owner's phone, measured: the page could be
+             dragged 388px, which moves .adm — the whole panel — to top:-388. The top bar (the ☰,
+             the scope pill, Connected, the skin toggle, sign-out) went completely off screen, the
+             revenue card was cut off mid-chart, and the bottom half of the screen was blank black.
+             Nothing in the app calls window.scrollTo any more (that line was removed for the
+             scroll-memory work), so no code path was broken — a finger was all it took.
+             The row now carries position: relative, so the cell is confined to its own row and
+             the document goes back to exactly one viewport. Only inside this media query: above
+             760px the table is a real table and this rule never applies. */
           .hq-table :global(td.rk) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
           .hq-table :global(td.go) { display: none; }
           /* every figure says what it is — there is no header above it any more */
