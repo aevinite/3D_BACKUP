@@ -407,6 +407,13 @@ ok(/fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"/.test(REPAIR), 
 ok(/rows=\{3\}[\s\S]{0,400}?fontFamily: "inherit"/.test(REPAIR), "P71717",
   "repair: the 'Report a problem' box has lost fontFamily:inherit — it renders in the browser's monospace");
 
+// ── item 6 · "except 1 that haven't said" ─────────────────────────────────────────────────
+{
+  const both = (HEALTH.match(/ol\.unknown === 1 \? "hasn't" : "haven't"/g) || []).length;
+  ok(both === 2, "P71727",
+    `health: ${both} of the two offline-layer sentences pluralise their verb — with one device the other reads "except 1 that haven't said"`);
+}
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);

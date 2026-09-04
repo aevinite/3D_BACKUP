@@ -257,9 +257,15 @@ export default function AdminHealth() {
           key: "sw", label: "Offline layer",
           value: ol.behind > 0 ? `${ol.behind} behind` : `all on ${ol.shipped}`,
           tone: ol.behind > 0 ? "warn" : "good",
+          // ── ONE DEVICE "HAVEN'T SAID" (item 6, 2026-09-04) ────────────────────────────────
+          // Both sentences hard-coded the plural verb, and the count in front of it is very often
+          // 1 — a single phone on a browser with no service worker, or one first visit not yet
+          // controlled. Read off the live screen: "Every device used in the last day is on the
+          // current saved copy, except 1 that haven't said." The count beside it is already
+          // pluralised correctly two clauses earlier, which is what makes the mistake stand out.
           means: ol.behind > 0
-            ? `${ol.behind} device${ol.behind === 1 ? "" : "s"} still on an older saved copy of the app (${ol.current} on the current one${ol.unknown ? `, ${ol.unknown} haven't said` : ""}). Reloading that panel picks up the new one.`
-            : `Every device used in the last day is on the current saved copy${ol.unknown ? `, except ${ol.unknown} that haven't said` : ""}.`,
+            ? `${ol.behind} device${ol.behind === 1 ? "" : "s"} still on an older saved copy of the app (${ol.current} on the current one${ol.unknown ? `, ${ol.unknown} ${ol.unknown === 1 ? "hasn't" : "haven't"} said` : ""}). Reloading that panel picks up the new one.`
+            : `Every device used in the last day is on the current saved copy${ol.unknown ? `, except ${ol.unknown} that ${ol.unknown === 1 ? "hasn't" : "haven't"} said` : ""}.`,
           needsYou: ol.behind > 0,
           go: { href: "/aevinite/staff-online", label: "Who's online" },
         });
