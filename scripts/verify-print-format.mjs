@@ -98,7 +98,15 @@ const USERS = [
   // SGST rows it may not legally print. So accept both shapes and keep rejecting a hand-rolled
   // <html> of its own, which check 2 above is what actually catches.
   ["components/admin/RestaurantSettings.tsx", /BILLDOC\.billDocHtml\(|billPreviewHtml\(/, "the settings form's bill preview"],
-  ["components/admin/RestaurantSettings.tsx", /BILLDOC\.kotDocHtml\(/, "the settings form's KOT preview"],
+  // THE SETTINGS FORM'S KOT PREVIEW IS GONE, AND THAT IS NOT A REGRESSION (T19 sweep #8, round 2,
+  // 2026-09-04). It lived on a kitchen-ticket card that NOTHING could open: its Access node was
+  // removed on 2026-08-29 (commit 2d3e7b46 — "I want all in one place", printing moved to
+  // /aevinite/printing) and the card was left behind, so the preview could not be reached by any
+  // person on any screen. The card is removed; the rule this line defends is unaffected, because
+  // the two places a KOT is really DRAWN both still render the shared document and are checked
+  // immediately below. Deleting the assertion outright would have cost the rule, so it moves.
+  ["public/panels/kitchen/app.js", /LFH_BILLDOC\.kotDocHtml\(/, "the kitchen board's kitchen ticket"],
+  ["public/panels/tablet/app.js", /LFH_BILLDOC\.kotDocHtml\(/, "the waiter tablet's kitchen ticket"],
 ];
 for (const [file, mark, label] of USERS) {
   if (mark.test(read(file))) ok(`${label} renders the shared document`);

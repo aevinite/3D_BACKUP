@@ -894,6 +894,61 @@ console.log("\n33. Owners: a login name held by two accounts is said out loud");
     "the hero's separator is an explicit {\" · \"} — a bare `·` on the next line loses its space");
 }
 
+// ── 34 · every settings section has a door, and every door has a section ──────────────────────
+//
+// WHERE THIS BITES: Access & permissions → the rows that open a settings card.
+//
+// The card component renders only the section its caller names, and the only caller is
+// components/admin/AccessTree.tsx, which takes that name from a node's `panel: "settings:<id>"`.
+// So a section with no node is unreachable by anybody, on any screen — and it does not look
+// broken, it just never appears.
+//
+// That happened. The kitchen-ticket card's node was removed on 2026-08-29 (commit 2d3e7b46 — the
+// owner's "I want all in one place", printing moved to /aevinite/printing) and the card was left
+// behind: ninety lines of UI with no door, plus an unconditional read of
+// /api/admin/restaurants/quick-features that fired on EVERY mount of the component — in all six
+// sections that ARE reachable — to fill state only the unreachable card rendered.
+//
+// Both directions are checked, because both are how it rots: a section nothing opens, and a node
+// pointing at a section that does not exist.
+console.log("\n34. Access → the settings sections: each one has a door, and each door has a section");
+{
+  const TREE = read("lib/accessTree.ts");
+  const declared = ((CARD.match(/export type SettingsSection = ([^;]+);/) || [])[1] || "")
+    .split("|").map(x => x.trim().replace(/^"|"$/g, "")).filter(Boolean);
+  const rendered = [...CARD.matchAll(/show\("([a-z]+)"\)/g)].map(m => m[1]);
+  const nodes = [...TREE.matchAll(/panel: "settings:([a-z]+)"/g)].map(m => m[1]);
+  want(declared.length > 0 && rendered.length > 0 && nodes.length > 0,
+    `the three lists are all readable (${declared.length} declared, ${rendered.length} rendered, ${nodes.length} nodes)`);
+  const noDoor = rendered.filter(r => !nodes.includes(r));
+  want(noDoor.length === 0,
+    noDoor.length === 0
+      ? "every section the card RENDERS has a node in lib/accessTree.ts that opens it"
+      : `section(s) nothing can open: ${noDoor.join(", ")} — give it a node, or remove the card`);
+  const noCard = nodes.filter(n => !rendered.includes(n));
+  want(noCard.length === 0,
+    noCard.length === 0
+      ? "…and every node that names a settings panel has a section behind it"
+      : `node(s) pointing at a section that does not exist: ${noCard.join(", ")}`);
+  const ghost = declared.filter(d => !rendered.includes(d));
+  want(ghost.length === 0,
+    ghost.length === 0
+      ? "…and the TYPE advertises exactly those sections — a name in the type is not a door"
+      : `the SettingsSection type still names ${ghost.join(", ")}, which nothing renders`);
+  // COMMENTS STRIPPED FIRST — the obituary explaining the removal names the string it forbids,
+  // and a naive grep reads its own explanation as the fault. (Round 1 lost time to this exact
+  // shape twice; it is written down here so a third time costs nothing.)
+  want(!/settings:kitchen/.test(strip(TREE)),
+    "…and `settings:kitchen` is gone from the panel TYPE too, so it cannot be typed back by accident");
+}
+{
+  // The read that card cost every other section. It must not come back ungated.
+  want(!/quick-features\?restaurant_id/.test(CARD),
+    "the settings card makes no unconditional quick-features read — that one served only the removed card");
+  const effects = (CARD.match(/useEffect\(/g) || []).length;
+  want(effects <= 6, `…and the card is down to ${effects} effects, none of them fetching for a section that cannot open`);
+}
+
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — an admin screen is claiming something it does not do\n`
   : "\n✓ every admin screen still keeps the promise it prints on itself\n");
