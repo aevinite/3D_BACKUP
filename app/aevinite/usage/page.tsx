@@ -42,6 +42,23 @@ const prettyDay = (s: string) => { try { return new Date(`${s}T12:00:00`).toLoca
 // in both modes instead of pointing at a column that isn't there.
 type SortKey = "name" | "orders" | "orders7d" | "staff" | "tables";
 
+// ── ITEM 14 · TWO OF THE FIVE HEADINGS CANNOT BE PRESSED ON A PHONE (owner, 2026-09-04) ────────
+// Measured at 360px: the card is 296px and the row needs 540px, so Staff and Tables start past the
+// right edge. The table sliding sideways is the RIGHT call for a comparison table and that decision
+// is not being changed — but the headings became sort BUTTONS after it was made, so two of the five
+// sorts were unreachable without dragging first, and nothing said so.
+//
+// The fix is a picker, phone only, driving the SAME `sort`/`desc` state the headings drive — not a
+// second way of sorting, one control in a second place. Its labels come from this one list, which
+// the headings below also read, so the two can never end up calling a column different things.
+const SORTS: { k: SortKey; label: string; ranged?: boolean }[] = [
+  { k: "orders", label: "Orders" },
+  { k: "orders7d", label: "7-day", ranged: false },   // hidden while a window is chosen — the column is too
+  { k: "name", label: "Restaurant" },
+  { k: "staff", label: "Staff" },
+  { k: "tables", label: "Tables" },
+];
+
 // A sortable heading is a BUTTON, so it is reachable by keyboard and says out loud what it does —
 // a clickable <span> is the thing that looks the same and works for nobody else. Declared at module
 // level, not inside the page: a component created during render is a NEW component type every
@@ -181,6 +198,23 @@ export default function AdminUsage() {
 
       <div className="adm-card">
         <h2 style={{ margin: "0 0 4px" }}>By restaurant</h2>
+        {/* Phone only (the same 560px breakpoint the slide hint and the stat strip use). On a
+            computer every heading is on screen and pressable, so a second control there would be
+            two ways to do one thing. */}
+        <div className="us-sortbar">
+          <label htmlFor="us-sort" className="adm-muted" style={{ fontSize: 12 }}>Sort by</label>
+          <select id="us-sort" value={sort} onChange={(e) => { setSort(e.target.value as SortKey); setDesc(e.target.value !== "name"); }}>
+            {SORTS.filter((o) => !(ranged && o.ranged === false)).map((o) => (
+              <option key={o.k} value={o.k}>{o.k === "orders" && !ranged ? "30-day" : o.label}</option>
+            ))}
+          </select>
+          <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setDesc((v) => !v)}
+            aria-label={desc ? "Sorted biggest first — switch to smallest first" : "Sorted smallest first — switch to biggest first"}
+            title={desc ? "Biggest first" : "Smallest first"}>
+            <i className={`fas fa-arrow-${desc ? "down" : "up"}`} style={{ marginRight: 6 }} aria-hidden="true" />
+            {desc ? "Biggest first" : "Smallest first"}
+          </button>
+        </div>
         <p className="hint" style={{ marginTop: 0 }}>
           {ranged ? <>Orders between <b>{rangeLabel}</b>.</> : <>Order volume over the last 7 and 30 days.</>}{" "}
           The bar shows each restaurant&rsquo;s share of the busiest one. Tap any heading to sort by it.
@@ -191,7 +225,7 @@ export default function AdminUsage() {
               the sentence above now promises something two of the five cannot deliver: measured at
               360px the card is 296px and the row 540px, leaving Staff and Tables entirely
               off-screen with nothing hinting they are there. One line, phone only. */}
-          <span className="us-slide"> On a phone the table slides sideways — drag it left for <b>Staff</b> and <b>Tables</b>.</span>
+          <span className="us-slide"> On a phone the table slides sideways — drag it left to read <b>Staff</b> and <b>Tables</b>, or use <b>Sort by</b> above to order by them without dragging.</span>
         </p>
         {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : rows.length === 0 ? (
           <div className="adm-empty">No restaurants yet.</div>
@@ -252,6 +286,16 @@ export default function AdminUsage() {
            the stat strip below uses, and comfortably below the ~540px the row needs. */
         .us-slide { display: none; }
         @media (max-width: 560px) { .us-slide { display: inline; } }
+
+        /* The phone sort picker (item 14). Hidden on a computer, where all five headings are on
+           screen and pressable — a second control there would be two ways to do one thing. */
+        .us-sortbar { display: none; }
+        @media (max-width: 560px) {
+          .us-sortbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 10px; }
+          .us-sortbar select { flex: 1 1 120px; min-width: 0; min-height: 34px; padding: 6px 9px; border-radius: 8px;
+            border: var(--border); background: var(--bg); color: var(--text); font: inherit; font-size: 12.5px; }
+          .us-sortbar button { min-height: 34px; white-space: nowrap; }
+        }
 
         /* ON A PHONE the four numbers took a whole screen and left a stray rule (T17 sweep,
            2026-08-19). Each cell asked for 150px plus 36px of padding, so two would not fit in
