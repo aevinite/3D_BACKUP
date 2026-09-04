@@ -376,19 +376,31 @@ export default function AdminRepair() {
     // that the page could not ask. Every feed now records its failure by name, the green card is
     // replaced by a "couldn't load" line with Retry, and the pill above shows "—" instead of 0.
     const failed: string[] = [];
-    if (e.ok) { setErrors(e.data.actions || []); setWaiting(e.data.waiting ?? null); } else { failed.push("problems"); setWaiting(null); }
-    if (q.ok) setRequests(q.data.requests || []); else failed.push("the Claude queue");
-    if (h.ok) setRuns(h.data.runs || []); else failed.push("Claude's history");
+    // ── `|| []` IS NOT ENOUGH FOR A LIST (item 21, 2026-09-05) ──────────────────────────────────
+    // Every one of these seven reads took `x.data.list || []`, which defends against null and
+    // undefined and nothing else. Anything ELSE truthy sails through: round 2 fed the problems feed
+    // `{ actions: "boom" }` and the board rendered "NaN" — groupErrors() had walked a string
+    // character by character.
+    //
+    // The routes cannot send that today: each builds its list from a checked read and would return
+    // an array or an error. So this is not a bug being fixed, it is the one line that stops a
+    // mis-shaped answer from ANY future version of a route turning into arithmetic on a string. It
+    // costs a type check per load and it makes the seven reads say the same thing about their own
+    // contract, which `|| []` only half said.
+    const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+    if (e.ok) { setErrors(list<Action>(e.data.actions)); setWaiting(typeof e.data.waiting === "number" ? e.data.waiting : null); } else { failed.push("problems"); setWaiting(null); }
+    if (q.ok) setRequests(list<FixRequest>(q.data.requests)); else failed.push("the Claude queue");
+    if (h.ok) setRuns(list<AgentRun>(h.data.runs)); else failed.push("Claude's history");
     // THE STRIP HAS TO FAIL THE WAY THE SECTIONS DO (T17 sweep #7, 2026-08-27). These two were the
     // only feeds whose failure never reached the counts at the top: with the complaints list
     // unreachable the pill read a confident "0 open complaints", and "need attention" sat on the
     // still-loading "…" for ever — two inches from the "problems open" pill, which correctly said
     // "—". Watched happen with both routes made to fail. Same rule as every other feed here: a
     // failed read is not an all-clear, and it is named in the line under the strip.
-    if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else { setIssuesErr(true); failed.push("complaints"); }
+    if (iss.ok) { setIssues(list<Issue>(iss.data.issues)); setIssuesErr(false); } else { setIssuesErr(true); failed.push("complaints"); }
     if (at.ok) { setAtt(at.data); setAttErr(false); } else { setAttErr(true); failed.push("account health"); }
-    if (rl.ok) { setRlHits(rl.data.events || []); setRlRules(rl.data.rules || []); } else failed.push("rate limits");
-    if (mem.ok) setMemories(mem.data.memories || []); else failed.push("the already-fixed record");
+    if (rl.ok) { setRlHits(list<RlHit>(rl.data.events)); setRlRules(list<RlRule>(rl.data.rules)); } else failed.push("rate limits");
+    if (mem.ok) setMemories(list<ErrMemory>(mem.data.memories)); else failed.push("the already-fixed record");
     setProblemsErr(e.ok ? "" : (e.error || "Couldn't load the problem list."));
     setRlErr(rl.ok ? "" : (rl.error || "Couldn't load the rate-limit alerts."));
     setFeedsFailed(failed);
@@ -426,8 +438,9 @@ export default function AdminRepair() {
   const loadProblems = useCallback(async () => {
     const e = await adminFetch<{ actions: Action[]; waiting: number | null }>(`/api/admin/oplog?level=error&limit=${ERROR_FEED_LIMIT}&unresolved=1`);
     if (e.ok) {
-      setErrors(e.data.actions || []);
-      setWaiting(e.data.waiting ?? null);
+      // The background refresh reads the same feed, so it gets the same guard (item 21).
+      setErrors(Array.isArray(e.data.actions) ? e.data.actions : []);
+      setWaiting(typeof e.data.waiting === "number" ? e.data.waiting : null);
       setProblemsErr("");
       // Only THIS feed's name may be added or cleared here. A quiet background refresh must never
       // erase the fact that another feed failed on the last full load.
@@ -679,7 +692,14 @@ export default function AdminRepair() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "allow", event_id: h.id }),
     });
-    if (r.ok) toast("Allowed — their counter is reset."); else { toast(r.error || "Couldn't allow.", "err"); loadHub(); }
+    // ── A REFUSAL HAS TO NAME WHAT IT REFUSED (item 20, 2026-09-05) ────────────────────────────
+    // Three of this page's fallbacks were a verb and nothing else: "Couldn't allow.",
+    // "Couldn't dismiss.", "Couldn't send." Every OTHER refusal here names its object — "Couldn't
+    // resolve that.", "Couldn't clear those alerts.", "Couldn't set that reminder." — and these
+    // three sit on a row with four buttons, so the one word does not say which of them did
+    // nothing. They are also the shortest thing on screen at the moment something went wrong,
+    // which is the worst moment to be terse.
+    if (r.ok) toast("Allowed — their counter is reset."); else { toast(r.error || "Couldn't let that person through — their counter is unchanged.", "err"); loadHub(); }
   };
   const rlDismiss = async (h: RlHit) => {
     setRlHits((prev) => prev.filter((x) => x.id !== h.id));
@@ -687,7 +707,7 @@ export default function AdminRepair() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "dismiss", event_id: h.id }),
     });
-    if (!r.ok) { toast(r.error || "Couldn't dismiss.", "err"); loadHub(); }
+    if (!r.ok) { toast(r.error || "Couldn't clear that alert — it is still on the board.", "err"); loadHub(); }
   };
   const rlFix = async (h: RlHit) => {
     const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
@@ -696,7 +716,7 @@ export default function AdminRepair() {
       // limit that does not exist, and it is the one line Claude reads first.
       body: JSON.stringify({ note: `Rate limit "${h.key}" reached by ${h.subject_label || h.subject}${h.restaurant_name ? ` at ${h.restaurant_name}` : ""} (${rlChip(h)}). Is this real abuse or is the limit too tight?`, restaurant_id: h.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? h.restaurant_id : null, mode: "overnight" }),
     });
-    if (r.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(r.error || "Couldn't send.", "err");
+    if (r.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(r.error || "Couldn't hand that limit to Claude — nothing was queued.", "err");
   };
   // Admin-login alert: "let them try again" — clear the short lockout on that device so a genuine
   // person (e.g. the owner forgot the password) can retry now. Marks the alert handled. (owner 2026-07-27)

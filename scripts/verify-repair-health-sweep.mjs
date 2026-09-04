@@ -98,9 +98,6 @@ const env = Object.fromEntries(read(".env.local").split("\n")
 if (!LEDGER) refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "the repair & health sweep");
 
 const ADMIN_COOKIE_VALUE = createHash("sha256").update(env.ADMIN_PASSWORD || "").digest("hex");
-const ADMIN_COOKIE = "lfh_staff_auth=" + ADMIN_COOKIE_VALUE;
-const get = (path) => fetch(BASE + path, { redirect: "manual", cache: "no-store", headers: { cookie: ADMIN_COOKIE } })
-  .catch((e) => ({ ok: false, status: 0, _err: e.message, json: async () => null, text: async () => "", headers: new Map() }));
 
 // ── the phase runner ────────────────────────────────────────────────────────────────────────────
 const FIRST_ID = 71731;
@@ -123,14 +120,6 @@ async function phase(title, fn) {
 }
 /** A phase that cannot be answered here is UNANSWERED, never a pass. "Not reachable on the screen
  *  I opened" is a statement about the screen, not about the product. */
-async function skip(title, why) {
-  n += 1; const id = idOf(n);
-  rows.push({ id, band, title });
-  if (LEDGER) return;
-  if (n < FROM || n > TO) return;
-  unanswered.push({ id, title, why });
-  console.log(`  ? ${id}  ${title}\n        UNANSWERED: ${why}`);
-}
 
 // ── the sources, read once ──────────────────────────────────────────────────────────────────────
 const SRC = {
@@ -166,9 +155,7 @@ const C = Object.fromEntries(Object.entries(SRC).map(([k, v]) => [k, strip(v)]))
 const HEALTH_CHECK_KEYS = [...new Set([...SRC.health.matchAll(/key: "([a-z0-9]+)", label: "([^"]+)"/g)].map((m) => m[1] + "|" + m[2]))];
 const HANDS_ON_TOOLS = [...SRC.repair.matchAll(/\{ op: "(\w+)", label: "([^"]+)"/g)].map((m) => ({ op: m[1], label: m[2] }));
 const SECTION_IDS = [...new Set([...SRC.repair.matchAll(/rp-sec-h" id="([\w-]+)"/g)].map((m) => m[1]))];
-const STRIP_PILLS = [...SRC.repair.matchAll(/<span>(problem|limit|open complaint|need)/g)].map((m) => m[1]);
 
-let live = null;   // filled by band F: the API answers, fetched once and shared
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // BAND A · the twelve items this run fixed — every rule, every surface, every way back
