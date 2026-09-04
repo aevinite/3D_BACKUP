@@ -557,6 +557,26 @@ const RULES = [
     ],
   },
   {
+    item: "s8·T16·6", file: ISSUES,
+    // MEASURED at 360px BEFORE the fix: the pill was capped at 298px of content width and held
+    // three flex children, so all three shrank below their content and every label wrapped —
+    // "Guest ratings" on one line and "· 0" alone on the next. Refresh was never a tab.
+    say: "on a phone a tab's count never falls onto its own line",
+    must: [
+      // Refresh sits OUTSIDE the segmented pill, in a row that may wrap…
+      /<div style=\{\{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 \}\}>\s*\n\s*<div className="own-range">/,
+      // …and each tab keeps its label and its count together.
+      /onClick=\{\(\) => setTab\("ratings"\)\} style=\{\{ whiteSpace: "nowrap" \}\}/,
+      /onClick=\{\(\) => setTab\("issues"\)\} style=\{\{ whiteSpace: "nowrap" \}\}/,
+    ],
+    mustNot: [
+      // Refresh back inside the pill is the whole cause; a wrapping PILL is what globals.css
+      // warns reads as a broken control, so neither shape may come back.
+      /<div className="own-range" style=\{\{ marginBottom: 14 \}\}>[\s\S]{0,1400}Refresh/,
+      /className="own-range"[^>]*flexWrap/,
+    ],
+  },
+  {
     item: "s8·T16·5", file: KHATA,
     // MEASURED on the phone he tests: this screen printed `9876500077` while the Customers list
     // beside it printed `90000 00007`. Pay Later is the screen you open to RING the person.

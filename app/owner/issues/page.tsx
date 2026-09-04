@@ -321,24 +321,40 @@ export default function OwnerFeedback() {
             read, with nothing to say so. So the tab that failed carries its own mark and says why
             when you point at it. A mark plus the hover text plus the count that stops changing —
             three carriers, none of them colour alone. */}
-        <div className="own-range" style={{ marginBottom: 14 }}>
-          {!ratingsOff && (
-            <button className={tab === "ratings" ? "on" : ""} onClick={() => setTab("ratings")}>
-              Guest ratings{summary ? ` · ${summary.total}` : ""}
-              {rErr && <i className="fas fa-triangle-exclamation" aria-hidden="true"
-                title="These couldn't be read just now — open this tab and press Try again"
-                style={{ marginLeft: 6, fontSize: 10.5, color: "var(--adm-warn)" }} />}
-            </button>
-          )}
-          {!issuesOff && (
-            <button className={tab === "issues" ? "on" : ""} onClick={() => setTab("issues")}>
-              Complaints · {openCount}
-              {iErr && <i className="fas fa-triangle-exclamation" aria-hidden="true"
-                title="These couldn't be read just now — open this tab and press Try again"
-                style={{ marginLeft: 6, fontSize: 10.5, color: "var(--adm-warn)" }} />}
-            </button>
-          )}
-          <button className="adm-btn" style={{ marginLeft: "auto" }} onClick={loadAll}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
+        {/* ── ON A PHONE THE COUNT WAS FALLING OFF ITS OWN LABEL (sweep 8 · T16, 2026-09-04) ────────
+            MEASURED at 360px: the segmented pill was capped at 298px of content width and held
+            THREE children — two tabs and Refresh. Flex items shrink below their content by default,
+            so every one of them wrapped to two lines: "Guest ratings" on one line and "· 0" alone
+            on the next, and the same for "Complaints · 0". The number that says how many complaints
+            are still open was orphaned from the word it belongs to, and it gets worse the moment the
+            counts are real ("· 381", "· 12") rather than zero.
+            Refresh was never a tab, and that is the whole cause: it was taking a third of a control
+            built for two. It moves OUT of the pill and sits beside it in a wrapping row, so the pill
+            is a proper two-tab segmented control that keeps each label and its count together, and
+            Refresh drops to its own line when there is no room. Nothing is squeezed and nothing
+            splits. A stretched pill background across a wrapped row is exactly what the note beside
+            `.own-range` in app/globals.css warns reads as a broken control — so the pill itself
+            never wraps; only the row around it does. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <div className="own-range">
+            {!ratingsOff && (
+              <button className={tab === "ratings" ? "on" : ""} onClick={() => setTab("ratings")} style={{ whiteSpace: "nowrap" }}>
+                Guest ratings{summary ? ` · ${summary.total}` : ""}
+                {rErr && <i className="fas fa-triangle-exclamation" aria-hidden="true"
+                  title="These couldn't be read just now — open this tab and press Try again"
+                  style={{ marginLeft: 6, fontSize: 10.5, color: "var(--adm-warn)" }} />}
+              </button>
+            )}
+            {!issuesOff && (
+              <button className={tab === "issues" ? "on" : ""} onClick={() => setTab("issues")} style={{ whiteSpace: "nowrap" }}>
+                Complaints · {openCount}
+                {iErr && <i className="fas fa-triangle-exclamation" aria-hidden="true"
+                  title="These couldn't be read just now — open this tab and press Try again"
+                  style={{ marginLeft: 6, fontSize: 10.5, color: "var(--adm-warn)" }} />}
+              </button>
+            )}
+          </div>
+          <button className="adm-btn" style={{ marginLeft: "auto", whiteSpace: "nowrap" }} onClick={loadAll}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
         </div>
 
         {partial.length > 0 && (
