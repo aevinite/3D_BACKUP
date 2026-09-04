@@ -811,7 +811,12 @@ if (LEDGER || WRITE_LEDGER) {
   out += `> "after making it live and merging plan 500 phases test within your boundaries make sure it\n> cover everthing within your boundries and test everything again if any error left"\n\n`;
   out += `Round 1 asked *what could be wrong here?* This round asks *is there anything in these four\nfiles that nothing has looked at?* — and answers it by GENERATING its phases from the files, so\nthe count grows with the product instead of going stale beside it.\n\n`;
   out += `**The ids come from two ranges.** T20's block is \`P73701\`–\`P74700\` and round 1 used\n\`P73701\`–\`P74308\`, leaving 392. A fresh 500 therefore needed 108 more, and exactly 108 were\nclaimed from the registry — the shortfall, never a whole fresh block.\n\n`;
-  out += "```\nnpm run verify:bin-billing-usage-r2 -- --base http://localhost:4000\nnpm run verify:bin-billing-usage-r2 -- --base http://localhost:4000 --from 1 --to 80\nnode scripts/verify-bin-billing-usage-r2.mjs --ledger        # regenerate this table\n```\n\n";
+  // NAME THE GENERATOR IN THE WORDS THE GUARD LOOKS FOR (T19 of sweep #8 added that rule the same
+  // day). A round ledger keeps its verdict in a run's output rather than in a column, so the one
+  // thing it must be held to is that the run still exists — otherwise these become 500 ids nobody
+  // can re-run, still counted and no longer provable.
+  out += `Every row here is GENERATED from \`node scripts/verify-bin-billing-usage-r2.mjs\` — the rows and\nthe checks cannot disagree, because both come out of that one file. Regenerate with\n\`node scripts/verify-bin-billing-usage-r2.mjs --ledger\`.\n\n`;
+  out += "```\nnpm run verify:bin-billing-usage-r2 -- --base http://localhost:4000\nnpm run verify:bin-billing-usage-r2 -- --base http://localhost:4000 --from 1 --to 80\n```\n\n";
   out += `**Result key:** ✅ pass · ❌ fail · ⏭ unanswered, with a written reason.\n`;
   for (const b of ["H", "H2", "I", "J", "K", "L", "M", "N"]) {
     const list = byBand[b] || [];
