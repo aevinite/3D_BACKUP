@@ -322,8 +322,19 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
     } catch (e) { setPayMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }); } finally { setPayBusy(false); payingRef.current = false; }
   };
 
-  const deletePayment = async (id: string) => {
-    if (!confirm("Delete this payment record?")) return;
+  // ── THE QUESTION NAMES THE PAYMENT (T20 sweep #8, 2026-09-04) ───────────────────────────────
+  // It used to ask "Delete this payment record?" — which of them? A restaurant on a monthly plan
+  // has twelve rows a year that differ only by their date and, often, not even by their amount, and
+  // the row a bin belongs to is decided by which of twelve small icons the mouse landed on. There
+  // is no undo: the row is gone, and the platform's own "Collected this year" drops by that much.
+  // A destructive question that cannot be checked against what you meant is not a confirmation.
+  const deletePayment = async (p: Payment) => {
+    const id = p.id;
+    if (!confirm(
+      `Delete the ${money(p.amount, row.currency)} payment dated ${istDate(p.paid_on)}${p.method ? ` (${p.method})` : ""}?\n\n`
+      + `This restaurant's "paid this year" drops by ${money(p.amount, row.currency)}. Nothing of the restaurant's own — no bill, no invoice — is touched.\n\n`
+      + `It cannot be undone; you would have to add the payment again.`,
+    )) return;
     setHistMsg(null);
     try {
       const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete_payment", payment_id: id }) });
@@ -428,7 +439,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
                       <span className="adm-muted">{p.method || "—"}</span>
                       <span className="adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.period_label || p.note || "—"}</span>
                       <span style={{ textAlign: "right" }}>
-                        <button className="adm-btn danger" style={{ padding: "4px 8px" }} onClick={() => deletePayment(p.id)} aria-label="Delete this payment" title="Delete this payment"><i className="fas fa-trash" aria-hidden="true" /></button>
+                        <button className="adm-btn danger" style={{ padding: "4px 8px" }} onClick={() => deletePayment(p)} aria-label="Delete this payment" title="Delete this payment"><i className="fas fa-trash" aria-hidden="true" /></button>
                       </span>
                     </div>
                   ))}
