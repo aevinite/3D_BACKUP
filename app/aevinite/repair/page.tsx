@@ -679,7 +679,14 @@ export default function AdminRepair() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "allow", event_id: h.id }),
     });
-    if (r.ok) toast("Allowed — their counter is reset."); else { toast(r.error || "Couldn't allow.", "err"); loadHub(); }
+    // ── A REFUSAL HAS TO NAME WHAT IT REFUSED (item 20, 2026-09-05) ────────────────────────────
+    // Three of this page's fallbacks were a verb and nothing else: "Couldn't allow.",
+    // "Couldn't dismiss.", "Couldn't send." Every OTHER refusal here names its object — "Couldn't
+    // resolve that.", "Couldn't clear those alerts.", "Couldn't set that reminder." — and these
+    // three sit on a row with four buttons, so the one word does not say which of them did
+    // nothing. They are also the shortest thing on screen at the moment something went wrong,
+    // which is the worst moment to be terse.
+    if (r.ok) toast("Allowed — their counter is reset."); else { toast(r.error || "Couldn't let that person through — their counter is unchanged.", "err"); loadHub(); }
   };
   const rlDismiss = async (h: RlHit) => {
     setRlHits((prev) => prev.filter((x) => x.id !== h.id));
@@ -687,7 +694,7 @@ export default function AdminRepair() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "dismiss", event_id: h.id }),
     });
-    if (!r.ok) { toast(r.error || "Couldn't dismiss.", "err"); loadHub(); }
+    if (!r.ok) { toast(r.error || "Couldn't clear that alert — it is still on the board.", "err"); loadHub(); }
   };
   const rlFix = async (h: RlHit) => {
     const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
@@ -696,7 +703,7 @@ export default function AdminRepair() {
       // limit that does not exist, and it is the one line Claude reads first.
       body: JSON.stringify({ note: `Rate limit "${h.key}" reached by ${h.subject_label || h.subject}${h.restaurant_name ? ` at ${h.restaurant_name}` : ""} (${rlChip(h)}). Is this real abuse or is the limit too tight?`, restaurant_id: h.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? h.restaurant_id : null, mode: "overnight" }),
     });
-    if (r.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(r.error || "Couldn't send.", "err");
+    if (r.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(r.error || "Couldn't hand that limit to Claude — nothing was queued.", "err");
   };
   // Admin-login alert: "let them try again" — clear the short lockout on that device so a genuine
   // person (e.g. the owner forgot the password) can retry now. Marks the alert handled. (owner 2026-07-27)

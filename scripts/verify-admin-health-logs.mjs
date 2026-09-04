@@ -510,10 +510,32 @@ ok(/This page checks for \{waiting === 1 \? "it" : "them"\} every couple of minu
 ok(/useActiveAutoRefresh/.test(SHARED_ADMIN), "P72349",
   "the shared active-only refresh helper is gone — a hand-rolled setInterval would poll a hidden tab");
 
+
+// ── item 20 · a refusal has to name what it refused ──────────────────────────────────────────
+// IDS P100763-P100766, claimed from the registry rather than from this terminal's own block —
+// which is now fully spent (P71701-P72700: 30 + 612 + 7 + 351). Written down because the FIRST
+// attempt reached for P72350, and round 2's sweep already owns that: the second time in this
+// terminal's two rounds that a guard assertion tried to take an id its own generated ledger held.
+// The ids inside a verify:* script are invisible to verify:ledger-index, so nothing catches it.
+// Found by round 2 walking every message string this page can show: three fallbacks were a verb
+// and nothing else — "Couldn't allow.", "Couldn't dismiss.", "Couldn't send." — on a row that carries
+// four buttons. Every other refusal here names its object.
+{
+  const terse = [...REPAIR.matchAll(/toast\(r\.error \|\| "(Couldn.t [a-z]+\.)"/g)].map((m) => m[1]);
+  ok(terse.length === 0, "P100763",
+    `repair: ${terse.length} refusal(s) name no object: ${terse.join(" ")} — on a row with four buttons, one word does not say which did nothing`);
+}
+ok(/Couldn.t let that person through/.test(REPAIR), "P100764",
+  "repair: the Allow refusal is back to a bare verb");
+ok(/Couldn.t clear that alert/.test(REPAIR), "P100765",
+  "repair: the Dismiss refusal is back to a bare verb");
+ok(/Couldn.t hand that limit to Claude/.test(REPAIR), "P100766",
+  "repair: the Fix-to-Claude refusal is back to a bare verb");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
   console.error("\n   Each line names the ledger phase (.claude/sweep/LEDGER/T17.md) that found it.\n");
   process.exit(1);
 }
-console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 13");
+console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 14");
