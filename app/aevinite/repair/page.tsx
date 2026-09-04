@@ -1586,7 +1586,15 @@ export default function AdminRepair() {
                  color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);
                  border:1px solid color-mix(in srgb,var(--accent) 32%,transparent);
                  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .rp-detail{font-size:12px;line-height:1.5;color:var(--muted);white-space:pre-wrap;word-break:break-word;overflow:hidden;transition:max-height .18s ease;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+        /* THE SENTENCE IS NOT CODE ANY MORE (item 4, 2026-09-04). This class was monospaced when
+           the line it held WAS the raw error text, and that was right. Since 2026-09-02 the closed
+           line is plainHeadline() — "Part of the app didn't finish downloading, so the screen
+           couldn't open." — and the owner's word for that change was that it "should be in the
+           human language". A human sentence in a code face says the opposite of that in the one
+           place he actually reads. The captured text still gets the code face: the open block
+           below sets its own fontFamily inline, and the "Already fixed" rows use this class for a
+           sentence too. Nothing is hidden either way — only the typeface moved. */
+        .rp-detail{font-size:12.5px;line-height:1.55;color:var(--muted);white-space:pre-wrap;word-break:break-word;overflow:hidden;transition:max-height .18s ease}
         .rp-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
         .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}
         .rp-x:hover{opacity:1;background:color-mix(in srgb,var(--text) 8%,transparent)}

@@ -393,6 +393,14 @@ ok(/\{!s\.report && s\.ended_at \?/.test(REPAIR), "P71710",
 ok(/\{s\.report \? \(\s*\n\s*<button onClick=\{\(\) => setOpenRun\(isOpen \? "" : s\.id\)\}/.test(REPAIR), "P71711",
   "repair: the run row is a <button> again whether or not it has a report — pressing 22 of the 30 rows changes nothing on screen and lies to a screen reader");
 
+// ── item 4 · the plain-English problem line must not wear a code face ───────────────────────
+// .rp-detail was monospaced when it held the RAW error text, and that was right. Since 2026-09-02
+// the closed line is plainHeadline() — a human sentence — and the raw text sets its own monospace.
+ok(!/\.rp-detail\{[^}]*font-family/.test(REPAIR), "P71718",
+  "repair: .rp-detail is monospaced again — the line it holds is now a plain-English sentence");
+ok(/fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"/.test(REPAIR), "P71719",
+  "repair: the OPEN block lost its own monospace — the captured text must still be shown byte for byte in a code face");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
