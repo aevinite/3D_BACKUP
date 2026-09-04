@@ -593,7 +593,12 @@ export async function syncKotSwitch(rid: string, on: boolean): Promise<void> {
   if (!st) return;
   if (on && st.auto_print_kot_allowed !== true) return;   // not ours to grant
   if (st.auto_print_kot === on) return;                   // already right — no write, no audit noise
-  await sb.from("settings").update({ auto_print_kot: on }).eq("restaurant_id", rid);
+  // THE TWELFTH-AND-A-HALF WRITE (2026-09-04). helloAgent's stamp was fixed the same day; this one
+  // was missed in the same pass and matters more. It is the write that keeps the kitchen-slip LINE
+  // and the auto_print_kot COLUMN in step — one decision, two places. If it fails silently the
+  // Printing board says slips print while mig 335's trigger queues nothing, or the reverse, and both
+  // boards' own comments warn about exactly that drift. Not a throw, same as every write here.
+  await wrote("syncKotSwitch auto_print_kot", sb.from("settings").update({ auto_print_kot: on }).eq("restaurant_id", rid));
 }
 
 /** How many notes are still waiting — the "Waiting to print: 0" line, and the honest answer to

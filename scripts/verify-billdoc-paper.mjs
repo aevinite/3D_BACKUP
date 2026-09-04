@@ -457,10 +457,23 @@ for (const [what, ts] of INSTANTS) {
   const good = BILLDOC.banquetDocHtml({ bill: { ...base, issued_at: "2026-08-16T16:01:00Z",
     fn_date: "2026-09-14", func: "Reception", fn_from: "7pm", advances: [{ amt: 500, mode: "upi", date: "2026-08-01" }] },
     lines: [{ title: "A", qty: 1, price: 1000 }], settings: {}, restaurant: {}, autoPrint: false });
-  (/Dated<\/div><div class="v">16-08-2026/.test(good) && /UPI PAY DT\.01\/08\/2026/.test(good)
-    && /Function: Reception · 14\/09\/2026 7pm/.test(good))
-    ? ok("  …and a sheet with real dates prints all three of them exactly as before")
-    : bad("a good banquet sheet's dates changed", "the guard must only bite on an unparseable value");
+  /* ⚠️ THIS PINNED THE INCONSISTENCY IT WAS MEANT TO IGNORE (2026-09-04). It required the three dates
+     LITERALLY — "Dated 16-08-2026" with dashes, "DT.01/08/2026" and "14/09/2026" with slashes — which
+     is two date formats on one sheet, frozen in place by the guard that was only ever supposed to
+     prove a VALID date still prints (see its own old failure line: "the guard must only bite on an
+     unparseable value"). The owner asked for one format on 2026-09-04, and this went red on the fix.
+     So it asserts the rule instead: all three dates appear, and they all punctuate the same way. */
+  const dSep = (good.match(/Dated<\/div><div class="v">(\d{2})([-/])(\d{2})\2(\d{4})/) || [])[2];
+  const three = [
+    ["the invoice date",  /Dated<\/div><div class="v">16[-/]08[-/]2026/],
+    ["the advance date",  /UPI PAY DT\.01[-/]08[-/]2026/],
+    ["the function date", /Function: Reception · 14[-/]09[-/]2026 7pm/],
+  ].filter(([, re]) => !re.test(good)).map(([w]) => w);
+  const seps = [...good.matchAll(/\b\d{2}([-/])\d{2}\1\d{4}\b/g)].map((m) => m[1]);
+  const mixed = [...new Set(seps)];
+  if (three.length) bad("a good banquet sheet lost a date", `missing: ${three.join(", ")} — the guard must only bite on an unparseable value`);
+  else if (mixed.length > 1) bad("the banquet sheet prints two date formats", `it used ${JSON.stringify(mixed)} on one sheet — dashes in one place and slashes in another, on the largest-value document this product prints`);
+  else ok(`  …and a sheet with real dates prints all three, all punctuated "${dSep || mixed[0]}"`);
 }
 
 // ── 3j. TWO PLACES, TWO DEFAULT WORDS, ONE SETTING ────────────────────────────────────────────

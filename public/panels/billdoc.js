@@ -367,7 +367,14 @@
         // ₹2 — the fault this fix exists to avoid, reintroduced one line later. A row only prints
         // paise when splitTax says it must (see its note on the ₹0 component).
         var shown = c.paise ? "₹" + (Math.round((Number(c.amt) || 0) * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : inr(c.amt);
-        return '<div class="t"><span>' + esc(c.label) + " " + c.rate + '%</span><span>' + shown + "</span></div>";
+        /* THE RATE WAS PRINTED RAW, and it is on a tax invoice. `c.rate` went straight into the
+           string, so a component with no rate configured printed "CGST undefined% ₹0" and a NaN one
+           "CGST NaN% ₹0" — beside a figure the same row had already sanitised to ₹0 through inr().
+           Every other number on this sheet goes through a formatter; this one did not. Same rule as
+           the banquet sheet's bqRate(): no decimal on a whole rate, one where it is needed. */
+        var rateNum = Number(c.rate);
+        var rateTxt = Number.isFinite(rateNum) ? (rateNum % 1 === 0 ? rateNum.toFixed(0) : String(Math.round(rateNum * 100) / 100)) : "";
+        return '<div class="t"><span>' + esc(c.label) + (rateTxt ? " " + rateTxt + "%" : "") + '</span><span>' + shown + "</span></div>";
       }).join("");
     };
     var taxRows = money(d.taxRows);
@@ -912,7 +919,14 @@
     r = r || {};   // one bad line must not cost the whole ticket — see the note in billDocHtml
     var opts = Array.isArray(r.options) ? r.options.map(function (x) { return typeof x === "string" ? x : ((x && x.label) || ""); }).filter(Boolean).join(", ") : "";
     var rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
-    return '<div class="kl"><span class="q">' + (r.qty || 1) + '×</span><span class="n">' + esc(r.title || "")
+    /* THE QUANTITY IS WHAT A COOK COOKS BY, and it went onto the paper unformatted: `(r.qty || 1)`
+       passes a number straight through, so anything that is not one prints itself — an object came
+       out as "[object Object]×". `|| 1` already admits the field can arrive missing; it just did not
+       finish the thought. A quantity that cannot be read as a number is shown as 1, which is what
+       the `|| 1` intended and is the only safe guess on a kitchen ticket. */
+    var qtyNum = Number(r.qty);
+    var qtyTxt = Number.isFinite(qtyNum) && qtyNum > 0 ? String(qtyNum) : "1";
+    return '<div class="kl"><span class="q">' + qtyTxt + '×</span><span class="n">' + esc(r.title || "")
       + (opts ? " <i>(" + esc(opts) + ")</i>" : "")
       + (rem ? " <i>— no " + esc(rem) + "</i>" : "")
       /* the whole-table note prints once, above the dishes — see sharedKotNote */
@@ -953,6 +967,20 @@
       if (n !== first) return "";
     }
     return first;
+  }
+
+  /* THE TICKET'S OWN NUMBER, GUARDED — because the SCREEN already guards it and the PAPER did not.
+     `String(o.kot)` printed "KOT #undefined" for an undefined number and "KOT #NaN" for a NaN one,
+     on the sheet a cook works from. Neither is hypothetical: kot_no is nullable (a ticket queued for
+     an order whose number was never drawn), and billdoc is also called directly with hand-built
+     figures by lib/billPreview.ts, the admin preview and lib/auditDetail.ts. The kitchen panel has
+     used `o.kot_no ?? "—"` for both its boards all along, so this is the paper catching up with the
+     screen rather than a new idea. */
+  function kotNoText(v) {
+    if (v === null || v === undefined || v === "") return "—";
+    if (typeof v === "number" && !Number.isFinite(v)) return "—";
+    if (typeof v === "object") return "—";
+    return String(v);
   }
 
   function kotDocHtml(o) {
@@ -1004,7 +1032,7 @@
 // not free text, so every panel's reprint looks identical.
 + (o.reprint ? '      <div class="rp">*** Reprint · Duplicate ***</div>\n' : "")
 + '      <div class="h">' + esc(o.rname || "Kitchen") + "<br>" + esc(o.head || "KITCHEN TICKET") + "</div>\n"
-+ '      <div class="meta"><span>KOT #' + esc(String(o.kot)) + "</span><span>" + esc(o.tableLabel || "") + "</span></div>\n"
++ '      <div class="meta"><span>KOT #' + esc(kotNoText(o.kot)) + "</span><span>" + esc(o.tableLabel || "") + "</span></div>\n"
 + '      <div class="meta"><span>' + esc(o.when || "") + "</span></div>\n"
 + "      " + sharedHtml + "\n"
 + "      " + (linesHtml || "<div>(no items)</div>") + "\n"
