@@ -1520,8 +1520,20 @@ export default function OwnerDashboard() {
       <Kpi k="Revenue" onOpen={offNote ? undefined : () => setTileOpen("revenue")} v={offNote ? "—" : (kMain?.revenue ?? 0)} money compact loading={!offNote && !kMain}
         delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
         prevTitle={PREV_LABEL[globalRange]} sub={offNote ? offSub : PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
+        {/* ── "₹0 PER PAID ORDER" IS THE SAME FAULT THE TODAY TILE WAS FIXED FOR
+            (T13 sweep, 2026-09-04) ──────────────────────────────────────────────────────────────
+            The average is `revenue / paidOrders`, guarded to 0 when nothing has been paid — so
+            before the first bill is settled this caption read "₹0 per paid order" as a fact,
+            directly under a count of 24 real orders. It says each paid order averaged nothing,
+            when the truth is that none has been paid.
+            The owner already settled this wording one tile to the right, on 2026-08-31 (item 26):
+            "₹0" beside "79 orders today" read as a bug to him, and the Today tile now says
+            "24 orders, none paid yet" instead. This is his own sentence, on the tile that raises
+            the same doubt. Derived from figures already in hand — no new query. */}
       <Kpi k="Orders" onOpen={offNote ? undefined : () => setTileOpen("orders")} v={offNote ? "—" : (kMain?.orders ?? 0)} loading={!offNote && !kMain}
-        sub={offNote ? offSub : kMain ? `${inr(kMain.avg)} per paid order` : PREV_LABEL[globalRange] || "whole history"}
+        sub={offNote ? offSub
+          : kMain ? (kMain.paidOrders ? `${inr(kMain.avg)} per paid order` : "none paid yet")
+          : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
       {/* ── AND THAT INCLUDES TODAY (T12 sweep, 2026-08-27) ───────────────────────────────────
