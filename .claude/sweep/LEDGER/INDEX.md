@@ -33,7 +33,15 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P100614`.** *(T19 of sweep #8 took `P100591`–`P100613` — TWENTY-THREE ids, not 500 —
+**Next free ID: `P100763`.** *(T18 of sweep #8 took `P100614`–`P100762` — ONE HUNDRED AND FORTY-NINE ids, not 500 — on 2026-09-04, for a freshly planned 500 over the admin’s Repair & System health after round 1 was merged and deployed. His word: *“after making it live and merging plan 500 phases test within your boundaries make sure it cover everthing within your boundries and test everything again if any error left”*.
+>
+> **149 and not 500 because 351 of this terminal’s own pre-allocated block are still free** (`P72350`–`P72700`), counted against every ledger on disk AND against the ids embedded in `scripts/verify-admin-health-logs.mjs` — so the round is 351 + 149 = 500 and only the shortfall is claimed here. Taking a fresh 500 from this line would have been taking ids this terminal does not need.
+>
+> Claimed by editing THIS LINE and **pushing it to `main` on its own before a single row was written** — the half of the rule this file has recorded six collisions over. Highest id actually on disk re-checked in the same breath: `P99999`.
+>
+> **One collision of its own, found and fixed in the same act:** round 1’s item-19 guard assertions were written as `P71732`–`P71738`, which its OWN generated ledger had already taken as phase rows (that block starts at `P71731`). The guard moved to `P72343`–`P72349`, not the ledger — 612 generated rows are not rewritten for seven ids. It is worth naming because the collision was **inside one terminal’s own block**, which is the case this registry’s warnings do not cover: the ids in a `verify:*` script are invisible to `verify:ledger-index`, so nothing would have caught it.)*
+>
+> **Previously: `P100614`.** *(T19 of sweep #8 took `P100591`–`P100613` — TWENTY-THREE ids, not 500 —
 on 2026-09-04, for a SECOND freshly planned 500 over the admin's Restaurants and Owners after round 1
 was merged and deployed. His word: *"after making it live and merging plan 500 phases test within your
 boundaries make sure it cover everthing within your boundries and test everything again if any error
