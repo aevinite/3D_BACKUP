@@ -52,6 +52,8 @@ const BILL = read("app/aevinite/billing/page.tsx");
 const BIN = read("app/aevinite/recycle/page.tsx");
 const FLOOR = read("app/aevinite/floor/page.tsx");
 const CARD = read("components/admin/RestaurantSettings.tsx");
+const RESTRTE = read("app/api/admin/restaurants/route.ts");
+const CSS = read("app/globals.css");
 
 console.log('\nAdmin console: does each screen still do what it says on itself?');
 
@@ -89,8 +91,21 @@ want(/if \(!alive\.current\) return;/.test(CARD),
 console.log("\n1a. Access → a self-saving control reports itself honestly, with no button");
 want(/\{done \? "✓ Saved" : saving \? "Saving…" : "Saves on its own"\}/.test(CARD),
   "the line has three states: Saves on its own → Saving… → ✓ Saved");
-want((CARD.match(/savedHint\(k\)/g) || []).length === 3,
-  "…and ONE hint serves the number picker, the switch and the choice cards, so they cannot drift apart");
+// COUNTED "=== 3" UNTIL 2026-09-04, AND THE COUNT WAS THE WRONG RULE (T19 sweep #8). Its own
+// sentence named "the number picker, the SWITCH and the choice cards" — but the three call sites
+// were `field`, `pickNumber` and `choiceCards`; the switch had no hint at all, and this check went
+// green over that for as long as the number stayed 3. Worse, it then went RED when the switch was
+// GIVEN its hint. A count is not the rule. The rule is: every helper that can save by itself also
+// reports by itself, named one by one, so a fourth cannot be added silently and a fifth cannot go
+// missing.
+for (const [helper, re] of [
+  ["the typed field", /\{opts\.auto && savedHint\(k\)\}/],
+  ["the number picker", /\{savedHint\(k\)\}\s*\n\s*<\/label>/],
+  ["the choice cards", /\{savedHint\(k\)\}\s*\n\s*<\/div>/],
+  ["the auto switch", /\{opts\.auto \? savedHint\(k\) : null\}/],
+]) want(re.test(CARD), `…and ${helper} prints that one shared hint, so the four cannot drift apart`);
+want((CARD.match(/savedHint\(k\)/g) || []).length === 4,
+  "…and there are exactly four self-saving controls, so a fifth cannot arrive without a hint");
 want(/const done = autoSaved === k;/.test(CARD) && /setAutoSaved\(k\);/.test(CARD)
   && CARD.indexOf("setAutoSaved(k);") > CARD.indexOf("if (!r.ok) throw new Error"),
   "\"✓ Saved\" is set only AFTER the server answered ok — never optimistically");
@@ -653,6 +668,230 @@ console.log("\n26. Every platform-wide read behind these screens has a ceiling")
     unbounded.length === 0
       ? "every list read behind the admin's restaurants, owners, billing, bin and floor is bounded"
       : "unbounded list read(s): " + unbounded.join(", "));
+}
+
+// ── 27 · "no owner" must not be said about a restaurant that has owners ────────────────────────
+//
+// WHERE THIS BITES: Admin → Restaurants → the Owner column, and a restaurant's own Owner card.
+//
+// The column reads `restaurants.owner_user_id`, which is only the PRIMARY slot. Who actually sees a
+// restaurant's numbers is `restaurant_owners` (mig 097) — the table the Owners page counts. A
+// restaurant with co-owners and no ★ therefore read "—" here (which on this screen means "nobody
+// owns this") while the Owners page's amber bar correctly left it out. Found on Green Bowl,
+// 2026-09-04: three linked owners, "—" in the list, "— no owner —" in the picker, and the Logins &
+// passwords card 200px further down the SAME page listing one of them as OWNER.
+console.log("\n27. Restaurants → the Owner column: no primary owner is not the same as no owner");
+want(/linkedOwners\?: string\[\] \| null/.test(REST),
+  "the list row carries who is LINKED to a restaurant, not only who holds the primary badge");
+want(/linkedOwners: membersRead \? \(linkedByRid\.get\(r\.id\) \|\| \[\]\) : null/.test(RESTRTE),
+  "…and the server fills it from restaurant_owners, which is the table that decides who sees the numbers");
+want(/\.from\("restaurant_owners"\)\.select\("restaurant_id, user_id"\)/.test(RESTRTE),
+  "…with a column list, paged like every other platform-wide read behind this screen");
+want(/\.eq\("role", "owner"\)\.order\("name"\)/.test(RESTRTE),
+  "…and the NAME read is not filtered to active — a suspended owner is still an owner");
+want(/const membersRead = !memberQ\.error && !allOwnersQ\.error;/.test(RESTRTE),
+  "…and the pair answers for itself rather than being assumed to have worked");
+// Assert the BEHAVIOUR, not the sentence that explains it: a failed membership read must come back
+// null, and the screen must then fall back to exactly what it drew before item 1 — not to a
+// confident "nobody owns this", which is the one thing this whole pair exists to stop it inventing.
+want(/: null;?\s*$/m.test(RESTRTE.split("linkedOwners: membersRead ?")[1]?.split("\n")[0] + ": null") ||
+     /linkedOwners: membersRead \? \([^)]*\) : null/.test(RESTRTE),
+  "…and a FAILED read comes back null, never an empty array that would read as 'nobody owns this'");
+want(/const coOwnersNoPrimary = !sel && !!restaurant\.linkedOwners && restaurant\.linkedOwners\.length > 0/.test(REST),
+  "…and the Owner card says nothing extra when it is null (a null is not 'nobody')");
+want(/const nCo = co \? co\.length : 0;/.test(REST),
+  "…and the list column falls back to the bare dash it drew before item 1");
+want(!/adminFetch[^\n]*"\/api\/admin\/owners"/.test(REST),
+  "…and the screen no longer makes a SECOND whole-roster call to get it (item 10)");
+want(/nCo > 0 \? `\$\{nCo\} owner\$\{nCo === 1 \? "" : "s"\} · no primary` : "—"/.test(REST),
+  "the Owner column says 'N owners · no primary' instead of a bare dash");
+want(/each of them sees this restaurant's numbers/.test(REST),
+  "…and names them on hover, so the admin knows who is already reading the takings");
+want(/coOwnersNoPrimary \? "— no primary owner —" : "— no owner —"/.test(REST),
+  "the Owner card's empty option says 'no primary owner' when people ARE linked");
+want(/already own\{coOwnersNoPrimary\.length === 1 \? "s" : ""\} this restaurant/.test(REST),
+  "…and the card names them, so assigning a primary is an informed act");
+want(/it takes nothing away from the others/.test(REST),
+  "…and says that giving the badge removes nobody's access");
+
+// ── 28 · every self-saving control on the settings card reports itself ─────────────────────────
+//
+// WHERE THIS BITES: Access & permissions → any row that opens a settings card → a switch that
+// carries no Save button.
+//
+// The owner's rule, 2026-08-20: "there shouldn't be a button also… it should be written that this
+// has been saved, and that return will only come when it is actually been saved." `field`,
+// `pickNumber` and `choiceCards` all print savedHint(). `boolToggle` with `auto` did not — and a
+// self-saving key is deliberately kept out of `dirtyKeys`, so the Save bar could not speak for it
+// either. Measured on French House: tapping "Let individual dishes differ from this" wrote
+// item_tax_modes_allowed = true and the screen said nothing at all.
+console.log("\n28. Access → a settings card: an auto-saving SWITCH says it saved, like every neighbour");
+want(/\{opts\.auto \? savedHint\(k\) : null\}/.test(CARD),
+  "an auto-saving switch prints the same three-state line the other self-saving controls print");
+{
+  // Every control that calls autoSaveNow / autoSave must also be able to report. This is the
+  // general rule, not the one call site — a second `auto` switch added tomorrow is covered.
+  const autoSites = (CARD.match(/opts\.auto/g) || []).length;
+  want(autoSites >= 2, "…and the `auto` flag is read for BOTH the write and the report");
+}
+
+// ── 29 · the phone-code switch says what turning it on really does ─────────────────────────────
+//
+// WHERE THIS BITES: Access & permissions → Menu → Dining session and location → the two switches.
+//
+// `lfh_place_order` (mig 357) refuses EVERY guest order with `otp_required` unless the diner's
+// membership carries `phone_verified`, and only `lfh_verify_otp` can set that. Nothing in app/,
+// components/ or public/panels/ calls it — `lib/session.ts` exports sendOtp/verifyOtp and they have
+// no caller — so a guest has no way to enter a code. Turning this switch on stops the restaurant
+// trading, and the card used to say nothing at all.
+console.log("\n29. Access → Dining session and location: the phone-code switch names its consequence");
+want(/The screen that asks a guest for the code has not been built yet/.test(CARD),
+  "the card says the phone-code screen does not exist yet");
+want(/turning it on stops this restaurant taking any guest orders at all/.test(CARD),
+  "…and what that costs — no guest orders at all");
+want(/Nobody can order here while this is on/.test(CARD),
+  "…and it turns into a live warning once the switch is actually ON");
+{
+  // The claim behind the warning: no screen can satisfy require_otp. If somebody builds the guest
+  // phone-code screen, this check goes red and the wording has to be rewritten — which is exactly
+  // the moment it should be.
+  const callers = ["app", "components", "public/panels"].flatMap((dir) => {
+    const out = [];
+    const walk = (d) => {
+      for (const e of readdirSync(join(ROOT, d), { withFileTypes: true })) {
+        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+        const rel = d + "/" + e.name;
+        if (e.isDirectory()) walk(rel);
+        else if (/\.(tsx?|jsx?)$/.test(e.name) && /\b(sendOtp|verifyOtp)\s*\(/.test(read(rel))) out.push(rel);
+      }
+    };
+    try { walk(dir); } catch { /* directory absent in a partial checkout */ }
+    return out;
+  });
+  want(callers.length === 0,
+    callers.length === 0
+      ? "…and the claim still holds: no screen anywhere calls sendOtp/verifyOtp"
+      : "the guest phone-code screen now EXISTS (" + callers.join(", ") + ") — rewrite the warning on the Dining sessions card");
+}
+
+// ── 30 · a retired setting is described as retired, in every sentence ──────────────────────────
+//
+// `kot_print_target` was retired by migration 369. One comment in this file said so; another, four
+// hundred lines away, still said "the coarse setting still exists underneath … and the route now
+// wins when there is one". Two comments in ONE file disagreeing about whether a dead column still
+// decides something is how a dead path gets revived by whoever reads the friendlier sentence.
+console.log("\n30. The settings card: a retired setting is not described as a live fallback");
+want(!/coarse\s+setting still exists underneath/.test(CARD),
+  "no comment claims kot_print_target is still a fallback");
+{
+  const readers = ["app", "lib", "components", "public/panels"].flatMap((dir) => {
+    const out = [];
+    const walk = (d) => {
+      for (const e of readdirSync(join(ROOT, d), { withFileTypes: true })) {
+        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+        const rel = d + "/" + e.name;
+        if (e.isDirectory()) walk(rel);
+        else if (/\.(tsx?|jsx?)$/.test(e.name)) {
+          const src = strip(read(rel));
+          if (/kot_print_target/.test(src)) out.push(rel);
+        }
+      }
+    };
+    try { walk(dir); } catch { /* absent */ }
+    return out;
+  });
+  want(readers.length === 0,
+    readers.length === 0
+      ? "…and the claim still holds: no CODE (comments stripped) reads kot_print_target"
+      : "kot_print_target is being read again by " + readers.join(", ") + " — mig 369 retired it");
+}
+
+// ── 31 · no screen in this territory prints a raw NaN ──────────────────────────────────────────
+//
+// WHERE THIS BITES: Admin → Owners → the person's hero line, "seen …".
+//
+// `seen()` is four `<` comparisons, and NaN fails every one of them — so a date it could not read
+// fell through to the last line and printed "seen NaN d ago". last_seen_at is a timestamp column,
+// so today it is either null or real; this keeps the standing rule true whatever it is fed next.
+console.log("\n31. Owners → the person's hero: an unreadable date reads 'never', never 'NaN d ago'");
+want(/if \(!Number\.isFinite\(m\)\) return "never";/.test(OWN),
+  "`seen()` refuses a date it cannot read instead of falling through to the days branch");
+{
+  // Run the real function's shape against a bad value rather than trusting the grep.
+  const seen = (iso) => {
+    if (!iso) return "never";
+    const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    if (!Number.isFinite(m)) return "never";
+    if (m < 2) return "just now";
+    if (m < 60) return `${m} min ago`;
+    if (m < 60 * 24) return `${Math.floor(m / 60)} h ago`;
+    return `${Math.floor(m / 1440)} d ago`;
+  };
+  want(!/NaN/.test(seen("not-a-date") + seen(null) + seen(undefined) + seen("")),
+    "…and no input this column can hold produces the text 'NaN'");
+}
+
+// ── 32 · on a phone, "Suspended" is not the column that is off-screen ─────────────────────────
+//
+// WHERE THIS BITES: Admin console → Restaurants, on a phone.
+//
+// Under 861px this table keeps its six columns aligned and scrolls SIDEWAYS inside its own wrapper
+// — deliberate since 2026-08-12, and not being undone. What was wrong is WHICH column ends up
+// hidden: measured at 360px, Name / Slug / Owner / Health are on screen and Status / Open are the
+// two behind the drag. "Is this one suspended?" is the question you open this list on a phone to
+// answer, and it was the one you had to drag for.
+console.log("\n32. Restaurants on a phone: a suspended restaurant says so beside its name");
+want(/className="rest-sus"/.test(REST),
+  "a suspended row repeats the Suspended chip beside the NAME");
+want(/\{!r\.active && <span className="rest-sus"/.test(REST),
+  "…only when the restaurant really is suspended — an 'Active' badge on every row would be noise");
+want(/\.rest-sus \{ display: none; \}/.test(REST),
+  "…and it is hidden by default, so nothing moves on a computer");
+want(/@media \(max-width: 860px\) \{\s*\n\s*\.rest-sus \{ display: inline-block;/.test(REST),
+  "…and shown only under 861px, the same breakpoint the sideways-scrolling table starts at");
+want(/\.adm-logwrap \{ overflow-x: auto/.test(CSS) && /\.adm-logrow \{ min-width: 540px; \}/.test(CSS),
+  "…and the deliberate sideways scroll it exists BECAUSE of is still there, untouched");
+want(!/<span style=\{\{ fontWeight: 700, minWidth: 0 \}\}>/.test(REST),
+  "the Name cell has no `minWidth: 0` — the row's tracks are bare `fr`, so zeroing the item's " +
+  "minimum shrank Name to 66px and spilled a long name 26px into Slug at 360px");
+
+// ── 33 · two accounts, one login name ─────────────────────────────────────────────────────────
+//
+// WHERE THIS BITES: Admin console → Owners → the list, a person's hero line, and the delete dialog.
+//
+// This cannot be MADE any more, and the first three checks are what say so: every route a person
+// can reach refuses a name that is taken. It still EXISTS, because the database's own rule is
+// per-restaurant (mig 245) and every restaurant used to be minted with a starter login literally
+// called `owner`. Two such accounts were on the backup stack, eleven weeks apart, showing as two
+// rows reading "@owner · 0 restaurants" with nothing saying they collide — and the delete dialog
+// asks you to type that username to confirm, which identifies neither.
+console.log("\n33. Owners: a login name held by two accounts is said out loud");
+{
+  const OWNRTE = read("app/api/admin/owners/route.ts");
+  const USERS = read("app/api/admin/users/route.ts");
+  want(/if \(action === "rename"\)[\s\S]{0,400}nameTakenMessage\(key\)/.test(OWNRTE),
+    "renaming an owner still checks the name GLOBALLY before it writes");
+  want(/const takenMsg = await nameTakenMessage\(key\);/.test(OWNRTE) && /nameTakenMessage/.test(RESTRTE),
+    "…and so does every path that MINTS one — the Owners page and the Owner card's create-and-assign box");
+  want(/Owners are managed on the Owners page, not here\./.test(USERS) && /\.neq\("role", "owner"\)/.test(USERS),
+    "…and Admin → Users cannot create or rename an owner at all, so there is no third rule");
+  want(/const sharedLogins = useMemo\(/.test(OWN),
+    "the Owners screen works out which login names are held by more than one account");
+  want(/sharedLogins\.has\(o\.username\) && \(/.test(OWN),
+    "…and marks the rail row, so two identical `@name` lines are not left looking like a duplicate render");
+  want(/\{sharedName \? <span className="own-dup">shared name<\/span> : null\}/.test(OWN),
+    "…and the person's own hero line says it too");
+  want(/\{sharedName && \(/.test(OWN) && /Typing it confirms <b>this<\/b> row/.test(OWN),
+    "…and the delete dialog says WHICH of the two typing the name will confirm");
+  want(/rgba\(217,119,6,\.20\)/.test(OWN),
+    "…in amber, not red — nothing is broken and nothing new can be created this way");
+}
+{
+  // The JSX space this screen lost, and the reason it is easy to lose: a text node that starts on
+  // a new line has its leading whitespace stripped, so `</span>\n            · created` shipped as
+  // "Active· created". Same class as the one already recorded on the tables-per-row card.
+  want(/\{" · "\}created \{created \?/.test(OWN),
+    "the hero's separator is an explicit {\" · \"} — a bare `·` on the next line loses its space");
 }
 
 console.log(failed

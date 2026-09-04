@@ -660,15 +660,31 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       </label>
     );
   };
-  // `auto` = this switch is a discrete control, so it saves itself on the same debounce the
-  // number pickers use. Left off, it behaves exactly as before (the Save bar owns it) — the two
-  // customer switches below keep that behaviour, so no existing call site changes.
+  // `auto` = this switch is a discrete control, so it saves itself the moment it is tapped. Left
+  // off, it behaves exactly as before (the Save bar owns it) — the seven other switches on this
+  // card keep that behaviour, so no existing call site changes.
+  //
+  // ── AND AN AUTO SWITCH REPORTS ITSELF, LIKE EVERY OTHER SELF-SAVING CONTROL (T19 sweep #8,
+  //    2026-09-04) ──────────────────────────────────────────────────────────────────────────────
+  // This was the ONE self-saving control with no line under it. `field`, `pickNumber` and
+  // `choiceCards` all print savedHint(); this printed nothing, and a self-saving key is also kept
+  // out of `dirtyKeys`, so no Save bar could speak for it either. Measured on French House: tapping
+  // "Let individual dishes differ from this" wrote item_tax_modes_allowed = true to the database
+  // and the screen said nothing at all — while the radio group two centimetres above it said
+  // "Saves on its own". That is the exact rule the owner set on 2026-08-20: "it should be written
+  // that this has been saved, and that return will only come when it is actually been saved."
+  //
+  // A fragment, not a wrapper div: every `auto` call site sits in a `display:grid` column, so the
+  // hint takes the next row on its own instead of being squeezed beside the pill.
   const boolToggle = (label: string, k: string, on: boolean, opts: { auto?: boolean } = {}) => (
-    <button type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!loadOk || busy}
-      onClick={() => { set(k, !on); if (opts.auto) autoSaveNow(k, !on); }}
-      title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
-      <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
-    </button>
+    <>
+      <button type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!loadOk || busy}
+        onClick={() => { set(k, !on); if (opts.auto) autoSaveNow(k, !on); }}
+        title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
+        <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
+      </button>
+      {opts.auto ? savedHint(k) : null}
+    </>
   );
   // A pick-one question where each answer needs a WORKED EXAMPLE under it. A <select> can't
   // carry that — and these three answers change what every bill means, so the explanation has
@@ -1148,10 +1164,19 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             This block used to be three radio cards ("kitchen screen / counter screen / both", mig 336).
             Since mig 341 the Printing board answers the same question far better — a computer running
             the helper, or a named panel/person/PC, per kind of paper — and two screens answering one
-            question differently is exactly what the owner asked to end. The radios are gone; the coarse
-            setting still exists underneath for restaurants with no route, and the route now wins when
-            there is one (see the kitchen/manager routes). What is left here is the one line worth
-            knowing, and the door to the board that owns it. */}
+            question differently is exactly what the owner asked to end. The radios are gone, and so is
+            the setting they wrote.
+            ── CORRECTED (T19 sweep #8, 2026-09-04): this note used to end "the coarse setting still
+            exists underneath for restaurants with no route, and the route now wins when there is one".
+            That was true for the two days between this block landing and migration 369, and it has been
+            wrong ever since — `kot_print_target` is RETIRED. `KEYS` above says so, the admin save route
+            refuses to write it, and a grep of app/, lib/, components/ and public/ finds seven mentions,
+            every one of them an obituary comment. There is no fallback underneath. The Printing board is
+            the only thing that decides where a kitchen ticket comes out, and a restaurant with no route
+            set falls back inside that board (docs/PRINT-HELPER.md), not to a column here. Two comments in
+            ONE file disagreeing about whether a retired setting still decides something is how a dead
+            path gets revived by the next person to read the friendlier sentence.
+            What is left here is the one line worth knowing, and the door to the board that owns it. */}
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: "var(--border)" }}>
           <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Where the paper comes out</h3>
           <div className="adm-elsewhere">
@@ -1210,6 +1235,31 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           {boolToggle("Require location (guest must be near the restaurant)", "require_location", draft.require_location !== false)}
           {boolToggle("Require a phone code (OTP) to place an order", "require_otp", draft.require_otp !== false)}
         </div>
+        {/* ── THE PHONE-CODE SWITCH HAS NO SCREEN BEHIND IT YET (T19 sweep #8, 2026-09-04) ─────────
+            Turning `require_otp` on is not a stricter version of ordering — it is a full stop.
+            `lfh_place_order` (last written in migration 357) refuses EVERY guest order with
+            `otp_required` unless that diner's membership carries `phone_verified`, and the only
+            thing that can set that flag is `lfh_verify_otp`. Nothing in `app/`, `components/` or
+            `public/panels/` calls it: `lib/session.ts` exports `sendOtp`/`verifyOtp` and they have
+            no caller, so a guest has no way to enter a code. What the diner is shown instead is
+            lib/guestOutbox.ts's translation — "Please confirm your phone number first." — an
+            instruction there is no screen to follow.
+            The switch is NOT removed: the manager panel carries the same one (public/panels/editor
+            /app.js), and phone verification is planned, so deleting one half would leave the other
+            half lying. What it gets is the sentence it never had, so nobody switches a restaurant's
+            ordering off by mistake. */}
+        {draft.require_otp === true ? (
+          <p className="hint" role="alert" style={{ margin: "0 0 12px", color: "var(--adm-danger, #dc2626)", borderLeft: "3px solid var(--adm-danger, #dc2626)", paddingLeft: 10 }}>
+            <b>Nobody can order here while this is on.</b> The phone-code screen is not built yet, so every
+            guest order is refused and the diner is told to confirm a number with nothing to confirm it in.
+            Switch it off unless you are testing.
+          </p>
+        ) : (
+          <p className="hint" style={{ margin: "0 0 12px" }}>
+            <b>Leave the phone code off.</b> The screen that asks a guest for the code has not been built yet,
+            so turning it on stops this restaurant taking any guest orders at all.
+          </p>
+        )}
         <p className="hint">
           Restaurant location — used only to confirm guests are physically there. In Google Maps, right-click the restaurant
           and click the latitude, longitude numbers to copy them. Leave blank to skip the location check.

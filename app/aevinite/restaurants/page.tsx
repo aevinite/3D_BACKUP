@@ -18,11 +18,35 @@ import { adminFetch } from "@/lib/adminFetch";
 import { flashTarget } from "@/lib/adminJump";
 
 
-type Restaurant = { id: string; slug: string; name: string; active: boolean; createdAt: string | null; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
+type Restaurant = { id: string; slug: string; name: string; active: boolean; createdAt: string | null; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null;
+  // Everyone in `restaurant_owners` for this restaurant, by name — see the Membership note below.
+  // `null` means the server could not read it, and the screen must NOT then say "nobody owns this".
+  linkedOwners?: string[] | null };
 type Owner = { id: string; name: string };
 // Activity health per restaurant (from /api/admin/restaurants/health, mig 146). Signals
 // only, no money — the admin panel never shows earnings.
 type Health = { last_order_at: string | null; orders_24h: number; open_issues: number; staff_online: number };
+
+// ── "NO OWNER" AND "NO PRIMARY OWNER" ARE NOT THE SAME SENTENCE (T19 sweep #8, 2026-09-04) ─────
+//
+// This screen's Owner column reads `restaurants.owner_user_id`, which is the PRIMARY slot only.
+// The thing that actually decides who sees a restaurant's numbers is the `restaurant_owners` join
+// table (mig 097) — the same table the Owners page counts. When a restaurant has co-owners but
+// nobody holds the ★, the two disagree, and this screen was the one that lied: it drew "—", which
+// on this page means "nobody owns this".
+//
+// Measured on the backup stack: Green Bowl is owned by three people on Admin → Owners (and its
+// own Logins & passwords card, further down its detail page, lists one of them as OWNER) while
+// this column read "—" and the Owner card's picker read "— no owner —". An admin reading that
+// would assign somebody, believing they were the first — and would never be told that three
+// people were already looking at that restaurant's takings. The Owners page's amber
+// "1 restaurant has no owner" bar counts the join table, so the two screens printed two different
+// numbers for the same question.
+//
+// EGRESS: NONE. This began as a second whole-roster call to `/api/admin/owners` on every open of
+// this screen; the owner picked item 10 and it moved onto the list read itself, which now carries
+// `linkedOwners` per row (two small paged reads that ride along inside the same round trip). So the
+// screen costs exactly what it cost before item 1: one call for the list, one for health.
 
 // Turn the raw signals into a one-word status + colour. "Healthy" = busy now (staff online
 // or an order in the last 24h); "Quiet" = ordered within a week; "Dormant" = nothing for 7+
@@ -60,6 +84,7 @@ export default function AdminRestaurants() {
   const [list, setList] = useState<Restaurant[] | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [health, setHealth] = useState<Record<string, Health>>({});
+
   const [healthFilter, setHealthFilter] = useState<"all" | "Healthy" | "Quiet" | "New" | "Dormant" | "Suspended">("all");
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Restaurant | null>(null);
@@ -153,11 +178,13 @@ export default function AdminRestaurants() {
   }, []);
   useEffect(() => { loadHealth(); }, [loadHealth]);
 
+
   if (selected) {
     // Re-read the freshest copy from the list so the owner shows correctly after a round-trip.
     const fresh = (list || []).find((r) => r.id === selected.id) || selected;
     return <RestaurantDetail key={fresh.id} restaurant={fresh} owners={owners}
-      onBack={() => { writeFocusUrl(null); setSelected(null); loadList(); }} onChanged={loadList} />;
+      onBack={() => { writeFocusUrl(null); setSelected(null); loadList(); }}
+      onChanged={loadList} />;
   }
 
   const needle = q.trim().toLowerCase();
@@ -188,6 +215,18 @@ export default function AdminRestaurants() {
       {/* The live slugs, so the guest-link preview can show the address the server will really
           mint rather than the one the typed name suggests (see slugPreview below). */}
       <NewRestaurant onCreated={loadList} takenSlugs={(list || []).map((r) => r.slug)} />
+
+      {/* Phone-only: see the note on the Suspended chip in the row below. Kept beside the screen it
+          belongs to rather than in globals.css, because it exists for one column of one table. */}
+      <style href="adm-rest-1" precedence="default">{`
+        .rest-sus { display: none; }
+        @media (max-width: 860px) {
+          .rest-sus { display: inline-block; margin-left: 7px; vertical-align: 1px;
+            font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+            padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+            background: color-mix(in srgb, var(--adm-danger) 22%, transparent); color: var(--adm-danger); }
+        }
+      `}</style>
 
       <div className="adm-card">
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -258,7 +297,28 @@ export default function AdminRestaurants() {
                 }}
                 title={`Open ${r.name}`}
               >
-                <span style={{ fontWeight: 700 }}>{r.name}</span>
+                {/* ── ON A PHONE, "SUSPENDED" MUST NOT BE THE COLUMN THAT IS OFF-SCREEN (T19 sweep
+                    #8, 2026-09-04 — the owner picked it as item 9) ────────────────────────────────
+                    Under 861px this table keeps its six columns aligned and scrolls SIDEWAYS inside
+                    its own wrapper — a deliberate decision from 2026-08-12 ("you compare rows down a
+                    column there"), and it is not being undone: `.adm-logwrap` still pins the row to
+                    540px and still scrolls. What was wrong is WHICH column ends up hidden. Measured
+                    at 360px: Name, Slug, Owner and Health are on screen; Status and Open are the two
+                    behind the drag. "Is this one suspended?" is the question you open this list on a
+                    phone to answer, and it was the one you had to drag for.
+                    So the Suspended chip is repeated beside the NAME, phone-only (`.rest-sus`, which
+                    is display:none above 860px), and ONLY when the restaurant really is suspended —
+                    an "Active" badge on every row would be noise, and the Status column already says
+                    it for anyone who scrolls. Nothing is removed and nothing moves on a computer. */}
+                {/* NO `minWidth: 0` HERE. It was tried and measured out again in the same hour: the
+                    row's tracks are bare `fr`, whose automatic minimum is the item's min-content, so
+                    zeroing the item's minimum shrank the Name track to 66px and let a long name spill
+                    26px into the Slug column at 360px (AANGAN GARDEN RESTAURANT). The track is meant
+                    to grow; the row is pinned to 540px and scrolls, which is the deliberate design. */}
+                <span style={{ fontWeight: 700 }}>
+                  {r.name}
+                  {!r.active && <span className="rest-sus" title="Suspended — its guest menu is offline">Suspended</span>}
+                </span>
                 <span className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{r.slug}</span>
                 {/* AN OWNER WHO CANNOT SIGN IN IS STILL AN OWNER (T16 sweep, 2026-08-19).
                     /api/admin/restaurants only lists ACTIVE owners, and a suspended one — or one
@@ -268,10 +328,20 @@ export default function AdminRestaurants() {
                     binned primary holder for this very reason; this column had the same hole. */}
                 {(() => {
                   const known = r.ownerUserId ? owners.find((o) => o.id === r.ownerUserId) : null;
-                  const label = !r.ownerUserId ? "—" : known ? known.name : "assigned · not active";
+                  // …AND A RESTAURANT WITH NO ★ IS NOT AN OWNERLESS ONE (see the Membership note).
+                  const co = r.linkedOwners;
+                  const nCo = co ? co.length : 0;
+                  const label = r.ownerUserId
+                    ? (known ? known.name : "assigned · not active")
+                    : nCo > 0 ? `${nCo} owner${nCo === 1 ? "" : "s"} · no primary` : "—";
+                  const title = r.ownerUserId && !known
+                    ? "This restaurant has an owner, but that account is suspended or in the recycle bin — open Owners to see who."
+                    : !r.ownerUserId && nCo > 0
+                      ? `${co!.join(", ")} — each of them sees this restaurant's numbers. Nobody holds the primary badge yet; set one on Owners.`
+                      : undefined;
                   return (
                     <span className="adm-muted" style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                      title={r.ownerUserId && !known ? "This restaurant has an owner, but that account is suspended or in the recycle bin — open Owners to see who." : undefined}>
+                      title={title}>
                       {label}
                     </span>
                   );
@@ -1184,6 +1254,9 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
   // An owner IS assigned, but they are not in the (active-only) owners list — see the note on the
   // select below. `sel` is the truth; `owners` is only who can be picked.
   const assignedUnknown = !!sel && !owners.some((o) => o.id === sel);
+  // Nobody holds the ★, but people ARE linked — the case this picker used to describe as
+  // "— no owner —". See the note on `Membership` at the top of this file.
+  const coOwnersNoPrimary = !sel && !!restaurant.linkedOwners && restaurant.linkedOwners.length > 0 ? restaurant.linkedOwners : null;
 
   const assign = async (ownerId: string) => {
     setBusy(true); setMsg(null);
@@ -1211,7 +1284,8 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
         <select value={sel} disabled={busy} onChange={(e) => assign(e.target.value)}
           style={{ padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
-          <option value="">— no owner —</option>
+          {/* …and the empty option itself must not say "no owner" when there are owners, only no ★. */}
+          <option value="">{coOwnersNoPrimary ? "— no primary owner —" : "— no owner —"}</option>
           {/* A SELECT WITH NO MATCHING OPTION SHOWS ITS FIRST ONE (T16 sweep, 2026-08-19). The
               owners list is active-only, so a restaurant whose owner is suspended or sitting in
               the recycle bin had no option to select and this box displayed "— no owner —" for a
@@ -1229,6 +1303,19 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
           This restaurant already has an owner, but that account is <b>suspended or in the recycle bin</b>, so
           it isn&rsquo;t in the list above. <a href="/aevinite/owners">Open Owners</a> to see who it is —
           picking somebody here replaces them.
+        </p>
+      )}
+      {/* THE PICKER ANSWERS "WHO HOLDS THE ★", NOT "DOES ANYBODY OWN THIS" (T19 sweep #8) — see the
+          note on `Membership`. Left as a bare "— no owner —", this box told the admin a restaurant
+          was unowned while several people were already reading its takings. */}
+      {coOwnersNoPrimary && (
+        <p className="hint" style={{ margin: "8px 0 0" }}>
+          <i className="fas fa-users" style={{ marginRight: 7 }} aria-hidden="true" />
+          <b>{coOwnersNoPrimary.length === 1 ? "1 person" : `${coOwnersNoPrimary.length} people`} already own{coOwnersNoPrimary.length === 1 ? "s" : ""} this restaurant</b>
+          {" "}&mdash; {coOwnersNoPrimary.join(", ")}. Each of them sees its numbers today. What is missing is
+          only the <b>primary</b> badge, which is the name this console shows in lists. Picking somebody above
+          gives them that badge; it takes nothing away from the others.{" "}
+          <a href="/aevinite/owners">Open Owners</a> to change who is linked.
         </p>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
