@@ -1272,9 +1272,15 @@ export default function AdminRepair() {
         <p className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.5, margin: "0 0 10px" }}>
           Describe what&rsquo;s going wrong in your own words — a printer, a button, a wrong total. {rid ? <>Tagged to <b>{scopedName}</b>.</> : <>Pick a restaurant at the top of this page to tag it, or leave it general.</>}
         </p>
+        {/* fontFamily: "inherit" — a <textarea> falls back to the browser's monospace unless it is
+            told otherwise, and every other input on this console is the console's own face. So the
+            one box on the page where he types a SENTENCE ("the bill button on table 12 does
+            nothing during rush") was the only thing on the screen dressed as a code editor, right
+            under a hint asking for his own words. Measured: computed font-family was "monospace"
+            while the page was Inter (item 5, 2026-09-04). */}
         <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} rows={3}
           placeholder="e.g. The bill button on table 12 does nothing during rush; happens on the waiter tablet."
-          style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13.5, resize: "vertical" }} />
+          style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.5, resize: "vertical" }} />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
           <span className="adm-muted" style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}>
             <i className="fas fa-bolt" aria-hidden="true" style={{ color: "var(--adm-accent, #e8a13c)" }} /> Now = a window on the Mac &nbsp;·&nbsp; <i className="fas fa-moon" aria-hidden="true" style={{ opacity: 0.8 }} /> Overnight = the 2:30 robot

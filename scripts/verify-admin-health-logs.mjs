@@ -401,6 +401,12 @@ ok(!/\.rp-detail\{[^}]*font-family/.test(REPAIR), "P71718",
 ok(/fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"/.test(REPAIR), "P71719",
   "repair: the OPEN block lost its own monospace — the captured text must still be shown byte for byte in a code face");
 
+// ── item 5 · the box he types a sentence into must not be a code editor ─────────────────────
+// A <textarea> falls back to the browser's monospace unless told otherwise; the measured computed
+// font-family was "monospace" while the console is Inter — under a hint asking for his own words.
+ok(/rows=\{3\}[\s\S]{0,400}?fontFamily: "inherit"/.test(REPAIR), "P71717",
+  "repair: the 'Report a problem' box has lost fontFamily:inherit — it renders in the browser's monospace");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
