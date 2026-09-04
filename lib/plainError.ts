@@ -315,6 +315,27 @@ export function screenName(where: string | null | undefined): string {
 type Rule = { test: RegExp; say: (m: RegExpMatchArray) => string; then?: string };
 
 const RULES: Rule[] = [
+  // ── TWO SHAPES THE ADMIN CONSOLE MEETS AND THIS TABLE DID NOT KNOW (T20 round 2, 2026-09-04) ──
+  // Measured by forcing each failure state on /aevinite/billing, /aevinite/recycle and
+  // /aevinite/usage and READING what landed on the screen. Both came out as the app's own words at
+  // a person, which is the honest fallback but not an answer:
+  //
+  //   a 401 answer          →  "unauthorized"
+  //   an answer that is not JSON (a server restarting, a proxy page)
+  //                         →  "Unexpected token '<', \"<html>not \"... is not valid JSON"
+  //
+  // The first is the commonest of all — a console left open overnight — and "unauthorized" tells
+  // nobody that all they have to do is sign in again.
+  {
+    test: /^(?:unauthorized|forbidden|not authori[sz]ed|auth(?:entication)? (?:required|failed))\.?$/i,
+    say: () => "Your sign-in has expired, so the screen couldn't load its numbers.",
+    then: "Nothing is wrong with the data. Sign in again and the screen fills in — anything you had typed is still on the page until you reload it.",
+  },
+  {
+    test: /(?:Unexpected token|is not valid JSON|JSON\.parse|Unexpected end of JSON input)/i,
+    say: () => "The server answered with something that wasn't an answer.",
+    then: "Usually a server that was restarting, or a network in the middle that returned its own page instead of ours. Try again in a moment; if it keeps happening, the server is the place to look.",
+  },
   // ── The app's own code failing to arrive ──────────────────────────────────────────────────────
   // Measured: "Failed to load chunk /_next/static/chunks/1g1jwpgiikpwc.js from module 64893".
   // Overwhelmingly the most common row in the table. It is almost never a bug in the app: it is a

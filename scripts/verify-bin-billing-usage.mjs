@@ -523,7 +523,10 @@ await phase("Billing · a refusal never wears the same quiet grey as a confirmat
 await phase("Billing · a date on screen is written the way the rest of the console writes dates", () => {
   // components/admin/shared.tsx exports istDate precisely so two admin screens cannot print the
   // same field differently — /aevinite/revenue already uses it for its Next-due column.
-  const importsIt = /import \{ useActiveAutoRefresh, istDate \}/.test(B);
+  // WHAT it imports, not the ORDER of the names on the line. Pinned to the exact import statement,
+  // this went red the moment a second helper joined it — a real fix reported as a regression, which
+  // is the one thing these files must never do.
+  const importsIt = /import \{[^}]*\bistDate\b[^}]*\} from "@\/components\/admin\/shared"/.test(B);
   const nextDue = /istDate\(r\.nextDueOn\)/.test(B);
   const paidOn = /istDate\(p\.paid_on\)/.test(B);
   const keepsRaw = /title=\{r\.nextDueOn \|\| undefined\}/.test(B) && /title=\{p\.paid_on\}/.test(B);
