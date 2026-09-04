@@ -50,6 +50,7 @@ const PANEL_MGR = "public/panels/editor/app.js";
 const PANEL_TAB = "public/panels/tablet/app.js";
 const INV_ROUTE = "app/api/owner/inventory/route.ts";
 const INV_UI = "components/owner/OwnerInventory.tsx";
+const PHONE_TEXT = "lib/phoneText.ts";
 
 // { item, file, say, must: [RegExp], mustNot: [RegExp] }
 const RULES = [
@@ -553,6 +554,34 @@ const RULES = [
       // clock west of UTC the September heading reads "August", and the tile beside it reads
       // "Bought (August)" over September's money.
       /new Date\(month \+ "-01"\)\.toLocaleString\("en-IN", \{ month: "long", year: "numeric" \}\)/,
+    ],
+  },
+  {
+    item: "s8·T16·5", file: KHATA,
+    // MEASURED on the phone he tests: this screen printed `9876500077` while the Customers list
+    // beside it printed `90000 00007`. Pay Later is the screen you open to RING the person.
+    say: "a mobile on Pay Later is spaced so it can be read back to a guest",
+    must: [
+      /import \{ showPhone \} from "@\/lib\/phoneText"/,
+      /\{c\.phone \? showPhone\(c\.phone\) : "no mobile"\}/,
+    ],
+    mustNot: [
+      // The raw run this replaced. A screen for phoning people may never print one again.
+      /\{c\.phone \|\| "no mobile"\}/,
+    ],
+  },
+  {
+    item: "s8·T16·5", file: CUSTOMERS,
+    say: "…and Customers reads the same rule from the same place, not its own copy",
+    must: [/import \{ showPhone \} from "@\/lib\/phoneText"/],
+    mustNot: [/const showPhone = \(p: string\)/],
+  },
+  {
+    item: "s8·T16·5", file: PHONE_TEXT,
+    say: "…and that one place handles a number that is NOT ten digits, and a missing one",
+    must: [
+      /s\.length === 10 \? `\$\{s\.slice\(0, 5\)\} \$\{s\.slice\(5\)\}` : s \|\| "—"/,
+      /const s = \(p \?\? ""\)\.trim\(\);/,      // so "  " is a missing number, not a name-shaped one
     ],
   },
   {

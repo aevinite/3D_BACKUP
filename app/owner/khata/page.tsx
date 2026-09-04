@@ -22,6 +22,13 @@ import { inr } from "@/components/admin/shared";
 // and crashed this page with "supabaseKey is required." (2026-08-06).
 import { partialNote } from "@/lib/partialRead";
 import { asSuffix } from "@/lib/ownerPin";
+// ── A NUMBER YOU ARE ABOUT TO RING IS SPACED SO IT CAN BE READ ALOUD (sweep 8 · T16, 2026-09-04) ─
+// This screen printed a guest's mobile as one ten-digit run — MEASURED on the phone he tests:
+// `9876500077`, sitting directly under a Customers list that showed `90000 00007`. Pay Later is the
+// screen you open when you are about to phone the person who owes you money, so it is the one that
+// most needs the number grouped. Same helper, one place: lib/phoneText.ts (zero imports, so it is
+// safe in this "use client" file, exactly like lib/searchText and lib/partialRead beside it).
+import { showPhone } from "@/lib/phoneText";
 
 const IST = "Asia/Kolkata";
 type Bill = { bill_no: number | null; table_number: string | null; khata_at: string; amount: number };
@@ -205,7 +212,7 @@ export default function OwnerKhata() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
                     <div className="adm-muted" style={{ fontSize: 12.5 }}>
-                      {c.phone || "no mobile"}{c.note ? ` · ${c.note}` : ""}
+                      {c.phone ? showPhone(c.phone) : "no mobile"}{c.note ? ` · ${c.note}` : ""}
                       {multi ? <> · <span className="adm-chip">{c.restaurantName}</span></> : null}
                     </div>
                   </div>
