@@ -660,15 +660,31 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       </label>
     );
   };
-  // `auto` = this switch is a discrete control, so it saves itself on the same debounce the
-  // number pickers use. Left off, it behaves exactly as before (the Save bar owns it) — the two
-  // customer switches below keep that behaviour, so no existing call site changes.
+  // `auto` = this switch is a discrete control, so it saves itself the moment it is tapped. Left
+  // off, it behaves exactly as before (the Save bar owns it) — the seven other switches on this
+  // card keep that behaviour, so no existing call site changes.
+  //
+  // ── AND AN AUTO SWITCH REPORTS ITSELF, LIKE EVERY OTHER SELF-SAVING CONTROL (T19 sweep #8,
+  //    2026-09-04) ──────────────────────────────────────────────────────────────────────────────
+  // This was the ONE self-saving control with no line under it. `field`, `pickNumber` and
+  // `choiceCards` all print savedHint(); this printed nothing, and a self-saving key is also kept
+  // out of `dirtyKeys`, so no Save bar could speak for it either. Measured on French House: tapping
+  // "Let individual dishes differ from this" wrote item_tax_modes_allowed = true to the database
+  // and the screen said nothing at all — while the radio group two centimetres above it said
+  // "Saves on its own". That is the exact rule the owner set on 2026-08-20: "it should be written
+  // that this has been saved, and that return will only come when it is actually been saved."
+  //
+  // A fragment, not a wrapper div: every `auto` call site sits in a `display:grid` column, so the
+  // hint takes the next row on its own instead of being squeezed beside the pill.
   const boolToggle = (label: string, k: string, on: boolean, opts: { auto?: boolean } = {}) => (
-    <button type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!loadOk || busy}
-      onClick={() => { set(k, !on); if (opts.auto) autoSaveNow(k, !on); }}
-      title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
-      <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
-    </button>
+    <>
+      <button type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!loadOk || busy}
+        onClick={() => { set(k, !on); if (opts.auto) autoSaveNow(k, !on); }}
+        title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
+        <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
+      </button>
+      {opts.auto ? savedHint(k) : null}
+    </>
   );
   // A pick-one question where each answer needs a WORKED EXAMPLE under it. A <select> can't
   // carry that — and these three answers change what every bill means, so the explanation has
