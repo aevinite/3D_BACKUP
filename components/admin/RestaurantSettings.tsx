@@ -1226,6 +1226,31 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           {boolToggle("Require location (guest must be near the restaurant)", "require_location", draft.require_location !== false)}
           {boolToggle("Require a phone code (OTP) to place an order", "require_otp", draft.require_otp !== false)}
         </div>
+        {/* ── THE PHONE-CODE SWITCH HAS NO SCREEN BEHIND IT YET (T19 sweep #8, 2026-09-04) ─────────
+            Turning `require_otp` on is not a stricter version of ordering — it is a full stop.
+            `lfh_place_order` (last written in migration 357) refuses EVERY guest order with
+            `otp_required` unless that diner's membership carries `phone_verified`, and the only
+            thing that can set that flag is `lfh_verify_otp`. Nothing in `app/`, `components/` or
+            `public/panels/` calls it: `lib/session.ts` exports `sendOtp`/`verifyOtp` and they have
+            no caller, so a guest has no way to enter a code. What the diner is shown instead is
+            lib/guestOutbox.ts's translation — "Please confirm your phone number first." — an
+            instruction there is no screen to follow.
+            The switch is NOT removed: the manager panel carries the same one (public/panels/editor
+            /app.js), and phone verification is planned, so deleting one half would leave the other
+            half lying. What it gets is the sentence it never had, so nobody switches a restaurant's
+            ordering off by mistake. */}
+        {draft.require_otp === true ? (
+          <p className="hint" role="alert" style={{ margin: "0 0 12px", color: "var(--adm-danger, #dc2626)", borderLeft: "3px solid var(--adm-danger, #dc2626)", paddingLeft: 10 }}>
+            <b>Nobody can order here while this is on.</b> The phone-code screen is not built yet, so every
+            guest order is refused and the diner is told to confirm a number with nothing to confirm it in.
+            Switch it off unless you are testing.
+          </p>
+        ) : (
+          <p className="hint" style={{ margin: "0 0 12px" }}>
+            <b>Leave the phone code off.</b> The screen that asks a guest for the code has not been built yet,
+            so turning it on stops this restaurant taking any guest orders at all.
+          </p>
+        )}
         <p className="hint">
           Restaurant location — used only to confirm guests are physically there. In Google Maps, right-click the restaurant
           and click the latitude, longitude numbers to copy them. Leave blank to skip the location check.
