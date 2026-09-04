@@ -21,7 +21,7 @@
 // Server-only: it imports the service-role client and every function is scoped by restaurant_id.
 import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { STALE_CLAIM_MS } from "@/lib/printQueue";
+import { STALE_CLAIM_MS, wrote } from "@/lib/printQueue";
 import type { PaperSize } from "@/lib/printBoardWords";
 
 /** A helper that has not said hello inside this window is shown as not connected. It polls every
@@ -230,7 +230,14 @@ export async function helloAgent(
   if (printers.length) patch.printers = printers;
   if (fp && !agent.fingerprint) patch.fingerprint = fp;          // first machine to use the code
   if (seen.size > 1) patch.seen_fingerprints = [...seen].slice(0, 6);
-  await sb.from("print_agents").update(patch).eq("id", agent.id);
+  // A WRITE NOBODY LOOKED AT IS NOT A WRITE. This one was the exception in an area where the other
+  // eleven were all given the check in August (lib/printQueue → wrote). If it fails, the board says
+  // "not heard from" about a computer whose helper is polling perfectly, the admin is sent to
+  // troubleshoot a machine that is fine, and nothing anywhere says the stamp never landed.
+  // NOT a throw, deliberately, for the same reason as every other write here: a print path that
+  // crashes leaves the ticket in a worse state than one that carries on. It says so in the log,
+  // where the Fix-NOW board and `vercel logs` both look.
+  await wrote("helloAgent seen-stamp", sb.from("print_agents").update(patch).eq("id", agent.id));
   return { clash: !!(fp && agent.fingerprint && fp !== agent.fingerprint) };
 }
 

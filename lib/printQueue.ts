@@ -31,7 +31,11 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 // the Fix-NOW board and `vercel logs` both look — which is the difference between a fault that is
 // invisible and a fault somebody can find. This is the same lesson as the bill tombstone that
 // "silently failed for months" (lib/softDelete.ts's own note).
-const wrote = async <T extends { error?: unknown } | null>(what: string, p: PromiseLike<T>): Promise<T> => {
+// EXPORTED (2026-09-04) so lib/printHelpers.ts can use THIS one rather than grow a second copy.
+// helloAgent's "seen just now" stamp was the twelfth write in this area and the only one never given
+// the check — so a board could say a working computer was asleep with nothing anywhere saying why.
+// One teller, so the two files cannot drift apart in what they report or how.
+export const wrote = async <T extends { error?: unknown } | null>(what: string, p: PromiseLike<T>): Promise<T> => {
   const r = await p;
   const e = (r as { error?: unknown } | null)?.error;
   if (e) console.error(`[print-queue] ${what} failed:`, (e as { message?: string })?.message ?? e);

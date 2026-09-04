@@ -1,11 +1,18 @@
-// lib/printStationScript.ts — MODE B: the restaurant's own Chrome does the printing.
+// lib/printStationScript.ts — the SCREEN-PRINTING setup file: the restaurant's own Chrome prints.
 //
-// Owner, 2026-08-28: *"there will be 2 mode… one for the helper, one for the kisko-Chrome setup —
-// like if we run that .bat or .command file it will open that Chrome which runs minimised and doesn't
-// auto-open when printing required, doesn't affect other tabs while print. And you can set a
-// particular user of that restaurant so that the KOT autoprint happens on that."*
+// ⚠️ IT IS NOT "MODE B" ANY MORE, and this header said it was until 2026-09-04. There were two modes
+// and a toggle to pick between them — owner, 2026-08-28: *"there will be 2 mode… one for the helper,
+// one for the kisko-Chrome setup — like if we run that .bat or .command file it will open that Chrome
+// which runs minimised and doesn't auto-open when printing required, doesn't affect other tabs while
+// print. And you can set a particular user of that restaurant so that the KOT autoprint happens on
+// that."* He then removed the toggle on 2026-08-31 (*"in admin panel also we don't need toggle"*,
+// migration 372 dropped the stored mode), so there is no "mode A" for this to be the B of.
 //
-// WHY THIS EXISTS BESIDE THE HELPER. The helper (lib/printHelperScript.ts) is the better answer and
+// THE FILE ITSELF IS LIVE AND UNCHANGED — only its self-description was out of date. What decides now
+// is one sentence: a computer prints if one is set up and named, and if none is, the kitchen screen
+// does. This file is how that screen gets set up.
+//
+// WHY THIS EXISTS BESIDE THE HELPER (both are simply available — there is nothing to choose). The helper (lib/printHelperScript.ts) is the better answer and
 // always will be: it needs no browser, no login, and it can send each kind of paper to a DIFFERENT
 // printer. But it needs a printer the machine can name, and some restaurants will not install
 // anything at all. For them the browser has always been the fallback — and it was a wall of Terminal
