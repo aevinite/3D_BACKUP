@@ -1350,9 +1350,13 @@ export default function AdminRepair() {
         {rid && <button className="adm-btn" onClick={load}><i className="fas fa-rotate-right" aria-hidden="true" style={{ marginRight: 6 }} />Reload its tables</button>}
       </div>
 
-      {!rid ? (
-        <div className="adm-empty">Choose a restaurant at the top of the page to unlock its table &amp; order tools.</div>
-      ) : dataErr ? (
+      {/* THE SAME SENTENCE, TWICE, ONE UNDER THE OTHER (item 7, 2026-09-04). The scope card above
+          already says "Choose a restaurant at the top of this page to unlock the table & order
+          tools." — and this empty state said it again in almost the same words, so the section
+          opened by telling him the same thing twice and reading like a stutter. The card is the
+          one that stays: it is the row that also names the chosen restaurant once there IS one,
+          so it can never be blank. */}
+      {!rid ? null : dataErr ? (
         <div className="adm-empty">Couldn&rsquo;t load that restaurant. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>
       ) : data === null ? (
         <div className="adm-empty">Loading…</div>

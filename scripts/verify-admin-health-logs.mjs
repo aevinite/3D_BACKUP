@@ -414,6 +414,13 @@ ok(/rows=\{3\}[\s\S]{0,400}?fontFamily: "inherit"/.test(REPAIR), "P71717",
     `health: ${both} of the two offline-layer sentences pluralise their verb — with one device the other reads "except 1 that haven't said"`);
 }
 
+// ── item 7 · the same sentence must not be printed twice, one under the other ───────────────
+{
+  const unlocks = (REPAIR.match(/unlock (?:the|its) table &amp; order tools/g) || []).length;
+  ok(unlocks === 1, "P71720",
+    `repair: "…unlock the table & order tools" appears ${unlocks} times — the scope card and the empty state said it back to back`);
+}
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
