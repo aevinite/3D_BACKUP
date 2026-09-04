@@ -166,20 +166,40 @@ function memoryFor(g: ErrGroup, mem: ErrMemory[]): ErrMemory | null {
 const NIGHT_WINDOW_END_HOUR = 8;
 /** The scheduled hour of each night job, for the "it was due at…" half of the sentence. */
 const SCHEDULED: Record<string, string> = { nightly: "2:30 am", audit: "6:00 am" };
+// ── ONE CLOCK ON THE WHOLE ROW (item 9, 2026-09-04) ─────────────────────────────────────────────
+// Everything else on this board prints its time with an explicit `timeZone: "Asia/Kolkata"` — the
+// restaurants' own clock, deliberately not the laptop's, so the console reads the same wherever it
+// is opened. This function did neither: it decided whether a run was "late" from `getHours()` and
+// printed its two times with no zone, both of which follow whatever the machine happens to be set
+// to. On the office Mac (IST) the answers agree, so nothing is wrong on his screen today. Opened
+// anywhere else the row would print "02:30 am" from the line above and "Started 22:00, not
+// overnight" from this one — two clocks, one row, and the second contradicting the first.
+// So the zone is stated here too, and the hour that decides "late" is read in the SAME zone as the
+// sentence that reports it.
+const IST = "Asia/Kolkata";
+const istTime = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZone: IST, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+const istClock = (d: Date) => d.toLocaleTimeString("en-IN", { timeZone: IST, hour: "2-digit", minute: "2-digit" });
+/** The hour (0–23) and the calendar day, read in the restaurants' own zone rather than the laptop's. */
+function istParts(d: Date): { hour: number; day: string } {
+  const f = new Intl.DateTimeFormat("en-GB", { timeZone: IST, hour: "2-digit", hour12: false, day: "2-digit", month: "2-digit", year: "numeric" });
+  const parts = Object.fromEntries(f.formatToParts(d).map((x) => [x.type, x.value]));
+  return { hour: Number(parts.hour), day: `${parts.year}-${parts.month}-${parts.day}` };
+}
 function lateNightRun(s: AgentRun): string {
   if (s.kind === "live") return "";       // a live fix is started by hand, whenever he asks for it
   const start = new Date(s.started_at);
-  const hour = start.getHours();          // the admin's own clock — the same one the row prints
+  const startIst = istParts(start);
   const due = SCHEDULED[s.kind] || "the night";
-  if (hour >= NIGHT_WINDOW_END_HOUR) {
-    return `Started ${start.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}, not overnight — it was due at ${due} and the Mac was asleep, so macOS ran it when you next woke it.`;
+  if (startIst.hour >= NIGHT_WINDOW_END_HOUR) {
+    return `Started ${istClock(start)}, not overnight — it was due at ${due} and the Mac was asleep, so macOS ran it when you next woke it.`;
   }
   // Started on time, but was it still going once the day began? Only worth saying when it really
   // ran past the window — a 40-minute 6am audit is not news.
   if (s.ended_at) {
     const end = new Date(s.ended_at);
-    if (end.getHours() >= NIGHT_WINDOW_END_HOUR && end.getDate() === start.getDate()) {
-      return `Started on time but ran until ${end.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} — so it was still working during the morning.`;
+    const endIst = istParts(end);
+    if (endIst.hour >= NIGHT_WINDOW_END_HOUR && endIst.day === startIst.day) {
+      return `Started on time but ran until ${istClock(end)} — so it was still working during the morning.`;
     }
   } else if (s.status === "running" && Date.now() - start.getTime() > 2 * 3600_000) {
     return "Started overnight and is STILL running — over two hours. It may be stuck.";
@@ -1338,7 +1358,7 @@ export default function AdminRepair() {
                 <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" title={q.mode === "overnight" ? "Waiting for the 2:30 AM robot" : "Instant — pops on the Mac"} style={{ marginTop: 2, opacity: 0.7 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.summary}</div>
-                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{new Date(q.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>fix ready →</a></> : ""}</div>
+                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{istTime(q.created_at)}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>fix ready →</a></> : ""}</div>
                 </div>
                 <button className="adm-btn" onClick={() => dismissRequest(q.id)} title="Dismiss" style={{ fontSize: 11.5, padding: "3px 9px" }}>Dismiss</button>
               </div>

@@ -431,6 +431,24 @@ ok(/\{waiting \? ` That also clears/.test(REPAIR), "P71722",
 ok(/scopedName \? " \(across all restaurants\)" : ""\}/.test(REPAIR), "P71723",
   "repair: the waiting clause no longer says whose reports it means, and that count is platform-wide");
 
+// ── item 9 · one clock on the whole row ─────────────────────────────────────────────────────
+// Every other time on this board is printed with an explicit Asia/Kolkata. lateNightRun decided
+// "late" from getHours() and printed its two times with no zone, so on a laptop outside IST the
+// row would carry two clocks and the second would contradict the first.
+ok(/const IST = "Asia\/Kolkata"/.test(REPAIR), "P71712",
+  "repair: the single IST constant is gone");
+ok(/function istParts\(d: Date\)/.test(REPAIR), "P71713",
+  "repair: istParts is gone — the 'late night run' verdict is back on the laptop's own clock");
+ok(!/const hour = start\.getHours\(\)/.test(REPAIR), "P71714",
+  "repair: lateNightRun reads getHours() again — that is the machine's zone, not the restaurants'");
+ok(!/end\.getHours\(\) >= NIGHT_WINDOW_END_HOUR/.test(REPAIR), "P71715",
+  "repair: the 'ran into the morning' test is back on the laptop's clock");
+{
+  const zoneless = [...REPAIR.matchAll(/toLocale(?:Time|Date)?String\("en-IN",\s*\{[^}]*\}/g)].filter((m) => !m[0].includes("timeZone"));
+  ok(zoneless.length === 0, "P71716",
+    `repair: ${zoneless.length} time(s) printed with no timeZone — the row beside them says Asia/Kolkata`);
+}
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
