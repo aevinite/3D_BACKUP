@@ -50,6 +50,7 @@ const PANEL_MGR = "public/panels/editor/app.js";
 const PANEL_TAB = "public/panels/tablet/app.js";
 const INV_ROUTE = "app/api/owner/inventory/route.ts";
 const INV_UI = "components/owner/OwnerInventory.tsx";
+const PHONE_TEXT = "lib/phoneText.ts";
 
 // { item, file, say, must: [RegExp], mustNot: [RegExp] }
 const RULES = [
@@ -523,6 +524,124 @@ const RULES = [
     must: [/const a = \(actor \?\? ""\)\.trim\(\);/, /if \(!a\) return "—";/,
            /if \(!\(actor \?\? ""\)\.trim\(\)\) return undefined;/],
     mustNot: [/if \(!actor\) return "—";/],
+  },
+  // ── SWEEP 8 · T16 (2026-09-04) — the fourth screen in this territory, which item 17 missed ──────
+  // Sweep 7 · T14 item 17 hardened the dates on Customers, Pay Later and Feedback on one day. The
+  // Inventory screen has its own two, and neither was guarded: one printed "updated NaN h ago" for
+  // an unreadable clock, and the other read the month heading in the BROWSER's timezone while every
+  // other date on the same screen is pinned to India time.
+  {
+    item: "s8·T16·2", file: INV_UI,
+    say: "an unreadable 'updated …' clock says nothing, never 'updated NaN h ago'",
+    must: [
+      // Number.isFinite on the parsed time, BEFORE any arithmetic that NaN would survive.
+      /const t = iso \? new Date\(iso\)\.getTime\(\) : NaN;[\s\S]{0,80}if \(!Number\.isFinite\(t\)\) return "";/,
+    ],
+    mustNot: [
+      // The exact shape that leaked it: Math.max(0, …) does NOT floor a NaN, and this reads as if it does.
+      /Math\.max\(0, Math\.round\(\(Date\.now\(\) - new Date\(iso\)\.getTime\(\)\)/,
+    ],
+  },
+  {
+    item: "s8·T16·3", file: INV_UI,
+    say: "the month heading is read in India time, like every other date on the screen",
+    must: [
+      // The heading and the tile label both come from this one expression, so it names IST once.
+      /monthLabel = new Date\(month \+ "-01"\)\.toLocaleString\("en-IN", \{ month: "long", year: "numeric", timeZone: IST \}\)/,
+    ],
+    mustNot: [
+      // Without a timeZone this parses as UTC midnight and renders in the DEVICE's zone: on any
+      // clock west of UTC the September heading reads "August", and the tile beside it reads
+      // "Bought (August)" over September's money.
+      /new Date\(month \+ "-01"\)\.toLocaleString\("en-IN", \{ month: "long", year: "numeric" \}\)/,
+    ],
+  },
+  {
+    item: "s8·T16·7", file: KHATA,
+    // Sweep 7 · T14 item 10 fixed exactly this inside the guest record. MEASURED at 360px on the
+    // tiles: "Collected today"'s ₹0 at y=261 and "Collected this month"'s ₹0 at y=275, because the
+    // longer label wraps and pushes its own number down. After: both at y=269.
+    say: "the four Pay Later figures share a baseline even when a label wraps",
+    must: [
+      /<div className="adm-stats" style=\{\{ marginBottom: 14, alignItems: "stretch" \}\}>/,
+      // all four tiles are columns with the number pinned to the bottom
+      /className="adm-stat" style=\{\{ display: "flex", flexDirection: "column" \}\}/,
+      /className="v" style=\{\{ marginTop: "auto" \}\}>\{summary \? inr\(summary\.totalOutstanding\)/,
+      /className="v" style=\{\{ marginTop: "auto" \}\}>\{summary \? summary\.peopleCount/,
+      /className="v" style=\{\{ marginTop: "auto" \}\}>\{!summary \? "…" : summary\.collectedToday/,
+      /className="v" style=\{\{ marginTop: "auto" \}\}>\{!summary \? "…" : summary\.collectedMonth/,
+    ],
+  },
+  {
+    item: "s8·T16·6", file: ISSUES,
+    // MEASURED at 360px BEFORE the fix: the pill was capped at 298px of content width and held
+    // three flex children, so all three shrank below their content and every label wrapped —
+    // "Guest ratings" on one line and "· 0" alone on the next. Refresh was never a tab.
+    say: "on a phone a tab's count never falls onto its own line",
+    must: [
+      // Refresh sits OUTSIDE the segmented pill, in a row that may wrap…
+      /<div style=\{\{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 \}\}>\s*\n\s*<div className="own-range">/,
+      // …and each tab keeps its label and its count together.
+      /onClick=\{\(\) => setTab\("ratings"\)\} style=\{\{ whiteSpace: "nowrap" \}\}/,
+      /onClick=\{\(\) => setTab\("issues"\)\} style=\{\{ whiteSpace: "nowrap" \}\}/,
+    ],
+    mustNot: [
+      // Refresh back inside the pill is the whole cause; a wrapping PILL is what globals.css
+      // warns reads as a broken control, so neither shape may come back.
+      /<div className="own-range" style=\{\{ marginBottom: 14 \}\}>[\s\S]{0,1400}Refresh/,
+      /className="own-range"[^>]*flexWrap/,
+    ],
+  },
+  {
+    item: "s8·T16·5", file: KHATA,
+    // MEASURED on the phone he tests: this screen printed `9876500077` while the Customers list
+    // beside it printed `90000 00007`. Pay Later is the screen you open to RING the person.
+    say: "a mobile on Pay Later is spaced so it can be read back to a guest",
+    must: [
+      /import \{ showPhone \} from "@\/lib\/phoneText"/,
+      /\{c\.phone \? showPhone\(c\.phone\) : "no mobile"\}/,
+    ],
+    mustNot: [
+      // The raw run this replaced. A screen for phoning people may never print one again.
+      /\{c\.phone \|\| "no mobile"\}/,
+    ],
+  },
+  {
+    item: "s8·T16·5", file: CUSTOMERS,
+    say: "…and Customers reads the same rule from the same place, not its own copy",
+    must: [/import \{ showPhone \} from "@\/lib\/phoneText"/],
+    mustNot: [/const showPhone = \(p: string\)/],
+  },
+  {
+    item: "s8·T16·5", file: PHONE_TEXT,
+    say: "…and that one place handles a number that is NOT ten digits, and a missing one",
+    must: [
+      /s\.length === 10 \? `\$\{s\.slice\(0, 5\)\} \$\{s\.slice\(5\)\}` : s \|\| "—"/,
+      /const s = \(p \?\? ""\)\.trim\(\);/,      // so "  " is a missing number, not a name-shaped one
+    ],
+  },
+  {
+    item: "s8·T16·4", file: ISSUES,
+    // DRIVEN, four ways, before this rule existed: with ONE of the two routes answering 500 and
+    // the other answering normally, Refresh produced no card, no sentence and no mark. The working
+    // half's `setErr(null)` wiped the failing half's message, because both wrote to one slot.
+    say: "one half of Feedback failing is said out loud, and cannot be wiped by the other half",
+    must: [
+      // The card shows the write error OR the load error of the tab on screen — never a shared slot.
+      /const loadErr = tab === "ratings" \? rErr : iErr;/,
+      /const shownErr = err \|\| loadErr;/,
+      /\{shownErr && \(/,
+      // …and the tab you are NOT on carries its own mark, so a half-failed Refresh is visible.
+      /\{rErr && <i className="fas fa-triangle-exclamation"/,
+      /\{iErr && <i className="fas fa-triangle-exclamation"/,
+    ],
+    mustNot: [
+      // The two shapes that made a success erase a failure. A load must never touch the shared slot.
+      /setRErr\(null\); setErr\(null\)/,
+      /setIErr\(null\); setErr\(null\)/,
+      /setErr\(m\); setRErr\(m\)/,
+      /setErr\(m\); setIErr\(m\)/,
+    ],
   },
 ];
 

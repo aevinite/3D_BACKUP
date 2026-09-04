@@ -133,9 +133,9 @@ export default function OwnerFeedback() {
       const j = await (await fetch(`/api/owner/ratings${suffix}`, { cache: "no-store" })).json();
       if (j.disabled) { setRatingsOff(true); return; }
       if (j.error) throw new Error(j.error);
-      setRatings(j.ratings || []); setSummary(j.summary || null); setRErr(null); setErr(null);
+      setRatings(j.ratings || []); setSummary(j.summary || null); setRErr(null);
       setRPartial(Array.isArray(j.partial) ? j.partial : []);
-    } catch (e) { const m = e instanceof Error ? e.message : String(e); setErr(m); setRErr(m); }
+    } catch (e) { setRErr(e instanceof Error ? e.message : String(e)); }
   }, [scp, rFilter]);
 
   const loadIssues = useCallback(async () => {
@@ -143,13 +143,13 @@ export default function OwnerFeedback() {
       const j = await (await fetch(`/api/owner/issues${scp}`, { cache: "no-store" })).json();
       if (j.disabled) { setIssuesOff(true); return; }
       if (j.error) throw new Error(j.error);
-      setIssues(j.issues || []); setIErr(null); setErr(null);
+      setIssues(j.issues || []); setIErr(null);
       // The server says so in `partial` when its own head-count failed; in that case it already fell
       // back to counting the shown page, and so do we.
       const countUnread = Array.isArray(j.partial) && j.partial.includes("openCount");
       setOpenSrv(!countUnread && typeof j.openCount === "number" ? j.openCount : null);
       setIPartial(Array.isArray(j.partial) ? j.partial : []);
-    } catch (e) { const m = e instanceof Error ? e.message : String(e); setErr(m); setIErr(m); }
+    } catch (e) { setIErr(e instanceof Error ? e.message : String(e)); }
   }, [scp]);
 
   const loadAll = useCallback(async () => { await Promise.all([loadRatings(), loadIssues()]); }, [loadRatings, loadIssues]);
@@ -281,6 +281,28 @@ export default function OwnerFeedback() {
   const ratingsCapped = ratingsShown >= RATINGS_PAGE && ratingsOf > ratingsShown;
   const issuesCapped = (issues || []).length >= ISSUES_PAGE;
   const partial = [...new Set([...rPartial, ...iPartial])];
+  // ── ONE HALF OF THIS SCREEN FAILING USED TO BE SAID BY NOBODY (sweep 8 · T16, 2026-09-04) ───────
+  // This page loads its two tabs together (`Promise.all([loadRatings(), loadIssues()])`) and both
+  // loaders wrote to ONE shared `err`: a failure set it, and a SUCCESS cleared it. So whichever of
+  // the two settled last had the final word — and when one read failed while the other worked, the
+  // working one wiped the failure's message before it could ever be painted.
+  //
+  // DRIVEN, not reasoned about: with the complaints route answering 500 and ratings answering
+  // normally, pressing Refresh produced **no red card, no sentence, and no mark on either tab** —
+  // in all four combinations (either route failing, either settle order). The stale complaint list
+  // just sat there looking current. The only case that DID speak was both halves failing at once.
+  // Which one settles last is a network coin-flip, and the failing one usually answers FASTER (a
+  // 500 comes straight back while the working one does real work), so the silent case is the
+  // ordinary one. That is the "never drop a tap in silence" rule, on the screen whose whole job is
+  // to tell him what still needs handling — and this same file already states it for the FIRST
+  // load ("this is a loading error, not 'no ratings'").
+  //
+  // So the two reads no longer share a slot: each keeps its own `rErr` / `iErr`, and `err` is left
+  // to the WRITE actions (Mark handled · Note · Resolve · Reopen), which set and clear it
+  // themselves. The card shows the write error, or the load error OF THE TAB YOU ARE LOOKING AT —
+  // never the other tab's, which would be a sentence about a list that is not on screen.
+  const loadErr = tab === "ratings" ? rErr : iErr;
+  const shownErr = err || loadErr;
 
   return (
     <>
@@ -291,11 +313,48 @@ export default function OwnerFeedback() {
           has not been given (R36). */}
       {bothOff ? null : (
       <div className="adm-card">
-        {/* Tabs (hide a tab the admin switched off) */}
-        <div className="own-range" style={{ marginBottom: 14 }}>
-          {!ratingsOff && <button className={tab === "ratings" ? "on" : ""} onClick={() => setTab("ratings")}>Guest ratings{summary ? ` · ${summary.total}` : ""}</button>}
-          {!issuesOff && <button className={tab === "issues" ? "on" : ""} onClick={() => setTab("issues")}>Complaints · {openCount}</button>}
-          <button className="adm-btn" style={{ marginLeft: "auto" }} onClick={loadAll}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
+        {/* Tabs (hide a tab the admin switched off)
+            ── AND THE MARK GOES ON THE TAB, NOT ONLY IN THE TAB (sweep 8 · T16, 2026-09-04) ────────
+            The red card lands on the tab you are LOOKING at, which is where a sentence about a list
+            belongs. But Refresh reloads both halves at once, so the half you are not looking at can
+            fail while you are on the other one — and then its tab still shows a count it could not
+            read, with nothing to say so. So the tab that failed carries its own mark and says why
+            when you point at it. A mark plus the hover text plus the count that stops changing —
+            three carriers, none of them colour alone. */}
+        {/* ── ON A PHONE THE COUNT WAS FALLING OFF ITS OWN LABEL (sweep 8 · T16, 2026-09-04) ────────
+            MEASURED at 360px: the segmented pill was capped at 298px of content width and held
+            THREE children — two tabs and Refresh. Flex items shrink below their content by default,
+            so every one of them wrapped to two lines: "Guest ratings" on one line and "· 0" alone
+            on the next, and the same for "Complaints · 0". The number that says how many complaints
+            are still open was orphaned from the word it belongs to, and it gets worse the moment the
+            counts are real ("· 381", "· 12") rather than zero.
+            Refresh was never a tab, and that is the whole cause: it was taking a third of a control
+            built for two. It moves OUT of the pill and sits beside it in a wrapping row, so the pill
+            is a proper two-tab segmented control that keeps each label and its count together, and
+            Refresh drops to its own line when there is no room. Nothing is squeezed and nothing
+            splits. A stretched pill background across a wrapped row is exactly what the note beside
+            `.own-range` in app/globals.css warns reads as a broken control — so the pill itself
+            never wraps; only the row around it does. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <div className="own-range">
+            {!ratingsOff && (
+              <button className={tab === "ratings" ? "on" : ""} onClick={() => setTab("ratings")} style={{ whiteSpace: "nowrap" }}>
+                Guest ratings{summary ? ` · ${summary.total}` : ""}
+                {rErr && <i className="fas fa-triangle-exclamation" aria-hidden="true"
+                  title="These couldn't be read just now — open this tab and press Try again"
+                  style={{ marginLeft: 6, fontSize: 10.5, color: "var(--adm-warn)" }} />}
+              </button>
+            )}
+            {!issuesOff && (
+              <button className={tab === "issues" ? "on" : ""} onClick={() => setTab("issues")} style={{ whiteSpace: "nowrap" }}>
+                Complaints · {openCount}
+                {iErr && <i className="fas fa-triangle-exclamation" aria-hidden="true"
+                  title="These couldn't be read just now — open this tab and press Try again"
+                  style={{ marginLeft: 6, fontSize: 10.5, color: "var(--adm-warn)" }} />}
+              </button>
+            )}
+          </div>
+          <button className="adm-btn" style={{ marginLeft: "auto", whiteSpace: "nowrap" }} onClick={loadAll}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
         </div>
 
         {partial.length > 0 && (
@@ -306,10 +365,14 @@ export default function OwnerFeedback() {
           </div>
         )}
 
-        {err && (
+        {shownErr && (
           <div className="adm-card" style={{ borderColor: "var(--adm-danger)", margin: "0 0 12px" }}>
-            <b>Couldn&apos;t load.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span>{" "}
-            <button className="adm-btn" style={{ marginLeft: 6 }} onClick={loadAll}>Try again</button>
+            <b>Couldn&apos;t load.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{shownErr}</span>{" "}
+            {/* Try again clears the WRITE error as well as re-reading. A load error clears itself
+                when the read next succeeds; a failed Save has no read to clear it, and now that a
+                background refresh no longer wipes it (that wiping was the fault above) this button
+                is the way out of it. */}
+            <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => { setErr(null); loadAll(); }}>Try again</button>
           </div>
         )}
 

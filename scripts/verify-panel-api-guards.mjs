@@ -381,11 +381,34 @@ blockedReadIsGated("app/api/tablet/[...path]/route.ts", "public/panels/tablet/ap
   else {
     const idx = inv.indexOf("#ppAdd");
     const handler = idx >= 0 ? inv.slice(idx, idx + 1400) : "";
-    // The rule asks for the LOOKUP, not just the variable: this guard's own negative test passed
-    // on `const already = [];`, which is the fault wearing the fixed code's name.
+    // ── THIS RULE WENT RED FOR A REFACTOR THAT MADE THE BEHAVIOUR BETTER (T16 sweep #8, 2026-09-04) ──
+    //
+    // It used to demand the literal `confirmDialog` or `window.confirm` INSIDE this handler. On
+    // 2026-08-31 the whole dialog chain — the panel's own card, then LFH_ASK, then the browser's
+    // confirm() as the last resort — moved out into one shared `askYesNo()` at the top of the same
+    // file, because three more prompt()s had the same dead end and a chain copied per call site is
+    // a chain that drifts. `verify:panel-dialogs` asserts that extraction and passes.
+    //
+    // So from 2026-08-31 this guard was RED on clean `main` while the thing it defends was
+    // completely intact: the handler looks the ingredient up, asks, says "Not added" on a no, and
+    // still allows a second line. A guard that is red for a fix is worse than no guard — it is the
+    // one nobody reads, and it took every other rule in this file down with it (a non-zero exit
+    // hides 100+ passing assertions about the four panel routes, this route family included).
+    //
+    // Re-pinned to the RULE, not the shape: the handler must ASK (through the shared helper or
+    // directly), and the helper it asks through must still hold the browser's own dialog as its
+    // last resort — which is the part that keeps the question answerable on a kiosk browser.
+    // The lookup clause is unchanged: it asks for the LOOKUP, not just the variable, because this
+    // guard's own negative test once passed on `const already = [];`.
     const looksUp = /lines\.filter\(\s*\(?\s*\w+\s*\)?\s*=>\s*\w+\.item_id\s*===\s*item_id/.test(handler);
-    if (looksUp && /already\.length/.test(handler) && /confirmDialog|window\.confirm/.test(handler)) {
+    const asks = /confirmDialog|window\.confirm|await askYesNo\(/.test(handler);
+    // Wherever the question is asked, SOMETHING must still fall back to the browser's own dialog.
+    const chainSurvives = /async function askYesNo\([\s\S]{0,400}?window\.confirm\(/.test(inv)
+      || /confirmDialog|window\.confirm/.test(handler);
+    if (looksUp && /already\.length/.test(handler) && asks && chainSurvives) {
       ok("the purchase form asks before adding the same ingredient a second time");
+    } else if (looksUp && /already\.length/.test(handler) && asks) {
+      fail("the duplicate-line question no longer falls back to the browser's own dialog — on a kiosk browser it could not be asked at all");
     } else {
       fail("the purchase form adds a duplicate ingredient line silently again (owner asked for ask-first, 2026-08-18)");
     }

@@ -91,9 +91,20 @@ function ShareRow({ label, value, of, tone }: { label: string; value: number; of
 }
 const EXP_LABELS: Record<string, string> = { breakage: "🔨 Breakage", repair: "🛠️ Repair", utilities: "💡 Utilities", cleaning: "🧹 Cleaning", supplies: "📦 Supplies", rent: "🏠 Rent", transport: "🛵 Transport", misc: "🧾 Other" };
 const WASTE_LABELS: Record<string, string> = { spoiled: "Spoiled", burnt: "Burnt", spilled: "Spilled", expired: "Expired", staff_meal: "Staff meals", complimentary: "On the house", other: "Other" };
+// ── A CLOCK WE CANNOT READ SAYS NOTHING, NEVER "updated NaN h ago" (sweep 8 · T16, 2026-09-04) ───
+// `new Date("nope").getTime()` is NaN, and NaN survives every step of this arithmetic —
+// `Math.round(NaN)` is NaN and `Math.max(0, NaN)` is NaN too, so the guard that looks like it
+// floors the value does not. MEASURED, not guessed: `agoLabel("not-a-date")` returns the literal
+// string **"updated NaN h ago"**, which lands in the top bar of this screen right beside Refresh.
+// Sweep 7 · T14 item 17 hardened exactly this on the three sister screens (Customers, Pay Later,
+// Feedback all gained an `ok(iso)`/`okDate(iso)` test that same day) — this fourth screen in the
+// same territory was the one it missed, and `shortDate` below shows the file already knew the rule.
+// `cachedAt` comes from our own route so it is not reachable from today's data; the whole point of
+// the sister guards is that a screen about money never prints a machine word at a person.
 const agoLabel = (iso?: string) => {
-  if (!iso) return "";
-  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
+  const t = iso ? new Date(iso).getTime() : NaN;
+  if (!Number.isFinite(t)) return "";
+  const m = Math.max(0, Math.round((Date.now() - t) / 60_000));
   return m < 1 ? "updated just now" : m < 60 ? `updated ${m} min ago` : `updated ${Math.round(m / 60)} h ago`;
 };
 
@@ -155,7 +166,17 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
     const [y, m] = month.split("-").map(Number);
     setMonth(new Date(Date.UTC(y, m - 1 + dir, 1)).toISOString().slice(0, 7));
   };
-  const monthLabel = new Date(month + "-01").toLocaleString("en-IN", { month: "long", year: "numeric" });
+  // ── THE MONTH HEADING IS INDIA TIME TOO (sweep 8 · T16, 2026-09-04) ────────────────────────────
+  // `new Date("2026-09-01")` is parsed as UTC midnight, and `toLocaleString` with no `timeZone`
+  // renders it in whatever zone the DEVICE is set to. MEASURED with `TZ=America/New_York`: the
+  // September month reads **"August 2026"**, and because the tile label is built from this same
+  // string (`monthLabel.split(" ")[0]`) the card above it reads **"Bought (August)"** over
+  // September's figures — a wrong month printed on top of the right money.
+  // Every other date on this screen is already pinned (`shortDate` two blocks up sends
+  // `timeZone: IST`, and so does the whole rest of the panel); this one heading was not, so the
+  // fault is invisible on the owner's own phone in India and appears the moment the app is opened
+  // from anywhere west of UTC.
+  const monthLabel = new Date(month + "-01").toLocaleString("en-IN", { month: "long", year: "numeric", timeZone: IST });
   const s = data?.summary;
 
   return (
