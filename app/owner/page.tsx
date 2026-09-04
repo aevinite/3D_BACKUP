@@ -1197,8 +1197,29 @@ export default function OwnerDashboard() {
       return buckets.map((bk) => by.get(bk) ?? 0);
     };
     const watchR = watchId ? p.restaurantRevenue.find((r) => r.id === watchId)! : null;
+    // ── NO TROPHY FOR ₹0 (T13 sweep, 2026-09-04) ────────────────────────────────────────────────
+    // `best` is `restaurantRevenue[0]`, and that list is ordered by revenue DESC in the database
+    // (mig 321), so it is the right restaurant — EXCEPT when every restaurant has taken nothing,
+    // which on a 4+ estate is every morning until the first bill is paid. Then the banner drew:
+    //
+    //     🏆 TOP PERFORMER · TODAY   My Little French House   ₹0 · 0% of revenue
+    //
+    // Measured on a real five-restaurant owner at the Today range. Two things were wrong with it.
+    // It crowns a winner of nothing — the exact "a figure it cannot stand behind" this page was
+    // swept for twice. And with every revenue equal the two orderings tie-break differently, so
+    // the trophy named French House while the estate table one card below ranked BURGER BARN #1:
+    // one screen, two answers about who is top, because `rank` sorts the OVERVIEW's row order and
+    // `best` reads the ANALYTICS payload's.
+    //
+    // The page's own insight strip already had this right — "X leads with N% of revenue" is
+    // guarded by `total > 0`, which is why the strip sat honestly empty in the same screenshot
+    // where the banner crowned someone. Same guard here. `watch` needs no change: it already
+    // requires a first half greater than zero, so it was null throughout.
+    // Both halves null ⇒ `(callouts.best || callouts.watch)` is false ⇒ the banner is simply not
+    // drawn, which is what "nobody has taken anything yet" should look like.
+    const bestEarned = !!best && best.revenue > 0 && total > 0;
     return {
-      best: best ? { id: best.id, name: best.name, revenue: best.revenue, share: total ? best.revenue / total : 0, spark: sparkFor(best.id) } : null,
+      best: bestEarned ? { id: best.id, name: best.name, revenue: best.revenue, share: total ? best.revenue / total : 0, spark: sparkFor(best.id) } : null,
       watch: watchR ? { id: watchR.id, name: watchR.name, pct: watchPct, spark: sparkFor(watchR.id) } : null,
     };
   }, [pl, globalRange]);
