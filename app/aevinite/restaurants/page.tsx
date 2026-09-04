@@ -216,6 +216,18 @@ export default function AdminRestaurants() {
           mint rather than the one the typed name suggests (see slugPreview below). */}
       <NewRestaurant onCreated={loadList} takenSlugs={(list || []).map((r) => r.slug)} />
 
+      {/* Phone-only: see the note on the Suspended chip in the row below. Kept beside the screen it
+          belongs to rather than in globals.css, because it exists for one column of one table. */}
+      <style href="adm-rest-1" precedence="default">{`
+        .rest-sus { display: none; }
+        @media (max-width: 860px) {
+          .rest-sus { display: inline-block; margin-left: 7px; vertical-align: 1px;
+            font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+            padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+            background: color-mix(in srgb, var(--adm-danger) 22%, transparent); color: var(--adm-danger); }
+        }
+      `}</style>
+
       <div className="adm-card">
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
           <i className="fas fa-magnifying-glass adm-muted" aria-hidden="true" />
@@ -285,7 +297,28 @@ export default function AdminRestaurants() {
                 }}
                 title={`Open ${r.name}`}
               >
-                <span style={{ fontWeight: 700 }}>{r.name}</span>
+                {/* ── ON A PHONE, "SUSPENDED" MUST NOT BE THE COLUMN THAT IS OFF-SCREEN (T19 sweep
+                    #8, 2026-09-04 — the owner picked it as item 9) ────────────────────────────────
+                    Under 861px this table keeps its six columns aligned and scrolls SIDEWAYS inside
+                    its own wrapper — a deliberate decision from 2026-08-12 ("you compare rows down a
+                    column there"), and it is not being undone: `.adm-logwrap` still pins the row to
+                    540px and still scrolls. What was wrong is WHICH column ends up hidden. Measured
+                    at 360px: Name, Slug, Owner and Health are on screen; Status and Open are the two
+                    behind the drag. "Is this one suspended?" is the question you open this list on a
+                    phone to answer, and it was the one you had to drag for.
+                    So the Suspended chip is repeated beside the NAME, phone-only (`.rest-sus`, which
+                    is display:none above 860px), and ONLY when the restaurant really is suspended —
+                    an "Active" badge on every row would be noise, and the Status column already says
+                    it for anyone who scrolls. Nothing is removed and nothing moves on a computer. */}
+                {/* NO `minWidth: 0` HERE. It was tried and measured out again in the same hour: the
+                    row's tracks are bare `fr`, whose automatic minimum is the item's min-content, so
+                    zeroing the item's minimum shrank the Name track to 66px and let a long name spill
+                    26px into the Slug column at 360px (AANGAN GARDEN RESTAURANT). The track is meant
+                    to grow; the row is pinned to 540px and scrolls, which is the deliberate design. */}
+                <span style={{ fontWeight: 700 }}>
+                  {r.name}
+                  {!r.active && <span className="rest-sus" title="Suspended — its guest menu is offline">Suspended</span>}
+                </span>
                 <span className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{r.slug}</span>
                 {/* AN OWNER WHO CANNOT SIGN IN IS STILL AN OWNER (T16 sweep, 2026-08-19).
                     /api/admin/restaurants only lists ACTIVE owners, and a suspended one — or one

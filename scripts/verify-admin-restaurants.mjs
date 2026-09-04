@@ -53,6 +53,7 @@ const BIN = read("app/aevinite/recycle/page.tsx");
 const FLOOR = read("app/aevinite/floor/page.tsx");
 const CARD = read("components/admin/RestaurantSettings.tsx");
 const RESTRTE = read("app/api/admin/restaurants/route.ts");
+const CSS = read("app/globals.css");
 
 console.log('\nAdmin console: does each screen still do what it says on itself?');
 
@@ -829,6 +830,30 @@ want(/if \(!Number\.isFinite\(m\)\) return "never";/.test(OWN),
   want(!/NaN/.test(seen("not-a-date") + seen(null) + seen(undefined) + seen("")),
     "…and no input this column can hold produces the text 'NaN'");
 }
+
+// ── 32 · on a phone, "Suspended" is not the column that is off-screen ─────────────────────────
+//
+// WHERE THIS BITES: Admin console → Restaurants, on a phone.
+//
+// Under 861px this table keeps its six columns aligned and scrolls SIDEWAYS inside its own wrapper
+// — deliberate since 2026-08-12, and not being undone. What was wrong is WHICH column ends up
+// hidden: measured at 360px, Name / Slug / Owner / Health are on screen and Status / Open are the
+// two behind the drag. "Is this one suspended?" is the question you open this list on a phone to
+// answer, and it was the one you had to drag for.
+console.log("\n32. Restaurants on a phone: a suspended restaurant says so beside its name");
+want(/className="rest-sus"/.test(REST),
+  "a suspended row repeats the Suspended chip beside the NAME");
+want(/\{!r\.active && <span className="rest-sus"/.test(REST),
+  "…only when the restaurant really is suspended — an 'Active' badge on every row would be noise");
+want(/\.rest-sus \{ display: none; \}/.test(REST),
+  "…and it is hidden by default, so nothing moves on a computer");
+want(/@media \(max-width: 860px\) \{\s*\n\s*\.rest-sus \{ display: inline-block;/.test(REST),
+  "…and shown only under 861px, the same breakpoint the sideways-scrolling table starts at");
+want(/\.adm-logwrap \{ overflow-x: auto/.test(CSS) && /\.adm-logrow \{ min-width: 540px; \}/.test(CSS),
+  "…and the deliberate sideways scroll it exists BECAUSE of is still there, untouched");
+want(!/<span style=\{\{ fontWeight: 700, minWidth: 0 \}\}>/.test(REST),
+  "the Name cell has no `minWidth: 0` — the row's tracks are bare `fr`, so zeroing the item's " +
+  "minimum shrank Name to 66px and spilled a long name 26px into Slug at 360px");
 
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — an admin screen is claiming something it does not do\n`
