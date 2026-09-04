@@ -36,11 +36,11 @@ longer be lost just because a window was covered.
 | One shared queue implementation (read · claim · report) | `lib/printQueue.ts` |
 | Kitchen screen: gets jobs on every board read, prints, reports | `app/api/kitchen/[...path]/route.ts` (`/board?autojobs=1`, `?jobs=1` on the targeted slice) + `public/panels/kitchen/app.js` (`processPrintJobs`) |
 | Manager screen as a printer | `app/api/editor/[...path]/route.ts` (`/print-jobs/pending`, `/claim`, `/:id/done`) + `public/panels/editor/app.js` (`managerPrintPass`) |
-| **WHO prints** (kitchen / counter / both) | **admin console → the restaurant → 🖨 KOT printing** (mig 336). NOT the manager panel: its Settings → Kitchen printing section is hidden from everyone there by the owner's 2026-07-31 decision, which is how the first attempt shipped an unreachable control. |
-| The per-device confirmation | manager panel → **Tables** → the strip above the floor asks once, and only a device that answers YES ever claims (a phone must never claim a ticket) |
+| **WHO prints** | **admin console → Printing** → *3 · Which printer gets which paper* (which printer) and *4 · The kitchen screen* (which screen, or one named person). NOT the manager panel: its Settings → Kitchen printing section is hidden from everyone there by the owner's 2026-07-31 decision, which is how the first attempt shipped an unreachable control. ⚠️ **This row used to say "(kitchen / counter / both) → 🖨 KOT printing (mig 336)". That control is RETIRED** — migration 369/376 turned `kot_print_target` into a route, `components/admin/RestaurantSettings.tsx` dropped the key on 2026-08-28 ("no control on any screen writes it any more"), and "both" went with the backup printer on 2026-08-30. Corrected 2026-09-04. |
+| The per-device confirmation | **GONE (owner, 2026-08-29)** — `PRINT_HERE_KEY` / `printHereAnswer` were deleted from `public/panels/editor/app.js`, so no strip asks a device anything. What stops a phone printing is now the SERVER: the address book names which screen (and optionally which person and which device) prints each paper, and `lib/printHelpers.ts`'s `screenMayPrint` refuses everyone else. Corrected 2026-09-04. |
 | The live socket stays open while a screen is the printer | `public/panels/realtime.js` (`keepAlive`) |
 | The kiosk launcher | **Nothing is shipped and nothing is offered as a download.** The reader types the one small file by hand from `public/print-setup.html`. `public/print-station/*` and `app/api/print-station/` were DELETED on 2026-08-19 — do not re-create them, do not re-add a ⬇ button anywhere (§9). |
-| Problems / stuck tickets | manager panel → **Tables** → the strip above the floor grid (mig 269) |
+| Problems / stuck tickets | manager panel → **the notification bell** (owner, 2026-08-30: *"I don't want it there — it should be in the notification thing that we have built… why is it taking the space of the table boxes"*). The two bands above the table grid were removed; `printer_events` rows now draw a printer row in the bell instead. `verify:printing-sweep` pins both halves ("the floor draws NO printing band above the tables" / "printing speaks through the notification bell instead"). Corrected 2026-09-04. |
 | **The restaurant-facing guide** | `public/print-setup.html` — served at `/print-setup.html`, linked from manager → Settings → Kitchen printing and from the kitchen's 🖨❗ sheet. THIS file is the engineering record; that page is what a restaurant reads. Keep them honest with each other. |
 
 ---
@@ -63,14 +63,24 @@ longer be lost just because a window was covered.
    once; that window keeps its own Chrome profile and stays logged in.
    *(For an unattended computer that prints with no window open at all, use the print helper instead
    — `docs/PRINT-HELPER.md`, admin console → Printing.)*
-5. **Choose WHICH screen prints** — admin console → the restaurant → **🖨 KOT printing → "Which
-   screen prints the ticket?"**: *the kitchen screen* (default) · *the counter (manager) screen* ·
-   *both — the counter is the backup* (30s). This is an ADMIN choice, deliberately: the manager
-   panel's Kitchen-printing section is hidden from everyone there (owner, 2026-07-31).
-6. **If you chose the counter:** on that computer, the manager panel's **Tables** screen shows a strip
-   asking *"Should this screen print the kitchen tickets?"* — answer **Yes, print here**. Answer **No**
-   on phones. A device that has never answered never claims a ticket, which is what stops a phone
-   "printing" into a dialog nobody sees.
+5. **Choose WHERE the paper comes out** — admin console → **Printing** → the restaurant. Nothing
+   has to be switched: *a computer prints a paper if one is set up and named for it; if none is, the
+   kitchen screen prints the slips.* Two places to answer, if you want to:
+   · *3 · Which printer gets which paper* — one dropdown per paper (kitchen slips · bills · banquet
+     sheets), listing each set-up computer's own printers, plus **Nobody** for "we have decided this
+     does not print".
+   · *4 · The kitchen screen* — leave it alone and anyone signed in on the kitchen screen prints the
+     slips. Name a person only to narrow the slips to THAT person's screen.
+   This is an ADMIN screen, deliberately: the manager panel's Kitchen-printing section is hidden
+   from everyone there (owner, 2026-07-31).
+
+   ⚠️ **This step used to describe "🖨 KOT printing → Which screen prints the ticket?" with three
+   options including *both — the counter is the backup (30s)*, and a sixth step telling you to
+   answer a "Should this screen print the kitchen tickets?" strip on the manager's Tables screen.
+   NONE of that exists.** `kot_print_target` was retired by migrations 369/376, "both" and every
+   backup went on 2026-08-30, and the per-device strip went on 2026-08-29. A setup guide that sends
+   somebody hunting for three controls that are not there is worse than no guide. Corrected
+   2026-09-04 (T11 sweep #8); the old list is recorded here rather than deleted so nobody re-adds it.
 6. **Test it:** send one order from the tablet, then MINIMISE the window and send another. Both
    tickets must come out. That second one is the whole point of this work.
 
