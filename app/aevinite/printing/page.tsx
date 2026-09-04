@@ -396,13 +396,30 @@ const PANEL_GROUPS: [ string, string ][] = [
                 links to one place in one screenful is the clutter that made this header hard to read. */}
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {/* ── AND IT ALL FITS ON A PHONE (T11 sweep #8, 2026-09-04) ─────────────────────────────
+            This row could not wrap. The OUTER flex above wraps, so the heading dropped onto its own
+            line and looked fine — but this inner group had no flexWrap and a select with a hard
+            minWidth:180, so at 360px it simply ran off the right-hand edge. Measured on the real
+            page at 360×780:
+
+              the restaurant picker   140 → 373   (13px clipped)
+              ↻ Refresh               381 → 480   (entirely off screen)
+
+            …and `document.documentElement.scrollWidth` was exactly the viewport width, so there was
+            no sideways scroll to reveal them and nothing on screen hinting anything was missing.
+            An admin on a phone had no Refresh button at all. (The "Take it out" / "Print it again"
+            buttons in step 5's table also sit past the edge, and those are FINE — that table is in
+            an overflow-x container, so they are reachable by scrolling it.)
+
+            Two changes, both plain CSS: let this group wrap, and let the picker shrink instead of
+            insisting on 180px. Nothing moves on a desktop. */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "100%" }}>
           {rid ? (
             <>
               <button className="adm-btn" onClick={() => { setRid(""); setSt(null); setLoadErr(""); }}>
                 ← All restaurants
               </button>
-              <select className="adm-input" value={rid} onChange={(e) => { setRid(e.target.value); }} style={{ minWidth: 180 }}>
+              <select className="adm-input" value={rid} onChange={(e) => { setRid(e.target.value); }} style={{ flex: "1 1 180px", minWidth: 0, maxWidth: "100%" }}>
                 {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
             </>
