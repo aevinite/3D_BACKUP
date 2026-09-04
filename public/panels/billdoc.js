@@ -391,7 +391,35 @@
        own label byte-for-byte. */
     var discLabel = d.discLabel;
     if (disc > R.discount) discLabel = discPct(R.subtotal, R.discount);
-    var discBlock = disc > 0
+    /* A DISCOUNT THAT ROUNDS AWAY TO NOTHING PRINTS NO ROW (T11 sweep #8, 2026-09-04).
+       This row was drawn whenever the CALLER's raw discount was above zero, while the rupees beside
+       it come from billRows(), which rounds to whole rupees like every other row on this sheet. So
+       any discount under 50 paise printed a labelled money box deducting nothing — and it lost its
+       percentage too, because the re-label above fires (disc > R.discount) and discPct() of zero is
+       "". Measured through the real path (billMoney → billData → billDocHtml) on a ₹200 bill with a
+       ₹0.40 discount:
+
+           Subtotal        ₹200
+           Discount        − ₹0      ← deducts nothing, and cannot even say what per cent
+           Taxable value   ₹200      ← restates a figure that nothing changed
+           CGST 2.5%   ₹5 · SGST 2.5%   ₹5
+           TOTAL           ₹210
+
+       REACHABLE from the discount modal's own 5% option, not only by hand: 5% of a ₹9 chai is
+       ₹0.45. At ₹0.60 the same bill reads "Discount (0.3%) − ₹1" and is fine, so the fault is
+       exactly the rounding boundary.
+
+       This is the rule this file already applies twice, in the owner's own terms — "a zero in a
+       labelled money box reads as a mistake even though the column adds up" (the all-MRP bill,
+       item 15, 2026-08-28) and "THE PAPER NEVER PRINTS A NEGATIVE TAXABLE VALUE" (2026-08-06). The
+       consistent answer is the one an undiscounted bill already gives: print neither row.
+
+       NO MONEY MOVES. The TOTAL is passed straight through as always, and R.discount was already
+       zero — this only stops drawing two rows that describe nothing. `base` in billRows() is
+       deliberately NOT changed with it: when R.discount is 0, `taxable` already equals
+       `subtotalShown`, so the round-off is identical, and re-keying it would alter the answer for a
+       negative hand-built subtotal that nothing reachable produces. */
+    var discBlock = R.discount > 0
       ? '<div class="t"><span>Discount' + (discLabel ? " (" + esc(discLabel) + ")" : "") + "</span><span>− " + inr(R.discount) + "</span></div>"
         + (restate ? '<div class="t tx"><span>Taxable value</span><span>' + inr(R.taxable) + "</span></div>" : "")
       : "";
