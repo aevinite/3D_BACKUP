@@ -544,9 +544,18 @@ console.log("The owner's money screens must use what the server already tells th
       if (/className="[^"]*\badm-page-title\b/.test(src)) hits.push(f);
     }
   };
-  try { walk("app"); } catch { /* no app dir — nothing to check */ }
-  if (!hits.length) ok("item 7 · no page uses `adm-page-title`, a class the stylesheet never defines");
-  else { bad("item 7 · a page uses `adm-page-title`, which no stylesheet defines"); for (const h of hits) console.log(`        ${h}`); }
+  // ── AND `components/` TOO (T17 sweep, 2026-09-04) ────────────────────────────────────────────
+  // The comment above already promised "this walks the whole app", and this line only ever entered
+  // `app/`. `components/owner/OwnerManagerMode.tsx` — the pick-a-restaurant screen a
+  // multi-restaurant owner meets first — carried `adm-page-title` for as long as this check was
+  // green, and rendered its heading at the browser's default 27px/700 beside a console of 22px/800
+  // ones. A guard narrower than its own comment is a shape this project has been caught by before;
+  // two directories cost nothing.
+  for (const dir of ["app", "components"]) {
+    try { walk(dir); } catch { /* directory absent — nothing to check there */ }
+  }
+  if (!hits.length) ok("item 7 · nothing in app/ or components/ uses `adm-page-title`, a class the stylesheet never defines");
+  else { bad("item 7 · a file uses `adm-page-title`, which no stylesheet defines"); for (const h of hits) console.log(`        ${h}`); }
 }
 
 for (const r of RULES) {

@@ -114,7 +114,17 @@ export default function OwnerManagerMode({
   if (!rid) {
     return (
       <div className="omm-launch">
-        <h1 className="adm-page-title">Manager mode</h1>
+        {/* `adm-page-h`, NOT `adm-page-title` (T17 sweep, 2026-09-04). No stylesheet has ever
+            declared `adm-page-title`, so this heading fell through to the browser's own h1 —
+            measured 27px / weight 700 with an 18px margin above AND below, beside a console whose
+            page headings are 22px / weight 800 with no top margin and 4px below (19px on a phone).
+            So the one screen a multi-restaurant owner meets first had the biggest, loosest, least
+            emphatic heading in the whole cockpit, and its own sub-line was pushed 18px away from it.
+            Three PAGES were cleaned of this class on 2026-08-31 and `verify:owner-money` item 7
+            exists for exactly it — but that check's walk only ever entered `app/`, and this file is
+            in `components/`, so it sat green over the fault. The walk now enters `components/` too,
+            and `verify:owner-shell` §1 asserts this file by name. */}
+        <h1 className="adm-page-h">Manager mode</h1>
         <p className="adm-page-sub">Pick the restaurant whose floor you want to run — live tables, orders and bills, exactly like the manager panel.</p>
         <div className="omm-grid">
           {restaurants.map((r) => (

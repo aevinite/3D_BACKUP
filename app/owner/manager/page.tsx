@@ -93,9 +93,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   // he is sent back to his dashboard instead. The ADMIN is unaffected: only a real owner can reach
   // this line, because the admin act-as branch above is never module-gated — admin = top power, and
   // its X-ray nav says outright "You can still open it from this view".
-  // The heading that used to sit here was the last user of `adm-page-title`, a class no
-  // stylesheet declares (sweep 6 · T14). It is gone with the screen; `verify:owner-money` still
-  // walks the whole of `app/` to make sure that class never comes back anywhere.
+  // The heading that used to sit here was ONE user of `adm-page-title`, a class no stylesheet
+  // declares (sweep 6 · T14). It is gone with the screen — but it was not the LAST one, and this
+  // comment said it was: the launcher in components/owner/OwnerManagerMode.tsx still carried it,
+  // and `verify:owner-money` item 7 only ever walked `app/`, so the guard stayed green over it.
+  // Both are fixed (T17 sweep, 2026-09-04); the walk now covers `app/` AND `components/`.
   if (!restaurants.length) redirect("/owner");
 
   return <OwnerManagerMode restaurants={restaurants} initial={selected} skin={skin} />;
