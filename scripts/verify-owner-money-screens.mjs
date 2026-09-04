@@ -524,6 +524,23 @@ const RULES = [
            /if \(!\(actor \?\? ""\)\.trim\(\)\) return undefined;/],
     mustNot: [/if \(!actor\) return "—";/],
   },
+  // ── SWEEP 8 · T16 (2026-09-04) — the fourth screen in this territory, which item 17 missed ──────
+  // Sweep 7 · T14 item 17 hardened the dates on Customers, Pay Later and Feedback on one day. The
+  // Inventory screen has its own two, and neither was guarded: one printed "updated NaN h ago" for
+  // an unreadable clock, and the other read the month heading in the BROWSER's timezone while every
+  // other date on the same screen is pinned to India time.
+  {
+    item: "s8·T16·2", file: INV_UI,
+    say: "an unreadable 'updated …' clock says nothing, never 'updated NaN h ago'",
+    must: [
+      // Number.isFinite on the parsed time, BEFORE any arithmetic that NaN would survive.
+      /const t = iso \? new Date\(iso\)\.getTime\(\) : NaN;[\s\S]{0,80}if \(!Number\.isFinite\(t\)\) return "";/,
+    ],
+    mustNot: [
+      // The exact shape that leaked it: Math.max(0, …) does NOT floor a NaN, and this reads as if it does.
+      /Math\.max\(0, Math\.round\(\(Date\.now\(\) - new Date\(iso\)\.getTime\(\)\)/,
+    ],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
