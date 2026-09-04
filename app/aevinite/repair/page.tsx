@@ -1404,8 +1404,20 @@ export default function AdminRepair() {
           {(() => {
             const scheduled = runs.filter((r) => r.kind !== "live");
             const recent = scheduled.slice(0, 12);
-            const failed = recent.filter((r) => r.status === "failed").length;
+            const failedRuns = recent.filter((r) => r.status === "failed");
+            const failed = failedRuns.length;
             if (recent.length < 4 || failed * 2 < recent.length) return null;
+            // ── DON'T SEND HIM TO A DOOR THAT ISN'T THERE (item 2, 2026-09-04) ──────────────────
+            // This ended with "Open any red row below and read what it did to see where it
+            // stopped." Measured on this platform: 7 of the last 12 failed and SIX of those seven
+            // saved no report at all — a run that dies before it can write one is exactly the run
+            // that fails, so the emptiest rows are the ones this sentence points at. Following the
+            // instruction meant pressing six rows that answered with nothing.
+            //
+            // So the sentence now says which half is readable. When none of them is, it says that
+            // plainly instead of naming a control that does not exist — the same rule as every
+            // other alert on this board: name the door, or say there isn't one.
+            const withReport = failedRuns.filter((r) => r.report).length;
             return (
               <div className="adm-card" style={{ marginBottom: 8, borderColor: "var(--adm-warn)", background: "color-mix(in srgb, var(--adm-warn) 8%, var(--card))" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, lineHeight: 1.55 }}>
@@ -1415,7 +1427,12 @@ export default function AdminRepair() {
                     <span className="adm-muted">
                       These are the overnight jobs on your Mac. When they fail, nothing looked at the
                       app that night — so problems that would have been found and fixed are still
-                      there. Open any red row below and read what it did to see where it stopped.
+                      there.{" "}
+                      {withReport === 0
+                        ? "None of them saved a report, which usually means the run died before it could start — the jobs themselves are what need a look."
+                        : withReport === failed
+                        ? "Open any red row below and read what it did to see where it stopped."
+                        : `${withReport} of the ${failed} saved a report — open ${withReport === 1 ? "that one" : "those"} to see where it stopped. The rest died before they could write one.`}
                     </span>
                   </div>
                 </div>

@@ -369,6 +369,17 @@ ok(!/\{h\.hit_count\} \/ \{h\.max_count\} per \{rlPer\(h\.window_seconds\)\}/.te
 ok(/\(\$\{rlChip\(h\)\}\)\. Is this real abuse/.test(REPAIR), "P71704",
   "repair: the Claude ticket for a limit hit no longer uses the same sentence as the chip — it would say '3 in 0h'");
 
+// ── item 2 · the failure banner must not send him to a door that is not there ────────────────
+// 7 of the last 12 scheduled runs had failed and SIX of the seven saved no report, while the
+// banner said "Open any red row below and read what it did". A run that dies early is exactly the
+// run with nothing to read, so the emptiest rows were the ones it pointed at.
+ok(/const withReport = failedRuns\.filter\(\(r\) => r\.report\)\.length/.test(REPAIR), "P71705",
+  "repair: the run-failure banner no longer counts how many of the failures actually saved a report");
+ok(/None of them saved a report/.test(REPAIR), "P71706",
+  "repair: the banner has no wording for the case where NO failed run left a report — it would name a control that does not exist");
+ok(/saved a report — open/.test(REPAIR), "P71707",
+  "repair: the banner no longer says which of the failures can be opened");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
