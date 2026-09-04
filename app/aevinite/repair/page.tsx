@@ -787,7 +787,7 @@ export default function AdminRepair() {
         </a>
         <a className={`rp-pill${!attErr && attCount ? " warn" : ""}`} href="#at-risk"
           title={attErr ? "Account health didn't load — this is not an all-clear" : "Jump to at-risk restaurants"}>
-          <i className={`fas ${attErr ? "fa-circle-question" : "fa-heart-pulse"}`} aria-hidden="true" /><span className="n">{attErr ? "—" : att ? attCount : "…"}</span><span>need attention</span>
+          <i className={`fas ${attErr ? "fa-circle-question" : "fa-heart-pulse"}`} aria-hidden="true" /><span className="n">{attErr ? "—" : att ? attCount : "…"}</span><span>need{!attErr && att && attCount === 1 ? "s" : ""} attention</span>
         </a>
         <div className="rp-pill" title={requestsElsewhere > 0 ? `${requestsElsewhere} more ${requestsElsewhere === 1 ? "is" : "are"} queued at other restaurants` : undefined}>
           <i className="fas fa-robot" aria-hidden="true" /><span className="n">{scopedRequests.length}</span><span>waiting for Claude</span>
