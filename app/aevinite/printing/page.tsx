@@ -377,8 +377,18 @@ const PANEL_GROUPS: [ string, string ][] = [
           <p className="adm-page-sub" style={{ margin: 0, maxWidth: "72ch" }}>
             {/* NEUTRAL NOW. This described the HELPER only ("a small helper program… asks us every two
                 seconds"), which read as the whole truth while the screen offers two ways to print. */}
-            Where this restaurant&apos;s paper comes out. There are two ways to do it — a small program on a
-            computer, or the restaurant&apos;s own Chrome — and the toggle below picks one. {/* A NEW TAB, like the four other places that offer this guide (owner's review, 2026-08-28).
+            {/* …AND IT NO LONGER POINTS AT A TOGGLE THAT IS NOT THERE (T11 sweep #8, 2026-09-04).
+                It said "there are two ways to do it … and the toggle below picks one" — the first
+                sentence an admin reads on this screen, naming a control that was deleted on
+                2026-08-31 (owner: "in admin panel also we don't need toggle"; migration 372 dropped
+                the stored key). This same file says so twice further down, in the past tense, while
+                the header went on telling people to go and use it. Nothing below has picked between
+                the two ways since; each paper line answers for itself. So the header now states
+                what actually decides, which is the one sentence lib/printHelpers.ts already
+                carries: a computer prints if one is set up and named; if none is, the kitchen
+                screen does. */}
+            Where this restaurant&apos;s paper comes out. A computer prints it if one is set up and named
+            below; if none is, the restaurant&apos;s own screen does. {/* A NEW TAB, like the four other places that offer this guide (owner's review, 2026-08-28).
                 It is read WHILE a printer is being set up, so opening it in place threw away the
                 screen you were halfway through — and the guide has no way back to it. */}
             <a href="/print-setup.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>The restaurant&apos;s own guide →</a>
