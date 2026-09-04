@@ -33,7 +33,20 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P100483`.** *(T9 of sweep #8 took `P99983`–`P100482` on 2026-09-03 for a THIRD freshly planned 500, on the owner's word after items 10/15/16 were built. **These are six-digit ids, and they are only possible because item 15 widened the format earlier in this same session** — `P99999` was the last id the old scheme could express, and a six-digit one would not have been refused, it would have been SILENTLY IGNORED. `verify:ledger-index` now counts all 500 of them.
+**Next free ID: `P100591`.** *(T20 of sweep #8 took `P100483`–`P100590` — ONE HUNDRED AND EIGHT ids,
+not 500 — on 2026-09-04, for a SECOND freshly planned 500 after round 1 was merged and deployed to
+backup. His word: *"after making it live and merging plan 500 phases test within your boundaries
+make sure it cover everthing within your boundries and test everything again if any error left"*.
+A hundred and eight and not 500 because **392 of this terminal's own pre-allocated block are still
+free** (`P74309`–`P74700`, counted against every ledger on disk, not against this line), so the
+round is 392 + 108 = 500 and only the SHORTFALL is claimed here — taking a fresh 500 from the mark
+would be taking ids this terminal does not need, which is how a registry runs out while half of it
+sits unused. This is the same arithmetic T10 used the day before. Claimed by editing THIS LINE and
+**pushing it to `main` on its own before a single row was written** — the half of the rule this file
+has recorded six collisions over. Checked immediately before writing: the highest id on disk was
+T9's `P100482`, so the block was free.)*
+
+**Previously: `P100483`.** *(T9 of sweep #8 took `P99983`–`P100482` on 2026-09-03 for a THIRD freshly planned 500, on the owner's word after items 10/15/16 were built. **These are six-digit ids, and they are only possible because item 15 widened the format earlier in this same session** — `P99999` was the last id the old scheme could express, and a six-digit one would not have been refused, it would have been SILENTLY IGNORED. `verify:ledger-index` now counts all 500 of them.
 
 **Superseded mark, kept for the record:** *(T10 of sweep #8 took `P99951`–`P99982` — THIRTY-TWO ids, not 500 — on
 2026-09-03, for a SECOND freshly planned 500 after round 1 was merged and deployed. His word:
