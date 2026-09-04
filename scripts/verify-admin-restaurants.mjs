@@ -788,6 +788,31 @@ want(!/coarse\s+setting still exists underneath/.test(CARD),
       : "kot_print_target is being read again by " + readers.join(", ") + " — mig 369 retired it");
 }
 
+// ── 31 · no screen in this territory prints a raw NaN ──────────────────────────────────────────
+//
+// WHERE THIS BITES: Admin → Owners → the person's hero line, "seen …".
+//
+// `seen()` is four `<` comparisons, and NaN fails every one of them — so a date it could not read
+// fell through to the last line and printed "seen NaN d ago". last_seen_at is a timestamp column,
+// so today it is either null or real; this keeps the standing rule true whatever it is fed next.
+console.log("\n31. Owners → the person's hero: an unreadable date reads 'never', never 'NaN d ago'");
+want(/if \(!Number\.isFinite\(m\)\) return "never";/.test(OWN),
+  "`seen()` refuses a date it cannot read instead of falling through to the days branch");
+{
+  // Run the real function's shape against a bad value rather than trusting the grep.
+  const seen = (iso) => {
+    if (!iso) return "never";
+    const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    if (!Number.isFinite(m)) return "never";
+    if (m < 2) return "just now";
+    if (m < 60) return `${m} min ago`;
+    if (m < 60 * 24) return `${Math.floor(m / 60)} h ago`;
+    return `${Math.floor(m / 1440)} d ago`;
+  };
+  want(!/NaN/.test(seen("not-a-date") + seen(null) + seen(undefined) + seen("")),
+    "…and no input this column can hold produces the text 'NaN'");
+}
+
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — an admin screen is claiming something it does not do\n`
   : "\n✓ every admin screen still keeps the promise it prints on itself\n");

@@ -46,6 +46,12 @@ const initials = (n: string) => n.split(" ").map((w) => w[0]).join("").slice(0, 
 const seen = (iso: string | null) => {
   if (!iso) return "never";
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  // A DATE THIS CANNOT READ MUST NOT PRINT "NaN d ago" (T19 sweep #8, 2026-09-04). Every branch
+  // below is a `<` comparison, and NaN fails all three — so an unreadable value fell through to the
+  // last line and the hero read "seen NaN d ago". `last_seen_at` is a timestamp column, so today
+  // it is either null or real; this is the one line that keeps the standing "no screen renders a
+  // raw NaN" rule true whatever the column is fed in future.
+  if (!Number.isFinite(m)) return "never";
   if (m < 2) return "just now";
   if (m < 60) return `${m} min ago`;
   if (m < 60 * 24) return `${Math.floor(m / 60)} h ago`;
