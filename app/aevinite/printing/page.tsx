@@ -539,7 +539,7 @@ const PANEL_GROUPS: [ string, string ][] = [
               <div className="adm-card" style={{ marginTop: 14 }}>
                 <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.two}</h2>
                 <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-                  It runs the helper and reports its own printers, so the dropdowns in step 4 are built from
+                  It runs the helper and reports its own printers, so the dropdowns in step 3 are built from
                   what that machine really has — nobody types a printer name.
                 </p>
                 {agents.length === 0 ? (
@@ -620,7 +620,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                 {agents.length === 0 ? (
                   <p style={{ margin: "0 0 4px", fontSize: 12.5, color: "var(--adm-warn, #f5a524)" }}>
                     <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6 }} />
-                    Set the computer up in step 3 first — the printers in these lists come from it.
+                    Set the computer up in step 2 first — the printers in these lists come from it.
                   </p>
                 ) : null}
                 {(st.kinds || []).map((kind) => {
@@ -636,7 +636,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                         </span>
                         <select className="adm-input" style={{ minWidth: 250, flex: "1 1 250px" }}
                           value={val} disabled={busy === "routes" || agents.length === 0}
-                          title={agents.length === 0 ? "Set a computer up in step 3 first — the printers come from it." : undefined}
+                          title={agents.length === 0 ? "Set a computer up in step 2 first — the printers come from it." : undefined}
                           aria-describedby={agents.length === 0 ? "no-computer-yet" : undefined}
                           onChange={(e) => void pickPrinter(kind, e.target.value)}>
                           <option value="off">{KIND_OFF_LABEL[kind] || "Nobody"}</option>
@@ -676,7 +676,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                     </div>
                   );
                 })}
-                {agents.length === 0 ? <span id="no-computer-yet" className="adm-muted" style={{ fontSize: 12 }}>Set a computer up in step 3 first — the printers come from it.</span> : null}
+                {agents.length === 0 ? <span id="no-computer-yet" className="adm-muted" style={{ fontSize: 12 }}>Set a computer up in step 2 first — the printers come from it.</span> : null}
               </div>
 
               {/* ═══ THE KITCHEN SCREEN — ON BY DEFAULT, NOTHING TO SWITCH ═════════════════════
