@@ -400,8 +400,21 @@ if not exist "%SUMATRA%" (
   curl -sL -m 300 -o "%WORK%\\sp.zip" "${SUMATRA.url}" 2>nul
   set "GOT="
   for /f "skip=1 tokens=*" %%h in ('certutil -hashfile "%WORK%\\sp.zip" SHA256 2^>nul') do if not defined GOT set "GOT=%%h"
-  set "GOT=%GOT: =%"
-  if /I not "%GOT%"=="${SUMATRA.sha256}" (
+REM ── !GOT!, NOT %GOT% — AND IT IS NOT A STYLE CHOICE (T11 sweep #8, 2026-09-04) ─────────────
+REM cmd.exe expands every %VAR% when it PARSES a whole parenthesised block, before a single line of
+REM it runs. GOT is set by the for-loop just above, INSIDE this block, so a %GOT% read here saw the
+REM value from before the block started — i.e. nothing. The two lines then became
+REM     set "GOT="                          (%GOT: =% on an undefined var is the empty string)
+REM     if /I not ""=="98b33a…"             (true)
+REM …so the checksum NEVER matched, the zip was deleted every time, and this file printed "The PDF
+REM printer did not download correctly" and exited. Windows has no built-in silent PDF print, so
+REM that means a Windows helper could not print at all unless somebody had already put
+REM SumatraPDF.exe beside the file by hand — the exact manual step this fetch exists to remove.
+REM setlocal enabledelayedexpansion is already on at the top of the file; !VAR! is what reads a
+REM value that was set in the same block. Guarded by verify:print-helper block 8i, which walks the
+REM generated .bat and fails on any %VAR% read inside a block that sets VAR.
+  set "GOT=!GOT: =!"
+  if /I not "!GOT!"=="${SUMATRA.sha256}" (
     del /q "%WORK%\\sp.zip" 2>nul
     echo   The PDF printer did not download correctly. Check the internet and start this again.
     echo %DATE% %TIME%  SumatraPDF checksum mismatch - refused>>"%LOG%"

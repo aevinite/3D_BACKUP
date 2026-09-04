@@ -925,6 +925,78 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     "app/pair/page.tsx put `name`/`rid` back in load()'s dependencies — every keystroke asks the door again");
 }
 
+// ── 8j · A .bat CANNOT READ A VALUE IT SET IN THE SAME BLOCK (T11 sweep #8, 2026-09-04) ───────────
+//
+// cmd.exe expands every %VAR% when it PARSES a whole parenthesised block — before one line of it
+// runs. So a %VAR% read inside `if ... ( ... )` sees the value from BEFORE the block started, even
+// when `setlocal enabledelayedexpansion` is on. !VAR! is what reads a value set in the same block.
+//
+// THIS WAS NOT HYPOTHETICAL. The Windows helper fetched SumatraPDF (Windows has no built-in silent
+// PDF print), hashed the zip with certutil inside an `if not exist (...)` block, and then compared:
+//
+//     set "GOT="
+//     for /f ... do if not defined GOT set "GOT=%%h"
+//     set "GOT=%GOT: =%"                ← parse-time: %GOT% is undefined, so this CLEARS GOT
+//     if /I not "%GOT%"=="98b33a…" (    ← parse-time: becomes  if /I not ""=="98b33a…"  → true
+//       del the zip · "did not download correctly" · exit /b 1
+//
+// …so the checksum could never match, the download was deleted on every run, and a Windows helper
+// could not print at all unless somebody had already put SumatraPDF.exe beside the file by hand —
+// the one manual step that fetch exists to remove. Fixed to !GOT!; this walks both generated .bat
+// templates so the class cannot come back on the next line somebody adds.
+//
+// It reads the TEMPLATE TEXT rather than the generated file, because this guard takes no TypeScript
+// loader — the .bat lines are verbatim in the source apart from ${…} interpolations.
+{
+  const batOf = (src, name) => {
+    const i = src.indexOf(`const ${name} = (a:`);
+    if (i < 0) return "";
+    const open = src.indexOf("`", i);
+    if (open < 0) return "";
+    // the template ends at the first backtick on its own that closes it: these files end each
+    // template with "\n`;" on its own line.
+    const close = src.indexOf("\n`;", open);
+    return close < 0 ? "" : src.slice(open + 1, close);
+  };
+  const targets = [
+    ["lib/printHelperScript.ts → print-helper.bat", batOf(script, "windows")],
+    ["lib/printStationScript.ts → print-station.bat", batOf(read("lib/printStationScript.ts"), "windows")],
+  ];
+  const trouble = [];
+  for (const [label, txt] of targets) {
+    if (!txt) { trouble.push(`${label}: could not find the windows template to read`); continue; }
+    let depth = 0;
+    const stack = [];
+    txt.split("\n").forEach((raw, n) => {
+      // drop REM/:: comment lines and blank out ${…} interpolations
+      if (/^\s*(REM|::)/i.test(raw)) return;
+      const ln = raw.replace(/\$\{[^}]*\}/g, "X");
+      for (const m of ln.matchAll(/%([A-Za-z_][A-Za-z0-9_]*)(?::[^%]*)?%/g)) {
+        const v = m[1].toUpperCase();
+        if (depth > 0 && stack.some((set) => set.has(v))) {
+          trouble.push(`${label} line ${n + 1}: reads %${m[1]}% inside a block that sets it — use !${m[1]}!  ·  ${raw.trim().slice(0, 80)}`);
+        }
+      }
+      const setM = /(?:^|\s)set\s+"?([A-Za-z_][A-Za-z0-9_]*)\s*=/i.exec(ln);
+      if (setM && depth > 0) stack[stack.length - 1]?.add(setM[1].toUpperCase());
+      const opens = (ln.match(/\(/g) || []).length;
+      const closes = (ln.match(/\)/g) || []).length;
+      for (let k = 0; k < opens; k++) { depth++; stack.push(new Set()); }
+      for (let k = 0; k < closes && depth > 0; k++) { depth--; stack.pop(); }
+    });
+  }
+  check(trouble.length === 0,
+    "no Windows script reads a value with %VAR% inside the block that set it (that value is always the old one)",
+    "a .bat reads a same-block value with %VAR%, which cmd expands before the block runs: " + trouble.join(" | "));
+  // …and delayed expansion is actually switched on, or !VAR! is just literal text.
+  for (const [label, txt] of targets) {
+    if (!txt) continue;
+    check(/setlocal\s+enabledelayedexpansion/i.test(txt) || !/![A-Za-z_][A-Za-z0-9_]*!/.test(txt),
+      `${label.split(" → ")[1]} may use !VAR! — delayed expansion is switched on`,
+      `${label} uses !VAR! without "setlocal enabledelayedexpansion" — the exclamation marks would print literally`);
+  }
+}
+
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
 check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan),
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",
