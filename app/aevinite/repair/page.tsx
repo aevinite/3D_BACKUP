@@ -912,6 +912,10 @@ export default function AdminRepair() {
 
           {confirmBulk === "resolve" ? (
             <span className="rp-bulk-ask">
+              {/* REJECTED (owner, 2026-09-04): skipping the waiting ones instead of saying so —
+                  R54 in docs/REJECTED-IDEAS.md. *"resolve all means resolve, you have to one by
+                  one resolve all the problems as simple as that."* The sentence below is the whole
+                  answer; do not turn it into a filter, a checkbox or a second button. */}
               {/* ── AND THE ONES THAT ARE WAITING (item 8, 2026-09-04) ──────────────────────────
                   "Resolve all" sends { all: true } and the server clears every unresolved error
                   report in scope — INCLUDING the ones set to come back later, which are not on
