@@ -18,7 +18,10 @@ import { adminFetch } from "@/lib/adminFetch";
 import { flashTarget } from "@/lib/adminJump";
 
 
-type Restaurant = { id: string; slug: string; name: string; active: boolean; createdAt: string | null; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
+type Restaurant = { id: string; slug: string; name: string; active: boolean; createdAt: string | null; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null;
+  // Everyone in `restaurant_owners` for this restaurant, by name — see the Membership note below.
+  // `null` means the server could not read it, and the screen must NOT then say "nobody owns this".
+  linkedOwners?: string[] | null };
 type Owner = { id: string; name: string };
 // Activity health per restaurant (from /api/admin/restaurants/health, mig 146). Signals
 // only, no money — the admin panel never shows earnings.
@@ -40,12 +43,10 @@ type Health = { last_order_at: string | null; orders_24h: number; open_issues: n
 // "1 restaurant has no owner" bar counts the join table, so the two screens printed two different
 // numbers for the same question.
 //
-// EGRESS: ONE extra bounded read per open of this screen — the same `/api/admin/owners` call the
-// Owners page already makes (one row per owner, plus their memberships). It is not polled, and it
-// is the only place the membership truth exists. The alternative — a per-row lookup — is the
-// thing docs/SAAS-EFFICIENCY-PLAYBOOK.md forbids.
-type Membership = { names: string[]; primaryName: string | null };
-type OwnerRoster = { id: string; name: string; restaurants: { id: string; primary: boolean }[] };
+// EGRESS: NONE. This began as a second whole-roster call to `/api/admin/owners` on every open of
+// this screen; the owner picked item 10 and it moved onto the list read itself, which now carries
+// `linkedOwners` per row (two small paged reads that ride along inside the same round trip). So the
+// screen costs exactly what it cost before item 1: one call for the list, one for health.
 
 // Turn the raw signals into a one-word status + colour. "Healthy" = busy now (staff online
 // or an order in the last 24h); "Quiet" = ordered within a week; "Dormant" = nothing for 7+
@@ -83,10 +84,7 @@ export default function AdminRestaurants() {
   const [list, setList] = useState<Restaurant[] | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [health, setHealth] = useState<Record<string, Health>>({});
-  // Who is actually linked to each restaurant (see the note on Membership above). Empty until the
-  // roster read lands, and simply stays empty if it fails — the column then behaves exactly as it
-  // did before, which is the right degradation for a read that only ever ADDS a sentence.
-  const [members, setMembers] = useState<Record<string, Membership>>({});
+
   const [healthFilter, setHealthFilter] = useState<"all" | "Healthy" | "Quiet" | "New" | "Dormant" | "Suspended">("all");
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Restaurant | null>(null);
@@ -180,28 +178,13 @@ export default function AdminRestaurants() {
   }, []);
   useEffect(() => { loadHealth(); }, [loadHealth]);
 
-  // The membership map — one bounded roster read, once, alongside the list.
-  const loadMembers = useCallback(async () => {
-    const res = await adminFetch<{ owners?: OwnerRoster[] }>("/api/admin/owners");
-    if (!res.ok) return; // silent on purpose: it only ever ADDS a sentence (see the note above)
-    const map: Record<string, Membership> = {};
-    for (const o of res.data.owners || []) {
-      for (const r of o.restaurants || []) {
-        const m = map[r.id] || (map[r.id] = { names: [], primaryName: null });
-        m.names.push(o.name);
-        if (r.primary) m.primaryName = o.name;
-      }
-    }
-    setMembers(map);
-  }, []);
-  useEffect(() => { loadMembers(); }, [loadMembers]);
 
   if (selected) {
     // Re-read the freshest copy from the list so the owner shows correctly after a round-trip.
     const fresh = (list || []).find((r) => r.id === selected.id) || selected;
-    return <RestaurantDetail key={fresh.id} restaurant={fresh} owners={owners} membership={members[fresh.id]}
+    return <RestaurantDetail key={fresh.id} restaurant={fresh} owners={owners}
       onBack={() => { writeFocusUrl(null); setSelected(null); loadList(); }}
-      onChanged={() => { loadList(); loadMembers(); }} />;
+      onChanged={loadList} />;
   }
 
   const needle = q.trim().toLowerCase();
@@ -313,15 +296,15 @@ export default function AdminRestaurants() {
                 {(() => {
                   const known = r.ownerUserId ? owners.find((o) => o.id === r.ownerUserId) : null;
                   // …AND A RESTAURANT WITH NO ★ IS NOT AN OWNERLESS ONE (see the Membership note).
-                  const co = members[r.id];
-                  const nCo = co ? co.names.length : 0;
+                  const co = r.linkedOwners;
+                  const nCo = co ? co.length : 0;
                   const label = r.ownerUserId
                     ? (known ? known.name : "assigned · not active")
                     : nCo > 0 ? `${nCo} owner${nCo === 1 ? "" : "s"} · no primary` : "—";
                   const title = r.ownerUserId && !known
                     ? "This restaurant has an owner, but that account is suspended or in the recycle bin — open Owners to see who."
                     : !r.ownerUserId && nCo > 0
-                      ? `${co!.names.join(", ")} — each of them sees this restaurant's numbers. Nobody holds the primary badge yet; set one on Owners.`
+                      ? `${co!.join(", ")} — each of them sees this restaurant's numbers. Nobody holds the primary badge yet; set one on Owners.`
                       : undefined;
                   return (
                     <span className="adm-muted" style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -856,7 +839,7 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
 // NOTE: auto-print KOT is NOT here — it lives ONLY in the Settings tab's "KOT printing"
 // section (owner 2026-07-26). Having it in both places showed two toggles that shared one
 // saved value but not one on-screen state, so they looked out of sync — one control now.
-function RestaurantDetail({ restaurant, owners, membership, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; membership?: Membership; onBack: () => void; onChanged: () => void }) {
+function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
   // Per-switch in-flight set: toggling ONE switch disables only THAT switch. The old single
   // (The per-switch in-flight tracker went with the toggle grids — this page has no
   // switches left to disable while a save is in flight.)
@@ -1071,7 +1054,7 @@ function RestaurantDetail({ restaurant, owners, membership, onBack, onChanged }:
 
           <div id="det-status"><StatusCard restaurant={restaurant} /></div>
 
-          <div id="det-owner"><OwnerCard restaurant={restaurant} owners={owners} membership={membership} onChanged={onChanged} /></div>
+          <div id="det-owner"><OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} /></div>
 
           <div id="det-enter"><EnterCard restaurant={restaurant} /></div>
 
@@ -1229,7 +1212,7 @@ function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaura
 
 // Owner assignment for one restaurant: pick an existing owner, or create a new one
 // (which is auto-assigned here). Writes via /api/admin/restaurants (PATCH/POST).
-function OwnerCard({ restaurant, owners, membership, onChanged }: { restaurant: Restaurant; owners: Owner[]; membership?: Membership; onChanged: () => void }) {
+function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; owners: Owner[]; onChanged: () => void }) {
   const [sel, setSel] = useState<string>(restaurant.ownerUserId || "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -1240,7 +1223,7 @@ function OwnerCard({ restaurant, owners, membership, onChanged }: { restaurant: 
   const assignedUnknown = !!sel && !owners.some((o) => o.id === sel);
   // Nobody holds the ★, but people ARE linked — the case this picker used to describe as
   // "— no owner —". See the note on `Membership` at the top of this file.
-  const coOwnersNoPrimary = !sel && !!membership && membership.names.length > 0 ? membership.names : null;
+  const coOwnersNoPrimary = !sel && !!restaurant.linkedOwners && restaurant.linkedOwners.length > 0 ? restaurant.linkedOwners : null;
 
   const assign = async (ownerId: string) => {
     setBusy(true); setMsg(null);

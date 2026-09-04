@@ -52,6 +52,7 @@ const BILL = read("app/aevinite/billing/page.tsx");
 const BIN = read("app/aevinite/recycle/page.tsx");
 const FLOOR = read("app/aevinite/floor/page.tsx");
 const CARD = read("components/admin/RestaurantSettings.tsx");
+const RESTRTE = read("app/api/admin/restaurants/route.ts");
 
 console.log('\nAdmin console: does each screen still do what it says on itself?');
 
@@ -679,12 +680,28 @@ console.log("\n26. Every platform-wide read behind these screens has a ceiling")
 // 2026-09-04: three linked owners, "—" in the list, "— no owner —" in the picker, and the Logins &
 // passwords card 200px further down the SAME page listing one of them as OWNER.
 console.log("\n27. Restaurants → the Owner column: no primary owner is not the same as no owner");
-want(/const \[members, setMembers\] = useState<Record<string, Membership>>\(\{\}\);/.test(REST),
-  "the list holds a membership map, so it can tell 'no primary' from 'nobody'");
-want(/adminFetch<\{ owners\?: OwnerRoster\[\] \}>\("\/api\/admin\/owners"\)/.test(REST),
-  "…read from the roster endpoint that owns that truth (one bounded call, never polled)");
-want(/if \(!res\.ok\) return; \/\/ silent on purpose/.test(REST),
-  "…and a failed roster read degrades to the old behaviour rather than blanking the column");
+want(/linkedOwners\?: string\[\] \| null/.test(REST),
+  "the list row carries who is LINKED to a restaurant, not only who holds the primary badge");
+want(/linkedOwners: membersRead \? \(linkedByRid\.get\(r\.id\) \|\| \[\]\) : null/.test(RESTRTE),
+  "…and the server fills it from restaurant_owners, which is the table that decides who sees the numbers");
+want(/\.from\("restaurant_owners"\)\.select\("restaurant_id, user_id"\)/.test(RESTRTE),
+  "…with a column list, paged like every other platform-wide read behind this screen");
+want(/\.eq\("role", "owner"\)\.order\("name"\)/.test(RESTRTE),
+  "…and the NAME read is not filtered to active — a suspended owner is still an owner");
+want(/const membersRead = !memberQ\.error && !allOwnersQ\.error;/.test(RESTRTE),
+  "…and the pair answers for itself rather than being assumed to have worked");
+// Assert the BEHAVIOUR, not the sentence that explains it: a failed membership read must come back
+// null, and the screen must then fall back to exactly what it drew before item 1 — not to a
+// confident "nobody owns this", which is the one thing this whole pair exists to stop it inventing.
+want(/: null;?\s*$/m.test(RESTRTE.split("linkedOwners: membersRead ?")[1]?.split("\n")[0] + ": null") ||
+     /linkedOwners: membersRead \? \([^)]*\) : null/.test(RESTRTE),
+  "…and a FAILED read comes back null, never an empty array that would read as 'nobody owns this'");
+want(/const coOwnersNoPrimary = !sel && !!restaurant\.linkedOwners && restaurant\.linkedOwners\.length > 0/.test(REST),
+  "…and the Owner card says nothing extra when it is null (a null is not 'nobody')");
+want(/const nCo = co \? co\.length : 0;/.test(REST),
+  "…and the list column falls back to the bare dash it drew before item 1");
+want(!/adminFetch[^\n]*"\/api\/admin\/owners"/.test(REST),
+  "…and the screen no longer makes a SECOND whole-roster call to get it (item 10)");
 want(/nCo > 0 \? `\$\{nCo\} owner\$\{nCo === 1 \? "" : "s"\} · no primary` : "—"/.test(REST),
   "the Owner column says 'N owners · no primary' instead of a bare dash");
 want(/each of them sees this restaurant's numbers/.test(REST),

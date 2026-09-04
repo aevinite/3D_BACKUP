@@ -1,5 +1,7 @@
 // /api/admin/restaurants — the admin super-panel's Restaurants tab.
-//   GET   → every restaurant {id, slug, name, active, hasSettings, ownerUserId, ownerName}
+//   GET   → every restaurant {id, slug, name, active, hasSettings, ownerUserId, ownerName,
+//           linkedOwners: the NAMES of everyone in restaurant_owners for it — which is who really
+//           sees its numbers, as opposed to ownerUserId, which is only the primary badge}
 //           + the list of existing owners (to pick from). Admin-gated.
 //   PATCH → { restaurant_id, owner_user_id|null }  assign / clear a restaurant's OWNER.
 //   POST  → { action:"create_owner", name, password? }  mint a new owner login
@@ -208,7 +210,7 @@ export async function GET(req: NextRequest) {
   // (`staff_users` filtered to active OWNERS is not one-row-per-restaurant, but it is the same shape
   //  of small complete list, and the dropdown it fills has to hold every owner or you cannot assign
   //  one — so it is paged too.)
-  const [restQ, setQ, ownersQ] = await Promise.all([
+  const [restQ, setQ, ownersQ, allOwnersQ, memberQ] = await Promise.all([
     // deleted_at IS NULL → the live/suspended list; trashed restaurants are hidden
     // here (they live in the recycle bin above).
     pageAll<{ id: string; slug: string; name: string; active: boolean; owner_user_id: string | null; created_at: string | null }>(
@@ -220,6 +222,26 @@ export async function GET(req: NextRequest) {
       "settings", (from, to) => sb.from("settings").select("restaurant_id, enabled_panels").order("restaurant_id").range(from, to)),
     pageAll<{ id: string; name: string | null; username: string }>(
       "owners", (from, to) => sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).order("name").range(from, to)),
+    // ── WHO IS ACTUALLY LINKED, AND WHAT THEY ARE CALLED (T19 sweep #8, item 10) ─────────────────
+    //
+    // `owner_user_id` above is the PRIMARY slot — the name this console shows in a list. What
+    // decides who really sees a restaurant's numbers is `restaurant_owners` (mig 097), the same
+    // table the Owners page counts for its "N restaurants have no owner" bar. When a restaurant has
+    // people linked and nobody holding the ★, the two disagree, and this list was the one that
+    // lied: it drew "—", which on that screen means "nobody owns this".
+    //
+    // The screen used to answer that by calling /api/admin/owners as well — a second whole-roster
+    // read on every open of the list. These two rides along instead, so the list costs ONE trip
+    // again. Both are one-row-per-link / one-row-per-owner and paged for the same reason as the
+    // three above.
+    //
+    // NOT filtered to `active`, unlike the picker read: a suspended or binned owner is still an
+    // owner, still sees nothing about it changing, and is exactly the case sweep #6 fixed on the
+    // OTHER half of this column. `owners` below stays active-only, so the dropdown is unchanged.
+    pageAll<{ id: string; name: string | null; username: string }>(
+      "owner names", (from, to) => sb.from("staff_users").select("id, name, username").eq("role", "owner").order("name").range(from, to)),
+    pageAll<{ restaurant_id: string; user_id: string }>(
+      "restaurant_owners", (from, to) => sb.from("restaurant_owners").select("restaurant_id, user_id").order("restaurant_id").range(from, to)),
   ]);
   if (restQ.error) return adminFail("the restaurant list", restQ.error as { message?: string }, { action: "load" });
   // ── THE OWNER COLUMN WENT BLANK AND NOTHING SAID WHY (T20 sweep #7, 2026-08-27) ─────────────────
@@ -235,6 +257,27 @@ export async function GET(req: NextRequest) {
   const unread: string[] = [];
   if (setQ.error) { console.error("[admin/restaurants] settings read failed:", (setQ.error as { message?: string })?.message); unread.push("panels"); }
   if (ownersQ.error) { console.error("[admin/restaurants] owners read failed:", (ownersQ.error as { message?: string })?.message); unread.push("owners"); }
+  // The membership pair degrades on its own: `linkedOwners` comes back NULL for every row, and the
+  // screen falls back to reading the primary slot alone — exactly what it did before item 1. A
+  // confident empty ARRAY here would be worse than a null: it says "nobody is linked", which is the
+  // very sentence this pair exists to stop the screen from inventing.
+  const membersRead = !memberQ.error && !allOwnersQ.error;
+  if (!membersRead) {
+    console.error("[admin/restaurants] membership read failed:",
+      ((memberQ.error || allOwnersQ.error) as { message?: string })?.message);
+    if (!unread.includes("owners")) unread.push("owners");
+  }
+  const anyOwnerName = new Map((allOwnersQ.rows || []).map((o) => [o.id, o.name || o.username]));
+  const linkedByRid = new Map<string, string[]>();
+  if (membersRead) {
+    for (const m of memberQ.rows || []) {
+      const nm = anyOwnerName.get(m.user_id);
+      if (!nm) continue;   // a link to a user who is no longer an owner at all — not a name to print
+      const list = linkedByRid.get(m.restaurant_id) || [];
+      if (!list.includes(nm)) list.push(nm);
+      linkedByRid.set(m.restaurant_id, list);
+    }
+  }
   const withSettings = new Set((setQ.rows || []).map((r) => r.restaurant_id).filter(Boolean));
   const panelsByRid = new Map((setQ.rows || []).map((r) => [r.restaurant_id, r.enabled_panels || null]));
   const owners = (ownersQ.rows || []).map((o) => ({ id: o.id, name: o.name || o.username }));
@@ -247,6 +290,9 @@ export async function GET(req: NextRequest) {
     // `null` when the name could not be READ, so the screen shows nothing rather than the "—" it
     // draws for a genuinely un-owned restaurant. `unread` below is what lets it say so.
     ownerName: r.owner_user_id ? (ownersQ.error ? null : (ownerName.get(r.owner_user_id) || "—")) : null,
+    // Everyone linked to this restaurant, named — the truth behind "does anybody own this?".
+    // `null` (not `[]`) when the read failed: see the note above.
+    linkedOwners: membersRead ? (linkedByRid.get(r.id) || []) : null,
     // Panel flags: a panel is ON unless explicitly false (matches /panels route semantics).
     panels: panelsByRid.get(r.id) || null,
   }));
