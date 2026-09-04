@@ -555,6 +555,29 @@ const RULES = [
       /new Date\(month \+ "-01"\)\.toLocaleString\("en-IN", \{ month: "long", year: "numeric" \}\)/,
     ],
   },
+  {
+    item: "s8·T16·4", file: ISSUES,
+    // DRIVEN, four ways, before this rule existed: with ONE of the two routes answering 500 and
+    // the other answering normally, Refresh produced no card, no sentence and no mark. The working
+    // half's `setErr(null)` wiped the failing half's message, because both wrote to one slot.
+    say: "one half of Feedback failing is said out loud, and cannot be wiped by the other half",
+    must: [
+      // The card shows the write error OR the load error of the tab on screen — never a shared slot.
+      /const loadErr = tab === "ratings" \? rErr : iErr;/,
+      /const shownErr = err \|\| loadErr;/,
+      /\{shownErr && \(/,
+      // …and the tab you are NOT on carries its own mark, so a half-failed Refresh is visible.
+      /\{rErr && <i className="fas fa-triangle-exclamation"/,
+      /\{iErr && <i className="fas fa-triangle-exclamation"/,
+    ],
+    mustNot: [
+      // The two shapes that made a success erase a failure. A load must never touch the shared slot.
+      /setRErr\(null\); setErr\(null\)/,
+      /setIErr\(null\); setErr\(null\)/,
+      /setErr\(m\); setRErr\(m\)/,
+      /setErr\(m\); setIErr\(m\)/,
+    ],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
