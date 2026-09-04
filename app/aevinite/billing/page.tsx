@@ -417,6 +417,21 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
 
             <div style={{ borderTop: "var(--border)", paddingTop: 16 }}>
               <h2 style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 800 }}>Payment history</h2>
+              {/* ── ITEM 8 · THESE FIGURES ARE IN TODAY'S CURRENCY, WHATEVER THEY WERE PAID IN ────
+                  A payment row (mig 118) stores an amount and no currency, so every one of them is
+                  drawn in whatever this restaurant is set to NOW. Change a restaurant from rupees to
+                  dollars and last year's ₹12,000 silently re-reads as $12,000 — the same number
+                  wearing the wrong symbol, in the platform's own money record. Giving each payment
+                  its own currency needs a database change; saying plainly what the column means does
+                  not, and it is what stops the figure being misread in the meantime. */}
+              {payments && payments.length > 0 && (
+                <p className="adm-muted" style={{ margin: "-4px 0 10px", fontSize: 11.5, lineHeight: 1.5 }}>
+                  <i className="fas fa-circle-info" style={{ marginRight: 6 }} aria-hidden="true" />
+                  Amounts are shown in <b>{(row.currency || "INR").toUpperCase()}</b>, this restaurant&rsquo;s
+                  current currency. A payment does not carry a currency of its own, so changing it above
+                  re-labels these too.
+                </p>
+              )}
               {histMsg && (
                 <div role="status" style={{ margin: "0 0 10px", padding: "7px 11px", borderRadius: 8, fontSize: 12.5,
                   color: /^Couldn/.test(histMsg) ? "var(--adm-danger)" : "var(--adm-ok, #16a34a)",
