@@ -68,8 +68,11 @@ const index = readFileSync(INDEX, "utf8");
 // `T<n>-<round>.md` now counts as a round of ledger `T<n>`. §2 below still asks INDEX.md about the
 // PARENT (`T20.md`), never about the round file, so nothing that was green can go red for this: a
 // round is filed under the terminal that owns it, and its territory is stated in its own header.
-const isLedger = (f) => /^T\d+(-[A-Za-z0-9]+)?\.md$/.test(f);
-const parentOf = (f) => f.replace(/^(T\d+)(-[A-Za-z0-9]+)?\.md$/, "$1.md");
+// ONE hyphen was not enough, and I proved it on myself within the hour: this allowed
+// `T20-S8.md` and then went blind to `T20-S8-R2.md`, the very next file I filed. A round name is
+// however many segments the terminal needed — the rule is "T<number>, then anything hyphenated".
+const isLedger = (f) => /^T\d+(-[A-Za-z0-9]+)*\.md$/.test(f);
+const parentOf = (f) => f.replace(/^(T\d+)(-[A-Za-z0-9]+)*\.md$/, "$1.md");
 const ledgers = readdirSync(DIR).filter(isLedger)
   .sort((a, b) => (Number(a.replace(/^T(\d+).*$/, "$1")) - Number(b.replace(/^T(\d+).*$/, "$1"))) || a.localeCompare(b));
 if (!ledgers.length) { console.error("\n❌ verify:ledger-index — no ledger files at all in " + DIR + "\n"); process.exit(1); }
@@ -120,7 +123,10 @@ const PHASE_ROW_START = new RegExp(`^\\|\\s*P${ID_DIGITS}\\s*\\|`);
 // result/note reads below simply find nothing there — which is the truth about that table, not a
 // fault in it. Every other ledger still needs its four cells, so a recap row elsewhere cannot be
 // mistaken for a phase row.
-const isRound = (f) => /^T\d+-[A-Za-z0-9]+\.md$/.test(f);
+// ONE hyphen was not enough, and T20 proved it on itself within the hour: this allowed
+// `T20-S8.md` and then went blind to `T20-S8-R2.md`, the very next file it filed. A round name is
+// however many segments the terminal needed — the rule is "T<number>, then anything hyphenated".
+const isRound = (f) => /^T\d+(-[A-Za-z0-9]+)+\.md$/.test(f);
 // ── …AND THE GENERATOR IT HANDS ITS VERDICT TO MUST ACTUALLY BE THERE (T19 of sweep #8, the same
 //    day, integrated onto T20's item 7 rather than over it) ────────────────────────────────────
 // The rule above is right and stays: a round ledger may keep its verdict in a run's output instead
