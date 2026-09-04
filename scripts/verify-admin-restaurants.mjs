@@ -89,8 +89,21 @@ want(/if \(!alive\.current\) return;/.test(CARD),
 console.log("\n1a. Access → a self-saving control reports itself honestly, with no button");
 want(/\{done \? "✓ Saved" : saving \? "Saving…" : "Saves on its own"\}/.test(CARD),
   "the line has three states: Saves on its own → Saving… → ✓ Saved");
-want((CARD.match(/savedHint\(k\)/g) || []).length === 3,
-  "…and ONE hint serves the number picker, the switch and the choice cards, so they cannot drift apart");
+// COUNTED "=== 3" UNTIL 2026-09-04, AND THE COUNT WAS THE WRONG RULE (T19 sweep #8). Its own
+// sentence named "the number picker, the SWITCH and the choice cards" — but the three call sites
+// were `field`, `pickNumber` and `choiceCards`; the switch had no hint at all, and this check went
+// green over that for as long as the number stayed 3. Worse, it then went RED when the switch was
+// GIVEN its hint. A count is not the rule. The rule is: every helper that can save by itself also
+// reports by itself, named one by one, so a fourth cannot be added silently and a fifth cannot go
+// missing.
+for (const [helper, re] of [
+  ["the typed field", /\{opts\.auto && savedHint\(k\)\}/],
+  ["the number picker", /\{savedHint\(k\)\}\s*\n\s*<\/label>/],
+  ["the choice cards", /\{savedHint\(k\)\}\s*\n\s*<\/div>/],
+  ["the auto switch", /\{opts\.auto \? savedHint\(k\) : null\}/],
+]) want(re.test(CARD), `…and ${helper} prints that one shared hint, so the four cannot drift apart`);
+want((CARD.match(/savedHint\(k\)/g) || []).length === 4,
+  "…and there are exactly four self-saving controls, so a fifth cannot arrive without a hint");
 want(/const done = autoSaved === k;/.test(CARD) && /setAutoSaved\(k\);/.test(CARD)
   && CARD.indexOf("setAutoSaved(k);") > CARD.indexOf("if (!r.ok) throw new Error"),
   "\"✓ Saved\" is set only AFTER the server answered ok — never optimistically");
@@ -653,6 +666,126 @@ console.log("\n26. Every platform-wide read behind these screens has a ceiling")
     unbounded.length === 0
       ? "every list read behind the admin's restaurants, owners, billing, bin and floor is bounded"
       : "unbounded list read(s): " + unbounded.join(", "));
+}
+
+// ── 27 · "no owner" must not be said about a restaurant that has owners ────────────────────────
+//
+// WHERE THIS BITES: Admin → Restaurants → the Owner column, and a restaurant's own Owner card.
+//
+// The column reads `restaurants.owner_user_id`, which is only the PRIMARY slot. Who actually sees a
+// restaurant's numbers is `restaurant_owners` (mig 097) — the table the Owners page counts. A
+// restaurant with co-owners and no ★ therefore read "—" here (which on this screen means "nobody
+// owns this") while the Owners page's amber bar correctly left it out. Found on Green Bowl,
+// 2026-09-04: three linked owners, "—" in the list, "— no owner —" in the picker, and the Logins &
+// passwords card 200px further down the SAME page listing one of them as OWNER.
+console.log("\n27. Restaurants → the Owner column: no primary owner is not the same as no owner");
+want(/const \[members, setMembers\] = useState<Record<string, Membership>>\(\{\}\);/.test(REST),
+  "the list holds a membership map, so it can tell 'no primary' from 'nobody'");
+want(/adminFetch<\{ owners\?: OwnerRoster\[\] \}>\("\/api\/admin\/owners"\)/.test(REST),
+  "…read from the roster endpoint that owns that truth (one bounded call, never polled)");
+want(/if \(!res\.ok\) return; \/\/ silent on purpose/.test(REST),
+  "…and a failed roster read degrades to the old behaviour rather than blanking the column");
+want(/nCo > 0 \? `\$\{nCo\} owner\$\{nCo === 1 \? "" : "s"\} · no primary` : "—"/.test(REST),
+  "the Owner column says 'N owners · no primary' instead of a bare dash");
+want(/each of them sees this restaurant's numbers/.test(REST),
+  "…and names them on hover, so the admin knows who is already reading the takings");
+want(/coOwnersNoPrimary \? "— no primary owner —" : "— no owner —"/.test(REST),
+  "the Owner card's empty option says 'no primary owner' when people ARE linked");
+want(/already own\{coOwnersNoPrimary\.length === 1 \? "s" : ""\} this restaurant/.test(REST),
+  "…and the card names them, so assigning a primary is an informed act");
+want(/it takes nothing away from the others/.test(REST),
+  "…and says that giving the badge removes nobody's access");
+
+// ── 28 · every self-saving control on the settings card reports itself ─────────────────────────
+//
+// WHERE THIS BITES: Access & permissions → any row that opens a settings card → a switch that
+// carries no Save button.
+//
+// The owner's rule, 2026-08-20: "there shouldn't be a button also… it should be written that this
+// has been saved, and that return will only come when it is actually been saved." `field`,
+// `pickNumber` and `choiceCards` all print savedHint(). `boolToggle` with `auto` did not — and a
+// self-saving key is deliberately kept out of `dirtyKeys`, so the Save bar could not speak for it
+// either. Measured on French House: tapping "Let individual dishes differ from this" wrote
+// item_tax_modes_allowed = true and the screen said nothing at all.
+console.log("\n28. Access → a settings card: an auto-saving SWITCH says it saved, like every neighbour");
+want(/\{opts\.auto \? savedHint\(k\) : null\}/.test(CARD),
+  "an auto-saving switch prints the same three-state line the other self-saving controls print");
+{
+  // Every control that calls autoSaveNow / autoSave must also be able to report. This is the
+  // general rule, not the one call site — a second `auto` switch added tomorrow is covered.
+  const autoSites = (CARD.match(/opts\.auto/g) || []).length;
+  want(autoSites >= 2, "…and the `auto` flag is read for BOTH the write and the report");
+}
+
+// ── 29 · the phone-code switch says what turning it on really does ─────────────────────────────
+//
+// WHERE THIS BITES: Access & permissions → Menu → Dining session and location → the two switches.
+//
+// `lfh_place_order` (mig 357) refuses EVERY guest order with `otp_required` unless the diner's
+// membership carries `phone_verified`, and only `lfh_verify_otp` can set that. Nothing in app/,
+// components/ or public/panels/ calls it — `lib/session.ts` exports sendOtp/verifyOtp and they have
+// no caller — so a guest has no way to enter a code. Turning this switch on stops the restaurant
+// trading, and the card used to say nothing at all.
+console.log("\n29. Access → Dining session and location: the phone-code switch names its consequence");
+want(/The screen that asks a guest for the code has not been built yet/.test(CARD),
+  "the card says the phone-code screen does not exist yet");
+want(/turning it on stops this restaurant taking any guest orders at all/.test(CARD),
+  "…and what that costs — no guest orders at all");
+want(/Nobody can order here while this is on/.test(CARD),
+  "…and it turns into a live warning once the switch is actually ON");
+{
+  // The claim behind the warning: no screen can satisfy require_otp. If somebody builds the guest
+  // phone-code screen, this check goes red and the wording has to be rewritten — which is exactly
+  // the moment it should be.
+  const callers = ["app", "components", "public/panels"].flatMap((dir) => {
+    const out = [];
+    const walk = (d) => {
+      for (const e of readdirSync(join(ROOT, d), { withFileTypes: true })) {
+        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+        const rel = d + "/" + e.name;
+        if (e.isDirectory()) walk(rel);
+        else if (/\.(tsx?|jsx?)$/.test(e.name) && /\b(sendOtp|verifyOtp)\s*\(/.test(read(rel))) out.push(rel);
+      }
+    };
+    try { walk(dir); } catch { /* directory absent in a partial checkout */ }
+    return out;
+  });
+  want(callers.length === 0,
+    callers.length === 0
+      ? "…and the claim still holds: no screen anywhere calls sendOtp/verifyOtp"
+      : "the guest phone-code screen now EXISTS (" + callers.join(", ") + ") — rewrite the warning on the Dining sessions card");
+}
+
+// ── 30 · a retired setting is described as retired, in every sentence ──────────────────────────
+//
+// `kot_print_target` was retired by migration 369. One comment in this file said so; another, four
+// hundred lines away, still said "the coarse setting still exists underneath … and the route now
+// wins when there is one". Two comments in ONE file disagreeing about whether a dead column still
+// decides something is how a dead path gets revived by whoever reads the friendlier sentence.
+console.log("\n30. The settings card: a retired setting is not described as a live fallback");
+want(!/coarse\s+setting still exists underneath/.test(CARD),
+  "no comment claims kot_print_target is still a fallback");
+{
+  const readers = ["app", "lib", "components", "public/panels"].flatMap((dir) => {
+    const out = [];
+    const walk = (d) => {
+      for (const e of readdirSync(join(ROOT, d), { withFileTypes: true })) {
+        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+        const rel = d + "/" + e.name;
+        if (e.isDirectory()) walk(rel);
+        else if (/\.(tsx?|jsx?)$/.test(e.name)) {
+          const src = strip(read(rel));
+          if (/kot_print_target/.test(src)) out.push(rel);
+        }
+      }
+    };
+    try { walk(dir); } catch { /* absent */ }
+    return out;
+  });
+  want(readers.length === 0,
+    readers.length === 0
+      ? "…and the claim still holds: no CODE (comments stripped) reads kot_print_target"
+      : "kot_print_target is being read again by " + readers.join(", ") + " — mig 369 retired it");
 }
 
 console.log(failed
