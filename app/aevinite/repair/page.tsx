@@ -43,6 +43,22 @@ type RlHit = { id: string; restaurant_id: string; restaurant_name: string | null
 // Rate limits page); it is what stops this screen printing a raw database key.
 type RlRule = { key: string; label: string };
 const rlPer = (s: number) => (s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60} min` : `${s}s`);
+// ── A LIMIT WITH NO NUMBERS MUST NOT PRINT ZERO ONES (item 1, 2026-09-04) ────────────────────────
+// Not every wall on this board has an editable ceiling. The ADMIN password wall deliberately has
+// none — the Rate limits page says so in its own words and refuses to offer it as a rule row — so
+// `rate_limit_events` carries `max_count: 0, window_seconds: 0` for those hits. The chip printed
+// them straight through, and `rlPer(0)` answers "0h" because 0 divides by 3600 cleanly, so the one
+// live alert on this platform read:
+//
+//     Admin login    3 / 0 per 0h
+//
+// which is not a smaller number than the real one, it is a meaningless one — the same class as a
+// NaN or an [object Object] reaching a person's screen. A hit with no configured ceiling now states
+// the only fact it actually has: how many attempts there were.
+const rlChip = (h: { hit_count: number; max_count: number; window_seconds: number }) =>
+  h.max_count > 0 && h.window_seconds > 0
+    ? `${h.hit_count} / ${h.max_count} per ${rlPer(h.window_seconds)}`
+    : `${h.hit_count} attempt${h.hit_count === 1 ? "" : "s"}`;
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
 
@@ -587,7 +603,9 @@ export default function AdminRepair() {
   const rlFix = async (h: RlHit) => {
     const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
       method: "POST", headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
-      body: JSON.stringify({ note: `Rate limit "${h.key}" reached by ${h.subject_label || h.subject}${h.restaurant_name ? ` at ${h.restaurant_name}` : ""} (${h.hit_count} in ${rlPer(h.window_seconds)}). Is this real abuse or is the limit too tight?`, restaurant_id: h.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? h.restaurant_id : null, mode: "overnight" }),
+      // The SAME sentence the chip shows (item 1) — a ticket that says "3 in 0h" describes a
+      // limit that does not exist, and it is the one line Claude reads first.
+      body: JSON.stringify({ note: `Rate limit "${h.key}" reached by ${h.subject_label || h.subject}${h.restaurant_name ? ` at ${h.restaurant_name}` : ""} (${rlChip(h)}). Is this real abuse or is the limit too tight?`, restaurant_id: h.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? h.restaurant_id : null, mode: "overnight" }),
     });
     if (r.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(r.error || "Couldn't send.", "err");
   };
@@ -1116,7 +1134,7 @@ export default function AdminRepair() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                   <b style={{ fontSize: 13.5 }}>{rlLabel(h.key)}</b>
-                  <span className="rp-chip danger">{h.hit_count} / {h.max_count} per {rlPer(h.window_seconds)}</span>
+                  <span className="rp-chip danger">{rlChip(h)}</span>
                   {h.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 5, fontSize: 9.5 }} />{h.restaurant_name}</span> : null}
                   <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(h.last_at)}</span>
                 </div>

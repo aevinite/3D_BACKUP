@@ -350,6 +350,25 @@ ok(/\.rp-rest\{[^}]*color:var\(--accent\)/.test(REPAIR), "P23623",
   "repair: the restaurant chip lost its own colour");
 ok(!/\.rp-rest\{[^}]*(--adm-danger|--adm-warn|--adm-ok)/.test(REPAIR), "P23624",
   "repair: the restaurant chip is using a SEVERITY colour — a restaurant is an identity, not a status, and a red name on a red tile competes with the alarm");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// SWEEP #8 · TERMINAL 18 — the twelve things this run found on Repair & System health (2026-09-04).
+// Ledger rows: .claude/sweep/LEDGER/T18-S8.md (P71701–P72200). Same discipline as everything
+// above: a static read of the source — no server, no database, no browser.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── item 1 · a limit with no configured ceiling must not print zero ones ─────────────────────
+// LIVE on the board when this run started: the one open alert read "Admin login  3 / 0 per 0h".
+// The admin password wall deliberately has no editable max or window, so its event carries 0/0 —
+// and rlPer(0) answers "0h", because 0 divides by 3600 cleanly.
+ok(/const rlChip = \(h: \{ hit_count: number; max_count: number; window_seconds: number \}\)/.test(REPAIR), "P71701",
+  "repair: rlChip is gone — a rate-limit hit with no configured ceiling will print '3 / 0 per 0h' again");
+ok(/h\.max_count > 0 && h\.window_seconds > 0/.test(REPAIR), "P71702",
+  "repair: rlChip no longer checks that the limit HAS numbers before printing them");
+ok(!/\{h\.hit_count\} \/ \{h\.max_count\} per \{rlPer\(h\.window_seconds\)\}/.test(REPAIR), "P71703",
+  "repair: the raw '{hit_count} / {max_count} per …' chip is back — it prints '/ 0 per 0h' for the admin-login wall");
+ok(/\(\$\{rlChip\(h\)\}\)\. Is this real abuse/.test(REPAIR), "P71704",
+  "repair: the Claude ticket for a limit hit no longer uses the same sentence as the chip — it would say '3 in 0h'");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
