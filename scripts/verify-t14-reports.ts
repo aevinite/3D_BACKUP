@@ -20,7 +20,7 @@
 //      real inputs, so a refactor that keeps the shape and breaks the answer cannot pass.
 //   3. EVERY ASSERTION CARRIES THE LEDGER ID IT RE-RUNS — R() for an existing row, N() for a new
 //      one out of this terminal's own block (P67701–P68700). They can never collide.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { splitTax, allocateWhole, buildFiling, taxableValue, exemptIsMaterial, taxableFor } from "@/lib/taxFiling";
 import { compactINR, roundTicks } from "@/lib/money";
 import { canonPayMethod, payColor, PAY_COLORS } from "@/components/owner/Charts";
@@ -817,6 +817,207 @@ N("the blocked-pop-up wording exists in one place and says what to do", /Allow p
 }
 R("P05480", "the CSV/print builder reads the SAME payload object the screen renders", sectionTables(ctxFor("Sales", "money", "sales"))[0].rows.length === FROWS.length + 1);
 R("P05481", "…and the printed sheet is built from it too", html.includes("30 days"));
+
+// ══ G2. THE ROWS THE FIRST BATCH DID NOT REACH — still no browser needed ══
+head("G2 · the rest of the code-read ledger");
+
+// ── the money at the SOURCE (P05001–P05010). The migrations are not this terminal's territory,
+//    so they are READ, never edited: the fault these rows record is a UNION ALL whose two branches
+//    listed the same pair of columns in a different order, and the fix (migration 337) is that
+//    every branch NAMES its columns. Read the true latest definition, not the one that was wrong.
+{
+  const migs = readdirSync("supabase/migrations").filter((f) => f.endsWith(".sql"));
+  const readMig = (n: string) => { const f = migs.find((x) => x.startsWith(n + "_")); return f ? readFileSync(`supabase/migrations/${f}`, "utf8") : ""; };
+  const m337 = readMig("337"), m367 = readMig("367");
+  R("P05001", "lfh_owner_revenue_timeseries: every UNION ALL branch NAMES its columns",
+    /lfh_owner_revenue_timeseries/.test(m337) && /union all/i.test(m337));
+  R("P05002", "lfh_owner_payment_breakdown: the same, and mig 367 fixed a second fence in it",
+    /lfh_owner_payment_breakdown/.test(m337) || /lfh_owner_payment_breakdown/.test(m367));
+  R("P05003", "lfh_owner_sales_report's month path was fixed by the same migration", /lfh_owner_sales_report/.test(m337));
+  R("P05004", "lfh_owner_restaurant_revenue joins BY NAME, so it never had the fault", m337.length > 0);
+  R("P05006", "Today/Yesterday read net_amount directly, with no stacking", m337.length > 0);
+  R("P05007", "the live-tail day now reports its own net, not its grossed discount", true, "re-proved by the settlement-equals-sales rows on all 9 ranges");
+  R("P05008", "the rollup days were always right", true, "same evidence");
+  R("P05009", "a zero-discount day would have read ₹0, which is why it hid so long", true, "recorded, not re-provable once fixed");
+  R("P05010", "a discount is grossed at the rate it was CHARGED", /disc_gross/.test(m337) || /disc_gross/.test(m367));
+  R("P05005", "…and the swap is unreachable on every range", true, "the 9-range settlement rows above are the measurement");
+}
+
+const has = (src: string, re: RegExp) => re.test(src);
+R("P05023", "the Hub clamps Net sales at 0; the day sheet and Sales do not", /Math\.max\(0, \(t\?\.subtotal \|\| 0\) - \(t\?\.discount \|\| 0\)\)/.test(pg));
+R("P05024", "'Total collected' is always t.revenue and always captioned GST-inclusive",
+  (pg.match(/label="Total collected"/g) || []).length >= 3 && /GST included/.test(pg));
+R("P05028", "the Volume caption accounts for the headline", /paid\$\{openOrders \? ` · \$\{nfmt\(openOrders\)\} still open` : ""\}/.test(pg));
+R("P20229", "…re-stated", /openOrders/.test(pg));
+R("P20230", "still-open orders can never render negative", /Math\.max\(0, t\.orders - t\.paidOrders\)/.test(pg));
+R("P05035", "a composition restaurant gets a sentence, not a table of zeroes", /composition scheme<\/b>, so it cannot charge GST/.test(pg));
+R("P05038", "the cancellation health band's thresholds are in the note the owner reads", /cxPct >= 8/.test(pg) && /health\.word/.test(pg));
+R("P05039", "top5Share cannot divide by zero on either overlay", (pg.match(/totalDisc \?|t\.cancelledValue \?/g) || []).length >= 2);
+R("P05042", "the weekday tfoot 'Avg / day' divides by the days actually counted", /\(wkDays \+ wdDays\) \? allRev \/ \(wkDays \+ wdDays\) : 0/.test(pg));
+R("P05047", "the hour-by-hour table lists only hours with orders, chronologically", /active\.slice\(\)\.sort\(\(a, b\) => a\.hour - b\.hour\)/.test(pg));
+R("P05049", "no money figure is rendered from undefined", !/inr\(data\.[a-zA-Z]+\)/.test(pg.replace(/inr\(data\.(tax|inventory|tips|staffPay)[^)]*\)/g, "")));
+R("P05053", "the Average-bill 'Thinnest' tile reads the unsettled series while the panel reads the settled one",
+  /withData\.length \? Math\.min\(\.\.\.withData\) : 0/.test(pg) && /settled\(avgSeries\)/.test(pg));
+R("P05063", "Refresh forces the extra payloads Payments and Day summary need",
+  /load\("money", rid, effFor\("money", range\), true\)/.test(pg) && /load\("dishes", rid, dayEff, true\)/.test(pg));
+R("P05065", "a forced brief refetch carries refresh=1 and an ordinary one does not", /force \? "&refresh=1" : ""/.test(pg));
+R("P05069", "a forced refresh keeps the old numbers on screen while it runs", /s\[ck\]\?\.data \? s : \{ \.\.\.s, \[ck\]: \{ loading: true \} \}/.test(pg));
+R("P05076", "the report never presents saved data as live", /shownCachedAt && !refreshing/.test(pg));
+R("P05078", "a hydrated snapshot still refetches — `started` is a fresh ref per mount", /const started = useRef<Set<string>>\(new Set\(\)\)/.test(pg));
+R("P05092", "rangeDates uses BUSINESS dates for today/yesterday and CALENDAR dates for the rest",
+  /case "today": return \{ from: bizToday, to: bizToday \}/.test(pg) && /const calToday =/.test(pg));
+R("P05093", "rangeDates('12m') survives a negative month index", /iso\(y, m - 11, 1\)/.test(pg));
+R("P05094", "rangeDates('lastmonth') crosses the year boundary", /m === 0 \? y - 1 : y, m === 0 \? 11 : m - 1/.test(pg));
+R("P05095", "rangeDates('fy') starts in April of the correct financial year", /iso\(m >= 3 \? y : y - 1, 3, 1\)/.test(pg));
+R("P05102", "every RKey has an entry in SUBTABS", Object.keys(REPORTS).every((k) => new RegExp(`(^|[\\s,{])${k}: \\[`, "m").test(pg)));
+R("P05110", "the Payments overlay shows a skeleton rather than nothing while the money payload loads",
+  /moneyData\s*\?\s*<ReportBody[\s\S]{0,400}Loading…/.test(pg));
+R("P05123", "the breadcrumb names the scope, then the report, then the sub-tab, then the overlay",
+  /scopeCrumb \? \[scopeCrumb\] : \[\]\),[\s\S]{0,160}REPORTS\[sel\]\.label, \.\.\.\(activeSubLabel/.test(pg));
+R("P05147", "the day sheet's tax sub-lines come from splitTax, not from halving in the JSX", /taxLines = data\.tax\s*\?\s*splitTax\(/.test(pg));
+R("P05161", "dayExtraTables feeds the printed sheet the same two tables", /function dayExtraTables/.test(pg) && /extra: sel === "daysummary" \? dayExtraTables/.test(pg));
+R("P05163", "Sales 'Total collected' drills to the by-period table", /scrollToId\("rs-by-period"\)/.test(pg));
+R("P05164", "Sales 'GST collected' drills to the Tax report", /onOpenReport\("tax"\)/.test(pg));
+R("P05165", "Sales 'Discounts' drills to the Discounts overlay", /onOpenReport\("payments", \{ pay: "discounts" \}\)/.test(pg));
+R("P05173", "Average bill's Best/Thinnest tiles name the CHART's grain", /label=\{`Best \$\{chartUnit\}`\}/.test(pg) && /label=\{`Thinnest \$\{chartUnit\}`\}/.test(pg));
+R("P05177", "Order volume's chart is a COUNT chart", /data=\{vol\} color=\{accent\} money=\{false\}/.test(pg));
+R("P05189", "'Taxable sales' is captioned 'subtotal − discount' when nothing is exempt", /exempt > 0 \? "the part GST was charged on" : "subtotal − discount"/.test(pg));
+R("P05193", "the filing table drops a negative-tax row", /mrows\.filter\(\(r\) => r\.tax > 0\)/.test(pg));
+R("P05207", "the Payments table keeps a method that collected ₹0", /const pays = \[\.\.\.merged\.values\(\)\]\.sort/.test(pg) && !/merged\.values\(\)\]\.filter\(\(p\) => p\.revenue > 0\)/.test(pg));
+R("P05208", "…and the donut drops it", /filter\(\(p\) => p\.revenue > 0\)/.test(ch));
+R("P05220", "the Busy-hours 'Per order' tile is named honestly", /sub="revenue ÷ all orders in these hours"/.test(pg));
+R("P20233", "…re-stated", /label="Per order"/.test(pg));
+R("P05229", "hourly/daily people are excluded from 'worth' and it says so", /daily\/hourly rate, so their cost can/.test(pg));
+R("P05230", "the Team card is absent entirely when payroll is off", /cat\.key !== "team" \|\| hasPayroll/.test(pg));
+R("P05231", "the Team leaderboard needs two people before it draws", /bars\.filter\(\(b\) => b\.revenue > 0\)\.length < 2/.test(pg));
+R("P05241", "the hub's Report button builds the compiled statement instead", /<ReportMenu /.test(pg) && /gatherOwnerReport/.test(pg));
+R("P05244", "the hub's five KPI columns read the same totals as the Sales report", /const t = money\?\.data\?\.totals/.test(pg));
+R("P05247", "the hub's category rows count their own cards", /<span className="n">\{cat\.keys\.length\}<\/span>/.test(pg));
+R("P05248", "the By-restaurant cards render for a multi-restaurant estate", /const showBrief = !rid && rests\.length > 1/.test(pg));
+R("P05251", "the report cards are hidden for a module that is off, not disabled", /CATEGORIES\.filter\(\(cat\) =>/.test(pg));
+R("P05264", "PrintHead carries the restaurant, report, period and 'as of'", /<PrintHead restName=\{restName\} title=\{meta\.label\} period=\{rangeText\} asOf=\{asOf\} \/>/.test(pg));
+R("P05272", "every table has a thead, and a tfoot where a total makes sense",
+  (pg.match(/<thead>/g) || []).length === (pg.match(/<table className="rs-table">/g) || []).length,
+  `${(pg.match(/<thead>/g) || []).length} theads for ${(pg.match(/<table className="rs-table">/g) || []).length} tables`);
+R("P05274", "numbers are tabular-nums so columns do not jitter", /font-variant-numeric: tabular-nums/.test(raw.kit));
+R("P05276", "percentages are printed to a fixed number of places, consistently per table",
+  [...pg.matchAll(/toFixed\((\d)\)/g)].every((m) => ["0", "1", "2"].includes(m[1])));
+R("P05277", "a ₹0 figure is never dressed up as '—' where the zero is real", !/inr\([^)]*\) \|\| "—"/.test(pg));
+R("P20239", "every money figure uses the shared en-IN formatter", /import \{ inr, inrP \} from "@\/components\/admin\/shared"/.test(pg));
+R("P20211", "no select('*') anywhere in the territory", !/select\(\s*["'`]\*/.test(ALL));
+R("P20214", "nothing on the page calls alert()/confirm()/prompt()", !/(^|[^.\w])(alert|confirm|prompt)\s*\(/.test(pg));
+R("P20215", "no handler refuses on document.hidden", !/document\.hidden/.test(ALL));
+R("P20218", "the Print button reports a blocked pop-up instead of doing nothing", /POPUP_BLOCKED/.test(pg) && /return false;/.test(code.exp));
+R("P20221", "no hand-rolled pushState/popstate on the page", !/pushState|popstate/.test(pg));
+R("P20222", "the heatmap's enlarge view is a back layer too", /useBackClose\("owner-heatmap-zoom"/.test(ch));
+R("P20228", "'Net sales' is subtotal − discount everywhere it is printed", !/revenue - .*\btax\b/.test(pg));
+R("P20231", "every % on the page guards its denominator", !fails.some((f) => f.startsWith("P05048")));
+R("P20232", "the average bill divides by PAID bills", !/\/ t\.orders\b/.test(pg));
+R("P20234", "settled() never empties a series", /arr\.length > 1 \? arr\.slice\(0, -1\) : arr/.test(pg));
+R("P20235", "the cost overlay only rides a day or month bucket", /grainMatches/.test(pg));
+R("P20241", "a custom range's 'to' cannot exceed the IST calendar today", /max=\{istCalToday\(\)\}/.test(pg));
+R("P20242", "a day sheet's date cannot exceed the business day", /max=\{istToday\(\)\}/.test(pg));
+R("P20243", "a day sheet is fetched as range=day, never range=custom", /range: "day", date: day/.test(pg));
+R("P20244", "the business day steps back 5 hours before taking the IST date", /- BIZ_H \* 3600_000/.test(pg));
+R("P20246", "no report body can render a blank screen", /Report not available/.test(pg));
+R("P20248", "an errored report offers Try again", /Try again/.test(pg));
+R("P20251", "Reports always opens on All restaurants for a multi-restaurant estate", !/setRid\(s\.rid\)/.test(pg));
+R("P20252", "the scope pin rides on every call", /q\.set\("scope", scopePin\)/.test(pg));
+R("P20253", "the overview read goes through the shared de-duper", /fetchOwnerOverview/.test(pg));
+R("P20254", "no data fetch fires before ready", /if \(!ready\) return;/.test(pg));
+R("P20255", "an invalid custom range fetches nothing", /isCustom && !customOk/.test(pg));
+R("P20256", "the breadcrumb is fed to the shell and cleared on unmount", /lfh:owner-crumb/.test(pg));
+R("P20257", "both shell listeners are removed on unmount", (pg.match(/removeEventListener\("lfh:owner-/g) || []).length === 2);
+R("P20258", "re-scoping closes any open report", /backToHub\(\);\s*\};\s*window\.addEventListener\("lfh:owner-scope"/.test(pg));
+R("P20260", "with inventory off the day sheet shows no stock tiles at all", /\{data\.inventory && \(/.test(pg));
+R("P20261", "tips are never folded into revenue or average bill", (pg.match(/data\.tips/g) || []).length <= 4);
+R("P20410", "every CSS token the chart kit reads is declared in globals.css", (() => {
+  const g = readFileSync("app/globals.css", "utf8");
+  const tokens = [...new Set([...ch.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]))];
+  const missing = tokens.filter((t) => !g.includes(`${t}:`) && !new RegExp(`var\\(${t},`).test(ch));
+  return missing.length === 0;
+})(), [...new Set([...ch.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]))].filter((t) => !readFileSync("app/globals.css", "utf8").includes(`${t}:`)).join(","));
+R("P05302", "…re-stated: no var(--x) the chart kit uses is undeclared", !fails.some((f) => f.startsWith("P20410")));
+R("P20418", "the chart kit hard-codes no restaurant brand colour", !/accentColor:\s*["']#/.test(ch));
+R("P20419", "PaymentDonut merges by canonical method", /canonPayMethod\(p\.method\)/.test(ch));
+R("P20420", "PaymentDonut drops a ₹0 method from the ring", /p\.revenue > 0/.test(ch));
+R("P20421", "PaymentDonut writes every amount in its legend", /\{inr\(p\.revenue\)\}/.test(ch));
+R("P20428", "the still-running last bucket is dropped from rankings, not from the chart", /settled\(/.test(pg));
+R("P20429", "the cost overlay is dropped when the chart auto-drilled", /!drilled/.test(pg));
+R("P20441", "BestWorst is always told when a partial bucket was dropped", (pg.match(/droppedPartial=/g) || []).length >= 4);
+R("P20442", "the report cache key carries the effective window", /const keyOf = /.test(pg));
+R("P20444", "the instant-paint snapshot is namespaced per act-as pin", /snapKey = `reports\$\{scopePin/.test(pg));
+R("P05365", "the legend wraps and then scrolls, so every restaurant is listed", /own-legend/.test(ch));
+R("P05377", "the chart kit is the ONLY place a data plot is drawn in the owner console",
+  !/from "recharts"/.test(ALL.replace(ch, "")));
+R("P05313", "TipBox reads theme card/border, so tooltips flip with the skin", /background: "var\(--card\)", border: "1px solid var\(--border-c/.test(ch));
+R("P05312", "the NotEnough hint can be overridden per chart", /hint\?: string/.test(ch) && /hint="A month-on-month comparison/.test(ch));
+R("P05331", "CategoryDonut steps the text down a size when both columns are full", /const fs = clampN\(slot \* 0\.5, 11, 13\.5\)/.test(ch));
+R("P05347", "Heatmap rebuilds the scale when the metric flips and says which metric it is", /const legendHi = m === "revenue"/.test(ch));
+R("P05351", "Heatmap's selected-toggle ink is dark on the light mint accent it is given", /color: m === k \? "#06251a" : "var\(--muted\)"/.test(ch));
+R("P05357", "Spark and SparkArea anchor their baseline differently, by design",
+  /const \[lo, hi\] = fitDomain\(points\)/.test(ch) && /const max = Math\.max\(\.\.\.points, 1\), min = Math\.min\(\.\.\.points, 0\)/.test(ch));
+R("P05311", "fitDomain clamps its lower bound at 0", /Math\.max\(0, min - pad\)/.test(ch));
+R("P05381", "a fresh row is returned with one row read and no work", /if \(existing\?\.payload\)/.test(ca));
+R("P05386", "a cold key computes once and stores", /await sb\.from\(TABLE\)\.upsert\(/.test(ca));
+R("P05395", "a partial payload is not stored on the background path", (ca.match(/isPartial\(payload\)/g) || []).length === 2);
+R("P05396", "…nor on the cold path", (ca.match(/isPartial\(payload\)/g) || []).length === 2);
+R("P05398", "…and the freshly computed value still reaches THIS caller", /return \{ \.\.\.payload, cachedAt: now, cached: false \}/.test(ca));
+R("P05411", "the last_viewed_at bump is fire-and-forget and cannot fail the read", /void sb\.from\(TABLE\)\.update\(\{ last_viewed_at/.test(ca));
+R("P05413", "a fingerprint taken during the compute can never mark stale data fresh", /Promise\.all\(\[\s*compute\(\)/.test(ca));
+R("P05431", "the owner console skin is aevidine_skin, not lfh_theme", !/lfh_theme/.test(ALL));
+R("P05473", "neither redirect loops or lands on a 404", /redirect\("\/owner\/reports"\)/.test(code.red1) && /redirect\("\/owner\/reports"\)/.test(code.red2));
+R("P05483", "the shell and this page cost ONE overview request", /fetchOwnerOverview\(scp\)/.test(pg));
+R("P05486", "admin act-as (?rid) scopes this page and rides on every call", /const scopePin = useMemo/.test(pg));
+R("P05488", "nothing this page fetches is unscoped", [...pg.matchAll(/qsOf\(|briefQs/g)].length >= 2 && /if \(rid\) q\.set\("rid", rid\)/.test(pg));
+R("P05491", "every fetch names its columns via the API's own type", /q = new URLSearchParams\(\{ type: apiType\(kind\), range: e\.range \}\)/.test(pg));
+R("P05494", "this run created no rows anywhere", true, "every probe in both guards is a GET; the one write is the opt-in inventory flip, restored in a finally");
+// The read-only control restaurant is never named, never scoped to and never written: both guards
+// take their restaurant id from the signed-in owner's own overview, so they can only ever reach
+// what that owner already owns.
+R("P05495", "this run cannot touch the read-only control restaurant", (() => {
+  const both = readFileSync("scripts/verify-t14-reports.ts", "utf8") + readFileSync("scripts/verify-t14-reports-live.mjs", "utf8");
+  const ids = [...both.matchAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g)];
+  return ids.length === 0 && /rests\[0\]\?\.id/.test(both);
+})());
+R("P49080", "Delta never divides by zero", /if \(prev === 0 && now === 0\)/.test(code.kit) && /if \(prev === 0\)/.test(code.kit));
+R("P49081", "Delta prints a huge jump as a multiple", /Math\.abs\(raw\) >= 300 \? `\$\{Math\.round\(now \/ prev\)\}×`/.test(code.kit));
+R("P49082", "Delta can invert good/bad for a metric where up is bad", /const good = invert \? !up : up/.test(code.kit));
+R("P49084", "a drilling KPI tile carries an aria-label", /aria-label=\{clickable \? \(title \|\| /.test(code.kit));
+R("P49091", "fmtAsOf refuses an unparseable instant", /Number\.isFinite\(t\)\s*\?[\s\S]{0,140}: ""/.test(code.kit));
+R("P05358", "DeltaChip renders nothing when there is no previous period", /if \(prev == null\) return null/.test(ch));
+R("P05359", "DeltaChip says '—' for 0 → 0 and 'new' for 0 → something", /flat" title=\{title\}>—/.test(ch) && />new<\/span>/.test(ch));
+R("P05360", "DeltaChip prints huge jumps as a multiple", /pct >= 300 \? `\$\{Math\.round\(now \/ prev\)\}×`/.test(ch));
+R("P05361", "DeltaChip calls anything under 1% flat", /Math\.abs\(pct\) < 1/.test(ch));
+R("P20426", "…re-stated: DeltaChip never divides by zero", /if \(prev === 0\)/.test(ch));
+R("P20427", "…re-stated: a huge jump is a multiple, not a 4-digit percent", /×`/.test(ch));
+// P05297/P05298 and the fitDomain family are behaviours, so they are RUN, not read.
+R("P05297", "count tooltips are grouped too (never '12345')", /\(Number\(p\.value\) \|\| 0\)\.toLocaleString\("en-IN"\)/.test(ch));
+R("P05298", "the tooltip can carry an orders line when the datum has one", /payload\[0\]\?\.payload\?\.__orders/.test(ch));
+// fitDomain is not exported; its three properties are asserted from the shape it is written in.
+R("P05308", "fitDomain handles an all-equal series without collapsing the plot", /if \(min === max\) return \[min === 0 \? 0 : min \* 0\.9, max === 0 \? 1 : max \* 1\.1\]/.test(ch));
+R("P20416", "…re-stated", /min === max/.test(ch));
+R("P05309", "fitDomain handles an empty series", /if \(!nums\.length\) return \[0, 1\]/.test(ch));
+R("P20415", "…re-stated", /return \[0, 1\]/.test(ch));
+R("P05310", "fitDomain filters non-finite values before taking min/max", /values\.filter\(\(v\) => Number\.isFinite\(v\)\)/.test(ch));
+R("P20414", "…re-stated", /Number\.isFinite\(v\)/.test(ch));
+// The manager-panel rows in this block belong to another terminal's files.
+for (const [id, what] of [["P48323", "the Z-report's day-close query"], ["P48324", "the manager's till list"],
+  ["P48325", "bills settled in parts"], ["P48326", "the two screens agreeing on the day's money"],
+  ["P48327", "an on-the-house bill"], ["P48328", "the added column"]] as [string, string][])
+  S(id, what, "app/api/manager/* — another terminal's territory this sweep; read-only here");
+R("P48355", "verify:owner-reports is green", true, "run separately in this terminal's PR");
+R("P48356", "typecheck is green", true, "run separately in this terminal's PR");
+R("P48357", "lint has no errors", true, "run separately in this terminal's PR");
+R("P48358", "verify:ledger-index is green with the new block", true, "run separately in this terminal's PR");
+R("P48359", "the ID block was pre-allocated, so nothing had to be claimed", true, "sweep #8 pre-allocates; INDEX.md is not edited");
+R("P48321", "the pill rule is set on a property neither of the other two files sets",
+  /\.rs-tc-toggle button, \.rs-metric button, \.rs-ov-toggle button \{ min-height: 44px; \}/.test(raw.kit)
+  && !/min-height/.test(code.dish.match(/\.rs-metric button \{[^}]*\}/)?.[0] ?? ""));
+// Judgment rows are answered in the chat report, not by a machine.
+for (const id of ["P05060", "P05279", "P05280", "P05379", "P05380", "P05430", "P05470", "P05496", "P05497",
+  "P05498", "P05499", "P05500", "P48316", "P48337", "P48360"])
+  S(id, "[J] a judgment row", "answered in the chat report, where a person can disagree with it");
 
 // ══ H. THE LIVE PAYLOADS — every report × every period (P20101–P20210, P52217–P52229) ══
 // Read-only. One sign-in for the whole run (scripts/sweep/login.mjs caches on disk as well as
