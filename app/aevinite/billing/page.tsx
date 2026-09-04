@@ -34,6 +34,34 @@ const money = (n: number, currency = "INR") => {
 // can answer "is that date past?".
 const today = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 
+// ── WHAT THE SCREEN SAID BACK, AND WHAT KIND OF THING IT WAS (T20 sweep #8, 2026-09-04) ─────────
+// Three kinds, and each one looks like what it is:
+//   ok    the quiet grey confirmation — "Saved.", "Payment recorded."
+//   warn  amber and bold — the server did HALF of it ("the payment saved, the due date did not")
+//   err   red and bold — it did not happen at all
+// The kind is decided where the answer is known, never by reading the words afterwards. Deciding
+// "is this good news?" by searching a sentence for "could not" is a guess, and it was wrong for
+// every refusal that did not happen to contain those words.
+type Said = { kind: "ok" | "warn" | "err"; text: string };
+const SAID_STYLE: Record<Said["kind"], React.CSSProperties> = {
+  ok: { fontSize: 12 },
+  warn: { fontSize: 12, color: "var(--adm-warn)", fontWeight: 600 },
+  err: { fontSize: 12, color: "var(--adm-danger)", fontWeight: 600 },
+};
+function SaidLine({ said }: { said: Said }) {
+  return (
+    <span
+      className={said.kind === "ok" ? "adm-muted" : undefined}
+      style={SAID_STYLE[said.kind]}
+      // A refusal is announced; a confirmation is not shouted at somebody who is still typing.
+      role={said.kind === "ok" ? undefined : "alert"}
+    >
+      {said.kind !== "ok" && <i className={`fas fa-${said.kind === "warn" ? "triangle-exclamation" : "circle-exclamation"}`} style={{ marginRight: 6 }} aria-hidden="true" />}
+      {said.text}
+    </span>
+  );
+}
+
 export default function AdminBilling() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -172,7 +200,21 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const [nextDueOn, setNextDueOn] = useState(row.nextDueOn || "");
   const [notes, setNotes] = useState(row.notes || "");
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  // ── A REFUSAL IS NOT A CONFIRMATION, AND MUST NOT LOOK LIKE ONE (T20 sweep #8, 2026-09-04) ────
+  // Both of the lines that report back beside a button on this screen used to be a bare string in
+  // <span className="adm-muted">. So "Saved." and "Couldn't save this restaurant's plan" arrived in
+  // the same 12px grey, in the same place, and the admin's eye could not tell a plan that saved
+  // from one that did not — on the screen that records what every restaurant pays us.
+  //
+  // The payment line below was half-solved: it decided the colour by SNIFFING the words for
+  // "could not / couldn't / not be", which caught the server's one warning sentence and nothing
+  // else. "Failed to fetch", "Pick a payment date." and the route's own "Amount must be a number
+  // greater than 0 (e.g. 12000)." all fell through to the quiet grey — a payment that was NOT
+  // recorded, dressed as one that was.
+  //
+  // The kind is now decided where the answer is KNOWN, and the styling follows the kind. Sniffing
+  // the words of a sentence to work out whether it is good news is a guess; this is not.
+  const [msg, setMsg] = useState<Said | null>(null);
 
   const [payAmount, setPayAmount] = useState("");
   const [payDate, setPayDate] = useState(today());
@@ -181,7 +223,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const [payNote, setPayNote] = useState("");
   const [rollDue, setRollDue] = useState(true);
   const [payBusy, setPayBusy] = useState(false);
-  const [payMsg, setPayMsg] = useState<string | null>(null);
+  const [payMsg, setPayMsg] = useState<Said | null>(null);
 
   const toast = useToast();
   const [payments, setPayments] = useState<Payment[] | null>(null);
@@ -232,8 +274,8 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
         started_on: startedOn || null, next_due_on: nextDueOn || null, notes: notes || null,
       }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setMsg("Saved."); onChanged();
-    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setSaving(false); }
+      setMsg({ kind: "ok", text: "Saved." }); onChanged();
+    } catch (e) { setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }); } finally { setSaving(false); }
   };
 
   const addPayment = async () => {
@@ -242,8 +284,8 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
     // is legitimately typed AROUND a number, then require what is left to BE one.
     const cleaned = String(payAmount).trim().replace(/[\s,]/g, "").replace(/^[₹$€£]/, "");
     const amt = /^-?\d+(\.\d+)?$/.test(cleaned) ? Number(cleaned) : NaN;
-    if (!(amt > 0)) { setPayMsg("Enter an amount greater than 0 (e.g. 12000)."); return; }
-    if (!payDate) { setPayMsg("Pick a payment date."); return; }
+    if (!(amt > 0)) { setPayMsg({ kind: "err", text: "Enter an amount greater than 0 (e.g. 12000)." }); return; }
+    if (!payDate) { setPayMsg({ kind: "err", text: "Pick a payment date." }); return; }
     if (payingRef.current) return;
     payingRef.current = true;
     if (!payActionIdRef.current) payActionIdRef.current = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
@@ -261,10 +303,12 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
       // the restaurant then reads as due — or overdue — the moment after being paid, and the only
       // way to find out was to notice. This screen threw that sentence away and said "Payment
       // recorded." either way. Now it says which of the two happened.
-      setPayMsg(typeof d?.warning === "string" && d.warning ? d.warning : "Payment recorded.");
+      setPayMsg(typeof d?.warning === "string" && d.warning
+        ? { kind: "warn", text: d.warning }
+        : { kind: "ok", text: "Payment recorded." });
       // loadHistory() re-reads billing and refreshes the "Next due on" field (rolled server-side).
       await loadHistory(); onChanged();
-    } catch (e) { setPayMsg(e instanceof Error ? e.message : String(e)); } finally { setPayBusy(false); payingRef.current = false; }
+    } catch (e) { setPayMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }); } finally { setPayBusy(false); payingRef.current = false; }
   };
 
   const deletePayment = async (id: string) => {
@@ -326,7 +370,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
                 <button className="adm-btn primary" disabled={saving} onClick={savePlan}>{saving ? "Saving…" : "Save plan"}</button>
-                {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
+                {msg && <SaidLine said={msg} />}
               </div>
             </div>
 
@@ -345,17 +389,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
               </label>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
                 <button className="adm-btn primary" disabled={payBusy} onClick={addPayment}>{payBusy ? "Recording…" : "Add payment"}</button>
-                {payMsg && (
-                  // A warning is not an aside: the half-done case ("the payment was saved, but the
-                  // next-due date could not be moved") has to read as something to act on, while
-                  // "Payment recorded." stays the quiet confirmation it was.
-                  <span
-                    className={/could not|couldn't|not be/i.test(payMsg) ? undefined : "adm-muted"}
-                    style={/could not|couldn't|not be/i.test(payMsg)
-                      ? { fontSize: 12, color: "var(--adm-danger)", fontWeight: 600 }
-                      : { fontSize: 12 }}
-                  >{payMsg}</span>
-                )}
+                {payMsg && <SaidLine said={payMsg} />}
               </div>
             </div>
 
