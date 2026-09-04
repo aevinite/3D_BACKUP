@@ -380,6 +380,19 @@ ok(/None of them saved a report/.test(REPAIR), "P71706",
 ok(/saved a report — open/.test(REPAIR), "P71707",
   "repair: the banner no longer says which of the failures can be opened");
 
+// ── item 3 · a row with nothing to open is not a button ─────────────────────────────────────
+// 22 of the 30 rows were real <button>s that set openRun, announced aria-expanded, and rendered
+// no change at all — a tap that succeeds at doing nothing, which cannot be told apart from one
+// that is broken.
+ok(/const rowBody = \(/.test(REPAIR), "P71708",
+  "repair: the run row's body is no longer shared, so the button and non-button branches can drift");
+ok(/No report was saved/.test(REPAIR), "P71709",
+  "repair: a run that ended with no report no longer says so — the row is silent again");
+ok(/\{!s\.report && s\.ended_at \?/.test(REPAIR), "P71710",
+  "repair: the 'no report' line is not gated on the run having ENDED — a run still working would be accused of losing one");
+ok(/\{s\.report \? \(\s*\n\s*<button onClick=\{\(\) => setOpenRun\(isOpen \? "" : s\.id\)\}/.test(REPAIR), "P71711",
+  "repair: the run row is a <button> again whether or not it has a report — pressing 22 of the 30 rows changes nothing on screen and lies to a screen reader");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);

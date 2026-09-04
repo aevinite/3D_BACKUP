@@ -1452,39 +1452,68 @@ export default function AdminRepair() {
               };
               const st = statusInfo[s.status];
               const isOpen = openRun === s.id;
+              // ── A ROW WITH NOTHING TO OPEN IS NOT A BUTTON (item 3, 2026-09-04) ──────────────
+              // Every row in this list was a real <button> that set `openRun` and announced
+              // `aria-expanded`, whether or not there was a report to expand. On this platform that
+              // is 22 of the 30 rows: pressing one moved state, changed nothing on screen, and told
+              // a screen reader the row had just expanded — into nothing. It is the "a tap never
+              // vanishes" rule in its quietest form: the tap did not fail, it succeeded at doing
+              // nothing, and there is no way to tell that apart from a broken button.
+              //
+              // A row that CAN open is exactly what it was. A row that cannot is plain markup and
+              // says so, which is the one thing the old row never did — and it is the row the
+              // failure banner above points at, because a run that dies early is the run that
+              // saves no report.
+              const rowBody = (
+                <>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: "2px 6px", borderRadius: 5, marginTop: 1, background: "color-mix(in srgb, var(--adm-accent, #e8a13c) 18%, transparent)", color: "var(--adm-accent, #e8a13c)" }}>{kindLabel}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {/* A run started before readableError() landed carries the whole gateway page
+                        as its TITLE, so this one line read "<!DOCTYPE html> <!--[if lt IE 7]>…".
+                        Same treatment as the problem rows: a title is a label, never the
+                        evidence — the full report is still printed verbatim below. */}
+                    <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{errorHeadline(s.title)}</span>
+                    <span className="adm-muted" style={{ fontSize: 11.5 }}>
+                      {istTime(s.started_at)}
+                      {mins !== null ? <> · {mins} min</> : null} · <span style={{ color: st.color }}>{st.label}</span>
+                      {s.report ? <> · {isOpen ? "hide" : "read what it did"}</> : null}
+                    </span>
+                    {/* WHY IS A NIGHT JOB STAMPED IN THE MORNING? (owner, 2026-09-02: "why night
+                        audit is going on in afternoon"). The schedules are right — 2:30am, 4am,
+                        6am — but macOS runs a MISSED scheduled job the moment the Mac next
+                        wakes, so a night the laptop was shut produces a "nightly" run stamped
+                        09:27am. On 1 Sept both the repair run and the owner audit fired in the
+                        same second at 09:27 for exactly that reason.
+                        The row showed the true time and no explanation, so the only reading
+                        available was "the night job is running in the daytime". It now says
+                        which of the two it is, in words. */}
+                    {late ? (
+                      <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, color: "var(--adm-warn)" }}>
+                        <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 5, fontSize: 10 }} />{late}
+                      </span>
+                    ) : null}
+                    {/* NOTHING TO OPEN, SAID OUT LOUD. Only for a run that ENDED — a run still
+                        working has not had the chance to write one yet, and calling that "no
+                        report" would be an invented fault. */}
+                    {!s.report && s.ended_at ? (
+                      <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, fontStyle: "italic" }}>
+                        No report was saved{s.status === "failed" ? " — it stopped before it could write one." : "."}
+                      </span>
+                    ) : null}
+                  </span>
+                </>
+              );
               return (
                 <div key={s.id} style={{ padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
-                  <button onClick={() => setOpenRun(isOpen ? "" : s.id)} aria-expanded={isOpen}
-                    style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", background: "none", border: "none", padding: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: s.report ? "pointer" : "default", minHeight: 40 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: "2px 6px", borderRadius: 5, marginTop: 1, background: "color-mix(in srgb, var(--adm-accent, #e8a13c) 18%, transparent)", color: "var(--adm-accent, #e8a13c)" }}>{kindLabel}</span>
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      {/* A run started before readableError() landed carries the whole gateway page
-                          as its TITLE, so this one line read "<!DOCTYPE html> <!--[if lt IE 7]>…".
-                          Same treatment as the problem rows: a title is a label, never the
-                          evidence — the full report is still printed verbatim below. */}
-                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{errorHeadline(s.title)}</span>
-                      <span className="adm-muted" style={{ fontSize: 11.5 }}>
-                        {new Date(s.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-                        {mins !== null ? <> · {mins} min</> : null} · <span style={{ color: st.color }}>{st.label}</span>
-                        {s.report ? <> · {isOpen ? "hide" : "read what it did"}</> : null}
-                      </span>
-                      {/* WHY IS A NIGHT JOB STAMPED IN THE MORNING? (owner, 2026-09-02: "why night
-                          audit is going on in afternoon"). The schedules are right — 2:30am, 4am,
-                          6am — but macOS runs a MISSED scheduled job the moment the Mac next
-                          wakes, so a night the laptop was shut produces a "nightly" run stamped
-                          09:27am. On 1 Sept both the repair run and the owner audit fired in the
-                          same second at 09:27 for exactly that reason.
-                          The row showed the true time and no explanation, so the only reading
-                          available was "the night job is running in the daytime". It now says
-                          which of the two it is, in words. */}
-                      {late ? (
-                        <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, color: "var(--adm-warn)" }}>
-                          <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 5, fontSize: 10 }} />{late}
-                        </span>
-                      ) : null}
-                    </span>
-                    {s.report ? <i className={`fas fa-chevron-${isOpen ? "up" : "down"}`} aria-hidden="true" style={{ marginTop: 4, opacity: 0.5, fontSize: 11 }} /> : null}
-                  </button>
+                  {s.report ? (
+                    <button onClick={() => setOpenRun(isOpen ? "" : s.id)} aria-expanded={isOpen}
+                      style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", background: "none", border: "none", padding: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer", minHeight: 40 }}>
+                      {rowBody}
+                      <i className={`fas fa-chevron-${isOpen ? "up" : "down"}`} aria-hidden="true" style={{ marginTop: 4, opacity: 0.5, fontSize: 11 }} />
+                    </button>
+                  ) : (
+                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", minHeight: 40 }}>{rowBody}</div>
+                  )}
                   {isOpen && s.report ? (
                     <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, lineHeight: 1.55, margin: "8px 0 0", padding: "10px 12px", borderRadius: 8, background: "color-mix(in srgb, var(--card) 60%, transparent)", border: "var(--border)", maxHeight: 320, overflowY: "auto", fontFamily: "inherit" }}>{s.report}</pre>
                   ) : null}
