@@ -1176,8 +1176,16 @@ await phase("…and a print on ITS printer closes it", async () => {
       // which are legitimate shell parameter expansions the generator escapes ON PURPOSE so they
       // reach the file intact. (Second wrong version of this phase; a TS interpolation cannot
       // survive into the text anyway, because it is evaluated. Only these three markers can.)
-      const bad = texts.filter((t) => /undefined|\[object Object\]|\bNaN\b/.test(t));
-      return bad.length === 0 || `${bad.length} of ${texts.length} generated file(s) contain undefined / [object Object] / an unresolved interpolation — a person would type that into a shop's computer`;
+      // THIRD REFINEMENT, and the same lesson a third time: judge the LINES THAT RUN, not the prose.
+      // These files are half explanation by design — every rule in them carries the measurement that
+      // put it there — so a REM/# line may legitimately contain the word "undefined" while
+      // explaining, say, that cmd.exe expands %GOT% to nothing when the variable is undefined
+      // (which is the comment beside the 2026-09-04 fix to the SumatraPDF checksum). A word in a
+      // comment is not a value that failed to resolve. The concern this phase exists for — a leaked
+      // value reaching an EXECUTED line — is unchanged and still fails.
+      const codeOf = (t) => t.split("\n").filter((l) => !/^\s*(REM\b|::|#)/i.test(l)).join("\n");
+      const bad = texts.filter((t) => /undefined|\[object Object\]|\bNaN\b/.test(codeOf(t)));
+      return bad.length === 0 || `${bad.length} of ${texts.length} generated file(s) contain undefined / [object Object] / an unresolved interpolation on a line that RUNS — a person would type that into a shop's computer`;
     });
   }
 }
