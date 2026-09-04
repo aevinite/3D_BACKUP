@@ -2055,8 +2055,26 @@ export default function OwnerDashboard() {
           : dishView === "missing" ? (
             <div className="adm-empty">
               No sales for <b>{view.dish}</b> in {RANGE_LABEL[globalRange]}.{" "}
-              <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => viewTo({ level: "restaurant", rid: view.rid })}>
-                <i className="fas fa-arrow-left" style={{ marginRight: 6 }} aria-hidden="true" /> Back to restaurant
+              {/* ── THE ONE WAY BACK OFF THIS SCREEN TOOK A ONE-RESTAURANT OWNER SOMEWHERE
+                  THAT HAS NO HERO (T13 sweep, 2026-09-04) ─────────────────────────────────────
+                  This button went to `{ level: "restaurant" }` unconditionally, and for an owner
+                  with ONE restaurant that level is not a place: home IS his restaurant. The ✕ in
+                  the dish header already knew that (`single ? home : restaurant`) and the dish
+                  back-stack layer knew it too (`!single`); this button was the one place that
+                  did not, so tapping it landed him on a dashboard with the tiles and the charts
+                  but WITHOUT the hero — no restaurant name, no Active pill, no "17 tables open
+                  now", and none of the three shortcuts (Reports / Team / Feedback), because the
+                  hero renders on `view.level === "home" && single`.
+                  Measured on the real page as the diag owner: hero 1 → 0, shortcuts 3 → 0.
+                  And it STUCK: the drill is persisted per tab, so sessionStorage held
+                  {"level":"restaurant"} and a REFRESH came back hero-less too, with no picker
+                  (he has one restaurant) and no back button on screen — only the browser's own
+                  BACK recovered it.
+                  Reachable the ordinary way: open a dish, change the period to one where that
+                  dish sold nothing, take the only control offered. */}
+              <button className="adm-btn" style={{ marginLeft: 6 }}
+                onClick={() => viewTo(single ? { level: "home" } : { level: "restaurant", rid: view.rid })}>
+                <i className="fas fa-arrow-left" style={{ marginRight: 6 }} aria-hidden="true" /> {single ? "Back to the dashboard" : "Back to the restaurant"}
               </button>
             </div>
           ) : (<>
