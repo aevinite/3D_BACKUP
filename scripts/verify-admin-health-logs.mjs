@@ -30,6 +30,7 @@ const CUSTLOG = read("app/api/admin/custlog/route.ts");
 const API_A = read("scripts/verify-admin-api-a.mjs");
 const HEALTH_ROUTE = read("app/api/admin/health/route.ts");
 const RESOLVE_ROUTE = read("app/api/admin/resolve-error/route.ts");
+const SHARED_ADMIN = read("components/admin/shared.tsx");
 
 const fails = [];
 const ok = (cond, id, msg) => { if (!cond) fails.push(`${id}  ${msg}`); };
@@ -476,10 +477,38 @@ ok(/backgroundColor: s\.c \}\} aria-hidden="true"/.test(HEALTH), "P71729",
 ok(/OBITUARY \(item 12, 2026-09-04\)/.test(HEALTH), "P71730",
   "health: the obituary explaining why there is no hollow dot is gone — the next reader will re-add it");
 
+
+// ── item 19 · "Remind me later" has to actually come back ────────────────────────────────────
+// Owner, 2026-09-04: "I do solve later. So after four hours, it doesn't show." The server was
+// right — proven by moving one report's wait into the past on the dev database and watching
+// /api/admin/oplog?unresolved=1 hand it straight back — but NOTHING ON THE PAGE EVER ASKED AGAIN.
+// The board is click-to-refresh, so the one screen that honours a wait was the one screen that
+// could not notice it ending. Driven end to end afterwards: the tile came back on its own in 120s
+// with no reload and exactly ONE background request.
+ok(/useActiveAutoRefresh\(loadProblems, 120000\)/.test(REPAIR), "P71732",
+  "repair: the board no longer re-asks for the problems feed on its own, so a wait that expires on an open tab never comes back");
+ok(/const loadProblems = useCallback\(/.test(REPAIR), "P71733",
+  "repair: the light single-feed refresh is gone");
+{
+  // IT MUST STAY ONE FEED. Putting loadHub() (seven feeds) on a timer to answer one question is
+  // the whole-board refetch this project's cost rules exist to prevent.
+  const fn = /const loadProblems = useCallback\([\s\S]*?\n  \}, \[\]\);/.exec(REPAIR);
+  ok(fn && (fn[0].match(/adminFetch/g) || []).length === 1, "P71734",
+    "repair: the background refresh fetches more than the one feed that can change — that is a seven-feed poll");
+  ok(fn && /oplog\?level=error/.test(fn[0]), "P71735",
+    "repair: the background refresh no longer reads the problems feed");
+  ok(fn && /setFeedsFailed\(\(prev\) => prev\.filter\(\(x\) => x !== "problems"\)\)/.test(fn[0]), "P71736",
+    "repair: a quiet background refresh can now erase the fact that ANOTHER feed failed on the last full load");
+}
+ok(/This page checks for \{waiting === 1 \? "it" : "them"\} every couple of minutes/.test(REPAIR), "P71737",
+  "repair: the waiting line no longer says the page watches for it — the promise and the behaviour must match");
+ok(/useActiveAutoRefresh/.test(SHARED_ADMIN), "P71738",
+  "the shared active-only refresh helper is gone — a hand-rolled setInterval would poll a hidden tab");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
   console.error("\n   Each line names the ledger phase (.claude/sweep/LEDGER/T17.md) that found it.\n");
   process.exit(1);
 }
-console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 12");
+console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes + sweep-8/T18’s 13");

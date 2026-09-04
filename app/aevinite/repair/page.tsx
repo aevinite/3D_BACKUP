@@ -15,7 +15,7 @@ import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
 import Dropdown from "@/components/admin/Dropdown";
 import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
-import { openRestaurantPanel, PANEL_COLOR, actLabel, timeAgo, type Action } from "@/components/admin/shared";
+import { openRestaurantPanel, PANEL_COLOR, actLabel, timeAgo, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
 import { errorSig, errorGroupKey, errorHeadline } from "@/lib/errorSignature";
 // Every error LINE on this board reads as English; the exact text stays one tap away, because it
 // is what Fix now hands Claude (owner, 2026-09-02). Run TITLES above still use errorHeadline —
@@ -379,6 +379,50 @@ export default function AdminRepair() {
     setErrLoading(false);
   }, []);
   useEffect(() => { loadHub(); }, [loadHub]);
+
+  // ── "REMIND ME LATER" HAS TO ACTUALLY COME BACK (item 19, owner 2026-09-04) ──────────────────
+  //
+  // His words: "I do solve later. So after four hours, it doesn't show. So make sure of that thing."
+  //
+  // The SERVER was right all along, and it was worth proving before changing anything: with one
+  // report's wait moved into the past on the dev database, /api/admin/oplog?unresolved=1 hands it
+  // straight back, stops counting it as waiting, and the row was restored to exactly what it was.
+  // Hidden while waiting ✓, counted while waiting ✓, comes back once passed ✓.
+  //
+  // What was missing is that NOTHING ON THIS PAGE EVER ASKED AGAIN. The board is deliberately
+  // click-to-refresh — no polling at all — so the one screen that honours a wait was also the one
+  // screen that could not notice it ending. Press "in 4 hours", leave the tab open, and four hours
+  // later you are looking at a four-hour-old answer: the problem IS back, and the board still says
+  // "All clear". The feature's whole promise is "it comes back by itself", and on a board left open
+  // that promise was false.
+  //
+  // ── WHY THIS IS ONE REQUEST AND NOT SEVEN ───────────────────────────────────────────────────
+  // loadHub() fires SEVEN feeds. Putting that on a timer to answer one question would be exactly
+  // the whole-board refetch this project's cost rules exist to prevent. Only ONE feed can change
+  // because a wait expired — the problems feed — and the waiting COUNT rides on that same answer,
+  // so the line under the strip stays right too. Everything else (the queue, the history,
+  // complaints, account health, limits, the fixed record) still moves only on arrival or on the
+  // Refresh button, which is unchanged and still re-pulls all seven.
+  //
+  // 120s, not 60: the waits are four hours, a day and a week, so being two minutes late is
+  // nothing, and the shared helper is visible-only + idle-aware + jittered + wake-on-return — a
+  // board nobody is looking at costs zero, and coming back to a parked tab refreshes at once.
+  const loadProblems = useCallback(async () => {
+    const e = await adminFetch<{ actions: Action[]; waiting: number | null }>(`/api/admin/oplog?level=error&limit=${ERROR_FEED_LIMIT}&unresolved=1`);
+    if (e.ok) {
+      setErrors(e.data.actions || []);
+      setWaiting(e.data.waiting ?? null);
+      setProblemsErr("");
+      // Only THIS feed's name may be added or cleared here. A quiet background refresh must never
+      // erase the fact that another feed failed on the last full load.
+      setFeedsFailed((prev) => prev.filter((x) => x !== "problems"));
+    } else {
+      setWaiting(null);
+      setProblemsErr(e.error || "Couldn't load the problem list.");
+      setFeedsFailed((prev) => (prev.includes("problems") ? prev : [...prev, "problems"]));
+    }
+  }, []);
+  useActiveAutoRefresh(loadProblems, 120000);
 
   const refreshAll = () => { setRefreshing(true); Promise.all([loadHub(), load()]).finally(() => setTimeout(() => setRefreshing(false), 500)); };
 
@@ -912,6 +956,10 @@ export default function AdminRepair() {
           <span>
             <b style={{ color: "var(--text)" }}>{waiting}</b> report{waiting === 1 ? "" : "s"}{scopedName ? " across all restaurants" : ""}{waiting === 1 ? " is" : " are"} set to come back later — still open, not fixed, and
             listed in <Link href="/aevinite/logs" style={{ color: "var(--accent)" }}>Audit &amp; logs</Link> the whole time.
+            {/* SAY THAT THE BOARD WATCHES FOR IT (item 19). The sentence promised the tile would
+                come back by itself, and until now nothing on this page ever asked again — so on a
+                tab left open it never did. It does now, so the promise is worth printing. */}
+            {" "}This page checks for {waiting === 1 ? "it" : "them"} every couple of minutes while you&rsquo;re here.
           </span>
         </p>
       )}
