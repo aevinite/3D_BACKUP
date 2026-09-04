@@ -121,7 +121,11 @@ export type Node = {
   // the restaurant-detail page. `settings:<id>` renders one section of RestaurantSettings,
   // `branding` renders the branding & theme editor. Owner, 2026-08-01: "you have completely
   // removed setting and permission from restaurant detail — everything will be here".
-  panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "settings:floor" | "settings:qr" | "branding" | "printing";
+  // `"settings:kitchen"` was removed from this list on 2026-09-04. Its NODE went on 2026-08-29
+  // (commit 2d3e7b46 — "I want all in one place", printing moved to /aevinite/printing), and the
+  // card it opened sat unreachable in components/admin/RestaurantSettings.tsx for six days because
+  // the type still named it. A panel name nothing renders is not a door; keep this list honest.
+  panel?: "settings:sessions" | "settings:banquet" | "settings:billing" | "settings:tables" | "settings:floor" | "settings:qr" | "branding" | "printing";
   // A format screen that can SHOW its finished page: puts a "Preview / Print" button at the
   // top right of the embedded editor, opening the real bill drawn from this restaurant's
   // settings (owner, 2026-08-02). The value picks which document — and every one of them is

@@ -69,7 +69,9 @@ const hintStyle: React.CSSProperties = { fontSize: 11.5, marginTop: 3 };
  *  dropdown of the feature it belongs to — "Dining sessions" opens the session rules, "Banquet
  *  billing" opens the banquet bill, and so on (owner, 2026-08-01). The component still loads and
  *  saves the whole settings row either way, so the same values are edited from either place. */
-export type SettingsSection = "billing" | "banquet" | "kitchen" | "sessions" | "tables" | "floor" | "qr";
+// "kitchen" IS NOT ON THIS LIST ANY MORE. A section in the type with no card behind it and no node
+// in front of it is exactly how the last one rotted unnoticed: the type looked like a door.
+export type SettingsSection = "billing" | "banquet" | "sessions" | "tables" | "floor" | "qr";
 
 /**
  * ONE SAVE BAR FOR THE WHOLE PAGE.
@@ -127,13 +129,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  // KOT auto-print (effective state, via the quick-features single source of truth).
-  const [kot, setKot] = useState<boolean | null>(null);
-  // The grant, on its own. `kot` is the EFFECTIVE answer (granted AND switched on); this is the first
-  // half, so the card can say which of the two is missing instead of showing one number that seems to
-  // contradict the switch above it.
-  const [kotAllowed, setKotAllowed] = useState<boolean | null>(null);
-  const [kotBusy, setKotBusy] = useState(false);
+  // (The three `kot*` pieces of state went with the kitchen card — see its obituary below.)
   const [qrBusy, setQrBusy] = useState<string | null>(null);
   // The bill's logo is the restaurant's own uploaded image (Design and styling → Theme and
   // wording). Read here so the preview shows the REAL header — including the empty case, which
@@ -208,18 +204,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   }, [restaurant.id, restaurant.name]);
   useEffect(() => { load(); }, [load]);
 
-  useEffect(() => {
-    fetch(`/api/admin/restaurants/quick-features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((j) => {
-        // Both halves, so the card can name the missing one. The effective value is kept for the
-        // places that only care whether paper is coming out at all.
-        if (typeof j.auto_print_kot_on === "boolean") setKot(j.auto_print_kot_on);
-        else if (typeof j.auto_print_kot === "boolean") setKot(j.auto_print_kot);
-        if (typeof j.auto_print_kot_allowed === "boolean") setKotAllowed(j.auto_print_kot_allowed);
-      })
-      .catch(() => {});
-  }, [restaurant.id]);
+  // ── THE QUICK-FEATURES READ WENT WITH THE KITCHEN CARD (T19 sweep #8, round 2) ────────────────
+  // It ran on EVERY mount of this component — billing, banquet, sessions, tables, floor, qr — to
+  // fill `kot` / `kotAllowed`, which only the kitchen card rendered, and that card had no door.
+  // Six open sections on the Access screen meant six requests for an answer nothing could show.
 
   const set = (k: string, v: unknown) => setDraft((d) => ({ ...d, [k]: v }));
   const [autoSaved, setAutoSaved] = useState<string | null>(null);
@@ -390,50 +378,12 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     pending.current.set(k, { v, timer });
   };
 
-  const toggleKot = async () => {
-    if (kot === null || kotBusy) return;
-    const next = !kot;
-    setKotBusy(true); setKot(next); if (next) setKotAllowed(true); // optimistic — ON grants as well
-    try {
-      const r = await fetch("/api/admin/restaurants/quick-features", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ restaurant_id: restaurant.id, feature: "auto_print_kot", on: next }),
-      });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setKot(!!d.auto_print_kot_on);
-      setKotAllowed(!!d.auto_print_kot_allowed);
-    } catch (e) { setKot(!next); setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setKotBusy(false); }
-  };
 
   // THE SAMPLE IS THE REAL TICKET (owner, 2026-08-02: "both should be sync"). This button used
   // to draw its own little ticket — a different heading, different rows, and no @page rule, so
   // it came out on two pieces of paper and told you nothing about the real one. It now renders
   // /panels/billdoc.js, the same file the manager panel and the kitchen board print from, and
   // it does so from the values on THIS form so unsaved edits show up too.
-  const previewKot = () => {
-    const html = BILLDOC.kotDocHtml({
-      title: "Sample kitchen ticket",
-      rname: BILLDOC.billIdentity(draft, restForDoc()).name,
-      head: "KITCHEN TICKET · SAMPLE",
-      kot: "SAMPLE",
-      // A restaurant that renamed its tables sees the name a live ticket will carry ("A5").
-      tableLabel: sampleTableLabel("Table 5"),
-      when: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
-      lines: [
-        { qty: 2, title: "Margherita Pizza" },
-        { qty: 1, title: "Garlic Bread", options: ["Extra cheese"] },
-        { qty: 1, title: "Coke", note: "no ice" },
-      ],
-      allergies: ["dairy", "nuts"],
-      note: "A sample ticket — the exact one the kitchen board prints, drawn from what is on this form right now.",
-    });
-    const w = window.open("", "lfh_kot_preview", "width=360,height=620");
-    if (!w) { setErr("Allow pop-ups to preview the KOT."); return; }
-    try { w.document.open(); } catch { /* reused window: start blank */ }
-    w.document.write(html); w.document.close();
-    try { w.focus(); } catch { /* already in front */ }
-  };
 
   // ── SEE THE BILL BEFORE ANYONE GETS ONE (owner, 2026-08-01, corrected 2026-08-02) ─────────
   // A made-up bill — invented customer, three invented lines — using THIS form's header, taxes
@@ -1103,116 +1053,35 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       </div>
       )}
 
-      {/* ═══ KOT PRINTING — same-to-same with the manager's Kitchen section ═══ */}
-      {show("kitchen") && (
-      <div id="det-kitchen" className="adm-card" style={{ marginBottom: 14 }}>
-        <h2><i className="fas fa-print" aria-hidden="true" style={{ marginRight: 8, opacity: .8 }} />Kitchen ticket printing</h2>
-        {/* ═══ TWO FACTS, NOT TWO SWITCHES (owner, 2026-08-26, with a screenshot: "why this ui looks
-            very shit… make both the option looks on the both mode are clearly visible") ═══
-            This card used to carry a SECOND toggle identical to the one on the Access row above it —
-            and the two write different things: the row above grants it (auto_print_kot_allowed), this
-            one grants AND switches on (both columns) while DISPLAYING the AND of the two. So granting
-            it upstairs showed ON above and OFF here, which reads as one switch arguing with itself,
-            and nothing printed. Both facts are now shown as facts, with the single action that fixes a
-            mismatch — and the switch itself stays in ONE place, upstairs. */}
-        <p className="hint" style={{ marginBottom: 12 }}>
-          When both of these are yes, a kitchen ticket prints itself the moment an order arrives — the
-          dishes to make, no prices — so nobody has to tap print.
-        </p>
-        <div className="adm-state">
-          <div className={`adm-state-row ${kotAllowed ? "yes" : "no"}`}>
-            <span className="adm-state-dot" aria-hidden="true" />
-            <span className="who"><b>Aevidine allows it</b> — the switch at the top of this row</span>
-            <span className="adm-state-val">{kotAllowed === null ? "…" : kotAllowed ? "YES" : "NO"}</span>
-          </div>
-          <div className={`adm-state-row ${kot ? "yes" : "no"}`}>
-            <span className="adm-state-dot" aria-hidden="true" />
-            <span className="who"><b>The restaurant has it switched on</b> — their own pause button</span>
-            <span className="adm-state-val">{kot === null ? "…" : kot ? "YES" : "NO"}</span>
-            {kot === false ? (
-              <button type="button" className="adm-btn primary" style={{ fontSize: 12 }} disabled={kotBusy} onClick={toggleKot}>
-                Switch it on
-              </button>
-            ) : null}
-          </div>
-        </div>
-        {kotAllowed && kot === false ? (
-          <p className="hint" style={{ margin: "0 0 12px", color: "var(--adm-warn, #f5a524)" }}>
-            <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ marginRight: 6 }} />
-            Allowed, but switched off — <b>nothing is printing by itself right now.</b>
-          </p>
-        ) : null}
-        <details className="adm-more">
-          <summary>What a kitchen ticket is, and what to set up first</summary>
-          <div>
-            A KOT is the kitchen&apos;s own slip: the dishes to make, no prices. Set the printer up on the
-            machine that will print before switching this on — a printer that is not ready simply means
-            tickets wait in the queue, which is safe but invisible to the kitchen. Where the paper comes
-            out is the Printing board, not here.
-          </div>
-        </details>
-        <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="adm-btn" onClick={previewKot}>
-            <i className="fas fa-eye" aria-hidden="true" style={{ marginRight: 6 }} />See a sample ticket
-          </button>
-          <a className="adm-btn" href={`/aevinite/printing?rid=${encodeURIComponent(restaurant.id)}`}>
-            <i className="fas fa-print" aria-hidden="true" style={{ marginRight: 6 }} />Choose the printer
-          </a>
-        </div>
+      {/* ═══ THE KITCHEN-TICKET CARD WAS HERE, AND IT HAD NO DOOR (T19 sweep #8, round 2, 2026-09-04)
+           ═══════════════════════════════════════════════════════════════════════════════════════
+           Roughly ninety lines: the grant-and-switch pair, a "Switch it on" action, a sample-ticket
+           preview, the link to the Printing board and the three per-OS setup-guide links.
 
-        {/* ═══ WHERE THE PAPER COMES OUT — ONE BOARD, NOT TWO (2026-08-26) ═══
-            This block used to be three radio cards ("kitchen screen / counter screen / both", mig 336).
-            Since mig 341 the Printing board answers the same question far better — a computer running
-            the helper, or a named panel/person/PC, per kind of paper — and two screens answering one
-            question differently is exactly what the owner asked to end. The radios are gone, and so is
-            the setting they wrote.
-            ── CORRECTED (T19 sweep #8, 2026-09-04): this note used to end "the coarse setting still
-            exists underneath for restaurants with no route, and the route now wins when there is one".
-            That was true for the two days between this block landing and migration 369, and it has been
-            wrong ever since — `kot_print_target` is RETIRED. `KEYS` above says so, the admin save route
-            refuses to write it, and a grep of app/, lib/, components/ and public/ finds seven mentions,
-            every one of them an obituary comment. There is no fallback underneath. The Printing board is
-            the only thing that decides where a kitchen ticket comes out, and a restaurant with no route
-            set falls back inside that board (docs/PRINT-HELPER.md), not to a column here. Two comments in
-            ONE file disagreeing about whether a retired setting still decides something is how a dead
-            path gets revived by the next person to read the friendlier sentence.
-            What is left here is the one line worth knowing, and the door to the board that owns it. */}
-        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "var(--border)" }}>
-          <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Where the paper comes out</h3>
-          <div className="adm-elsewhere">
-            <span className="lbl">Decided on the</span> <b>Printing</b>
-            <span className="lbl">board: which computer or which person&apos;s screen prints each kind of paper.</span>
-            <a href={`/aevinite/printing?rid=${encodeURIComponent(restaurant.id)}`}>Open Printing →</a>
-          </div>
-        </div>
+           NOTHING COULD OPEN IT. This component only ever renders the section its caller names, and
+           the only caller is components/admin/AccessTree.tsx with `only={[node.panel.slice(9)]}`.
+           `settings:kitchen` is still declared in the panel TYPE and no node in lib/accessTree.ts
+           carries it — removed on 2026-08-29 by commit 2d3e7b46, on the owner's own instruction:
+           "I want all in one place instead of going elsewhere to do diff stuff. There should be
+           total 3 switches." Printing moved to /aevinite/printing, entire. The restaurant-detail
+           page had already lost its Settings tab (2026-08-01) and FORWARDS `?section=kitchen`
+           there, so that door leads to Access, which has no kitchen row either.
 
-        {/* ═══ THE SETUP GUIDE, IN THE APP (owner, 2026-08-18) ═══
-            "Where is this setup in the app? Make it downloadable… link every single key and step…
-            or you can make HTML, it will open a whole page." It is a page the app serves, so it is
-            always the version that matches the running code. The starter DOWNLOADS are gone (owner,
-            2026-08-19: the Mac one showed "Apple could not verify… Move to Bin") — the guide now teaches
-            the file by hand in three per-OS menus, which no security layer can block. */}
-        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "var(--border)" }}>
-          <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>
-            <i className="fas fa-book-open" aria-hidden="true" style={{ marginRight: 7, opacity: .8 }} />How to set the printer up
-          </h3>
-          <p className="hint" style={{ margin: "0 0 10px" }}>
-            One menu per computer — <b>Windows</b>, <b>Mac</b>, <b>Linux / Raspberry Pi</b> — every step by
-            hand, with a Copy button on the code. Nothing is downloaded, because a downloaded script is
-            blocked by macOS and warned about by Windows. Opens as its own page and saves as a PDF.
-          </p>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">
-              <i className="fas fa-book-open" aria-hidden="true" style={{ marginRight: 6 }} />Open the guide
-            </a>
-            <a className="adm-btn" href="/print-setup.html#windows" target="_blank" rel="noopener">Windows</a>
-            <a className="adm-btn" href="/print-setup.html#mac" target="_blank" rel="noopener">Mac</a>
-            <a className="adm-btn" href="/print-setup.html#linux" target="_blank" rel="noopener">Linux / Pi</a>
-          </div>
-        </div>
-      </div>
-      )}
+           So this is his own standing rule, applied to the half that was left: A NEW WAY REPLACES
+           THE OLD ONE — never leave both (2026-08-29, the same day). The Printing board writes the
+           same `settings.auto_print_kot` column, carries the same `/print-setup.html` guide, and is
+           where the switch actually lives; the kitchen and waiter panels print the real ticket from
+           the same public/panels/billdoc.js this card previewed.
 
+           AND IT WAS NOT FREE. `kot`, `kotAllowed`, `kotBusy`, `toggleKot` and `previewKot` went
+           with it — and so did an unconditional read of /api/admin/restaurants/quick-features that
+           fired on EVERY mount of this component, in all six sections that ARE reachable, to fill
+           state only this unreachable card rendered. Six sections open on the Access screen meant
+           six requests for an answer nothing could show.
+
+           IF A KITCHEN SECTION IS EVER WANTED BACK: give lib/accessTree.ts a node with
+           `panel: "settings:kitchen"` FIRST, and only then write the card — the type alone was
+           never a door. */}
       {/* ═══ DINING SESSIONS — same-to-same with the manager's section ═══ */}
       {show("sessions") && (
       <div id="det-sessions" className="adm-card" style={{ marginBottom: 14 }}>
