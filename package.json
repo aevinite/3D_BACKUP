@@ -75,6 +75,7 @@
     "verify:hidden": "node scripts/verify-hidden-dishes.mjs",
     "verify:fix-survives": "node scripts/verify-fix-survives.mjs",
     "verify:guest-recovery": "node scripts/verify-guest-recovery.mjs",
+    "verify:bin-billing-usage": "node scripts/verify-bin-billing-usage.mjs",
     "verify:recycle-bin": "node scripts/verify-recycle-bin.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
     "verify:admin-restaurants": "node scripts/verify-admin-restaurants.mjs",
