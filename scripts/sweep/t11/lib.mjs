@@ -78,13 +78,24 @@ export async function run(label) {
 
   let pass = 0, fail = 0, skip = 0;
   const bad = [];
+  // --json emits one record per row, so the LEDGER records exactly what was executed rather than
+  // what somebody typed afterwards. That difference is the whole point of this harness.
+  const json = argv.includes("--json");
+  const records = [];
   for (const r of picked) {
-    if (r.skip) { skip++; if (!quiet) console.log(`  ⏭  ${r.id}  ${r.what}  — ${r.skip}`); continue; }
+    if (r.skip) { skip++; records.push({ id: r.id, what: r.what, result: "skip", note: r.skip }); if (!quiet && !json) console.log(`  ⏭  ${r.id}  ${r.what}  — ${r.skip}`); continue; }
     let verdict;
     try { verdict = await r.fn(); } catch (e) { verdict = `threw: ${e && e.message}`; }
-    if (verdict === true) { pass++; if (!quiet) console.log(`  ✅ ${r.id}  ${r.what}`); }
-    else { fail++; const why = verdict === false ? "(false)" : String(verdict); bad.push(`${r.id} · ${r.what} → ${why}`); console.log(`  ❌ ${r.id}  ${r.what}  → ${why}`); }
+    if (verdict === true) { pass++; records.push({ id: r.id, what: r.what, result: "pass", note: "" }); if (!quiet && !json) console.log(`  ✅ ${r.id}  ${r.what}`); }
+    else {
+      fail++;
+      const why = verdict === false ? "(false)" : String(verdict);
+      records.push({ id: r.id, what: r.what, result: "fail", note: why });
+      bad.push(`${r.id} · ${r.what} → ${why}`);
+      if (!json) console.log(`  ❌ ${r.id}  ${r.what}  → ${why}`);
+    }
   }
+  if (json) { console.log(JSON.stringify(records)); process.exit(fail ? 1 : 0); }
   console.log("─".repeat(78));
   console.log(`${label}: ${picked.length} rows · ${pass} passed · ${fail} failed · ${skip} skipped  (of ${rows.length} declared)`);
   if (bad.length) { console.log("\nwhat failed:"); for (const b of bad) console.log("  · " + b); }
