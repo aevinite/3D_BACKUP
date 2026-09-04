@@ -202,7 +202,7 @@ const PANEL_DOORS: { to: string; label: string; icon: string }[] = [
   { to: "/owner", label: "Owner", icon: "fa-crown" },
 ];
 
-function InsideCounts({ d }: { d: BinInside }) {
+function InsideCounts({ d, onRetry, busy }: { d: BinInside; onRetry: () => void; busy: boolean }) {
   const i = d.inside;
   const cells: { k: string; v: string }[] = [
     { k: "Dishes", v: num(i.dishes) },
@@ -235,9 +235,21 @@ function InsideCounts({ d }: { d: BinInside }) {
           removing this restaurant deletes the record of <b>who</b> owes them.
         </p>
       )}
+      {/* AN INSTRUCTION THAT DID NOTHING (T20 sweep #8, 2026-09-04). This line used to end
+          "— close and reopen this row to try again", and reopening the row refetched NOTHING:
+          `toggleOpen` only reads when `inside` is still null, and a partly-unread answer IS an
+          answer, so `inside` was set and the reopen was a no-op. The "?" stayed until the whole
+          page was reloaded — on the screen that decides a permanent delete, where a "?" instead
+          of a count is exactly the thing you must not act on. A button that really re-reads is
+          the honest version of the sentence that was already there. */}
       {(d.unread?.length || d.settingsUnread) && (
-        <p className="adm-muted" style={{ margin: 0, fontSize: 12, fontStyle: "italic" }}>
-          Some of these couldn&apos;t be read just now and show as &ldquo;?&rdquo; — close and reopen this row to try again.
+        <p className="adm-muted" style={{ margin: 0, fontSize: 12, display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          <span style={{ fontStyle: "italic" }}>
+            Some of these couldn&apos;t be read just now and show as &ldquo;?&rdquo;.
+          </span>
+          <button className="adm-btn" style={{ fontSize: 11.5, padding: "3px 9px" }} disabled={busy} onClick={onRetry}>
+            <i className="fas fa-rotate-right" style={{ marginRight: 6 }} aria-hidden="true" />{busy ? "Reading…" : "Try again"}
+          </button>
         </p>
       )}
       {d.owners.length > 0 && (
@@ -284,10 +296,14 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
     setInsideBusy(false);
   }, [r.id]);
 
+  // Reopening a row that came back COMPLETE costs nothing and re-reads nothing — that is the
+  // "fetched once and kept" rule, and it stays. Reopening one that came back with a hole in it
+  // now really does try again, which is what the line under the counts always claimed.
+  const insideIncomplete = !!inside && !!(inside.unread?.length || inside.settingsUnread);
   const toggleOpen = () => {
     const next = !open;
     setOpen(next);
-    if (next && !inside && !insideBusy) loadInside();
+    if (next && (!inside || insideIncomplete) && !insideBusy) loadInside();
   };
 
   // resolve = undefined for the plain first attempt; the dialog re-calls with one.
@@ -387,7 +403,7 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
               {insideErr} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={loadInside}>Retry</button>
             </div>
           )}
-          {inside && <InsideCounts d={inside} />}
+          {inside && <InsideCounts d={inside} onRetry={loadInside} busy={insideBusy} />}
           {/* WALK INTO IT. It is still in the bin — its guest menu stays offline and its own staff
               still cannot sign in. This is the admin looking, which is exactly what he asked for. */}
           <div>
