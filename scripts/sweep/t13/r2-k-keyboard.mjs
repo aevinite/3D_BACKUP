@@ -59,19 +59,32 @@ await chk(id(n++), "…and the chosen one is marked for a screen reader", async 
   return sel === 1 ? true : `${sel} rows marked as selected`;
 });
 await chk(id(n++), "…and ESCAPE closes it without changing the period", async () => {
+  // SELF-CONTAINED on purpose. This used to rely on the row above having opened the dropdown, so
+  // a `--only=<this id>` run filtered the setup away, found it already closed, and passed — which
+  // made it the one sabotage case in this band that could not fail. A driven check that needs a
+  // previous check to have run is a check that cannot be re-run by name, and being re-runnable by
+  // name is the entire point of an id.
+  await pg.locator("body").click({ position: { x: 3, y: 3 } });
+  await pg.waitForTimeout(250);
   const before = (await pg.locator(".owr-btn.main").innerText()).trim();
+  await pg.locator(".owr-btn.main").click();
+  await pg.waitForSelector(".owr-pop", { timeout: 8000 });
   await pg.keyboard.press("Escape");
-  await pg.waitForTimeout(400);
+  await pg.waitForTimeout(450);
   const closed = (await pg.locator(".owr-pop").count()) === 0;
   const after = (await pg.locator(".owr-btn.main").innerText()).trim();
   return closed && before === after ? true : `closed=${closed} "${before}" -> "${after}"`;
 });
 await chk(id(n++), "…and the button says whether it is open", async () => {
+  await pg.locator("body").click({ position: { x: 3, y: 3 } });
+  await pg.waitForTimeout(250);
   const btn = pg.locator(".owr-btn.main");
   const shut = await btn.getAttribute("aria-expanded");
-  await btn.click(); await pg.waitForTimeout(400);
+  await btn.click();
+  await pg.waitForSelector(".owr-pop", { timeout: 8000 });
   const open = await btn.getAttribute("aria-expanded");
-  await pg.keyboard.press("Escape"); await pg.waitForTimeout(300);
+  await pg.keyboard.press("Escape");
+  await pg.waitForTimeout(350);
   return shut === "false" && open === "true" ? true : `closed=${shut} open=${open}`;
 });
 await chk(id(n++), "…and it declares that it opens a list", async () => {
@@ -391,7 +404,10 @@ for (const [what, fn] of [
 await pg.screenshot({ path: ".claude/sweep/shots/T13/r2-keyboard.png" });
 await A.ctx.close();
 
-if (executedIds().length !== EXPECT_ROWS) {
+// The row-count lock is about a FULL run. A `--only=<id>` run deliberately executes one row, and
+// an earlier version exited 2 here before report() could print — so every sabotage case looked
+// like a guard staying green when the guard had never been given the chance to speak.
+if (!argOnly && executedIds().length !== EXPECT_ROWS) {
   console.log(`\nID DRIFT: ran ${executedIds().length} rows, declares ${EXPECT_ROWS} (next id ${id(n)})`);
   process.exit(2);
 }

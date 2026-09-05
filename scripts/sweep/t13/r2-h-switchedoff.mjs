@@ -372,7 +372,10 @@ await chk(id(80), "…and the page is still exactly one screen wide", async () =
 await H.pg.screenshot({ path: ".claude/sweep/shots/T13/r2-both-off.png" });
 await H.ctx.close();
 
-if (executedIds().length !== EXPECT_ROWS) {
+// The row-count lock is about a FULL run. A `--only=<id>` run deliberately executes one row, and
+// an earlier version exited 2 here before report() could print — so every sabotage case looked
+// like a guard staying green when the guard had never been given the chance to speak.
+if (!argOnly && executedIds().length !== EXPECT_ROWS) {
   console.log(`\nID DRIFT: ran ${executedIds().length} rows, declares ${EXPECT_ROWS}.`);
   process.exit(2);
 }

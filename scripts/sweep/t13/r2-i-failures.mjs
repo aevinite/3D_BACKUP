@@ -418,7 +418,10 @@ skip(id(n++), "a payload whose numbers are STRINGS prints an unformatted figure"
   "the whole panel down) is fixed. Guarding the TYPE of every number as well as the shape of every " +
   "array would be over-fitting a hypothetical, so it is recorded here rather than coded around.");
 
-if (executedIds().length !== EXPECT_ROWS) {
+// The row-count lock is about a FULL run. A `--only=<id>` run deliberately executes one row, and
+// an earlier version exited 2 here before report() could print — so every sabotage case looked
+// like a guard staying green when the guard had never been given the chance to speak.
+if (!argOnly && executedIds().length !== EXPECT_ROWS) {
   console.log(`\nID DRIFT: ran ${executedIds().length} rows, declares ${EXPECT_ROWS} (next free would be ${id(n)})`);
   process.exit(2);
 }
