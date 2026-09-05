@@ -3859,8 +3859,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
       await log("editor", "order_serve", { restaurant_id: rid, order_id: b, device_id: dev });
-      // Only session_id is needed (for auto-settle); the client discards the body → not the full row.
-      const servedRow = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).single());
+      // NO SECOND READ HERE, AND THE REASON IS AN OBITUARY (sweep #8 T25, item 3). A
+      // `SELECT session_id FROM orders` sat on this line, its result assigned and never used. It
+      // existed only to feed `maybeAutoSettle(...)`, and auto-settle was DELETED on 2026-08-02
+      // when the owner ruled that no table ends itself (commit c0396aee, "a finished table waits
+      // for a person to close it"). The call went; the read that fed it stayed, still commented
+      // "for auto-settle" — a pointer at a feature that no longer exists. That is a whole extra
+      // round trip to Mumbai on ✓ Serve all, the button a manager presses most, for a value
+      // nothing reads. lib/autoSettle is gone; do not bring the read back with it.
       return ok({ ok: true });
     }
     if (a === "orders" && c === "item") {
@@ -3876,8 +3882,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
       const orderStatus = servedCount === items.length ? "served"
         : items.some((i: any) => i.status === "preparing" || i.status === "served") ? "preparing" : "received";
-      // Only session_id is needed (for auto-settle); the client discards the body.
-      const row = must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).eq("restaurant_id", rid).select("session_id"));
+      // return=minimal: the client re-fetches the board, so the write asks for nothing back. The
+      // `.select("session_id")` that used to sit here fed maybeAutoSettle, deleted 2026-08-02 —
+      // see the obituary on serve-all above. (sweep #8 T25, item 3)
+      must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).eq("restaurant_id", rid));
       return ok({ ok: true });
     }
 
@@ -6003,8 +6011,10 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       } else if (patch.status === "received" && cur.status === "cancelled") {
         await log("editor", "order_uncancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: "cancel undone — back on the floor", device_id: deviceIdFrom(req) });
       }
-      // Only session_id is needed (for auto-settle on pay); the client discards the body → no full row.
-      const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select("session_id"));
+      // return=minimal: the client re-fetches, so the write asks for nothing back. The
+      // `.select("session_id")` that used to sit here fed maybeAutoSettle on pay, deleted
+      // 2026-08-02 — see the obituary on serve-all. (sweep #8 T25, item 3)
+      must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid));
       // ── NOW the row is cancelled, so the answer can do its work (mig 337) ──────────────────────
       // made=true keeps the kitchen-fire consumption and prices it as a food_loss expense;
       // made=false reverses the consumption so the ingredients go back on the shelf. Best-effort: the
