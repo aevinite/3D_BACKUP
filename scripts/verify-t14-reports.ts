@@ -38,7 +38,9 @@ const fails: string[] = [];
 const rows: { id: string; msg: string; res: string; note: string }[] = [];
 const LEDGER = arg("--ledger");
 const used = new Set<string>();
-const NEW_FROM = 67701, NEW_TO = 67850;   // the driven half takes P67851–P67900, the fresh 500 P67901+
+// This terminal's block is P67701-P68700, sliced three ways so the guards can grow independently:
+// this half P67701-P67900, the driven half P67901-P68000, the freshly-planned 500 P68001-P68700.
+const NEW_FROM = 67701, NEW_TO = 67900;
 let nextNew = NEW_FROM;
 function record(id: string, msg: string, cond: boolean, note: string) {
   if (used.has(id)) { fail++; fails.push(`DUPLICATE ID ${id}`); console.log(`  ⚠️ DUPLICATE ID ${id}`); }
@@ -93,19 +95,29 @@ const HOUSE = [
   { key: "hist", label: "no hand-rolled pushState/popstate", bad: (s: string) => /pushState|popstate/.test(s) },
   { key: "enus", label: "no en-US MONEY formatting", bad: (s: string) => /toLocaleString\(\s*["']en-US/.test(s) },
   { key: "poll", label: "no setInterval faster than the 60s backstop", bad: (s: string) => [...s.matchAll(/setInterval\([^,]+,\s*([0-9_]+)/g)].some((m) => Number(String(m[1]).replace(/_/g, "")) < 60_000) },
+  // A ₹ glued to a number by hand is how one screen came to group the American way while the table
+  // under it grouped the Indian way. The ONLY places allowed to build the symbol are the shared
+  // formatters themselves (components/admin/shared → inr, lib/money → compactINR, and the export's
+  // own local copy, which exists to add paise).
+  { key: "rupee", label: "no hard-coded ₹ concatenated by hand outside a formatter",
+    bad: (s: string) => /["'`]₹["'`]\s*\+|\+\s*["'`]₹/.test(s.replace(/const inr = [\s\S]{0,400}?\n/g, "").replace(/return \(v < 0 \? "−₹" : "₹"\)[^\n]*/g, "")) },
+  // An `as any` on a money value skips the null check the type system was doing for you, and a
+  // money figure that is quietly undefined renders as ₹NaN.
+  { key: "anycast", label: "no `any` cast used to skip a null check on money",
+    bad: (s: string) => /\bas any\b/.test(s) },
 ] as const;
 const ROW_FOR: Record<string, Record<string, string>> = {
-  page: { star: "P49001", alert: "P49002", hidden: "P49003", hist: "P49004", enus: "P49005", poll: "P49007" },
-  charts: { star: "P49009", alert: "P49010", hidden: "P49011", hist: "P49012", enus: "P49013", poll: "P49015" },
-  cache: { star: "P49017", alert: "P49018", hidden: "P49019", hist: "P49020", enus: "P49021", poll: "P49023" },
-  dish: { star: "P49025", alert: "P49026", hidden: "P49027", hist: "P49028", enus: "P49029", poll: "P49031" },
-  inv: { star: "P49033", alert: "P49034", hidden: "P49035", hist: "P49036", enus: "P49037", poll: "P49039" },
-  exp: { star: "P49041", alert: "P49042", hidden: "P49043", hist: "P49044", enus: "P49045", poll: "P49047" },
-  red1: { star: "P49049", alert: "P49050", hidden: "P49051", hist: "P49052", enus: "P49053", poll: "P49055" },
-  red2: { star: "P49057", alert: "P49058", hidden: "P49059", hist: "P49060", enus: "P49061", poll: "P49063" },
-  kit: { star: "P49065", alert: "P49066", hidden: "P49067", hist: "P49068", enus: "P49069", poll: "P49071" },
-  st: { star: "P49096", alert: "P49097", hidden: "P49098", hist: "P49099", enus: "P49100", poll: "P49102" },
-  ins: { star: "P49133", alert: "P49134", hidden: "P49135", hist: "P49136", enus: "P49137", poll: "P49139" },
+  page: { rupee: "P49006", anycast: "P49008", star: "P49001", alert: "P49002", hidden: "P49003", hist: "P49004", enus: "P49005", poll: "P49007" },
+  charts: { rupee: "P49014", anycast: "P49016", star: "P49009", alert: "P49010", hidden: "P49011", hist: "P49012", enus: "P49013", poll: "P49015" },
+  cache: { rupee: "P49022", anycast: "P49024", star: "P49017", alert: "P49018", hidden: "P49019", hist: "P49020", enus: "P49021", poll: "P49023" },
+  dish: { rupee: "P49030", anycast: "P49032", star: "P49025", alert: "P49026", hidden: "P49027", hist: "P49028", enus: "P49029", poll: "P49031" },
+  inv: { rupee: "P49038", anycast: "P49040", star: "P49033", alert: "P49034", hidden: "P49035", hist: "P49036", enus: "P49037", poll: "P49039" },
+  exp: { rupee: "P49046", anycast: "P49048", star: "P49041", alert: "P49042", hidden: "P49043", hist: "P49044", enus: "P49045", poll: "P49047" },
+  red1: { rupee: "P49054", anycast: "P49056", star: "P49049", alert: "P49050", hidden: "P49051", hist: "P49052", enus: "P49053", poll: "P49055" },
+  red2: { rupee: "P49062", anycast: "P49064", star: "P49057", alert: "P49058", hidden: "P49059", hist: "P49060", enus: "P49061", poll: "P49063" },
+  kit: { rupee: "P49070", anycast: "P49072", star: "P49065", alert: "P49066", hidden: "P49067", hist: "P49068", enus: "P49069", poll: "P49071" },
+  st: { rupee: "P49101", anycast: "P49103", star: "P49096", alert: "P49097", hidden: "P49098", hist: "P49099", enus: "P49100", poll: "P49102" },
+  ins: { rupee: "P49138", anycast: "P49140", star: "P49133", alert: "P49134", hidden: "P49135", hist: "P49136", enus: "P49137", poll: "P49139" },
 };
 for (const k of Object.keys(FILES) as FK[])
   for (const r of HOUSE) R(ROW_FOR[k][r.key], `${FILES[k]}: ${r.label}`, !r.bad(code[k]));
@@ -581,6 +593,19 @@ R("P20263", "…re-stated (server-side, /owner/report)", !/"use client"/.test(ra
 R("P20264", "…re-stated (server-side, /owner/sales)", !/"use client"/.test(raw.red2));
 R("P20265", "…re-stated (target)", /\/owner\/reports/.test(code.red1));
 R("P20266", "…re-stated (target)", /\/owner\/reports/.test(code.red2));
+// ── T27's seven rows about these files: does the visible text read as English, and does it belong
+//    to the right language layer? A GUEST surface must draw translatable text from lib/i18n.ts; a
+//    STAFF surface may be English-only, and the owner console is a staff surface.
+{
+  const T27: [string, FK][] = [["P13361", "page"], ["P13388", "charts"], ["P13393", "dish"],
+    ["P13394", "ins"], ["P13395", "inv"], ["P13396", "kit"], ["P13397", "exp"]];
+  for (const [id, k] of T27) {
+    const usesI18n = /from "@\/lib\/i18n"/.test(code[k]);
+    const isGuest = /app\/(menu|r\/|q\/)/.test(FILES[k]);
+    R(id, `${FILES[k]} — its visible text reads as English, and it belongs to the right language layer`,
+      !isGuest && !usesI18n, `${isGuest ? "guest surface" : "staff surface"}, i18n ${usesI18n ? "used" : "not used"}`);
+  }
+}
 R("P49093", "no file outside the studio wears an rs- class the studio would have to style", true);
 R("P49094", "…and the one component that emits rs- markup from outside is only used inside it", true);
 

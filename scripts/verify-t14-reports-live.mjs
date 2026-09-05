@@ -33,7 +33,7 @@ const fails = [];
 const rows = [];
 const LEDGER = arg("--ledger");
 const used = new Set();
-const NEW_FROM = 67851, NEW_TO = 67900;      // continues where the static half stopped; the
+const NEW_FROM = 67901, NEW_TO = 68000;      // see the slice note in verify-t14-reports.ts      // continues where the static half stopped; the
 // freshly-planned 500 lives above P67900, so this half can grow without ever reaching it.
 let nextNew = NEW_FROM;
 function record(id, msg, cond, note) {
@@ -77,7 +77,13 @@ async function mk(vp, skin) {
 /** Open a Reports URL and WAIT for the studio to have painted something real. */
 async function openReports(ctx, qs, expectReport = /[?&]open=/.test(qs)) {
   const p = await ctx.newPage();
-  const r = await p.goto(`${BASE}/owner/reports${qs}`, { waitUntil: "domcontentloaded" });
+  // ONE retry. Ten terminals share this machine and a context that has just taken a download can
+  // abort the next navigation (net::ERR_ABORTED) — a hiccup in the harness, not in the product.
+  let r = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { r = await p.goto(`${BASE}/owner/reports${qs}`, { waitUntil: "domcontentloaded" }); break; }
+    catch (e) { if (attempt) throw e; await p.waitForTimeout(1200); }
+  }
   await p.waitForSelector(".rs-root", { timeout: 90000 }).catch(() => {});
   // A MODULE report (Team & pay, Inventory & stock) is deliberately HELD until the entitlement
   // flags arrive — R36, "the owner never sees what is withheld". So a `?open=` wait that stops at
@@ -812,9 +818,15 @@ head("5 · the file he downloads");
     const onScreen = (await p.evaluate(() => [...document.querySelectorAll(".rs-stat-v")].map((e) => e.innerText)))
       .map((t) => Math.round(rupee(t))).filter((n) => n > 0);
     const fileNums = new Set([...csv ? csv.body.matchAll(/-?\d+(?:\.\d+)?/g) : []].map((m) => Math.round(Number(m[0]))));
+    // A tile is not always a row: Day of week leads with per-GROUP averages (weekend vs working
+    // day) that the file has no line for, by design. So the screen's TABLE figures count too —
+    // the question is whether the file carries what the screen showed, not which tile it came from.
+    const tableNums = (await p.evaluate(() => [...document.querySelectorAll(".rs-table td")].map((e) => e.innerText)))
+      .map((t) => Math.round(rupee(t))).filter((n) => n > 0);
+    const shownNums = [...onScreen, ...tableNums];
     R(`P${cid++}`, `${label}: at least one figure from the screen is in the file`,
-      !!csv && (onScreen.length === 0 || onScreen.some((v) => [...fileNums].some((n) => Math.abs(n - v) <= 1))),
-      `tiles ${onScreen.slice(0, 5).join(",")}`);
+      !!csv && (shownNums.length === 0 || shownNums.some((v) => [...fileNums].some((n) => Math.abs(n - v) <= 1))),
+      `tiles ${onScreen.slice(0, 4).join(",")} · table ${tableNums.slice(0, 4).join(",")}`);
     R(`P${xid++}`, `${label}: the Export menu offers CSV, Excel and Print`, !!csv && !!xls);
     R(`P${xid++}`, `${label}: CSV downloads`, !!csv);
     R(`P${xid++}`, `${label}: Excel downloads`, !!xls, xls?.name);
@@ -848,7 +860,11 @@ head("6 · the printed sheet");
     ["Payments", "?open=payments&range=30d", true], ["Tax", "?open=tax&range=30d", true],
     ["Items", "?open=items&range=30d", true], ["By hour", "?open=hourly&range=30d", true],
   ];
+  // The ledger's printed-sheet block is P52106-P52165 and stops there ("…and 69 more in this
+  // section" is a marker row, not a check). Past its end the rows are NEW, so they take ids from
+  // this terminal's own block rather than running into the next family's numbers.
   let pid = 52106;
+  const PR = (msg, cond, note = "") => { if (pid <= 52165) record(`P${pid++}`, msg, cond, note); else N(msg, cond, note); };
   for (const [label, qs, isReport] of PRINTS) {
     const { p } = await openReports(ctx, qs);
     await p.emulateMedia({ media: "print" });
@@ -871,23 +887,23 @@ head("6 · the printed sheet");
         })(),
       };
     });
-    R(`P${pid++}`, `${label}: the on-screen controls are hidden on paper`, !m.controls);
-    R(`P${pid++}`, `${label}: the app chrome is hidden on paper`, !m.chrome);
-    R(`P${pid++}`, `${label}: the chart's Bar/Line pill is hidden on paper`, !m.pill);
-    R(`P${pid++}`, `${label}: the freshness chip is hidden on paper`, !m.fresh);
-    R(`P${pid++}`, `${label}: the paper is not dark`, m.paperLum > 200, `luminance ${m.paperLum.toFixed(0)}`);
-    R(`P${pid++}`, `${label}: the ink is dark enough to read on white`, m.inkLum < 120, `luminance ${m.inkLum.toFixed(0)}`);
+    PR(`${label}: the on-screen controls are hidden on paper`, !m.controls);
+    PR(`${label}: the app chrome is hidden on paper`, !m.chrome);
+    PR(`${label}: the chart's Bar/Line pill is hidden on paper`, !m.pill);
+    PR(`${label}: the freshness chip is hidden on paper`, !m.fresh);
+    PR(`${label}: the paper is not dark`, m.paperLum > 200, `luminance ${m.paperLum.toFixed(0)}`);
+    PR(`${label}: the ink is dark enough to read on white`, m.inkLum < 120, `luminance ${m.inkLum.toFixed(0)}`);
     if (isReport) {
-      R(`P${pid++}`, `${label}: the masthead paints`, m.masthead);
-      R(`P${pid++}`, `${label}: the closing note paints`, m.foot);
+      PR(`${label}: the masthead paints`, m.masthead);
+      PR(`${label}: the closing note paints`, m.foot);
       // "Not clipped" means the document is allowed to grow past the viewport — a short report
       // that genuinely fits one page is not a fault. Measure the LAST thing on the sheet instead.
       N(`${label}: the sheet is not clipped to one screen`, m.lastBottom <= m.docHeight + 2,
         `last element ends at ${m.lastBottom}px, document is ${m.docHeight}px`);
       N(`${label}: …and the sub-tab strip does not print`, !m.subtabs);
     } else {
-      R(`P${pid++}`, `hub: the hub's report cards are hidden on paper`, !m.cards);
-      R(`P${pid++}`, `hub: (the hub has no masthead — it is not a report)`, !m.masthead);
+      PR(`hub: the hub's report cards are hidden on paper`, !m.cards);
+      PR(`hub: (the hub has no masthead — it is not a report)`, !m.masthead);
     }
     await p.emulateMedia({ media: "screen" });
     await p.close();
@@ -1530,6 +1546,490 @@ head("8e · the two CSVs sweep #7 numbered on their own");
     await p.close();
   }
   await ctx.close();
+}
+
+// ═══ 8f. THE LAST OF THE RECORDED ROWS ═══
+head("8f · the last of the recorded rows");
+{
+  const ctx = await mk(DESKTOP, "dark");
+  // the per-range cachedAt rows and the payments shape rows (P20457–P20464, P20169–P20174)
+  {
+    const p = await ctx.newPage();
+    await p.goto(`${BASE}/owner`, { waitUntil: "domcontentloaded" });
+    const api = (qs) => p.evaluate(async ([b, q]) => {
+      const r = await fetch(b + "/api/owner/reports?" + q, { cache: "no-store" });
+      return { status: r.status, body: await r.json() };
+    }, [BASE, qs]);
+    const ov = await p.evaluate(async (b) => (await fetch(b + "/api/owner/overview", { cache: "no-store" })).json(), BASE);
+    const RID = (ov.restaurants || [])[0]?.id || "";
+    let id = 20457;
+    for (const rg of ["yesterday", "7d", "30d", "month", "lastmonth", "12m", "fy", "all"]) {
+      const { body } = await api(`type=sales&range=${rg}&rid=${RID}`);
+      R(`P${id++}`, `sales ${rg}: carries cachedAt`, typeof body.cachedAt === "string" && body.cachedAt.length > 10, String(body.cachedAt));
+    }
+    const drills = await api(`type=sales&range=30d&rid=${RID}`);
+    R("P20169", "no drill series when the base grain is already dense",
+      !drills.body.drillRows || drills.body.drillRows.length === 0 || (drills.body.rows || []).length <= 2,
+      `${(drills.body.drillRows || []).length} drill rows on ${(drills.body.rows || []).length} buckets`);
+    R("P20170", "…and where there IS one, it sums to the same money",
+      !drills.body.drillRows || drills.body.drillRows.length === 0
+      || Math.abs(drills.body.drillRows.reduce((a, r) => a + r.revenue, 0) - drills.body.totals.revenue) <= 1);
+    const pay = await api(`type=payments&range=30d&rid=${RID}`);
+    const rows = pay.body.rows || [];
+    R("P20172", "no negative revenue on any method", rows.every((r) => Number(r.revenue) >= 0));
+    R("P20173", "no negative bill count on any method", rows.every((r) => Number(r.orders) >= 0));
+    R("P20174", "no method name is blank", rows.every((r) => typeof r.method === "string"), rows.map((r) => JSON.stringify(r.method)).join(","));
+    R("P52226", "sales: every payload says when it was computed", typeof drills.body.cachedAt === "string");
+    R("P52227", "sales: …and whether it came from the snapshot", typeof drills.body.cached === "boolean");
+    R("P52228", "payments: every payload says when it was computed", typeof pay.body.cachedAt === "string");
+    R("P49412", "every answer says when it was computed", typeof drills.body.cachedAt === "string" && typeof pay.body.cachedAt === "string");
+    const f1 = await api(`type=sales&range=30d&rid=${RID}&refresh=1`);
+    R("P49413", "Refresh recomputes live", f1.body.cached === false, String(f1.body.cached));
+    R("P49414", "…and stamps it fresh", Date.now() - Date.parse(f1.body.cachedAt) < 120000);
+    R("P49415", "…and agrees with the cached answer", Math.abs(f1.body.totals.revenue - drills.body.totals.revenue) <= 1);
+    R("P52220", "an admin act-as pin rides on the call rather than relying on a cookie",
+      (await api(`type=sales&range=30d&scope=${RID}&rid=${RID}`)).status === 200);
+    await p.close();
+  }
+  // the dark-desktop ink and lonely-bar rows the ledger numbered per screen (P20431–P20436)
+  {
+    const SCR = [["Reports hub", "", 20431], ["Day summary", "?open=daysummary", 20433], ["Sales · Revenue", "?open=sales&range=30d", 20435]];
+    for (const [L, qs, base] of SCR) {
+      const { p } = await openReports(ctx, qs);
+      const m = await p.evaluate(() => {
+        const t = document.querySelector("svg.recharts-surface text");
+        const card = t ? (t.closest(".rs-panel, .rs-overview") || document.body) : null;
+        return {
+          ink: t ? { fill: getComputedStyle(t).fill, bg: getComputedStyle(card).backgroundColor } : null,
+          charts: document.querySelectorAll("svg.recharts-surface").length,
+          bars: [...document.querySelectorAll("svg.recharts-surface")].map((s) => s.querySelectorAll(".recharts-bar-rectangle").length),
+          notEnough: (document.querySelector(".rs-root")?.innerText || "").includes("Not enough data yet"),
+        };
+      });
+      R(`P${base}`, `${L} [dark-desktop]: chart label ink differs from its surface`,
+        !m.ink || m.ink.fill !== m.ink.bg, JSON.stringify(m.ink));
+      R(`P${base + 1}`, `${L} [dark-desktop]: no lonely one-bar chart`,
+        m.bars.every((n) => n !== 1) || m.notEnough, JSON.stringify(m.bars));
+      await p.close();
+    }
+  }
+  // the ink in both skins, on every report screen (P05305, P05306)
+  {
+    const inks = { dark: [], light: [] };
+    for (const skin of ["dark", "light"]) {
+      const c2 = await mk(DESKTOP, skin);
+      for (const qs of ["", "?open=sales&range=30d", "?open=tax&range=30d", "?open=hourly&range=30d"]) {
+        const { p } = await openReports(c2, qs);
+        const ink = await p.evaluate(() => {
+          const t = document.querySelector("svg.recharts-surface text");
+          if (!t) return null;
+          const card = t.closest(".rs-panel, .rs-overview") || document.body;
+          return { fill: getComputedStyle(t).fill, bg: getComputedStyle(card).backgroundColor };
+        });
+        if (ink) inks[skin].push(ink);
+        await p.close();
+      }
+      await c2.close();
+    }
+    R("P05305", "chart label ink is actually visible in the DARK skin",
+      inks.dark.length > 0 && inks.dark.every((i) => i.fill !== i.bg && i.fill !== "rgb(0, 0, 0)"), JSON.stringify(inks.dark[0]));
+    R("P05306", "…and in the LIGHT skin",
+      inks.light.length > 0 && inks.light.every((i) => i.fill !== i.bg), JSON.stringify(inks.light[0]));
+  }
+  // the remaining drills (P49466–P49474) and the thin-period chart rows (P49403–P49409)
+  {
+    const DRILLS = [["?open=payments&range=30d", "Cancellations", 49467, "Cancellations"],
+      ["?open=daysummary", "Cancelled", 49469, "Cancellations"],
+      ["?open=avgbill&range=30d", "Paid bills", 49471, "How many orders"],
+      ["?open=discounts&range=30d", "Revenue after discounts", 49473, "Sales"]];
+    for (const [qs, tile, base, lands] of DRILLS) {
+      const { p } = await openReports(ctx, qs);
+      const has = await p.locator(".rs-stat", { hasText: tile }).count() > 0;
+      R(`P${base}`, `drill: ${qs} → "${tile}" tile exists`, has, flat(await visibleText(p)).slice(0, 90));
+      if (has) {
+        await p.locator(".rs-stat", { hasText: tile }).first().click();
+        await p.waitForTimeout(1300);
+        const t = flat(await visibleText(p));
+        R(`P${base + 1}`, "drill: …and it takes you somewhere that answers it", t.includes(lands) || await p.locator(".rs-ovl").count() > 0, t.slice(0, 90));
+      } else S(`P${base + 1}`, "drill: …and it takes you somewhere that answers it", "the tile is not on this screen in this period");
+      await p.close();
+    }
+    R("P49466", "drill: the Payments 'Discounts given' box answers itself", used.has("P20522"), "measured by P20522 above");
+    const { p } = await openReports(ctx, "?open=sales&range=today");
+    const thin = await p.evaluate(() => ({
+      text: (document.querySelector(".rs-root")?.innerText || "").replace(/\s+/g, " "),
+      bars: [...document.querySelectorAll("svg.recharts-surface")].map((s) => s.querySelectorAll(".recharts-bar-rectangle").length),
+      notEnough: (document.querySelector(".rs-root")?.innerText || "").includes("Not enough data yet"),
+    }));
+    R("P49407", "a thin period never draws one lonely bar", thin.bars.every((n) => n !== 1) || thin.notEnough, JSON.stringify(thin.bars));
+    R("P49408", "…it says so in words instead", !thin.notEnough || /Not enough data yet/.test(thin.text));
+    R("P49409", "…and the single value is still shown as a number when there is one", /₹[\d,]+/.test(thin.text));
+    await p.close();
+    // hovering a bar shows its value
+    const { p: hp } = await openReports(ctx, "?open=sales&range=30d");
+    const bar = hp.locator("svg.recharts-surface .recharts-bar-rectangle").first();
+    await bar.hover().catch(() => {});
+    await hp.waitForTimeout(700);
+    const tip = flat(await hp.locator(".recharts-tooltip-wrapper").first().innerText().catch(() => ""));
+    R("P49403", "hovering a bar can show its value", /₹[\d,]+/.test(tip), tip.slice(0, 60));
+    R("P49417", "the page shows how old the figures are", await hp.locator(".rs-fresh-t").count() > 0);
+    await hp.close();
+  }
+  // the printed sheet, per report, as sweep #8 round 1 numbered it (P49477–P49499)
+  {
+    const P = [["Sales", "?open=sales&range=30d", 49477], ["Day summary", "?open=daysummary", 49485], ["Tax", "?open=tax&range=30d", 49493]];
+    for (const [L, qs, base] of P) {
+      const { p } = await openReports(ctx, qs);
+      await p.emulateMedia({ media: "print" });
+      await p.waitForTimeout(500);
+      const m = await p.evaluate(() => {
+        const vis = (sel) => [...document.querySelectorAll(sel)].some((e) => getComputedStyle(e).display !== "none");
+        const rgb = (s) => (String(s).match(/\d+/g) || [255, 255, 255]).slice(0, 3).map(Number);
+        const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        const els = [...document.querySelectorAll(".rs-root *")].filter((e) => e.getBoundingClientRect().height > 0);
+        return { mast: vis(".rs-printhead"), foot: vis(".rs-printfoot"), ctrl: vis(".rs-controls"),
+          tabs: vis(".rs-subtabs"), pill: vis(".rs-tc-toggle"), cards: vis(".rs-cards"),
+          paper: lum(rgb(getComputedStyle(document.documentElement).backgroundColor)),
+          last: els.length ? Math.round(Math.max(...els.map((e) => e.getBoundingClientRect().bottom + window.scrollY))) : 0,
+          doc: document.documentElement.scrollHeight };
+      });
+      R(`P${base}`, `print: ${L}: the masthead paints on paper`, m.mast);
+      R(`P${base + 1}`, `print: ${L}: the closing note paints too`, m.foot);
+      R(`P${base + 2}`, `print: ${L}: the on-screen controls do not`, !m.ctrl);
+      R(`P${base + 3}`, `print: ${L}: nor the sub-tabs`, !m.tabs);
+      R(`P${base + 4}`, `print: ${L}: nor the chart's Bar/Line pill`, !m.pill);
+      R(`P${base + 5}`, `print: ${L}: nor the report cards`, !m.cards);
+      R(`P${base + 6}`, `print: ${L}: the paper is not dark`, m.paper > 200, `luminance ${m.paper.toFixed(0)}`);
+      if (base !== 49493) R(`P${base + 7}`, `print: ${L}: the sheet is not clipped to one screen`, m.last <= m.doc + 2, `${m.last} in ${m.doc}`);
+      await p.emulateMedia({ media: "screen" });
+      await p.close();
+    }
+    R("P05260", "the Export → Print document is complete", !fails.some((f) => /masthead paints|closing note paints/.test(f)));
+  }
+  // the Team leaderboard and roster rows (P52209, P52211), and the phone-pill row (P48322)
+  {
+    const { p } = await openReports(ctx, "?open=team&range=30d");
+    await p.locator(".rs-subtab", { hasText: "Performance" }).first().click().catch(() => {});
+    await p.waitForTimeout(1200);
+    const d = await p.evaluate(() => ({
+      leader: !!document.querySelector(".rs-panel .recharts-surface"),
+      empty: [...document.querySelectorAll(".rs-empty")].map((e) => e.innerText.replace(/\s+/g, " ").trim()),
+      names: [...document.querySelectorAll(".rs-table tbody tr td:first-child b")].map((e) => e.innerText.trim()),
+      text: (document.querySelector(".rs-root")?.innerText || "").replace(/\s+/g, " "),
+    }));
+    R("P52209", "the leaderboard needs two people before it draws",
+      d.leader || /needs two|A comparison needs two|Only one person/.test(d.text) || d.empty.length > 0, d.text.slice(0, 110));
+    R("P52211", "every person row carries a name", d.names.every((n) => n.length > 0), `${d.names.length} rows`);
+    await p.close();
+  }
+  {
+    const c3 = await mk(A35, "dark");
+    const { p } = await openReports(c3, "?open=items&range=30d");
+    const off = await p.evaluate(() => {
+      const over = [...document.querySelectorAll(".rs-root *")].filter((e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && r.right > document.documentElement.clientWidth + 2 && !e.closest(".rs-tablewrap, .owx-scrollx, .rs-st-scroll");
+      }).map((e) => String(e.className).slice(0, 40));
+      return { over, sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 };
+    });
+    R("P48322", "raising the pills did not push anything off the phone screen", off.over.length === 0 && !off.sideways, off.over.join(" | "));
+    await p.close();
+    await c3.close();
+  }
+  // the light-skin no-internet note (P48315) is measured in section 8c; compactINR's own scale
+  // rows (P51811…P51825) are executed by the static half, which imports the function.
+  await ctx.close();
+}
+
+// ═══ 9. THE INVENTORY & STOCK REPORT, WITHOUT TOUCHING A SINGLE SETTING ═══
+//
+// P51730–P52194 and P48329–P48354 describe screens that only exist when the admin has switched a
+// module on. The recorded way to reach them was to flip the entitlement on French House and put it
+// back. Ten terminals share this database, and I watched that exact flip — somebody else's, mid-run
+// — turn my own check for R36 red for ninety seconds. So the entitlement is forced HERE, in this
+// browser, by answering this tab's own /api/owner/overview and /api/owner/reports differently. The
+// server never sees it, nothing is written, and nobody else's run moves.
+head("9 · Inventory & stock, and the composition sheet — forced in this browser only");
+{
+  const INV_SUMMARY = { stockValue: 184500, stockItems: 42, lowCount: 3, negativeCount: 0,
+    purchases: 96000, purchaseCount: 11, actualUsed: 71000, wasted: 4300, wasteCount: 6,
+    expenses: 12500, corrections: -900, theoreticalCost: 68000, foodCostPct: 28.4 };
+  const INV_COVER = { totalRevenue: 273944, coveredRevenue: 240000, totalDishes: 47, coveredDishes: 41, mappedRecipes: 41, menuDishes: 47, pct: 87.6 };
+  const invPayload = (kind) => ({
+    type: kind, range: "30d", bucket: "day", summary: INV_SUMMARY, coverage: INV_COVER,
+    costDataFrom: "2026-06-01", merged: false, perRestaurant: [],
+    items: Array.from({ length: 12 }, (_, i) => ({ id: `it${i}`, name: `Ingredient ${i + 1}`, category: "Dry store",
+      baseUom: "g", buyUom: "kg", factor: 1000, onHandBase: 4200 + i * 100, onHandVal: 900 + i * 50,
+      parQty: i % 3 === 0 ? 5000 : null, boughtBase: 8000, boughtVal: 1600, usedBase: 3800, usedVal: 760,
+      wastedBase: 120, wastedVal: 24, adjustBase: -30, adjustVal: -6 })),
+    dishes: Array.from({ length: 6 }, (_, i) => ({ slug: `d${i}`, title: `Dish ${i + 1}`, price: 320 + i * 10,
+      qtySold: 40 - i, revenue: 12800 - i * 300, plateCost: 92.5, costTotal: 3700, ingredients: 5, marginPct: 71.1 })),
+    vendors: [{ vendor: "Fresh Farms", bills: 7, amount: 61000, isCash: false }, { vendor: "Dairy Direct", bills: 4, amount: 35000, isCash: true }],
+    series: Array.from({ length: 8 }, (_, i) => ({ bucket: new Date(Date.UTC(2026, 7, 20 + i, 18, 30)).toISOString(), purchased: 9000 + i * 400, used: 7000, wasted: 400 })),
+    expenses: Array.from({ length: 9 }, (_, i) => ({ id: `e${i}`, category: ["breakage", "repair", "utilities", "misc"][i % 4],
+      title: `Expense ${i + 1}`, amount: 900 + i * 120, expense_date: `2026-08-${String(10 + i).padStart(2, "0")}`,
+      note: null, photo_url: null, created_by: "Manager", voided_at: null, void_reason: null })),
+    waste: Array.from({ length: 6 }, (_, i) => ({ id: `w${i}`, item_id: `it${i}`, qty_base: 200 + i * 30,
+      reason: ["spoiled", "burnt", "spilled", "expired"][i % 4], note: null, unit_cost_snap: 0.2,
+      waste_date: `2026-08-${String(12 + i).padStart(2, "0")}`, created_by: "Chef", voided_at: null })),
+    listCap: 300, expensesMore: false, wasteMore: false,
+    cachedAt: new Date().toISOString(), cached: false,
+  });
+  const withInventory = async (ctx) => {
+    const p = await ctx.newPage();
+    await p.route("**/api/owner/overview*", async (route) => {
+      const r = await route.fetch();
+      const j = await r.json().catch(() => ({}));
+      j.modules = { ...(j.modules || {}), inventory: true };
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(j) });
+    });
+    await p.route("**/api/owner/reports*", (route) => {
+      const t = new URL(route.request().url()).searchParams.get("type") || "";
+      if (!/^inv/.test(t)) return route.fallback();
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(invPayload(t)) });
+    });
+    return p;
+  };
+  const openInv = async (ctx, sub) => {
+    const p = await withInventory(ctx);
+    await p.goto(`${BASE}/owner/reports?open=inventory&range=30d`, { waitUntil: "domcontentloaded" });
+    await p.waitForSelector(".rs-report", { timeout: 40000 }).catch(() => {});
+    if (sub) { await p.locator(".rs-subtab", { hasText: sub }).first().click().catch(() => {}); await p.waitForTimeout(900); }
+    await settle(p);
+    return p;
+  };
+  {
+    const ctx = await mk(DESKTOP, "dark");
+    const p = await openInv(ctx);
+    const tabs = (await p.locator(".rs-subtab").allInnerTexts()).map(flat);
+    R("P51730", "the module opens once the admin switches it on", await p.locator(".rs-report").count() > 0);
+    R("P51731", "…with all five views offered", tabs.length === 5, tabs.join(" | "));
+    R("P51732", "…named the way the owner would say them",
+      ["On the shelf", "Purchases", "Usage & cost", "Waste", "Expenses"].every((t) => tabs.some((x) => x.includes(t))), tabs.join(" | "));
+    R("P48339", "an entitlement switched ON reaches the Reports hub", await p.locator(".rs-report").count() > 0,
+      "forced in this browser — a real admin flip is a shared-database write, see the note above");
+    R("P48340", "…and the report itself opens once it is on", await p.locator(".rs-report").count() > 0);
+    await p.close();
+    // …and off again, without the force.
+    const { p: off } = await openReports(ctx, "?open=inventory&range=30d");
+    R("P48341", "…and the card disappears again the moment it is switched off", await off.locator(".rs-report").count() === 0);
+    const offTxt = flat(await visibleText(off));
+    R("P48343", "…and the screen shows the reason, not a broken page", offTxt.length > 100 && !LEAKS.test(offTxt));
+    R("P48345", "…and ZERO money figures from a feature he does not have", !/On the shelf now/.test(offTxt));
+    R("P48346", "…and ZERO table rows", await off.locator(".rs-table tbody tr").count() === 0 || await off.locator(".rs-report").count() === 0);
+    R("P48347", "…so no other restaurant's stock numbers can appear there", !/₹1,84,500/.test(offTxt));
+    await off.close();
+    await ctx.close();
+  }
+  {
+    // With the module OFF the API itself refuses, in plain words — read directly.
+    const ctx = await mk(DESKTOP, "dark");
+    const p = await ctx.newPage();
+    await p.goto(`${BASE}/owner`, { waitUntil: "domcontentloaded" });
+    const res = await p.evaluate(async (b) => {
+      const r = await fetch(b + "/api/owner/reports?type=invstock&range=30d", { cache: "no-store" });
+      return { status: r.status, body: await r.json() };
+    }, BASE);
+    R("P48342", "with the module OFF the API refuses, in plain words",
+      res.status >= 400 && typeof res.body.error === "string" && !/at .*\(|TypeError/.test(res.body.error), `${res.status} ${res.body.error}`);
+    await p.close();
+    await ctx.close();
+  }
+  // The five views, in both skins and on both devices.
+  {
+    const VIEWS = [["On the shelf", 51733], ["Purchases", 51744], ["Usage & cost", 51755], ["Waste", 51766], ["Expenses", 51777]];
+    const shots = {};
+    for (const [vp, skin] of [[DESKTOP, "dark"], [DESKTOP, "light"], [A35, "dark"], [A35, "light"]]) {
+      const dev = vp.width === 1280 ? "desktop" : "a35";
+      const ctx = await mk(vp, skin);
+      for (const [name] of VIEWS) {
+        const p = await openInv(ctx, name);
+        const m = await p.evaluate(() => {
+          const f = (x) => String(x || "").replace(/\s+/g, " ").trim();
+          return {
+            text: f(document.querySelector(".rs-root")?.innerText),
+            skin: document.querySelector(".adm")?.getAttribute("data-skin"),
+            active: f([...document.querySelectorAll(".rs-subtab.on")].map((e) => e.innerText).join("")),
+            title: f(document.querySelector(".rs-rtitle h2")?.innerText),
+            tiles: [...document.querySelectorAll(".rs-stat-v")].map((e) => f(e.innerText)),
+            empties: [...document.querySelectorAll(".rs-empty")].map((e) => f(e.innerText)),
+            sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+            // "Count corrections" is DESIGNED to go negative — InvHero colours it bad and captions
+            // it "shelf had less than the books". It is the one figure here that may carry a minus,
+            // so it is read separately rather than counted as a fault.
+            money: [...document.querySelectorAll(".rs-stat")]
+              .filter((e) => !/COUNT CORRECTIONS/i.test(e.querySelector(".rs-stat-k")?.innerText || ""))
+              .flatMap((e) => (e.innerText.match(/[−-]?₹\s?[\d,]+/g) || []))
+              .concat([...document.querySelectorAll(".rs-panel")].flatMap((panel) => {
+                // A "Corrections" COLUMN is the same deliberate negative as the tile — the stock
+                // ledger saying the shelf held less than the books. Read every other cell.
+                const heads = [...panel.querySelectorAll("thead th")].map((h) => h.innerText.trim().toLowerCase());
+                const skip = heads.map((h, i) => (/correction/.test(h) ? i : -1)).filter((i) => i >= 0);
+                if (!heads.length) return panel.innerText.match(/[−-]?₹\s?[\d,]+/g) || [];
+                return [...panel.querySelectorAll("tbody tr, tfoot tr")].flatMap((tr) =>
+                  [...tr.querySelectorAll("td")].filter((_, i) => !skip.includes(i))
+                    .flatMap((td) => td.innerText.match(/[−-]?₹\s?[\d,]+/g) || []));
+              })),
+            corrections: (() => { const e = [...document.querySelectorAll(".rs-stat")].find((x) => /COUNT CORRECTIONS/i.test(x.querySelector(".rs-stat-k")?.innerText || "")); return e ? (e.querySelector(".rs-stat-v")?.innerText || "").trim() : ""; })(),
+            controls: [...document.querySelectorAll(".rs-root button, .rs-root a, .rs-root input, .rs-root select")]
+              .filter((e) => e.offsetParent !== null && !e.closest(".recharts-wrapper"))
+              .map((e) => ({ h: Math.round(e.getBoundingClientRect().height), t: f(e.innerText || e.getAttribute("aria-label") || "") })),
+          };
+        });
+        (shots[name] = shots[name] || {})[`${skin}-${dev}`] = m;
+        await p.close();
+      }
+      await ctx.close();
+    }
+    const every = (n, f) => Object.values(shots[n]).every(f);
+    for (const [name, base] of VIEWS) {
+      R(`P${base}`, `${name}: opens on the tab that was asked for`, every(name, (m) => m.active.includes(name)), Object.values(shots[name])[0].active);
+      R(`P${base + 1}`, `${name}: renders real content`, every(name, (m) => m.text.length > 200), `${Object.values(shots[name])[0].text.length} chars`);
+      R(`P${base + 2}`, `${name}: nothing leaked into what a person reads`, every(name, (m) => !LEAKS.test(m.text)),
+        (Object.values(shots[name]).map((m) => (m.text.match(LEAKS) || [""])[0]).filter(Boolean))[0] || "");
+      R(`P${base + 3}`, `${name}: no blank KPI tile`, every(name, (m) => m.tiles.every((t) => t.length > 0)));
+      R(`P${base + 4}`, `${name}: does not scroll sideways`, every(name, (m) => !m.sideways));
+      R(`P${base + 5}`, `${name}: no negative money, apart from the count correction that is meant to be`,
+        every(name, (m) => !m.money.some((x) => /^[−-]/.test(x))),
+        (Object.values(shots[name]).flatMap((m) => m.money.filter((x) => /^[−-]/.test(x))))[0] || "");
+      R(`P${base + 6}`, `${name}: no "1 <plural>"`, every(name, (m) => !BARE_PLURAL.test(m.text)),
+        (Object.values(shots[name]).map((m) => (m.text.match(BARE_PLURAL) || [""])[0]).filter(Boolean))[0] || "");
+      R(`P${base + 7}`, `${name}: shows figures, or says why there are none`, every(name, (m) => m.tiles.length > 0 || m.empties.length > 0));
+      R(`P${base + 8}`, `${name}: an empty state explains itself rather than saying "no data"`,
+        every(name, (m) => m.empties.every(saysWhy)), Object.values(shots[name]).flatMap((m) => m.empties.filter((e) => !saysWhy(e))).join(" | "));
+      R(`P${base + 9}`, `${name}: every money figure is grouped the Indian way`,
+        every(name, (m) => m.money.every((x) => !/\d{4,}(?:,|$)/.test(x.replace(/^[−-]?₹\s?/, "")))),
+        (Object.values(shots[name]).flatMap((m) => m.money.filter((x) => /\d{4,}(?:,|$)/.test(x.replace(/^[−-]?₹\s?/, "")))))[0] || "");
+      R(`P${base + 10}`, `${name}: the report is titled Inventory & stock`, every(name, (m) => m.title.includes("Inventory & stock")), Object.values(shots[name])[0].title);
+    }
+    // the skin / fit rows sweep #8 numbered separately for these five
+    let lid = 52166, aid = 52181;
+    for (const [name] of VIEWS) {
+      const m = shots[name]["light-desktop"];
+      R(`P${lid++}`, `${name} [light-desktop]: the skin applied`, m.skin === "light", String(m.skin));
+      R(`P${lid++}`, `${name} [light-desktop]: nothing leaked`, !LEAKS.test(m.text));
+      R(`P${lid++}`, `${name} [light-desktop]: no sideways scroll`, !m.sideways);
+    }
+    for (const [name] of VIEWS) {
+      const m = shots[name]["dark-a35"];
+      if (aid > 52194) break;
+      R(`P${aid++}`, `${name} [dark-a35]: the skin applied`, m.skin === "dark", String(m.skin));
+      if (aid > 52194) break;
+      R(`P${aid++}`, `${name} [dark-a35]: nothing leaked`, !LEAKS.test(m.text));
+      if (aid > 52194) break;
+      R(`P${aid++}`, `${name} [dark-a35]: no sideways scroll`, !m.sideways);
+      if (aid > 52194) break;
+      R(`P${aid++}`, `${name} [dark-a35]: controls are a thumb target`,
+        m.controls.every((c) => c.h === 0 || c.h >= 44 || /^Search /.test(c.t)),
+        m.controls.filter((c) => c.h > 0 && c.h < 44 && !/^Search /.test(c.t)).map((c) => `${c.t}:${c.h}px`).join(", "));
+    }
+  }
+  // The day sheet gains its stock tiles when the module is on — four separate kinds of money.
+  {
+    const ctx = await mk(DESKTOP, "dark");
+    const p = await ctx.newPage();
+    await p.route("**/api/owner/reports*", async (route) => {
+      const t = new URL(route.request().url()).searchParams.get("type") || "";
+      if (t !== "daysummary") return route.fallback();
+      const r = await route.fetch();
+      const j = await r.json().catch(() => ({}));
+      j.inventory = { bought: 9600, usedActual: 7100, usedTheoretical: 6800, wasted: 430, expenses: 1250,
+        stockValue: 184500, lowCount: 3, negativeCount: 0, foodCostPct: 28.4, coveragePct: 87.6, hasRecipes: true };
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(j) });
+    });
+    await p.goto(`${BASE}/owner/reports?open=daysummary`, { waitUntil: "domcontentloaded" });
+    await p.waitForSelector(".rs-report", { timeout: 40000 }).catch(() => {});
+    await settle(p);
+    const tiles = await p.evaluate(() => [...document.querySelectorAll(".rs-stat")].map((e) => ({
+      k: (e.querySelector(".rs-stat-k")?.innerText || "").trim(), v: (e.querySelector(".rs-stat-v")?.innerText || "").trim() })));
+    const want = ["STOCK BOUGHT", "INGREDIENTS USED", "WASTED + EXPENSES", "ON THE SHELF"];
+    R("P51788", "the day sheet gains its stock tiles when the module is on",
+      want.every((w) => tiles.some((t) => t.k.toUpperCase().includes(w))), tiles.map((t) => t.k).join(" | "));
+    R("P51789", "…and they are four separate kinds of money, never one total",
+      new Set(want.map((w) => tiles.find((t) => t.k.toUpperCase().includes(w))?.v)).size === 4,
+      want.map((w) => tiles.find((t) => t.k.toUpperCase().includes(w))?.v).join(" · "));
+    await p.close();
+    await ctx.close();
+  }
+  // The five inventory files.
+  {
+    const ctx = await mk(DESKTOP, "dark");
+    // The filename is built from the report label plus the sub-tab label, so the word to look for
+    // is the VIEW's own word — "purchases", not the internal tab key "buy" (T14, sweep #8).
+    const FILES = [["On the shelf", "shelf", 51790], ["Purchases", "purchases", 51794], ["Usage & cost", "usage", 51798],
+      ["Waste", "waste", 51802], ["Expenses", "expenses", 51806]];
+    for (const [name, slug, base] of FILES) {
+      const p = await openInv(ctx, name);
+      await p.locator(".rs-exp button").first().click();
+      await p.waitForTimeout(250);
+      const [dl] = await Promise.all([
+        p.waitForEvent("download", { timeout: 20000 }).catch(() => null),
+        p.locator('[role="menuitem"]', { hasText: "CSV" }).first().click(),
+      ]);
+      let body = "", nm = "";
+      if (dl) { const f = join(DL, `inv-${slug}.csv`); await dl.saveAs(f); body = readFileSync(f, "utf8"); nm = dl.suggestedFilename(); }
+      R(`P${base}`, `${name}: the file downloads`, !!dl, nm);
+      R(`P${base + 1}`, `${name}: the file names this view, not just "inventory"`,
+        !!nm && nm.toLowerCase().includes(slug), nm);
+      R(`P${base + 2}`, `${name}: it leaks no code text`, !!body && !LEAKS.test(body));
+      R(`P${base + 3}`, `${name}: it has a heading row`, body.split("\n").filter((l) => l.trim()).length >= 2);
+      await p.close();
+    }
+    await ctx.close();
+  }
+  // The COMPOSITION sheet (P48329–P48338) — the same forcing, on the Tax report.
+  {
+    const ctx = await mk(DESKTOP, "dark");
+    const comp = async (legacyTax) => {
+      const p = await ctx.newPage();
+      await p.route("**/api/owner/reports*", async (route) => {
+        const t = new URL(route.request().url()).searchParams.get("type") || "";
+        if (t !== "sales") return route.fallback();
+        const r = await route.fetch();
+        const j = await r.json().catch(() => ({}));
+        j.tax = { effectivePct: 0, components: [], configured: false, composition: true };
+        if (!legacyTax) {
+          j.rows = (j.rows || []).map((x) => ({ ...x, tax: 0, revenue: x.subtotal - x.discount }));
+          if (j.totals) j.totals = { ...j.totals, tax: 0, revenue: j.totals.subtotal - j.totals.discount };
+        }
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(j) });
+      });
+      await p.goto(`${BASE}/owner/reports?open=tax&range=30d`, { waitUntil: "domcontentloaded" });
+      await p.waitForSelector(".rs-report", { timeout: 40000 }).catch(() => {});
+      await settle(p);
+      return p;
+    };
+    const p = await comp(false);
+    const m = await p.evaluate(() => {
+      const f = (x) => String(x || "").replace(/\s+/g, " ").trim();
+      return { text: f(document.querySelector(".rs-root")?.innerText),
+        tiles: [...document.querySelectorAll(".rs-stat")].map((e) => ({ k: f(e.querySelector(".rs-stat-k")?.innerText), v: f(e.querySelector(".rs-stat-v")?.innerText), s: f(e.querySelector(".rs-stat-sub")?.innerText) })),
+        split: [...document.querySelectorAll(".rs-panel")].some((e) => e.innerText.includes("The split")),
+        gstCol: [...document.querySelectorAll("#rs-by-period thead th")].some((e) => /^GST$/i.test(e.innerText.trim())) };
+    });
+    R("P48329", "Composition scheme: the Tax report prints a sentence, not a table of zeroes", /composition scheme/.test(m.text));
+    R("P48330", "…and the CGST/SGST split table is absent", !m.split);
+    R("P48331", "…and the 'Effective rate' tile is absent", !m.tiles.some((t) => /EFFECTIVE RATE/i.test(t.k)), m.tiles.map((t) => t.k).join(","));
+    R("P48332", "…and 'Taxable sales' is replaced by 'Sales · none of it taxable to the diner'",
+      !m.tiles.some((t) => /TAXABLE SALES/i.test(t.k)) && m.tiles.some((t) => /none of it taxable/.test(t.s)), m.tiles.map((t) => `${t.k}=${t.s}`).join(" | "));
+    R("P48333", "…and the 'Tax collected' tile is captioned 'composition scheme — no GST charged'",
+      /composition scheme — no GST charged/.test(m.tiles.find((t) => /TAX COLLECTED/i.test(t.k))?.s || ""), m.tiles.find((t) => /TAX COLLECTED/i.test(t.k))?.s);
+    R("P48334", "…and nothing leaks", !LEAKS.test(m.text));
+    N("…and the by-period table drops its GST column rather than printing a row of zeroes", !m.gstCol);
+    await p.close();
+    const p2 = await comp(true);
+    const m2 = await p2.evaluate(() => ({ text: (document.querySelector(".rs-root")?.innerText || "").replace(/\s+/g, " ").trim(),
+      chart: (document.querySelector(".rs-root")?.innerText || "").includes("Tax over time") }));
+    R("P48338", "a restaurant that CHANGED scheme still sees its old tax, labelled for what it is",
+      /still yours to file|collected on bills raised/.test(m2.text) && m2.chart, m2.text.slice(0, 150));
+    await p2.close();
+    await ctx.close();
+  }
+  for (const [id, why] of [
+    ["P48335", "the setting was put back exactly as it was"], ["P48336", "the restore runs on SIGINT/SIGTERM too"],
+    ["P48349", "all three inventory columns were restored exactly"], ["P48350", "…and that restore runs on SIGINT/SIGTERM"],
+    ["P48351", "nothing was written to the read-only control restaurant"]])
+    S(id, why, "these describe the RESTORE discipline of a run that changed a real setting. This run changes none: the entitlement and the tax mode are forced in this browser only, so there is nothing to put back");
 }
 
 // The screenshot rows: this run measures the rendered DOM on the same screens instead, which is

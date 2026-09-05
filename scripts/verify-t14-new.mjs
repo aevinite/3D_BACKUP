@@ -36,7 +36,7 @@ const LEDGER = arg("--ledger");
 const used = new Set();
 // The re-run guards take P67701–P67900 (the static half ends at P67805; the driven half grows as
 // screens are added, so it is given room to P67900). This block starts clear of both.
-const FROM = 67901, TO = 68700;
+const FROM = 68001, TO = 68700;          // see the slice note in verify-t14-reports.ts
 let next = FROM;
 function N(msg, cond, note = "") {
   if (next > TO) { console.log("  ⚠️ ID BLOCK EXHAUSTED"); process.exit(2); }
