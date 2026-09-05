@@ -6134,9 +6134,29 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
-    // generic delete: DELETE /:kind/:id  (items | categories | filters | settings)
+    // generic delete: DELETE /:kind/:id  (items | categories | filters)
+    //
+    // ⚠️ `settings` IS NOT ON THIS LIST, AND THAT IS THE WHOLE POINT (sweep #8 T25, item 1).
+    // TABLES is shared with the POST upsert above, where `settings` belongs — a manager saving
+    // the floor goes through it. Reusing the same map here meant DELETE inherited a fourth kind
+    // nobody wrote it for: `DELETE /settings/<the row's id>` reached
+    // `sb.from("settings").delete()` with nothing above it but requireRole("manager"), and took
+    // the restaurant's ONE settings row with it — tax rate and components, table count, the whole
+    // floor plan and its table names, the billing name/address/GSTIN, the invoice prefix, the bill
+    // footer, the log-retention window. Driven against the shipped handler with a manager holding
+    // no permissions at all: 200 {ok:true}, one row matched, row gone.
+    //
+    // The same manager is refused EVERY ONE of those fields on the save door two hundred lines up
+    // (MANAGER_BLOCKED_SETTINGS, plus the "refuse any key a manager sends" loop). A door that
+    // cannot be used to change a value must not be usable to remove it wholesale, and no screen
+    // has ever called this — public/panels/editor/app.js only ever sends the tab it is on, which
+    // is items / categories / filters.
+    //
+    // So the list is written out HERE instead of inherited: a kind added to TABLES for the save
+    // path can no longer become deletable by accident.
+    const DELETABLE_KINDS = ["items", "categories", "filters"] as const;
     if (a && id) {
-      const t = TABLES[a];
+      const t = (DELETABLE_KINDS as readonly string[]).includes(a) ? TABLES[a] : undefined;
       if (!t) return err("unknown kind", 404);
       if ((a === "items" || a === "categories" || a === "filters") && !(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the menu");
       // Granular delete gate (non-breaking): a restricted manager can be blocked from deleting.
