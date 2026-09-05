@@ -2015,11 +2015,22 @@ export default function OwnerDashboard() {
             <div className="adm-card">
               <div className="ow2-ct">
                 <span>Every dish <span className="mut">· tap one for detail</span></span>
+                {/* ── THE ONE CARD THAT DID NOT SAY WHICH PERIOD IT COVERS (owner's item 9,
+                    2026-09-05) ────────────────────────────────────────────────────────────────
+                    Every other card on this page carries the period chip; this one carried none,
+                    and its title named no period either — while the "Your records" strip a few
+                    inches below deliberately spells out "LAST 30 DAYS (ROLLING)" precisely because
+                    two dish figures with different windows once read as a contradiction (T5,
+                    2026-08-06: 549 plates against 529, both captioned "30 days").
+                    The list changes completely with the dropdown, and its own empty state already
+                    says "in this range" — so the card knew; it just did not say so once it had
+                    something to show. Same chip, same corner, same tooltip as its neighbours. */}
                 <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                   <span className="rv-sort">
                     <button className={dishSort === "revenue" ? "on" : ""} onClick={() => setDishSort("revenue")}>By revenue</button>
                     <button className={dishSort === "qty" ? "on" : ""} onClick={() => setDishSort("qty")}>By qty</button>
                   </span>
+                  <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
                 </span>
               </div>
               <DishList payload={pl(globalRange) as RestA | undefined} sort={dishSort} note={loadNote}

@@ -185,20 +185,19 @@ await chk(nextId(), "every figure on the page is captioned with the period it co
     return out;
   });
   await pg.close();
-  // KNOWN AND REPORTED, not waved through: "Every dish" is the one card that shows per-period
-  // figures without naming the period anywhere on its face. Its empty state does say "in this
-  // range", so it knows it is ranged; the populated state does not. That is a real honesty gap
-  // and it is carried into the report as a decision item rather than changed unasked — it is a
-  // visible alteration to a card layout the owner approved. Every OTHER card must still name its
-  // period, and this row goes red if a second one stops.
-  const KNOWN = ["Every dish"];
-  const unexpected = uncaptioned.filter((t) => !KNOWN.some((k) => t.startsWith(k)));
-  return unexpected.length === 0
-    ? true : `cards with no period named: ${JSON.stringify(unexpected)}`;
+  // NO EXCEPTIONS LEFT. "Every dish" used to be the one card showing period-scoped figures with
+  // no period on its face; the owner picked that as his item 9 on 2026-09-05 and it now carries
+  // the same chip as its neighbours. This row is the reason the exception could not be quietly
+  // forgotten — it named the card rather than skipping the check.
+  return uncaptioned.length === 0
+    ? true : `cards with no period named: ${JSON.stringify(uncaptioned)}`;
 });
-skip("P67294", "the 'Every dish' card names the period its figures cover",
-  "REPORTED, not fixed: it is the only card on the page with no period on its face, while the records strip beside it deliberately names its own rolling window. Carried to the report as a decision item because adding a chip changes a card layout the owner approved.");
-
+chk("P67294", "…and the 'Every dish' card is one of them, with a chip that FOLLOWS the dropdown", () => {
+  const m = /<span>Every dish <span className="mut">· tap one for detail<\/span><\/span>([\s\S]*?)<\/div>/.exec(praw);
+  if (!m) return "the Every dish card header is gone";
+  const chip = /<span className="ow2-tag" title=\{\[rangeSpanText\(globalRange\), mainAge\(\)\][\s\S]{0,60}?\{RANGES\.find\(\(r\) => r\.k === globalRange\)!\.label\}<\/span>/.test(m[1]);
+  return chip ? true : "the dish card's period chip is gone, or no longer reads the main range";
+});
 // ── the project's own rules, for THIS territory ───────────────────────────────────────────────
 await chk(nextId(), "no new column is added to `settings` by anything in this territory", () => {
   const files = [p, a, ov, code("app/owner/layout.tsx")];
