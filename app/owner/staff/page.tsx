@@ -541,6 +541,30 @@ export default function OwnerStaffPage() {
                           onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
                         <button className="ost-btn" disabled={busy} onClick={() => saveEdit(s)}>Save</button>
                         <button className="ost-mini" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
+                        {/* ── THE ONE EDIT ON THIS ROW THAT STOPS SOMEONE SIGNING IN, AND IT SAID NOTHING
+                            (sweep #8 T15, 2026-09-04) ────────────────────────────────────────────────
+                            The first box IS the login. `/api/owner/staff` → action `edit` runs the typed
+                            value through normalizeLoginName and writes BOTH `name` and `username`, and
+                            its own comment says why that matters: "a rename means the name that person
+                            has always typed no longer works". It even logs a `staff_rename` row with
+                            both names, precisely so "my login stopped working" has an answer.
+                            Every other control on this row that costs somebody their access says so
+                            before it happens — Reset password ("Their current login stops working"),
+                            Disable ("logged out immediately"), the role picker ("logged out and must
+                            sign in again"). This one, which does the same thing, was a bare pair of
+                            boxes and a Save button. And it is quieter than all of them: no token bump,
+                            so the person stays signed in and only discovers it at their NEXT sign-in,
+                            hours later, with nothing connecting the two.
+                            A confirm() would be wrong here — the same editor edits the phone number,
+                            which is harmless and frequent, and a dialog on every phone edit is the
+                            noise that gets dialogs dismissed unread. So the warning appears only while
+                            the name has actually been changed, and it names both sides of the change. */}
+                        {editing.name.trim() && editing.name.trim() !== (s.name || s.username) && (
+                          <div className="ost-renamewarn">
+                            This is their <b>login name</b>: after saving they sign in as{" "}
+                            <b>{editing.name.trim()}</b>, and <b>{s.username}</b> stops working. Tell them before they next sign in.
+                          </div>
+                        )}
                       </div>
                     )}
                     {/* PER-USER WAITER PERMISSIONS WERE REMOVED FROM HERE (owner, 2026-08-04).
@@ -789,6 +813,10 @@ export default function OwnerStaffPage() {
         .ost-nokitchen { font-size: 11.5px; color: var(--muted); }
         .ost-actions { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; margin-top: 8px; }
         .ost-editrow { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: var(--border); }
+        /* Amber, not red: nothing is wrong and nothing is lost — it is a consequence the owner has to
+           know before they press Save. Full width so it sits UNDER the boxes rather than squeezing
+           them, and it reads at 360px without the row growing when it is absent. */
+        .ost-renamewarn { flex-basis: 100%; margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--adm-warn); }
         .ost-mini { font: inherit; font-size: 11.5px; font-weight: 700; padding: 5px 9px; border-radius: 7px; border: var(--border); background: var(--card); color: var(--fg, inherit); cursor: pointer; }
         .ost-mini:hover:not(:disabled) { border-color: var(--accent); }
         /* DANGER IS VISIBLE WITHOUT A MOUSE (2026-08-05). This was :hover-only, so on the owner's
