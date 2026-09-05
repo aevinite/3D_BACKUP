@@ -372,8 +372,17 @@ export async function openRestaurantPanel(restaurantId: string, path: string, ow
   if (w) { try { w.opener = null; } catch {} }
   return w;
 }
+// A DATE IT CANNOT READ MUST NOT PRINT "NaNd ago" (sweep #8 T23, 2026-09-06).
+// Its two siblings in this file already guard: `istDate` returns the raw string on an unparseable
+// value and `fullWhen` does the same. This one did not — every comparison against NaN is false, so
+// it fell through all three branches to `Math.floor(NaN / 86400) + "d ago"`. It is the stamp under
+// "updated …" on Platform revenue, Platform analytics and Customers, and beside every row of the
+// activity feed, so a null or a malformed timestamp in any of those replies put a literal NaN in
+// front of the admin — the exact shape of leaked code text this sweep looks for.
 export const timeAgo = (iso: string) => {
-  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "—";
+  const s = Math.floor((Date.now() - t) / 1000);
   if (s < 60) return "just now";
   if (s < 3600) return Math.floor(s / 60) + "m ago";
   if (s < 86400) return Math.floor(s / 3600) + "h ago";
