@@ -202,7 +202,9 @@
     "verify:tip": "node scripts/verify-tip.mjs",
     "verify:owner-s7": "node scripts/verify-owner-territory-s7.mjs",
     "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs",
-    "verify:owner-live500": "node scripts/verify-owner-live-500.mjs"
+    "verify:owner-live500": "node scripts/verify-owner-live-500.mjs",
+    "verify:owner-team-and-logs": "node scripts/verify-owner-team-and-logs.mjs",
+    "verify:owner-team-and-logs-live": "node scripts/verify-owner-team-and-logs-live.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"
