@@ -677,6 +677,48 @@ check("…and it is still built from the RESOLVED window, never the raw query st
   "app/api/owner/analytics/route.ts: the custom cache key reads the raw query values again, so every\n" +
   "       distinct junk value mints its own cache row holding the identical 30-day payload.");
 
+// ══ THE THREE HE PICKED OFF THE REPORT (items 9, 10, 11 — 2026-09-05) ═════════════════════════
+
+// item 9 — the Every dish card names the period its figures cover
+check("the Every dish card carries a period chip, like every other card on the page",
+  /<span>Every dish <span className="mut">· tap one for detail<\/span><\/span>[\s\S]{0,700}?<span className="ow2-tag"/.test(homeC),
+  "app/owner/page.tsx: this was the only card showing period-scoped figures with no period on its\n" +
+  "       face, while the 'Your records' strip below it deliberately spells out its own rolling window\n" +
+  "       — because two dish figures with different windows once read as a contradiction (549 plates\n" +
+  "       against 529, both captioned '30 days'). The list changes completely with the dropdown.");
+check("…and that chip follows the MAIN range rather than a window of its own",
+  /<span>Every dish[\s\S]{0,700}?<span className="ow2-tag" title=\{\[rangeSpanText\(globalRange\), mainAge\(\)\]/.test(homeC),
+  "app/owner/page.tsx: the dish card's chip no longer reads globalRange, so it can name one period\n" +
+  "       while the list under it shows another — the exact fault the chip was added to prevent.");
+
+// item 11 — Who earns more stands down when the whole estate has taken nothing
+check("'Who earns more' says so when NO restaurant has taken anything",
+  /if \(populated\(data\.map\(\(d\) => Number\(d\.revenue\) \|\| 0\)\) === 0\) \{[\s\S]{0,240}?<NotEnough/.test(read("components/owner/Charts.tsx")),
+  "components/owner/Charts.tsx: on a zero-revenue period this drew one flat ₹0 column per restaurant\n" +
+  "       while 'Revenue over time' in the very next card said 'Not enough data yet'. Same screen, same\n" +
+  "       empty morning, two different answers about whether there is anything to show.");
+check("…and the gate is ZERO, not the MIN_POINTS rule the time charts use",
+  !/populated\(data\.map\(\(d\) => Number\(d\.revenue\) \|\| 0\)\) < MIN_POINTS/.test(read("components/owner/Charts.tsx")),
+  "components/owner/Charts.tsx: this is a COMPARISON between restaurants, not a trend. One restaurant\n" +
+  "       on ₹8,000 with four on ₹0 is a real and useful picture — it says exactly who traded. Applying\n" +
+  "       the two-point trend rule here would hide the answer.");
+
+// item 10 — our own test tooling must not trip the app's sign-in limit
+check("the sweep's login helper TESTS an expired session before spending a sign-in",
+  /const probe = await context\.request\.get\(`\$\{base\}\$\{shared\.route \|\| l\.route\}`, \{ maxRedirects: 0/.test(read("scripts/sweep/login.mjs")),
+  "scripts/sweep/login.mjs: the 15-minute TTL is a guess at how long a session lasts; the real cookie\n" +
+  "       lives far longer. Discarding an expired entry meant a long sweep signed in three or four times\n" +
+  "       for no reason — five in five minutes answers 429, and on a stack with alerts on, the owner is\n" +
+  "       messaged about his own test tooling.");
+check("…and it waits out a 429 instead of throwing and leaving the lane dead",
+  /if \(res\.status\(\) === 429\) \{[\s\S]{0,600}?res = await attempt\(\);/.test(read("scripts/sweep/login.mjs")),
+  "scripts/sweep/login.mjs: answering the limit by throwing meant the lane died AND the attempt still\n" +
+  "       counted against the window. Two lanes doing that in a row locks the whole sweep out.");
+check("…and it still says plainly which failure it was",
+  /is still rate-limited after waiting/.test(read("scripts/sweep/login.mjs")),
+  "scripts/sweep/login.mjs: a real wrong-password and a rate limit must not read the same, or the next\n" +
+  "       person raises the limit instead of finding the lane that is looping.");
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
