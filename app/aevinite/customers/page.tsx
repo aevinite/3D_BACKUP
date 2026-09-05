@@ -72,7 +72,27 @@ export default function AdminCustomers() {
   const q = useRef({ search, rid, seg, sort, page });
   q.current = { search, rid, seg, sort, page };
 
+  // ONLY THE NEWEST ANSWER MAY LAND (sweep #8 T23, 2026-09-06).
+  //
+  // This list is asked for again on every keystroke (debounced 320ms), on every filter, segment,
+  // sort and page change, on the 60-second backstop and on every return to the tab — so several
+  // requests are in flight routinely, each for DIFFERENT rows. Nothing sequenced them, so whichever
+  // REPLY arrived last won, regardless of what the screen was asking for.
+  //
+  // Measured on this page before this guard, at 1280x900 with the "9" reply held back 3 seconds:
+  // typing "9" and then "zzzzzzzz" showed the right answer ("Nobody matches") for a moment, and
+  // then FIFTY guests appeared under a search box reading "zzzzzzzz". Nothing on screen said the
+  // table was answering an older question. The same coin-flip decides which page of a paged list
+  // you get after two quick taps of Next.
+  //
+  // The identical fault was found and fixed on Platform analytics (T18, 2026-08-20 — a 30-day
+  // label over the 7-day number); this is its sibling screen, and it is the same remedy: a
+  // monotonic token, not an AbortController, because the losing request may well be warming the
+  // snapshot cache for another tab — we let it finish and simply refuse to WRITE its reply.
+  const reqSeq = useRef(0);
+
   const load = useCallback(async (opts?: { force?: boolean }) => {
+    const mine = ++reqSeq.current;
     try {
       const { search: s, rid: r, seg: g, sort: so, page: p } = q.current;
       const qs = new URLSearchParams();
@@ -83,6 +103,7 @@ export default function AdminCustomers() {
       if (so !== "last_seen_at") qs.set("sort", so);
       if (p) qs.set("page", String(p));
       const j = await (await fetch(`/api/admin/customers?${qs}`, { cache: "no-store" })).json();
+      if (mine !== reqSeq.current) return;          // a newer question is being asked — drop this
       if (j.error) throw new Error(j.error);
       setCustomers(j.customers || []);
       setSummary(j.summary || null);
@@ -91,7 +112,12 @@ export default function AdminCustomers() {
       setCachedAt(j.cachedAt || null);
       if (j.restaurants) setRests(j.restaurants);
       setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) {
+      // A stale FAILURE is just as wrong as a stale list: it would put "Couldn't load" over rows
+      // that loaded perfectly well a moment later.
+      if (mine !== reqSeq.current) return;
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   }, []);
 
   // First load immediate; typing is debounced. One effect for both, so mounting doesn't
