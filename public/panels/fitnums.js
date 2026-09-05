@@ -57,7 +57,19 @@
       var w = el.getBoundingClientRect().width || 1;
       var cur = parseFloat(cs.fontSize) || 16; // cs is live — reads the current size
       var next = Math.max(MIN_PX, Math.floor(cur * ((w - over) / w) * 10) / 10);
-      if (next >= cur) return;
+      // `break`, for the same reason as the `over <= 1` line above — and this one was still a
+      // `return` (sweep #8 T12, 2026-09-04). It fires when the figure's OWN font is already at or
+      // under the 11px floor, so there is no shrinking left to do: exactly the moment the tail
+      // below is for. A `return` there skipped both halves of it — the Indian short form for a
+      // summary, and the `title` that lets somebody read a clipped exact figure at all — so the
+      // one case that most needs a way out got none.
+      // NOT REACHABLE WITH TODAY'S SELECTORS, and said plainly rather than dressed up: every
+      // element in the panels' four `data-fit` lists starts at 14px or more (.ordtotal 14,
+      // .ctotal 15, .ks-val 18/20, .ord-total span 1.5rem, .kot 26), so `next` is always below
+      // `cur` on the first pass and the loop ends at the floor via the line below instead. It
+      // becomes reachable the day anyone adds a small-font selector or puts .fit-num on an 11px
+      // element, which is precisely when nobody will be looking at this loop.
+      if (next >= cur) break;
       el.style.fontSize = next + "px";
       if (next === MIN_PX) break;
     }
