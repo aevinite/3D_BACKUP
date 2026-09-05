@@ -131,7 +131,12 @@ check("the refusal is remembered per scope",
 // while the tiles still drew delta chips and sparklines and the payroll tiles printed real money,
 // all of it from the instant-paint snapshot of an earlier visit.
 check("no stale snapshot figure leaks through the switched-off state",
-  /\(offScope && offScope\.scope === scopeKey\) \? undefined/.test(homeC),
+  // Re-pinned 2026-09-05 (T13 round 2). This asserted the one-line ternary `pl` used to be. `pl`
+  // is now a block — it also refuses a snapshot whose SHAPE this version of the page does not
+  // recognise — and the rule is unchanged: a refused scope yields no payload, from the live cache
+  // or the saved one. Both halves are required, so neither can be dropped quietly.
+  /if \(offScope && offScope\.scope === scopeKey\) return undefined;/.test(homeC)
+    && /const saved = snap\?\.cache\?\.\[/.test(homeC),
   "app/owner/page.tsx: `pl` is serving the instant-paint snapshot again for a scope the server has\n       refused, so the page prints delta chips, sparklines, a full revenue chart and real payroll\n       money underneath a note saying the figures are not shown.");
 check("no card claims to be loading once the section is known to be off",
   /const loadNote = offNote \?/.test(homeC) && (homeC.match(/\{loadNote\}/g) || []).length >= 12,
@@ -140,7 +145,10 @@ check("no card claims to be loading once the section is known to be off",
 // with the section off, no tile may offer a way in, and the popup's own footer says so instead of
 // showing a live link into a hub that would refuse him.
 check("no tile opens its popup when Reports are off",
-  /onOpen=\{offNote \? undefined :/.test(homeC),
+  // Re-pinned 2026-09-05 (T13 round 2): the condition is now `dashed` (offNote OR a failed
+  // overview), which is strictly wider — a tile with nothing behind it is not a button in EITHER
+  // state. `dashed` is asserted to contain offNote alongside, so the original rule still holds.
+  /onOpen=\{dashed \? undefined :/.test(homeC) && /const dashed = !!offNote \|\| ovFailed;/.test(homeC),
   "app/owner/page.tsx: a KPI tile opens its popup unconditionally again. With Reports switched off\n       there is nothing to show and nowhere to send him — the tile must not be a button.");
 check("the popup's footer refuses instead of linking when Reports are off",
   /reportsOn \? \(/.test(homeC) && /Reports are switched off for this restaurant/.test(home),
@@ -413,10 +421,16 @@ check("the search's empty state offers a way to clear it",
 
 // 12 — the switched-off state reaches EVERY tile, today included
 check("\"Today so far\" goes quiet when Reports are switched off",
-  /k="Today so far"[\s\S]{0,400}?offNote \? undefined : \(\) => setTileOpen\("today"\)[\s\S]{0,400}?offNote \? "—" : todayRev/.test(homeC),
+  // Re-pinned 2026-09-05 (T13 round 2). The condition is now named `dashed`, which is
+  // `offNote || ovFailed` — the tile also stops pretending when the OVERVIEW read has failed, a
+  // state in which it used to sit blank for ever. `dashed` still contains offNote (asserted just
+  // below), so the rule this row is about is unchanged and strictly wider.
+  /k="Today so far"[\s\S]{0,400}?dashed \? undefined : \(\) => setTileOpen\("today"\)[\s\S]{0,400}?dashed \? "—" : todayRev/.test(homeC)
+    && /const dashed = !!offNote \|\| ovFailed;/.test(homeC),
   "app/owner/page.tsx: the Today tile prints the overview's figure again. That route ZEROES the day for\n       a restaurant whose Reports the admin took away, so the tile prints ₹0 as fact beside four tiles\n       that honestly say '—'. It reads as 'you took nothing today'.");
 check("…and its \"live\" pill goes with it",
-  /k="Today so far"[\s\S]{0,600}?pill=\{offNote \? undefined : "● live"\}/.test(homeC),
+  /k="Today so far"[\s\S]{0,600}?pill=\{dashed \? undefined : "● live"\}/.test(homeC)
+    && /const dashed = !!offNote \|\| ovFailed;/.test(homeC),
   "app/owner/page.tsx: a '● live' pill is back over an em dash. There is nothing live to point at when\n       the figures are not shown.");
 
 // 13 — never a database id where a person's name goes
@@ -741,6 +755,43 @@ check("…and the wrapper and the card read the SAME condition, so they cannot d
     && /\{logsCardOn && \(/.test(homeC),
   "app/owner/page.tsx: the row's column count and the card's own gate must be one value. Two copies\n" +
   "       of the same condition is how the hole came back the first time.");
+
+// a tile that will never fill must not keep animating
+check("the tiles stop pretending to load once the overview read has FAILED",
+  /const ovFailed = !ov && !!err;/.test(homeC) && /const dashed = !!offNote \|\| ovFailed;/.test(homeC),
+  "app/owner/page.tsx: with /api/owner/overview answering 500, `ov` is never coming — and every tile\n" +
+  "       sat blank for ever: no figure, no dash, no caption, and the '● live' pill still on the Today\n" +
+  "       tile over nothing at all. The red card explains the PAGE; a tile has to explain itself, which\n" +
+  "       is the rule the switched-off state already follows.");
+check("…and each of the five says WHY, rather than just going blank",
+  /const dashSub = offNote \? offSub : "We couldn/.test(homeC)
+    && (homeC.match(/sub=\{dashed \? dashSub/g) || []).length === 5,
+  "app/owner/page.tsx: a dash with no sentence beside it is only half an answer. All five tiles must\n" +
+  "       carry the reason, and it must say 'switched off' or 'we could not load it' — never both.");
+check("a coverage caption never claims a count the page does not have",
+  /const restScopeText = !ov\s*\n?\s*\? "your restaurants"/.test(homeC),
+  "app/owner/page.tsx: with no overview payload restCount is 0, so four chart captions read 'added up\n" +
+  "       across all 0 restaurants' under a red 'Couldn\u2019t load' card. A caption that overstates its\n" +
+  "       coverage is what this line was written for; claiming ZERO coverage as fact is the same fault\n" +
+  "       upside down.");
+check("an unrecognised payload shape is treated as NO payload, not rendered",
+  // Both DOORS and the SUBSTANCE. Asserting only that the function exists and is called let a
+  // sabotaged `isPayload` that returns true unconditionally sit here green — the driven band
+  // (P67411-P67430) catches that, but a static guard that cannot tell a validator from a stub is
+  // not worth much on its own. So it also has to check the fields it walks.
+  /function isPayload\(x: unknown\): boolean \{/.test(homeC)
+    && /p\.scope !== "group" && p\.scope !== "restaurant"/.test(homeC)
+    && /!Array\.isArray\(p\.timeseries\)/.test(homeC)
+    && /!Array\.isArray\(p\.restaurantRevenue\)/.test(homeC)
+    && /!Array\.isArray\(p\.dishes\)/.test(homeC)
+    && /if \(!isPayload\(a\)\) throw new Error/.test(homeC)
+    && /saved && isPayload\(saved\)/.test(homeC),
+  "app/owner/page.tsx: every card walks p.timeseries / p.dishes / p.restaurantRevenue. Hand any of\n" +
+  "       them something that is not an array and monthCompare throws 'p.timeseries is not iterable' —\n" +
+  "       an uncaught render error, so the WHOLE owner panel falls to the error boundary and reads 'We\n" +
+  "       couldn\u2019t load this just now'. Measured with {}, [] and a bare string: shell gone, five\n" +
+  "       tiles gone. Both doors need the check — the live fetch AND the sessionStorage snapshot, which\n" +
+  "       was written by whatever version of this page last ran in the tab.");
 
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",

@@ -139,6 +139,33 @@ type RestA = {
   partial?: string[];
 };
 type Payload = GroupA | RestA;
+// ── A 200 IS NOT A PROMISE THAT THE SHAPE IS RIGHT (T13 round 2, 2026-09-05) ──────────────────
+// Every card on this page reads `p.timeseries`, `p.dishes`, `p.restaurantRevenue` by walking them.
+// Hand any of them something that is not an array and the FIRST one to run — monthCompare — throws
+// "p.timeseries is not iterable", which is not a broken card: it is an uncaught render error, so
+// the whole owner panel falls to the error boundary and reads "We couldn't load this just now".
+// Measured by answering the route with `{}`, with `[]`, and with a bare string: shell gone, five
+// tiles gone, the entire panel replaced.
+//
+// That is not hypothetical. The analytics route's own cache key carries a VERSION precisely
+// because a stored snapshot can serve JSON that is MISSING a field the UI now reads — its comment
+// records that happening on 2026-07-26 and again on 2026-08-31. The instant-paint snapshot in
+// sessionStorage is the same hazard one step closer: it is written by whatever version of this
+// page last ran in the tab.
+//
+// So a payload is checked ONCE, where it enters, and anything else is treated as "no payload" —
+// which every card already knows how to render. Deliberately narrow: it asks only for the marker
+// the route always sets and for the arrays the cards actually walk, so a genuinely new optional
+// field can still be added without tripping it.
+function isPayload(x: unknown): boolean {
+  if (!x || typeof x !== "object") return false;
+  const p = x as Record<string, unknown>;
+  if (p.scope !== "group" && p.scope !== "restaurant") return false;
+  if (!Array.isArray(p.timeseries)) return false;
+  if (p.scope === "group" && !Array.isArray(p.restaurantRevenue)) return false;
+  if (p.scope === "restaurant" && (!Array.isArray(p.dishes) || !p.kpis || typeof p.kpis !== "object")) return false;
+  return true;
+}
 type MoneyTotals = { revenue: number; discount: number; cancelledOrders: number; cancelledValue: number; tax: number };
 type View = { level: "home" } | { level: "restaurant"; rid: string } | { level: "dish"; rid: string; dish: string };
 type Act = { id: string; panel: string; action: string; actor: string | null; table_number: string | null; created_at: string };
@@ -664,9 +691,17 @@ export default function OwnerDashboard() {
   // chart was fully painted, and "Staff pay out" and "After staff pay" printed real money derived
   // from the very revenue that was supposedly hidden. Once the server has refused this scope, the
   // honest answer is that we have nothing to show for it — snapshot included.
-  const pl = useCallback((range: string): Payload | undefined =>
-    (offScope && offScope.scope === scopeKey) ? undefined
-      : cache[`${scopeKey}|${range}`] ?? snap?.cache?.[`${scopeKey}|${range}`], [cache, snap, scopeKey, offScope]);
+  const pl = useCallback((range: string): Payload | undefined => {
+    if (offScope && offScope.scope === scopeKey) return undefined;
+    const live = cache[`${scopeKey}|${range}`];
+    if (live) return live;
+    // The instant-paint snapshot is read from sessionStorage, so it was written by whatever
+    // version of this page last ran in this tab. An older shape is exactly the case the analytics
+    // route bumps its cache version for — see isPayload. Unrecognised means "no payload", which
+    // paints the loading state for a moment rather than taking the whole panel down.
+    const saved = snap?.cache?.[`${scopeKey}|${range}`];
+    return saved && isPayload(saved) ? (saved as Payload) : undefined;
+  }, [cache, snap, scopeKey, offScope]);
   const moneyOf = (range: Range): MoneyTotals | "err" | undefined =>
     offNote ? undefined : moneyCache[`${scopeKey}|${range}`] ?? snap?.money?.[`${scopeKey}|${range}`];
 
@@ -762,6 +797,9 @@ export default function OwnerDashboard() {
       // broken. It gets its own state so the page can say it plainly and stop pretending to load.
       if (a.error && a.disabled) { setOffScope({ scope: sk, msg: errText(a.error) }); setErr(null); setLanded(true); return; }
       if (a.error) throw new Error(errText(a.error));
+      // A 200 carrying something that is not a payload is a FAILED read, not data. Caching it
+      // would crash the panel on the next render and then keep crashing it from the snapshot.
+      if (!isPayload(a)) throw new Error("The figures came back in a shape this screen doesn\u2019t recognise.");
       setOffScope((cur) => (cur && cur.scope === sk ? null : cur));
       setCache((c) => ({ ...c, [key]: a }));
       setLanded(true);

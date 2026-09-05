@@ -44,7 +44,13 @@ export async function closeBrowser() { if (browser) { await browser.close(); bro
  * original response body, so a test can corrupt a REAL payload rather than invent a fake shape.
  */
 export async function openWith({ creds = null, width = 1440, height = 950, mobile = false,
-                                 skin = "dark", path = null, rules = [] } = {}) {
+                                 skin = "dark", path = null, rules = [],
+                                 // `waitUntil` matters for one kind of question: what does the screen
+                                 // look like WHILE a slow read is in flight? "networkidle" waits for
+                                 // that very read to finish, so a check written that way can never
+                                 // see the state it is about — it measured the page after the delay
+                                 // and reported a working loading state as missing.
+                                 waitUntil = "networkidle", settle = 3400 } = {}) {
   const b = await getBrowser();
   // ── serviceWorkers: "block", OR NONE OF THIS WORKS ──────────────────────────────────────────
   // The owner panel registers public/sw.js, and its DATA_PATHS include the /api/owner/* family —
@@ -74,8 +80,8 @@ export async function openWith({ creds = null, width = 1440, height = 950, mobil
     await pg.route((u) => u.href.includes(needle), (rt) => handler(rt, pg));
   }
   await pg.addInitScript((s) => { try { localStorage.setItem("aevidine_skin", s); } catch {} }, skin);
-  await pg.goto(BASE + (path || route), { waitUntil: "networkidle", timeout: 180000 });
-  await pg.waitForTimeout(3400);
+  await pg.goto(BASE + (path || route), { waitUntil, timeout: 180000 });
+  await pg.waitForTimeout(settle);
   return { pg, ctx, errs, reqs, route };
 }
 
@@ -109,7 +115,19 @@ export async function setRange(pg, label) {
   await pg.waitForFunction((l) => (document.querySelector(".owr-btn.main")?.textContent || "").includes(l), label, { timeout: 20000 });
   await pg.waitForTimeout(5000);
 }
-/** The visible text of the main pane — what a person would actually read. */
-export const screenText = (pg) => pg.locator(".adm-main").innerText();
+/**
+ * The visible text of the main pane — what a person would actually read.
+ *
+ * Falls back to the BODY when `.adm-main` is not there, because "not there" is itself an answer:
+ * it means the whole owner panel fell to its error boundary. Waiting 30s and dying with a stack
+ * trace turned that into a crashed harness instead of a red row — which is exactly the moment a
+ * suite needs to be at its clearest. Proven by stubbing isPayload to accept anything: the band now
+ * reports the panel as gone rather than timing out.
+ */
+export const screenText = async (pg) => {
+  if (await pg.locator(".adm-main").count()) return pg.locator(".adm-main").innerText();
+  const body = await pg.locator("body").innerText().catch(() => "");
+  return `[THE OWNER PANEL DID NOT RENDER — no .adm-main] ${body}`;
+};
 /** Console/network problems the PAGE caused, as opposed to our own sign-in traffic. */
 export const pageErrors = (errs) => errs.filter((e) => !/panel-login|favicon|model-viewer|React DevTools/i.test(e));
