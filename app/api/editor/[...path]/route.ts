@@ -1967,24 +1967,41 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Under mrp_tax_treatment='inclusive' an MRP line resolves to 'incl' and its GST is
       // already inside `tax` here; under 'none' it is exempt and contributes none. No branch
       // is needed because the behaviour was frozen onto the line when it was sold.
-      const bills = new Map<string, { base: number; nontax: number; cap: number; disc: number; day: string }>();
+      //
+      // ── AND AT THE RATE EACH ORDER WAS ACTUALLY CHARGED (T24 sweep #8, 2026-09-06) ────────────
+      // This block worked every bill out at ONE rate — `rate`, the restaurant's settings rate —
+      // while selecting `tax_rate` in the column list above and never reading it. That is exactly
+      // the rule the Z-report was moved off on 2026-08-11 (T7 finding F8) and that billTaxOf's own
+      // header describes: a banquet carries its own rate (mig 239) and is inserted into the table's
+      // existing OPEN session (migs 237/239), so an 18% banquet genuinely shares a bill with 5%
+      // food — and this document declared the whole bill at 5%.
+      //
+      // MEASURED on the dev database, French House, August 2026: at each order's own rate the
+      // month's output tax is ₹25,967.60; at the settings rate this reported ₹25,853.55 — ₹114.05
+      // under-declared on the one document that goes to the tax authority. Every other month on
+      // that restaurant carries a single rate and is unchanged to the paisa.
+      //
+      // Fixed by calling billTaxOf() — the SAME function the day-close sheet and the printed bill
+      // use — instead of restating a second copy of the arithmetic here. `rate` stays as the
+      // fallback for rows written before the column existed, which is all it ever was.
+      const bills = new Map<string, { rows: BillTaxRow[]; base: number; nontax: number; day: string }>();
       for (const o of orders) {
         const key = o.session_id || ("solo:" + o.id);
-        const b = bills.get(key) || { base: 0, nontax: 0, cap: 0, disc: 0, day: istDay(o.created_at) };
+        const b = bills.get(key) || { rows: [], base: 0, nontax: 0, day: istDay(o.created_at) };
+        b.rows.push(o as BillTaxRow);
         b.base += o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0);
         b.nontax += Number(o.nontax_amount) || 0;
-        b.cap += discountBaseOf(o, rate);
-        b.disc += Number(o.discount) || 0; b.day = istDay(o.created_at);
+        b.day = istDay(o.created_at);
         bills.set(key, b);
       }
       const byDay = new Map<string, { taxable: number; tax: number; mrp: number; gross: number; bills: number }>();
       let taxable = 0, tax = 0, gross = 0, mrp = 0;
       for (const b of bills.values()) {
-        // Capped exactly the way every discount door caps it (discountBaseOf / mig 272), and
-        // totalled with the one formula subtotal − discount + tax, so a zero-rate month adds up.
-        const dsc = Math.min(b.disc, b.cap);
-        const tx = Math.max(0, b.base - Math.min(dsc, b.base)), t = r2(tx * rate);
-        const tot = r2(b.base + b.nontax - dsc + t);
+        // Capped exactly the way every discount door caps it (discountBaseOf / mig 272) — inside
+        // billTaxOf, at each order's OWN rate — and totalled with the one formula
+        // subtotal − discount + tax, so a zero-rate month still adds up.
+        const { disc: dsc, taxable: tx, tax: t } = billTaxOf(b.rows, rate);
+        const tot = r2(r2(b.base + b.nontax) - dsc + t);
         taxable += tx; tax += t; gross += tot; mrp += b.nontax;
         const d = byDay.get(b.day) || { taxable: 0, tax: 0, mrp: 0, gross: 0, bills: 0 };
         d.taxable += tx; d.tax += t; d.mrp += b.nontax; d.gross += tot; d.bills += 1; byDay.set(b.day, d);
