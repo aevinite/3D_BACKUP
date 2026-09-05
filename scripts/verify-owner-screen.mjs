@@ -100,8 +100,14 @@ check("the activity feed tells a refusal apart from an empty answer",
   /j\.disabled/.test(auditC.slice(0, 0) + homeC) && /setActsOff\(true\)/.test(homeC),
   "app/owner/page.tsx: fetchActs no longer reads `disabled` from the answer, so a 403 becomes the\n       same `null` as \"nothing arrived\" and the card sits on \"Loading…\" for ever.");
 check("the card is left out entirely when the log is off",
-  /!actsOff\s*&&/.test(homeC),
-  "app/owner/page.tsx: the Recent-activity card no longer checks `actsOff`. Module checklist\n       point 6: render nothing when the flag is off — never a card that spins for ever.");
+  // Re-pinned 2026-09-05 (T13 round 2). This asserted the INLINE form `!actsOff &&` and went red
+  // when that condition was named `logsCardOn` and reused by the row's column count — a refactor,
+  // not a regression, and the behaviour is identical. What the row is about: the card's render
+  // gate must still depend on actsOff, however it is spelled, and the gate must be a WITHHOLDING
+  // one (the card absent) rather than a disabled shell.
+  (/!actsOff\s*&&/.test(homeC) || /const logsCardOn = [^;]*!actsOff/.test(homeC))
+    && /\{logsCardOn && \(|!actsOff && \(/.test(homeC),
+  "app/owner/page.tsx: the Recent-activity card no longer depends on `actsOff`. Module checklist\n       point 6: render nothing when the flag is off — never a card that spins for ever.");
 
 // ── 4. the activity feed rides the 60s backstop ─────────────────────────────────────────────────
 {
