@@ -443,6 +443,7 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
   // The SERVER already narrowed to `kind` — passing it again here would be harmless but it would also
   // hide a mismatch between the two, so the client only searches and sorts.
   const list = AUDITSORT.view(removals || [], { q, sort, kindLabel: KINDS, reasonLabel: REMOVAL_REASON });
+  const searching = q.trim().length > 0;
   // What the visible rows come to in money — the figure an owner is really after when they pick
   // "Deleted bills". Only shown when there is money on them at all (a dish off the menu has none).
   const shownMoney = AUDITSORT.sumAmount(list);
@@ -534,7 +535,7 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search a KOT, bill, table, dish, person or reason…"
+          placeholder={pages > 1 ? "Search this page — KOT, bill, table, dish, person or reason…" : "Search a KOT, bill, table, dish, person or reason…"}
           aria-label="Search the removals record"
           style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}
         />
@@ -564,8 +565,13 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
           counted in the database. */}
       {list.length > 0 && (
         <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
-          {list.length.toLocaleString("en-IN")} {list.length === 1 ? "record" : "records"}
-          {pages > 1 ? ` on this page of ${total.toLocaleString("en-IN")}` : ""}
+          {/* A SEARCHED COUNT IS NOT A PAGE COUNT (sweep #8 T15, 2026-09-04). With a search running,
+              `list` is the MATCHES, not the page — so "3 records on this page of 791" put the number
+              of matches where the reader expects the size of the page. Say "3 matches on this page"
+              instead, and keep the page-of-total wording for the unsearched view it was written for. */}
+          {searching
+            ? <>{list.length.toLocaleString("en-IN")} {list.length === 1 ? "match" : "matches"} on this page{pages > 1 ? ` of ${total.toLocaleString("en-IN")} records` : ""}</>
+            : <>{list.length.toLocaleString("en-IN")} {list.length === 1 ? "record" : "records"}{pages > 1 ? ` on this page of ${total.toLocaleString("en-IN")}` : ""}</>}
           {activeKind ? ` · ${KINDS[activeKind] || humanKind(activeKind)}` : ""}
           {shownMoney > 0 ? ` · ${inr(shownMoney)}${pages > 1 ? " on this page" : " in total"}` : ""}
         </p>
@@ -582,8 +588,26 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
         /* Three different empty states, because "nothing matches" and "nothing has happened" are
            different facts — and a narrowed type has a way back out of it. */
         <div className="adm-empty">
+          {/* ── "NOTHING MATCHES THAT." WAS NOT TRUE, AND THE RECORD KNEW IT (sweep #8 T15, 2026-09-04) ──
+              This search box is CLIENT-side: /api/owner/audit takes `page`, `kind` and `rid` and no
+              search term at all, so `q` only ever filters the 200 rows already in hand. The chips
+              beside it are the opposite — they go to the server and count the WHOLE record. Two
+              boxes on one card, one covering everything and one covering a fifth of it, and neither
+              said so.
+              Measured on French House: 791 removals over 4 pages; a reason note that exists on
+              page 2 ("T7 write-test") typed into this box answered, flatly, "Nothing matches that."
+              — 591 of the 791 rows had never been looked at. An owner searching a bill number is
+              told the record does not contain it.
+              So the sentence now says which slice it searched and offers the two ways onward: the
+              type chips, which DO cover everything, and the pages. Searching the whole record needs
+              /api/owner/audit to take a `q` (the Activity half beside it already does) — that route
+              belongs to another lane this sweep, so it is written up as a decision, not half-done
+              here. What must not stand is the screen claiming an answer it never went to find. */}
           {q.trim()
-            ? "Nothing matches that."
+            ? (pages > 1
+                ? <>Nothing on this page matches &ldquo;{q.trim()}&rdquo; — and this search only looks at the {(removals || []).length.toLocaleString("en-IN")} records on <b>page {page} of {pages}</b>. Narrow with a type above (those count the whole record), or turn the page.{" "}
+                    <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setQ("")}>Clear the search</button></>
+                : <>Nothing matches that. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setQ("")}>Clear the search</button></>)
             : activeKind
               ? <>Nothing of that kind. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setKind("")}>Show all</button></>
               : scopeName
