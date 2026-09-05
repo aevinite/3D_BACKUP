@@ -772,7 +772,15 @@ export default function OwnerStaffPage() {
         .ost-find { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-height: 40px;
           padding: 0 11px; border: var(--border); border-radius: 10px; background: var(--card); color: var(--muted); font-size: 12.5px; }
         .ost-find:focus-within { border-color: var(--accent); }
-        .ost-find input { font: inherit; font-size: 13px; border: 0; outline: none; background: none; color: var(--fg, inherit); min-width: 0; width: 210px; }
+        /* 240px, NOT 210 (sweep #8 T15, 2026-09-04). Its own placeholder — "Find someone — name,
+           phone or role" — measures 230px in this font, so at 210 the box cut the last two words and
+           the strip read "Find someone — name, phone o". The wrong half of the screen, which is why
+           three visual sweeps walked past it: on the A35 the input is flex-grown inside a
+           full-width row and gets 288px, so it only ever clipped on the WIDE view. 240 clears the
+           real measurement with a little room, and costs nothing — the field is pushed right by
+           margin-left:auto on a strip with one tab in it. Measured, not guessed: the guard
+           re-measures the placeholder against the box rather than pinning this number. */
+        .ost-find input { font: inherit; font-size: 13px; border: 0; outline: none; background: none; color: var(--fg, inherit); min-width: 0; width: 240px; }
         .ost-find input::-webkit-search-cancel-button { filter: grayscale(1); opacity: .6; }
         .ost-find .ost-x { margin-left: 0; }
         @media (max-width: 560px) {
