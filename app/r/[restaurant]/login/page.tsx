@@ -6,7 +6,7 @@
 // the form (signing in here simply replaces that session).
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
+import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
 import { ROLE_HOME } from "@/lib/panelGate";
 import { isPanelEnabled } from "@/lib/panelAccess";
 import { getRestaurantBySlug, slugMovedTo } from "@/lib/tenant";
@@ -30,7 +30,27 @@ export default async function ScopedLoginPage({
   }
   if (!r) notFound();
   const store = await cookies();
-  const u = await userFromCookie(store.get(USER_COOKIE)?.value);
+  // A RESTAURANT'S OWN SIGN-IN DOOR MUST NOT BREAK WHEN THE DATABASE IS SLOW (sweep #8 T25,
+  // item 4). `/login` was given exactly this treatment as T10's finding F1, and its own comment
+  // says why at length: `userFromCookie` THROWS `AuthDbError` when the staff_users lookup itself
+  // fails, and an uncaught throw in a page renders Next's error page — so the one screen a person
+  // needs in order to START a shift showed a crash instead of the Username / Password card. This
+  // door was left behind, and it is the door every restaurant's staff actually bookmark:
+  // /r/<slug>/login is where requirePanelAt sends anyone who is signed out.
+  //
+  // The answer is the same one /login settled on. The lookup is asked here ONLY to bounce somebody
+  // who is ALREADY signed in, so "I couldn't check" is answered by simply showing the form: the
+  // form is public, nothing on it needs the cookie, and the worst case is that a signed-in person
+  // sees the card for a moment instead of being forwarded. That is strictly better than a crash
+  // page, because the sign-in POST answers 503 "Server can't reach the database — retrying",
+  // which the card shows and they can retry from.
+  let u: Awaited<ReturnType<typeof userFromCookie>> = null;
+  try {
+    u = await userFromCookie(store.get(USER_COOKIE)?.value);
+  } catch (e) {
+    if (!(e instanceof AuthDbError)) throw e;   // a real bug still surfaces
+    console.error("[r/login] couldn't check for an existing session:", e.message);
+  }
   // Already signed in HERE → straight to your panel. Only when the panel is
   // actually reachable, though — a disabled panel (or inactive restaurant) would
   // bounce right back from requirePanelAt and loop the redirects forever; showing

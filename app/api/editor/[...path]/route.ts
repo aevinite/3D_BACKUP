@@ -3859,8 +3859,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
       await log("editor", "order_serve", { restaurant_id: rid, order_id: b, device_id: dev });
-      // Only session_id is needed (for auto-settle); the client discards the body → not the full row.
-      const servedRow = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).single());
+      // NO SECOND READ HERE, AND THE REASON IS AN OBITUARY (sweep #8 T25, item 3). A
+      // `SELECT session_id FROM orders` sat on this line, its result assigned and never used. It
+      // existed only to feed `maybeAutoSettle(...)`, and auto-settle was DELETED on 2026-08-02
+      // when the owner ruled that no table ends itself (commit c0396aee, "a finished table waits
+      // for a person to close it"). The call went; the read that fed it stayed, still commented
+      // "for auto-settle" — a pointer at a feature that no longer exists. That is a whole extra
+      // round trip to Mumbai on ✓ Serve all, the button a manager presses most, for a value
+      // nothing reads. lib/autoSettle is gone; do not bring the read back with it.
       return ok({ ok: true });
     }
     if (a === "orders" && c === "item") {
@@ -3876,8 +3882,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
       const orderStatus = servedCount === items.length ? "served"
         : items.some((i: any) => i.status === "preparing" || i.status === "served") ? "preparing" : "received";
-      // Only session_id is needed (for auto-settle); the client discards the body.
-      const row = must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).eq("restaurant_id", rid).select("session_id"));
+      // return=minimal: the client re-fetches the board, so the write asks for nothing back. The
+      // `.select("session_id")` that used to sit here fed maybeAutoSettle, deleted 2026-08-02 —
+      // see the obituary on serve-all above. (sweep #8 T25, item 3)
+      must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).eq("restaurant_id", rid));
       return ok({ ok: true });
     }
 
@@ -6003,8 +6011,10 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       } else if (patch.status === "received" && cur.status === "cancelled") {
         await log("editor", "order_uncancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: "cancel undone — back on the floor", device_id: deviceIdFrom(req) });
       }
-      // Only session_id is needed (for auto-settle on pay); the client discards the body → no full row.
-      const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select("session_id"));
+      // return=minimal: the client re-fetches, so the write asks for nothing back. The
+      // `.select("session_id")` that used to sit here fed maybeAutoSettle on pay, deleted
+      // 2026-08-02 — see the obituary on serve-all. (sweep #8 T25, item 3)
+      must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid));
       // ── NOW the row is cancelled, so the answer can do its work (mig 337) ──────────────────────
       // made=true keeps the kitchen-fire consumption and prices it as a food_loss expense;
       // made=false reverses the consumption so the ingredients go back on the shelf. Best-effort: the
@@ -6134,9 +6144,29 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
-    // generic delete: DELETE /:kind/:id  (items | categories | filters | settings)
+    // generic delete: DELETE /:kind/:id  (items | categories | filters)
+    //
+    // ⚠️ `settings` IS NOT ON THIS LIST, AND THAT IS THE WHOLE POINT (sweep #8 T25, item 1).
+    // TABLES is shared with the POST upsert above, where `settings` belongs — a manager saving
+    // the floor goes through it. Reusing the same map here meant DELETE inherited a fourth kind
+    // nobody wrote it for: `DELETE /settings/<the row's id>` reached
+    // `sb.from("settings").delete()` with nothing above it but requireRole("manager"), and took
+    // the restaurant's ONE settings row with it — tax rate and components, table count, the whole
+    // floor plan and its table names, the billing name/address/GSTIN, the invoice prefix, the bill
+    // footer, the log-retention window. Driven against the shipped handler with a manager holding
+    // no permissions at all: 200 {ok:true}, one row matched, row gone.
+    //
+    // The same manager is refused EVERY ONE of those fields on the save door two hundred lines up
+    // (MANAGER_BLOCKED_SETTINGS, plus the "refuse any key a manager sends" loop). A door that
+    // cannot be used to change a value must not be usable to remove it wholesale, and no screen
+    // has ever called this — public/panels/editor/app.js only ever sends the tab it is on, which
+    // is items / categories / filters.
+    //
+    // So the list is written out HERE instead of inherited: a kind added to TABLES for the save
+    // path can no longer become deletable by accident.
+    const DELETABLE_KINDS = ["items", "categories", "filters"] as const;
     if (a && id) {
-      const t = TABLES[a];
+      const t = (DELETABLE_KINDS as readonly string[]).includes(a) ? TABLES[a] : undefined;
       if (!t) return err("unknown kind", 404);
       if ((a === "items" || a === "categories" || a === "filters") && !(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the menu");
       // Granular delete gate (non-breaking): a restricted manager can be blocked from deleting.
@@ -6148,7 +6178,28 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       const gonesTitle = ((await sb.from(t.name).select("title").eq(t.key, id).eq("restaurant_id", rid).maybeSingle()).data as { title?: string } | null)?.title || "";
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
-      must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid));
+      //
+      // …AND A DELETE THAT DELETED NOTHING IS NOT A DELETE (sweep #8 T25, item 2). This looked at
+      // neither the row count nor the reply: PostgREST answers a DELETE that matched nothing with
+      // `data: []` and NO error, so `must()` was happy, the caller got 200 {ok:true}, the Activity
+      // log gained "deleted dish: paneer-tikka" and the Audit gained a `menu_item_deleted` removal
+      // row — all for a dish that was not there. Driven against the shipped handler with an empty
+      // menu table: exactly that, both records written.
+      //
+      // It is reachable on an ordinary shift: two people on two devices with the same list open,
+      // both tap ✕. The second one is told it worked and the Audit carries a second person's name
+      // against a removal only the first person made. This file already states the rule three
+      // times over ("a record of something that didn't happen is worse than no record" — the
+      // maintenance route, the password write, the profile write), and the live-order siblings
+      // already answer 404 by name ("That dish isn't on this order any more — refresh").
+      //
+      // `.select(t.key)` is what makes a zero-row match visible; the refusal comes BEFORE the
+      // cache purge and both records, so nothing at all is written for a delete that did nothing.
+      const removed = must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid).select(t.key));
+      if (!removed?.length) {
+        const word = a === "items" ? "dish" : a === "categories" ? "category" : "tag";
+        return err(`That ${word} is already gone — reload to see the current menu.`, 404);
+      }
       // Reconcile dishes that still referenced the deleted category/filter, else they'd
       // keep a dead slug (a category chip that no longer exists / an orphan tag) — 2026-07-06.
       // Best-effort (the delete already succeeded): never fail the request on cleanup.

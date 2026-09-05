@@ -207,6 +207,9 @@
     "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs",
     "verify:owner-live500": "node scripts/verify-owner-live-500.mjs",
     "verify:repair-sweep": "node scripts/verify-repair-health-sweep.mjs",
+    "verify:t25-doors": "node scripts/verify-t25-login-and-panel-apis.mjs",
+    "verify:t25-doors-live": "node scripts/verify-t25-login-and-panel-apis.mjs --live",
+    "verify:t25-writes": "node scripts/verify-t25-editor-writes.mjs",
     "verify:repair-r2": "node scripts/verify-repair-health-round2.mjs"
   },
   "overrides": {
