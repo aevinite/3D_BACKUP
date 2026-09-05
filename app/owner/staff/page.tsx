@@ -103,11 +103,15 @@ export default function OwnerStaffPage() {
   const [, forceRerender] = useState(0);
   // Inline rename / edit-phone editor: which row is open + its draft values.
   const [editing, setEditing] = useState<{ id: string; name: string; phone: string } | null>(null);
-  // Two views of the same page: the PEOPLE (a roster you open a profile from) and the POWERS
-  // (what managers here may do). Splitting them stopped the page being one long scroll where
-  // the person list was buried under toggles. ?tab=powers deep-links the second one.
-  const [tab] = useState<"team" | "powers">(() =>
-    "team"); // powers moved to the admin panel; this page is the roster only
+  // THE `tab` STATE IS GONE (sweep #8 T15, 2026-09-04). It was declared as `"team" | "powers"`,
+  // initialised to "team" by a function that could return nothing else, never given a setter, and
+  // read by exactly one `{tab === "team" && …}` that was therefore always true. The comment above it
+  // described the two-view page in the present tense — "the PEOPLE … and the POWERS … ?tab=powers
+  // deep-links the second one" — over its own one-line obituary, so the file both promised a Powers
+  // view and admitted it had been removed, in adjacent lines. Nothing reads `?tab` anywhere in the
+  // product. The Powers tab left in the access rebuild (owner, 2026-07-31: "only admin will have all
+  // this permission"); its CSS was deleted 2026-08-19 and its controls 2026-08-04. This is the last
+  // of it — "a new way replaces the old one", finished rather than left half-standing.
   // Synchronous re-entry guard so a fast double-click on "Add" can't fire twice before
   // React flushes the disabled state (the exact race that showed a raw duplicate-key error).
   const addingRef = useRef(false);
@@ -595,8 +599,7 @@ export default function OwnerStaffPage() {
             </div>
 
 
-            {/* ── TEAM tab: the roster ───────────────────────────────────────────── */}
-            {tab === "team" && <>
+            {/* ── The roster. There is no second view; see the note where `tab` used to live. ── */}
             {/* A HEADING WITH NOTHING UNDER IT SAYS NOTHING (T13 sweep, 2026-08-27 — read the
                 screenshot). Search for someone who is DISABLED and every match lands in the group
                 below, so this read: "Team", then blank, then "Disabled · 1 — cannot sign in". The
@@ -737,7 +740,6 @@ export default function OwnerStaffPage() {
                 </details>
               )}
             </form>
-            </>}
           </div>
         );
       })}
