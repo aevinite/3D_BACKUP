@@ -253,7 +253,36 @@ export const inrP = (n: number) => {
 // with that person's name, and those are NOT a manager-PIN authorisation. So we exclude them:
 // a login row must show "Done by <name>", never a "Manager PIN" block (owner 2026-07-25:
 // "if there is not manager PIN involved, the manager PIN part should not be there").
-const SELF_ACTOR_ACTIONS = new Set(["login", "logout", "profile_setup", "profile_update", "password_change", "pin_set"]);
+// `login_failed` WAS MISSING FROM THIS SET, AND IT IS THE ONE THAT READS WORST (sweep #8 T15,
+// 2026-09-04). A refused sign-in on a tablet stamps `actor` with the person who typed the wrong
+// password — so every one of them fell through to the manager-PIN branch and was drawn with the
+// gold 🔑 chip whose own tooltip says "Unlocked by this manager's PIN". Measured on French House:
+// 10 of the 200 rows on page 1 of the owner's Activity log, each reading
+//
+//     TABLET   Wrong password  🔑 ZZTEST GAMMA  · login failed · wrong password for "zztest Gamma"
+//
+// i.e. the record said a manager authorised the attempt that was in fact REFUSED — the exact
+// inversion, on the screen whose job is to say who allowed what. It breaks the owner's own rule
+// quoted three lines above (2026-07-25: "if there is not manager PIN involved, the manager PIN part
+// should not be there"), and a failed sign-in is plainly one of the "person's OWN identity actions"
+// this set already exists to exclude; it was simply never added when the action was introduced.
+// One entry fixes the owner's Audit & logs, the admin's Everything log and the manager panel at
+// once, because all three read this helper.
+// Guarded by `npm run verify:owner-team-and-logs`, which fails if any action name this app writes
+// containing login/logout/password/pin/profile is missing from this set — so the NEXT one is caught
+// when it is added, not four months later on a screenshot.
+//
+// THREE were missing, not one — and the guard is what found the other two. `login_failed` was the
+// visible one (10 rows on page 1). `login_denied` is the same shape and arguably worse: panel-login
+// writes it with `logAction(u.role, …)`, so for a WAITER whose panel has been switched off, or whose
+// restaurant sits in the recycle bin, the row reads "signed in but the tablet panel is not enabled"
+// — a refusal — under a chip claiming a manager unlocked it. `login_blocked` logs on the admin panel
+// today and so never reaches the tablet branch, but it belongs to the same class and costs nothing
+// to name here rather than waiting for the panel to change.
+const SELF_ACTOR_ACTIONS = new Set([
+  "login", "login_failed", "login_denied", "login_blocked", "logout",
+  "profile_setup", "profile_update", "password_change", "pin_set",
+]);
 export function isManagerPinRow(row: { panel?: string; action?: string; actor?: string | null }): boolean {
   return row.panel === "tablet" && !!row.actor && !SELF_ACTOR_ACTIONS.has(row.action || "");
 }
