@@ -318,8 +318,17 @@ function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; valu
     const close = (e: MouseEvent) => {
       if (!(e.target as HTMLElement | null)?.closest?.(`[data-rng="${id}"]`)) setOpen(false);
     };
+    // ── ESCAPE, TOO (T13 round 2, 2026-09-05) ───────────────────────────────────────────────
+    // This closed on an outside click and on the phone's BACK, and did nothing at all on Escape —
+    // while the tile popup and the estate drawer have both bound it for months. The drawer was
+    // given Escape on 2026-08-06 for exactly this reason, written down at the time: "on a desktop
+    // that meant the one habit that works everywhere else silently did nothing here." This is the
+    // control on the page he touches most, and it was the one still missing it.
+    // Measured from the keyboard: the list stayed open and aria-expanded stayed true.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("click", close); document.removeEventListener("keydown", key); };
   }, [open, id]);
   const cur = RANGES.find((r) => r.k === value)!;
   return (
@@ -384,8 +393,11 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
     const close = (e: MouseEvent) => {
       if (!(e.target as HTMLElement | null)?.closest?.("[data-restdrop]")) setOpen(false);
     };
+    // Escape as well — the same gap, and the same cure, as the period dropdown above.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("click", close); document.removeEventListener("keydown", key); };
   }, [open]);
   const idx = activeRid ? rests.findIndex((r) => r.id === activeRid) : -1;
   const cur = idx >= 0 ? rests[idx] : null;

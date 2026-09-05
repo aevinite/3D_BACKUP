@@ -793,6 +793,20 @@ check("an unrecognised payload shape is treated as NO payload, not rendered",
   "       tiles gone. Both doors need the check — the live fetch AND the sessionStorage snapshot, which\n" +
   "       was written by whatever version of this page last ran in the tab.");
 
+// every overlay on this page closes on Escape — the habit that works everywhere else
+check("the period dropdown closes on Escape, like every other overlay here",
+  /const key = \(e: KeyboardEvent\) => \{ if \(e\.key === "Escape"\) setOpen\(false\); \};/.test(homeC)
+    && (homeC.match(/document\.addEventListener\("keydown", key\);/g) || []).length >= 2,
+  "app/owner/page.tsx: the period dropdown and the restaurant picker closed on an outside click and\n" +
+  "       on the phone's BACK, and did nothing at all on Escape — while the tile popup and the estate\n" +
+  "       drawer have both bound it for months. The drawer was given Escape on 2026-08-06 for exactly\n" +
+  "       this reason: 'on a desktop that meant the one habit that works everywhere else silently did\n" +
+  "       nothing here.' The period dropdown is the control on this page he touches most.");
+check("…and both listeners are removed when it closes",
+  (homeC.match(/document\.removeEventListener\("keydown", key\);/g) || []).length >= 2,
+  "app/owner/page.tsx: a keydown listener left attached after the dropdown closes is a document-wide\n" +
+  "       handler that fires for every key on every screen after it.");
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
