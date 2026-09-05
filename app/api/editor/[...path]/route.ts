@@ -6168,7 +6168,28 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       const gonesTitle = ((await sb.from(t.name).select("title").eq(t.key, id).eq("restaurant_id", rid).maybeSingle()).data as { title?: string } | null)?.title || "";
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
-      must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid));
+      //
+      // …AND A DELETE THAT DELETED NOTHING IS NOT A DELETE (sweep #8 T25, item 2). This looked at
+      // neither the row count nor the reply: PostgREST answers a DELETE that matched nothing with
+      // `data: []` and NO error, so `must()` was happy, the caller got 200 {ok:true}, the Activity
+      // log gained "deleted dish: paneer-tikka" and the Audit gained a `menu_item_deleted` removal
+      // row — all for a dish that was not there. Driven against the shipped handler with an empty
+      // menu table: exactly that, both records written.
+      //
+      // It is reachable on an ordinary shift: two people on two devices with the same list open,
+      // both tap ✕. The second one is told it worked and the Audit carries a second person's name
+      // against a removal only the first person made. This file already states the rule three
+      // times over ("a record of something that didn't happen is worse than no record" — the
+      // maintenance route, the password write, the profile write), and the live-order siblings
+      // already answer 404 by name ("That dish isn't on this order any more — refresh").
+      //
+      // `.select(t.key)` is what makes a zero-row match visible; the refusal comes BEFORE the
+      // cache purge and both records, so nothing at all is written for a delete that did nothing.
+      const removed = must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid).select(t.key));
+      if (!removed?.length) {
+        const word = a === "items" ? "dish" : a === "categories" ? "category" : "tag";
+        return err(`That ${word} is already gone — reload to see the current menu.`, 404);
+      }
       // Reconcile dishes that still referenced the deleted category/filter, else they'd
       // keep a dead slug (a category chip that no longer exists / an orphan tag) — 2026-07-06.
       // Best-effort (the delete already succeeded): never fail the request on cleanup.
