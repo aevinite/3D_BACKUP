@@ -719,6 +719,23 @@ check("…and it still says plainly which failure it was",
   "scripts/sweep/login.mjs: a real wrong-password and a rate limit must not read the same, or the next\n" +
   "       person raises the limit instead of finding the lane that is looping.");
 
+// ══ ROUND 2 (2026-09-05) ══════════════════════════════════════════════════════════════════════
+
+// a withheld card must not leave a hole where it was
+check("the dish row collapses to ONE column when the activity card is withheld",
+  /className=\{`ow2-two\$\{logsCardOn \? "" : " ow2-one"\}`\}/.test(homeC)
+    && /\.ow2-two\.ow2-one \{ grid-template-columns: minmax\(0, 1fr\); \}/.test(home),
+  "app/owner/page.tsx: when the admin takes Audit & logs away, the Recent-activity card is correctly\n" +
+  "       left out — and the grid kept its second track, so the dish list stayed in the left half and the\n" +
+  "       right half was blank. Measured at 1440px: a 582x500 rectangle of empty page in the middle of\n" +
+  "       the dashboard, which reads exactly like a card that failed to load. The comment beside that\n" +
+  "       gate had claimed 'the dish list beside it simply takes the row' since it was written.");
+check("…and the wrapper and the card read the SAME condition, so they cannot disagree",
+  /const logsCardOn = ov\?\.entitlements\?\.logs !== false && !actsOff;/.test(homeC)
+    && /\{logsCardOn && \(/.test(homeC),
+  "app/owner/page.tsx: the row's column count and the card's own gate must be one value. Two copies\n" +
+  "       of the same condition is how the hole came back the first time.");
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),

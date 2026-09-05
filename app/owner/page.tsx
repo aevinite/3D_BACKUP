@@ -1408,6 +1408,9 @@ export default function OwnerDashboard() {
    *  server has not refused this payload. Used to stop the KPI tiles linking into a Reports hub
    *  that would only refuse him — the hero shortcut has always been gated, the tiles never were. */
   const reportsOn = ov?.entitlements?.reports !== false && !offNote;
+  /** Is the Recent-activity card being drawn at all? The dish row beside it reads the SAME value,
+   *  so a withheld card can never leave the grid holding an empty track (T13 round 2). */
+  const logsCardOn = ov?.entitlements?.logs !== false && !actsOff;
   const kMain = kpiOf(globalRange);
   const money = moneyOf(globalRange);
   const trendPayload = pl(globalRange);
@@ -2010,7 +2013,17 @@ export default function OwnerDashboard() {
             </div>
           )}
 
-          <div className="ow2-two" style={{ marginTop: 12 }}>
+          {/* ── A WITHHELD CARD MUST NOT LEAVE A HOLE (T13 round 2, 2026-09-05) ──────────────────
+              This row is a two-column grid holding "Every dish" and "Recent activity". When the
+              admin takes Audit & logs away, the second card is correctly left out entirely
+              (module checklist point 6) — and the comment beside that gate has always claimed
+              "the dish list beside it simply takes the row". It did not. The grid kept both
+              tracks, so the dish list stayed in the left 582px and the right 582px was empty:
+              measured at 1440px, a 582x500 rectangle of blank page in the middle of the
+              dashboard, which reads exactly like a card that failed to load.
+              One column when there is one card. `logsCardOn` is the same condition the card
+              itself renders on, so the two can never disagree. */}
+          <div className={`ow2-two${logsCardOn ? "" : " ow2-one"}`} style={{ marginTop: 12 }}>
             {/* Every dish — tap one for detail */}
             <div className="adm-card">
               <div className="ow2-ct">
@@ -2041,7 +2054,7 @@ export default function OwnerDashboard() {
                 from the server's own 403 and `logs` is the entitlement the overview really sends.
                 Either one leaves the card out entirely (module checklist point 6) and the dish
                 list beside it simply takes the row. */}
-            {ov?.entitlements?.logs !== false && !actsOff && (
+            {logsCardOn && (
             <div className="adm-card">
               <div className="ow2-ct">
                 <span>Recent activity <span className="mut">· who did what</span></span>
@@ -2316,6 +2329,9 @@ export default function OwnerDashboard() {
            they close the string and the build fails with "Identifier cannot follow number". */
         .ow2-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
         .ow2-two > * { min-width: 0; }
+        /* One card, one column — see the note by the dish row. Without this a withheld card left
+           its track behind and the page showed a blank half-width rectangle. */
+        .ow2-two.ow2-one { grid-template-columns: minmax(0, 1fr); }
         /* A card that hands its leftover height to its chart instead of leaving a blank
            band under it. The grid already stretches both cards to the taller one's height;
            this is what lets the SHORTER card's content actually use it. */
