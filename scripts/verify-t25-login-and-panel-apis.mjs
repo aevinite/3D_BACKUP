@@ -173,6 +173,8 @@ check("P04648", "this door says 'admin console', not 'staff sign in'",
   has(S.staffLoginForm, "Restaurant OS · admin console"));
 check("P04649", "there is a plain link to the staff door for someone at the wrong one",
   has(CODE.staffLoginForm, 'href="/login"'));
+// R19 and R24 are the owner's own decisions, recorded in docs/REJECTED-IDEAS.md — these two
+// checks exist so nobody "fixes" either of them again.
 check("P04650", "the 100vh on /staff-login is left alone (REJECTED R19)",
   has(S.staffLoginPage, 'minHeight: "100vh"') && has(S.staffLoginPage, "REJECTED (owner, 2026-08-13)"));
 check("P04651", "the SVG brand mark is left alone (REJECTED R24)",
