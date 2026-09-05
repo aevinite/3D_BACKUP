@@ -654,8 +654,14 @@ export default function OwnerDashboard() {
   // estate of 5 with reports off for 1, a caption claimed 5 over numbers covering 4. A money
   // label that overstates its own coverage is exactly what a decision gets built on.
   const reportedCount = (ov?.restaurants ?? []).filter((r) => !r.reportsOff).length;
-  const restScopeText =
-    reportedCount === restCount
+  // ── AND A COUNT WE DO NOT HAVE IS NOT A COUNT (T13 round 2, 2026-09-05) ───────────────────────
+  // With no overview payload `restCount` is 0, so this read "all 0 restaurants" — and printed it
+  // into four chart captions while a red "Couldn't load" card sat above them. A caption that
+  // overstates its coverage is the exact fault this line was written for; claiming ZERO coverage
+  // as fact is the same fault upside down. When we have no list, say so without a number.
+  const restScopeText = !ov
+    ? "your restaurants"
+    : reportedCount === restCount
       ? `all ${restCount} restaurant${restCount === 1 ? "" : "s"}`
       : `${reportedCount} of ${restCount} restaurants · takings hidden for ${restCount - reportedCount}`;
   const scopeKey = activeRid ?? "group";
@@ -1556,11 +1562,23 @@ export default function OwnerDashboard() {
   // `offNote` means no analytics payload is ever coming, so every tile prints an em dash and says
   // why instead of animating a blank for ever, and none of them opens a popup or a report.
   const offSub = "Reports are switched off";
+  // ── A TILE THAT WILL NEVER FILL MUST NOT KEEP ANIMATING (T13 round 2, 2026-09-05) ─────────────
+  // The five tiles show a loading state while `ov` is missing. If the overview read FAILED, `ov`
+  // is never coming — so every tile sat blank for ever: no figure, no dash, no caption, and the
+  // "● live" pill still on the Today tile over nothing at all. Measured by answering
+  // /api/owner/overview with a 500: five empty tiles, a live pill, and four captions claiming
+  // "all 0 restaurants", under a red "Couldn't load" card.
+  // The red card explains the page; the tiles have to explain THEMSELVES, which is the same rule
+  // the switched-off state follows one line above. It retries on the 60s tick, so this is a
+  // statement about now, not for ever.
+  const ovFailed = !ov && !!err;
+  const dashed = !!offNote || ovFailed;
+  const dashSub = offNote ? offSub : "We couldn\u2019t load this just now";
   const kpiRow = (
     <div className="adm-stats ow2-stats ow2-stats5">
-      <Kpi k="Revenue" onOpen={offNote ? undefined : () => setTileOpen("revenue")} v={offNote ? "—" : (kMain?.revenue ?? 0)} money compact loading={!offNote && !kMain}
+      <Kpi k="Revenue" onOpen={dashed ? undefined : () => setTileOpen("revenue")} v={dashed ? "—" : (kMain?.revenue ?? 0)} money compact loading={!dashed && !kMain}
         delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
-        prevTitle={PREV_LABEL[globalRange]} sub={offNote ? offSub : PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
+        prevTitle={PREV_LABEL[globalRange]} sub={dashed ? dashSub : PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
         {/* ── "₹0 PER PAID ORDER" IS THE SAME FAULT THE TODAY TILE WAS FIXED FOR
             (T13 sweep, 2026-09-04) ──────────────────────────────────────────────────────────────
             The average is `revenue / paidOrders`, guarded to 0 when nothing has been paid — so
@@ -1571,8 +1589,8 @@ export default function OwnerDashboard() {
             "₹0" beside "79 orders today" read as a bug to him, and the Today tile now says
             "24 orders, none paid yet" instead. This is his own sentence, on the tile that raises
             the same doubt. Derived from figures already in hand — no new query. */}
-      <Kpi k="Orders" onOpen={offNote ? undefined : () => setTileOpen("orders")} v={offNote ? "—" : (kMain?.orders ?? 0)} loading={!offNote && !kMain}
-        sub={offNote ? offSub
+      <Kpi k="Orders" onOpen={dashed ? undefined : () => setTileOpen("orders")} v={dashed ? "—" : (kMain?.orders ?? 0)} loading={!dashed && !kMain}
+        sub={dashed ? dashSub
           : kMain ? (kMain.paidOrders ? `${inr(kMain.avg)} per paid order` : "none paid yet")
           : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
@@ -1602,16 +1620,16 @@ export default function OwnerDashboard() {
                                           is the same fact stated as a statistic)
           NO NEW QUERY. It is derived from the two numbers the overview payload already carries, so
           this costs nothing — which is the whole reason it is done here and not in the route. */}
-      <Kpi k="Today so far" onOpen={offNote ? undefined : () => setTileOpen("today")} v={offNote ? "—" : todayRev} money compact
-        loading={!offNote && !ov} pill={offNote ? undefined : "● live"}
-        sub={offNote ? offSub
+      <Kpi k="Today so far" onOpen={dashed ? undefined : () => setTileOpen("today")} v={dashed ? "—" : todayRev} money compact
+        loading={!dashed && !ov} pill={dashed ? undefined : "● live"}
+        sub={dashed ? dashSub
           : todayOrd === 0 ? "no orders yet today"
           // "216 orders today · nothing paid yet" wrapped with "yet" alone on the second line of a
           // ~180px tile (seen in the shot). Same fact, eight characters shorter, one clean wrap.
           : todayRev === 0 ? `${todayOrd} order${todayOrd === 1 ? "" : "s"}, none paid yet`
           : `${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
-      <Kpi k="Expenses" onOpen={offNote ? undefined : () => setTileOpen("expenses")} v={offNote ? "—" : expensesOut} money compact loading={!offNote && !kMain}
-        sub={offNote ? offSub
+      <Kpi k="Expenses" onOpen={dashed ? undefined : () => setTileOpen("expenses")} v={dashed ? "—" : expensesOut} money compact loading={!dashed && !kMain}
+        sub={dashed ? dashSub
           : foodLost > 0 && staffOut > 0 ? "staff pay + food lost"
           : foodLost > 0 ? `${foodLostRows} cancellation${foodLostRows === 1 ? "" : "s"} where food was made`
           // A FAILED FOOD-LOSS READ IS NOT A ZERO (T12 sweep, 2026-08-27). The route returns null
@@ -1621,8 +1639,8 @@ export default function OwnerDashboard() {
           // so a total that is too low looked complete.
           : kMain && kMain.foodLoss == null ? "staff pay only — we couldn\u2019t read the food figure"
           : hasPayroll ? `${kMain!.staffPay!.entries} staff payment${kMain!.staffPay!.entries === 1 ? "" : "s"}` : "nothing recorded yet"} />
-      <Kpi k="On hand" onOpen={offNote ? undefined : () => setTileOpen("onhand")} v={offNote ? "—" : onHand} money compact loading={!offNote && !kMain}
-        sub={offNote ? offSub : "revenue minus expenses"} />
+      <Kpi k="On hand" onOpen={dashed ? undefined : () => setTileOpen("onhand")} v={dashed ? "—" : onHand} money compact loading={!dashed && !kMain}
+        sub={dashed ? dashSub : "revenue minus expenses"} />
     </div>
   );
 
