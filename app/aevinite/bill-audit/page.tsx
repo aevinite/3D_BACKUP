@@ -337,7 +337,11 @@ export default function AdminBills() {
 
       {/* Filters */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <button className="blz-chip" onClick={() => setState("")} style={chip(state === "")} title="Every bill loaded on this page \u2014 use the dates or the search to reach older ones">All <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? rows.length : "\u2014"}</span></button>
+        {/* A REAL EM DASH, NOT `\u2014` (T22 sweep, 2026-09-06). A JSX string ATTRIBUTE is not a
+            JavaScript string literal — it carries no backslash escapes — so this tooltip printed the
+            six characters `\u2014` to anyone who hovered the All chip. The two `{"\u2014"}` below are
+            inside expressions, where the escape IS processed, which is why only this one leaked. */}
+        <button className="blz-chip" onClick={() => setState("")} style={chip(state === "")} title="Every bill loaded on this page — use the dates or the search to reach older ones">All <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? rows.length : "\u2014"}</span></button>
         {ORDER.map((k) => (
           <button key={k} className="blz-chip" onClick={() => setState(k)} style={chip(state === k, META[k].tone)}>
             <span className="hue-ink" style={{ ["--hue" as string]: META[k].tone, display: "inline-flex" }}><Ico n={META[k].icon} s={14} /></span>
