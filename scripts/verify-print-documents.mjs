@@ -749,7 +749,12 @@ P("an unconfigured restaurant prints NO GSTIN line rather than inventing one", (
 console.log("\n§L · printing's prose everywhere else");
 const OTHER = [
   ["the owner's settings page", "app/owner/settings/page.tsx"],
-  ["the owner settings route",  "app/api/owner/settings/route.tsx"],
+  // (`app/api/owner/settings/route.tsx` was listed here as well, with an x on the end. There is
+  // no such file — an API route is `.ts` — so every check about it was answered against an empty
+  // string and could only pass. The real route is the line below, and it was already here, so
+  // nothing is lost by dropping the typo. Caught by verify:guards-alive, which is red repo-wide
+  // in the PostToolUse hook and therefore refuses Write/Edit for every session until it is fixed.
+  //  — sweep #8 T12, 2026-09-05)
   ["the owner settings API",    "app/api/owner/settings/route.ts"],
   ["the waiter tablet",         "public/panels/tablet/app.js"],
   ["the print board words",     "lib/printBoardWords.ts"],
