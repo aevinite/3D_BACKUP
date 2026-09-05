@@ -749,7 +749,13 @@ P("an unconfigured restaurant prints NO GSTIN line rather than inventing one", (
 console.log("\n§L · printing's prose everywhere else");
 const OTHER = [
   ["the owner's settings page", "app/owner/settings/page.tsx"],
-  ["the owner settings route",  "app/api/owner/settings/route.tsx"],
+  // ── ONE LINE REMOVED, 2026-09-05 (T13 of sweep #8, while running its own gates) ──────────────
+  // This list carried "app/api/owner/settings/route.tsx" AND "…/route.ts". Only the second exists;
+  // the first was the same file with a typo'd extension, so `read()` returned "" and every check
+  // about it passed without asserting anything — the exact "a missing file reads as empty" fault
+  // verify:guards-alive exists to catch, and it had that guard RED on origin/main. Deleted rather
+  // than repointed, because the correct path is the very next line and repointing would only
+  // duplicate the checks.
   ["the owner settings API",    "app/api/owner/settings/route.ts"],
   ["the waiter tablet",         "public/panels/tablet/app.js"],
   ["the print board words",     "lib/printBoardWords.ts"],
