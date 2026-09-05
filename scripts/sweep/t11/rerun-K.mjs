@@ -436,9 +436,12 @@ async function sheet(opts = {}) {
   await r.page.evaluate(() => { document.body.innerHTML = ""; });
   for (const src of ["/panels/backstack.js", "/panels/billcustomer.js"]) await r.page.addScriptTag({ url: src });
   await r.page.evaluate((o) => {
-    window.api = async () => ({ rows: [] });
+    // `ask()` takes its door as an OPTION (`const api = o.api`), never as a global — see the note
+    // in rerun-LMN.mjs. These rows do not need a lookup to answer, but passing it correctly means
+    // the sheet behaves as it does in a panel rather than in a half-wired fixture.
+    const api = async () => ({ matches: [] });
     window.LFH_BACK = window.LFH_BACK || { layer: () => () => {} };
-    window.__res = window.LFH_BILLCUST.ask(o);
+    window.__res = window.LFH_BILLCUST.ask({ api, ...o });
   }, opts);
   await r.page.waitForSelector(".bcust-overlay", { timeout: 8000 }).catch(() => {});
   return r;

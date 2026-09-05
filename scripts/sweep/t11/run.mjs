@@ -7,6 +7,7 @@ await import("./rerun-GHIJ.mjs");
 await import("./rerun-F.mjs");
 await import("./rerun-F-live.mjs");
 await import("./rerun-K.mjs");
+await import("./rerun-LMN.mjs");
 await import("./new-A.mjs");
 await import("./new-B.mjs");
 await import("./new-E.mjs");
