@@ -204,9 +204,18 @@ for (const f of ledgers) {
     fail(`${DIR}/${f} exists but INDEX.md has no row for it — add its territory and its ID block, ` +
          `or the next sweep will not know it is there.`);
 }
-for (const m of index.matchAll(/\bT(\d+)\.md\b/g)) {
+// ── THE SAME WIDENING ON THE WAY BACK (T13 of sweep #8, 2026-09-05) ───────────────────────────
+// `isLedger` above now accepts `T<n>-<round>.md`, so the FORWARD check ("every ledger is in the
+// index") sees a round file. This loop is the REVERSE check ("every index entry is real"), and it
+// still matched `\bT(\d+)\.md\b` — which cannot match "T17-R2.md" at all. So an index row naming
+// a round ledger that had been deleted or never filed would have said nothing, in the one file
+// whose job is to keep the index and the disk agreeing.
+for (const m of index.matchAll(/\bT(\d+(?:[.-][\w.-]+)?)\.md\b/g)) {
   const f = `T${m[1]}.md`;
-  if (ledgers.includes(f)) continue;
+  // Two ways to be real, and both are legitimate: it is a ledger this run counted, OR it is simply
+  // a file on disk. The second covers a companion that carries no phase rows — the index is right
+  // to name such a file, and asking the filesystem is what this check was always about.
+  if (ledgers.includes(f) || existsSync(join(DIR, f))) continue;
   const near = index.slice(Math.max(0, m.index - 500), m.index + 500);
   if (!/NEVER FILED|not yet filed|unmerged branch/i.test(near))
     fail(`INDEX.md points at ${DIR}/${f}, which does not exist here — either file it, or say ` +

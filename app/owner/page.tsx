@@ -1197,8 +1197,29 @@ export default function OwnerDashboard() {
       return buckets.map((bk) => by.get(bk) ?? 0);
     };
     const watchR = watchId ? p.restaurantRevenue.find((r) => r.id === watchId)! : null;
+    // ── NO TROPHY FOR ₹0 (T13 sweep, 2026-09-04) ────────────────────────────────────────────────
+    // `best` is `restaurantRevenue[0]`, and that list is ordered by revenue DESC in the database
+    // (mig 321), so it is the right restaurant — EXCEPT when every restaurant has taken nothing,
+    // which on a 4+ estate is every morning until the first bill is paid. Then the banner drew:
+    //
+    //     🏆 TOP PERFORMER · TODAY   My Little French House   ₹0 · 0% of revenue
+    //
+    // Measured on a real five-restaurant owner at the Today range. Two things were wrong with it.
+    // It crowns a winner of nothing — the exact "a figure it cannot stand behind" this page was
+    // swept for twice. And with every revenue equal the two orderings tie-break differently, so
+    // the trophy named French House while the estate table one card below ranked BURGER BARN #1:
+    // one screen, two answers about who is top, because `rank` sorts the OVERVIEW's row order and
+    // `best` reads the ANALYTICS payload's.
+    //
+    // The page's own insight strip already had this right — "X leads with N% of revenue" is
+    // guarded by `total > 0`, which is why the strip sat honestly empty in the same screenshot
+    // where the banner crowned someone. Same guard here. `watch` needs no change: it already
+    // requires a first half greater than zero, so it was null throughout.
+    // Both halves null ⇒ `(callouts.best || callouts.watch)` is false ⇒ the banner is simply not
+    // drawn, which is what "nobody has taken anything yet" should look like.
+    const bestEarned = !!best && best.revenue > 0 && total > 0;
     return {
-      best: best ? { id: best.id, name: best.name, revenue: best.revenue, share: total ? best.revenue / total : 0, spark: sparkFor(best.id) } : null,
+      best: bestEarned ? { id: best.id, name: best.name, revenue: best.revenue, share: total ? best.revenue / total : 0, spark: sparkFor(best.id) } : null,
       watch: watchR ? { id: watchR.id, name: watchR.name, pct: watchPct, spark: sparkFor(watchR.id) } : null,
     };
   }, [pl, globalRange]);
@@ -1499,8 +1520,20 @@ export default function OwnerDashboard() {
       <Kpi k="Revenue" onOpen={offNote ? undefined : () => setTileOpen("revenue")} v={offNote ? "—" : (kMain?.revenue ?? 0)} money compact loading={!offNote && !kMain}
         delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
         prevTitle={PREV_LABEL[globalRange]} sub={offNote ? offSub : PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
+        {/* ── "₹0 PER PAID ORDER" IS THE SAME FAULT THE TODAY TILE WAS FIXED FOR
+            (T13 sweep, 2026-09-04) ──────────────────────────────────────────────────────────────
+            The average is `revenue / paidOrders`, guarded to 0 when nothing has been paid — so
+            before the first bill is settled this caption read "₹0 per paid order" as a fact,
+            directly under a count of 24 real orders. It says each paid order averaged nothing,
+            when the truth is that none has been paid.
+            The owner already settled this wording one tile to the right, on 2026-08-31 (item 26):
+            "₹0" beside "79 orders today" read as a bug to him, and the Today tile now says
+            "24 orders, none paid yet" instead. This is his own sentence, on the tile that raises
+            the same doubt. Derived from figures already in hand — no new query. */}
       <Kpi k="Orders" onOpen={offNote ? undefined : () => setTileOpen("orders")} v={offNote ? "—" : (kMain?.orders ?? 0)} loading={!offNote && !kMain}
-        sub={offNote ? offSub : kMain ? `${inr(kMain.avg)} per paid order` : PREV_LABEL[globalRange] || "whole history"}
+        sub={offNote ? offSub
+          : kMain ? (kMain.paidOrders ? `${inr(kMain.avg)} per paid order` : "none paid yet")
+          : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
       {/* ── AND THAT INCLUDES TODAY (T12 sweep, 2026-08-27) ───────────────────────────────────
@@ -1982,11 +2015,22 @@ export default function OwnerDashboard() {
             <div className="adm-card">
               <div className="ow2-ct">
                 <span>Every dish <span className="mut">· tap one for detail</span></span>
+                {/* ── THE ONE CARD THAT DID NOT SAY WHICH PERIOD IT COVERS (owner's item 9,
+                    2026-09-05) ────────────────────────────────────────────────────────────────
+                    Every other card on this page carries the period chip; this one carried none,
+                    and its title named no period either — while the "Your records" strip a few
+                    inches below deliberately spells out "LAST 30 DAYS (ROLLING)" precisely because
+                    two dish figures with different windows once read as a contradiction (T5,
+                    2026-08-06: 549 plates against 529, both captioned "30 days").
+                    The list changes completely with the dropdown, and its own empty state already
+                    says "in this range" — so the card knew; it just did not say so once it had
+                    something to show. Same chip, same corner, same tooltip as its neighbours. */}
                 <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                   <span className="rv-sort">
                     <button className={dishSort === "revenue" ? "on" : ""} onClick={() => setDishSort("revenue")}>By revenue</button>
                     <button className={dishSort === "qty" ? "on" : ""} onClick={() => setDishSort("qty")}>By qty</button>
                   </span>
+                  <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
                 </span>
               </div>
               <DishList payload={pl(globalRange) as RestA | undefined} sort={dishSort} note={loadNote}
@@ -2055,8 +2099,26 @@ export default function OwnerDashboard() {
           : dishView === "missing" ? (
             <div className="adm-empty">
               No sales for <b>{view.dish}</b> in {RANGE_LABEL[globalRange]}.{" "}
-              <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => viewTo({ level: "restaurant", rid: view.rid })}>
-                <i className="fas fa-arrow-left" style={{ marginRight: 6 }} aria-hidden="true" /> Back to restaurant
+              {/* ── THE ONE WAY BACK OFF THIS SCREEN TOOK A ONE-RESTAURANT OWNER SOMEWHERE
+                  THAT HAS NO HERO (T13 sweep, 2026-09-04) ─────────────────────────────────────
+                  This button went to `{ level: "restaurant" }` unconditionally, and for an owner
+                  with ONE restaurant that level is not a place: home IS his restaurant. The ✕ in
+                  the dish header already knew that (`single ? home : restaurant`) and the dish
+                  back-stack layer knew it too (`!single`); this button was the one place that
+                  did not, so tapping it landed him on a dashboard with the tiles and the charts
+                  but WITHOUT the hero — no restaurant name, no Active pill, no "17 tables open
+                  now", and none of the three shortcuts (Reports / Team / Feedback), because the
+                  hero renders on `view.level === "home" && single`.
+                  Measured on the real page as the diag owner: hero 1 → 0, shortcuts 3 → 0.
+                  And it STUCK: the drill is persisted per tab, so sessionStorage held
+                  {"level":"restaurant"} and a REFRESH came back hero-less too, with no picker
+                  (he has one restaurant) and no back button on screen — only the browser's own
+                  BACK recovered it.
+                  Reachable the ordinary way: open a dish, change the period to one where that
+                  dish sold nothing, take the only control offered. */}
+              <button className="adm-btn" style={{ marginLeft: 6 }}
+                onClick={() => viewTo(single ? { level: "home" } : { level: "restaurant", rid: view.rid })}>
+                <i className="fas fa-arrow-left" style={{ marginRight: 6 }} aria-hidden="true" /> {single ? "Back to the dashboard" : "Back to the restaurant"}
               </button>
             </div>
           ) : (<>
@@ -2427,7 +2489,10 @@ export default function OwnerDashboard() {
           .hq-scroll { overflow: visible; max-height: none; }
           .hq-table :global(thead) { display: none; }
           .hq-table, .hq-table :global(tbody), .hq-table :global(tr), .hq-table :global(td) { display: block; width: auto; }
-          .hq-table :global(tr.hq-row) { border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 10px 12px; margin: 0 12px 10px; }
+          /* position: relative so the visually-hidden rank cell below has a containing block
+             INSIDE this row. See the note on td.rk — without it that cell resolved against the
+             document and gave the whole page 388px of phantom scroll. */
+          .hq-table :global(tr.hq-row) { position: relative; border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 10px 12px; margin: 0 12px 10px; }
           .hq-table :global(tr.hq-row:hover) :global(td) { background: none; }
           /* label on the left, figure on the right — the shape a person reads a list of numbers in,
              and the one the tile popups on this same page already use. */
@@ -2436,6 +2501,22 @@ export default function OwnerDashboard() {
           /* the name line reads as the heading of its own block */
           .hq-table :global(td.l) { display: block; font-size: 15px; font-weight: 800; padding: 0 0 6px; text-align: left; }
           .hq-table :global(td.l) :global(.hq-nm) { max-width: 100%; }
+          /* ── AN ABSOLUTE WITH NO POSITIONED ANCESTOR IS POSITIONED AGAINST THE DOCUMENT
+             (T13 sweep, 2026-09-04) ───────────────────────────────────────────────────────────────
+             This is the visually-hidden pattern — keep the rank in the accessibility tree, take it
+             off the screen — and it was right to prefer it over display:none. But tr.hq-row had
+             no position, so the cell's containing block was the INITIAL one: the document. Its
+             static position sits partway down the estate list, so it stretched
+             documentElement.scrollHeight to 1168px against a 780px viewport.
+             What that looked like on a two-restaurant owner's phone, measured: the page could be
+             dragged 388px, which moves .adm — the whole panel — to top:-388. The top bar (the ☰,
+             the scope pill, Connected, the skin toggle, sign-out) went completely off screen, the
+             revenue card was cut off mid-chart, and the bottom half of the screen was blank black.
+             Nothing in the app calls window.scrollTo any more (that line was removed for the
+             scroll-memory work), so no code path was broken — a finger was all it took.
+             The row now carries position: relative, so the cell is confined to its own row and
+             the document goes back to exactly one viewport. Only inside this media query: above
+             760px the table is a real table and this rule never applies. */
           .hq-table :global(td.rk) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
           .hq-table :global(td.go) { display: none; }
           /* every figure says what it is — there is no header above it any more */

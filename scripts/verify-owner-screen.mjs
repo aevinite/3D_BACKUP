@@ -609,6 +609,116 @@ check("…and the phone rule does not reach the desktop",
   }
 }
 
+// ══ THE FIVE FIXES FROM SWEEP #8 / T13 (2026-09-04) ═══════════════════════════════════════════
+// Each of these was a real fault on the owner's dashboard, each has one commit, and each is
+// watched here so it cannot come back quietly. The driven versions live in
+// scripts/sweep/t13/ (P66701–P67296); these are the cheap static half that needs no server.
+
+// item 1 — a one-restaurant owner lost his restaurant's header on the way back from a dish
+check("the way out of an empty dish goes HOME for a one-restaurant owner",
+  /viewTo\(single \? \{ level: "home" \} : \{ level: "restaurant", rid: view\.rid \}\)/.test(homeC),
+  "app/owner/page.tsx: the 'No sales for this dish' button sends a ONE-restaurant owner to a\n" +
+  "       'restaurant' level that he does not have. The hero renders on (home && single), so he lands\n" +
+  "       on a dashboard with no restaurant name, no ACTIVE pill, no open-table count and none of the\n" +
+  "       three shortcuts — and the drill is remembered per tab, so a refresh comes back the same way.");
+check("…and it is LABELLED for the place it actually goes",
+  /\{single \? "Back to the dashboard" : "Back to the restaurant"\}/.test(homeC),
+  "app/owner/page.tsx: the empty-dish button's words and its destination can disagree again.");
+check("…and the dish header's ✕ still agrees with it",
+  (homeC.match(/single \? "Back to the dashboard" : "Back to the restaurant"/g) || []).length >= 3,
+  "app/owner/page.tsx: the ✕ and the empty-state button word the same journey differently.");
+
+// item 2 — the estate crowned a top performer that had taken ₹0
+check("the top-performer banner is not awarded for ₹0",
+  /const bestEarned = !!best && best\.revenue > 0 && total > 0;/.test(homeC),
+  "app/owner/page.tsx: on a 4+ restaurant estate before the first bill of the day, the banner read\n" +
+  "       '🏆 TOP PERFORMER · TODAY — <name> — ₹0 · 0% of revenue'. It crowns a winner of nothing, and\n" +
+  "       because every revenue is equal at that point the two orderings tie-break differently — the\n" +
+  "       trophy named one restaurant while the table below ranked another #1. The page's own insight\n" +
+  "       strip already guards on the group total; this is the same guard.");
+check("…and `best` still reads the payload the database orders by revenue",
+  /const best = p\.restaurantRevenue\[0\];/.test(homeC),
+  "app/owner/page.tsx: the banner no longer reads restaurantRevenue[0]. That list is ORDER BY revenue\n" +
+  "       DESC in the database (mig 321); if the banner stops reading [0], this contract has moved and\n" +
+  "       the guard above is watching the wrong thing.");
+
+// item 3 — the Orders tile stated an average before anything was paid
+check("the Orders caption does not state an average when nothing has been paid",
+  /kMain\.paidOrders \? `\$\{inr\(kMain\.avg\)\} per paid order` : "none paid yet"/.test(homeC),
+  "app/owner/page.tsx: with real orders on the floor and nothing settled, the Orders tile read\n" +
+  "       '₹0 per paid order' as a fact. The owner settled this wording on the tile beside it on\n" +
+  "       2026-08-31 — '₹0' next to '79 orders today' read as a bug to him — and that tile says\n" +
+  "       'none paid yet'. Same words, same doubt, no new query.");
+
+// item 4 — on a phone the whole panel could be dragged, taking the top bar off screen
+check("the stacked estate row is a positioned box, so nothing inside it escapes to the document",
+  /\.hq-table :global\(tr\.hq-row\) \{ position: relative;/.test(home),
+  "app/owner/page.tsx: the estate table's rank cell is hidden off-screen with position:absolute so a\n" +
+  "       screen reader still announces it. Without `position: relative` on its ROW, that cell resolves\n" +
+  "       against the DOCUMENT and its resting place is partway down the list — measured at 360px, the\n" +
+  "       page became 1168px tall against a 780px screen, so the whole panel could be dragged up 388px,\n" +
+  "       taking the top bar (menu, scope, Connected, skin, sign-out) off screen and leaving the bottom\n" +
+  "       half blank. Keep this inside the 760px media query.");
+check("…and the rank cell is still hidden by CLIPPING, not by display:none",
+  /\.hq-table :global\(td\.rk\) \{ position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset\(50%\); \}/.test(home),
+  "app/owner/page.tsx: display:none would take the rank out of the accessibility tree entirely. The\n" +
+  "       clipping pattern keeps it announced while off screen — that is the point of it.");
+
+// item 5 — a custom date range ending today recomputed on every open
+check("a custom period's cache key is stable, so its saved figures can be found again",
+  /\? `custom:\$\{from\.slice\(0, 10\)\}:\$\{to\.slice\(0, 10\)\}`/.test(code(read("app/api/owner/analytics/route.ts"))),
+  "app/api/owner/analytics/route.ts: for a custom range the key carried the RESOLVED end of the\n" +
+  "       window, and for any range including today that end is 'now' down to the millisecond — so no\n" +
+  "       two requests could share a key and every open recomputed the whole payload, leaving another\n" +
+  "       cache row behind under a key nothing can hit again. Keyed to the DAY, like the eight fixed\n" +
+  "       periods already are; the fingerprint is what notices new orders inside that day.");
+check("…and it is still built from the RESOLVED window, never the raw query string",
+  !/custom:\$\{sp\.get\("from"\)/.test(code(read("app/api/owner/analytics/route.ts"))),
+  "app/api/owner/analytics/route.ts: the custom cache key reads the raw query values again, so every\n" +
+  "       distinct junk value mints its own cache row holding the identical 30-day payload.");
+
+// ══ THE THREE HE PICKED OFF THE REPORT (items 9, 10, 11 — 2026-09-05) ═════════════════════════
+
+// item 9 — the Every dish card names the period its figures cover
+check("the Every dish card carries a period chip, like every other card on the page",
+  /<span>Every dish <span className="mut">· tap one for detail<\/span><\/span>[\s\S]{0,700}?<span className="ow2-tag"/.test(homeC),
+  "app/owner/page.tsx: this was the only card showing period-scoped figures with no period on its\n" +
+  "       face, while the 'Your records' strip below it deliberately spells out its own rolling window\n" +
+  "       — because two dish figures with different windows once read as a contradiction (549 plates\n" +
+  "       against 529, both captioned '30 days'). The list changes completely with the dropdown.");
+check("…and that chip follows the MAIN range rather than a window of its own",
+  /<span>Every dish[\s\S]{0,700}?<span className="ow2-tag" title=\{\[rangeSpanText\(globalRange\), mainAge\(\)\]/.test(homeC),
+  "app/owner/page.tsx: the dish card's chip no longer reads globalRange, so it can name one period\n" +
+  "       while the list under it shows another — the exact fault the chip was added to prevent.");
+
+// item 11 — Who earns more stands down when the whole estate has taken nothing
+check("'Who earns more' says so when NO restaurant has taken anything",
+  /if \(populated\(data\.map\(\(d\) => Number\(d\.revenue\) \|\| 0\)\) === 0\) \{[\s\S]{0,240}?<NotEnough/.test(read("components/owner/Charts.tsx")),
+  "components/owner/Charts.tsx: on a zero-revenue period this drew one flat ₹0 column per restaurant\n" +
+  "       while 'Revenue over time' in the very next card said 'Not enough data yet'. Same screen, same\n" +
+  "       empty morning, two different answers about whether there is anything to show.");
+check("…and the gate is ZERO, not the MIN_POINTS rule the time charts use",
+  !/populated\(data\.map\(\(d\) => Number\(d\.revenue\) \|\| 0\)\) < MIN_POINTS/.test(read("components/owner/Charts.tsx")),
+  "components/owner/Charts.tsx: this is a COMPARISON between restaurants, not a trend. One restaurant\n" +
+  "       on ₹8,000 with four on ₹0 is a real and useful picture — it says exactly who traded. Applying\n" +
+  "       the two-point trend rule here would hide the answer.");
+
+// item 10 — our own test tooling must not trip the app's sign-in limit
+check("the sweep's login helper TESTS an expired session before spending a sign-in",
+  /const probe = await context\.request\.get\(`\$\{base\}\$\{shared\.route \|\| l\.route\}`, \{ maxRedirects: 0/.test(read("scripts/sweep/login.mjs")),
+  "scripts/sweep/login.mjs: the 15-minute TTL is a guess at how long a session lasts; the real cookie\n" +
+  "       lives far longer. Discarding an expired entry meant a long sweep signed in three or four times\n" +
+  "       for no reason — five in five minutes answers 429, and on a stack with alerts on, the owner is\n" +
+  "       messaged about his own test tooling.");
+check("…and it waits out a 429 instead of throwing and leaving the lane dead",
+  /if \(res\.status\(\) === 429\) \{[\s\S]{0,600}?res = await attempt\(\);/.test(read("scripts/sweep/login.mjs")),
+  "scripts/sweep/login.mjs: answering the limit by throwing meant the lane died AND the attempt still\n" +
+  "       counted against the window. Two lanes doing that in a row locks the whole sweep out.");
+check("…and it still says plainly which failure it was",
+  /is still rate-limited after waiting/.test(read("scripts/sweep/login.mjs")),
+  "scripts/sweep/login.mjs: a real wrong-password and a rate limit must not read the same, or the next\n" +
+  "       person raises the limit instead of finding the lane that is looping.");
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),

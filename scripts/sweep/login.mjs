@@ -100,13 +100,58 @@ export async function loginAs(context, role, base = "http://localhost:4000", cre
     return shared.route;
   }
 
-  realLogins++;
-  const res = await context.request.post(`${base}/api/panel-login`, {
+  // ── A SESSION PAST ITS TTL IS NOT A DEAD SESSION — TRY IT BEFORE SPENDING A LOGIN ────────────
+  // (T13 of sweep #8, 2026-09-05 — the owner picked it as his item 10.)
+  //
+  // The 15-minute TTL above is this file's guess at how long a session lasts. The real cookie
+  // lives far longer, so a sweep that runs for an hour across a dozen separate scripts threw away
+  // a perfectly good session three or four times and signed in again for no reason. That is what
+  // tripped the app's own limit during this very sweep: five sign-ins in five minutes answers 429,
+  // and on a stack with alerts switched on the owner is messaged about his own test tooling.
+  //
+  // So an EXPIRED entry is now tested rather than discarded: replay its cookies and ask the panel
+  // route whether it still answers. A GET is not rate-limited and costs nothing anyone notices;
+  // a sign-in is the expensive, alarming thing. If it still works we re-stamp it and make ZERO
+  // login requests.
+  if (shared && Array.isArray(shared.cookies) && shared.cookies.length) {
+    try {
+      await context.addCookies(shared.cookies);
+      const probe = await context.request.get(`${base}${shared.route || l.route}`, { maxRedirects: 0, timeout: 30000 });
+      const signedIn = probe.status() === 200;
+      if (signedIn) {
+        sessionCache.set(key, { cookies: shared.cookies, route: shared.route || l.route });
+        writeDiskSession(key, { cookies: shared.cookies, route: shared.route || l.route, at: Date.now() });
+        return shared.route || l.route;
+      }
+    } catch { /* the probe failing just means we fall through and sign in properly */ }
+  }
+
+  // ── AND IF WE DO HAVE TO SIGN IN, NEVER WALK INTO THE WALL TWICE ─────────────────────────────
+  // The limit is five attempts per five minutes. Answering a 429 by throwing meant the lane died
+  // AND the attempt still counted; two lanes doing that in a row is how a whole sweep ends up
+  // locked out. Wait the window out and try once more — honouring Retry-After when the server
+  // sends one — and say plainly in the error which it was, so a real wrong-password never gets
+  // mistaken for a limit.
+  const attempt = () => context.request.post(`${base}/api/panel-login`, {
     headers: { "content-type": "application/json" },
     data: { username: l.username, password: l.password },
   });
+  realLogins++;
+  let res = await attempt();
+  if (res.status() === 429) {
+    const after = Number(res.headers()["retry-after"]);
+    const waitMs = Math.min(Math.max(Number.isFinite(after) ? after * 1000 : 60_000, 5_000), 5 * 60_000);
+    console.warn(`[loginAs] ${l.username}: the app's sign-in limit answered 429. Waiting ${Math.round(waitMs / 1000)}s ` +
+      `rather than hammering it — this is our own tooling being too eager, not a fault in the app.`);
+    await new Promise((r) => setTimeout(r, waitMs));
+    realLogins++;
+    res = await attempt();
+  }
   if (!res.ok()) {
-    throw new Error(`loginAs: panel-login as ${l.username} → HTTP ${res.status()}`);
+    throw new Error(res.status() === 429
+      ? `loginAs: panel-login as ${l.username} is still rate-limited after waiting. Some other lane is ` +
+        `signing in in a loop — find it rather than raising the limit.`
+      : `loginAs: panel-login as ${l.username} → HTTP ${res.status()}`);
   }
   // Cache the resulting cookies, re-pointed at `base` so any context can accept them.
   const cookies = (await context.cookies()).map((c) => ({ name: c.name, value: c.value, url: base }));

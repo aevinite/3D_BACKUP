@@ -471,6 +471,23 @@ export function WhoEarnsMore({ data, onSelect }: {
   onSelect?: (id: string) => void;
 }) {
   if (!data.length) return <Empty />;
+  // ── NOBODY HAS TAKEN ANYTHING IS NOT A CHART (T13 sweep, 2026-09-05 — owner's item 11) ────────
+  // Seen on a real five-restaurant owner at the Today range, first thing in the morning: this card
+  // drew five flat columns all labelled ₹0, while "Revenue over time" in the very next card said
+  // "Not enough data yet". Same screen, same empty morning, two different answers about whether
+  // there is anything to show.
+  //
+  // The rule the rest of this file follows is MIN_POINTS — fewer than two populated points and you
+  // get the NotEnough card. That rule is deliberately NOT applied here, and the difference matters:
+  // this is a COMPARISON between restaurants, not a trend over time. One restaurant on ₹8,000 with
+  // four on ₹0 is a real and useful picture — it says exactly who traded and who did not — and
+  // hiding it behind "not enough data" would throw away the answer. So the gate is ZERO, not two:
+  // draw the comparison whenever there is anything at all to compare, and only stand down when the
+  // whole estate has taken nothing.
+  if (populated(data.map((d) => Number(d.revenue) || 0)) === 0) {
+    return <NotEnough height={230}
+      hint="No restaurant has taken anything in this period yet — this fills in with the first paid bill." />;
+  }
   // The chart picks itself off the count — no toggle. "Line" is gone with the toggle
   // because the card sitting immediately beside this one is already the
   // revenue-over-time lines, so it was the same picture twice.
