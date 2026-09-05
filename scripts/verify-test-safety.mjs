@@ -261,12 +261,30 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   const refusesNonBackup = (src) =>
     (/wnsfcizclkbobwzcxqsf/.test(src) && /(Refusing|refuse|process\.exit\(1\)|throw new Error)/.test(src)) ||
     (/refuseUnlessDevTestDb\s*\(/.test(src) && /devStacks\.mjs/.test(src));
+  /* A GUARD THAT LOOKS FOR THE LIVE REF IS NOT A SCRIPT THAT USES IT (sweep #8 T12, 2026-09-05).
+     The comment above already names this class - "naming the live ref in order to refuse it is
+     the good pattern … the first version of this check punished exactly the scripts doing it
+     right" - and handles ONE form of it, the script that refuses to run off the dev database.
+     There is a third form, and two of them landed on main today:
+
+         return !/kclqkmdxnwlhtyrducku|3D_Menu_Av|env\.AV\.live/.test(all)
+
+     That is a sweep check asserting that nothing ELSE names the live stack. It points at nothing.
+     Flagging it made this guard red, and because it runs in the PostToolUse hook a red here
+     refuses Write and Edit for EVERY session in this repo, not just the one that wrote the file.
+
+     So: a live ref that appears only inside a regex literal handed straight to `.test()` is a
+     QUESTION about the string, never a use of it. Everything else still counts - a script that
+     really points at the client stack puts the id in a URL, a string or an env lookup, and all
+     three survive this strip. Sabotage-checked both ways before shipping. */
+  const stripLiveChecks = (src) => src.replace(/\/(?:[^/\\\n[]|\\.|\[(?:[^\]\\]|\\.)*\])+\/[gimsuy]*\s*\.test\s*\(/g, " REGEX_TEST(");
   const bad = [];
   for (const f of files) {
     if (BY_DESIGN.test(f)) continue;
     const src = read(f);
     if (refusesNonBackup(src)) continue;
-    for (const { what, re } of LIVE) if (re.test(src)) bad.push(`${f} — names ${what}`);
+    const used = stripLiveChecks(src);
+    for (const { what, re } of LIVE) if (re.test(used)) bad.push(`${f} — names ${what}`);
   }
   check(
     "no script points at the live client stack",

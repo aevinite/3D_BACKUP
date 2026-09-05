@@ -66,7 +66,7 @@
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=79344a64"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=50328560"></script>
+  <script src="/panels/connbadge.js?v=004aecb5"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and BEFORE app.js.
@@ -84,7 +84,7 @@
   <!-- undobar: the shared "take it back" bar after a Ready mis-tap. -->
   <script src="/panels/undobar.js?v=e5a33483"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
-  <script src="/panels/fitnums.js?v=49e195eb" data-fit=".kot"></script>
+  <script src="/panels/fitnums.js?v=0610dc4b" data-fit=".kot"></script>
   <!-- billdoc: THE kitchen ticket, written down once (LFH_BILLDOC) and shared with the manager
        panel and the admin's sample, so a ticket can never look different in two places. -->
   <script src="/panels/billdoc.js?v=86daa56d"></script>

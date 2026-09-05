@@ -161,7 +161,7 @@
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=79344a64"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=50328560"></script>
+  <script src="/panels/connbadge.js?v=004aecb5"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
@@ -215,7 +215,7 @@
        renderer long ago — `dashCard()` now writes a bare `<b>` — so the exclusion had nothing to
        exclude, and `.dash-card b.ktext` in style.css had nothing to style. If a word-valued tile
        comes back, the class goes back on the element AND back in this list, together. -->
-  <script src="/panels/fitnums.js?v=49e195eb" data-fit=".dash-card .kbody b,.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
+  <script src="/panels/fitnums.js?v=0610dc4b" data-fit=".dash-card .kbody b,.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
   <script src="/panels/editor/inventory.js?v=aabfc336"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC) and shared with
