@@ -71,7 +71,7 @@
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=79344a64"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=50328560"></script>
+  <script src="/panels/connbadge.js?v=004aecb5"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and BEFORE app.js.
@@ -99,7 +99,7 @@
   <!-- undobar: the shared "take it back" bar after a Serve/Ready/Settle mis-tap. -->
   <script src="/panels/undobar.js?v=e5a33483"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
-  <script src="/panels/fitnums.js?v=49e195eb" data-fit=".ordtotal,.ctotal"></script>
+  <script src="/panels/fitnums.js?v=0610dc4b" data-fit=".ordtotal,.ctotal"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC). This panel does
        not print, but it reads the shared money rules from here — discPct(), the one definition of
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
