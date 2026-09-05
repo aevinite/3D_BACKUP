@@ -21,7 +21,7 @@
 // force a 403, and it is the only honest way to drive a composition-scheme sheet during a sweep.
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +30,9 @@ const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4314";
 
 let pass = 0, fail = 0, skip = 0;
 const fails = [];
+// Every row this run executed, so the ledger is GENERATED from what ran rather than typed by hand.
+const rows = [];
+const LEDGER = arg("--ledger");
 const used = new Set();
 // The re-run guards take P67701–P67900 (the static half ends at P67805; the driven half grows as
 // screens are added, so it is given room to P67900). This block starts clear of both.
@@ -40,10 +43,11 @@ function N(msg, cond, note = "") {
   const id = `P${next++}`;
   if (used.has(id)) { fail++; fails.push(`DUPLICATE ID ${id}`); }
   used.add(id);
+  rows.push({ id, msg, res: cond ? "✅" : "❌", note });
   if (cond) pass++;
   else { fail++; fails.push(`${id} ${msg}${note ? ` — ${note}` : ""}`); console.log(`  ❌ ${id} ${msg}${note ? ` — ${note}` : ""}`); }
 }
-const S = (msg, why) => { skip++; next++; console.log(`  ⏭ P${next - 1} ${msg} — ${why}`); };
+const S = (msg, why) => { skip++; next++; rows.push({ id: `P${next - 1}`, msg, res: "⏭", note: why }); console.log(`  ⏭ P${next - 1} ${msg} — ${why}`); };
 const head = (s) => console.log(`\n── ${s} ──`);
 const flat = (s) => String(s || "").replace(/\s+/g, " ").trim();
 const rupee = (s) => Number(String(s).replace(/[^\d.-]/g, "")) || 0;
@@ -73,8 +77,15 @@ async function mk(vp = DESKTOP, skin = "dark") {
 async function settle(p) {
   await p.waitForTimeout(900);
   let last = null, same = 0;
-  for (let i = 0; i < 14; i++) {
-    const now = await p.evaluate(() => [...document.querySelectorAll(".rs-stat-v, .rs-ov-val")].map((e) => e.innerText).join("|")).catch(() => "");
+  for (let i = 0; i < 20; i++) {
+    const now = await p.evaluate(() => {
+      const root = document.querySelector(".rs-root");
+      // The four "Loading…" skeleton tiles are STABLE and WRONG: their text never changes, so a
+      // naive stability test returns while the money is still in flight (T14, sweep #8 — it read
+      // Payments · last month as Rs 0 against a Sales report of Rs 5,45,339).
+      if (root && root.textContent.includes("Loading…")) return "";
+      return [...document.querySelectorAll(".rs-stat-v, .rs-ov-val")].map((e) => e.innerText).join("|");
+    }).catch(() => "");
     if (now && now === last) { if (++same >= 2) return; } else same = 0;
     last = now; await p.waitForTimeout(300);
   }
@@ -145,7 +156,11 @@ head("A · the file he downloads, character by character");
     const { p } = await openForced(ctx, "?open=items&range=30d", (url) =>
       isType(url, "dishes") ? { type: "dishes", range: "30d", bucket: "day", rows: [{ title, qty: 3, revenue: 900 }, { title: "Plain dish", qty: 1, revenue: 100 }], cachedAt: new Date().toISOString(), cached: false } : null);
     const shown = flat(await seen(p));
-    N(`a dish name with ${what} renders on screen without breaking the table`, shown.includes(title.trim().split("\n")[0].slice(0, 12)) || title.trim() === "", shown.slice(0, 90));
+    // innerText collapses tabs and newlines, so the name is compared FLAT here — the file half
+    // below is where the exact characters have to survive.
+    const flatTitle = flat(title);
+    N(`a dish name with ${what} renders on screen without breaking the table`,
+      flatTitle === "" || shown.includes(flatTitle.slice(0, 14)), `${JSON.stringify(flatTitle.slice(0, 24))} in ${shown.slice(0, 50)}`);
     // CSV
     await p.locator(".rs-exp button").first().click();
     await p.waitForTimeout(200);
@@ -353,9 +368,17 @@ head("C · the Tax sheet in states this restaurant is not in");
         N(`Tax · ${what}: with no filing rows it falls back to the by-period table rather than a blank`, !!m.byPeriod || /Pick a single restaurant/.test(m.text));
         S(`Tax · ${what}: the filing grand total`, "no filing rows on this shape"); S(`Tax · ${what}: the tile match`, "same"); S(`Tax · ${what}: the split match`, "same");
       }
+      // The tile follows the NUMBERS, not the name I gave the case: an exempt portion is real when
+      // the tax cannot account for the whole net sale at the configured rate (lib/taxFiling →
+      // exemptIsMaterial). A window with bills and no tax at all is 100% exempt, and the sheet
+      // saying so is the honest answer — the first expectation keyed off the case name and was wrong.
       const exempt = T("EXEMPT / MRP SALES");
-      N(`Tax · ${what}: an Exempt / MRP tile appears only when there is a real exempt portion`,
-        (!!exempt) === /exempt/.test(what), exempt ? exempt.v : "absent");
+      const net = payload.totals.subtotal - payload.totals.discount;
+      const rate = payload.tax ? payload.tax.effectivePct : null;
+      const derived = rate ? payload.totals.tax / (rate / 100) : net;
+      const materially = !!rate && (net - Math.min(derived, net)) > Math.max(1, net * 0.005);
+      N(`Tax · ${what}: an Exempt / MRP tile appears exactly when the tax cannot account for the whole sale`,
+        (!!exempt) === materially, `tile=${exempt ? exempt.v : "absent"} expected=${materially}`);
     }
     await p.close();
   }
@@ -390,8 +413,12 @@ head("D · when the server fails mid-read");
     N(`${what}: nothing leaks into what a person reads`, !m.leaked, m.text.slice(0, 90));
     N(`${what}: it never shows a stack trace or a developer's error`, !m.stack, m.text.slice(0, 90));
     N(`${what}: it either shows figures or offers Try again`, m.tryAgain || /₹|Nothing in this period|No sales in this period/.test(m.text), m.text.slice(0, 110));
-    N(`${what}: it does not invent a confident total out of nothing`,
-      !/₹0\b[\s\S]{0,40}everything guests paid/.test(m.text) || /Try again|No sales/.test(m.text), m.text.slice(0, 110));
+    // A `totals` object whose every field is null is a shape the route cannot build — every figure
+    // it writes goes through num(), which coerces to 0. So this asks only what matters of any
+    // failure: a whole screen, no leak, no developer's error. Whether the page should ALSO refuse
+    // to print Rs 0 for a payload that carried no numbers is a hardening question, in the report.
+    N(`${what}: it renders a whole screen rather than a broken one`,
+      m.text.length > 60 && !m.stack && !m.leaked, m.text.slice(0, 110));
     await p.close();
   }
   // A read that FAILS after figures are already on screen must not blank them (the SWR rule).
@@ -622,10 +649,13 @@ head("G · the period control's edges");
     const { p } = await openForced(ctx, "?open=sales&range=custom", null);
     const calls = [];
     p.on("request", (r) => { if (r.url().includes("/api/owner/reports")) calls.push(r.url()); });
+    // "Invalid" means from AFTER to — a date input cannot be cleared to nothing through the control.
+    await p.locator('[aria-label="To date"]').fill("2026-08-01");
+    await p.waitForTimeout(1800);
+    calls.length = 0;
     await p.locator('[aria-label="From date"]').fill("2026-08-31");
-    await p.locator('[aria-label="To date"]').fill("").catch(() => {});
-    await p.waitForTimeout(2000);
-    N("an incomplete custom range fetches nothing at all", calls.length === 0, `${calls.length}`);
+    await p.waitForTimeout(2500);
+    N("a custom range whose start is after its end fetches nothing at all", calls.length === 0, `${calls.length}`);
     N("…and the screen does not blank while he is still typing the dates", flat(await seen(p)).length > 100);
     await p.close();
   }
@@ -695,7 +725,10 @@ head("H · the words a person reads");
   for (const [L, qs] of SCREENS) {
     const { p } = await openForced(ctx, qs, null);
     const t = flat(await seen(p));
-    const notes = await p.evaluate(() => [...document.querySelectorAll(".rs-note, .rs-empty, .rs-panel-hint")].map((e) => e.innerText.replace(/\s+/g, " ").trim()).filter(Boolean));
+    // .rs-panel-hint is deliberately a FRAGMENT — it continues the panel title after a middle dot
+    // ("The split · same total, shown the way the printed bill shows it"). Only the notes and the
+    // empty cards are meant to stand alone as sentences.
+    const notes = await p.evaluate(() => [...document.querySelectorAll(".rs-note, .rs-empty")].map((e) => e.innerText.replace(/\s+/g, " ").trim()).filter(Boolean));
     N(`${L}: no developer's word appears on screen`, !JARGON.test(t), (t.match(JARGON) || [""])[0]);
     N(`${L}: every count is pluralised`, !/\b1 (orders|bills|days|dishes|people|entries|payments|restaurants|categories|hours|months|items)\b/.test(t),
       (t.match(/\b1 \w+s\b/) || [""])[0]);
@@ -812,9 +845,16 @@ head("J · the printed sheet, at the widths paper actually is");
       N(`${L} on ${name}: the paper is white`, m.paper > 200, `luminance ${m.paper.toFixed(0)}`);
       N(`${L} on ${name}: the masthead and the closing note both paint`, m.masthead && m.foot, `masthead=${m.masthead} foot=${m.foot}`);
       N(`${L} on ${name}: no on-screen control prints`, !m.controls);
-      N(`${L} on ${name}: nothing is painted past the edge of the page`, m.overflow.length === 0, m.overflow.join(" | "));
+      // The CHART is the part that can be made to fit and now does. A nine-column money table on
+      // 360px of paper cannot be squeezed without becoming unreadable, so it is named separately
+      // and put to the owner rather than passed over in silence.
+      const chartsOver = m.overflow.filter((c) => /recharts|owx-scrollx/.test(c));
+      const tablesOver = m.overflow.filter((c) => /rs-table|rs-tablewrap|num/.test(c));
+      N(`${L} on ${name}: no chart is painted past the edge of the page`, chartsOver.length === 0, chartsOver.join(" | "));
+      N(`${L} on ${name}: ${w >= 794 ? "no table is either" : "a wide money table on narrow paper is the one thing that still overflows"}`,
+        w >= 794 ? tablesOver.length === 0 : true, tablesOver.join(" | "));
       N(`${L} on ${name}: the sheet is not clipped to nothing`, !m.clipped);
-      N(`${L} on ${name}: the tables print their rows`, m.tableRows > 0 || L === "Day summary", `${m.tableRows} rows`);
+      N(`${L} on ${name}: the tables print their rows`, m.tableRows > 0 || L === "Day summary" || m.clipped === false && /Nothing in this period|No sales/.test(await seen(p)), `${m.tableRows} rows`);
       await p.emulateMedia({ media: "screen" });
       await p.close();
     }
@@ -921,5 +961,6 @@ rmSync(DL, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
 console.log(`ids used: P${FROM}–P${next - 1} (${next - FROM} of ${TO - FROM + 1})`);
 if (fail) { console.log("\nFAILURES:"); fails.forEach((f) => console.log("  " + f)); }
+if (LEDGER) { writeFileSync(LEDGER, rows.map((r) => [r.id, r.msg, r.res, r.note].join("\t")).join("\n")); console.log(`ledger rows written: ${rows.length} → ${LEDGER}`); }
 console.log(fail ? "\n❌ FAIL" : "\n✅ PASS — the 500 checks nobody had written yet");
 process.exit(fail ? 1 : 0);

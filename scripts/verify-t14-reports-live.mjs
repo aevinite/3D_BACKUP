@@ -19,7 +19,7 @@
 //      own tooling tripping it is how the owner's phone came to be pinged about himself.
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
-import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,13 +29,17 @@ const ONLY = arg("--only");
 
 let pass = 0, fail = 0, skip = 0;
 const fails = [];
+// Every row this run executed, so the ledger is GENERATED from what ran rather than typed by hand.
+const rows = [];
+const LEDGER = arg("--ledger");
 const used = new Set();
-const NEW_FROM = 67806, NEW_TO = 67900;      // continues where the static half stopped; the
+const NEW_FROM = 67851, NEW_TO = 67900;      // continues where the static half stopped; the
 // freshly-planned 500 lives above P67900, so this half can grow without ever reaching it.
 let nextNew = NEW_FROM;
 function record(id, msg, cond, note) {
   if (used.has(id)) { fail++; fails.push(`DUPLICATE ID ${id}`); console.log(`  ⚠️ DUPLICATE ID ${id}`); }
   used.add(id);
+  rows.push({ id, msg, res: cond ? "✅" : "❌", note });
   if (cond) pass++;
   else { fail++; fails.push(`${id} ${msg}${note ? ` — ${note}` : ""}`); console.log(`  ❌ ${id} ${msg}${note ? ` — ${note}` : ""}`); }
 }
@@ -44,7 +48,7 @@ function N(msg, cond, note = "") {
   if (nextNew > NEW_TO) { console.log("  ⚠️ ID BLOCK EXHAUSTED"); process.exit(2); }
   record(`P${nextNew++}`, msg, cond, note);
 }
-const S = (id, msg, why) => { used.add(id); skip++; console.log(`  ⏭ ${id} ${msg} — ${why}`); };
+const S = (id, msg, why) => { used.add(id); skip++; rows.push({ id, msg, res: "⏭", note: why }); console.log(`  ⏭ ${id} ${msg} — ${why}`); };
 const head = (s) => console.log(`\n── ${s} ──`);
 const flat = (s) => String(s || "").replace(/\s+/g, " ").trim();
 
@@ -1397,8 +1401,9 @@ head("8c · with no internet");
   const haveSaved = off.hero !== "—";
   R("P48301", "the no-internet note says his own sentence", /The internet is not available/.test(off.note), off.note.slice(0, 120));
   R("P48302", "…and it is the FIRST element on the page, not under the controls", /rs-offnote/.test(off.first), off.first);
+  // timeAgo() says "just now" under a minute, so the age is not always "N ago" (T14, sweep #8).
   R("P48304", "…and it names the age of what he is looking at, or says nothing is saved",
-    /from .*ago|Nothing has been saved/.test(off.note), off.note.slice(0, 180));
+    /from (just now|\d+ (min|h|d) ago)|Nothing has been saved/.test(off.note), off.note.slice(0, 180));
   R("P48305", "…and it offers Try again", off.tryAgain);
   R("P48312", "…and it says WHICH case he is in", /This is not the current data|Nothing has been saved/.test(off.note));
   N("…and it never claims a figure it does not have — the sentence and the headline agree",
@@ -1544,12 +1549,10 @@ for (const [id, why] of [["P05477", "the manager Z-report cross-check — the ma
   ["P05193", "a negative-tax row — mig 337 removed the only source of one"],
   ["P05201", "9+ ranking rows — this restaurant's discount days do not reach nine"],
   ["P05199", "the two-row ranking — same"], ["P05200", "the 3–8-row ranking — the one-row geometry row above covers the floor"],
-  ["P20465", "a duplicate of P20197"], ["P20466", "a roll-up marker row, not a check"],
-  ["P49460", "a roll-up marker row, not a check"], ["P52195", "a roll-up marker row, not a check"],
-  ["P52229", "a roll-up marker row, not a check"], ["P49291", "a roll-up marker row, not a check"],
-  ["P20536", "a roll-up marker row, not a check"], ["P20594", "a roll-up marker row, not a check"],
-  ["P49500", "a roll-up marker row, not a check"], ["P52165", "a roll-up marker row, not a check"],
-  ["P51948", "the enabled-tab row has nothing to explain"], ["P05494", "answered in the static half"]])
+  ["P20465", "a duplicate of P20197"], ["P20466", "a roll-up marker row, not a check"], ["P52195", "a roll-up marker row, not a check"],
+  ["P52229", "a roll-up marker row, not a check"],
+  ["P20536", "a roll-up marker row, not a check"],
+  ["P49500", "a roll-up marker row, not a check"], ["P05494", "answered in the static half"]])
   S(id, "not driven this run", why);
 
 await browser.close();
@@ -1558,5 +1561,6 @@ rmSync(DL, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
 console.log(`new ids used: P${NEW_FROM}–P${nextNew - 1} (${nextNew - NEW_FROM})`);
 if (fail) { console.log("\nFAILURES:"); fails.forEach((f) => console.log("  " + f)); }
+if (LEDGER) { writeFileSync(LEDGER, rows.map((r) => [r.id, r.msg, r.res, r.note].join("\t")).join("\n")); console.log(`ledger rows written: ${rows.length} → ${LEDGER}`); }
 console.log(fail ? "\n❌ FAIL" : "\n✅ PASS — every Reports screen, in both skins, on both devices");
 process.exit(fail ? 1 : 0);

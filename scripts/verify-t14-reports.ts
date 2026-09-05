@@ -20,7 +20,7 @@
 //      real inputs, so a refactor that keeps the shape and breaks the answer cannot pass.
 //   3. EVERY ASSERTION CARRIES THE LEDGER ID IT RE-RUNS — R() for an existing row, N() for a new
 //      one out of this terminal's own block (P67701–P68700). They can never collide.
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { splitTax, allocateWhole, buildFiling, taxableValue, exemptIsMaterial, taxableFor } from "@/lib/taxFiling";
 import { compactINR, roundTicks } from "@/lib/money";
 import { canonPayMethod, payColor, PAY_COLORS } from "@/components/owner/Charts";
@@ -34,12 +34,16 @@ const BASE = arg("--base") || process.env.LFH_BASE || "";
 
 let pass = 0, fail = 0, skip = 0;
 const fails: string[] = [];
+// Every row this run executed, so the ledger is GENERATED from what ran rather than typed by hand.
+const rows: { id: string; msg: string; res: string; note: string }[] = [];
+const LEDGER = arg("--ledger");
 const used = new Set<string>();
-const NEW_FROM = 67701, NEW_TO = 68700;
+const NEW_FROM = 67701, NEW_TO = 67850;   // the driven half takes P67851–P67900, the fresh 500 P67901+
 let nextNew = NEW_FROM;
 function record(id: string, msg: string, cond: boolean, note: string) {
   if (used.has(id)) { fail++; fails.push(`DUPLICATE ID ${id}`); console.log(`  ⚠️ DUPLICATE ID ${id}`); }
   used.add(id);
+  rows.push({ id, msg, res: cond ? "✅" : "❌", note });
   if (cond) pass++;
   else { fail++; fails.push(`${id} ${msg}${note ? ` — ${note}` : ""}`); console.log(`  ❌ ${id} ${msg}${note ? ` — ${note}` : ""}`); }
 }
@@ -50,7 +54,9 @@ function N(msg: string, cond: boolean, note = "") {
   if (nextNew > NEW_TO) { console.log("  ⚠️ ID BLOCK EXHAUSTED"); process.exit(2); }
   record(`P${nextNew++}`, msg, cond, note);
 }
-const S = (id: string, msg: string, why: string) => { used.add(id); skip++; console.log(`  ⏭ ${id} ${msg} — ${why}`); };
+/** A NEW check this half decided not to answer, with the reason. Takes an id from the block. */
+function S_NEW(msg: string, why: string) { skip++; const id = `P${nextNew++}`; used.add(id); rows.push({ id, msg, res: "⏭", note: why }); console.log(`  ⏭ ${id} ${msg} — ${why}`); }
+const S = (id: string, msg: string, why: string) => { used.add(id); skip++; rows.push({ id, msg, res: "⏭", note: why }); console.log(`  ⏭ ${id} ${msg} — ${why}`); };
 const head = (s: string) => console.log(`\n── ${s} ──`);
 const near = (a: number, b: number, eps = 1) => Math.abs(a - b) <= eps;
 
@@ -110,7 +116,7 @@ const pg = code.page;
 R("P05061", "every fetch on the page is one of the two known call sites", (pg.match(/fetch\(/g) || []).length === 2);
 R("P20213", "every fetch on the page goes to /api/owner/", [...pg.matchAll(/fetch\(\s*`([^`]+)`/g)].every((m) => m[1].startsWith("/api/owner/")));
 R("P20437", "every report fetch is cache:'no-store'", (pg.match(/cache:\s*"no-store"/g) || []).length >= 2);
-R("P05062", "Refresh sends ?refresh=1 for the active payload", /q\.set\("refresh",\s*"1"\)/.test(pg));
+N("Refresh sends ?refresh=1 for the active payload", /q\.set\("refresh",\s*"1"\)/.test(pg));
 R("P05064", "Refresh reaches the By-restaurant brief too", /forcedTick/.test(pg) && /refresh=1/.test(pg));
 R("P05066", "a key is fetched at most once without force (the started ref)", /started\.current\.has\(ck\)/.test(pg));
 R("P05067", "a failed fetch deletes its key so a retry is possible", /started\.current\.delete\(ck\)/.test(pg));
@@ -141,15 +147,15 @@ R("P05099", "the query carries date OR from\/to, never both", /if \(e\.date\) q\
 R("P05100", "apiType maps money → sales", /kind === "money" \? "sales"/.test(pg));
 R("P05105", "an unknown ?open= value is ignored rather than throwing", /return map\[k\] \?\? null;/.test(pg));
 R("P05106", "the day-of-week tab is disabled on a period with no day buckets", /const off = !!t\.needsDayGrain && !DAY_GRAIN_RANGES\.has\(range\)/.test(pg));
-R("P05107", "…and the owner is slid to the first usable view instead", /tabsEarly\.find\(subUsableEarly\)/.test(pg));
+N("…and the owner is slid to the first usable view instead", /tabsEarly\.find\(subUsableEarly\)/.test(pg));
 R("P05108", "the payload that gets FETCHED follows the same rule as the strip", pg.indexOf("activeSubKeyEarly") < pg.indexOf("const activeKind"));
 R("P05109", "Payments fetches the money payload too", /needMoneyToo = sel === "payments"/.test(pg));
 R("P05112", "Back closes an open report to the hub", /useBackClose\("owner-report-view"/.test(pg));
 R("P05113", "Back closes the print dialog", /useBackClose\("owner-print-ask"/.test(pg));
 R("P05114", "Back closes the discount/cancellation overlay", /useBackClose\("owner-report-detail"/.test(pg));
 R("P05115", "Back closes the period dropdown", /useBackClose\("owner-reports-period"/.test(pg));
-R("P05116", "Escape closes the print dialog", /if \(!printAsk\) return;[\s\S]{0,200}Escape/.test(pg));
-R("P05117", "Escape closes the detail overlay", /ReportOverlay[\s\S]{0,400}Escape/.test(pg));
+N("Escape closes the print dialog", /if \(!printAsk\) return;[\s\S]{0,200}Escape/.test(pg));
+N("Escape closes the detail overlay", /ReportOverlay[\s\S]{0,400}Escape/.test(pg));
 R("P05118", "the backdrop closes both dialogs", (pg.match(/e\.target === e\.currentTarget/g) || []).length >= 2);
 R("P05119", "the period dropdown closes on an outside click and detaches", /removeEventListener\("click", close\)/.test(pg));
 R("P05120", "every overlay is registered in the back-button manager", !/pushState|popstate/.test(pg) && (pg.match(/useBackClose\(/g) || []).length === 4);
@@ -195,7 +201,7 @@ R("P05040", "the weekday breakdown only lets a weekday that occurred win or lose
 R("P05041", "weekend vs weekday compares per-DAY averages", /wkDays \? wkRev \/ wkDays : 0/.test(pg) && /wdDays \? wdRev \/ wdDays : 0/.test(pg));
 R("P05044", "the day-part 'Quietest' ignores a part that took nothing", /parts\.filter\(\(p\) => p\.rev > 0\)/.test(pg));
 R("P05045", "Busy-hours 'Quietest hour' ignores hours with zero orders", /hrs\.filter\(\(h\) => h\.orders > 0\)/.test(pg));
-R("P05046", "Busy-hours builds a full 24-bucket series", (pg.match(/Array\.from\(\{ length: 24 \}/g) || []).length >= 2);
+N("Busy-hours builds a full 24-bucket series", (pg.match(/Array\.from\(\{ length: 24 \}/g) || []).length >= 2);
 R("P05048", "every % on the page guards its denominator", (() => {
   // A denominator is safe if it is ternary-guarded (`x ?` / `x > 0 ?`) OR floored by construction
   // (`Math.max(…, 1)`). Only checking for `x ?` marked two honest lines as faults — `tv > 0 ?` and
@@ -237,7 +243,7 @@ R("P05270", "the overlays are role=dialog aria-modal", (pg.match(/role="dialog" 
 R("P05273", "no table renders a row without a stable React key",
   [...pg.matchAll(/<tbody>\{?[\s\S]{0,600}?\.map\(\(([^)]*)\) =>\s*(?:\{[\s\S]{0,200}?return\s*)?<tr([^>]*)/g)].every((m) => /key=/.test(m[2])));
 R("P05275", "every money figure uses the shared en-IN inr", /from "@\/components\/admin\/shared"/.test(pg) && !/₹" \+/.test(pg));
-R("P05489", "the only interval on the page is the 60s age tick", (pg.match(/setInterval\(/g) || []).length === 1 && /60_000/.test(pg));
+N("the only interval on the page is the 60s age tick", (pg.match(/setInterval\(/g) || []).length === 1 && /60_000/.test(pg));
 R("P20392", "…re-stated: exactly one setInterval", (pg.match(/setInterval\(/g) || []).length === 1);
 R("P05492", "a failed report does not retry in a loop", !/setTimeout\([^)]*load\(/.test(pg));
 R("P05493", "the page cannot raise a real alert or notification", !/notify\(|Notification\(/.test(pg));
@@ -277,7 +283,7 @@ R("P20217", "there are KPI tiles to check at all", STATS.length > 40, `${STATS.l
 R("P05253", "a KPI tile without a drill has no pointer affordance", STATS.some((s) => !/onClick=/.test(s)));
 R("P05254", "the freshness chip's tooltip prints the full IST timestamp", /title=\{`Figures computed \$\{new Date\(shownCachedAt\)/.test(pg));
 R("P05255", "Refresh is disabled while a refresh is running", (pg.match(/disabled=\{refreshing\}/g) || []).length >= 2);
-R("P05256", "the print dialog prefills the period on screen", /const w = rangeDates\(range, cFrom, cTo\)/.test(pg));
+N("the print dialog prefills the period on screen", /const w = rangeDates\(range, cFrom, cTo\)/.test(pg));
 R("P05257", "the print dialog's day picker cannot exceed the business day", /value=\{pdDay\} max=\{istToday\(\)\}/.test(pg));
 R("P05258", "the print dialog's from cannot exceed its to", /value=\{pdFrom\} max=\{pdTo\}/.test(pg));
 R("P05259", "a blocked pop-up is reported in a bar with an OK button", /\{printErr && \(/.test(pg) && /OK<\/button>/.test(pg));
@@ -322,7 +328,7 @@ R("P05293", "every NUMERIC axis asks for round ticks", NUM_AXES.length === 7 && 
 R("P20407", "…re-stated: the one axis without ticks is the CATEGORY axis, which has none to round",
   ch.split("<YAxis").slice(1).filter((s) => !/ticks=\{/.test(s.slice(0, 220))).every((s) => /type="category"/.test(s.slice(0, 200))));
 R("P05294", "tk() degrades to recharts' own behaviour when nothing round fits", /return t\.length \? t : undefined/.test(ch));
-R("P05295", "the y-axis uses the shared compactINR", /compact = compactINR/.test(ch));
+N("the y-axis uses the shared compactINR", /compact = compactINR/.test(ch));
 R("P05296", "money tooltips are en-IN", /toLocaleString\("en-IN"\)/.test(ch));
 R("P05299", "the tooltip pluralises order\/orders", /order\{Number\(orders\) === 1 \? "" : "s"\}/.test(ch));
 R("P05300", "every gradient id is scoped per chart INSTANCE", (ch.match(/useId\(\)\.replace/g) || []).length === 5);
@@ -490,7 +496,7 @@ R("P05043", "the four day parts partition all 24 hours", (() => {
   return hrs.length === 24 && new Set(hrs).size === 24 && hrs.every((h) => h >= 0 && h <= 23);
 })());
 R("P20262", "…re-stated", DAYPARTS.flatMap((p) => p.hours).length === 24);
-R("P05223", "…re-stated from the Times-of-day report", new Set(DAYPARTS.flatMap((p) => p.hours)).size === 24);
+N("…re-stated from the Times-of-day report", new Set(DAYPARTS.flatMap((p) => p.hours)).size === 24);
 N("the day parts are seven contiguous runs, so no hour sits between two named stretches",
   DAYPARTS.every((p) => p.hours.every((h, i) => i === 0 || h === (p.hours[i - 1] + 1) % 24)));
 N("WEEKDAY_SHORT starts on Monday, so a week reads Mon→Sun the way a rota does", WEEKDAY_SHORT[0] === "Mon" && WEEKDAY_SHORT[6] === "Sun");
@@ -546,8 +552,8 @@ R("P49120", "every caller passes words that fit ITS list", (() => {
   const callers = [...ALL.matchAll(/<SearchTable[\s\S]{0,700}?\/>/g)];
   return callers.length >= 4 && callers.every((m) => /emptyText=/.test(m[0]));
 })(), `${[...ALL.matchAll(/<SearchTable[\s\S]{0,700}?\/>/g)].filter((m) => !/emptyText=/.test(m[0])).length} without emptyText`);
-R("P49121", "the totals row is withheld while a search is active", /\{footer && !q && <tfoot>/.test(code.st));
-R("P49126", "…re-stated: a total of everything under a filtered list would be a lie", /!q &&/.test(code.st));
+N("the totals row is withheld while a search is active", /\{footer && !q && <tfoot>/.test(code.st));
+N("…re-stated: a total of everything under a filtered list would be a lie", /!q &&/.test(code.st));
 R("P49141", "an empty bucket never counts as the quietest", /series\.filter\(\(s\) => Number\.isFinite\(s\.value\) && s\.value > 0\)/.test(code.ins));
 R("P49143", "the trend cannot divide by zero", /firstAvg \? \(\(lastAvg - firstAvg\) \/ firstAvg\) \* 100 : 0/.test(code.ins));
 R("P49144", "the widget renders nothing rather than a broken card with no data", /if \(!best \|\| !worst\) return null;/.test(code.ins));
@@ -569,8 +575,8 @@ R("P05474", "…re-stated: both redirects are server-side", /from "next\/navigat
 R("P49159", "/owner/sales is a server redirect too", /redirect\("\/owner\/reports"\)/.test(code.red2));
 R("P49160", "neither redirect points at itself", !/redirect\("\/owner\/report"\)/.test(code.red1) && !/redirect\("\/owner\/sales"\)/.test(code.red2));
 R("P49161", "both are tiny — nothing renders before the redirect", raw.red1.split("\n").length <= 6 && raw.red2.split("\n").length <= 6);
-R("P05471", "/owner/report points at /owner/reports", /redirect\("\/owner\/reports"\)/.test(code.red1));
-R("P05472", "/owner/sales points at /owner/reports", /redirect\("\/owner\/reports"\)/.test(code.red2));
+N("/owner/report points at /owner/reports", /redirect\("\/owner\/reports"\)/.test(code.red1));
+N("/owner/sales points at /owner/reports", /redirect\("\/owner\/reports"\)/.test(code.red2));
 R("P20263", "…re-stated (server-side, /owner/report)", !/"use client"/.test(raw.red1));
 R("P20264", "…re-stated (server-side, /owner/sales)", !/"use client"/.test(raw.red2));
 R("P20265", "…re-stated (target)", /\/owner\/reports/.test(code.red1));
@@ -672,7 +678,7 @@ R("P51913", "no configured rate means nothing to call exempt", exemptIsMaterial(
 R("P51914", "a per-row taxable base falls back to net sales when nothing is exempt", taxableFor(FROWS[0], 5, false) === 2000);
 R("P51915", "…and is derived from the tax when something is, still capped at net sales",
   taxableFor(FROWS[0], 5, true) === Math.min(100.4 / 0.05, 2000), `${taxableFor(FROWS[0], 5, true)}`);
-R("P05190", "…re-stated: no phantom exempt tile on a single-rate restaurant", exemptIsMaterial({ ...T1, tax: 4999.9 }, 5) === false);
+N("…re-stated: no phantom exempt tile on a single-rate restaurant", exemptIsMaterial({ ...T1, tax: 4999.9 }, 5) === false);
 
 // canonPayMethod / payColor — P05339–P05343
 R("P05342", "canonPayMethod folds casing onto the known names", canonPayMethod("cash") === "Cash" && canonPayMethod("UPI") === "UPI");
@@ -694,9 +700,9 @@ const MENU = [
 ];
 const cm = classifyMenu(MENU);
 R("P05215", "menu engineering classifies through the ONE shared classifyMenu", cm.dishes.length === 4);
-R("P49325", "every dish is put in one of the four groups", cm.dishes.every((d) => ["star", "workhorse", "puzzle", "dog"].includes(d.klass)));
-R("P49328", "the % units column sums to 100", near(cm.dishes.reduce((a, d) => a + d.qtyShare, 0) * 100, 100, 0.01));
-R("P49329", "the % sales column sums to 100", near(cm.dishes.reduce((a, d) => a + d.revShare, 0) * 100, 100, 0.01));
+N("every dish is put in one of the four groups", cm.dishes.every((d) => ["star", "workhorse", "puzzle", "dog"].includes(d.klass)));
+N("the % units column sums to 100", near(cm.dishes.reduce((a, d) => a + d.qtyShare, 0) * 100, 100, 0.01));
+N("the % sales column sums to 100", near(cm.dishes.reduce((a, d) => a + d.revShare, 0) * 100, 100, 0.01));
 N("a dish that sold nothing is left out of the grouping entirely, not filed as a Dog",
   classifyMenu([...MENU, { title: "Never ordered", qty: 0, revenue: 0 }]).dishes.length === 4);
 N("the busiest, priciest dish is a Star", cm.dishes.find((d) => d.title === "Truffle pizza")?.klass === "star");
@@ -759,7 +765,7 @@ for (const [label, kind, body] of BODIES) {
 }
 // The four that share a shape with another report — the fault that made a file lie about itself.
 const daypartT = sectionTables(ctxFor("Times of day", "hourly", "daypart", { rows: [{ hour: 8, orders: 2, revenue: 200 }, { hour: 20, orders: 9, revenue: 4100 }], bucket: "hour" }));
-R("P20536", "Times of day downloads the four day PARTS, not 24 hourly rows",
+N("Times of day downloads the four day PARTS, not 24 hourly rows",
   daypartT[0].rows.some((r) => r[0] === "Morning") && daypartT[0].rows.some((r) => r[0] === "Late night"), JSON.stringify(daypartT[0].rows.map((r) => r[0])));
 const weekdayT = sectionTables(ctxFor("Day of week", "money", "weekday"));
 N("Day of week downloads Monday…Sunday, not dated by-period rows",
@@ -823,7 +829,7 @@ N("the blocked-pop-up wording exists in one place and says what to do", /Allow p
   N("…and the printed dish sheet gives that Total row the same rule the money sheets get",
     /class="tot"/.test(dishHtml));
 }
-R("P05480", "the CSV/print builder reads the SAME payload object the screen renders", sectionTables(ctxFor("Sales", "money", "sales"))[0].rows.length === FROWS.length + 1);
+N("the CSV/print builder reads the SAME payload object the screen renders", sectionTables(ctxFor("Sales", "money", "sales"))[0].rows.length === FROWS.length + 1);
 R("P05481", "…and the printed sheet is built from it too", html.includes("30 days"));
 
 // ══ G2. THE ROWS THE FIRST BATCH DID NOT REACH — still no browser needed ══
@@ -848,10 +854,11 @@ head("G2 · the rest of the code-read ledger");
   R("P05008", "the rollup days were always right", true, "same evidence");
   R("P05009", "a zero-discount day would have read ₹0, which is why it hid so long", true, "recorded, not re-provable once fixed");
   R("P05010", "a discount is grossed at the rate it was CHARGED", /disc_gross/.test(m337) || /disc_gross/.test(m367));
-  R("P05005", "…and the swap is unreachable on every range", true, "the 9-range settlement rows above are the measurement");
+  // P05005 — "the swap is unreachable on every range" — is answered by MEASUREMENT in the live
+  // layer below (the settlement total equals the Sales revenue on all nine), not by reading the
+  // migration here. One id, one check.
 }
 
-const has = (src: string, re: RegExp) => re.test(src);
 R("P05023", "the Hub clamps Net sales at 0; the day sheet and Sales do not", /Math\.max\(0, \(t\?\.subtotal \|\| 0\) - \(t\?\.discount \|\| 0\)\)/.test(pg));
 R("P05024", "'Total collected' is always t.revenue and always captioned GST-inclusive",
   (pg.match(/label="Total collected"/g) || []).length >= 3 && /GST included/.test(pg));
@@ -880,28 +887,28 @@ R("P05095", "rangeDates('fy') starts in April of the correct financial year", /i
 R("P05102", "every RKey has an entry in SUBTABS", Object.keys(REPORTS).every((k) => new RegExp(`(^|[\\s,{])${k}: \\[`, "m").test(pg)));
 R("P05110", "the Payments overlay shows a skeleton rather than nothing while the money payload loads",
   /moneyData\s*\?\s*<ReportBody[\s\S]{0,400}Loading…/.test(pg));
-R("P05123", "the breadcrumb names the scope, then the report, then the sub-tab, then the overlay",
+N("the breadcrumb names the scope, then the report, then the sub-tab, then the overlay",
   /scopeCrumb \? \[scopeCrumb\] : \[\]\),[\s\S]{0,160}REPORTS\[sel\]\.label, \.\.\.\(activeSubLabel/.test(pg));
 R("P05147", "the day sheet's tax sub-lines come from splitTax, not from halving in the JSX", /taxLines = data\.tax\s*\?\s*splitTax\(/.test(pg));
 R("P05161", "dayExtraTables feeds the printed sheet the same two tables", /function dayExtraTables/.test(pg) && /extra: sel === "daysummary" \? dayExtraTables/.test(pg));
-R("P05163", "Sales 'Total collected' drills to the by-period table", /scrollToId\("rs-by-period"\)/.test(pg));
-R("P05164", "Sales 'GST collected' drills to the Tax report", /onOpenReport\("tax"\)/.test(pg));
-R("P05165", "Sales 'Discounts' drills to the Discounts overlay", /onOpenReport\("payments", \{ pay: "discounts" \}\)/.test(pg));
-R("P05173", "Average bill's Best/Thinnest tiles name the CHART's grain", /label=\{`Best \$\{chartUnit\}`\}/.test(pg) && /label=\{`Thinnest \$\{chartUnit\}`\}/.test(pg));
-R("P05177", "Order volume's chart is a COUNT chart", /data=\{vol\} color=\{accent\} money=\{false\}/.test(pg));
-R("P05189", "'Taxable sales' is captioned 'subtotal − discount' when nothing is exempt", /exempt > 0 \? "the part GST was charged on" : "subtotal − discount"/.test(pg));
-R("P05193", "the filing table drops a negative-tax row", /mrows\.filter\(\(r\) => r\.tax > 0\)/.test(pg));
+N("Sales 'Total collected' drills to the by-period table", /scrollToId\("rs-by-period"\)/.test(pg));
+N("Sales 'GST collected' drills to the Tax report", /onOpenReport\("tax"\)/.test(pg));
+N("Sales 'Discounts' drills to the Discounts overlay", /onOpenReport\("payments", \{ pay: "discounts" \}\)/.test(pg));
+N("Average bill's Best/Thinnest tiles name the CHART's grain", /label=\{`Best \$\{chartUnit\}`\}/.test(pg) && /label=\{`Thinnest \$\{chartUnit\}`\}/.test(pg));
+N("Order volume's chart is a COUNT chart", /data=\{vol\} color=\{accent\} money=\{false\}/.test(pg));
+N("'Taxable sales' is captioned 'subtotal − discount' when nothing is exempt", /exempt > 0 \? "the part GST was charged on" : "subtotal − discount"/.test(pg));
+N("the filing table drops a negative-tax row", /mrows\.filter\(\(r\) => r\.tax > 0\)/.test(pg));
 R("P05207", "the Payments table keeps a method that collected ₹0", /const pays = \[\.\.\.merged\.values\(\)\]\.sort/.test(pg) && !/merged\.values\(\)\]\.filter\(\(p\) => p\.revenue > 0\)/.test(pg));
 R("P05208", "…and the donut drops it", /filter\(\(p\) => p\.revenue > 0\)/.test(ch));
-R("P05220", "the Busy-hours 'Per order' tile is named honestly", /sub="revenue ÷ all orders in these hours"/.test(pg));
+N("the Busy-hours 'Per order' tile is named honestly", /sub="revenue ÷ all orders in these hours"/.test(pg));
 R("P20233", "…re-stated", /label="Per order"/.test(pg));
 R("P05229", "hourly/daily people are excluded from 'worth' and it says so", /daily\/hourly rate, so their cost can/.test(pg));
 R("P05230", "the Team card is absent entirely when payroll is off", /cat\.key !== "team" \|\| hasPayroll/.test(pg));
 R("P05231", "the Team leaderboard needs two people before it draws", /bars\.filter\(\(b\) => b\.revenue > 0\)\.length < 2/.test(pg));
 R("P05241", "the hub's Report button builds the compiled statement instead", /<ReportMenu /.test(pg) && /gatherOwnerReport/.test(pg));
-R("P05244", "the hub's five KPI columns read the same totals as the Sales report", /const t = money\?\.data\?\.totals/.test(pg));
-R("P05247", "the hub's category rows count their own cards", /<span className="n">\{cat\.keys\.length\}<\/span>/.test(pg));
-R("P05248", "the By-restaurant cards render for a multi-restaurant estate", /const showBrief = !rid && rests\.length > 1/.test(pg));
+N("the hub's five KPI columns read the same totals as the Sales report", /const t = money\?\.data\?\.totals/.test(pg));
+N("the hub's category rows count their own cards", /<span className="n">\{cat\.keys\.length\}<\/span>/.test(pg));
+N("the By-restaurant cards render for a multi-restaurant estate", /const showBrief = !rid && rests\.length > 1/.test(pg));
 R("P05251", "the report cards are hidden for a module that is off, not disabled", /CATEGORIES\.filter\(\(cat\) =>/.test(pg));
 R("P05264", "PrintHead carries the restaurant, report, period and 'as of'", /<PrintHead restName=\{restName\} title=\{meta\.label\} period=\{rangeText\} asOf=\{asOf\} \/>/.test(pg));
 R("P05272", "every table has a thead, and a tfoot where a total makes sense",
@@ -974,12 +981,12 @@ R("P05398", "…and the freshly computed value still reaches THIS caller", /retu
 R("P05411", "the last_viewed_at bump is fire-and-forget and cannot fail the read", /void sb\.from\(TABLE\)\.update\(\{ last_viewed_at/.test(ca));
 R("P05413", "a fingerprint taken during the compute can never mark stale data fresh", /Promise\.all\(\[\s*compute\(\)/.test(ca));
 R("P05431", "the owner console skin is aevidine_skin, not lfh_theme", !/lfh_theme/.test(ALL));
-R("P05473", "neither redirect loops or lands on a 404", /redirect\("\/owner\/reports"\)/.test(code.red1) && /redirect\("\/owner\/reports"\)/.test(code.red2));
+N("neither redirect loops or lands on a 404", /redirect\("\/owner\/reports"\)/.test(code.red1) && /redirect\("\/owner\/reports"\)/.test(code.red2));
 R("P05483", "the shell and this page cost ONE overview request", /fetchOwnerOverview\(scp\)/.test(pg));
 R("P05486", "admin act-as (?rid) scopes this page and rides on every call", /const scopePin = useMemo/.test(pg));
 R("P05488", "nothing this page fetches is unscoped", [...pg.matchAll(/qsOf\(|briefQs/g)].length >= 2 && /if \(rid\) q\.set\("rid", rid\)/.test(pg));
 R("P05491", "every fetch names its columns via the API's own type", /q = new URLSearchParams\(\{ type: apiType\(kind\), range: e\.range \}\)/.test(pg));
-R("P05494", "this run created no rows anywhere", true, "every probe in both guards is a GET; the one write is the opt-in inventory flip, restored in a finally");
+N("this run created no rows anywhere", true, "every probe in both guards is a GET; the one write is the opt-in inventory flip, restored in a finally");
 // The read-only control restaurant is never named, never scoped to and never written: both guards
 // take their restaurant id from the signed-in owner's own overview, so they can only ever reach
 // what that owner already owns.
@@ -1035,6 +1042,7 @@ if (!BASE) {
   console.log("\n⏭ live layer skipped — pass --base http://localhost:<port> to run it");
   console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
   if (fail) { console.log("\nFAILURES:"); fails.forEach((f) => console.log("  " + f)); }
+  if (LEDGER) { writeFileSync(LEDGER, rows.map((r) => [r.id, r.msg, r.res, r.note].join("\t")).join("\n")); console.log(`ledger rows written: ${rows.length} → ${LEDGER}`); }
   process.exit(fail ? 1 : 0);
 }
 
@@ -1158,7 +1166,7 @@ R("P05019", "…including a method that collected ₹0", true);
 {
   const bizToday = new Date(Date.now() + 5.5 * 3600_000 - 5 * 3600_000).toISOString().slice(0, 10);
   const bizYest = new Date(Date.now() + 5.5 * 3600_000 - 5 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
-  let ok = { st: 0, tot: 0, id2: 0, set: 0, bill: 0, neg: 0, hr: 0, sp: 0, inv: 0, tip: 0 };
+  const ok = { st: 0, tot: 0, id2: 0, set: 0, bill: 0, neg: 0, hr: 0, sp: 0, inv: 0, tip: 0 };
   for (const d of [bizToday, bizYest]) {
     const { status, body } = await api(`type=daysummary&range=day&date=${d}&rid=${RID}`);
     const t = body.totals; const pays = ((body as unknown as { payments?: { method: string; revenue: number; orders: number }[] }).payments) ?? [];
@@ -1194,7 +1202,7 @@ R("P05019", "…including a method that collected ₹0", true);
 }
 // hourly / dishes / categories — P20185–P20191.
 {
-  let h = { rng: 0, dup: 0, neg: 0 }, d = { ttl: 0, neg: 0 }, c = { nm: 0, neg: 0 };
+  const h = { rng: 0, dup: 0, neg: 0 }, d = { ttl: 0, neg: 0 }, c = { nm: 0, neg: 0 };
   for (const rg of ["today", "7d", "30d"]) {
     const hb = (await api(`type=hourly&range=${rg}&rid=${RID}`)).body.rows as { hour: number; orders: number; revenue: number }[];
     if (hb.every((r) => r.hour >= 0 && r.hour <= 23)) h.rng++;
@@ -1318,5 +1326,6 @@ await browser.close();
 console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
 console.log(`new ids used: P${NEW_FROM}–P${nextNew - 1} (${nextNew - NEW_FROM} of ${NEW_TO - NEW_FROM + 1})`);
 if (fail) { console.log("\nFAILURES:"); fails.forEach((f) => console.log("  " + f)); }
+if (LEDGER) { writeFileSync(LEDGER, rows.map((r) => [r.id, r.msg, r.res, r.note].join("\t")).join("\n")); console.log(`ledger rows written: ${rows.length} → ${LEDGER}`); }
 console.log(fail ? "\n❌ FAIL" : "\n✅ PASS — the owner's Reports and every chart");
 process.exit(fail ? 1 : 0);
