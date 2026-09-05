@@ -223,10 +223,37 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
      apart, which is exactly the fault P04150 and the offline bar were each repaired for.
      offline.js's own sheet already special-cases this (`held`); this panel never did. */
   check("P65797", "a change held behind an earlier one is not pilled 'Sending...'", () => {
+    /* ASSERTED ON WHAT THE PILL IS BUILT FROM, not on a phrase appearing nearby. The first
+       version of this check looked for `it.why === "behind"` anywhere in the queued-row loop —
+       so when the fix was deliberately reverted (the pill put back to the device-wide `st.word`)
+       the line declaring `heldBack` was still there and the guard stayed GREEN over the exact
+       bug it was written for. Caught by sabotaging it; recorded here because a guard that keeps
+       passing while its subject is broken is worth less than no guard at all.
+       The rule: the pill's WORD and its two colours must each be chosen per row, not taken
+       straight from the device-wide answer. */
     const queuedRows = renderPop.slice(renderPop.indexOf("outbox.queued.forEach"));
     if (!/el\("span", "lfh-conn-pill"/.test(queuedRows)) return "could not find the queued row's pill";
-    const perRow = /it\.why === "behind"|heldWord|pillFor\(it\)|wordFor\(it\)/.test(queuedRows);
-    return perRow ? true
-      : "every queued row shows the same device-wide word, so a deliberately-held change is pilled as if it were being sent";
+    if (!/it\.why === "behind"/.test(queuedRows)) return "nothing in the queued row reads why the change is waiting";
+    /* RESOLVE THE NAMES, don't read the call. The pill is built as
+           var pill = el("span", "lfh-conn-pill", word);
+       so looking at that line only ever sees the identifier `word` — which is exactly as true
+       when `word` is the per-row choice as when somebody sets `var word = st.word;`. The second
+       sabotage of this check walked straight through it for that reason. Follow each name back
+       to what it is ASSIGNED, and require the row's own reason to be in that expression. */
+    const pillWord = (queuedRows.match(/el\("span", "lfh-conn-pill", ([^)]+)\)/) || [])[1];
+    if (!pillWord) return "could not read what the pill is labelled with";
+    const nameOf = (n) => (queuedRows.match(new RegExp(`var ${n}\\s*=\\s*([^;]+);`)) || [])[1] || "";
+    const wordExpr = /^[A-Za-z_$][\w$]*$/.test(pillWord.trim()) ? nameOf(pillWord.trim()) : pillWord;
+    if (!wordExpr) return `could not resolve what the pill's label (${pillWord.trim()}) is set from`;
+    if (!/heldBack|it\.why/.test(wordExpr)) {
+      return `the pill's word is "${wordExpr.trim()}" — the device-wide answer, so a deliberately-held change reads as being sent`;
+    }
+    const bgExpr = (queuedRows.match(/pill\.style\.background = ([^;]+);/) || [])[1] || "";
+    const bgName = (bgExpr.match(/^\s*([A-Za-z_$][\w$]*)\s*\?/) || [])[1];
+    const movingExpr = bgName ? nameOf(bgName) || bgName : bgExpr;
+    if (/^\s*st\.sending\s*$/.test(movingExpr) || /^\s*st\.sending\s*\?/.test(bgExpr)) {
+      return "the pill's colour comes straight from the device-wide answer, so a held change is painted as moving";
+    }
+    return true;
   });
 }

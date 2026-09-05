@@ -82,8 +82,15 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
       /if \(t === window\.LFH_THEME\.get\(\)\) return;/.test(S));
     check("P65906", "the cross-tab sync can never break the panel", () =>
       /catch \(err\) \{ /.test(S));
-    check("P65907", "the pointer listeners are capture-phase, so a stopped event is still seen", () =>
-      count(S, /\}, true\)/g) >= 3);
+    check("P65907", "the pointer listeners are capture-phase, so a stopped event is still seen", () => {
+      /* Judged per LINE. Two of the three pass a named handler (`release, true`) and the third
+         an inline one whose body contains a semicolon - so neither a brace-anchored pattern nor
+         a `[^;]*` one sees all three. Both of those were tried here and each under-counted. */
+      const lines = S.split("\n").filter((l) => /window\.addEventListener\("pointer(down|up|cancel)"/.test(l));
+      if (lines.length !== 3) return `expected 3 pointer listeners, found ${lines.length}`;
+      const bubbling = lines.filter((l) => !/,\s*true\s*\)/.test(l));
+      return bubbling.length ? `not capture-phase: ${bubbling.map((l) => l.trim()).join(" | ")}` : true;
+    });
     check("P65908", "theme.js carries a content-hash ?v= in every panel", () => {
       for (const k of ["editorHtml", "kitchenHtml", "tabletHtml"]) {
         if (!/theme\.js\?v=[a-f0-9]{6,}/.test(c[k] || "")) return `${k}: theme.js has no content-hash ?v=`;
@@ -284,12 +291,15 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
     check("P65923", "the file is strict mode, so a typo becomes an error rather than a global", () =>
       /"use strict"/.test(raw.backstack));
     check("P65924", "backstack.js loads before every panel's own app.js", () => {
-      for (const [k, app] of [["editorHtml", "editor/app.js"], ["kitchenHtml", "kitchen/app.js"], ["tabletHtml", "tablet/app.js"]]) {
+      // The kitchen and tablet load their own app.js by a RELATIVE path ("app.js?v=..."), the
+      // manager by an absolute one - so match the tag that ends in app.js either way.
+      for (const k of ["editorHtml", "kitchenHtml", "tabletHtml"]) {
         const srcs = [...(c[k] || "").matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]);
         const b = srcs.findIndex((s) => s.includes("/backstack.js"));
-        const a = srcs.findIndex((s) => s.includes(app));
-        if (b < 0 || a < 0) return `${k}: could not find backstack.js and ${app} as script tags`;
-        if (b > a) return `${k}: backstack.js must load before ${app}`;
+        const a = srcs.findIndex((s) => /(^|\/)app\.js(\?|$)/.test(s));
+        if (b < 0) return `${k}: backstack.js is not loaded`;
+        if (a < 0) return `${k}: the panel's own app.js is not loaded`;
+        if (b > a) return `${k}: backstack.js must load before app.js`;
       }
       return true;
     });

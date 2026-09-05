@@ -58,10 +58,15 @@ const FILES = {
   editorHtml: "public/panels/editor/index.html",
   editorApp: "public/panels/editor/app.js",
   editorCss: "public/panels/editor/style.css",
+  kitchenApp: "public/panels/kitchen/app.js",
+  kitchenCss: "public/panels/kitchen/style.css",
+  tabletApp: "public/panels/tablet/app.js",
+  tabletCss: "public/panels/tablet/style.css",
   sw: "public/sw.js",
   guestOutbox: "lib/guestOutbox.ts",
   connectionStatus: "lib/connectionStatus.ts",
   connBadgeTsx: "components/ConnectionBadge.tsx",
+  staffProfileShared: "lib/staffProfileShared.ts",
 };
 
 const raw = {};
@@ -198,12 +203,6 @@ for (const r of results) {
   seen.set(r.id, true);
 }
 
-if (VERBOSE) {
-  for (const r of results) {
-    const mark = r.ok === true ? "PASS" : r.ok === "skip" ? "SKIP" : "FAIL";
-    console.log(`${mark}  ${r.id}  ${r.what}${r.note ? "  -- " + r.note : ""}`);
-  }
-}
 console.log(`\nverify:t12-plumbing - ${results.length} checks: ${pass} pass, ${fail.length} fail, ${skipped.length} skip`);
 if (skipped.length && VERBOSE === false) {
   for (const s of skipped) console.log(`  SKIP ${s.id}  ${s.what} -- ${s.note}`);
