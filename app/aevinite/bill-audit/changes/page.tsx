@@ -207,7 +207,28 @@ export default function AdminBillChanges() {
 
       <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
         {!d ? (err ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={5} label="Loading changes" />) : rows.length === 0 ? (
-          <div className="adm-empty">No bill changes recorded in this view.</div>
+          /* AN EMPTY PAGE MUST STILL HAVE A WAY BACK (T22 sweep, 2026-09-06). The pager lives inside
+             the branch below, which only draws when there is at least one row — so landing on a page
+             with none left the admin holding one sentence, no ← Prev, no page numbers and no box to
+             type one into. The only escape was the browser's address bar or a reload, on a tamper log
+             whose whole promise is that every change is reachable.
+             It is reachable in ordinary use: `go()` clamps to the last page only when the COUNT was
+             read, and the count is deliberately allowed to fail (it travels as null so the banner can
+             say "I don't know" rather than "no removals"). With no last page, "Go to page 9" of a
+             two-page log lands here. Rows pruned between the count and the read do the same thing to
+             the real last page. Measured in the browser: with the count suppressed, typing 9 gave an
+             empty card with no control on it at all. */
+          <div className="adm-empty">
+            {page > 1
+              ? <>Nothing on page {page.toLocaleString("en-IN")} — this is past the end of the log.</>
+              : <>No bill changes recorded in this view.</>}
+            {page > 1 && (
+              <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12, flexWrap: "wrap" }}>
+                <button className="adm-btn" disabled={loading} onClick={() => go(page - 1)}>← Back a page</button>
+                <button className="adm-btn" disabled={loading} onClick={() => { setPage(1); setMeta(null); }}>Back to the newest changes</button>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="adm-logwrap chg-wrap" style={{ border: 0 }}>
             <div className="adm-logrow head chg-row">
