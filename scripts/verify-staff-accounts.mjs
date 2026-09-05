@@ -180,7 +180,23 @@ async function createUser(name, role, { phone, password, tables } = {}) {
   }
 
   // ── 9. OPERATION LOG: staff edits present, scoped to actor ────────────────
-  const oplog = await api("/api/admin/oplog", { cookie: adminCookie });
+  //
+  // ?limit=200, NOT THE DEFAULT 30 (sweep #8 T15, 2026-09-04 — it had gone red again).
+  //
+  // `/api/admin/oplog` with no `limit` answers the newest **30** rows for the WHOLE PLATFORM. The
+  // 2026-08-27 repair below moved this section off "nothing anywhere recently said 'edit'" and onto
+  // "no NEW row names THIS person", which is the right claim — but both halves still read through
+  // that 30-row keyhole, and the section's own detector reaches back for the `user_create` row of a
+  // person created ~40 writes earlier. This run alone creates 10 logins, sets up two profiles, sends
+  // five wrong passwords and edits a phone; with ten sweep lanes sharing one dev database, the row
+  // the detector needs is simply no longer in the newest 30 by the time it looks. Measured on
+  // 2026-09-04: 40 passed, 1 failed — "the check can see a row that DOES name them" — on clean code,
+  // with `user_create` logging perfectly well.
+  //
+  // A wider window can only ever make these three checks STRICTER, never laxer: `idsBefore` grows
+  // (so "new row" means more precisely new), the two "…was logged" checks look in a superset, and
+  // the detector gets the row it is there to find. 200 is the route's own ceiling.
+  const oplog = await api("/api/admin/oplog?limit=200", { cookie: adminCookie });
   const rows = oplog.json?.actions || [];
   check("oplog readable by admin", oplog.status === 200 && Array.isArray(rows));
   check("staff profile_setup logged", rows.some((r) => r.action === "profile_setup" && /zztest Alpha/.test(r.actor || "")));
@@ -213,7 +229,7 @@ async function createUser(name, role, { phone, password, tables } = {}) {
   // edit, and fail only if a NEW row names THIS person. Platform noise cannot move it either way.
   const idsBefore = new Set(rows.map((r) => r.id));
   await api("/api/admin/users", { method: "PATCH", cookie: adminCookie, body: { id: beta.id, action: "edit", phone: "5550001111" } });
-  const oplog2 = await api("/api/admin/oplog", { cookie: adminCookie });
+  const oplog2 = await api("/api/admin/oplog?limit=200", { cookie: adminCookie });
   const namesThisPerson = (r) =>
     new RegExp(`${beta.id}|${beta.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")
       .test(`${r.detail || ""} ${r.actor || ""}`);
