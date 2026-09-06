@@ -620,15 +620,23 @@ async function dishPhotoUpload(req: NextRequest, g: { user: StaffUser | null }, 
 // is frozen — reject any money-changing edit so the printed invoice total can't drift.
 // Reopen (void) the invoice first. (work-checker 2026-06-21)
 const LOCKED_MSG = "This bill is invoiced — reopen it (void the invoice) before changing the order.";
-async function invoiceLockedByOrder(orderId: string): Promise<boolean> {
-  const o = (await sb.from("orders").select("session_id").eq("id", orderId).maybeSingle()).data as { session_id?: string } | null;
+// ── IT ASKS ABOUT *THIS* RESTAURANT'S ROW (T24 sweep #8, 2026-09-06) ──────────────────────────
+// These three reads were keyed on an id ALONE, and the id comes straight off the request path —
+// no caller proves the order is this restaurant's first. Nothing was wrong on the floor (every
+// write underneath is separately scoped, so no row could move), but it is the exact shape
+// verify:scoped-reads exists for: inside lib/ and here the service-role client is exempt from the
+// database's own row rules, so the WHERE clause is the only scope there is. Every call site
+// already had `rid` in hand. Required, not optional — an optional scope is one a future caller
+// forgets, which is the note lib/sessionClose.ts carries for the same reason.
+async function invoiceLockedByOrder(orderId: string, rid: string): Promise<boolean> {
+  const o = (await sb.from("orders").select("session_id").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { session_id?: string } | null;
   if (!o?.session_id) return false;
-  const s = (await sb.from("sessions").select("invoice_no,invoice_voided").eq("id", o.session_id).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean } | null;
+  const s = (await sb.from("sessions").select("invoice_no,invoice_voided").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean } | null;
   return !!(s && s.invoice_no != null && !s.invoice_voided);
 }
-async function invoiceLockedByItem(itemId: string): Promise<boolean> {
-  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).maybeSingle()).data as { order_id?: string } | null;
-  return it?.order_id ? invoiceLockedByOrder(it.order_id) : false;
+async function invoiceLockedByItem(itemId: string, rid: string): Promise<boolean> {
+  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string } | null;
+  return it?.order_id ? invoiceLockedByOrder(it.order_id, rid) : false;
 }
 
 // ── WHAT A DISCOUNT MAY WORK ON (mig 270 + 271) ──────────────────────────────────────────
@@ -3812,7 +3820,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
     if (a === "orders" && c === "discount") {
       if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
-      if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
+      if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);
       // .eq(restaurant_id, rid) is the only tenant boundary (sb is service-role, RLS bypassed) —
       // a foreign order id can't be discounted.
       const cur = must(await sb.from("orders").select("subtotal, taxable_base, mrp_amount, session_id").eq("id", b).eq("restaurant_id", rid).single());
@@ -4430,7 +4438,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // dishes (and cancels the order if it's now empty), all in one transaction.
     // The RPC refuses to touch a PAID bill. Returns { ok, items_left, total, ... }.
     if (a === "items" && c === "delete") {
-      if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
+      if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);
       // Confirm the dish belongs to THIS restaurant before the RPC (which looks it up by id alone) —
       // the same tenant boundary the sibling money endpoints enforce. (B15 scoping consistency.)
       // Read what it WAS before the RPC deletes it: the Audit row has to name the dish and what it
@@ -4467,7 +4475,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // from order_items (orders.total is a stored server-priced number). Refuses a
     // PAID/cancelled order. (owner, 2026-06-17 — gated behind the UI confirm.)
     if (a === "items" && c === "qty") {
-      if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
+      if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);
       const qty = Math.round(Number(body?.qty));
       if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
       // What it was, so the Audit row can say 3 → 1 rather than just "1" (owner: "whatever the
@@ -4569,7 +4577,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Server-priced (rejects unknown/sold-out), inserted as 'received', then the
     // bill is re-priced. Body: { dishId, qty, options?, removed?, note? }.
     if (a === "orders" && c === "add-item") {
-      if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
+      if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);
       const dishId = String(body?.dishId || body?.id || "").trim();
       if (!dishId) return err("dish required");
       if (!(await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That order was not found.", 404); // B15 scoping
@@ -5899,7 +5907,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // per-dish delete, the quantity stepper and the discount. A live invoice number locks the
       // bill; a VOIDED one does not, because the bill was deliberately reopened and is editable
       // again. Reusing it is what stops "invoiced" meaning four slightly different things.
-      if (patch.status === "cancelled" && await invoiceLockedByOrder(id)) {
+      if (patch.status === "cancelled" && await invoiceLockedByOrder(id, rid)) {
         return err("This bill's invoice has already been printed, so no KOT can be taken off it. Reopen the bill first — that retires the invoice number and records why — or issue a credit note if it is already settled.", 409);
       }
       // CANCELLING A TICKET IS NOT GATED (restored 2026-08-02, and here is why it changed twice).
