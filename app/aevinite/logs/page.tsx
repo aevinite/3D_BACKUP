@@ -413,8 +413,14 @@ export default function AdminLogs() {
             <div style={{ flex: "1 1 260px", minWidth: 200 }}>
               <b style={{ fontSize: 13 }}>Keep the Audit for</b>
               <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+                {/* THE WARNING HAS TO AGREE WITH ITS OWN SENTENCE (T22 sweep, 2026-09-06). This read
+                    `>= 8`, and the offered windows are 1 / 3 / 5 / 7 / 10 — so choosing SEVEN drew a
+                    red warning whose own words are "records are normally kept 6–8 years". Seven is
+                    inside that range, and docs/COMPLIANCE-GUARDRAILS.md says the same thing ("Records
+                    retention 6–8 years"), so the screen was contradicting itself and the rule it
+                    quotes. The line is where the doc puts it: below six is short. */}
                 {auditYears == null ? "…"
-                  : auditYears >= 8
+                  : auditYears >= 6
                     ? "Removals older than this are cleared automatically. Anything newer is kept — nothing here can be deleted by hand."
                     : `⚠ Records are normally kept 6–8 years. At ${auditYears} year${auditYears === 1 ? "" : "s"} you would no longer have the removal trail for older bills.`}
               </div>
