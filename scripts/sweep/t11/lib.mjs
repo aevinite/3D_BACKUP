@@ -72,7 +72,17 @@ export async function run(label) {
   // A SUITE THAT FILTERS ITSELF OUT MUST NOT PRINT "all clean" (the argv.indexOf(-1)+1 scar).
   let picked = rows;
   if (only) picked = rows.filter((r) => r.id === only);
-  else if (from) picked = rows.filter((r) => r.id >= from);
+  // NUMERICALLY, NEVER AS TEXT. `r.id >= from` is a STRING compare, and the ledger's ids left the
+  // five-digit space in September ("P100921"): "P18844" > "P100921" as text, so `--from P100921`
+  // quietly ran eight hundred rows nobody asked for and would just as quietly SKIP rows if the
+  // comparison fell the other way. A filter that silently picks the wrong set is the same class of
+  // fault as a suite that filters itself out and still prints "all clean".
+  else if (from) {
+    const n = (x) => Number(String(x).replace(/^P/i, ""));
+    const floor = n(from);
+    if (!Number.isFinite(floor)) { console.log(`${label}: --from ${from} is not a phase id.`); process.exit(2); }
+    picked = rows.filter((r) => n(r.id) >= floor);
+  }
   if (!picked.length) {
     console.log(`\n${label}: NOTHING RAN — ${only || from || "(no filter)"} matched 0 of ${rows.length} rows.`);
     process.exit(2);

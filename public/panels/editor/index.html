@@ -12,7 +12,9 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=b6e55516" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=6dadb4c6" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=dc335568" />
+  <!-- the "who is this bill for?" box — shared with the other panel that opens it -->
+  <link rel="stylesheet" href="/panels/billcustomer.css?v=23b15d10" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=7aaf299f"></script>
 </head>
@@ -197,7 +199,7 @@
   <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
   <script src="/panels/undobar.js?v=e5a33483"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
-  <script src="/panels/billcustomer.js?v=78df0b22"></script>
+  <script src="/panels/billcustomer.js?v=53a15e30"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping.
        `.bill-amt` was REMOVED from this list on 2026-09-03 (T8 sweep #8). It was the Bills tab's
        bill-amount class until the 2026-08-03 Bills rebuild renamed it `.bl-amt`, and the list was
@@ -222,7 +224,7 @@
        the kitchen panel and the admin's sample, so a document can never look different in two
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —
        without it, printing a bill throws "LFH_BILLDOC is not defined" and nothing prints. -->
-  <script src="/panels/billdoc.js?v=86daa56d"></script>
+  <script src="/panels/billdoc.js?v=d782d9c2"></script>
   <!-- auditsort: the plain-English words and the sort order for Audit & logs, shared with the
        owner console's Audit screen so the same event can never be worded two ways. -->
   <script src="/panels/auditsort.js?v=1da861b5"></script>

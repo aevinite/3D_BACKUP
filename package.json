@@ -207,7 +207,8 @@
     "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs",
     "verify:owner-live500": "node scripts/verify-owner-live-500.mjs",
     "verify:repair-sweep": "node scripts/verify-repair-health-sweep.mjs",
-    "verify:repair-r2": "node scripts/verify-repair-health-round2.mjs"
+    "verify:repair-r2": "node scripts/verify-repair-health-round2.mjs",
+    "verify:shared-panel-styles": "node scripts/verify-shared-panel-styles.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"

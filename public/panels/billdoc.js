@@ -910,8 +910,17 @@
     // the same ticket printed "AUG 6" on one machine and "6 AUG" on another. A kitchen ticket must
     // read the same on every device in the building — and the DAY NUMBER has to come from India too,
     // or a ticket rung at 01:30 IST prints the previous date on a device sitting behind UTC.
+    // …AND THE MONTH IS BUILT EXPLICITLY FOR THE SAME REASON THE ORDER IS (T11, sweep #8,
+    // 2026-09-06). `month: "short"` hands the abbreviation to the platform's own ICU data, and ICU
+    // changed its mind about September: the same ticket prints "1 SEP" on one device and "1 SEPT"
+    // on another, and eleven months are three letters while the twelfth is four — on a 66mm roll
+    // with fixed columns. The note directly above says a kitchen ticket must read the same on
+    // every device in the building; this is the other half of keeping that true. Three letters,
+    // decided here, the same everywhere and in every year.
+    var MON = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
     var day = d.toLocaleDateString("en-GB", { day: "numeric", timeZone: "Asia/Kolkata" });
-    var mon = d.toLocaleDateString("en-GB", { month: "short", timeZone: "Asia/Kolkata" }).toUpperCase();
+    var mNum = Number(d.toLocaleDateString("en-GB", { month: "numeric", timeZone: "Asia/Kolkata" }));
+    var mon = MON[mNum - 1] || "";
     return day + " " + mon + " " + time;
   }
 
