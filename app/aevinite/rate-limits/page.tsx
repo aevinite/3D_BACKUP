@@ -47,6 +47,20 @@ const hitChip = (h: { hit_count: number; max_count: number; window_seconds: numb
     ? `${h.hit_count} / ${h.max_count} per ${perLabel(h.window_seconds)}`
     : `${h.hit_count} attempt${h.hit_count === 1 ? "" : "s"}`;
 
+// ── "max 0" IS THE DATABASE'S WORD FOR *NO* LIMIT, AND THE SCREEN SAID THE OPPOSITE (item 2) ─────
+// lfh_rate_check (migration 205) opens with
+//     if not found or not v_rule.enabled or v_rule.max_count <= 0 then return true;
+// so a rule stored with max_count 0 lets EVERY attempt through. This row rendered it as
+// "max 0 per 1 min", which any person reads as the strictest setting there is — nothing allowed.
+// One screen, two opposite meanings, and the wrong one is the reassuring one.
+// It was one keystroke away, too: the number box floored at 0, so CLEARING it (to type a new
+// number) produced 0, Save lit up, and the server accepts 0. Measured: a rule at 8, box cleared,
+// Save enabled. The box now floors at 1 — turning a limit OFF is what the On/Off switch beside it
+// is for — and a 0 already in the database still reads as what it does.
+const ruleWords = (r: { enabled: boolean; max_count: number; window_seconds: number }) =>
+  !r.enabled ? "off"
+    : r.max_count <= 0 ? "off — a limit of 0 lets everything through"
+      : `max ${r.max_count} per ${perLabel(r.window_seconds)}`;
 
 export default function AdminRateLimits() {
   const toast = useToast();
@@ -354,11 +368,11 @@ export default function AdminRateLimits() {
               <div key={r.id} id={`rule-${r.key}`} className="rl-rule">
                 <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <b style={{ fontSize: 13.5 }}>{r.label}</b>
-                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{r.enabled ? `max ${r.max_count} per ${perLabel(r.window_seconds)}` : "off"}</div>
+                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{ruleWords(r)}</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <input type="number" min={0} max={100000} className="rl-num" value={d.max_count}
-                    onChange={(e) => setDraft((p) => ({ ...p, [r.id]: { ...d, max_count: Math.max(0, Math.trunc(+e.target.value || 0)) } }))} aria-label={`${r.label} max count`} />
+                  <input type="number" min={1} max={100000} className="rl-num" value={d.max_count}
+                    onChange={(e) => setDraft((p) => ({ ...p, [r.id]: { ...d, max_count: Math.max(1, Math.trunc(+e.target.value || 1)) } }))} aria-label={`${r.label} max count`} />
                   <span className="adm-muted" style={{ fontSize: 12 }}>per</span>
                   <input type="number" min={1} max={86400} className="rl-num" value={d.window_seconds}
                     onChange={(e) => setDraft((p) => ({ ...p, [r.id]: { ...d, window_seconds: Math.max(1, Math.trunc(+e.target.value || 1)) } }))} aria-label={`${r.label} window seconds`} />
