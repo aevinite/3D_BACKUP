@@ -3015,7 +3015,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const upd = await sb.from("staff_users").update({ assigned_tables: tables })
         .eq("id", uid).eq("restaurant_id", rid).eq("role", "tablet")
         .select("id, username, name, assigned_tables");
-      if (upd.error) return err(upd.error.message, 500);
+      // Same rule as everywhere else: the database's own words go to the server log, never to the
+      // person standing at the section editor. (T24 sweep #8, 2026-09-06)
+      if (upd.error) {
+        console.error("[editor/table-sections] save failed:", upd.error.message);
+        return err("Couldn't save that waiter's tables — please try again.", 500);
+      }
       const row = (upd.data || [])[0];
       if (!row) return err("That waiter is no longer on this restaurant's team.", 404);
       await log("editor", "table_sections_set", {
