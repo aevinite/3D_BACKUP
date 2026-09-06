@@ -487,6 +487,33 @@ export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs 
   }, [intervalMs, idleMs]);
 }
 
+/**
+ * useNarrow — "is this a phone-width screen right now?"
+ *
+ * WHY IT EXISTS (sweep #8 T23, 2026-09-06). A placeholder cannot be swapped by CSS, and two search
+ * boxes in this console were written with a helpful, example-carrying placeholder that DOES NOT FIT
+ * on the phone the owner tests on. Measured with the real rendered font against the real content
+ * box: the Users search needed 406px of the 249px it has at 390px, and the Access find-a-setting
+ * box needed 359px of 285px — so both stopped mid-word, and the part that never arrived was the
+ * part that says what you may search BY.
+ *
+ * ONE helper rather than two copies of a media query, so a third box cannot answer this question a
+ * third way. Read in an EFFECT, never during render: the server knows nothing about the viewport,
+ * so deciding it in the initial state is a hydration mismatch — and React answers one by
+ * re-rendering the whole page.
+ */
+export function useNarrow(maxPx = 640): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${maxPx}px)`);
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [maxPx]);
+  return narrow;
+}
+
 // NO food/earnings revenue in these stat cards (owner 2026-07-03: the admin sees no restaurant
 // earnings — no ₹ at all here, including table "due" amounts). Platform SUBSCRIPTION income
 // (what restaurants pay us) is a separate thing and does show on Billing/Revenue by design.
