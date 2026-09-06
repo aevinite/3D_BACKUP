@@ -323,7 +323,12 @@ export default function AdminFloor() {
       ) : null}
 
       {rests && (() => {
-        const occ = rests.map((r) => ({ r, ts: r.tables.filter((t) => t.s !== "free") })).filter((x) => x.ts.length);
+        // THE SORT CONTROL HAS TO REACH THIS LIST TOO (item 6, sweep #8 T21). This box read `rests`,
+        // the raw response, while the restaurant blocks below read `sorted` — so choosing "Busiest
+        // first" or "Needs attention" reordered the coloured blocks and left this list in the
+        // server's own name order. Two lists of the same restaurants, on one screen, disagreeing
+        // about which one matters most, with a control at the top that only half worked.
+        const occ = sorted.map((r) => ({ r, ts: r.tables.filter((t) => t.s !== "free") })).filter((x) => x.ts.length);
         const total = occ.reduce((s, x) => s + x.ts.length, 0);
         return (
           <div className="adm-card" style={{ marginBottom: 14, padding: 0, overflow: "hidden" }}>
