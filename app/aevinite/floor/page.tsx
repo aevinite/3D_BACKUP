@@ -588,6 +588,14 @@ export default function AdminFloor() {
            This was the other half of that pair, on the busier screen of the two. Same colours as
            .so-snap, deliberately, so the two "manual" pills read as one idea. */
         .adm-snapchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent); white-space: nowrap; }
+        /* A TEN-TABLE RESTAURANT MUST NOT RENDER A 700-PIXEL EMPTY CARD (item 5, sweep #8 T21).
+           .adm-flooryear is a CSS grid, and a grid stretches every item in a row to the tallest one.
+           A 300-table restaurant's mini-grid is ~630px tall, so on this platform Aangan (10 tables,
+           22px of tiles) and Demo Bistro rendered as 701px and 726px cards with two-thirds of the
+           height blank — measured on this page at 1280×800. The blocks now take their own height;
+           a short restaurant is a short block, which is also what makes the "year calendar" read as
+           a calendar rather than a wall. */
+        .adm-flooryear { align-items: start; }
       `}</style>
     </>
   );
