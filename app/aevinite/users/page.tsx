@@ -12,6 +12,7 @@ import { CopyButton } from "@/components/admin/CopyButton";
 import StaffProfile from "@/components/admin/StaffProfile";
 import { useOverlayParam } from "@/components/admin/useOverlayParam";
 import { SkelList, SkelLine } from "@/components/admin/Skeleton";
+import { useNarrow } from "@/components/admin/shared";
 
 type User = {
   id: string; username: string; role: string; name: string | null; phone: string | null;
@@ -66,6 +67,8 @@ export default function AdminUsers() {
   // Spotlight redesign (owner 2026-07-24): the create form is tucked behind a "+ Add user"
   // button so the SEARCH is the hero. Opens on demand.
   const [addOpen, setAddOpen] = useState(false);
+  // Phone width — the search placeholder is shortened there; see the note beside it.
+  const narrow = useNarrow(640);
 
   // ── WHICH TABLES A NEW WAITER WILL SERVE (sweep T15, 2026-08-18) ────────────────────────────
   // Waiter sections (migs 222-225, owner 2026-07-30: "new tablet user will have to choose …
@@ -193,7 +196,15 @@ export default function AdminUsers() {
       <div className="usp-hero">
         <label className="usp-search">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search a person — name, role, restaurant or phone…" aria-label="Search users" />
+          {/* THE PLACEHOLDER HAS TO FIT THE PHONE HE TESTS ON (sweep #8 T23, 2026-09-06). Measured
+              with the rendered font against the real content box: the long version needs 406px and
+              this box has 249px at 390px and 219px at 360px, so it stopped at "…name, role, r" —
+              and the two things this box uniquely searches by, the restaurant and the phone number,
+              were the half that never arrived. The aria-label keeps the full sentence for a screen
+              reader at every width. */}
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder={narrow ? "Name, restaurant, phone…" : "Search a person — name, role, restaurant or phone…"}
+            aria-label="Search users — name, role, restaurant or phone" />
           {search ? <button type="button" className="clr" onClick={() => setSearch("")} aria-label="Clear">×</button> : null}
         </label>
         <div className="usp-tools">

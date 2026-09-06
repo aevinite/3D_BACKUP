@@ -25,6 +25,7 @@
  * page (rule 1 of this screen — no greyed-out ghosts), so it has no row to jump to. Rather
  * than a dead click, those results say what has to be on first and land on that parent. */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNarrow } from "@/components/admin/shared";
 import { SECTIONS, type Node, type Section } from "@/lib/accessTree";
 
 /** Extra words people actually type that don't appear in a row's own label. Kept small and
@@ -192,6 +193,7 @@ export default function AccessSearch({ isOn, onPick }: {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
+  const narrow = useNarrow(640);
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -252,13 +254,20 @@ export default function AccessSearch({ isOn, onPick }: {
 
   return (
     <div className="as-wrap" ref={boxRef}>
-      <SearchStyle />
+      {/* No stylesheet render here — app/aevinite/access/page.tsx renders SearchStyle
+          unconditionally, beside the page's own and the tree's, so the CSS is in the SERVER HTML
+          long before this component exists. See the note on SearchStyle below. */}
       <div className="as-field">
         <svg className="as-mag" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.6-3.6" /></svg>
+        {/* THE PLACEHOLDER HAS TO FIT (sweep #8 T23, 2026-09-06). Measured with the rendered font
+            against the real content box: the long version needs 359px and this box has 285px at
+            390px and 255px at 360px — it only reaches its full width at about 480px, so it was cut
+            mid-example on EVERY common phone. The short one keeps ONE example, which is the part
+            that teaches you what to type. */}
         <input
           ref={inputRef} className="as-input" type="search" value={q} autoComplete="off" spellCheck={false}
-          placeholder="Find a setting — try “language”, “discount”, “zomato”…"
+          placeholder={narrow ? "Find a setting — “discount”…" : "Find a setting — try “language”, “discount”, “zomato”…"}
           aria-label="Find a setting"
           aria-expanded={show} aria-controls="as-list" role="combobox"
           onChange={(ev) => { setQ(ev.target.value); setOpen(true); }}
@@ -309,9 +318,23 @@ export default function AccessSearch({ isOn, onPick }: {
   );
 }
 
-function SearchStyle() {
+/**
+ * THE SEARCH BAR'S OWN STYLESHEET, HOISTED LIKE ITS THREE NEIGHBOURS (sweep #8 T23, 2026-09-06).
+ *
+ * `/aevinite/access` renders four stylesheets and, measured on the served page, only three of them
+ * reached the server HTML: `adm-access` (the page), `adm-access-tree` and `adm-access-person` were
+ * all present and `.as-field` was absent. This one was rendered from INSIDE AccessSearch, which
+ * only exists after the tree's fetch resolves — so the find-a-setting box's CSS arrived in the same
+ * commit as the box, which is the flash the other three carry a "do not convert this back" note
+ * about.
+ *
+ * Two changes, both matching the siblings exactly: it is `export`ed and rendered by the page, and
+ * the element now carries `href` + `precedence`, which is what makes React 19 hoist it into <head>
+ * and keep exactly one copy of it. A bare <style> is an ordinary element rendered where it sits.
+ */
+export function SearchStyle() {
   return (
-    <style>{`
+    <style href="adm-access-search" precedence="default">{`
   /* z-index 41 — ABOVE the scrim (39) and the list (40), so the field you are typing in is never
      dimmed by the very thing your typing opened. */
   .as-wrap { position: relative; flex: 1 1 320px; min-width: 0; max-width: 560px; z-index: 41; }

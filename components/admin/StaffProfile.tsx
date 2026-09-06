@@ -61,7 +61,9 @@ import {
 export type ProfileHost = {
   /** → { person, restaurant, payrollOn, payments, activity, tree? } */
   load: () => Promise<{ ok: boolean; data: any }>;
-  patch: (payload: Record<string, unknown>, expect?: { fields: Record<string, unknown> }) => Promise<any>;
+  /** `label` = what the SCREEN calls this row, so a refusal can name it in the admin's own words
+   *  instead of the storage key ("Give a discount", never "give_discounts"). */
+  patch: (payload: Record<string, unknown>, expect?: { fields: Record<string, unknown>; label?: string }) => Promise<any>;
   /** absent = this console does not hand out photos */
   photo?: { upload: (f: File) => Promise<{ ok: boolean; error?: string }>; remove: () => Promise<{ ok: boolean; error?: string }> };
   /** absent = no danger zone */
@@ -107,7 +109,7 @@ const adminHost = (userId: string): ProfileHost => ({
         // expectHeader(), not JSON.stringify(): these fields are a PERSON'S OWN TYPING, and a header
         // must be ISO-8859-1 — a designation with a curly apostrophe or an em dash would make fetch()
         // throw away the whole request, so Save would do nothing at all. (sweep T15, 2026-08-18)
-        ...(expect ? { "X-LFH-Expect": expectHeader({ table: "staff_users", id: userId, fields: expect.fields }) } : {}),
+        ...(expect ? { "X-LFH-Expect": expectHeader({ table: "staff_users", id: userId, fields: expect.fields, ...(expect.label ? { label: expect.label } : {}) }) } : {}),
       },
       body: JSON.stringify({ id: userId, ...payload }),
     });
@@ -260,7 +262,7 @@ export default function StaffProfile({ userId, onClose, onChanged, host }: {
   // vanilla panels use — the rule just never reached the React screens, and a person's PAY was the
   // most valuable thing left unprotected. Omit it and nothing changes.
   const patch = useCallback(
-    (payload: object, expect?: { fields: Record<string, unknown> }): Promise<any> =>
+    (payload: object, expect?: { fields: Record<string, unknown>; label?: string }): Promise<any> =>
       hostRef.patch(payload as Record<string, unknown>, expect),
     [hostRef]);
 
@@ -546,7 +548,20 @@ function Permissions({ d, tree, patch, reload, flash }: Kit & { tree: TreeState 
     // silently doesn't save is worse than one that visibly fails.
     setPerms((x) => { const n = { ...x }; if (v === "default") delete n[cap.key]; else n[cap.key] = v; return n; });
     try {
-      await patch({ action: "set_permissions", permissions: { [cap.key]: v === "default" ? "" : v } });
+      // FIRST SAVE WINS HERE TOO (sweep #8 T23, 2026-09-06). Every other edit on this panel — the
+      // person's details, their job, their PAY — has told the server what it was editing from since
+      // 2026-08-04 (finding F21), and this one row did not: two admins on the same person could set
+      // opposite answers for the same power and the second silently won, with the loser's screen
+      // still showing the value that lost. On the one screen that decides what a person may do,
+      // "it saved and then it wasn't" is the worst possible silence.
+      //
+      // `permissions.<key>` is the jsonb sub-key form lib/clash.ts added for exactly this, and an
+      // ABSENT key compares equal to "" (lib/clashCompare → sameValue), so "was following the
+      // default" is itself a previous value the gate can hold you to.
+      await patch(
+        { action: "set_permissions", permissions: { [cap.key]: v === "default" ? "" : v } },
+        { fields: { [`permissions.${cap.key}`]: before[cap.key] ?? "" }, label: cap.node.name },
+      );
       flash(v === "default" ? "Back to the restaurant's default" : `Saved · ${STATE_LABEL[v]}`);
       reload();
     } catch (e: any) { setPerms(before); flash(e.message || "That permission didn't save."); }
@@ -1196,7 +1211,7 @@ function Danger({ d, patch, reload, onClose, onChanged }: Kit & { onClose: () =>
 }
 
 // ── small shared bits ────────────────────────────────────────────────────────
-type Kit = { d: Detail; patch: (payload: object, expect?: { fields: Record<string, unknown> }) => Promise<any>; reload: () => void; flash: (m: string) => void };
+type Kit = { d: Detail; patch: (payload: object, expect?: { fields: Record<string, unknown>; label?: string }) => Promise<any>; reload: () => void; flash: (m: string) => void };
 
 function Field({ label, v, on, type = "text", placeholder, wide, disabled }: {
   label: string; v: string; on: (v: string) => void; type?: string; placeholder?: string; wide?: boolean; disabled?: boolean;

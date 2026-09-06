@@ -372,8 +372,17 @@ export async function openRestaurantPanel(restaurantId: string, path: string, ow
   if (w) { try { w.opener = null; } catch {} }
   return w;
 }
+// A DATE IT CANNOT READ MUST NOT PRINT "NaNd ago" (sweep #8 T23, 2026-09-06).
+// Its two siblings in this file already guard: `istDate` returns the raw string on an unparseable
+// value and `fullWhen` does the same. This one did not — every comparison against NaN is false, so
+// it fell through all three branches to `Math.floor(NaN / 86400) + "d ago"`. It is the stamp under
+// "updated …" on Platform revenue, Platform analytics and Customers, and beside every row of the
+// activity feed, so a null or a malformed timestamp in any of those replies put a literal NaN in
+// front of the admin — the exact shape of leaked code text this sweep looks for.
 export const timeAgo = (iso: string) => {
-  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "—";
+  const s = Math.floor((Date.now() - t) / 1000);
   if (s < 60) return "just now";
   if (s < 3600) return Math.floor(s / 60) + "m ago";
   if (s < 86400) return Math.floor(s / 3600) + "h ago";
@@ -476,6 +485,33 @@ export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs 
       evs.forEach((e) => window.removeEventListener(e, bump, { capture: true } as EventListenerOptions));
     };
   }, [intervalMs, idleMs]);
+}
+
+/**
+ * useNarrow — "is this a phone-width screen right now?"
+ *
+ * WHY IT EXISTS (sweep #8 T23, 2026-09-06). A placeholder cannot be swapped by CSS, and two search
+ * boxes in this console were written with a helpful, example-carrying placeholder that DOES NOT FIT
+ * on the phone the owner tests on. Measured with the real rendered font against the real content
+ * box: the Users search needed 406px of the 249px it has at 390px, and the Access find-a-setting
+ * box needed 359px of 285px — so both stopped mid-word, and the part that never arrived was the
+ * part that says what you may search BY.
+ *
+ * ONE helper rather than two copies of a media query, so a third box cannot answer this question a
+ * third way. Read in an EFFECT, never during render: the server knows nothing about the viewport,
+ * so deciding it in the initial state is a hydration mismatch — and React answers one by
+ * re-rendering the whole page.
+ */
+export function useNarrow(maxPx = 640): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${maxPx}px)`);
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [maxPx]);
+  return narrow;
 }
 
 // NO food/earnings revenue in these stat cards (owner 2026-07-03: the admin sees no restaurant

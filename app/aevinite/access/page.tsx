@@ -14,6 +14,7 @@
  * docs/ACCESS-MODEL.md. */
 import { useEffect, useState } from "react";
 import AccessTree, { TreeStyle } from "@/components/admin/AccessTree";
+import { SearchStyle } from "@/components/admin/AccessSearch";
 import AccessPerPerson, { PerPersonStyle } from "@/components/admin/AccessPerPerson";
 import { SettingsSaveBar } from "@/components/admin/RestaurantSettings";
 
@@ -76,6 +77,11 @@ export default function AccessPage() {
       <Style />
       <TreeStyle />
       <PerPersonStyle />
+      {/* …and the FOURTH one (sweep #8 T23, 2026-09-06). The find-a-setting box lives inside the
+          tree, which renders nothing until its fetch resolves, so its CSS was the one stylesheet on
+          this page that was NOT in the server HTML — measured: `.at-box`, `.acc2-head` and
+          `.app-wrap` were all present in the response body and `.as-field` was absent. */}
+      <SearchStyle />
       <nav className="adm-crumbs" style={{ marginBottom: 4 }}>
         <a href="/aevinite">Dashboard</a><span className="sep">›</span>
         <a href="/aevinite/restaurants">Restaurants</a><span className="sep">›</span>
