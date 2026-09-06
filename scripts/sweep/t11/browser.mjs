@@ -49,6 +49,11 @@ export async function renderDoc(kind, data, opts = {}) {
       : BILLDOC.banquetDocHtml(data);
   // A real same-origin page, so relative URLs and storage behave as they do in a bill window.
   await page.goto(BASE + "/print-setup.html", { waitUntil: "domcontentloaded", timeout: 60000 });
+  // ⚠️ SEED BEFORE setContent, NEVER page.reload(). The document is injected, so a reload throws it
+  // away and brings back the ORIGIN page — which is how fourteen zoom-memory checks came to report
+  // an empty chip on a bill that was not on screen any more. Anything the document reads on load
+  // (the remembered zoom) has to be in place before the content is set.
+  if (opts.seed) await page.evaluate(opts.seed);
   await page.setContent(html, { waitUntil: "load", timeout: 60000 });
   if (opts.media) await page.emulateMedia({ media: opts.media });
   await page.waitForTimeout(opts.settle ?? 450);
