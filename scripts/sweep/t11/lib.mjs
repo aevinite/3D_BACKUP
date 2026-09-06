@@ -55,6 +55,10 @@ export const baseBill = (over = {}) => ({
 const rows = [];
 /** row(id, what, fn) — fn returns true for a pass, or a STRING saying what was actually seen. */
 export const row = (id, what, fn) => rows.push({ id, what, fn });
+/** Which ids are already registered. Two modules covering the same range need this: the generated
+ *  bank yields the rows a hand-written module implements, rather than both filing the same id —
+ *  which the duplicate check would (correctly) refuse to run at all. */
+export const registered = () => new Set(rows.map((r) => r.id));
 /** A row this run genuinely cannot execute. `why` is what a later session must do. */
 export const skipRow = (id, what, why) => rows.push({ id, what, skip: why });
 

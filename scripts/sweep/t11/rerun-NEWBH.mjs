@@ -70,9 +70,10 @@ const bTot = (html, which) => {
 // ══ the dispatch table ══════════════════════════════════════════════════════════════════════
 const HANDLERS = [
   // ── NEW B · the banquet columns ─────────────────────────────────────────────────────────
-  [/^the banquet columns foot and stay non-negative when (.+?) and (.+)$/, (m) => () => {
+  [/^the banquet columns foot and stay non-negative when (.+?) and (.+)$/, (m) => {
     const lines = LINESETS[m[1]], drift = DRIFTS[m[2]];
-    if (!lines || drift === undefined) return `the generator does not know the shape "${m[1]}" / "${m[2]}"`;
+    if (!lines || drift === undefined) return null;   // DECLINE — the hand-written module has it
+    return () => {
     const html = banquetShape(lines, drift);
     const cols = banquetCols(html);
     const bad = [];
@@ -83,6 +84,7 @@ const HANDLERS = [
     const want = bTot(html, 0);
     if (want == null) return "no TOTAL row on the sheet";
     return Math.abs(r2(taxable) - want) < 0.02 || `the taxable column adds to ${r2(taxable)}, the TOTAL row says ${want}`;
+    };
   }],
   // ── NEW B · the round-off never grows into a claw-back ──────────────────────────────────
   [/^the round-off stays within a rupee or two: MRP treated as (tax-inclusive|exempt), (\d+)% off$/, (m) => () => {
@@ -95,7 +97,7 @@ const HANDLERS = [
     if (!f.ok) return `the rows add to ${f.sum} and the TOTAL says ${f.R.total}`;
     return Math.abs(f.R.roundOff) <= 2 || `round off ${f.R.roundOff} — this file's own note says at most a rupee or two`;
   }],
-  [/^the round-off stays within a rupee or two, and the rows foot: (.+)$/, (m) => () => {
+  [/^the round-off stays within a rupee or two, and the rows foot: (.+)$/, (m) => {
     const SHAPES = {
       "a plain 5% bill": [[ord()], S5],
       "a plain 5% bill with a discount": [[ord({ discount: 40 })], S5],
@@ -109,14 +111,16 @@ const HANDLERS = [
       "a paise-level subtotal": [[ord({ subtotal: 201.37, taxable_base: 201.37, items: [{ title: "Dal", qty: 1, price: 201.37, tax_mode: "excl" }] })], S5],
     };
     const key = Object.keys(SHAPES).find((k) => m[1].startsWith(k));
-    if (!key) return `the generator does not know the shape "${m[1]}"`;
+    if (!key) return null;                  // DECLINE at match time
     const [orders, settings] = SHAPES[key];
-    const f = foots(dataOf(orders, settings));
-    if (!f.ok) return `the rows add to ${f.sum} and the TOTAL says ${f.R.total}`;
-    return Math.abs(f.R.roundOff) <= 2 || `round off ${f.R.roundOff}`;
+    return () => {
+      const f = foots(dataOf(orders, settings));
+      if (!f.ok) return `the rows add to ${f.sum} and the TOTAL says ${f.R.total}`;
+      return Math.abs(f.R.roundOff) <= 2 || `round off ${f.R.roundOff}`;
+    };
   }],
   // ── NEW B · the bill renders honestly on rubbish input ──────────────────────────────────
-  [/^the bill renders honestly with (.+?) — no NaN/, (m) => () => {
+  [/^the bill renders honestly with (.+?) — no NaN/, (m) => {
     const BAD = {
       "a negative subtotal": { subtotal: -400 }, "a negative total": { total: -420 },
       "a discount bigger than the bill": { discount: 5000 }, "a negative discount": { discount: -50 },
@@ -139,7 +143,8 @@ const HANDLERS = [
       "fifty tax rows": { taxRows: Array.from({ length: 50 }, (_, i) => ({ label: `T${i}`, rate: 1, amt: 1 })) },
     };
     const key = Object.keys(BAD).find((k) => m[1].startsWith(k));
-    if (!key) return `the generator does not know the input "${m[1]}"`;
+    if (!key) return null;                  // DECLINE at match time
+    return () => {
     const base = { name: "R", tableDisp: "5", dateStr: "x", lines: [{ title: "Dal", qty: 2, price: 200 }],
       subtotal: 400, total: 420, taxRows: [{ label: "CGST", rate: 2.5, amt: 10 }, { label: "SGST", rate: 2.5, amt: 10 }], noBar: true };
     let html;
@@ -148,6 +153,7 @@ const HANDLERS = [
     const junk = clean(html);
     if (junk.length) return `the paper shows ${junk.join(", ")}`;
     return html.length > 200 || `it rendered only ${html.length} characters`;
+    };
   }],
   // ── NEW B · what the sheet CALLS itself, across GSTIN × scheme × live/cancelled ─────────
   [/^(a live|a cancelled) sale at a restaurant with (a GSTIN|no GSTIN|a whitespace GSTIN), (on the ordinary scheme|on the composition scheme|with tax inside prices)/, (m) => () => {
@@ -263,16 +269,17 @@ HANDLERS.push(
       return s.z <= 0.61 || `it stopped at zoom ${s.z} (${s.chip}) with ${s.need}px to show in ${s.have}px, and the floor is 0.6`;
     } finally { await r.close(); }
   }],
-  [/^(.+?): the PRINTED sheet is identical whatever the screen is zoomed to \((.+?)\)$/, (m) => async () => {
-    if (!canDrive) return `needs playwright and a server at ${BASE}`;
+  [/^(.+?): the PRINTED sheet is identical whatever the screen is zoomed to \((.+?)\)$/, (m) => {
     const SHAPES = {
       "a plain bill": billOf(8), "a discounted bill": billOf(8, { discount: 80, discLabel: "10%", total: 760 }),
       "a cancelled bill": billOf(8, { cancelled: true }), "a composition bill": billOf(8, { composition: true, taxRows: [] }),
       "an MRP bill": billOf(8, { nontax: 42, subtotal: 842, total: 882 }),
     };
     const key = Object.keys(SHAPES).find((k) => m[1].startsWith(k));
-    if (!key) return `the generator does not know the shape "${m[1]}"`;
+    if (!key) return null;                  // DECLINE at match time — never probe a browser row
     const zoom = m[2];
+    return async () => {
+    if (!canDrive) return `needs playwright and a server at ${BASE}`;
     const r = await renderDoc("bill", SHAPES[key], { width: 1280, height: 900 });
     try {
       await r.page.waitForTimeout(700);
@@ -293,18 +300,20 @@ HANDLERS.push(
       if (String(paper.zoom) !== "1") return `the paper is zoomed to ${paper.zoom} — a screen setting reached the printer`;
       return Math.abs(paper.width - ROLL_PX) <= 1 || `the printed column is ${paper.width}px, not ${ROLL_PX}px`;
     } finally { await r.close(); }
+    };
   }],
   // Everything the zoom layer remembers, and everything it must refuse to believe. The stored
   // value is a per-window key written by a person's own − / + presses, so it is untrusted input:
   // a word, an object, a negative, NaN and 1e9 all have to land somewhere sane between 0.6 and 2.
-  [/^the preview opens at the right size with (?:a remembered |the word )?(.+?) remembered$/, (m) => async () => {
-    if (!canDrive) return `needs playwright and a server at ${BASE}`;
+  [/^the preview opens at the right size with (?:a remembered |the word )?(.+?) remembered$/, (m) => {
     const RAW = { "fit": "fit", "1.5": "1.5", "0.6": "0.6", "2": "2", "1.35": "1.35",
       "0.59 (below the floor)": "0.59", "2.01 (above the ceiling)": "2.01", "0": "0", "-1": "-1",
       "NaN": "NaN", "empty string": "", "word": "banana", "1e9": "1e9", "object literal": "[object Object]" };
     const key = Object.keys(RAW).find((k) => m[1].startsWith(k));
-    if (key === undefined) return `the generator does not know the remembered value "${m[1]}"`;
+    if (key === undefined) return null;     // DECLINE at match time
     const v = RAW[key];
+    return async () => {
+    if (!canDrive) return `needs playwright and a server at ${BASE}`;
     const r = await renderDoc("bill", billOf(8), { width: 1280, height: 900,
       seed: `(() => { try {
         const w = Math.round((innerWidth || 380) / 100) * 100, h = Math.round((innerHeight || 680) / 100) * 100;
@@ -317,6 +326,7 @@ HANDLERS.push(
       if (!(s2.z >= 0.6 && s2.z <= 2)) return `a remembered "${v}" put the bill at zoom ${s2.z} — outside the 0.6–2 range`;
       return /^\d+%$/.test(s2.chip) || `the chip reads "${s2.chip}"`;
     } finally { await r.close(); }
+    };
   }],
   [/^([−+]) (?:steps (?:the size )?(?:down|it up)|cannot go (?:below|above))/, (m) => async () => {
     if (!canDrive) return `needs playwright and a server at ${BASE}`;
@@ -533,14 +543,15 @@ const sheetState = (page) => page.evaluate(() => {
     cls: go?.className || "", text: ov?.innerText || "" };
 });
 HANDLERS.push(
-  [/^the counter and the button agree with the box after typing (.+)$/, (m) => async () => {
-    if (!canDrive) return `needs playwright and a server at ${BASE}`;
+  [/^the counter and the button agree with the box after typing (.+)$/, (m) => {
     const what = m[1];
     const INPUT = { "4 digits": "9825", "9 digits": "982501234", "10 digits": "9825012345",
       "13 digits": "9825012345678", "16 digits (capped at 13)": "9825012345678999",
       "a +91 number": "+919825012345", "letters": "abcdefghij", "spaces and dashes": "98250-12345" };
     const key = Object.keys(INPUT).find((k) => what.startsWith(k.split(" (")[0]));
-    if (!key) return `the generator does not know the input "${what}"`;
+    if (!key) return null;                  // DECLINE at match time
+    return async () => {
+    if (!canDrive) return `needs playwright and a server at ${BASE}`;
     const r = await sheet();
     try {
       await typeInto(r.page, INPUT[key], null);
@@ -554,9 +565,9 @@ HANDLERS.push(
       const shouldBeGreen = s.digits === 10;
       return s.green === shouldBeGreen || `${s.digits} digits: green=${s.green}, expected ${shouldBeGreen}`;
     } finally { await r.close(); }
+    };
   }],
-  [/^Generate is (live|not ready) with (.+)$/, (m) => async () => {
-    if (!canDrive) return `needs playwright and a server at ${BASE}`;
+  [/^Generate is (live|not ready) with (.+)$/, (m) => {
     const CASES = {
       "10 digits and a name": ["9825012345", "Asha"], "9 digits and a name": ["982501234", "Asha"],
       "13 digits and a name": ["9825012345678", "Asha"], "10 digits and no name": ["9825012345", ""],
@@ -565,8 +576,10 @@ HANDLERS.push(
       "a name of spaces": ["9825012345", "   "],
     };
     const key = Object.keys(CASES).find((k) => m[2].startsWith(k.split(" (")[0]));
-    if (!key) return `the generator does not know the case "${m[2]}"`;
+    if (!key) return null;                  // DECLINE at match time
     const [phone, name] = CASES[key];
+    return async () => {
+    if (!canDrive) return `needs playwright and a server at ${BASE}`;
     const r = await sheet({ required: true });
     try {
       await typeInto(r.page, phone, name);
@@ -577,6 +590,7 @@ HANDLERS.push(
       return looksReady === (m[1] === "live")
         || `it looks ${looksReady ? "live" : "not ready"} (aria-disabled=${s.ready ? "false" : "true"}, dimmed=${s.dimmed})`;
     } finally { await r.close(); }
+    };
   }],
   [/^tapping Generate with (.+?) says which box, in red, and puts the/, (m) => async () => {
     if (!canDrive) return `needs playwright and a server at ${BASE}`;
@@ -675,6 +689,8 @@ HANDLERS.push([/^(.*)$/, (m) => {
 }]);
 
 // ══ dispatch ════════════════════════════════════════════════════════════════════════════════
+export const HANDOVER = [];
+export const ALL_IDS = ROWS.map((r) => r.id);
 let built = 0;
 for (const { id, check } of ROWS) {
   let fn = null;
@@ -684,9 +700,15 @@ for (const { id, check } of ROWS) {
     const made = make(m);
     if (made) { fn = made; break; }
   }
+  // A handler DECLINES by returning null from make(), before any closure is built — never by
+  // failing at run time. Probing was the first design and it was wrong twice over: it could not see
+  // through an async handler's Promise, and for a browser row it would open a page just to ask
+  // whether the row belonged here.
   if (fn) { built++; row(id, check, fn); continue; }
-  // Reported LOUDLY, never skipped — a generated bank that quietly drops rows is the
+  // NOT SKIPPED, and not filed as a placeholder either: handed to rerun-NEWBH2.mjs, which writes
+  // each of these out by hand. The completeness check at the end of that file is what makes the
+  // hand-over safe — it fails if any id in this range ends up registered by NOBODY, which is the
   // "suite that filters itself out and prints all clean" scar this repo already carries.
-  row(id, check, () => "this row was not matched to an assertion by the generator — it must be read and implemented, not skipped");
+  HANDOVER.push({ id, check });
 }
-console.log(`  (NEW B–H: ${built} of ${ROWS.length} rows generated from the ledger)`);
+console.log(`  (NEW B–H: ${built} of ${ROWS.length} generated; ${HANDOVER.length} written out by hand in rerun-NEWBH2.mjs)`);

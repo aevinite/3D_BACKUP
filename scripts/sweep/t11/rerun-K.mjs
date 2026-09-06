@@ -3,7 +3,7 @@
 // The section's own header says every row "renders the REAL document HTML in a real browser and
 // asserts what is on screen or on the emitted PDF — never the source string." That is what this
 // does; the documents come from the SERVED billdoc.js, so it is the bytes a restaurant runs.
-import { BILLDOC as B, row, skipRow, read } from "./lib.mjs";
+import { BILLDOC as B, row, skipRow, read, codeOnly } from "./lib.mjs";
 import { BASE, canDrive, renderDoc, seenText, inkWidth, bodyWidth, toPdf, ROLL_PX, closeBrowser } from "./browser.mjs";
 
 const R = (id, what, fn) => (canDrive ? row(id, what, fn)
@@ -623,4 +623,31 @@ R("P03875", "the browser this section started is closed at the end of the run", 
   // asserted by construction: every row above closes its own context, and run.mjs closes the
   // browser when the suite ends. This row is the reminder that it must stay true.
   return true;
+});
+
+// ── J's last row, which sits at the top of this range ────────────────────────────────────────
+R("P03800", "nothing in my territory reads or names the AV-live stack", () => {
+  // The client stack is off-limits including reads. Nothing here may name its folder, its repo,
+  // its Supabase project or its key file — not in code, and not in a path a script could follow.
+  const MINE = ["public/panels/billdoc.js", "public/panels/billcustomer.js", "lib/printHelpers.ts",
+    "lib/printHelperScript.ts", "lib/printQueue.ts", "lib/printStationScript.ts",
+    "app/api/print-agent/[...path]/route.ts", "app/aevinite/printing/page.tsx",
+    "docs/NUMBERING.md", "docs/PRINT-HELPER.md", "docs/KITCHEN-PRINT-SETUP.md"];
+  // WHAT THE RULE ACTUALLY FORBIDS is touching that stack: its folder, its repo, its Supabase
+  // project, its key file. Those must appear NOWHERE — not even in a comment, because a path in a
+  // comment is a path the next session follows.
+  const NEVER = [/3D_Menu_Av/, /aevinitegroup/, /kclqkmdxnwlhtyrducku/, /\.env\.AV\.live/];
+  // The live HOSTNAME is different: `lib/printHelperScript.ts` has carried it since 2026-08-20 as
+  // the example in `origin: string;  // the site the helper talks to, e.g. https://www.aevinite.shop`
+  // — a type comment showing what an origin looks like. Nothing reads it and nothing points at it:
+  // the real value comes from `originOf(req)`, the request's own host. So it is forbidden in CODE,
+  // where it would be a hard-coded target, and allowed in a comment, where it is documentation.
+  // (My first version banned it everywhere and reported that comment as a violation.)
+  const bad = [];
+  for (const f of MINE) {
+    let t; try { t = read(f); } catch { continue; }
+    for (const re of NEVER) if (re.test(t)) bad.push(`${f} names ${re.source}`);
+    if (/aevinite\.shop|3d-menu-av/.test(codeOnly(t))) bad.push(`${f} hard-codes the live site in CODE`);
+  }
+  return bad.length === 0 || bad.join(" · ");
 });

@@ -11,8 +11,14 @@ import { BILLDOC as B, row, read } from "./lib.mjs";
 const T8 = read(".claude/sweep/LEDGER/T8.md").split("\n");
 const ROWS = [];
 for (const ln of T8) {
-  const m = /^\| (P186\d\d) \| (.*?) \| (.*?) \| (.*?) \|/.exec(ln);
-  if (m) ROWS.push({ id: m[1], check: m[2].trim() });
+  // ⚠️ P186\d\d CANNOT MATCH P18700, and the next bank starts at P18701 — so the boundary row of
+  // this section belonged to nobody and ran nowhere. It was caught only by counting the ledger's
+  // rows against the harness's, which is why that count is worth doing. Matched by NUMBER now, not
+  // by digit pattern.
+  const m = /^\| (P\d{5}) \| (.*?) \| (.*?) \| (.*?) \|/.exec(ln);
+  if (!m) continue;
+  const n = Number(m[1].slice(1));
+  if (n >= 18601 && n <= 18700) ROWS.push({ id: m[1], check: m[2].trim() });
 }
 
 // ── the instants the rows name, in IST, as real UTC timestamps ──────────────────────────────
@@ -142,6 +148,10 @@ const BAD_VALUES = {
   "null": null, "an empty string": "", "the word garbage": "garbage", "zero": 0,
   "undefined": undefined, "NaN": NaN, "a negative epoch": -1,
   "an object": { nope: true }, "a far-future date": "275760-09-14T00:00:00Z",
+  // An ISO string with NO ZONE is the one a database hands back for a `date` column, and it is
+  // read as LOCAL time by Date() — which is exactly the class of fault this whole section exists
+  // for. It must still never print "Invalid Date".
+  "an ISO string with no zone": "2026-08-16T21:31:00",
 };
 const printsNothingBad = (v) => {
   const bad = [];

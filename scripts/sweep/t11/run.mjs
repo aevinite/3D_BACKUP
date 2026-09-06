@@ -10,6 +10,7 @@ await import("./rerun-K.mjs");
 await import("./rerun-LMN.mjs");
 await import("./rerun-NEWA.mjs");
 await import("./rerun-NEWBH.mjs");
+await import("./rerun-NEWBH2.mjs");
 await import("./new-A.mjs");
 await import("./new-B.mjs");
 await import("./new-E.mjs");
