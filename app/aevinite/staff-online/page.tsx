@@ -59,7 +59,21 @@ export default function AdminStaffOnline() {
       if (j.error) { setErr(j.error); return; }
       setErr("");
       setStaff(j.staff || []);
-      setRestaurants(j.restaurants || []);
+      const rl = (j.restaurants || []) as { id: string; name: string }[];
+      setRestaurants(rl);
+      // ── THE PICKER MUST NEVER SAY "ALL" WHILE A FILTER IS STILL ON (item 3, sweep #8 T21) ──────
+      // This list only carries the restaurants that have SOMEBODY online right now (the route says
+      // so in its own words), so it changes on every Refresh — a restaurant whose last person signs
+      // out simply leaves it. The chosen id was kept anyway, and a <select> whose value matches no
+      // option falls back to showing its FIRST one. So the screen read:
+      //
+      //     picker: "All restaurants"      count: "0 of 2 online"      "No online staff match these filters."
+      //
+      // …with two people genuinely online. The control said one thing, the list obeyed another, and
+      // the only clue was a "Clear filters" button the admin had no reason to press. Measured
+      // headless: pick a restaurant, refresh onto a roster from a different one, read the picker.
+      // A filter that no longer names anything is dropped, so the picker and the list agree again.
+      setFilterRid((cur) => (cur && !rl.some((r) => r.id === cur) ? "" : cur));
       setUpdatedAt(Date.now());
     }).catch((e) => {
       if (my !== seq.current) return;

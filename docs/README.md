@@ -18,7 +18,7 @@ If you only read one thing: `CLAUDE.md` in the repo root is the rulebook, and
 | document | what it is for |
 |---|---|
 | **`CLAUDE-DETAIL.md`** | the full text of every rule in `CLAUDE.md`, under the same heading. The one to open before acting. |
-| **`GUARD-MAP.md`** | "I changed this file — which of the 182 checks covers it?" Start here before running anything. |
+| **`GUARD-MAP.md`** | "I changed this file — which of the 183 checks covers it?" Start here before running anything. |
 | **`REJECTED-IDEAS.md`** | what the owner has already said NO to. **Read before suggesting any improvement.** |
 | `ACCESS-MODEL.md` | how permissions actually work now (the live model — replaces the retired ladder). |
 | `ACCESS-REDESIGN-SPEC.md` | the access work still owed. A live working list, not history. |

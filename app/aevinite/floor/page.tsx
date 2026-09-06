@@ -323,7 +323,12 @@ export default function AdminFloor() {
       ) : null}
 
       {rests && (() => {
-        const occ = rests.map((r) => ({ r, ts: r.tables.filter((t) => t.s !== "free") })).filter((x) => x.ts.length);
+        // THE SORT CONTROL HAS TO REACH THIS LIST TOO (item 6, sweep #8 T21). This box read `rests`,
+        // the raw response, while the restaurant blocks below read `sorted` — so choosing "Busiest
+        // first" or "Needs attention" reordered the coloured blocks and left this list in the
+        // server's own name order. Two lists of the same restaurants, on one screen, disagreeing
+        // about which one matters most, with a control at the top that only half worked.
+        const occ = sorted.map((r) => ({ r, ts: r.tables.filter((t) => t.s !== "free") })).filter((x) => x.ts.length);
         const total = occ.reduce((s, x) => s + x.ts.length, 0);
         return (
           <div className="adm-card" style={{ marginBottom: 14, padding: 0, overflow: "hidden" }}>
@@ -579,7 +584,23 @@ export default function AdminFloor() {
         .adx .floor-gate .floor-gate-btn { font-size: 14px; padding: 11px 20px; min-height: 44px; }
         .adm-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
         .adm-btn-primary:hover:not(:disabled) { filter: brightness(1.07); }
-        .adm-snapchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--adm-warn, #d97706); background: color-mix(in srgb, var(--adm-warn, #d97706) 13%, transparent); white-space: nowrap; }
+        /* A NOTE, NOT A WARNING (item 4, sweep #8 T21 — the same call already made on Staff online).
+           This pill says "this page doesn't update on its own", which is deliberate and correct, not
+           a fault: the page is a lookout, and its own gate card says so twice. It was drawn in the
+           console's WARNING colour, so an amber badge sat on the Live floor on every single load, for
+           ever. A bar that is always up is how the admin learns to stop reading amber — the reason
+           .so-snap on /aevinite/staff-online was changed to neutral grey in sweep #6 (T17 item 11).
+           This was the other half of that pair, on the busier screen of the two. Same colours as
+           .so-snap, deliberately, so the two "manual" pills read as one idea. */
+        .adm-snapchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent); white-space: nowrap; }
+        /* A TEN-TABLE RESTAURANT MUST NOT RENDER A 700-PIXEL EMPTY CARD (item 5, sweep #8 T21).
+           .adm-flooryear is a CSS grid, and a grid stretches every item in a row to the tallest one.
+           A 300-table restaurant's mini-grid is ~630px tall, so on this platform Aangan (10 tables,
+           22px of tiles) and Demo Bistro rendered as 701px and 726px cards with two-thirds of the
+           height blank — measured on this page at 1280×800. The blocks now take their own height;
+           a short restaurant is a short block, which is also what makes the "year calendar" read as
+           a calendar rather than a wall. */
+        .adm-flooryear { align-items: start; }
       `}</style>
     </>
   );
