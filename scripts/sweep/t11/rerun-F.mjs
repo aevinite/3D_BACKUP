@@ -3,7 +3,8 @@
 // The file is a browser IIFE that ends on `window.LFH_BILLCUST = …`, so its four exported pure
 // functions are reachable in node behind a two-line window shim. Everything the rows describe as
 // "read X" is asserted against the source; the two the rows themselves mark as headless
-// (P03689, P03690) are driven in a real page by rerun-F-live.mjs.
+// (P03689, P03690) are driven in a real page by rerun-F-live.mjs — which, from 2026-09-04 until
+// 2026-09-06, this comment claimed and did NOT exist. It does now.
 import { read, row, codeOnly } from "./lib.mjs";
 
 const BC = read("public/panels/billcustomer.js");

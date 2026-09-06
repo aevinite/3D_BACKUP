@@ -233,7 +233,15 @@ for (const [what, orders] of [
 //
 // Reachable on a bill whose tax is under ₹1.50: about ₹30 at 5%. A tea counter sees it; a
 // restaurant does not.
-for (const [sub, wantSplit] of [[19, "1/0"], [21, "1/0"], [29, "1/0"], [40, "1/1"], [201, "5/5"], [380, "10/9"]]) {
+// ── UPDATED 2026-09-06: ITEM 20 WAS DECIDED, AND THESE ROWS ARE WHY THE CHANGE IS SAFE ─────────
+// When these were written the answer was "1/0" and the note above said, in as many words, that they
+// pin the CURRENT behaviour and fail if it changes EITHER WAY, so the choice could be carried to the
+// owner rather than made here. He took it: a tax block whose whole tax rounds to ₹1 now prints
+// PAISE on that block only — 0.50 / 0.50 — so both halves are named, nothing is overstated, and it
+// still foots to ₹1. Every larger bill takes the same path it always did.
+// The rows are updated to the decided answer rather than deleted, because their job is unchanged:
+// they now fail if anybody drifts BACK to 1/0, or forward to 1/1 (₹2 collected on ₹1).
+for (const [sub, wantSplit] of [[19, "0.5/0.5"], [21, "0.5/0.5"], [29, "0.5/0.5"], [40, "1/1"], [201, "5/5"], [380, "10/9"]]) {
   row(id(), `a ₹${sub} bill at 5%: the two tax halves print ${wantSplit}, and they add to the tax charged`, () => {
     const s2 = { tax_rate: 0.05 };
     const orders = [ord({ subtotal: sub, taxable_base: sub, tax_rate: 0.05, items: [{ title: "Chai", qty: 1, price: sub, tax_mode: "excl" }] })];
@@ -242,10 +250,10 @@ for (const [sub, wantSplit] of [[19, "1/0"], [21, "1/0"], [29, "1/0"], [40, "1/1
     const got = (d2.taxRows || []).map((x) => x.amt).join("/");
     const sum = (d2.taxRows || []).reduce((a2, x) => a2 + x.amt, 0);
     if (sum !== Math.round(m.taxAdded)) return `the halves add to ${sum} but ${Math.round(m.taxAdded)} was charged`;
-    return got === wantSplit || `the halves print ${got}, not ${wantSplit} — if this is the fix, the report item is the place to say so`;
+    return got === wantSplit || `the halves print ${got}, not ${wantSplit} — a drift back to 1/0 (a component collecting nothing) or on to 1/1 (₹2 printed on ₹1 collected)`;
   });
 }
-row(id(), "a ₹0 tax component is only ever possible when the WHOLE tax rounds to ₹1 or less", () => {
+row(id(), "no tax component prints ₹0 at ANY subtotal from ₹1 to ₹2,000 (item 20 removed the last case)", () => {
   const s2 = { tax_rate: 0.05 };
   const bad = [];
   for (let sub = 1; sub <= 2000; sub++) {
@@ -253,9 +261,9 @@ row(id(), "a ₹0 tax component is only ever possible when the WHOLE tax rounds 
     const m = B.billMoney(orders, s2);
     const d2 = B.billData({ settings: s2, restaurant: {}, orders, money: m, session: {}, tableDisp: "1" });
     const zeros = (d2.taxRows || []).filter((x) => x.amt === 0);
-    if (zeros.length && Math.round(m.taxAdded) > 1) bad.push(sub);
+    if (zeros.length) bad.push(sub);
   }
-  return bad.length === 0 || `a ₹0 component also appears at subtotal(s) ${bad.slice(0, 6).join(",")} where the tax is more than ₹1`;
+  return bad.length === 0 || `a component still prints ₹0 at subtotal(s) ${bad.slice(0, 6).join(",")}`;
 });
 row(id(), "…and the tax rows ALWAYS add up to the tax charged, at every subtotal from ₹1 to ₹2,000", () => {
   const s2 = { tax_rate: 0.05 };

@@ -55,6 +55,10 @@ export const baseBill = (over = {}) => ({
 const rows = [];
 /** row(id, what, fn) — fn returns true for a pass, or a STRING saying what was actually seen. */
 export const row = (id, what, fn) => rows.push({ id, what, fn });
+/** Which ids are already registered. Two modules covering the same range need this: the generated
+ *  bank yields the rows a hand-written module implements, rather than both filing the same id —
+ *  which the duplicate check would (correctly) refuse to run at all. */
+export const registered = () => new Set(rows.map((r) => r.id));
 /** A row this run genuinely cannot execute. `why` is what a later session must do. */
 export const skipRow = (id, what, why) => rows.push({ id, what, skip: why });
 
@@ -95,7 +99,19 @@ export async function run(label) {
       if (!json) console.log(`  ❌ ${r.id}  ${r.what}  → ${why}`);
     }
   }
-  if (json) { console.log(JSON.stringify(records)); process.exit(fail ? 1 : 0); }
+  if (json) {
+    // TO A FILE when asked. console.log of a very long string is TRUNCATED at ~64KB when stdout is
+    // a pipe, which silently cut the record set in half and made a JSON parse fail look like a
+    // suite problem. `--json-out <path>` writes the whole thing.
+    const outAt = argv.indexOf("--json-out");
+    const text = JSON.stringify(records);
+    if (outAt >= 0 && argv[outAt + 1]) {
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(argv[outAt + 1], text);
+      console.log(`${records.length} records written to ${argv[outAt + 1]}`);
+    } else console.log(text);
+    process.exit(fail ? 1 : 0);
+  }
   console.log("─".repeat(78));
   console.log(`${label}: ${picked.length} rows · ${pass} passed · ${fail} failed · ${skip} skipped  (of ${rows.length} declared)`);
   if (bad.length) { console.log("\nwhat failed:"); for (const b of bad) console.log("  · " + b); }
