@@ -1276,8 +1276,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const like = `%${histQ}%`;
           const [sessQ2, memQ2] = await Promise.all([
             // The bill's own customer (mig 227), the table, and the two numbers.
+            // ── A BILL NUMBER IS TAKEN ON THE FIRST ORDER, NOT WHEN THE TABLE OPENS (mig 040) ──
+            // …so a table that opened before the 05:00 boundary and ordered this morning carries
+            // TODAY's bill number under YESTERDAY's created_at — the same trap the Z-report's
+            // numbering block below documents at length and had to use two doors to get round.
+            // Filtering these sessions on their own created_at lost exactly that bill: the ONE-BOX
+            // search could not find it by its number, its invoice number, its table or its
+            // customer, while `type=bill` (which has no date filter) found it immediately.
+            // One extra day of slack closes it, and nothing older can escape: `oq` is still clamped
+            // to the window on the ORDERS, so a wider session set can only ever narrow to the same
+            // days. (T24 sweep #8, 2026-09-06)
             sb.from("sessions").select("id,bill_no,invoice_no,table_number,cust_name,cust_phone")
-              .eq("restaurant_id", rid).gte("created_at", windowStartIso).limit(2000),
+              .eq("restaurant_id", rid)
+              .gte("created_at", new Date(Date.parse(windowStartIso) - 24 * 3600 * 1000).toISOString())
+              .limit(2000),
             // …and the guest's own name on their phone.
             sb.from("session_members").select("session_id,name,phone")
               .eq("restaurant_id", rid).ilike("name", like).limit(300),
