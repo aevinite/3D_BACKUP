@@ -2326,7 +2326,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!job) return err("That print job is gone.", 404);
       const [o, items] = await Promise.all([
         sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items").eq("id", job.order_id).eq("restaurant_id", rid).maybeSingle(),
-        sb.from("order_items").select("id, order_id, title, qty, note, options, removed").eq("order_id", job.order_id).eq("restaurant_id", rid).order("created_at"),
+        // Bounded like every other read here. One KOT's lines are a handful; the cap exists so the
+        // rule is uniform and a bad `order_id` can never turn this into an open-ended read.
+        sb.from("order_items").select("id, order_id, title, qty, note, options, removed").eq("order_id", job.order_id).eq("restaurant_id", rid).order("created_at").limit(500),
       ]);
       if (!o.data) return err("That KOT's order is gone.", 404);
       return ok({ job, order: o.data, items: items.data || [] });
@@ -3230,7 +3232,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (row?.session_id) {
           // The bill's CURRENT discount + this one. Read from the session's own orders so a
           // discount given seconds earlier on another device is included rather than lost.
-          const sib = (must(await sb.from("orders").select("discount, status").eq("session_id", row.session_id).eq("restaurant_id", rid)) || []) as { discount?: number; status?: string }[];
+          const sib = (must(await sb.from("orders").select("discount, status").eq("session_id", row.session_id).eq("restaurant_id", rid).limit(500)) || []) as { discount?: number; status?: string }[];
           const already = sib.reduce((a, o) => a + (o.status === "cancelled" ? 0 : Number(o.discount) || 0), 0);
           must(await sb.rpc("lfh_staff_bill_discount", { p_session: row.session_id, p_amount: Math.round((already + amount) * 100) / 100, p_note: note }));
         } else {
