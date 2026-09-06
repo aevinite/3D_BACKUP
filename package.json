@@ -76,6 +76,7 @@
     "verify:fix-survives": "node scripts/verify-fix-survives.mjs",
     "verify:guest-recovery": "node scripts/verify-guest-recovery.mjs",
     "verify:bin-billing-usage": "node scripts/verify-bin-billing-usage.mjs",
+    "verify:admin-access-people": "node scripts/verify-admin-access-people.mjs",
     "verify:bin-billing-usage-r2": "node scripts/verify-bin-billing-usage-r2.mjs",
     "verify:recycle-bin": "node scripts/verify-recycle-bin.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
