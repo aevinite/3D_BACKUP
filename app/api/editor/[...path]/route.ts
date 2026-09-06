@@ -79,11 +79,24 @@ import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "
 // screenMayPrint(), which never set `backup` at all once the backup screen was deleted on
 // 2026-08-30 — so it answered false on every request, and no panel read it. Removed with the
 // declaration it came from rather than left as a constant nobody trusts.
-async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
+// ── THE ADDRESS BOOK IS READ ONCE, NOT FOUR TIMES (T24 sweep #8, 2026-09-06) ─────────────────
+// `helperFor` and `targetFor` each do the SAME pair of reads — the routes row and the agents view.
+// helpersFor()/targetsFor() exist precisely because "asking helperFor() three times on a poll is
+// three times the same two queries" (their own comment). The pending-jobs poll then asked FOUR
+// times over: helpersFor + targetsFor for all three kinds, and this function asking again for the
+// kitchen slips it already had in both. That is 8 reads of two small tables every 20 seconds, per
+// manager device, plus one on every ops breadcrumb — for 4 reads' worth of information.
+//
+// So the two answers can be handed in when the caller already holds them. Nothing else changes:
+// with no `pre` this behaves exactly as before, which is what the two callers further down do.
+async function counterPrintTarget(
+  rid: string,
+  pre?: { helper: Awaited<ReturnType<typeof helperFor>>; route: Awaited<ReturnType<typeof targetFor>> },
+): Promise<{ mayPrint: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
   const [stQ, helper, route] = await Promise.all([
     sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
-    helperFor(rid, "kot"),
-    targetFor(rid, "kot"),
+    pre ? Promise.resolve(pre.helper) : helperFor(rid, "kot"),
+    pre ? Promise.resolve(pre.route) : targetFor(rid, "kot"),
   ]);
   const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
   // A STOPPED QUEUE holds every screen too, not just the helper — otherwise "stop the queue" would
@@ -2211,24 +2224,27 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // first refusal and this screen is the safety net rather than the main path. The age test is
     // enforced again at the claim, server-side, so a stale tab cannot jump the queue.
     if (path[0] === "print-jobs" && path[1] === "pending") {
-      const t = await counterPrintTarget(rid);
       // WHO IS PRINTING (mig 338) — sent whether or not this screen may print, because the answer
       // "printing is happening on the kitchen screen" is exactly what a manager needs to see.
       const dv = deviceIdFrom(req);
-      const station = await stationView(rid, dv);
+      // Every kind's owner, not just the kitchen slips: the panel needs to know before it prints a
+      // BILL whether a computer will do it, and this is the read it already makes. One pair of
+      // queries for all three (helpersFor), not three pairs — and the same one pair again for the
+      // routes (targetsFor). Resolved FIRST so counterPrintTarget can be handed the kitchen-slip
+      // answers instead of asking for them a second and third time (see its own note).
+      const [owners, targets, station] = await Promise.all([
+        helpersFor(rid, ["kot", "bill", "banquet"]),
+        targetsFor(rid, ["kot", "bill", "banquet"]),
+        stationView(rid, dv),
+      ]);
+      const t = await counterPrintTarget(rid, { helper: owners.kot, route: targets.kot });
       if (station.mine) { try { await touchStation(rid, dv as string); } catch { /* next read retries */ } }
       // `off` is a real answer, not an error: the panel stops asking and shows nothing. Either
       // auto-print is not on for this restaurant, or the admin has said only the KITCHEN prints.
-      // Every kind's owner, not just the kitchen slips: the panel needs to know before it prints a
-      // BILL whether a computer will do it, and this is the read it already makes. One pair of
-      // queries for all three (helpersFor), not three pairs.
-      const owners = await helpersFor(rid, ["kot", "bill", "banquet"]);
-      // …and how far behind the printer is, on the SAME read (owner, 2026-08-27). It is sent whether
-      // or not this screen may print, for the same reason the station is: "eleven tickets are stacked
-      // up" is exactly what a manager needs to see about a printer that is not theirs.
+      // …and how far behind the printer is (owner, 2026-08-27). It is sent whether or not this
+      // screen may print, for the same reason the station is: "eleven tickets are stacked up" is
+      // exactly what a manager needs to see about a printer that is not theirs.
       const waiting = await waitingToPrint(rid, "kot");
-      // The same one resolver: which panel/person/device the owner named for each kind of paper.
-      const targets = await targetsFor(rid, ["kot", "bill", "banquet"]);
       const whoAmI = { panel: "manager" as const, personId: g.user?.id || null, deviceId: dv };
       const mayKot = screenMayPrint(targets.kot, whoAmI);
       // MAY THIS PERSON'S SCREEN PRINT AT ALL (accessTree ACTIONS → "print_here").
