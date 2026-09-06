@@ -1087,20 +1087,40 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
       if (q) sel = sel.or(`name.ilike.%${q}%,phone.ilike.%${q}%`);
       const people = (must(await sel) || []) as any[];
-      // Show each shown person's CURRENT tab so staff see they're adding to an existing
-      // debt. Scoped to just the ≤8 shown people, riding the open-khata index (mig 166).
+      // Show each shown person's CURRENT tab so staff see they're adding to an existing debt.
+      //
+      // ── WHAT SOMEBODY OWES HAS ONE ANSWER, AND IT IS THE BOOK'S (T24 sweep #8, 2026-09-06) ─────
+      // This used to work the debt out for itself, from the orders rows, in three ways the Pay
+      // Later BOOK two endpoints above does not:
+      //   · it re-derived the tax rate as tax ÷ subtotal — the exact expression migration 301's own
+      //     header removed, "never re-derived from tax/subtotal, which is wrong the moment a bill
+      //     carries an untaxed line", and which mig 310 replaced with the stored `orders.net_amount`
+      //     under a column comment reading "EVERY money reader … sums THIS column, so no two
+      //     screens can compute revenue differently";
+      //   · it counted a BINNED bill as still owed (the book has `deleted_at IS NULL`, F12);
+      //   · it showed the WHOLE bill on a tab that had already been part-collected — migration 364
+      //     made a debt "the order net minus what arrived alongside the owed part", and this knew
+      //     nothing about that.
+      //
+      // MEASURED on the dev database, French House: for the one person who owes anything, the Pay
+      // Later book said ₹161.00 and this tag said "owes ₹483.00" — the whole of a bill whose other
+      // ₹322 was taken in cash and UPI at the time. Three times the real debt, on the sheet a
+      // waiter reads before parking another bill on the same person.
+      //
+      // So it asks the same function the book asks, and there is no second rule left to drift.
+      // The cost is one indexed RPC on a debounced search instead of one scoped select — the same
+      // read the Pay Later screen already makes when it opens.
       if (people.length) {
-        const openRows = (must(await sb.from("orders")
-          .select("khata_customer_id,subtotal,tax,total,discount")
-          .eq("restaurant_id", rid).in("khata_customer_id", people.map((p2) => p2.id))
-          .not("khata_at", "is", null).neq("payment_status", "paid").neq("status", "cancelled")) || []) as any[];
+        const shown = new Set(people.map((p2) => String(p2.id)));
+        const openRows = (must(await sb.rpc("lfh_khata_outstanding", { p_restaurant_ids: [rid] })) || []) as
+          { khata_customer_id: string; bill_amount: number }[];
         const owed = new Map<string, number>();
-        for (const o of openRows) {
-          const sub = Number(o.subtotal) || 0, tax = Number(o.tax) || 0, rate = sub > 0 ? tax / sub : 0;
-          const due = Math.round(((Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate)) * 100) / 100;
-          owed.set(o.khata_customer_id, Math.round(((owed.get(o.khata_customer_id) || 0) + due) * 100) / 100);
+        for (const r of openRows) {
+          const who = String(r.khata_customer_id || "");
+          if (!shown.has(who)) continue;
+          owed.set(who, Math.round(((owed.get(who) || 0) + (Number(r.bill_amount) || 0)) * 100) / 100);
         }
-        people.forEach((p2) => { p2.outstanding = owed.get(p2.id) || 0; });
+        people.forEach((p2) => { p2.outstanding = owed.get(String(p2.id)) || 0; });
       }
       return ok({ customers: people });
     }
