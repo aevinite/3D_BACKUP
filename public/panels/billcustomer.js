@@ -81,7 +81,14 @@
 
   /** Remember what the server (or a bill we just saved) told us, so it costs nothing next time. */
   function remember(rows) {
-    for (const r of rows || []) {
+    /* ONE BAD ROW MUST NOT COST THE WHOLE ANSWER — the same rule billDocHtml and kotLineHtml
+       already keep ("r = r || {}"). A null inside `matches` threw here, and because every call
+       site sits inside the lookup's own catch the throw was swallowed: the guest was simply never
+       recognised, with nothing anywhere saying why. Skipping the bad row keeps the good ones.
+       (T11, sweep #8, 2026-09-06.) */
+    if (!Array.isArray(rows)) rows = [];
+    for (const r of rows) {
+      if (!r || typeof r !== "object") continue;
       const k = norm(r.phone);
       if (k) known.set(k, { name: r.name || "", visits: Number(r.visits) || 0 });
     }

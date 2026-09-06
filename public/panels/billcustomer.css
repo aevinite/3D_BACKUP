@@ -1,0 +1,95 @@
+/* public/panels/billcustomer.css — THE LOOK OF "WHO IS THIS BILL FOR?", FOR EVERY PANEL THAT
+   OPENS IT.
+
+   WHY THIS FILE EXISTS (T11, sweep #8, 2026-09-06). `public/panels/billcustomer.js` is loaded by
+   TWO panels — the manager's (`editor/index.html`) and the tablet's — and both call
+   `LFH_BILLCUST.ask()` on the ordinary path to generating a bill. Every one of its style rules
+   lived in `editor/style.css`, and `tablet/style.css` had none of them: not the box's own rules,
+   and not `.sx-modal-overlay`/`.sx-modal` either. Measured by rendering the real box under each
+   panel's real stylesheet at 390px:
+
+       editor   position:fixed · a backdrop · z-index 1100 · the box at y=15   ← a modal
+       tablet   position:static · NO backdrop · z-index auto · the box at y=437 ← in the page flow
+
+   So on the tablet a waiter tapping "generate bill" got the box dumped into the page below
+   whatever was already there, with no backdrop and nothing dimmed behind it — and `.bc-status`
+   lost its reserved 17px, so the box also jumped under their thumb as the number was typed.
+
+   THE RULES ARE MOVED, NOT COPIED. Copying them into `tablet/style.css` would have made two
+   copies of one look, and the next person to change the box would change one of them — which is
+   the drift this project has been bitten by before. They live here, next to the script they
+   describe, and BOTH index.html files link this file. They are GONE from `editor/style.css`.
+
+   The overlay and box geometry below is `.sx-modal-overlay`/`.sx-modal` from `editor/style.css`,
+   copied verbatim and re-scoped to this box's own classes — so the manager's panel looks exactly
+   as it did, the editor's other modals are untouched, and the tablet gets a real modal. */
+
+/* The overlay and the sheet — what makes it a modal rather than a block in the page. Scoped to
+   this box so it stands on its own in a panel that has no sx-modal rules at all. */
+.bcust-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center;
+  justify-content: center; padding: 20px; box-sizing: border-box; background: var(--scrim);
+  backdrop-filter: blur(6px); }
+.bcust-modal { max-height: 86vh; overflow-y: auto;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line); box-shadow: 0 30px 70px rgba(0,0,0,0.6); }
+/* the box's own fields, borrowed from the panel's modal input rule for the same reason */
+.bcust-modal input:not([type="checkbox"]):not([type="radio"]) { box-sizing: border-box; }
+
+/* ── "WHO IS THIS BILL FOR?" (owner, 2026-08-01: "make this UI better") ─────────────────────
+   It was two bare inputs stacked with dead space between them and a primary button that looked
+   half-disabled even when it wasn't. This gives it a header that says what it's for, fields that
+   read as fields, and a button that states clearly whether it can be pressed. */
+.bcust-modal { max-width: 460px; width: min(94vw, 460px); border-radius: 18px; overflow: hidden; }
+.bcust-head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--gold) 8%, var(--panel)); }
+.bcust-ico { width: 40px; height: 40px; flex: none; border-radius: 12px; display: grid; place-items: center;
+  font-size: 20px; background: color-mix(in srgb, var(--gold) 20%, var(--panel-2)); border: 1px solid color-mix(in srgb, var(--gold) 40%, var(--line)); }
+.bcust-htxt { flex: 1 1 auto; min-width: 0; }
+.bcust-htxt h3 { margin: 0 0 3px; font-size: 18px; line-height: 1.2; }
+.bcust-htxt p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+/* Why the number is kept (DPDP). Smaller and quieter than the instruction above it, but
+   present on the one form in the product that actually collects a personal detail. */
+.bcust-htxt p.bcust-why { margin-top: 5px; font-size: 11.5px; line-height: 1.4; opacity: .85; }
+.bcust-x { flex: none; }
+.bcust-body { padding: 16px 18px 4px; display: flex; flex-direction: column; gap: 11px; }
+.bcust-field { display: block; }
+.bcust-lbl { display: block; font-size: 12px; font-weight: 800; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.bcust-req, .bcust-opt { font-style: normal; font-size: 10.5px; font-weight: 800; padding: 1px 6px;
+  border-radius: 999px; margin-left: 6px; letter-spacing: .02em; }
+.bcust-req { color: color-mix(in srgb, #ef4444 78%, var(--text)); background: transparent;
+  padding: 0; margin-left: 5px; font-size: 11px; letter-spacing: 0; text-transform: none; }
+.bcust-req::before { content: "• "; }
+.bcust-opt { color: var(--muted); background: var(--panel-2); }
+.bcust-inwrap { display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  border: 1.5px solid var(--line); border-radius: 12px; background: var(--panel-2);
+  transition: border-color .14s ease, box-shadow .14s ease; }
+.bcust-inwrap:focus-within { border-color: var(--gold);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 22%, transparent); }
+.bcust-prefix { font-size: 15px; font-weight: 800; color: var(--muted); flex: none;
+  padding-right: 10px; margin-right: 2px; border-right: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+/* THE BOX-INSIDE-A-BOX (owner, 2026-08-01: "you can see the box and all that stuff" — he told me to
+   screenshot it, and the screenshot showed why). The panel's GLOBAL input styling (border, background,
+   inset shadow) was still painting inside this rounded wrapper, so every field read as a rectangle
+   drawn inside a box, plainest on Name. A plain `border: 0` lost to that more specific global rule,
+   which is why the markup looked right and the screen did not. */
+.bcust-inwrap input, .bcust-inwrap input:focus {
+  flex: 1 1 auto; min-width: 0; color: var(--text); font-size: 16px; font-weight: 700;
+  padding: 13px 0; letter-spacing: .01em; line-height: 1.2;
+  border: 0 !important; outline: 0 !important; background: transparent !important;
+  box-shadow: none !important; border-radius: 0 !important; margin: 0 !important; height: auto !important; }
+.bcust-inwrap input::placeholder { font-weight: 500; color: color-mix(in srgb, var(--muted) 75%, transparent); }
+.bcust-count { flex: none; font-size: 11.5px; font-weight: 800; color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+.bcust-count.ok { color: #22c55e; }
+/* Space is RESERVED for the "we know this number" line, so the dialog never jumps as you type. */
+.bcust-body .bc-status { min-height: 17px; font-size: 12.5px; font-weight: 700; margin: -6px 0 -4px; }
+.bcust-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 18px 18px; }
+.bcust-foot .btn { min-width: 116px; padding: 11px 18px; font-weight: 800; }
+.bcust-foot .btn.primary:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4); }
+.bcust-foot .btn.primary:not(:disabled) { box-shadow: 0 4px 14px color-mix(in srgb, var(--gold) 35%, transparent); }
+@media (max-width: 480px) {
+  .bcust-modal { width: 96vw; }
+  .bcust-foot { flex-direction: column-reverse; }
+  .bcust-foot .btn { width: 100%; }
+}

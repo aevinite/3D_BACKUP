@@ -133,10 +133,26 @@ for (const [what, ts] of INSTANTS) {
     } else ok("a past-midnight ticket from the same business day prints as today (no case to build right now)");
   } else ok("skipped the past-midnight case — the clock is inside 00:00–05:00 IST, where it cannot be built");
   // And something genuinely old still says so.
-  const old = BILLDOC.kotWhen(new Date(now - 5 * 86400000).toISOString());
-  /^\d{1,2} [A-Z]{3} /.test(old)
-    ? ok("a five-day-old ticket still names its date")
-    : bad(`a five-day-old ticket printed "${old}"`, "an old ticket must say so — that is what this function exists for");
+  const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+// EVERY MONTH, NOT JUST TODAY'S. This check used to fire kotWhen once, five days back, and match
+// /^\d{1,2} [A-Z]{3} /. Three letters exactly — so it went RED for the whole of September and
+// only September, because `month:"short"` asked the platform's ICU and modern ICU answers "Sept".
+// The ticket was right; the guard was narrower than its own rule. It now asserts the real rule —
+// the month is one of twelve fixed three-letter names, the same on every device — and it walks all
+// twelve, so a platform that abbreviates ANY month differently is caught the day it lands, not in
+// the month it happens to break.
+let dateBad = [];
+for (let m = 0; m < 12; m++) {
+  const when = Date.UTC(2026, m, 15, 6, 0, 0);            // the 15th, mid-morning IST, every month
+  const s = BILLDOC.kotWhen(new Date(when).toISOString());
+  if (!/^\d{1,2} [A-Z]{3} /.test(s)) dateBad.push(`${MONTHS[m]} → "${s}"`);
+  else if (!s.includes(" " + MONTHS[m] + " ")) dateBad.push(`${MONTHS[m]} printed as "${s.split(" ")[1]}"`);
+}
+const old = BILLDOC.kotWhen(new Date(now - 5 * 86400000).toISOString());
+if (!/^\d{1,2} [A-Z]{3} /.test(old)) dateBad.push(`a five-day-old ticket printed "${old}"`);
+dateBad.length === 0
+  ? ok("an old ticket names its date, and every month is the same three letters on every device")
+  : bad("a ticket's date does not read the same everywhere", dateBad.join(" · "));
   const yday = BILLDOC.kotWhen(new Date(now - 86400000).toISOString());
   /^YESTERDAY /.test(yday)
     ? ok("yesterday's ticket says YESTERDAY")
