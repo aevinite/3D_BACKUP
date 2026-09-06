@@ -27,6 +27,27 @@ function perLabel(s: number): string {
   return `${s} sec`;
 }
 
+// ── A HIT WITH NO CEILING MUST NOT PRINT ZERO ONES (item 1, sweep #8 T21) ────────────────────────
+// Not every wall on this page has an editable ceiling. The ADMIN password wall deliberately has
+// none — this very page says so, in the note at the bottom of "The limits", and refuses to offer it
+// as a rule row — so migration 208's lfh_rate_alert writes `max_count: 0, window_seconds: 0` on
+// those events. The chip printed them straight through, and perLabel(0) answers "0 hours" because 0
+// divides by 3600 cleanly, so the one live alert on this platform read:
+//
+//     Admin login    3 / 0 per 0 hours
+//
+// which is not a smaller number than the real one, it is a meaningless one — the same class as a
+// NaN or an [object Object] reaching a person's screen. It was measured on this screen at 1280×800
+// and at 360×780, and it is the SECOND half of a pair: the Repair board printed the same chip and
+// was fixed there on 2026-09-04 (`rlChip`, app/aevinite/repair/page.tsx), one screen of two. The
+// wording is deliberately kept identical to that one, so the two boards keep saying the same thing
+// about the same alert — the exact drift `labelFor` below was fixed for a day earlier.
+const hitChip = (h: { hit_count: number; max_count: number; window_seconds: number }) =>
+  h.max_count > 0 && h.window_seconds > 0
+    ? `${h.hit_count} / ${h.max_count} per ${perLabel(h.window_seconds)}`
+    : `${h.hit_count} attempt${h.hit_count === 1 ? "" : "s"}`;
+
+
 export default function AdminRateLimits() {
   const toast = useToast();
   const [rules, setRules] = useState<Rule[]>([]);
@@ -280,7 +301,7 @@ export default function AdminRateLimits() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                   <b style={{ fontSize: 13.5 }}>{labelFor(h.key)}</b>
-                  <span className="rl-chip danger">{h.hit_count} / {h.max_count} per {perLabel(h.window_seconds)}</span>
+                  <span className="rl-chip danger">{hitChip(h)}</span>
                   {h.restaurant_name ? <span className="adm-muted" style={{ fontSize: 11.5 }}><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{h.restaurant_name}</span> : null}
                   <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(h.last_at)}</span>
                 </div>
