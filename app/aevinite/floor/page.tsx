@@ -579,7 +579,15 @@ export default function AdminFloor() {
         .adx .floor-gate .floor-gate-btn { font-size: 14px; padding: 11px 20px; min-height: 44px; }
         .adm-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
         .adm-btn-primary:hover:not(:disabled) { filter: brightness(1.07); }
-        .adm-snapchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--adm-warn, #d97706); background: color-mix(in srgb, var(--adm-warn, #d97706) 13%, transparent); white-space: nowrap; }
+        /* A NOTE, NOT A WARNING (item 4, sweep #8 T21 — the same call already made on Staff online).
+           This pill says "this page doesn't update on its own", which is deliberate and correct, not
+           a fault: the page is a lookout, and its own gate card says so twice. It was drawn in the
+           console's WARNING colour, so an amber badge sat on the Live floor on every single load, for
+           ever. A bar that is always up is how the admin learns to stop reading amber — the reason
+           .so-snap on /aevinite/staff-online was changed to neutral grey in sweep #6 (T17 item 11).
+           This was the other half of that pair, on the busier screen of the two. Same colours as
+           .so-snap, deliberately, so the two "manual" pills read as one idea. */
+        .adm-snapchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent); white-space: nowrap; }
       `}</style>
     </>
   );
