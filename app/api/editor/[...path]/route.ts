@@ -1183,7 +1183,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!(await managerCan(g, rid, "view_ratings"))) return permDenied("see guest ratings");
       const onlyUnhandled = new URL(req.url).searchParams.get("filter") === "unhandled";
       const sum = await sb.rpc("lfh_ratings_summary", { p_ids: [rid] });
-      if (sum.error) return err(sum.error.message, 500);
+      // A failed read is not a sentence a manager can act on. The raw text goes to the server log,
+      // where the Fix-NOW board reads it; the screen gets words (lib/panelFailure's own rule, which
+      // this line predated). (T24 sweep #8, 2026-09-06)
+      if (sum.error) {
+        console.error("[editor/ratings] summary read failed:", sum.error.message);
+        return err("Couldn't load the ratings summary — please try again.", 500);
+      }
       const s = (sum.data?.[0] ?? {}) as Record<string, any>;
       const summary = {
         total: Number(s.total) || 0, avg: Number(s.avg) || 0,
@@ -2964,7 +2970,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // prints no two rows could be told apart. Both facts were already in reach: `table_number`
       // is a column logAction has always accepted and nothing here passed, and the bill number is
       // one extra column on a read this branch already makes.
-      await logAction("editor", g.user ? "print_sent" : "print_sent_by_admin", {
+      // ── …AND *WHO* SENT IT (T24 sweep #8, 2026-09-06) ────────────────────────────────────────
+      // This was the ONE write in this file filed with nobody's name on it. It called logAction()
+      // directly and passed `actor` only on the admin branch, so a manager pressing Print produced
+      // a diary row whose By column was empty — on the very row the note above says he asked for
+      // ("say who printed a bill, on the bill itself" → "make log do that"). Every other write here
+      // goes through log(), which fills in the person's name AND their stable id; this one now does
+      // too, and the admin branch still overrides both, exactly as before.
+      await log("editor", g.user ? "print_sent" : "print_sent_by_admin", {
         restaurant_id: rid, device_id: dev,
         // Filterable as well as readable: the Audit & logs tab groups by table, so a bill print
         // now sits with the rest of that table's story instead of floating loose. A banquet sheet
