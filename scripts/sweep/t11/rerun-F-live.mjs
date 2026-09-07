@@ -29,7 +29,10 @@ async function openSheet(browser, opts = {}) {
   // gives the sheet the world it expects — and it tests the SERVED bytes, which is the point.
   await page.goto(BASE + "/print-setup.html", { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.evaluate(() => { document.body.innerHTML = ""; });
-  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js"]) {
+  // billdoc.js TOO, because norm() delegates to phone10() there (2026-09-07). A page holding only
+  // billcustomer.js measures the delegate's FALLBACK — the raw digits — not the product: a "+91"
+  // number came back twelve digits long and the Generate button read as stuck.
+  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js", "/panels/billdoc.js"]) {
     await page.addScriptTag({ url: src });
   }
   // the panel's own api() is what the sheet uses; stub it so nothing is asked of the server

@@ -107,8 +107,19 @@ row("P03695", "the digit counter turns green at exactly 10", () => {
   const seg = CODE.slice(i, i + 600);
   return /classList\.toggle\("ok",\s*n === 10\)/.test(seg) || `the switch reads: ${(/classList\.toggle\([^)]*\)/.exec(seg) || ["(none)"])[0]}`;
 });
-row("P03696", "typing is capped at 13 digits so a mistyped run cannot grow forever", () =>
-  /slice\(0,\s*13\)/.test(CODE) || "the 13-digit cap is gone");
+// RE-DECIDED, NOT FLIPPED (owner, 2026-09-07). This row asserted the literal `.slice(0, 13)` —
+// thirteen being the longest shape the app knew. He then asked for the international "0091 …"
+// form, which is FOURTEEN, and the literal cap silently ate its last digit. So the rule is no
+// longer "thirteen": it is "as many digits as phone10() can identify, and not one more", named
+// once as MAX_TYPED. Pinning a guard to a number instead of the rule behind it is what made this
+// row go red over a change that was correct.
+row("P03696", "typing is capped at the longest number the app can identify, so a mistyped run cannot grow forever", () => {
+  const cap = Number(/const MAX_TYPED = (\d+)/.exec(CODE)?.[1]);
+  if (!Number.isFinite(cap)) return "there is no named cap any more — a mistyped run can grow forever";
+  if (!/slice\(0,\s*MAX_TYPED\)/.test(CODE)) return "the input handler no longer uses the named cap";
+  const longest = Math.max(...["", "91", "0", "091", "0091"].map((p2) => p2.length + 10));
+  return cap === longest || `the box holds ${cap} digits but the longest number it can identify is ${longest}`;
+});
 row("P03697", "Enter moves phone → name, and Enter on the name submits only when the button is live", () => {
   const enters = (CODE.match(/["']Enter["']/g) || []).length;
   return enters >= 2 || `${enters} Enter handler(s) — expected the phone box and the name box`;

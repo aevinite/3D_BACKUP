@@ -839,6 +839,47 @@ dateBad.length === 0
       "this page is the one place that answers 'which number is this?' — it has to describe today's paper");
 }
 
+/* ── THE ALLERGY WARNING IS ABOVE THE FOOD (owner, 2026-09-07) ──────────────────────────────
+   He asked for it by name after it was carried to him as a decision. It printed BELOW the dish
+   list, which is fine on a three-line ticket and useless on a hundred-line banquet order: a cook
+   reads the food, starts cooking, and meets "AVOID: peanut" last. It is the one line on this
+   paper where being read late is the same as not being read.
+   Checked in EVERY shape a ticket comes in, not just the easy one — the shared note grows with
+   whatever a waiter typed, and a reprint adds a banner above everything, so both are shapes in
+   which the warning could be pushed back down without anybody noticing. */
+{
+  const at = (html, cls) => html.split("</style>")[1].indexOf(`class="${cls}"`);
+  const SHAPES = [
+    ["a plain ticket", { kot: 1, tableLabel: "T4", lines: [{ title: "Pasta", qty: 1 }], allergies: ["peanut"] }],
+    ["with a note every line shares", { kot: 2, tableLabel: "T4", lines: [{ title: "Pasta", qty: 1, note: "x" }, { title: "Salad", qty: 2, note: "x" }], allergies: ["peanut"] }],
+    ["a reprint", { kot: 3, tableLabel: "T4", lines: [{ title: "Pasta", qty: 1 }], allergies: ["peanut"], reprint: true }],
+    ["a hundred lines", { kot: 4, tableLabel: "T4", lines: Array.from({ length: 100 }, (_, i) => ({ title: `Dish ${i + 1}`, qty: 1 })), allergies: ["peanut", "shellfish"] }],
+    ["an order with nothing on it", { kot: 5, tableLabel: "T4", lines: [], allergies: ["peanut"] }],
+  ];
+  const wrong = [];
+  // A THROW IS THE WORST OUTCOME, SO IT IS REPORTED, NOT ALLOWED TO CRASH THE RUN. These
+  // documents are drawn into a window.open or a hidden iframe: a throw here is a BLANK WINDOW —
+  // the kitchen gets no ticket at all, with nothing on screen saying why. A guard that dies on
+  // the same throw tells you far less than one that names the shape that caused it.
+  const draw = (o) => { try { return BILLDOC.kotDocHtml(o); } catch (e) { return { threw: e.message }; } };
+  for (const [name, o] of SHAPES) {
+    const h = draw(o);
+    if (h.threw) { wrong.push(`${name}: the ticket THREW — a cook gets a blank window (${h.threw})`); continue; }
+    const al = at(h, "al"), food = at(h, "kl"), note = at(h, "on"), head = at(h, "h");
+    if (al < 0) { wrong.push(`${name}: the warning is not on the ticket at all`); continue; }
+    if (food >= 0 && al > food) wrong.push(`${name}: the warning is below the food`);
+    if (note >= 0 && al > note) wrong.push(`${name}: the warning is below the shared note, which grows with what a waiter typed`);
+    if (head >= 0 && al < head) wrong.push(`${name}: the warning is above the ticket's own heading`);
+  }
+  // …and a ticket with no allergy must not print an empty box where it would have been.
+  const none = draw({ kot: 6, tableLabel: "T4", lines: [{ title: "Pasta", qty: 1 }] });
+  if (none.threw) wrong.push(`a ticket with no allergy THREW — a cook gets a blank window (${none.threw})`);
+  else if (none.split("</style>")[1].includes('class="al"')) wrong.push("a ticket with no allergy prints the warning box empty");
+  wrong.length
+    ? bad("the allergy warning is not where a cook reads it first", wrong.join(" · "))
+    : ok(`the allergy warning prints above the food in all ${SHAPES.length} ticket shapes, and not at all when there is none`);
+}
+
 console.log(fails
   ? `\n${fails} check(s) FAILED — the paper does not read the same everywhere, or its rows do not describe its rupees.`
   : "\nAll checks passed — one clock, one day, and every printed figure describes itself.");

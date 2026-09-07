@@ -434,7 +434,10 @@ R("P03857", "the banquet sheet's date and time are already immune", async () => 
 async function sheet(opts = {}) {
   const r = await renderDoc("bill", bill({ noBar: true }), { width: 360, height: 780 });
   await r.page.evaluate(() => { document.body.innerHTML = ""; });
-  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js"]) await r.page.addScriptTag({ url: src });
+  // billdoc.js TOO, because norm() delegates to phone10() there (2026-09-07). A page holding only
+  // billcustomer.js measures the delegate's FALLBACK — the raw digits — not the product: a "+91"
+  // number came back twelve digits long and the Generate button read as stuck.
+  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js", "/panels/billdoc.js"]) await r.page.addScriptTag({ url: src });
   await r.page.evaluate((o) => {
     // `ask()` takes its door as an OPTION (`const api = o.api`), never as a global — see the note
     // in rerun-LMN.mjs. These rows do not need a lookup to answer, but passing it correctly means

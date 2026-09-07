@@ -232,7 +232,10 @@ for (const [id, shape, zoom] of [
 async function sheet(opts = {}, rows = [{ phone: "9825011111", name: "Asha Kumari", visits: 4 }]) {
   const r = await renderDoc("bill", { name: "x", lines: [], subtotal: 0, total: 0, taxRows: [], tableDisp: "1", dateStr: "x", noBar: true }, { width: 360, height: 780 });
   await r.page.evaluate(() => { document.body.innerHTML = ""; });
-  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js"]) await r.page.addScriptTag({ url: src });
+  // billdoc.js TOO, because norm() delegates to phone10() there (2026-09-07). A page holding only
+  // billcustomer.js measures the delegate's FALLBACK — the raw digits — not the product: a "+91"
+  // number came back twelve digits long and the Generate button read as stuck.
+  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js", "/panels/billdoc.js"]) await r.page.addScriptTag({ url: src });
   await r.page.evaluate(({ o, rr }) => {
     window.__calls = [];
     window.__backOn = 0; window.__backOff = 0;
@@ -256,12 +259,26 @@ const state = (page) => page.evaluate(() => {
     ready: go?.getAttribute("aria-disabled") === "false", calls: window.__calls.length,
     text: ov?.innerText || "", name: ins[1]?.value || "", open: !!ov, backOn: window.__backOn, backOff: window.__backOff };
 });
-D("P18935", "the counter and the button agree with the box after typing 15 digits (capped at 13)", async () => {
+// RE-DECIDED, NOT FLIPPED (owner, 2026-09-07). Two of the three numbers this row named have
+// changed, and both changes were asked for. The CAP is no longer 13 but MAX_TYPED (14), because
+// the international "0091 …" form is fourteen digits and the old cap ate the last one. And the
+// COUNTER no longer counts keystrokes: a complete number written the international way announced
+// itself as "14/10" and never turned green, so it now counts the GUEST'S number — any shape
+// phone10() recognises reads 10/10. What the row is really about is unchanged and still asserted:
+// the box, the counter and the button must never disagree with each other.
+D("P18935", "the counter and the button agree with the box after a mistyped run of 15 digits", async () => {
   const r = await sheet();
   try {
     await typePhone(r.page, "982501234567890");
-    const s = await state(r.page);
-    return (s.digits === 13 && s.counter === 13) || `the box holds ${s.digits} and the counter says ${s.counter}/10 — the cap is 13`;
+    const st = await state(r.page);
+    const cap = 14;                       // MAX_TYPED — verify:one-phone-number holds it to phone10
+    const bad = [];
+    if (st.digits !== cap) bad.push(`the box holds ${st.digits} digits, not ${cap}`);
+    // 15 digits is not a number anything can identify, so the counter falls back to counting them
+    // — and must NOT claim the entry is complete.
+    if (st.counter !== st.digits) bad.push(`the counter says ${st.counter} while the box holds ${st.digits}`);
+    if (st.ready) bad.push("the button offers to generate a bill for a number nobody can call");
+    return bad.length === 0 || bad.join(" · ");
   } finally { await r.close(); }
 });
 for (const [id, what, phone, name, want] of [
@@ -343,7 +360,7 @@ D("P18965", "a failed lookup leaves the sheet fully usable", async () => {
   const r = await renderDoc("bill", { name: "x", lines: [], subtotal: 0, total: 0, taxRows: [], tableDisp: "1", dateStr: "x", noBar: true }, { width: 360, height: 780 });
   try {
     await r.page.evaluate(() => { document.body.innerHTML = ""; });
-    for (const src of ["/panels/backstack.js", "/panels/billcustomer.js"]) await r.page.addScriptTag({ url: src });
+    for (const src of ["/panels/backstack.js", "/panels/billcustomer.js", "/panels/billdoc.js"]) await r.page.addScriptTag({ url: src });
     await r.page.evaluate(() => {
       window.__calls = [];                 // state() reads this; without it the probe throws
       window.__backOn = 0; window.__backOff = 0;

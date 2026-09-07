@@ -31,6 +31,14 @@
  */
 (function () {
   const MIN_LOOKUP = 6;      // digits before we ask the server anything
+  /* MAX_TYPED — the longest shape phone10() can identify, and therefore the longest the box may
+     hold. It was written straight into the input handler as `.slice(0, 13)`, sized for the
+     thirteen-digit "091…" form, and when the international "0091…" form was recognised on
+     2026-09-07 the box silently ATE ITS LAST DIGIT: fourteen digits went in, thirteen stayed,
+     and the guest was never found. A constant that has to be remembered whenever a rule moves is
+     a constant that will be forgotten, so it is named here beside the rule it serves and checked
+     against phone10() by npm run verify:one-phone-number. */
+  const MAX_TYPED = 14;
   const DEBOUNCE_MS = 140;   // keystrokes settle fast enough to feel instant
   /* HOW MANY ROWS THE SERVER SENDS IS THE SERVER'S BUSINESS. The sheet only ever displays four
      suggestions, and the server asks the database for more than that on purpose: an answer is only
@@ -66,15 +74,23 @@
   }
 
   const digits = (s) => String(s || "").replace(/\D/g, "");
-  // "+91 98250 12345", "098250 12345" and "9825012345" are one person — mirrors
-  // lfh_phone10() in migration 227 so the client and the database agree.
+  // "+91 98250 12345", "098250 12345", "9825012345" and "0091 98250 12345" are one person.
+  /* THE RULE IS NOT WRITTEN HERE ANY MORE (T11, sweep #8, 2026-09-07).
+     The comment above this used to promise that these five lines "mirror lfh_phone10() in
+     migration 227 so the client and the database agree" — and mirroring is exactly the
+     arrangement that drifts, which the same comment warns about two lines earlier. It had
+     already drifted a third way: public/panels/billdoc.js peeled only two of the shapes, so the
+     number PRINTED on the bill was not always the number the database had matched.
+     One definition now lives in billdoc.js (the file every printing panel loads and the server
+     requires) and one in SQL (mig 379). This is a delegate.
+     THE GUARD IS NOT DECORATION: billcustomer.js is listed BEFORE billdoc.js in both panels'
+     index.html, so norm() can be called in a moment when LFH_BILLDOC is not on the window yet.
+     The fallback answers the digits — never a wrong guess at whose number it is. */
   function norm(s) {
     const d = digits(s);
-    if (d.length === 10) return d;
-    if (d.length === 12 && d.slice(0, 2) === "91") return d.slice(-10);
-    if (d.length === 11 && d[0] === "0") return d.slice(-10);
-    if (d.length === 13 && d.slice(0, 3) === "091") return d.slice(-10);
-    return d;
+    return (typeof LFH_BILLDOC !== "undefined" && LFH_BILLDOC && LFH_BILLDOC.phone10)
+      ? LFH_BILLDOC.phone10(d)
+      : d;
   }
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const pretty = (p) => { const d = norm(p); return d.length === 10 ? d.slice(0, 5) + " " + d.slice(5) : d; };
@@ -162,7 +178,16 @@
       const goBtn = wrap.querySelector(".bc-go");
       const countEl = wrap.querySelector(".bcust-count");
       const paintCount = () => {
-        const n = String(phoneEl.value || "").replace(/\D/g, "").length;
+        /* COUNT THE GUEST'S NUMBER, NOT THE KEYSTROKES. This counted raw digits against a target
+           of ten, which reads correctly only for someone typing the bare national number: write
+           the same number the international way and a complete, recognised, perfectly good entry
+           announced itself as "14/10" and never turned green. norm() already knows which ten
+           digits those fourteen are — so the counter asks it, and any recognised form reads
+           10/10. An UNrecognised string still counts its own digits, because there is nothing
+           better to say about it. (2026-09-07.) */
+        const typed = String(phoneEl.value || "").replace(/\D/g, "");
+        const known10 = norm(typed);
+        const n = known10.length === 10 ? 10 : typed.length;
         if (countEl) { countEl.textContent = `${n}/10`; countEl.classList.toggle("ok", n === 10); }
       };
       phoneEl.addEventListener("input", paintCount);
@@ -390,7 +415,7 @@
         // digit is before the caret, so it lands at the end exactly as it always did.
         const caret = phoneEl.selectionStart;
         const before = caret == null ? null : digits(String(phoneEl.value).slice(0, caret)).length;
-        const d = digits(phoneEl.value).slice(0, 13);
+        const d = digits(phoneEl.value).slice(0, MAX_TYPED);
         const next = d.length > 5 && d.length <= 10 ? d.slice(0, 5) + " " + d.slice(5) : d;
         if (next !== phoneEl.value) {
           phoneEl.value = next;

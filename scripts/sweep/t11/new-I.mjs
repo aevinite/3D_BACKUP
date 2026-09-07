@@ -84,7 +84,12 @@ async function custPage(opts = {}) {
   // reserved for the recognition line had never been applied.
   await r.page.addStyleTag({ url: `${BASE}/panels/editor/style.css` });
   await r.page.addStyleTag({ url: `${BASE}/panels/billcustomer.css` });
+  // BOTH FILES, IN THE PANELS' OWN ORDER. norm() delegates to phone10() in billdoc.js, so a page
+  // holding only billcustomer.js measures the FALLBACK, not the product: the international form
+  // came back as fourteen raw digits and read as a fault. Both panels list billcustomer.js first
+  // and billdoc.js second, which is exactly why the delegate carries a typeof guard at all.
   await r.page.addScriptTag({ url: CUST });
+  await r.page.addScriptTag({ url: `${BASE}/panels/billdoc.js` });
   await r.page.evaluate(() => {
     // THE STUB MUST ANSWER IN THE SHAPE THE CODE READS, AND STAY SWAPPABLE. billcustomer.js calls
     // `api("GET", "/customer-search?q=…")` — the METHOD is the first argument — and it reads
@@ -117,12 +122,17 @@ const NUMBERS = [
   ["09876543210", "9876543210"], ["+91 98765 43210", "9876543210"], ["98765-43210", "9876543210"],
   ["(+91) 9876543210", "9876543210"], ["  9876543210  ", "9876543210"], ["+91-98765-43210", "9876543210"],
   ["98765 43210", "9876543210"], ["+91.98765.43210", "9876543210"],
-  // "0091 …" (fourteen digits) is DELIBERATELY not on this list. norm() handles 10, 12 (91…), 11
-  // (0…) and 13 (091…) because it MIRRORS lfh_phone10() in migration 227, and the file says in as
-  // many words that a constant here and a constant there drifting is "silent and expensive".
-  // Teaching the client a fourteenth shape the database does not know would CREATE that drift, so
-  // it goes to the owner as a decision rather than a one-sided fix.
-  ["09876543210", "9876543210"],
+  // "0091 …" (fourteen digits) IS on this list now. It was left off while it was still a question
+  // — teaching the browser a shape the database did not know would have made the sheet find a
+  // guest the database then missed, which is the drift billcustomer.js's own comment warns about.
+  // The owner decided on 2026-09-07, so BOTH sides moved: migration 379 in SQL, phone10() in
+  // billdoc.js for the browser and the paper, and norm() delegates to it rather than mirroring it.
+  // THE COUNT IS PART OF THE CONTRACT. Every id in this bank is handed out by a counter walking
+  // these lists, so adding an entry silently renumbers every row after it — and a ledger id that
+  // moves is a ledger id that collides. The international form REPLACES the duplicate
+  // "09876543210" that was standing in for it while it was still an open question; twelve in,
+  // twelve out.
+  ["0091 98765 43210", "9876543210"],
 ];
 for (const [raw, want] of NUMBERS)
   D(`P${id++}`, `the customer strip reads "${raw}" as the same number`, async () => {

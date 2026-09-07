@@ -39,6 +39,37 @@
   var inr = function (v) { return "₹" + Math.round(parseFloat(v) || 0).toLocaleString("en-IN"); };
   var pn = function (v) { return Math.round(Number(v) || 0).toLocaleString("en-IN"); };
 
+  /* phone10(raw) — ONE definition of "which guest is this number?", for the panels AND the server.
+     (T11, sweep #8, 2026-09-07, on the owner's word: a number written "0091 98765 43210" is the
+     same guest.)
+
+     There were THREE half-answers to this question before today. The database knew four shapes
+     (lfh_phone10, mig 227). public/panels/billcustomer.js knew the same four and said in as many
+     words that it "mirrors lfh_phone10() so the client and the database agree". And the printed
+     bill, right here in this file, knew TWO — it peeled a leading 91 or a leading 0 and printed
+     anything else raw. So a guest stored as "0919876543210" was one person to the database, one
+     person to the sheet that asks for the number, and an unparsed string of digits on the paper
+     handed back to them.
+
+     It is decided once, here, for the same reason discPct is: this is the file every panel that
+     prints loads AND the one the server requires. billcustomer.js delegates to it (with a typeof
+     guard, because it is listed BEFORE this file in both panels' index.html and could be asked
+     before this one has run). Migration 379 carries the identical rule in SQL.
+
+     Returns the ten-digit national number when it can be identified, and otherwise the DIGITS as
+     given — never a guess. A caller that needs to know whether it succeeded checks the length,
+     which is exactly what the bill's own display code does: a number we cannot confidently parse
+     is safer whole than wrongly chopped. */
+  function phone10(raw) {
+    var x = String(raw == null ? "" : raw).replace(/[^0-9]/g, "");
+    if (x.length === 10) return x;
+    if (x.length === 12 && x.slice(0, 2) === "91") return x.slice(-10);
+    if (x.length === 11 && x.charAt(0) === "0") return x.slice(-10);
+    if (x.length === 13 && x.slice(0, 3) === "091") return x.slice(-10);
+    if (x.length === 14 && x.slice(0, 4) === "0091") return x.slice(-10);   // the international form
+    return x;
+  }
+
   /* discPct(subtotal, disc) — a discount written as a PERCENTAGE of the pre-discount subtotal
      (owner, 2026-08-01: "in the bill it should show how much percentage of discount you have
      given — and on the printed bill the percentage should show too"). The app stores a discount
@@ -1019,7 +1050,7 @@
 // specific instruction ("no onion for the child"), i.e. the line a cook most needs to read on a
 // rushed pass, and it was the smallest text on the paper. Pinned like every other size here.
 + "      .kl small{font-size:12px}\n"
-+ "      .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}\n"
++ "      .al{margin:0 0 6px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}\n"
 /* The whole-table note. Bordered like the ⚠ AVOID box, because it is the same KIND of thing — one
    instruction that applies to every dish below it — and printed ABOVE the dishes, since reading it
    after the food would be reading it too late. 13px, one ink, same 66mm discipline as the rest. */
@@ -1043,9 +1074,18 @@
 + '      <div class="h">' + esc(o.rname || "Kitchen") + "<br>" + esc(o.head || "KITCHEN TICKET") + "</div>\n"
 + '      <div class="meta"><span>KOT #' + esc(kotNoText(o.kot)) + "</span><span>" + esc(o.tableLabel || "") + "</span></div>\n"
 + '      <div class="meta"><span>' + esc(o.when || "") + "</span></div>\n"
+/* THE ALLERGY WARNING GOES ABOVE THE FOOD (owner, 2026-09-07 — asked for it by name after it
+   was carried to him as a decision). It used to print BELOW the dish list, which is fine on a
+   three-line ticket and useless on a hundred-line banquet order: a cook reads the food, starts
+   cooking, and meets "AVOID: peanut" last. It is the one line on this piece of paper where being
+   read late is the same as not being read.
+   It sits ABOVE the shared note too, so nothing can push it down: the shared note grows with what
+   a waiter typed, and the warning must be the first thing under the ticket's own heading.
+   NOT a layout opinion — R26 in docs/REJECTED-IDEAS.md is the owner telling this territory not to
+   restyle the ticket on its own initiative, and it still stands. This one he asked for. */
++ "      " + allergHtml + "\n"
 + "      " + sharedHtml + "\n"
 + "      " + (linesHtml || "<div>(no items)</div>") + "\n"
-+ "      " + allergHtml + "\n"
 + "      " + (o.extraHtml || "") + "\n"
 + (o.note ? pageScriptKot() : "")
 + "    </body></html>";
@@ -1559,10 +1599,12 @@
     // accepted input. So: peel a leading 91 (12 digits) or a leading trunk 0 (11) down to the
     // national number, then group. Anything else prints as-is rather than being guessed at — a
     // number we cannot confidently parse is safer whole than wrongly chopped.
-    var phone10 = phoneRaw.length === 12 && phoneRaw.slice(0, 2) === "91" ? phoneRaw.slice(2)
-      : phoneRaw.length === 11 && phoneRaw.charAt(0) === "0" ? phoneRaw.slice(1)
-      : phoneRaw;
-    var custPhone = phone10.length === 10 ? phone10.slice(0, 5) + " " + phone10.slice(5) : phoneRaw;
+    // …and the peeling is no longer done here. It knew two of the five shapes; phone10() above
+    // knows all five and is the same rule the database and the customer sheet use. The DISPLAY
+    // decision is unchanged: group it only when it really is a ten-digit number, otherwise print
+    // what is stored rather than guess at it.
+    var nat = phone10(phoneRaw);
+    var custPhone = nat.length === 10 ? nat.slice(0, 5) + " " + nat.slice(5) : phoneRaw;
 
     var sess = a.session || {};
     var pct = Math.round(m.rate * 10000) / 100;
@@ -2211,6 +2253,7 @@ ${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
     billIdentity: billIdentity,
     splitTax: splitTax,
     discPct: discPct,
+    phone10: phone10,
     // The tip, decided once — see the block beside discPct above.
     tipFromPaid: tipFromPaid,
     tipPct: tipPct,

@@ -510,7 +510,10 @@ HANDLERS.push(
 async function sheet(opts = {}, size = { width: 360, height: 780 }) {
   const r = await renderDoc("bill", { name: "x", lines: [], subtotal: 0, total: 0, taxRows: [], tableDisp: "1", dateStr: "x", noBar: true }, size);
   await r.page.evaluate(() => { document.body.innerHTML = ""; });
-  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js"]) await r.page.addScriptTag({ url: src });
+  // billdoc.js TOO, because norm() delegates to phone10() there (2026-09-07). A page holding only
+  // billcustomer.js measures the delegate's FALLBACK — the raw digits — not the product: a "+91"
+  // number came back twelve digits long and the Generate button read as stuck.
+  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js", "/panels/billdoc.js"]) await r.page.addScriptTag({ url: src });
   await r.page.evaluate((o) => {
     const api = async () => ({ matches: [{ phone: "9825011111", name: "Asha Kumari", visits: 4 }] });
     window.LFH_BACK = { layer: () => () => {} };
@@ -540,8 +543,13 @@ const sheetState = (page) => page.evaluate(() => {
     green: !!ov?.querySelector(".ok"),
     ready: !!go && go.getAttribute("aria-disabled") === "false",
     dimmed: !!go && (go.style.opacity !== "" && Number(go.style.opacity) < 1),
-    cls: go?.className || "", text: ov?.innerText || "" };
+    cls: go?.className || "", text: ov?.innerText || "",
+    // the raw digits as well as their COUNT, so a row can ask phone10 which number they are
+    digitsText: (ins[0]?.value || "").replace(/\D/g, "") };
 });
+/* phone10 comes from billdoc.js — the one definition the browser, the paper and the database all
+   use (mig 227 + 379). A row that re-implemented the ladder here would be the fourth copy. */
+const LFH_PHONE10 = (x) => B.phone10(x);
 HANDLERS.push(
   [/^the counter and the button agree with the box after typing (.+)$/, (m) => {
     const what = m[1];
@@ -556,14 +564,24 @@ HANDLERS.push(
     try {
       await typeInto(r.page, INPUT[key], null);
       const s = await sheetState(r.page);
-      // the counter must say what the BOX holds, and the green state must agree with "ten digits"
       if (s.counter == null) return "no counter on the sheet";
-      // THE COUNTER SAYS WHAT IS IN THE BOX, even above ten — "13/10" is the honest reading of a
-      // box holding three digits too many, and the box itself caps at 13. My first version expected
-      // it to stop at 10, which would have hidden the overrun from the person typing.
-      if (s.counter !== s.digits) return `the box holds ${s.digits} digits and the counter says ${s.counter}/10`;
-      const shouldBeGreen = s.digits === 10;
-      return s.green === shouldBeGreen || `${s.digits} digits: green=${s.green}, expected ${shouldBeGreen}`;
+      /* RE-DECIDED, NOT FLIPPED (owner, 2026-09-07). This used to say the counter must equal the
+         DIGITS IN THE BOX, always. That was right while the only complete number was ten bare
+         digits — and wrong the moment the international "0091 …" form was recognised, because a
+         complete, recognised, perfectly good entry then announced itself as "14/10" and never
+         turned green. A person who wrote their guest's number the way it is printed on a business
+         card was told their entry was wrong.
+         So the counter counts THE GUEST'S NUMBER when it can identify one, and the keystrokes when
+         it cannot. Both halves are asserted here — including the overrun case this row's earlier
+         note was protecting, which is the one that must still read honestly. */
+      const nat = LFH_PHONE10(s.digitsText || "");
+      const identified = nat.length === 10;
+      const wantCounter = identified ? 10 : s.digits;
+      if (s.counter !== wantCounter)
+        return identified
+          ? `the box holds a number the app recognises as ${nat}, and the counter says ${s.counter}/10`
+          : `the box holds ${s.digits} digits nobody can identify, and the counter says ${s.counter}/10`;
+      return s.green === identified || `${s.digits} digits (identified: ${identified}): green=${s.green}`;
     } finally { await r.close(); }
     };
   }],

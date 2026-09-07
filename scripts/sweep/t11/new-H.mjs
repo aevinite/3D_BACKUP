@@ -107,15 +107,18 @@ const whole = [
     const m = /Pizza[\s\S]{0,120}?no onion, garlic/.test(s.html.replace(/<[^>]+>/g, " "));
     return m || "the kitchen is not told which dish the onion comes out of";
   }],
-  ["an allergy warning reaches the paper, and says AVOID in words", async () => {
-    // WHAT THIS DOES *NOT* ASSERT, deliberately. The warning prints BELOW the food, not above it
-    // — on a hundred-line banquet ticket a cook reads it last. That is a layout judgement on the
-    // kitchen ticket, and R26 in docs/REJECTED-IDEAS.md is the owner telling this territory not to
-    // re-report the KOT's layout as a bug on its own initiative. So it is carried to him as a
-    // decision instead, and this row asserts only what is not in doubt: the warning is there.
+  ["an allergy warning reaches the paper, says AVOID in words, and is ABOVE the food", async () => {
+    // DECIDED, so now asserted. This row used to stop at "the warning is there" and say in a note
+    // that it prints BELOW the dish list — a layout judgement the territory may not make on its
+    // own (R26 in docs/REJECTED-IDEAS.md). It was carried to the owner as a decision and he asked
+    // for it by name on 2026-09-07, so the position is part of the promise now.
     const s = await shot(10);
-    return (/AVOID/i.test(s.text) && /peanut/i.test(s.text) && /shellfish/i.test(s.text))
-      || "an allergy the guest declared does not reach the cook";
+    if (!(/AVOID/i.test(s.text) && /peanut/i.test(s.text) && /shellfish/i.test(s.text)))
+      return "an allergy the guest declared does not reach the cook";
+    const body = s.html.split("</style>")[1];
+    const al = body.indexOf('class="al"'), food = body.indexOf('class="kl"');
+    return (al >= 0 && (food < 0 || al < food))
+      || `the warning is at ${al} and the food at ${food} — a cook reads it after they have started cooking`;
   }],
 ];
 for (const [what, judge] of whole) {
