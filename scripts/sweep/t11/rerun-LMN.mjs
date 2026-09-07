@@ -376,7 +376,9 @@ R("P03916", "…the pad mode leaves the pre-printed letterhead space empty", () 
 async function sheet(opts = {}, size = { width: 360, height: 780 }) {
   const r = await renderDoc("bill", bill({ noBar: true }), size);
   await r.page.evaluate(() => { document.body.innerHTML = ""; });
-  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js"]) await r.page.addScriptTag({ url: src });
+  // billdoc.js TOO, because norm() delegates to phone10() there (2026-09-07). A page holding only
+  // billcustomer.js measures the delegate's FALLBACK — the raw digits — not the product.
+  for (const src of ["/panels/backstack.js", "/panels/billcustomer.js", "/panels/billdoc.js"]) await r.page.addScriptTag({ url: src });
   await r.page.evaluate((o) => {
     // TWO THINGS MY FIRST VERSION GOT WRONG, both about how the sheet is actually wired:
     //  · it reads `res.matches` — `const rows = (res && res.matches) || []` — not `res.rows`;

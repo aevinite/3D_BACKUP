@@ -208,7 +208,8 @@
     "verify:owner-live500": "node scripts/verify-owner-live-500.mjs",
     "verify:repair-sweep": "node scripts/verify-repair-health-sweep.mjs",
     "verify:repair-r2": "node scripts/verify-repair-health-round2.mjs",
-    "verify:shared-panel-styles": "node scripts/verify-shared-panel-styles.mjs"
+    "verify:shared-panel-styles": "node scripts/verify-shared-panel-styles.mjs",
+    "verify:one-phone-number": "node scripts/verify-one-phone-number.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"

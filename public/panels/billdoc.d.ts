@@ -179,6 +179,13 @@ export function splitTax(
 /** A discount as a percentage of the pre-discount subtotal — "10%" / "12.5%", "" when there
  *  is nothing to show. Derived in ONE place so the paper and every screen quote the same figure. */
 export function discPct(subtotal: number, disc: number): string;
+
+/** The ten-digit national number a phone number belongs to — the ONE definition, shared by the
+ *  printed bill, `billcustomer.js`'s `norm()` and `lfh_phone10()` in SQL (mig 227 + 379).
+ *  Knows five shapes: `9876543210`, `919876543210`, `09876543210`, `0919876543210` and the
+ *  international `00919876543210`. Returns the DIGITS as given when it cannot identify the
+ *  number — never a guess. Check `.length === 10` to know whether it succeeded. */
+export function phone10(raw: unknown): string;
 /** What is due, what they handed over → the tip. Never negative: handing over LESS than the bill
  *  is a part payment, not a small tip, and the app has a separate thing for that. */
 export function tipFromPaid(due: number, paid: number): number;
