@@ -880,6 +880,39 @@ dateBad.length === 0
     : ok(`the allergy warning prints above the food in all ${SHAPES.length} ticket shapes, and not at all when there is none`);
 }
 
+/* ── A HOLE IN A LIST MUST NOT COST THE PAPER (sweep #7 for lines, T11 sweep #8 for orders) ──
+   Every one of these documents is drawn into a window.open or a hidden iframe, so a throw is a
+   BLANK WINDOW: the kitchen gets no ticket, or the guest gets no bill, with nothing on any screen
+   saying why. The LINES list has been guarded since sweep #7. The ORDERS list, one level up, had
+   the same exposure and no guard — billMoney([null]) threw on `.status` — and billMoney is on the
+   export table, so any panel handing it a list assembled from two reads got no money and no
+   document. Both levels are asserted here, on every entry point that takes a list. */
+{
+  const real = { id: "a", status: "served", subtotal: 100, taxable_base: 100, tax_rate: 0.05,
+    items: [{ title: "Dal", qty: 1, price: 100, tax_mode: "excl" }] };
+  const HOLES = [[null], [undefined], [null, real], [real, null], [null, undefined, real]];
+  const broke = [];
+  for (const orders of HOLES) {
+    for (const [name, fn] of [["billMoney", () => BILLDOC.billMoney(orders, { tax_rate: 0.05 })],
+                              ["mrpTaxInside", () => BILLDOC.mrpTaxInside(orders, 0.05)]]) {
+      try { fn(); } catch (e) { broke.push(`${name}(${JSON.stringify(orders).slice(0, 26)}) → ${e.message}`); }
+    }
+  }
+  // …and a hole must cost NOTHING: the real order beside it is still charged in full.
+  const m = (() => { try { return BILLDOC.billMoney([null, real], { tax_rate: 0.05 }); } catch { return null; } })();
+  if (m && Math.abs(Number(m.total) - 105) > 0.51) broke.push(`a hole beside a ₹100 order produced a total of ₹${m.total}, not ₹105`);
+  // …and the LINES list, which is the level sweep #7 fixed — checked so it cannot regress quietly.
+  for (const [name, fn] of [["billDocHtml", () => BILLDOC.billDocHtml({ lines: [null, { title: "Dal", qty: 1, price: 200 }] })],
+                            ["kotDocHtml", () => BILLDOC.kotDocHtml({ kot: 1, lines: [null, { title: "Dal", qty: 1 }] })],
+                            ["banquetDocHtml", () => BILLDOC.banquetDocHtml({ bill: {}, settings: {}, lines: [null, { title: "Dinner", qty: 1, price: 100 }] })],
+                            ["combineBillLines", () => BILLDOC.combineBillLines([null, { title: "Dal", qty: 1, price: 200 }])]]) {
+    try { fn(); } catch (e) { broke.push(`${name} with a hole in its lines → ${e.message}`); }
+  }
+  broke.length === 0
+    ? ok("a hole in a list of orders or of lines costs nothing — no document is ever a blank window")
+    : bad("a hole in a list throws, and a throw here is a blank window", broke.join(" · "));
+}
+
 console.log(fails
   ? `\n${fails} check(s) FAILED — the paper does not read the same everywhere, or its rows do not describe its rupees.`
   : "\nAll checks passed — one clock, one day, and every printed figure describes itself.");

@@ -62,6 +62,23 @@ export const registered = () => new Set(rows.map((r) => r.id));
 /** A row this run genuinely cannot execute. `why` is what a later session must do. */
 export const skipRow = (id, what, why) => rows.push({ id, what, skip: why });
 
+/* ── PUTTING BACK WHAT A BANK WROTE ───────────────────────────────────────────────────────────
+   A bank that writes rows to the shared dev database has to delete them again, and there was
+   nowhere to do it. The rows are executed by run() long after every module has finished importing,
+   so a bank has no `finally` of its own to hang cleanup on — and `process.on("beforeExit")` never
+   fires either, because run() ends with process.exit(). Bank J registered two signal handlers,
+   called its own cleanup nowhere, and left a virtual computer and fourteen tickets sitting in a
+   real restaurant's printing screen.
+   So: register here, and run() awaits every one of them before it exits — on a pass, on a failure,
+   and on a throw. A finisher that throws is reported and does not stop the others. */
+const finishers = [];
+export const onFinish = (fn) => finishers.push(fn);
+export const runFinishers = async () => {
+  for (const fn of finishers) {
+    try { await fn(); } catch (e) { console.log(`  ⚠ a cleanup step failed: ${e?.message || e}`); }
+  }
+};
+
 export async function run(label) {
   const argv = process.argv.slice(2);
   const onlyAt = argv.indexOf("--only");
@@ -120,10 +137,12 @@ export async function run(label) {
       writeFileSync(argv[outAt + 1], text);
       console.log(`${records.length} records written to ${argv[outAt + 1]}`);
     } else console.log(text);
+    await runFinishers();
     process.exit(fail ? 1 : 0);
   }
   console.log("─".repeat(78));
   console.log(`${label}: ${picked.length} rows · ${pass} passed · ${fail} failed · ${skip} skipped  (of ${rows.length} declared)`);
   if (bad.length) { console.log("\nwhat failed:"); for (const b of bad) console.log("  · " + b); }
+  await runFinishers();
   process.exit(fail ? 1 : 0);
 }

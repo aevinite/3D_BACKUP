@@ -150,6 +150,14 @@ HOST="$(scutil --get ComputerName 2>/dev/null || hostname)"
 
 # Every printer this Mac has, with the paper it is set to (in millimetres, read from the queue's own
 # driver file). This is what fills the dropdowns in the app, so nobody types a printer name.
+# A VALUE GOING INTO JSON IS ESCAPED FIRST (T11, sweep #8, 2026-09-07).
+# This file builds its printer list by hand, and interpolated $p and $desc straight into it. A
+# printer whose CUPS model name contains a double quote — Brother \"QL\" Series — or a backslash
+# made the whole list invalid JSON, so the server could not read this machine's printers at all:
+# the admin's dropdowns came up empty for it and nothing anywhere said why. The Windows half was
+# never exposed to this, because PowerShell's ConvertTo-Json escapes by construction; these two
+# shell halves now agree with it.
+jesc() { printf '%s' "\$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g'; }
 printers_json() {
   local first=1 out="[" p desc media dims w h
   for p in $(lpstat -e 2>/dev/null); do
@@ -170,8 +178,8 @@ printers_json() {
     fi
     [ $first -eq 0 ] && out="$out,"
     first=0
-    out="$out{\\"name\\":\\"$p\\",\\"desc\\":\\"$desc\\""
-    [ -n "$w" ] && [ -n "$h" ] && out="$out,\\"paper\\":{\\"name\\":\\"$media\\",\\"wMm\\":$w,\\"hMm\\":$h}"
+    out="$out{\\"name\\":\\"$(jesc "$p")\\",\\"desc\\":\\"$(jesc "$desc")\\""
+    [ -n "$w" ] && [ -n "$h" ] && out="$out,\\"paper\\":{\\"name\\":\\"$(jesc "$media")\\",\\"wMm\\":$w,\\"hMm\\":$h}"
     out="$out}"
   done
   echo "$out]"
@@ -640,6 +648,14 @@ done
 FP="$(cat /etc/machine-id 2>/dev/null || hostname)"
 HOST="$(hostname)"
 
+# A VALUE GOING INTO JSON IS ESCAPED FIRST (T11, sweep #8, 2026-09-07).
+# This file builds its printer list by hand, and interpolated $p and $desc straight into it. A
+# printer whose CUPS model name contains a double quote — Brother \"QL\" Series — or a backslash
+# made the whole list invalid JSON, so the server could not read this machine's printers at all:
+# the admin's dropdowns came up empty for it and nothing anywhere said why. The Windows half was
+# never exposed to this, because PowerShell's ConvertTo-Json escapes by construction; these two
+# shell halves now agree with it.
+jesc() { printf '%s' "\$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g'; }
 printers_json() {
   first=1; out="["
   for p in $(lpstat -e 2>/dev/null); do
@@ -666,8 +682,8 @@ printers_json() {
       w="\${dims%% *}"; h="\${dims##* }"
     fi
     [ $first -eq 0 ] && out="$out,"; first=0
-    out="$out{\\"name\\":\\"$p\\",\\"desc\\":\\"$desc\\""
-    [ -n "$w" ] && [ -n "$h" ] && out="$out,\\"paper\\":{\\"name\\":\\"$media\\",\\"wMm\\":$w,\\"hMm\\":$h}"
+    out="$out{\\"name\\":\\"$(jesc "$p")\\",\\"desc\\":\\"$(jesc "$desc")\\""
+    [ -n "$w" ] && [ -n "$h" ] && out="$out,\\"paper\\":{\\"name\\":\\"$(jesc "$media")\\",\\"wMm\\":$w,\\"hMm\\":$h}"
     out="$out}"
   done
   echo "$out]"
