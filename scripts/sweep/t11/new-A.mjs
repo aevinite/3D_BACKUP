@@ -210,12 +210,27 @@ eachHelper("…and asks the machine for the PAPER SIZE where it can", (t) =>
 // Not read — EXECUTED. This machine has two real POS-80 thermal queues in CUPS, so the Mac and
 // Linux printers_json() bodies can be pulled out of the generated script and run as themselves.
 // No sweep had done this: every previous row about printer discovery read the source.
+/* IT TAKES EVERY FUNCTION printers_json CALLS, not just printers_json.
+   On 2026-09-07 the generated script gained `jesc()` — a one-line escape so a printer whose model
+   name contains a quote cannot break the JSON the server parses (round 5, bank L). This extraction
+   cut out printers_json alone, so `jesc "$p"` resolved to nothing and every printer came back with
+   an empty name: the row reported "2 of 2 incomplete" about a script that works perfectly. An
+   extraction that reproduces PART of a program measures a program that does not exist. */
+const DEPS = ["jesc"];
+const cutFn = (t, name) => {
+  const i = t.indexOf(`${name}() {`);
+  if (i < 0) return "";
+  const j = t.indexOf("\n}", i) + 2;
+  return t.slice(i, j);
+};
 const runDiscovery = (os) => {
   const t = H[os];
-  const i = t.indexOf("printers_json() {");
-  const j = t.indexOf("\n}", i) + 2;
+  const parts = DEPS.map((d) => cutFn(t, d)).filter(Boolean);
+  const body = cutFn(t, "printers_json");
+  const missing = DEPS.filter((d) => new RegExp(`\\b${d}\\b`).test(body) && !cutFn(t, d));
+  if (missing.length) throw new Error(`printers_json calls ${missing.join(", ")} and the ${os} script does not define it`);
   const f = pjoin(tmpdir(), `t11-pj-${os}.sh`);
-  writeFileSync(f, t.slice(i, j) + "\nprinters_json\n");
+  writeFileSync(f, [...parts, body, "printers_json", ""].join("\n"));
   return execFileSync("/bin/sh", [f], { encoding: "utf8" }).trim();
 };
 let discovered = null;

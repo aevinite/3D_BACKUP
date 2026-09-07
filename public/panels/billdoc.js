@@ -1314,7 +1314,8 @@
     // (LFH_BILLDOC.mrpTaxInside) and the manager panel wraps it as a one-liner that passes
     // whatever its caller holds — so a future call site would have printed "MRP items include
     // ₹X GST" counting a tombstoned line, on the one document that must reconcile to the rupee.
-    (orders || []).filter(function (x) { return x.status !== "cancelled" && !x.deleted_at; }).forEach(function (o) {
+    // …and the same hole-in-the-list guard as billMoney above, for the same reason.
+    (orders || []).filter(Boolean).filter(function (x) { return x.status !== "cancelled" && !x.deleted_at; }).forEach(function (o) {
       (Array.isArray(o.items) ? o.items : []).forEach(function (i) {
         if (!i || !i.is_mrp || i.tax_mode !== "incl") return;
         var amt = Math.round((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1) * 100) / 100;
@@ -1404,7 +1405,15 @@
     // drops it, so the paper charged for a line the admin ledger said was not there. Whichever is
     // right they may not disagree (COMPLIANCE §3, reconcile to the rupee), and a deleted line is
     // by definition off the bill.
-    var live = (orders || []).filter(function (o) { return o.status !== "cancelled" && !o.deleted_at; });
+    /* AND A HOLE IN THE ORDERS LIST MUST NOT COST THE BILL EITHER (T11, sweep #8, 2026-09-07).
+       The LINES list has been guarded against this since sweep #7, with a note above billDocHtml
+       saying why: "a single null in a line list threw out of the render — on all three documents —
+       and these are drawn into a window.open or a hidden iframe, so a throw here is a BLANK
+       WINDOW". The ORDERS list, one level up, had the same exposure and no guard: billMoney([null])
+       threw on `.status`, and billMoney is on the export table, so any panel that hands it a list
+       assembled from two reads — one of which came back null — got no money, no document and no
+       error. Same rule, same reason, one level higher. */
+    var live = (orders || []).filter(Boolean).filter(function (o) { return o.status !== "cancelled" && !o.deleted_at; });
     var tm = taxModel(settings);
     var r2 = function (n) { return Math.round(n * 100) / 100; };
     // THE RATE EACH ORDER WAS ACTUALLY CHARGED AT (orders.tax_rate, mig 284), per order — not one
