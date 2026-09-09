@@ -283,6 +283,24 @@ while :; do
        sleep 30; continue ;;
   esac
 
+  # ── HOW OFTEN THIS ASKS IS THE APP'S DECISION, NOT THIS FILE'S (2026-09-09) ─────────────────
+  # The server has always sent "pollMs" in this very answer and nothing had ever read it: one write
+  # on the server, zero readers anywhere. So "every 2 seconds" was hard-coded into every copy of this
+  # file, and slowing printing traffic down would have meant re-installing on every restaurant's
+  # computer. At 2s one helper is ~43,000 requests a day; twenty restaurants is ~864,000, each one a
+  # function call and a database read.
+  #
+  # IT CAN ONLY EVER SLOW DOWN. The value is accepted only when it is a whole number between 2,000
+  # and 60,000 ms; anything else - missing, empty, garbled, an old server that sends nothing - falls
+  # back to the 2 seconds this file used before. That is deliberate, and it is what makes this safe
+  # to ship to an operating system nobody here can test on: the worst case is today's behaviour,
+  # never a tighter loop. Nothing here can cost more than it already does.
+  PMS="$(printf '%s' "$HELLO" | sed -n 's/.*"pollMs"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' | head -1)"
+  case "$PMS" in ''|*[!0-9]*) PMS=2000 ;; esac
+  [ "$PMS" -lt 2000 ] && PMS=2000
+  [ "$PMS" -gt 60000 ] && PMS=60000
+  IDLE=$(( PMS / 1000 ))
+
   # Keep asking while there is work; the sleep below is only for when the basket is empty.
   while :; do
     JOB="$(curl -s -m 20 "$SITE/api/print-agent/next" -H "x-lfh-agent: $CODE")"
@@ -348,7 +366,7 @@ while :; do
       say "FAILED job $ID on $PRINTER — is it switched on, with paper?"
     fi
   done
-  sleep 2
+  sleep "$IDLE"
 done
 `;
 
@@ -417,6 +435,7 @@ REM open for the life of the process, so a leftover lock from a crash is not mis
   timeout /t 6 /nobreak >nul
   exit /b 0
 )
+
 
 set "CHROME=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"
 if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"
@@ -580,6 +599,23 @@ if errorlevel 1 (
   goto loop
 )
 
+REM ── HOW OFTEN THIS ASKS IS THE APP'S DECISION (2026-09-09) ───────────────────────────────────
+REM See the long note in the mac branch. It can only ever slow DOWN: anything that is not a whole
+REM number between 2000 and 60000 leaves this at the 2 seconds it used before, so a parsing quirk on
+REM this operating system costs nothing.
+REM
+REM IT SITS HERE, not up in the setup, because it reads hello.out - which does not exist until the
+REM answer above has landed. Placed earlier it would have read nothing, fallen back to 2s and looked
+REM like it worked while ignoring the app for ever.
+REM
+REM EVERY LINE IS TOP LEVEL, on purpose. A %VAR% compared INSIDE the same parenthesised block that
+REM SETS it is expanded when cmd.exe parses the block, so it can never be true - the fault that made
+REM the PDF-printer check fail on every Windows machine.
+set "IDLE=2"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "try{[int]((Get-Content '%WORK%\\hello.out' -Raw | ConvertFrom-Json).pollMs)}catch{0}"\`) do set "PMS=%%i"
+if "%PMS%"=="" set "PMS=0"
+if %PMS% GEQ 2000 if %PMS% LEQ 60000 set /a IDLE=%PMS%/1000
+
 :work
 curl -s -m 20 "%SITE%/api/print-agent/next" -H "x-lfh-agent: %CODE%" > "%WORK%\\job.json" 2>nul
 for %%A in ("%WORK%\\job.json") do if %%~zA LSS 5 goto idle
@@ -609,7 +645,7 @@ if errorlevel 1 (
 goto work
 
 :idle
-timeout /t 2 /nobreak >nul
+timeout /t %IDLE% /nobreak >nul
 goto work
 `;
 
@@ -745,6 +781,25 @@ while :; do
     *'"ok":true'*) : ;;
     *) say "this computer's link was removed on the site — delete $TOKEN_FILE and start again."; sleep 30; continue ;;
   esac
+
+  # ── HOW OFTEN THIS ASKS IS THE APP'S DECISION, NOT THIS FILE'S (2026-09-09) ─────────────────
+  # The server has always sent "pollMs" in this very answer and nothing had ever read it: one write
+  # on the server, zero readers anywhere. So "every 2 seconds" was hard-coded into every copy of this
+  # file, and slowing printing traffic down would have meant re-installing on every restaurant's
+  # computer. At 2s one helper is ~43,000 requests a day; twenty restaurants is ~864,000, each one a
+  # function call and a database read.
+  #
+  # IT CAN ONLY EVER SLOW DOWN. The value is accepted only when it is a whole number between 2,000
+  # and 60,000 ms; anything else - missing, empty, garbled, an old server that sends nothing - falls
+  # back to the 2 seconds this file used before. That is deliberate, and it is what makes this safe
+  # to ship to an operating system nobody here can test on: the worst case is today's behaviour,
+  # never a tighter loop. Nothing here can cost more than it already does.
+  PMS="$(printf '%s' "$HELLO" | sed -n 's/.*"pollMs"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' | head -1)"
+  case "$PMS" in ''|*[!0-9]*) PMS=2000 ;; esac
+  [ "$PMS" -lt 2000 ] && PMS=2000
+  [ "$PMS" -gt 60000 ] && PMS=60000
+  IDLE=$(( PMS / 1000 ))
+
   while :; do
     JOB="$(curl -s -m 20 "$SITE/api/print-agent/next" -H "x-lfh-agent: $CODE")"
     [ -z "$JOB" ] && break
@@ -790,7 +845,7 @@ while :; do
       say "FAILED job $ID on $PRINTER"
     fi
   done
-  sleep 2
+  sleep "$IDLE"
 done
 `;
 

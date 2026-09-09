@@ -936,6 +936,122 @@ P("a bill discounted to nothing prints no tax rather than a ₹0 tax line", () =
   return taxCellsOf(h).length === 0 || "a fully discounted bill still prints a tax line";
 });
 
+// ══ §Q · THE APP DECIDES HOW OFTEN A PRINTING COMPUTER CHECKS IN ════════════════════════════
+// The server has sent `pollMs` in its hello answer since the helper existed, and for just as long
+// nothing read it: one write, zero readers. Every copy of the file had "every 2 seconds" baked in, so
+// slowing printing traffic down would have meant re-installing on every restaurant's computer — and
+// the value of being able to change it centrally drops to zero the moment shops install the file.
+//
+// THE FLOOR IS THE WHOLE SAFETY ARGUMENT. The file accepts the number only between 2,000 and 60,000
+// ms and otherwise uses the 2 seconds it always used, so a parsing quirk on an operating system
+// nobody here can run costs nothing: the worst case is today's behaviour, never a tighter loop.
+// That is what made it safe to write the Windows half without a Windows machine.
+console.log("\n§Q · the app decides how often a computer checks in");
+{
+  const route = read("app/api/print-agent/[...path]/route.ts");
+  const hs = read("lib/printHelperScript.ts");
+  // TWO backslashes, not four. In a template literal `\\s` is the two-character string \s, which is
+  // what RegExp wants; `\\\\s` is a literal backslash followed by s and matches nothing. Over-escaped,
+  // this returned "" for all three branches and every check below failed on code that was correct.
+  const branch = (os) => (hs.match(new RegExp(`const ${os}\\b[\\s\\S]*?\`;`)) || [""])[0];
+
+  P("the server still sends an interval with its hello", () =>
+    /pollMs:\s*POLL_MS/.test(route) || "the answer no longer carries pollMs, so nothing can be told to slow down");
+  P("…and the interval it sends is a named constant, not a number inline", () =>
+    /const POLL_MS\s*=\s*\d+/.test(route) || "POLL_MS is gone — the one place to change the speed");
+
+  for (const os of ["mac", "linux", "windows"]) {
+    const b = branch(os);
+    P(`the ${os} file READS that interval`, () =>
+      /pollMs/.test(b) || `it ignores pollMs and keeps its own hard-coded wait, which is the fault this section exists for`);
+    /* ASSERT THE COMPARISON, NOT THE NUMBER. The first version tested `/2000/` — and "2000" also
+       appears in the fallback (`PMS=2000`) and in the prose ("between 2,000"), so deleting the floor
+       outright changed nothing and the phase stayed green. Sabotage caught it. The floor is the
+       entire reason this was safe to write for an untestable operating system, so its check has to
+       be the clamp itself. */
+    P(`…and the ${os} file has a FLOOR, so it can never poll faster than today`, () => {
+      const floor = os === "windows" ? /if\s+%PMS%\s+GEQ\s+2000/ : /-lt\s+2000\s*\]\s*&&\s*PMS=2000/;
+      return floor.test(b) || "no floor — a bad value could make this machine ask FASTER than it does now, which is the one direction that costs money";
+    });
+    P(`…and a CEILING, so a mistake cannot silence a printer for an hour`, () => {
+      const ceil = os === "windows" ? /if\s+%PMS%\s+LEQ\s+60000/ : /-gt\s+60000\s*\]\s*&&\s*PMS=60000/;
+      return ceil.test(b) || "no ceiling — a wrong value could leave tickets waiting for as long as the server said";
+    });
+    P(`…and no hard-coded idle wait survives in ${os}`, () => {
+      const idle = os === "windows" ? /timeout \/t 2 \/nobreak/ : /^\s*sleep 2\s*$/m;
+      return !idle.test(b) || "the old fixed wait is still there, so the interval it reads does nothing";
+    });
+    P(`…and the ${os} file reads it AFTER the answer that carries it`, () => {
+      const hello = b.indexOf("print-agent/hello");
+      const reads = b.indexOf("pollMs");
+      if (hello < 0 || reads < 0) return "cannot find both the hello and the read";
+      return reads > hello
+        || "it reads the interval before the answer has landed — it would always fall back to 2s and look like it worked while ignoring the app for ever";
+    });
+  }
+  // the Windows command substitution is easy to get wrong in a way that silently does nothing
+  P("the windows file RUNS its interval read rather than echoing the command", () => {
+    const b = branch("windows");
+    const line = (b.match(/for \/f "usebackq[^\n]*pollMs[^\n]*/) || [""])[0];
+    if (!line) return "no usebackq line reads pollMs";
+    // IN THE SOURCE the backquote is escaped (\\`) because this all lives inside a template literal, so
+    // the check has to allow that backslash. Reading it as the shop receives it would mean generating
+    // the file; matching either form is the same assertion with no build step.
+    return /in \(\\?`/.test(line) || "`usebackq` with quotes instead of backquotes iterates the literal text and never runs PowerShell — the read would silently do nothing";
+  });
+}
+
+// ══ §R · THE LIGHT-SKIN INK FIX IS LIGHT-SCOPED ═════════════════════════════════════════════
+// The readability NUMBERS live in verify:look-ink, which mounts these class names into the real
+// running cascade and measures them in BOTH skins — .card h3, .card h3 .muted, .btn.primary,
+// .tab.active and .chip.on were added there on 2026-09-09 after they measured 3.13:1 and 4.42:1 on
+// the light skin. Repeating the arithmetic here would be two guards for one job.
+//
+// WHAT IS ASSERTED HERE INSTEAD is the thing measuring cannot catch: that the fix is scoped to the
+// LIGHT skin only. A rule that leaks out of `html[data-theme="light"]` would darken the dark skin's
+// gold, where it already reads 9.75:1 and is right — and both guards would still be green, because
+// each only checks that a number is high ENOUGH.
+console.log("\n§R · the light-skin ink fix stays in the light skin");
+{
+  /* COMMENT-STRIPPED, and this is the fifth time in one session that not doing so produced a wrong
+     answer. Both inks are NAMED in the explanatory comment above their own rules ("#1f1505 gives
+     4.85:1 there"), so searching the raw file found the prose, walked back from it to the wrong
+     brace, and reported green while the rule itself had been sabotaged away. A guard that reads the
+     note instead of the code is testing the story. */
+  const css = read("public/panels/editor/style.css").replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));
+  /* ANCHOR ON THE RULES, NOT ON THE COMMENT ABOVE THEM. The first version captured "the comment up to
+     the next blank line" and the selectors fell outside that span, so making a rule global changed
+     nothing and the phase stayed green. Sabotage caught it. This finds every rule that paints one of
+     the two fix inks and checks the selector it is attached to. */
+  const INKS = [/#1f1505/i, /var\(--gold-ink/];
+  const ruleFor = (inkRe) => {
+    // walk backwards from the ink to the "{" that opens its rule, then to the start of the selector
+    const m = css.match(inkRe);
+    if (!m) return null;
+    const at = css.indexOf(m[0]);
+    const brace = css.lastIndexOf("{", at);
+    if (brace < 0) return null;
+    // the selector list runs back to the previous "}" or "*/" or blank line
+    const stops = [css.lastIndexOf("}", brace), css.lastIndexOf("*/", brace), css.lastIndexOf("\n\n", brace)];
+    const from = Math.max(...stops) + 1;
+    return css.slice(from, brace);
+  };
+  for (const [what, inkRe] of [["the button/tab/chip ink", /#1f1505/i], ["the gold text ink", /var\(--gold-ink,/]]) {
+    P(`${what} is still declared`, () => inkRe.test(css) || `the ink is gone — the light skin goes back to the value that measured under 4.5:1`);
+    P(`…and every selector it is attached to is light-scoped`, () => {
+      const sel = ruleFor(inkRe);
+      if (sel === null) return "could not find the rule the ink belongs to";
+      const parts = sel.split(",").map((x) => x.trim()).filter(Boolean);
+      const leaked = parts.filter((x) => !/data-theme="light"/.test(x));
+      return leaked.length === 0
+        || `${leaked.length} selector(s) are not light-scoped and would darken the DARK skin's gold, where the same words already read 9.75:1: "${leaked[0].slice(0, 50)}"`;
+    });
+  }
+  P("the light skin's own green is declared inside a light block", () =>
+    /html\[data-theme="light"\]\{\s*--green:/.test(css)
+    || "the green confirmation line's colour is not light-scoped — the dark skin would inherit a colour tuned for cream");
+}
+
 // ══ §G · THE GUARDS THAT PROTECT ALL OF THIS ═════════════════════════════════════════════════
 console.log("\n§G · the guards themselves");
 // A NAME THAT DOES NOT EXIST LOOKS EXACTLY LIKE A FAILING GUARD, because `npm run <unknown>` exits 1

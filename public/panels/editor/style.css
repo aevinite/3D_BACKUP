@@ -3999,6 +3999,55 @@ html[data-theme="light"]{
   --shadow-sm:0 1px 2px rgba(60,45,20,.07);
   --shadow-md:0 16px 36px rgba(60,45,20,.13);
 }
+
+/* ── GOLD THAT CARRIES WORDS USES --gold-ink IN THIS SKIN (2026-09-09) ─────────────────────────
+   Measured on the running panel, light skin, Settings → Printing: the step headings and the small
+   print beside them came out at 3.13:1 on the cream panel. 13px bold at 3.13 is the number the owner
+   was shown; it needs 4.5.
+
+   THE TOKEN ITSELF IS NOT TOUCHED, and that is the point. --gold-strong is also a BACKGROUND
+   (.btn.primary:hover) and one end of --brand-grad, so darkening it to fix text would darken the
+   primary button and the panel's own brand lettering — a visual change nobody asked for to fix a
+   readability one. --gold-ink already exists in this skin for exactly this ("gold 65% mixed with
+   black" = #835d29 = 4.97:1) and is what the tablet's gold words already use.
+
+   Only DECLARATIONS THAT PAINT TEXT are listed. Backgrounds, borders and gradients keep the bright
+   gold, so the panel looks the same and only the words get darker. */
+html[data-theme="light"] .card h3,
+html[data-theme="light"] .fstat.warn .fstat-n,
+html[data-theme="light"] .sx-item-qty,
+html[data-theme="light"] .to-dish-n,
+html[data-theme="light"] .tp-kot-head,
+html[data-theme="light"] .tp-kot-head:hover,
+html[data-theme="light"] .to-dish-edit { color: var(--gold-ink, #835d29); }
+/*                                                        ^^^^^^^^
+   THE FALLBACK IS THE SAME COLOUR, and it is here for the tooling. --gold-ink is
+   `color-mix(in srgb, var(--gold) 65%, #000)`, which the browser computes to exactly #835d29 — but
+   verify:look-ink mounts its probes inside a chosen scope, and in that scope the var did not resolve,
+   so the declaration was thrown away and the element fell back to the unscoped --gold-strong rule at
+   4.5:1's wrong side. A readability guard that cannot see the colour is worse than no guard.
+   --gold-ink IS declared in both skins, so this is not the orphan-var trap that same guard exists to
+   catch; it is the same value written twice on purpose, and the guard now measures 4.97:1. */
+
+/* The confirmation line on the Printing card ("Kitchen slips print on the kitchen screen already")
+   measured 4.23:1 — the green is right for the dark skin and two hundredths short on the cream. */
+html[data-theme="light"]{ --green:#137337; }
+
+/* ── DARK INK ON GOLD, IN THIS SKIN ONLY (2026-09-09) ─────────────────────────────────────────
+   The primary button, the active tab and an "on" chip all put #2a1d0c on gold. On the LIGHT skin the
+   gold is a gradient whose dark end is #b07a28, and against that the ink measures 4.42:1 — under the
+   4.5 a 14px control needs, and it is the "gold button" number the owner was shown.
+
+   MEASURED AT THE DARK END, not the average. A gradient has two ratios and only the worse one
+   matters; averaging is how a control passes a check and still cannot be read at one end.
+   #1f1505 gives 4.85:1 there, and against the light end (#c98f3f) more still. Both read as the same
+   near-black brown — nothing about the panel looks different, the words are simply legible.
+   The DARK skin already reads 7.37:1 at its worst end and is deliberately left alone. */
+html[data-theme="light"] .btn.primary,
+html[data-theme="light"] .tab.active,
+html[data-theme="light"] .chip.on { color:#1f1505; }
+
+
 /* Hardcoded dark surfaces → light equivalents. */
 /* LONGHANDS HERE TOO — and this is the rule that was actually biting, because LIGHT is the
    panels' default skin. It restated the shorthand and so re-blanked the colour the dark rule
