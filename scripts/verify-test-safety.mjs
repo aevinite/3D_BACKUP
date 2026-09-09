@@ -266,7 +266,25 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     if (BY_DESIGN.test(f)) continue;
     const src = read(f);
     if (refusesNonBackup(src)) continue;
-    for (const { what, re } of LIVE) if (re.test(src)) bad.push(`${f} — names ${what}`);
+    /* A THIRD GOOD PATTERN, and this check punished it exactly as its first version punished the
+       second one (see exemption 1 above — the lesson is written down and was learned again anyway).
+       Three sweep scripts hold the live identifiers inside a NEVER list so they can assert that
+       nothing in their territory names them:
+
+           const NEVER = [/3D_Menu_Av/, /aevinitegroup/, /kclqkmdxnwlhtyrducku/, /\.env\.AV\.live/];
+           return !/kclqkmdxnwlhtyrducku|3D_Menu_Av|env\.AV\.live/.test(all);
+
+       Those are the guards that ENFORCE this rule, and flagging them made verify:push red on main
+       for every session — a guard that blocks the whole folder for doing the right thing.
+
+       An identifier used as a SEARCH PATTERN is not a target, so regex literals and comments are
+       removed before looking. A real offender is a STRING or a URL (`fetch("https://aevinite.shop…")`,
+       `SUPABASE_URL=…kclqkmdxnwlhtyrducku…`) and is still caught, which the sabotage below proves. */
+    const searchable = src
+      .replace(/\/\*[\s\S]*?\*\//g, " ")                                    // block comments
+      .split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "")).join("\n")        // whole-line comments
+      .replace(/(^|[=(,\[:!&|?\s])\/(?![*\/])(?:\\.|\[[^\]]*\]|[^\/\n\\])+\/[gimsuy]*/g, "$1 "); // regex literals
+    for (const { what, re } of LIVE) if (re.test(searchable)) bad.push(`${f} — names ${what}`);
   }
   check(
     "no script points at the live client stack",

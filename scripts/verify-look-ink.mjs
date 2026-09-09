@@ -413,8 +413,27 @@ const PROBES = [
            <div class="ftile ft-free" style="--c:#9aa0a6"><span class="ft-num">10</span></div>
            <div class="ftile"><span class="ft-num ft-num-sm">22</span>
              <div class="ft-merge ft-merge-parent">one party T12 T13</div></div>
-           <span class="tab-badge">3</span>`,
+           <span class="tab-badge">3</span>
+           <div class="card"><h3>1 &middot; Is printing switched on <span class="muted">(optional)</span></h3></div>
+           <button class="btn primary">Save</button>
+           <button class="tab active">Editor</button><span class="chip on">On</span>`,
     checks: [[".ft-ico-go", 3, "the tile's accept-this-order tick (was 1.10 on the light skin — invisible)"],
+             // ── THE SETTINGS CARDS, which this guard passed over while the floor was being fixed
+             // (2026-09-09). Measured on the running panel, light skin, Settings → Printing: the step
+             // heading and the small print inside it were 3.13:1 at 13px on the cream card, and the
+             // gold primary button's own label 4.42:1 against the DARK END of its gradient.
+             //
+             // --gold-strong is also a BACKGROUND and one end of --brand-grad, so the token was left
+             // alone and only the TEXT was pointed at --gold-ink, which exists for exactly this.
+             [".card h3", 4.5, "a settings card's step heading — 13px bold, so it needs 4.5 not 3 (was 3.13 light)"],
+             [".card h3 .muted", 4.5, "the small print inside that heading, which INHERITS its colour (was 3.13 light)"],
+             // A GRADIENT HAS TWO RATIOS AND ONLY THE WORSE ONE MATTERS. gradTop() above averages the
+             // stops, which is why this passed at 5.1 while the dark end read 4.42 — an average is how
+             // a control passes a check and still cannot be read at one end. The ink is now dark
+             // enough for the dark end, so both readings clear.
+             [".btn.primary", 4.5, "the gold primary button's own words (was 4.42 at the light gradient's dark end)"],
+             [".tab.active", 4.5, "the chosen tab, same ink on the same gold"],
+             [".chip.on", 4.5, "an 'on' chip, same ink on the same gold"],
              [".brand-rest", 4.5, "the restaurant's own name in the top bar (was 2.81 on the light skin)"],
              ["#__brandword", 3, "the panel's OWN name, painted as gradient lettering (was 2.64 on the light skin — the guard measured the restaurant name beside it and missed this one)"],
              [".to-rail-h", 4.5, "Take order → 'Categories' over the left box (was 2.81 light)"],

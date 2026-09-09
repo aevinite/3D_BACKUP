@@ -4,6 +4,10 @@ One Next.js app that runs a whole restaurant: the diner's menu (with a 3D dish v
 manager's floor, the kitchen screen, the waiter's tablet, the owner's reports and the admin console
 — for many restaurants at once, out of one codebase and one database.
 
+> **If you need to RUN or CHANGE this and want one page, read `docs/RUNBOOK.md`.** How to start it,
+> how to know you have not broken it, what to do when a check goes red, how to ship, and the three
+> things to ask about first. Every command on it has been run.
+>
 > **If you are an AI assistant working in this repo, read `CLAUDE.md` first.** It is the rulebook,
 > it is short on purpose, and every rule's full text is in `docs/CLAUDE-DETAIL.md` under the same
 > heading. This README is the human's five-minute orientation.
@@ -83,7 +87,7 @@ more**, so a green run here is necessary but not sufficient:
 
 Run those two as well before you push and the local answer really is the CI answer.
 
-There are 176 `verify:*` scripts in all, one per bug that once reached somebody's screen.
+There are 178 `verify:*` scripts in all, one per bug that once reached somebody's screen.
 **`docs/GUARD-MAP.md` tells you which ones your change needs** — look up the file you touched.
 
 Do **not** run `npm run verify:everything` casually: it is the 500-phase suite, it writes to the
