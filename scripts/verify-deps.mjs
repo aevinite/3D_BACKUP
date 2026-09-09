@@ -27,15 +27,21 @@ import { execFileSync } from "node:child_process";
 // Sentry 10.70) cleared EIGHT of them: next, postcss, sharp, js-yaml, nanoid and the three
 // @opentelemetry packages. The guard printed exactly which lines to delete, which is how they
 // came out. Do the same next time — never re-add a name to silence a fresh problem.
-const ACKNOWLEDGED = new Map([
-  ["brace-expansion", "Transitive, dev tooling only."],
-  ["fast-uri", "Transitive, dev tooling only."],
-  ["ip-address", "Transitive, dev tooling only."],
-  ["undici", "Transitive, dev tooling only."],
-  ["@babel/core", "Transitive, build-time only, severity low."],
-  ["@hono/node-server", "Transitive, moderate."],
-  ["hono", "Transitive, moderate."],
-]);
+// IT IS EMPTY (2026-09-09), for the first time since it was written. It opened at FIFTEEN on
+// 2026-08-16; the grouped Dependabot merge cleared eight the same day; `npm audit fix
+// --package-lock-only` cleared the remaining seven — brace-expansion, fast-uri, ip-address, undici,
+// @babel/core, @hono/node-server, hono — along with the two that had just appeared and turned this
+// check red on main for every branch (js-yaml, sharp). All transitive, all with a fix available, so
+// the honest move was to take the fix rather than park it: `npm audit` now reports 0 critical,
+// 0 high, 0 moderate, 0 low.
+//
+// Lockfile only, no package.json change, and verified rather than assumed: npm ci, typecheck, lint,
+// all three unit suites and a full `next build` after it.
+//
+// EMPTY IS THE GOAL, NOT A COINCIDENCE. If you are about to add a name here, first check whether a
+// fix exists — the last nine did. Add one only when it genuinely cannot be fixed now, with a reason,
+// and never to silence something fresh.
+const ACKNOWLEDGED = new Map([]);
 
 // Only these two block a build. Moderate/low are reported and do not fail — the point is to be
 // believed when it does fail.
