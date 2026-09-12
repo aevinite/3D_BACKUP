@@ -347,7 +347,12 @@ const RULES: Rule[] = [
     then: "Almost never a fault in the app itself: it is a dropped connection, or a page left open from before the last update, which is asking for a file that no longer exists under that name. Reloading the page fixes it.",
   },
   {
-    test: /^Failed to (?:fetch|load) dynamically imported module/i,
+    // Native ES modules, all three wordings: Chrome/Firefox ("Failed to fetch dynamically imported
+    // module"), the same failure seen from a loader ("error loading dynamically imported module"),
+    // and Safari's own sentence ("Importing a module script failed."). Same cause as the chunk rule
+    // above, so the same words — and `lib/staleCode.ts`, which decides whether to reload out of it,
+    // must recognise exactly this set. verify:plain-logs asserts the two agree.
+    test: /^Failed to (?:fetch|load) dynamically imported module|\berror loading dynamically imported module\b|\bimporting a module script failed\b/i,
     say: () => "Part of the app didn't finish downloading, so the screen couldn't open.",
     then: "Usually a dropped connection, or a page left open from before the last update. Reloading it fixes it.",
   },

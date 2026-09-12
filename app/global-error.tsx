@@ -5,8 +5,14 @@
 // recoverable page. Kept dependency-free (inline styles) since the app's CSS may not have loaded.
 import { useEffect } from "react";
 import { panelFromPath, reportClientError } from "@/lib/errorReport";
+import { canReloadForStaleCode, isStaleCodeError, reloadForStaleCode } from "@/lib/staleCode";
 
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  // A tab left open across a deploy asks for a JavaScript file that no longer exists under that
+  // name. `reset()` cannot cure that — one reload can. Decided during render so the person sees a
+  // quiet line rather than a crash card flashing for the moment before it lands (lib/staleCode.ts).
+  const recovering = canReloadForStaleCode(error?.message);
+
   useEffect(() => {
     // Record WHICH page crashed, not just "menu". This boundary is the root one, so it also
     // catches owner/staff-panel crashes; hardcoding "menu" filed them under the guest menu and
@@ -14,8 +20,22 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
     // Same idea as naming the endpoint on a server route_error.
     const path = window.location.pathname || "";
     const digest = error?.digest ? ` #${error.digest}` : "";
+    // Report FIRST: sendBeacon survives the unload, but only if it was handed the report before it.
     reportClientError(panelFromPath(path), error?.message || "root error", `${path}${digest}`);
+    reloadForStaleCode(error?.message);
   }, [error]);
+
+  if (recovering) {
+    return (
+      <html>
+        <body style={{ fontFamily: "system-ui, sans-serif", background: "#0b0b0c", color: "#f4f4f5", margin: 0 }}>
+          <div style={{ maxWidth: 460, margin: "18vh auto", textAlign: "center", padding: "0 20px" }}>
+            <p style={{ fontSize: 14, opacity: 0.7, margin: 0 }}>Getting the latest version…</p>
+          </div>
+        </body>
+      </html>
+    );
+  }
 
   return (
     <html>
@@ -27,7 +47,8 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
             The page hit an unexpected error. Please try again.
           </p>
           <button
-            onClick={() => reset()}
+            // A missing file is not cured by re-rendering the same tree; only a reload gets fresh names.
+            onClick={() => (isStaleCodeError(error?.message) ? window.location.reload() : reset())}
             style={{ background: "#d4a574", color: "#1a1a1a", border: 0, borderRadius: 10, padding: "10px 20px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
           >
             Try again
