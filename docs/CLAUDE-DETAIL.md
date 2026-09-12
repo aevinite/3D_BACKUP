@@ -1433,7 +1433,65 @@ Three sections carry this, in the order you need them:
 1. `## 🚦 DEPLOY LOCK — one session deploys at a time` — the lock ritual, below.
 2. `## 🥇 BACKUP-1 IS **UPSTREAM** — everything lands there first`, including
    `### 📥 THE MAC FOLDER MUST NEVER FALL BEHIND BACKUP-1` (`npm run check:current`).
-3. `## Deployment (ONE target now)` — the target names and the backup-2 fallback steps.
+3. `## The 2026-09-12 merge baseline — `main` has no backlog, and older branches are NOT to be re-audited
+
+**Owner, 2026-09-12, STANDING:** *"there isn't any branch left to merge … whenever I ask you, you
+will only merge from further this."*
+
+On 2026-09-12 the whole outstanding merge backlog was cleared in one session, ending at `1ccba2f5`:
+
+| | |
+|---|---|
+| open PRs merged | **11** (10 sweep-#8 lanes + the dependabot routine bump) |
+| branches landed | **12** sweep-#8 lanes, conflicts integrated, never one side discarded |
+| branches proved SUPERSEDED and deleted | **`sweep8/t10-rebased`** (all 9 commits already on `main` under other SHAs, and `main` held items 11–16 that it predated — merging it would have REVERTED newer work) |
+| stale branches deleted | **581** local (333 by SHA, 236 by merged PR, 12 by evidence) + 13 remote |
+| worktrees removed | **28**, and ~2 GB of leftover folders |
+| still open afterwards | **0 PRs · 1 branch (`b2sync`) · 1 worktree (`main`)** |
+
+### What "merge what's left" means from now on
+
+**Work created AFTER 2026-09-12 only.** Do not go looking through older branches again. Anything
+older reached the product by another route — squashed, rewritten, or rebuilt by a later lane — and
+its files have moved on **43–758 commits** since its merge base. Merging one now does not add a
+feature; it drags a two-month-old version of a file back over the current one.
+
+### `b2sync` is the ONE survivor, and it is NEVER merged into `main`
+
+It is not abandoned work. `docs/SESSION-CONTEXT.md` names that exact branch in the backup-2 failover
+sync procedure (`git checkout -q -B b2sync b2repo/main && git merge origin/main`), and the `-B`
+means it is recreated on every run. Its diff against `main` is **deletions** — `.claude/REQUESTS.md`
+and `.claude/work-checker-lessons.md` — so merging it would remove the owner's requests log.
+
+### How a branch was proved superseded (use this method, not a guess)
+
+`git cherry` is not enough: a rebase or a squash changes the patch id, so genuinely-landed work
+still reads as unmerged. Three checks were used together:
+
+1. **Per-commit containment** — `git diff c^ c | git apply --check -R --3way -` against `main`. If a
+   commit's patch reverse-applies cleanly, `main` already has it.
+2. **The artefact** — does the migration / feature actually exist? `132_banquet_no_table.sql`,
+   `221_inventory_core.sql` and `234_summary_qty_guard_into_source.sql` were all present, which
+   settled the banquet, inventory and floor-quantity branches outright.
+3. **Staleness** — how many commits `main` has made on the very files the branch changes. Measure it
+   with `git diff --name-only -z BASE BRANCH | xargs -0 git log --oneline BASE..origin/main --`.
+   **Use `-z`/`xargs -0`**: a plain word-split pathspec hits `app/api/editor/[...path]/route.ts`,
+   the brackets are read as a glob, and every branch silently reports `0` — which reads exactly like
+   "perfectly current" and is how this nearly went unnoticed.
+
+### Two traps this session walked into, both worth knowing
+
+- **A refused `git merge` looks exactly like a clean one.** Judging merges by
+  `grep -E 'CONFLICT|files changed'` reported **five merges as "✓ clean" that had never run** — a
+  guard invoked earlier in the same command had rewritten `ROW-COUNTS.json`, so git refused with
+  *"Your local changes would be overwritten by merge"*, which matches neither pattern. Judge by
+  state: capture `HEAD` before, check the exit code, confirm `HEAD` moved.
+- **A ledger row escapes its pipes, and re-run stampers tore them.** A literal pipe in a cell is
+  `\|`; several lanes' stampers split on every `|` and dropped their stamp inside the escape. Ten
+  rows across T1/T3/T8/T11/T30 were torn in half, eight of them already on `main` for weeks. Split
+  on unescaped pipes only — `(?<!\\)\|`. Detect with `grep -rn '\\ · ' .claude/sweep/LEDGER/*.md`.
+
+## Deployment (ONE target now)` — the target names and the backup-2 fallback steps.
 
 Load the `ship-safety` skill at the moment of deploying, not before: it holds the branch-per-task,
 rebase and conflict-integration rules, and the "whatever you start, you end" process ownership.

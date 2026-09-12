@@ -271,6 +271,10 @@ update the detail doc's section in the same commit.
   `origin/main`. "Make it live" includes pulling this folder current after the merge.
 - **Deployment target:** one repo → `aevinite/3D_BACKUP` → Vercel `3-d-backup` auto-deploys
   `main`. The old separate editor repo is retired.
+- **🧹 MERGE BASELINE 2026-09-12 (`1ccba2f5`): `main` has NO backlog.** Every PR and branch was landed
+  or proved superseded, then deleted; only `b2sync` survives (never merge it — it holds deletions).
+  "Merge what's left" therefore means **work created after 2026-09-12**; do NOT re-audit older
+  branches. Why, and the evidence: `docs/CLAUDE-DETAIL.md` → "The 2026-09-12 merge baseline".
 
 ## Known gotchas (one line each — stories in docs/CLAUDE-DETAIL.md `## Known gotchas` and `docs/PROJECT-HISTORY.md §12`)
 
