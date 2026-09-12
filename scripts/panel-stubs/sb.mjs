@@ -38,6 +38,8 @@ function builder(table) {
   };
   function settle(one) {
     const found = rows();
+    // Every trip is recorded, reads included — see the note on G.READS in state.mjs.
+    if (st.op === "select") (G.READS ||= []).push({ table: st.table, op: "select", matched: found.length, at: (G.READS || []).length });
     if (st.op !== "select") {
       G.WRITES.push({ table: st.table, op: st.op, patch: clone(st.patch ?? null), matched: found.length, at: G.WRITES.length });
       if (st.op === "update") for (const r of found) Object.assign(r, st.patch);
@@ -48,7 +50,13 @@ function builder(table) {
       if (st.op === "delete") G.FIX[st.table] = (G.FIX[st.table] || []).filter((r) => !match(r));
     }
     if (st.head) return Promise.resolve({ data: null, error: null, count: found.length });
-    const src = st.op === "select" ? found : (G.FIX[st.table] || []).filter(match);
+    // A DELETE'S RETURNING SELECT HANDS BACK THE ROWS IT REMOVED (sweep #8 T25, improvement 6).
+    // This re-read the table AFTER deleting, so `.delete().select()` always came back EMPTY — the
+    // opposite of what PostgREST does. Measured against the dev database with a throwaway row:
+    // a real delete answers [{...}] and a delete that matched nothing answers [] with no error.
+    // The old shape made the stub unable to tell those two apart, so any guard checking "did this
+    // delete actually remove anything" read as a refusal on a delete that worked.
+    const src = st.op === "select" ? found : st.op === "delete" ? found : (G.FIX[st.table] || []).filter(match);
     return Promise.resolve({ data: one ? (src[0] ? clone(src[0]) : null) : clone(src), error: null, count: src.length });
   }
   return api;

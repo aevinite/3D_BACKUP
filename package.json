@@ -220,7 +220,10 @@
     "verify:t14-new": "node scripts/verify-t14-new.mjs",
     "verify:owner-team-and-logs": "node scripts/verify-owner-team-and-logs.mjs",
     "verify:owner-team-and-logs-live": "node scripts/verify-owner-team-and-logs-live.mjs",
-    "verify:bill-ledger": "node --experimental-strip-types --no-warnings scripts/verify-bill-ledger-sweep.mjs"
+    "verify:bill-ledger": "node --experimental-strip-types --no-warnings scripts/verify-bill-ledger-sweep.mjs",
+    "verify:t25-doors": "node scripts/verify-t25-login-and-panel-apis.mjs",
+    "verify:t25-doors-live": "node scripts/verify-t25-login-and-panel-apis.mjs --live",
+    "verify:t25-writes": "node scripts/verify-t25-editor-writes.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"

@@ -121,16 +121,40 @@ export async function hashSecret(plain: string): Promise<string> {
 }
 // Constant-time verify. Also tolerates a legacy bare-SHA-256 hash (none exist
 // today, but this keeps us safe if an old row ever appears).
+//
+// A STORED VALUE THAT DOES NOT DECODE IS A "NO", NOT A CRASH (sweep #8 T25, item 5).
+// The salt is base64url-decoded with atob(), which THROWS `InvalidCharacterError` on a value
+// that only LOOKS like a pbkdf2 string ("pbkdf2$120000$…$…" with a damaged middle). That throw
+// escaped this function, and loginUser calls it inside a loop with nothing around it — so ONE
+// malformed `password_hash` row made the whole sign-in door answer a server error instead of
+// "Wrong name or password."
+//
+// The part that makes it worth guarding rather than shrugging at: a login name is unique only
+// PER restaurant (mig 091), so the loop can hold TWO people's rows. Driven with a damaged row at
+// one restaurant and a perfectly good one at another, the good person's CORRECT password threw —
+// one corrupted row, and a second restaurant's manager cannot start their shift, with a raw 500
+// rather than the 503 the panel knows how to retry.
+//
+// Answering false is also the right answer on its own terms: a password that cannot be checked
+// has not been checked, and this function's whole job is "does this match?". Fail closed.
 export async function verifySecret(plain: string, stored: string | null): Promise<boolean> {
   if (!stored) return false;
   const parts = stored.split("$");
   if (parts[0] !== "pbkdf2" || parts.length !== 4) {
     return safeEqual(await sha256hex(plain), stored); // legacy fallback
   }
-  const iters = parseInt(parts[1], 10) || PBKDF2_ITERS;
-  const salt = b64urlDec(parts[2]);
-  const got = b64url(await pbkdf2(plain, salt, iters));
-  return safeEqual(got, parts[3]);
+  try {
+    const iters = parseInt(parts[1], 10) || PBKDF2_ITERS;
+    const salt = b64urlDec(parts[2]);
+    const got = b64url(await pbkdf2(plain, salt, iters));
+    return safeEqual(got, parts[3]);
+  } catch (e) {
+    // Loud in the logs (a row like this needs an admin to reset that person's password), silent
+    // to the person, who simply gets the ordinary refusal.
+    console.error("[auth] a stored password hash could not be read — the account needs a reset:",
+      e instanceof Error ? e.message : e);
+    return false;
+  }
 }
 
 // ── cookie sign / verify (HMAC-SHA256 over id:role:token_version:iat) ─────────

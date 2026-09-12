@@ -82,7 +82,13 @@ function world(managerPerms = {}, extra = {}) {
 const req = (path, { method = "POST", body = null, query = "" } = {}) =>
   new NextRequest(`http://localhost/api/editor/${path}${query}`, {
     method,
-    headers: { "content-type": "application/json", cookie: "lfh_admin_act=" + RID },
+    // THE COOKIE NAME HAS TO BE THE REAL ONE (sweep #8 T25, item 6). This said `lfh_admin_act`,
+    // which exists nowhere in the app — lib/panelScope's ADMIN_ACT_COOKIE is `aevidine_admin_rid`.
+    // So the admin super-user never got a restaurant to act on: editorScope answered 400 "No
+    // restaurant scope", and because `allowed()` below only asked "is it not a 403", both admin
+    // cases printed "allowed — 400" and passed. The one claim in this file that a person cannot
+    // check by reading the route — "the admin passes every rung by design" — was never exercised.
+    headers: { "content-type": "application/json", cookie: "aevidine_admin_rid=" + RID },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
 const ctx = (path) => ({ params: Promise.resolve({ path: path.split("/") }) });
@@ -100,10 +106,16 @@ const refused = async (label, verb, path, opts, wording) => {
   if (r.status === 403 && wording.test(String(r.error || ""))) ok(`${label} → refused`, `403 "${r.error}"`);
   else bad(`${label} should have been refused`, `got ${r.status} ${JSON.stringify(r.error || r).slice(0, 120)}`);
 };
+// "Not a 403" is not the same as "allowed", and the difference hid the fault above for a month:
+// a 400 "No restaurant scope" satisfied it perfectly. A request that was genuinely allowed reaches
+// the handler, so it answers 2xx — or a 4xx that is ABOUT THE DATA (409 "nothing to settle",
+// 404 "not found"), never one about who is asking. Both shapes are accepted, and the status is
+// printed either way so a surprise is visible rather than swallowed.
+const GATE_REFUSALS = [400, 401, 403];
 const allowed = async (label, verb, path, opts) => {
   const r = await call(verb, path, opts);
-  if (r.status !== 403) ok(`${label} → allowed`, `${r.status}`);
-  else bad(`${label} should have been ALLOWED`, `403 "${r.error}"`);
+  if (!GATE_REFUSALS.includes(r.status)) ok(`${label} → allowed`, `${r.status}`);
+  else bad(`${label} should have been ALLOWED`, `${r.status} "${r.error}"`);
 };
 
 const OPEN_SESSION = [{ id: "s1", restaurant_id: RID, table_number: "5", status: "open", last_activity_at: "2026-08-04T10:00:00Z", opened_at: "2026-08-04T09:00:00Z" }];
