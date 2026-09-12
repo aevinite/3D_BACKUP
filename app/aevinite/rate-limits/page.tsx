@@ -27,6 +27,41 @@ function perLabel(s: number): string {
   return `${s} sec`;
 }
 
+// ── A HIT WITH NO CEILING MUST NOT PRINT ZERO ONES (item 1, sweep #8 T21) ────────────────────────
+// Not every wall on this page has an editable ceiling. The ADMIN password wall deliberately has
+// none — this very page says so, in the note at the bottom of "The limits", and refuses to offer it
+// as a rule row — so migration 208's lfh_rate_alert writes `max_count: 0, window_seconds: 0` on
+// those events. The chip printed them straight through, and perLabel(0) answers "0 hours" because 0
+// divides by 3600 cleanly, so the one live alert on this platform read:
+//
+//     Admin login    3 / 0 per 0 hours
+//
+// which is not a smaller number than the real one, it is a meaningless one — the same class as a
+// NaN or an [object Object] reaching a person's screen. It was measured on this screen at 1280×800
+// and at 360×780, and it is the SECOND half of a pair: the Repair board printed the same chip and
+// was fixed there on 2026-09-04 (`rlChip`, app/aevinite/repair/page.tsx), one screen of two. The
+// wording is deliberately kept identical to that one, so the two boards keep saying the same thing
+// about the same alert — the exact drift `labelFor` below was fixed for a day earlier.
+const hitChip = (h: { hit_count: number; max_count: number; window_seconds: number }) =>
+  h.max_count > 0 && h.window_seconds > 0
+    ? `${h.hit_count} / ${h.max_count} per ${perLabel(h.window_seconds)}`
+    : `${h.hit_count} attempt${h.hit_count === 1 ? "" : "s"}`;
+
+// ── "max 0" IS THE DATABASE'S WORD FOR *NO* LIMIT, AND THE SCREEN SAID THE OPPOSITE (item 2) ─────
+// lfh_rate_check (migration 205) opens with
+//     if not found or not v_rule.enabled or v_rule.max_count <= 0 then return true;
+// so a rule stored with max_count 0 lets EVERY attempt through. This row rendered it as
+// "max 0 per 1 min", which any person reads as the strictest setting there is — nothing allowed.
+// One screen, two opposite meanings, and the wrong one is the reassuring one.
+// It was one keystroke away, too: the number box floored at 0, so CLEARING it (to type a new
+// number) produced 0, Save lit up, and the server accepts 0. Measured: a rule at 8, box cleared,
+// Save enabled. The box now floors at 1 — turning a limit OFF is what the On/Off switch beside it
+// is for — and a 0 already in the database still reads as what it does.
+const ruleWords = (r: { enabled: boolean; max_count: number; window_seconds: number }) =>
+  !r.enabled ? "off"
+    : r.max_count <= 0 ? "off — a limit of 0 lets everything through"
+      : `max ${r.max_count} per ${perLabel(r.window_seconds)}`;
+
 export default function AdminRateLimits() {
   const toast = useToast();
   const [rules, setRules] = useState<Rule[]>([]);
@@ -280,7 +315,7 @@ export default function AdminRateLimits() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                   <b style={{ fontSize: 13.5 }}>{labelFor(h.key)}</b>
-                  <span className="rl-chip danger">{h.hit_count} / {h.max_count} per {perLabel(h.window_seconds)}</span>
+                  <span className="rl-chip danger">{hitChip(h)}</span>
                   {h.restaurant_name ? <span className="adm-muted" style={{ fontSize: 11.5 }}><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{h.restaurant_name}</span> : null}
                   <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(h.last_at)}</span>
                 </div>
@@ -333,11 +368,11 @@ export default function AdminRateLimits() {
               <div key={r.id} id={`rule-${r.key}`} className="rl-rule">
                 <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <b style={{ fontSize: 13.5 }}>{r.label}</b>
-                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{r.enabled ? `max ${r.max_count} per ${perLabel(r.window_seconds)}` : "off"}</div>
+                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{ruleWords(r)}</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <input type="number" min={0} max={100000} className="rl-num" value={d.max_count}
-                    onChange={(e) => setDraft((p) => ({ ...p, [r.id]: { ...d, max_count: Math.max(0, Math.trunc(+e.target.value || 0)) } }))} aria-label={`${r.label} max count`} />
+                  <input type="number" min={1} max={100000} className="rl-num" value={d.max_count}
+                    onChange={(e) => setDraft((p) => ({ ...p, [r.id]: { ...d, max_count: Math.max(1, Math.trunc(+e.target.value || 1)) } }))} aria-label={`${r.label} max count`} />
                   <span className="adm-muted" style={{ fontSize: 12 }}>per</span>
                   <input type="number" min={1} max={86400} className="rl-num" value={d.window_seconds}
                     onChange={(e) => setDraft((p) => ({ ...p, [r.id]: { ...d, window_seconds: Math.max(1, Math.trunc(+e.target.value || 1)) } }))} aria-label={`${r.label} window seconds`} />
