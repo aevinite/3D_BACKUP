@@ -19,12 +19,17 @@
 //      own tooling tripping it is how the owner's phone came to be pinged about himself.
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4314";
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". Required of every guard that drives the app
+// (verify:guards-alive §6); this lane shipped without it.
+await requireUp(BASE, "the owner's Reports and every chart");
 const ONLY = arg("--only");
 
 let pass = 0, fail = 0, skip = 0;

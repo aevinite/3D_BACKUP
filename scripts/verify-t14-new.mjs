@@ -21,12 +21,17 @@
 // force a 403, and it is the only honest way to drive a composition-scheme sheet during a sweep.
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4314";
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". Required of every guard that drives the app
+// (verify:guards-alive §6); this lane shipped without it.
+await requireUp(BASE, "the owner's Reports, this block's new ground");
 
 let pass = 0, fail = 0, skip = 0;
 const fails = [];

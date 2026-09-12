@@ -17,9 +17,14 @@
 // verify:owner-s7-live report 197/3 on a dev server and 200/0 on the deployed one.)
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : null; };
 const BASE = (arg("--base") || "http://localhost:4000").replace(/\/$/, "");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". Required of every guard that drives the app
+// (verify:guards-alive §6); this lane shipped without it.
+await requireUp(BASE, "the owner's Audit & logs and Team screens");
 const IS_DEV = /localhost|127\.0\.0\.1/.test(BASE);
 let pass = 0, skipped = 0; const fails = [];
 const ok = (name, cond, detail = "") => {

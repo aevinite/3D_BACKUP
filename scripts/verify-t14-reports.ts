@@ -1079,6 +1079,11 @@ type Body = {
   staffPay?: unknown; inventory?: unknown; tips?: unknown; people?: unknown[];
 };
 
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". Required of every guard that drives the app
+// (verify:guards-alive §6); this lane shipped without it.
+const { requireUp } = await import(process.cwd() + "/scripts/sweep/appUp.mjs");
+await requireUp(BASE, "the owner's Reports, driven for real");
 const { chromium } = await import("playwright");
 const { loginAs } = await import(process.cwd() + "/scripts/sweep/login.mjs");
 const browser = await chromium.launch();
