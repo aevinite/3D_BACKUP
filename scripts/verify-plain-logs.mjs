@@ -363,8 +363,89 @@ function checkPhoneAlerts() {
   }
 }
 
+// ── 7 · A SCREEN THAT CAN'T FIND ITS OWN CODE RECOVERS, AND STILL REPORTS ───────────────────────
+//
+// The commonest error row in the table, on every panel at once, is a tab that was open across a
+// deploy asking for a JavaScript file that no longer exists under that name. lib/plainError.ts has
+// said "Reloading the page fixes it" for weeks; until 2026-09-12 nothing did, and the boundary's
+// own "Try again" button called reset(), which re-renders the same tree and asks for the same dead
+// file. lib/staleCode.ts now takes ONE reload.
+//
+// Two ways that rots, so both are asserted here:
+//   · the two files judging the same set drift apart — the translator calls a message "part of the
+//     app didn't finish downloading" while the recoverer does not recognise it, so the screen is
+//     told what to do and never does it. Checked by ASKING both, not by grepping either.
+//   · somebody "tidies" the boundary by reloading INSTEAD of reporting. Suppressing an error is a
+//     standing no (owner, 2026-07-28): the report has to be handed over BEFORE the reload.
+const STALE_CODE_ROWS = [
+  "Failed to load chunk /_next/static/chunks/1g1jwpgiikpwc.js from module 64893 @ /aevinite/no-such-page [Safari · Mac]",
+  "Loading chunk 4821 failed.",
+  "ChunkLoadError: Loading chunk app/layout failed.",
+  "Failed to fetch dynamically imported module: https://example.test/_next/static/chunks/x.js",
+  "Importing a module script failed.",
+];
+
+async function checkStaleCodeRecovery() {
+  let staleCode, plainError;
+  try {
+    staleCode = await import("../lib/staleCode.ts");
+    plainError = await import("../lib/plainError.ts");
+  } catch (e) {
+    fail(`lib/staleCode.ts would not load (${e.message}). Nothing would reload a screen out of a missing-file crash.`);
+    return;
+  }
+  const { isStaleCodeError } = staleCode;
+  const { plainProblem } = plainError;
+  const STALE_WORDS = "Part of the app didn't finish downloading";
+
+  // Both directions. Every message the translator calls a missing-file problem must be one the
+  // recoverer reloads out of, and vice versa — a one-way check passes while half the rule is dead.
+  let drifted = 0;
+  for (const raw of [...STALE_CODE_ROWS, ...REAL_ERROR_ROWS]) {
+    const translatorSaysStale = plainProblem(raw).headline.includes(STALE_WORDS);
+    const recovererSaysStale = isStaleCodeError(raw);
+    const short = raw.slice(0, 52);
+    if (translatorSaysStale === recovererSaysStale) continue;
+    drifted++;
+    if (translatorSaysStale) {
+      fail(`lib/plainError.ts tells the admin "${STALE_WORDS}…" for "${short}…" but lib/staleCode.ts does not recognise it, so the screen never takes the reload it was just told cures it.`);
+    } else {
+      fail(`lib/staleCode.ts would reload the page for "${short}…", but lib/plainError.ts does not call that a missing-file problem. A reload cannot cure a real bug — it would loop the person through the same crash.`);
+    }
+  }
+  if (!drifted) ok(`the words on the log and the reload the screen takes agree on what a missing-file crash is (${STALE_CODE_ROWS.length + REAL_ERROR_ROWS.length} messages)`);
+
+  // A message that is a real bug must never trigger a reload.
+  if (isStaleCodeError("Cannot read properties of undefined (reading 'length') @ /aevinite")) {
+    fail("lib/staleCode.ts treats an ordinary crash as a missing file. That reloads the person straight back into the same bug.");
+  } else ok("an ordinary crash is not mistaken for a missing file");
+
+  // The boundaries: recover, and report BEFORE recovering.
+  for (const [f, what] of [
+    ["app/error.tsx", "the guest menu"],
+    ["app/global-error.tsx", "the root boundary"],
+    ["app/aevinite/error.tsx", "the admin console"],
+  ]) {
+    const src = strip(read(f));
+    if (!src) { fail(`${f} is missing — ${what} has no error boundary at all.`); continue; }
+    if (!/reloadForStaleCode\(/.test(src)) {
+      fail(`${f} never calls reloadForStaleCode, so ${what} still dead-ends on "Something went wrong" when the app's own code is out of date.`);
+      continue;
+    }
+    if (!/isStaleCodeError\(/.test(src)) {
+      fail(`${f} does not use isStaleCodeError for its Try-again button, so on ${what} that button calls reset() and asks for the same missing file again.`);
+    }
+    const report = src.indexOf("reportClientError(");
+    const reload = src.indexOf("reloadForStaleCode(");
+    if (report === -1) fail(`${f} no longer reports the crash. ${what} would recover silently and the Repair board would never learn the problem exists.`);
+    else if (report > reload) fail(`${f} reloads before it reports. sendBeacon survives the unload only if it was handed the report first — ${what} would lose the row.`);
+    else ok(`${what} reports the crash, then takes the one reload that cures it`);
+  }
+}
+
 const run = async () => {
   await checkTranslator();
+  await checkStaleCodeRecovery();
   checkNoStringifiedDetails();
   checkNoRawErrorRender();
   checkAlertsLandOnControls();

@@ -23,15 +23,46 @@
 // script stamps on <html>, so it is readable in both skins.
 import { useEffect } from "react";
 import { panelFromPath, reportClientError } from "@/lib/errorReport";
+import { canReloadForStaleCode, isStaleCodeError, reloadForStaleCode } from "@/lib/staleCode";
 
 export default function AppError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  // A diner whose tab was open across a deploy is asking for a JavaScript file that no longer
+  // exists under that name. That is not a fault in the menu and `reset()` cannot cure it — it
+  // re-renders the same tree and asks for the same dead file. One reload does cure it, so decide
+  // here, during render, and show a quiet line rather than flashing a crash card at them.
+  // See lib/staleCode.ts; the crash is still reported below, unchanged.
+  const recovering = canReloadForStaleCode(error?.message);
+
   useEffect(() => {
     // Record WHERE it happened, exactly as global-error.tsx does — a guest-menu throw and an owner
     // page throw must not both file themselves as the same screen.
     const path = typeof window !== "undefined" ? window.location.pathname || "" : "";
     const digest = error?.digest ? ` #${error.digest}` : "";
+    // Report FIRST: sendBeacon survives the unload, but only if it was handed the report before it.
     reportClientError(panelFromPath(path), error?.message || "page error", `${path}${digest}`);
+    reloadForStaleCode(error?.message);
   }, [error]);
+
+  if (recovering) {
+    return (
+      <main
+        style={{
+          minHeight: "100dvh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 24,
+          textAlign: "center",
+          fontFamily: "system-ui, -apple-system, sans-serif",
+          colorScheme: "light dark",
+          background: "Canvas",
+          color: "CanvasText",
+        }}
+      >
+        <p style={{ fontSize: 14, opacity: 0.7, margin: 0 }}>Getting the latest version…</p>
+      </main>
+    );
+  }
 
   return (
     <main
@@ -59,7 +90,9 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
           Something went wrong on our side — it&rsquo;s not your connection. Please try again in a moment.
         </p>
         <button
-          onClick={() => reset()}
+          // `reset()` re-renders the same tree, so for a file that no longer exists under that name
+          // it asks for the same missing file and fails again. Only a real reload gets fresh names.
+          onClick={() => (isStaleCodeError(error?.message) ? window.location.reload() : reset())}
           style={{
             background: "#d4a574",
             color: "#1a1a1a",
