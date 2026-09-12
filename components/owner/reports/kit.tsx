@@ -651,6 +651,22 @@ export function ReportsStyles() {
         /* Tables print in FULL — no inner scroll cap, no sticky header, rows kept whole.
            (.rs-st-scroll carries an inline max-height that this !important overrides.) */
         .rs-tablewrap, .rs-st-scroll { overflow: visible !important; max-height: none !important; }
+
+        /* ── A CHART THAT SCROLLS SIDEWAYS HAS NOWHERE TO SCROLL ON PAPER (T14, sweep #8) ──────
+           ScrollX (components/owner/Charts.tsx) keeps every bar at least 24px by giving the plot
+           an inline width of max(100%, count x 24px) inside an overflow-x:auto frame. On screen
+           that is the owner's own dynamic-chart rule: dense series SCROLL rather than squeeze.
+           Paper cannot scroll. Printing from a narrow window — a phone, which is where he reads
+           these — laid the page box out at 360 CSS px while the plot stayed 672px wide, so the
+           right-hand 46% of every chart was simply off the sheet, with nothing to say so.
+           Measured during a REAL print layout (a rendered A4 PDF, not a media-query emulation):
+           page box 360px, chart 13px → 685px, on Reports · Sales · 30 days.
+           On paper the frame gives up its minimum and the plot fits the page instead: narrower
+           bars, but the whole period. The inline width is beaten with !important — that is what
+           the inline style needs. A4 and every desktop width are unchanged: the plot was already
+           narrower than the page there, so width:100% resolves to the size it already had. */
+        .owx-scrollx { overflow: visible !important; }
+        .owx-scrollx > div { width: 100% !important; }
         .rs-table th { position: static !important; background: #fff !important; color: #333 !important; border-bottom: 1px solid #999 !important; }
         .rs-table td { border-bottom: 1px solid #e4e4e4 !important; }
         .rs-table tbody tr { break-inside: avoid; }

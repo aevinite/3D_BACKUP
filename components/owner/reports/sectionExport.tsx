@@ -278,8 +278,29 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
     if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;
   }
-  if (meta.kind === "dishes") return [{ title, head: ["Dish", "Qty sold", "Dish sales (GST included)"], rows: ((data.rows ?? []) as { title: string; qty: number; revenue: number }[]).map((r) => [r.title, r.qty, Math.round(r.revenue)]) }];
-  if (meta.kind === "categories") return [{ title, head: ["Category", "Qty sold", "Category sales (GST included)"], rows: ((data.rows ?? []) as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, Math.round(r.revenue)]) }];
+  // ── AND EVERY ONE OF THESE THREE ENDS WITH ITS OWN TOTAL (T14, sweep #8) ────────────────────
+  // The money tables have carried a Total row since the Studio landed; the dish, category and
+  // by-hour tables never did — on the FILE. The SCREEN has always ended each of them with a
+  // <tfoot> Total (SearchTable's `footer`, and the by-hour table's own tfoot), so the sheet he
+  // downloads or files ended one line short of the screen he read it from: Items leads with
+  // "DISH SALES ₹2,73,944" and the CSV, the Excel file and the printed sheet all stopped at the
+  // last dish, with that figure written nowhere. Measured 2026-09-04 on French House · 30 days:
+  // 47 dish rows, no total; 6 category rows, no total; 24 hour rows, no total.
+  //   The totals are the SAME sums the screen prints, taken from the same rows, so a file can
+  // never disagree with the tfoot above it. `cols` is declared at the same time so the printed
+  // document formats each column by what it IS rather than by guessing from the header wording.
+  if (meta.kind === "dishes") {
+    const rows = (data.rows ?? []) as { title: string; qty: number; revenue: number }[];
+    return [{ title, head: ["Dish", "Qty sold", "Dish sales (GST included)"], cols: ["text", "num", "money"],
+      rows: [...rows.map((r) => [r.title, r.qty, Math.round(r.revenue)] as (string | number)[]),
+        ["Total", rows.reduce((a, r) => a + (Number(r.qty) || 0), 0), Math.round(rows.reduce((a, r) => a + (Number(r.revenue) || 0), 0))]] }];
+  }
+  if (meta.kind === "categories") {
+    const rows = (data.rows ?? []) as { category: string; qty: number; revenue: number }[];
+    return [{ title, head: ["Category", "Qty sold", "Category sales (GST included)"], cols: ["text", "num", "money"],
+      rows: [...rows.map((r) => [r.category, r.qty, Math.round(r.revenue)] as (string | number)[]),
+        ["Total", rows.reduce((a, r) => a + (Number(r.qty) || 0), 0), Math.round(rows.reduce((a, r) => a + (Number(r.revenue) || 0), 0))]] }];
+  }
   if (meta.kind === "payments") {
     // The same merged, biggest-first list the on-screen table and the donut show — plus the
     // Total row and the % share the screen carries, so the file and the screen are one report.
@@ -298,7 +319,12 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
   }
   // "8 PM", not "20:00" — the whole console (hour12(), the Studio's hourLabel, the Busy-times
   // tiles) speaks the 12-hour clock, and only the EXPORT of it spoke 24-hour (T5 sweep, 2026-08-11).
-  if (meta.kind === "hourly") return [{ title, head: ["Hour", "Orders", "Revenue"], rows: ((data.rows ?? []) as { hour: number; orders: number; revenue: number }[]).map((r) => [hour12(r.hour), r.orders, Math.round(r.revenue)]) }];
+  if (meta.kind === "hourly") {
+    const rows = (data.rows ?? []) as { hour: number; orders: number; revenue: number }[];
+    return [{ title, head: ["Hour", "Orders", "Revenue"], cols: ["text", "num", "money"],
+      rows: [...rows.map((r) => [hour12(r.hour), r.orders, Math.round(r.revenue)] as (string | number)[]),
+        ["Total", rows.reduce((a, r) => a + (Number(r.orders) || 0), 0), Math.round(rows.reduce((a, r) => a + (Number(r.revenue) || 0), 0))]] }];
+  }
   // Team & pay (mig 220/221). Without these two branches the export fell through to the
   // empty "—" table below, so Export and Print produced a blank document (2026-07-31 sweep).
   if (meta.kind === "staffpay") {
@@ -459,7 +485,6 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
 export function sectionHtml(c: SectionCtx): string {
   const tables = sectionTables(c);
   const gen = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" });
-  const isMoney = c.meta.kind === "money" || c.meta.kind === "daysummary";
   // A cell is formatted by what its column IS. `t.cols[i]` says so explicitly; only tables
   // that don't declare it fall back to the old header-wording guess (kept so the compiled
   // statement's tables, built elsewhere, render exactly as before).
@@ -474,7 +499,7 @@ export function sectionHtml(c: SectionCtx): string {
   const tableHtml = (t: ExportTable) => `
     <h3>${esc(t.title.split(" — ")[1] ? t.title.split(" — ").slice(1).join(" · ") : t.title)}</h3>
     <table><thead><tr>${t.head.map((h, i) => `<th${i > 0 ? ' class="r"' : ""}>${esc(h)}</th>`).join("")}</tr></thead>
-    <tbody>${t.rows.map((r, ri) => `<tr${ri === t.rows.length - 1 && isMoney && String(r[0]).startsWith("Total") ? ' class="tot"' : ""}>${r.map((cell, i) => `<td${i > 0 ? ' class="r"' : ""}>${i === 0 ? esc(String(cell)) : fmtCell(cell, String(t.head[i] ?? ""), t.cols?.[i])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    <tbody>${t.rows.map((r, ri) => `<tr${ri === t.rows.length - 1 && String(r[0]).startsWith("Total") ? ' class="tot"' : ""}>${r.map((cell, i) => `<td${i > 0 ? ' class="r"' : ""}>${i === 0 ? esc(String(cell)) : fmtCell(cell, String(t.head[i] ?? ""), t.cols?.[i])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   return `<!doctype html><html><head><meta charset="utf-8"/><title>${esc(c.meta.label)} · ${esc(c.restName)} · ${esc(c.periodLabel)}</title>
 <style>
   *{box-sizing:border-box} body{font-family:-apple-system,"Segoe UI",Inter,Roboto,sans-serif;color:#10231c;margin:0;padding:34px 40px 50px;font-size:12.5px;line-height:1.5}
