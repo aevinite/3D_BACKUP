@@ -63,8 +63,12 @@ let failed = 0;
 const ok = (m) => { if (!HOOK) console.log(`  ok   ${m}`); };
 const fail = (m) => { failed++; console.log(`  FAIL ${m}`); };
 
+// ROOT is QUOTED. Unquoted, this guard crashed the PostToolUse hook — and therefore blocked
+// every Write and Edit in the session — the moment a file was edited in a project whose folder
+// name contained a space or a bracket ("(CMR) Customer Relationship Management", 2026-09-05).
+// A guard that can refuse an unrelated edit is worse than the bug it looks for.
 const files = execFileSync("bash", ["-lc",
-  `cd ${ROOT} && find app components public/panels -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \\) -not -path '*/node_modules/*' | sort`,
+  `cd ${JSON.stringify(ROOT)} && find app components public/panels -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \\) -not -path '*/node_modules/*' | sort`,
 ], { encoding: "utf8" }).trim().split("\n");
 
 // A file's text with comments removed — so a comment EXPLAINING a banned word is never mistaken
