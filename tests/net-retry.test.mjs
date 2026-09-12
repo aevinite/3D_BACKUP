@@ -17,15 +17,18 @@ const PANEL_FILE = "public/panels/netretry.js";
 const TS_FILE = "lib/netRetry.ts";
 
 /** Load the panel file with a controllable fetch, and hand back its netFetch + the call log. */
-function load({ responses, onLine = true }) {
+function load({ responses, onLine = true, hasAbortSignal = true }) {
   const calls = [];
   const ctx = {
     navigator: { onLine },
     setTimeout: (fn) => fn(),        // no real waiting — the delays are asserted separately
     Promise,
     Math,
+    Object,
+    // A stand-in for AbortSignal.timeout so the deadline can be observed without waiting 15s.
+    AbortSignal: hasAbortSignal ? { timeout: (ms) => ({ aborted: false, deadlineMs: ms }) } : {},
     fetch: async (url, opts) => {
-      calls.push({ url, method: (opts && opts.method) || "GET" });
+      calls.push({ url, method: (opts && opts.method) || "GET", signal: opts && opts.signal });
       const next = responses.shift();
       if (next === undefined) throw new Error("test ran out of scripted responses");
       if (next instanceof Error) throw next;
@@ -102,6 +105,45 @@ test("it gives up after the budget and rethrows the last error", async () => {
   const { netFetch, calls } = load({ responses: [netDown(), netDown(), netDown()] });
   await assert.rejects(() => netFetch("/x", { method: "GET" }), /Failed to fetch/);
   assert.equal(calls.length, 3);
+});
+
+// ── A READ MUST ALWAYS END ────────────────────────────────────────────────────────────────────
+// The owner, 2026-09-12: a tab left open 30-60 minutes, then "you click any button it loads and
+// loads and you have to refresh". A stale socket accepts a request and never answers; with no
+// deadline the promise never settles, and the manager panel caches an unsettled promise for ever.
+
+test("a read with no signal of its own is given a deadline", async () => {
+  const { netFetch, calls } = load({ responses: [ok()] });
+  await netFetch("/api/editor/all", { method: "GET" });
+  assert.ok(calls[0].signal, "the read went out with no deadline — it could hang for ever");
+  assert.equal(calls[0].signal.deadlineMs, 15000, "panel reads should share the 15s browser ceiling");
+});
+
+test("the caller's OWN signal always wins — a deadline is never forced over it", async () => {
+  const mine = { aborted: false, mine: true };
+  const { netFetch, calls } = load({ responses: [ok()] });
+  await netFetch("/x", { method: "GET", signal: mine });
+  assert.equal(calls[0].signal, mine, "a caller's signal was replaced");
+});
+
+test("retries SHARE the one deadline — they do not each get a fresh 15s", async () => {
+  const { netFetch, calls } = load({ responses: [netDown(), ok()] });
+  await netFetch("/x", { method: "GET" });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].signal, calls[1].signal, "each attempt got its own ceiling — total would treble");
+});
+
+test("a phone without AbortSignal.timeout still works — slow, never dead", async () => {
+  const { netFetch, calls } = load({ responses: [ok()], hasAbortSignal: false });
+  const res = await netFetch("/x", { method: "GET" });
+  assert.equal(res.status, 200, "reading a missing API must not throw and kill the read");
+  assert.equal(calls[0].signal, undefined);
+});
+
+test("a write is never given a deadline here — the outbox owns its own", async () => {
+  const { netFetch, calls } = load({ responses: [ok()] });
+  await netFetch("/x", { method: "POST" });
+  assert.equal(calls[0].signal, undefined);
 });
 
 test("the panel copy and the TypeScript copy carry the SAME rule", () => {

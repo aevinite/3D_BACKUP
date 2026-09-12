@@ -605,6 +605,9 @@ const errText = (e) => (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))
   : ((e && e.message) || "unknown error");
 
 const _inflightGET = new Map(); // coalesce concurrent identical GETs into ONE network hit
+// How long an entry may live at most, even if its request never answers. Comfortably past the 15s
+// read deadline in public/panels/netretry.js, so this only ever catches the case that escaped it.
+const INFLIGHT_MAX_MS = 20000;
 async function api(method, path, body, opts) {
   // Writes go through the offline outbox (sent now if online, else saved + replayed
   // on reconnect, at-most-once). GETs keep the in-flight-dedup fetch below.
@@ -672,6 +675,20 @@ async function api(method, path, body, opts) {
     _inflightGET.set(url, run);
     const cleanup = () => { if (_inflightGET.get(url) === run) _inflightGET.delete(url); };
     run.then(cleanup, cleanup); // drop the entry once settled (both fulfil + reject), no unhandled rejection
+    // AND DROP IT EVEN IF IT NEVER SETTLES (owner, 2026-09-12: "keep a tab on for 30min or 1hr
+    // and you click any button it loads and loads and you have to refresh").
+    //
+    // Sharing one in-flight promise is a real saving, but it has a failure mode the settle-based
+    // cleanup above cannot reach: a stale socket accepts a request and answers nothing, so `run`
+    // never settles, the entry is never removed, and from then on EVERY caller reading this url is
+    // handed the same dead promise. One hung request quietly becomes a panel where no button works
+    // until the page is reloaded — which is exactly what he described.
+    //
+    // netretry.js now gives reads a 15s deadline, so `run` normally always settles and this timer
+    // never fires. It stays because that deadline depends on AbortSignal.timeout, which some older
+    // phones do not have — and those are the devices on the worst connections. Forgetting the entry
+    // does NOT cancel the request; it only stops the NEXT click from joining something already dead.
+    setTimeout(cleanup, INFLIGHT_MAX_MS);
   }
   return run;
 }
