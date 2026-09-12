@@ -14,6 +14,10 @@ import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import OwnerMenuEditor from "@/components/owner/OwnerMenuEditor";
+// ONE ORDER for every restaurant list in this console (T17 sweep, 2026-09-04). This one is not
+// cosmetic: `selected = ids[0]` below decides WHOSE MENU OPENS, and `ids` came straight out of an
+// unordered `.in("id", …)`. See components/owner/ownerRestaurantSort for the measurement.
+import { byName } from "@/components/owner/ownerRestaurantSort";
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
   const { rid: qRid } = await searchParams;
@@ -59,9 +63,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
       else {
         // Absent / non-boolean = ON, exactly as mergeOwnerEntitlements defines it, so nothing
         // changes for a restaurant that has never had the switch touched.
-        restaurants = (q.data || [])
+        restaurants = byName((q.data || [])
           .filter((r) => mergeOwnerEntitlements(r.owner_entitlements).menu !== false)
-          .map((r) => ({ id: r.id as string, name: (r.name as string) || "Restaurant" }));
+          .map((r) => ({ id: r.id as string, name: (r.name as string) || "Restaurant" })));
         const ids = restaurants.map((r) => r.id);
         // Honour ?rid only when the owner actually owns it; else default to their first.
         selected = qRid && ids.includes(qRid) ? qRid : (ids[0] || "");

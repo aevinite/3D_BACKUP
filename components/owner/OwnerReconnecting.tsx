@@ -12,12 +12,33 @@ import { useEffect, useState } from "react";
 const ATTEMPTS_KEY = "owner_reconnect_attempts";
 
 export default function OwnerReconnecting() {
+  // THE COUNTER IS BUMPED WHEN WE ACTUALLY RETRY, NOT WHILE WORKING OUT THE WAIT (T17 sweep,
+  // 2026-09-04). Both halves used to sit inside this `useState` initializer — a READ and a WRITE.
+  // React requires an initializer to be pure and in development deliberately renders twice to
+  // catch exactly this, so the stored attempt count went up TWICE per reconnect screen and the
+  // ladder climbed 3s → 12s → 30s instead of 3s → 6s → 12s → 24s → 30s: after two blips the owner
+  // waited half a minute for a retry that was designed to come in six seconds. A production build
+  // runs it once, so this was a development-only wrong number — but this is the third time this
+  // file's own family has been caught doing work in a place React may call twice (see the same
+  // note over `toggleSkin` in OwnerShell, T12 sweep), and an impure initializer is a writer nobody
+  // can count. The read stays here (it is pure); the write moved next to `location.reload()`,
+  // which is the moment an attempt genuinely happens.
   const [delay] = useState(() => {
     let a = 0;
     try { a = Number(sessionStorage.getItem(ATTEMPTS_KEY)) || 0; } catch {}
-    try { sessionStorage.setItem(ATTEMPTS_KEY, String(a + 1)); } catch {}
     return Math.min(3000 * 2 ** a, 30000);
   });
+  // BOTH ways of retrying count, exactly as they did before: the timer below and the button at the
+  // bottom of the card. If only the timer counted, someone tapping "Retry now" through a sustained
+  // outage would sit at 3s for ever and the storm guard would be gone for the one person able to
+  // cause a storm by hand.
+  const retryNow = () => {
+    try {
+      const a = Number(sessionStorage.getItem(ATTEMPTS_KEY)) || 0;
+      sessionStorage.setItem(ATTEMPTS_KEY, String(a + 1));
+    } catch { /* a counter we cannot store just means the next wait starts at 3s again */ }
+    location.reload();
+  };
   const [secs, setSecs] = useState(Math.ceil(delay / 1000));
   // Follow the owner's chosen skin instead of a hardcoded dark hex (which clashed for
   // a light-mode owner). We render inside `.adm.owx` so the same CSS tokens the panel
@@ -28,7 +49,9 @@ export default function OwnerReconnecting() {
   useEffect(() => {
     try { const s = localStorage.getItem("aevidine_skin"); if (s === "light" || s === "dark") setSkin(s); } catch {}
     const tick = setInterval(() => setSecs((s) => (s > 0 ? s - 1 : 0)), 1000);
-    const go = setTimeout(() => location.reload(), delay);
+    // ONE attempt = one bump, recorded the instant we make it. StrictMode mounts this effect twice
+    // in development, but the first mount's cleanup clears its timeout, so exactly one ever fires.
+    const go = setTimeout(retryNow, delay);
     return () => { clearInterval(tick); clearTimeout(go); };
   }, [delay]);
   return (
@@ -46,7 +69,7 @@ export default function OwnerReconnecting() {
           We hit a brief hiccup reaching the database. You&apos;re still signed in — this
           will retry on its own in {secs}s.
         </p>
-        <button onClick={() => location.reload()} style={{
+        <button onClick={retryNow} style={{
           border: "none", borderRadius: 10, padding: "10px 18px", fontWeight: 700, fontSize: 13.5,
           background: "var(--accent)", color: "#fff", cursor: "pointer",
         }}>
