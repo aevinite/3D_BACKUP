@@ -899,7 +899,7 @@ export default function AdminRepair() {
 
       {/* One line naming EVERY feed that didn't arrive, so a quiet page is never mistaken for a
           quiet platform. It sits directly under the counts it makes untrustworthy. */}
-      {!errLoading && feedsFailed.length > 0 && (
+      {feedsFailed.length > 0 && (
         <div className="rp-unread">
           <i className="fas fa-plug-circle-exclamation" aria-hidden="true" />
           <span>
@@ -915,7 +915,16 @@ export default function AdminRepair() {
         <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: problemsErr ? "var(--adm-warn)" : groups.length ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>Problems right now</h2>
         {groups.length ? <span className="rp-chip danger">{groups.length}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>{scopedName ? scopedName : "all restaurants"} · not yet resolved</span>
+        {/* A RE-READ HAPPENS IN PLACE — IT DOES NOT EMPTY THE SCREEN (owner, 2026-09-12) ────────
+            Every action here ends in loadHub(), and loadHub used to blank this whole section back
+            to "Checking for problems…" — the board, the Fix-all row and the waiting line all
+            vanished for as long as seven feeds took to answer. The page collapsed to a tenth of
+            its height, the browser had to clamp the scroll to what was left, and the owner ended
+            up parked in Rate limits or Complaints: *"when i click fix now it just autoscrool to
+            someelse check"*, and *"there is not button on top"* — the Fix-all row, gone mid-read.
+            So the rows stay on screen while we ask again, and this word is the only thing that
+            moves. It sits in the header, which already holds chips, so nothing reflows. */}
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>{scopedName ? scopedName : "all restaurants"} · {errLoading && groups.length > 0 ? "checking again…" : "not yet resolved"}</span>
       </div>
 
       {/* ── The board's "all" row (owner, 2026-08-20) ────────────────────────────────────────────
@@ -923,7 +932,7 @@ export default function AdminRepair() {
           on a mis-tap, one tile is a nuisance and nineteen is a lost afternoon — and every one is
           scoped by the picker above, so the button can never act on nine restaurants under a
           banner that says one. */}
-      {!errLoading && !problemsErr && groups.length > 0 && (
+      {!problemsErr && groups.length > 0 && (
         <div className="rp-bulk">
           <i className="fas fa-layer-group" aria-hidden="true" style={{ opacity: 0.65 }} />
           <span className="rp-bulk-lead">
@@ -994,7 +1003,7 @@ export default function AdminRepair() {
           console's red count, so the number of them has to be on screen — otherwise "3 problems
           open" stops meaning "3 problems exist", which is the exact fault the capped-list line
           further down was added for. `null` = we couldn't read the count, so we say nothing. */}
-      {!errLoading && !problemsErr && !!waiting && (
+      {!problemsErr && !!waiting && (
         <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px", display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
           <i className="fas fa-clock" aria-hidden="true" style={{ opacity: 0.7 }} />
           {/* THE PICKER HAS TO MEAN THIS SENTENCE TOO (T17 sweep #7, 2026-08-27). The board asks for
@@ -1014,7 +1023,7 @@ export default function AdminRepair() {
         </p>
       )}
 
-      {errLoading ? (
+      {errLoading && groups.length === 0 ? (
         <div className="adm-empty">Checking for problems…</div>
       ) : problemsErr ? (
         <div className="rp-unread">
