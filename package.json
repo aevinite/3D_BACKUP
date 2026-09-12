@@ -213,6 +213,7 @@
     "verify:repair-r2": "node scripts/verify-repair-health-round2.mjs",
     "verify:shared-panel-styles": "node scripts/verify-shared-panel-styles.mjs",
     "verify:one-phone-number": "node scripts/verify-one-phone-number.mjs",
+    "verify:t12-live": "node --env-file=.env.local scripts/verify-t12-live.mjs",
     "verify:t12-plumbing": "node scripts/verify-t12-plumbing.mjs",
     "verify:t12-plumbing-live": "node scripts/verify-t12-plumbing-live.mjs",
     "verify:t14": "npx esbuild scripts/verify-t14-reports.ts --bundle --platform=node --format=esm --alias:@=. --external:playwright --outfile=node_modules/.cache/verify-t14-reports.mjs --log-level=warning && node node_modules/.cache/verify-t14-reports.mjs",
