@@ -922,7 +922,12 @@ await drove(H, "System health's own refresh is no faster than the 60s backstop",
   while (t < 150000 && seen.length < 2) { await p.page.waitForTimeout(1000); t += 1000; const now = at(); if (now > last) { seen.push(t); last = now; } }
   if (seen.length < 2) return seen.length === 1 ? true : "no auto-refresh was observed at all in 150s — that is not a poll that is too fast, but it is worth a look";
   const gap = (seen[1] - seen[0]) / 1000;
-  return gap >= 55 || `two refreshes ${gap}s apart — the backstop is 60s`;
+  // 48s, not 55: useActiveAutoRefresh deliberately spreads every interval by ±20%
+  // (`spread()` in components/admin/shared.tsx is ms * (0.8 + Math.random() * 0.4)), so a 60s
+  // backstop legitimately lands anywhere in 48–72s. A 55s floor called that a fault about one
+  // run in four — this went red at 51s on 2026-09-12 with nothing on the page changed. The rule
+  // being defended is "no faster than the backstop ALLOWS", and 48s is what it allows.
+  return gap >= 48 || `two refreshes ${gap}s apart — the backstop is 60s, jittered no lower than 48s`;
 });
 
 // the two retired URLs, driven

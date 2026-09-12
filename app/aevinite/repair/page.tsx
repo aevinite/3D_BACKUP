@@ -899,7 +899,10 @@ export default function AdminRepair() {
 
       {/* One line naming EVERY feed that didn't arrive, so a quiet page is never mistaken for a
           quiet platform. It sits directly under the counts it makes untrustworthy. */}
-      {feedsFailed.length > 0 && (
+      {/* Still gated on the read having FINISHED: unlike the rows below, this banner is only
+          ever drawn when a feed failed, and P71813 (verify:repair-sweep) exists to keep it from
+          being shown while we are still asking. */}
+      {!errLoading && feedsFailed.length > 0 && (
         <div className="rp-unread">
           <i className="fas fa-plug-circle-exclamation" aria-hidden="true" />
           <span>
