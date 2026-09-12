@@ -79,11 +79,24 @@ import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "
 // screenMayPrint(), which never set `backup` at all once the backup screen was deleted on
 // 2026-08-30 — so it answered false on every request, and no panel read it. Removed with the
 // declaration it came from rather than left as a constant nobody trusts.
-async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
+// ── THE ADDRESS BOOK IS READ ONCE, NOT FOUR TIMES (T24 sweep #8, 2026-09-06) ─────────────────
+// `helperFor` and `targetFor` each do the SAME pair of reads — the routes row and the agents view.
+// helpersFor()/targetsFor() exist precisely because "asking helperFor() three times on a poll is
+// three times the same two queries" (their own comment). The pending-jobs poll then asked FOUR
+// times over: helpersFor + targetsFor for all three kinds, and this function asking again for the
+// kitchen slips it already had in both. That is 8 reads of two small tables every 20 seconds, per
+// manager device, plus one on every ops breadcrumb — for 4 reads' worth of information.
+//
+// So the two answers can be handed in when the caller already holds them. Nothing else changes:
+// with no `pre` this behaves exactly as before, which is what the two callers further down do.
+async function counterPrintTarget(
+  rid: string,
+  pre?: { helper: Awaited<ReturnType<typeof helperFor>>; route: Awaited<ReturnType<typeof targetFor>> },
+): Promise<{ mayPrint: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
   const [stQ, helper, route] = await Promise.all([
     sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
-    helperFor(rid, "kot"),
-    targetFor(rid, "kot"),
+    pre ? Promise.resolve(pre.helper) : helperFor(rid, "kot"),
+    pre ? Promise.resolve(pre.route) : targetFor(rid, "kot"),
   ]);
   const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
   // A STOPPED QUEUE holds every screen too, not just the helper — otherwise "stop the queue" would
@@ -607,15 +620,23 @@ async function dishPhotoUpload(req: NextRequest, g: { user: StaffUser | null }, 
 // is frozen — reject any money-changing edit so the printed invoice total can't drift.
 // Reopen (void) the invoice first. (work-checker 2026-06-21)
 const LOCKED_MSG = "This bill is invoiced — reopen it (void the invoice) before changing the order.";
-async function invoiceLockedByOrder(orderId: string): Promise<boolean> {
-  const o = (await sb.from("orders").select("session_id").eq("id", orderId).maybeSingle()).data as { session_id?: string } | null;
+// ── IT ASKS ABOUT *THIS* RESTAURANT'S ROW (T24 sweep #8, 2026-09-06) ──────────────────────────
+// These three reads were keyed on an id ALONE, and the id comes straight off the request path —
+// no caller proves the order is this restaurant's first. Nothing was wrong on the floor (every
+// write underneath is separately scoped, so no row could move), but it is the exact shape
+// verify:scoped-reads exists for: inside lib/ and here the service-role client is exempt from the
+// database's own row rules, so the WHERE clause is the only scope there is. Every call site
+// already had `rid` in hand. Required, not optional — an optional scope is one a future caller
+// forgets, which is the note lib/sessionClose.ts carries for the same reason.
+async function invoiceLockedByOrder(orderId: string, rid: string): Promise<boolean> {
+  const o = (await sb.from("orders").select("session_id").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { session_id?: string } | null;
   if (!o?.session_id) return false;
-  const s = (await sb.from("sessions").select("invoice_no,invoice_voided").eq("id", o.session_id).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean } | null;
+  const s = (await sb.from("sessions").select("invoice_no,invoice_voided").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean } | null;
   return !!(s && s.invoice_no != null && !s.invoice_voided);
 }
-async function invoiceLockedByItem(itemId: string): Promise<boolean> {
-  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).maybeSingle()).data as { order_id?: string } | null;
-  return it?.order_id ? invoiceLockedByOrder(it.order_id) : false;
+async function invoiceLockedByItem(itemId: string, rid: string): Promise<boolean> {
+  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string } | null;
+  return it?.order_id ? invoiceLockedByOrder(it.order_id, rid) : false;
 }
 
 // ── WHAT A DISCOUNT MAY WORK ON (mig 270 + 271) ──────────────────────────────────────────
@@ -1087,20 +1108,40 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
       if (q) sel = sel.or(`name.ilike.%${q}%,phone.ilike.%${q}%`);
       const people = (must(await sel) || []) as any[];
-      // Show each shown person's CURRENT tab so staff see they're adding to an existing
-      // debt. Scoped to just the ≤8 shown people, riding the open-khata index (mig 166).
+      // Show each shown person's CURRENT tab so staff see they're adding to an existing debt.
+      //
+      // ── WHAT SOMEBODY OWES HAS ONE ANSWER, AND IT IS THE BOOK'S (T24 sweep #8, 2026-09-06) ─────
+      // This used to work the debt out for itself, from the orders rows, in three ways the Pay
+      // Later BOOK two endpoints above does not:
+      //   · it re-derived the tax rate as tax ÷ subtotal — the exact expression migration 301's own
+      //     header removed, "never re-derived from tax/subtotal, which is wrong the moment a bill
+      //     carries an untaxed line", and which mig 310 replaced with the stored `orders.net_amount`
+      //     under a column comment reading "EVERY money reader … sums THIS column, so no two
+      //     screens can compute revenue differently";
+      //   · it counted a BINNED bill as still owed (the book has `deleted_at IS NULL`, F12);
+      //   · it showed the WHOLE bill on a tab that had already been part-collected — migration 364
+      //     made a debt "the order net minus what arrived alongside the owed part", and this knew
+      //     nothing about that.
+      //
+      // MEASURED on the dev database, French House: for the one person who owes anything, the Pay
+      // Later book said ₹161.00 and this tag said "owes ₹483.00" — the whole of a bill whose other
+      // ₹322 was taken in cash and UPI at the time. Three times the real debt, on the sheet a
+      // waiter reads before parking another bill on the same person.
+      //
+      // So it asks the same function the book asks, and there is no second rule left to drift.
+      // The cost is one indexed RPC on a debounced search instead of one scoped select — the same
+      // read the Pay Later screen already makes when it opens.
       if (people.length) {
-        const openRows = (must(await sb.from("orders")
-          .select("khata_customer_id,subtotal,tax,total,discount")
-          .eq("restaurant_id", rid).in("khata_customer_id", people.map((p2) => p2.id))
-          .not("khata_at", "is", null).neq("payment_status", "paid").neq("status", "cancelled")) || []) as any[];
+        const shown = new Set(people.map((p2) => String(p2.id)));
+        const openRows = (must(await sb.rpc("lfh_khata_outstanding", { p_restaurant_ids: [rid] })) || []) as
+          { khata_customer_id: string; bill_amount: number }[];
         const owed = new Map<string, number>();
-        for (const o of openRows) {
-          const sub = Number(o.subtotal) || 0, tax = Number(o.tax) || 0, rate = sub > 0 ? tax / sub : 0;
-          const due = Math.round(((Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate)) * 100) / 100;
-          owed.set(o.khata_customer_id, Math.round(((owed.get(o.khata_customer_id) || 0) + due) * 100) / 100);
+        for (const r of openRows) {
+          const who = String(r.khata_customer_id || "");
+          if (!shown.has(who)) continue;
+          owed.set(who, Math.round(((owed.get(who) || 0) + (Number(r.bill_amount) || 0)) * 100) / 100);
         }
-        people.forEach((p2) => { p2.outstanding = owed.get(p2.id) || 0; });
+        people.forEach((p2) => { p2.outstanding = owed.get(String(p2.id)) || 0; });
       }
       return ok({ customers: people });
     }
@@ -1163,7 +1204,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!(await managerCan(g, rid, "view_ratings"))) return permDenied("see guest ratings");
       const onlyUnhandled = new URL(req.url).searchParams.get("filter") === "unhandled";
       const sum = await sb.rpc("lfh_ratings_summary", { p_ids: [rid] });
-      if (sum.error) return err(sum.error.message, 500);
+      // A failed read is not a sentence a manager can act on. The raw text goes to the server log,
+      // where the Fix-NOW board reads it; the screen gets words (lib/panelFailure's own rule, which
+      // this line predated). (T24 sweep #8, 2026-09-06)
+      if (sum.error) {
+        console.error("[editor/ratings] summary read failed:", sum.error.message);
+        return err("Couldn't load the ratings summary — please try again.", 500);
+      }
       const s = (sum.data?.[0] ?? {}) as Record<string, any>;
       const summary = {
         total: Number(s.total) || 0, avg: Number(s.avg) || 0,
@@ -1256,8 +1303,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const like = `%${histQ}%`;
           const [sessQ2, memQ2] = await Promise.all([
             // The bill's own customer (mig 227), the table, and the two numbers.
+            // ── A BILL NUMBER IS TAKEN ON THE FIRST ORDER, NOT WHEN THE TABLE OPENS (mig 040) ──
+            // …so a table that opened before the 05:00 boundary and ordered this morning carries
+            // TODAY's bill number under YESTERDAY's created_at — the same trap the Z-report's
+            // numbering block below documents at length and had to use two doors to get round.
+            // Filtering these sessions on their own created_at lost exactly that bill: the ONE-BOX
+            // search could not find it by its number, its invoice number, its table or its
+            // customer, while `type=bill` (which has no date filter) found it immediately.
+            // One extra day of slack closes it, and nothing older can escape: `oq` is still clamped
+            // to the window on the ORDERS, so a wider session set can only ever narrow to the same
+            // days. (T24 sweep #8, 2026-09-06)
             sb.from("sessions").select("id,bill_no,invoice_no,table_number,cust_name,cust_phone")
-              .eq("restaurant_id", rid).gte("created_at", windowStartIso).limit(2000),
+              .eq("restaurant_id", rid)
+              .gte("created_at", new Date(Date.parse(windowStartIso) - 24 * 3600 * 1000).toISOString())
+              .limit(2000),
             // …and the guest's own name on their phone.
             sb.from("session_members").select("session_id,name,phone")
               .eq("restaurant_id", rid).ilike("name", like).limit(300),
@@ -1967,24 +2026,41 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Under mrp_tax_treatment='inclusive' an MRP line resolves to 'incl' and its GST is
       // already inside `tax` here; under 'none' it is exempt and contributes none. No branch
       // is needed because the behaviour was frozen onto the line when it was sold.
-      const bills = new Map<string, { base: number; nontax: number; cap: number; disc: number; day: string }>();
+      //
+      // ── AND AT THE RATE EACH ORDER WAS ACTUALLY CHARGED (T24 sweep #8, 2026-09-06) ────────────
+      // This block worked every bill out at ONE rate — `rate`, the restaurant's settings rate —
+      // while selecting `tax_rate` in the column list above and never reading it. That is exactly
+      // the rule the Z-report was moved off on 2026-08-11 (T7 finding F8) and that billTaxOf's own
+      // header describes: a banquet carries its own rate (mig 239) and is inserted into the table's
+      // existing OPEN session (migs 237/239), so an 18% banquet genuinely shares a bill with 5%
+      // food — and this document declared the whole bill at 5%.
+      //
+      // MEASURED on the dev database, French House, August 2026: at each order's own rate the
+      // month's output tax is ₹25,967.60; at the settings rate this reported ₹25,853.55 — ₹114.05
+      // under-declared on the one document that goes to the tax authority. Every other month on
+      // that restaurant carries a single rate and is unchanged to the paisa.
+      //
+      // Fixed by calling billTaxOf() — the SAME function the day-close sheet and the printed bill
+      // use — instead of restating a second copy of the arithmetic here. `rate` stays as the
+      // fallback for rows written before the column existed, which is all it ever was.
+      const bills = new Map<string, { rows: BillTaxRow[]; base: number; nontax: number; day: string }>();
       for (const o of orders) {
         const key = o.session_id || ("solo:" + o.id);
-        const b = bills.get(key) || { base: 0, nontax: 0, cap: 0, disc: 0, day: istDay(o.created_at) };
+        const b = bills.get(key) || { rows: [], base: 0, nontax: 0, day: istDay(o.created_at) };
+        b.rows.push(o as BillTaxRow);
         b.base += o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0);
         b.nontax += Number(o.nontax_amount) || 0;
-        b.cap += discountBaseOf(o, rate);
-        b.disc += Number(o.discount) || 0; b.day = istDay(o.created_at);
+        b.day = istDay(o.created_at);
         bills.set(key, b);
       }
       const byDay = new Map<string, { taxable: number; tax: number; mrp: number; gross: number; bills: number }>();
       let taxable = 0, tax = 0, gross = 0, mrp = 0;
       for (const b of bills.values()) {
-        // Capped exactly the way every discount door caps it (discountBaseOf / mig 272), and
-        // totalled with the one formula subtotal − discount + tax, so a zero-rate month adds up.
-        const dsc = Math.min(b.disc, b.cap);
-        const tx = Math.max(0, b.base - Math.min(dsc, b.base)), t = r2(tx * rate);
-        const tot = r2(b.base + b.nontax - dsc + t);
+        // Capped exactly the way every discount door caps it (discountBaseOf / mig 272) — inside
+        // billTaxOf, at each order's OWN rate — and totalled with the one formula
+        // subtotal − discount + tax, so a zero-rate month still adds up.
+        const { disc: dsc, taxable: tx, tax: t } = billTaxOf(b.rows, rate);
+        const tot = r2(r2(b.base + b.nontax) - dsc + t);
         taxable += tx; tax += t; gross += tot; mrp += b.nontax;
         const d = byDay.get(b.day) || { taxable: 0, tax: 0, mrp: 0, gross: 0, bills: 0 };
         d.taxable += tx; d.tax += t; d.mrp += b.nontax; d.gross += tot; d.bills += 1; byDay.set(b.day, d);
@@ -2156,24 +2232,27 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // first refusal and this screen is the safety net rather than the main path. The age test is
     // enforced again at the claim, server-side, so a stale tab cannot jump the queue.
     if (path[0] === "print-jobs" && path[1] === "pending") {
-      const t = await counterPrintTarget(rid);
       // WHO IS PRINTING (mig 338) — sent whether or not this screen may print, because the answer
       // "printing is happening on the kitchen screen" is exactly what a manager needs to see.
       const dv = deviceIdFrom(req);
-      const station = await stationView(rid, dv);
+      // Every kind's owner, not just the kitchen slips: the panel needs to know before it prints a
+      // BILL whether a computer will do it, and this is the read it already makes. One pair of
+      // queries for all three (helpersFor), not three pairs — and the same one pair again for the
+      // routes (targetsFor). Resolved FIRST so counterPrintTarget can be handed the kitchen-slip
+      // answers instead of asking for them a second and third time (see its own note).
+      const [owners, targets, station] = await Promise.all([
+        helpersFor(rid, ["kot", "bill", "banquet"]),
+        targetsFor(rid, ["kot", "bill", "banquet"]),
+        stationView(rid, dv),
+      ]);
+      const t = await counterPrintTarget(rid, { helper: owners.kot, route: targets.kot });
       if (station.mine) { try { await touchStation(rid, dv as string); } catch { /* next read retries */ } }
       // `off` is a real answer, not an error: the panel stops asking and shows nothing. Either
       // auto-print is not on for this restaurant, or the admin has said only the KITCHEN prints.
-      // Every kind's owner, not just the kitchen slips: the panel needs to know before it prints a
-      // BILL whether a computer will do it, and this is the read it already makes. One pair of
-      // queries for all three (helpersFor), not three pairs.
-      const owners = await helpersFor(rid, ["kot", "bill", "banquet"]);
-      // …and how far behind the printer is, on the SAME read (owner, 2026-08-27). It is sent whether
-      // or not this screen may print, for the same reason the station is: "eleven tickets are stacked
-      // up" is exactly what a manager needs to see about a printer that is not theirs.
+      // …and how far behind the printer is (owner, 2026-08-27). It is sent whether or not this
+      // screen may print, for the same reason the station is: "eleven tickets are stacked up" is
+      // exactly what a manager needs to see about a printer that is not theirs.
       const waiting = await waitingToPrint(rid, "kot");
-      // The same one resolver: which panel/person/device the owner named for each kind of paper.
-      const targets = await targetsFor(rid, ["kot", "bill", "banquet"]);
       const whoAmI = { panel: "manager" as const, personId: g.user?.id || null, deviceId: dv };
       const mayKot = screenMayPrint(targets.kot, whoAmI);
       // MAY THIS PERSON'S SCREEN PRINT AT ALL (accessTree ACTIONS → "print_here").
@@ -2247,7 +2326,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!job) return err("That print job is gone.", 404);
       const [o, items] = await Promise.all([
         sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items").eq("id", job.order_id).eq("restaurant_id", rid).maybeSingle(),
-        sb.from("order_items").select("id, order_id, title, qty, note, options, removed").eq("order_id", job.order_id).eq("restaurant_id", rid).order("created_at"),
+        // Bounded like every other read here. One KOT's lines are a handful; the cap exists so the
+        // rule is uniform and a bad `order_id` can never turn this into an open-ended read.
+        sb.from("order_items").select("id, order_id, title, qty, note, options, removed").eq("order_id", job.order_id).eq("restaurant_id", rid).order("created_at").limit(500),
       ]);
       if (!o.data) return err("That KOT's order is gone.", 404);
       return ok({ job, order: o.data, items: items.data || [] });
@@ -2915,7 +2996,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // prints no two rows could be told apart. Both facts were already in reach: `table_number`
       // is a column logAction has always accepted and nothing here passed, and the bill number is
       // one extra column on a read this branch already makes.
-      await logAction("editor", g.user ? "print_sent" : "print_sent_by_admin", {
+      // ── …AND *WHO* SENT IT (T24 sweep #8, 2026-09-06) ────────────────────────────────────────
+      // This was the ONE write in this file filed with nobody's name on it. It called logAction()
+      // directly and passed `actor` only on the admin branch, so a manager pressing Print produced
+      // a diary row whose By column was empty — on the very row the note above says he asked for
+      // ("say who printed a bill, on the bill itself" → "make log do that"). Every other write here
+      // goes through log(), which fills in the person's name AND their stable id; this one now does
+      // too, and the admin branch still overrides both, exactly as before.
+      await log("editor", g.user ? "print_sent" : "print_sent_by_admin", {
         restaurant_id: rid, device_id: dev,
         // Filterable as well as readable: the Audit & logs tab groups by table, so a bill print
         // now sits with the rest of that table's story instead of floating loose. A banquet sheet
@@ -2978,7 +3066,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const upd = await sb.from("staff_users").update({ assigned_tables: tables })
         .eq("id", uid).eq("restaurant_id", rid).eq("role", "tablet")
         .select("id, username, name, assigned_tables");
-      if (upd.error) return err(upd.error.message, 500);
+      // Same rule as everywhere else: the database's own words go to the server log, never to the
+      // person standing at the section editor. (T24 sweep #8, 2026-09-06)
+      if (upd.error) {
+        console.error("[editor/table-sections] save failed:", upd.error.message);
+        return err("Couldn't save that waiter's tables — please try again.", 500);
+      }
       const row = (upd.data || [])[0];
       if (!row) return err("That waiter is no longer on this restaurant's team.", 404);
       await log("editor", "table_sections_set", {
@@ -3139,7 +3232,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (row?.session_id) {
           // The bill's CURRENT discount + this one. Read from the session's own orders so a
           // discount given seconds earlier on another device is included rather than lost.
-          const sib = (must(await sb.from("orders").select("discount, status").eq("session_id", row.session_id).eq("restaurant_id", rid)) || []) as { discount?: number; status?: string }[];
+          const sib = (must(await sb.from("orders").select("discount, status").eq("session_id", row.session_id).eq("restaurant_id", rid).limit(500)) || []) as { discount?: number; status?: string }[];
           const already = sib.reduce((a, o) => a + (o.status === "cancelled" ? 0 : Number(o.discount) || 0), 0);
           must(await sb.rpc("lfh_staff_bill_discount", { p_session: row.session_id, p_amount: Math.round((already + amount) * 100) / 100, p_note: note }));
         } else {
@@ -3729,7 +3822,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
     if (a === "orders" && c === "discount") {
       if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
-      if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
+      if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);
       // .eq(restaurant_id, rid) is the only tenant boundary (sb is service-role, RLS bypassed) —
       // a foreign order id can't be discounted.
       const cur = must(await sb.from("orders").select("subtotal, taxable_base, mrp_amount, session_id").eq("id", b).eq("restaurant_id", rid).single());
@@ -4347,7 +4440,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // dishes (and cancels the order if it's now empty), all in one transaction.
     // The RPC refuses to touch a PAID bill. Returns { ok, items_left, total, ... }.
     if (a === "items" && c === "delete") {
-      if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
+      if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);
       // Confirm the dish belongs to THIS restaurant before the RPC (which looks it up by id alone) —
       // the same tenant boundary the sibling money endpoints enforce. (B15 scoping consistency.)
       // Read what it WAS before the RPC deletes it: the Audit row has to name the dish and what it
@@ -4384,7 +4477,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // from order_items (orders.total is a stored server-priced number). Refuses a
     // PAID/cancelled order. (owner, 2026-06-17 — gated behind the UI confirm.)
     if (a === "items" && c === "qty") {
-      if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
+      if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);
       const qty = Math.round(Number(body?.qty));
       if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
       // What it was, so the Audit row can say 3 → 1 rather than just "1" (owner: "whatever the
@@ -4486,7 +4579,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Server-priced (rejects unknown/sold-out), inserted as 'received', then the
     // bill is re-priced. Body: { dishId, qty, options?, removed?, note? }.
     if (a === "orders" && c === "add-item") {
-      if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
+      if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);
       const dishId = String(body?.dishId || body?.id || "").trim();
       if (!dishId) return err("dish required");
       if (!(await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That order was not found.", 404); // B15 scoping
@@ -5816,7 +5909,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // per-dish delete, the quantity stepper and the discount. A live invoice number locks the
       // bill; a VOIDED one does not, because the bill was deliberately reopened and is editable
       // again. Reusing it is what stops "invoiced" meaning four slightly different things.
-      if (patch.status === "cancelled" && await invoiceLockedByOrder(id)) {
+      if (patch.status === "cancelled" && await invoiceLockedByOrder(id, rid)) {
         return err("This bill's invoice has already been printed, so no KOT can be taken off it. Reopen the bill first — that retires the invoice number and records why — or issue a credit note if it is already settled.", 409);
       }
       // CANCELLING A TICKET IS NOT GATED (restored 2026-08-02, and here is why it changed twice).
