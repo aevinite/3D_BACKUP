@@ -279,7 +279,10 @@
     var s = syncState();
     return [v.level, v.label, v.ms, v.bars, s.head,
       outbox.failed.map(function (it) { return it.id + ":" + (it.error || "") + ":" + (it.retryable === false ? "0" : "1"); }).join("|"),
-      outbox.queued.map(function (it) { return it.id; }).join("|"),
+      // `why` rides in the signature because the row's PILL now reads it (see renderPop). A
+      // signature that leaves out something the panel prints is how a repaint-only-when-changed
+      // guard comes to hold a stale sentence on screen.
+      outbox.queued.map(function (it) { return it.id + ":" + (it.why || ""); }).join("|"),
       (window.LFH_RT && window.LFH_RT.getLatencyHistory ? window.LFH_RT.getLatencyHistory().length : 0),
     ].join("~");
   }
@@ -391,9 +394,25 @@
         // offline bar and this row cannot describe one moment three ways.
         t.appendChild(el("small", null, whyLine(it) + " · " + fmtAgo(it.at)));
         row.appendChild(t);
-        var pill = el("span", "lfh-conn-pill", st.word);
-        pill.style.background = st.sending ? "rgba(34,197,94,.18)" : "rgba(239,68,68,.18)";
-        pill.style.color = st.sending ? "#86efac" : "#fca5a5";
+        // …AND THE PILL HAS TO AGREE WITH THE LINE ABOVE IT (sweep #8 T12, 2026-09-04).
+        //
+        // `st` is ONE device-wide answer, and every queued row wore it. So while a round was in
+        // flight — the ordinary case, since a round is what drains the queue — a change being
+        // deliberately HELD was pilled "Sending…" in the green "moving" colour, two inches under
+        // its own subtitle reading "waiting for an earlier change on this table". One row saying
+        // both things at once is the same cry-wolf fault this panel was repaired for twice (see
+        // syncState above, and P04150), and it is sharper here than anywhere: the hold is REAL —
+        // flush() puts that table in `stalled` and walks past it — so the row was not merely
+        // vague, it was wrong about the one thing the manager opened the panel to find out.
+        //
+        // offline.js's own "Needs you" sheet has read `why === "behind"` for this since
+        // 2026-08-28; this panel is the twin that never got it. Per row, not per device.
+        var heldBack = navigator.onLine !== false && it.why === "behind";
+        var word = heldBack ? "Waiting" : st.word;
+        var moving = heldBack ? false : st.sending;
+        var pill = el("span", "lfh-conn-pill", word);
+        pill.style.background = moving ? "rgba(34,197,94,.18)" : "rgba(239,68,68,.18)";
+        pill.style.color = moving ? "#86efac" : "#fca5a5";
         row.appendChild(pill);
         sync.appendChild(row);
       });

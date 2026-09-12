@@ -209,7 +209,9 @@
     "verify:repair-sweep": "node scripts/verify-repair-health-sweep.mjs",
     "verify:repair-r2": "node scripts/verify-repair-health-round2.mjs",
     "verify:shared-panel-styles": "node scripts/verify-shared-panel-styles.mjs",
-    "verify:one-phone-number": "node scripts/verify-one-phone-number.mjs"
+    "verify:one-phone-number": "node scripts/verify-one-phone-number.mjs",
+    "verify:t12-plumbing": "node scripts/verify-t12-plumbing.mjs",
+    "verify:t12-plumbing-live": "node scripts/verify-t12-plumbing-live.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"

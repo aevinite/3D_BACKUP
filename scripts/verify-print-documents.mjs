@@ -756,6 +756,7 @@ const OTHER = [
   // verify:guards-alive exists to catch, and it had that guard RED on origin/main. Deleted rather
   // than repointed, because the correct path is the very next line and repointing would only
   // duplicate the checks.
+  // (Sweep #8 T12 reached the same conclusion independently, the same week.)
   ["the owner settings API",    "app/api/owner/settings/route.ts"],
   ["the waiter tablet",         "public/panels/tablet/app.js"],
   ["the print board words",     "lib/printBoardWords.ts"],
