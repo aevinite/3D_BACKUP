@@ -26,6 +26,10 @@ import { partialNote } from "@/lib/partialRead";
 // Client-safe: lib/searchText has zero imports and no server-only code. It is the SAME cleaner the
 // route runs on `?q=`, so this screen can say what was really searched for. See `searched` below.
 import { safeSearch } from "@/lib/searchText";
+// 10 digits read as "97376 38206" — easier to read back to a guest than one long run. The rule
+// moved into lib/phoneText.ts (sweep 8 · T16) when Pay Later needed the same thing: it was written
+// here first, and a second copy of it beside a screen that rings people would have been a third.
+import { showPhone } from "@/lib/phoneText";
 
 const IST = "Asia/Kolkata";
 type Customer = {
@@ -53,8 +57,6 @@ type Detail = {
 // cell, the phone card, the card's spoken label, the erase button's spoken label and the confirm
 // text), so it is one helper rather than five `.trim()`s that can drift apart.
 const named = (n: string | null | undefined): string | null => { const t = (n ?? "").trim(); return t || null; };
-// 10 digits read as "97376 38206" — easier to read back to a guest than one long run.
-const showPhone = (p: string) => (p && p.length === 10 ? `${p.slice(0, 5)} ${p.slice(5)}` : p || "—");
 // The clock time a figure was counted, in India time like every other date on this page.
 // ── A DATE WE CANNOT READ SHOWS A DASH, NEVER "Invalid Date" (sweep 7 · T14 round 2) ─────────────
 // `new Date("nope").toLocaleDateString()` returns the literal string "Invalid Date" and it lands on

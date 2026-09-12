@@ -22,6 +22,13 @@ import { inr } from "@/components/admin/shared";
 // and crashed this page with "supabaseKey is required." (2026-08-06).
 import { partialNote } from "@/lib/partialRead";
 import { asSuffix } from "@/lib/ownerPin";
+// ── A NUMBER YOU ARE ABOUT TO RING IS SPACED SO IT CAN BE READ ALOUD (sweep 8 · T16, 2026-09-04) ─
+// This screen printed a guest's mobile as one ten-digit run — MEASURED on the phone he tests:
+// `9876500077`, sitting directly under a Customers list that showed `90000 00007`. Pay Later is the
+// screen you open when you are about to phone the person who owes you money, so it is the one that
+// most needs the number grouped. Same helper, one place: lib/phoneText.ts (zero imports, so it is
+// safe in this "use client" file, exactly like lib/searchText and lib/partialRead beside it).
+import { showPhone } from "@/lib/phoneText";
 
 const IST = "Asia/Kolkata";
 type Bill = { bill_no: number | null; table_number: string | null; khata_at: string; amount: number };
@@ -119,13 +126,22 @@ export default function OwnerKhata() {
       <h1 className="adm-page-h">Pay Later</h1>
       <p className="adm-page-sub">Money guests still owe on a tab, and how much you&apos;ve collected. Staff collect a tab from the manager panel; this is your live view of what&apos;s outstanding.</p>
 
-      <div className="adm-stats" style={{ marginBottom: 14 }}>
-        <div className="adm-stat"><div className="k">Outstanding now</div><div className="v">{summary ? inr(summary.totalOutstanding) : "…"}</div></div>
-        <div className="adm-stat"><div className="k">People who owe</div><div className="v">{summary ? summary.peopleCount.toLocaleString("en-IN") : "…"}</div></div>
+      {/* ── THE FOUR FIGURES LINE UP, EVEN WHEN A LABEL WRAPS (sweep 8 · T16, 2026-09-04) ──────────
+          Same fault the guest record already had fixed as sweep 7 · T14 item 10, on the tiles this
+          time. "Collected this month" is the longest of the four labels, so on a phone it wraps to
+          two lines and pushes its own number down. MEASURED at 360px: "Collected today"'s ₹0 sat at
+          y=261 and "Collected this month"'s ₹0 at y=275 — 14px apart, on the row the eye reads
+          across. The boxes were always the same height (they are grid cells); it was the NUMBERS
+          that did not line up. Each tile is now a column with the label on top and the number
+          pinned to the bottom, so the figures share a baseline whether a label wraps or not.
+          Inline on these four tiles only — `.adm-stats` is shared with half the panel. */}
+      <div className="adm-stats" style={{ marginBottom: 14, alignItems: "stretch" }}>
+        <div className="adm-stat" style={{ display: "flex", flexDirection: "column" }}><div className="k">Outstanding now</div><div className="v" style={{ marginTop: "auto" }}>{summary ? inr(summary.totalOutstanding) : "…"}</div></div>
+        <div className="adm-stat" style={{ display: "flex", flexDirection: "column" }}><div className="k">People who owe</div><div className="v" style={{ marginTop: "auto" }}>{summary ? summary.peopleCount.toLocaleString("en-IN") : "…"}</div></div>
         {/* A figure that could NOT be read shows a dash, not ₹0 — and the note below says which
             one and offers Refresh. `inr(0)` and "we didn't read it" must never look the same. */}
-        <div className="adm-stat"><div className="k">Collected today</div><div className="v">{!summary ? "…" : summary.collectedToday === null ? "—" : inr(summary.collectedToday)}</div></div>
-        <div className="adm-stat"><div className="k">Collected this month</div><div className="v">{!summary ? "…" : summary.collectedMonth === null ? "—" : inr(summary.collectedMonth)}</div></div>
+        <div className="adm-stat" style={{ display: "flex", flexDirection: "column" }}><div className="k">Collected today</div><div className="v" style={{ marginTop: "auto" }}>{!summary ? "…" : summary.collectedToday === null ? "—" : inr(summary.collectedToday)}</div></div>
+        <div className="adm-stat" style={{ display: "flex", flexDirection: "column" }}><div className="k">Collected this month</div><div className="v" style={{ marginTop: "auto" }}>{!summary ? "…" : summary.collectedMonth === null ? "—" : inr(summary.collectedMonth)}</div></div>
       </div>
 
       {/* Not a warning — a plain statement of what the list holds, so the tiles above and the rows
@@ -205,7 +221,7 @@ export default function OwnerKhata() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
                     <div className="adm-muted" style={{ fontSize: 12.5 }}>
-                      {c.phone || "no mobile"}{c.note ? ` · ${c.note}` : ""}
+                      {c.phone ? showPhone(c.phone) : "no mobile"}{c.note ? ` · ${c.note}` : ""}
                       {multi ? <> · <span className="adm-chip">{c.restaurantName}</span></> : null}
                     </div>
                   </div>

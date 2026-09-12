@@ -1,0 +1,184 @@
+// BLOCK B · P69901–P70060 — the four owner screens and the Inventory embed, read.
+import { check, has, hasRaw, countOf, count, results, CUSTOMERS as C, KHATA as K, ISSUES as I, INV_PAGE as P, INV_UI as U, CODE } from "./static.mjs";
+import { readFileSync as __rf } from "node:fs";
+const PHONE = __rf("lib/phoneText.ts", "utf8");   // the one place the mobile-grouping rule lives (item 5)
+
+// ── B1 · Customers (P69901–P69945) ──────────────────────────────────────────────────────────────
+check("P69901", "Customers is read-only about money except the owner's own takings", () => has(C, /Money is the/i) || hasRaw(C, /READ-ONLY and money-free/));
+check("P69902", "a name that is only spaces is not a name — one helper, not five trims", () => has(C, /const named = \(n: string \| null \| undefined\): string \| null => \{ const t = \(n \?\? ""\)\.trim\(\); return t \|\| null; \}/));
+check("P69903", "…and every place a name is printed goes through it", () => countOf(C, /named\(/g) === 7);
+// Item 5 moved this rule into lib/phoneText.ts and DELETED the local copy, so the claim is now
+// "Customers reads the shared rule" plus "the shared rule does the grouping".
+check("P69904", "a ten-digit mobile is spaced so it can be read back to a guest", () => has(C, /import \{ showPhone \} from "@\/lib\/phoneText"/) && /s\.length === 10 \? `\$\{s\.slice\(0, 5\)\} \$\{s\.slice\(5\)\}`/.test(PHONE));
+check("P69905", "…and an empty one shows a dash, never 'undefined'", () => /: s \|\| "—"/.test(PHONE));
+check("P69906", "an unreadable date shows a dash, never the words 'Invalid Date'", () => has(C, /const ok = \(iso: string\) => Number\.isFinite\(new Date\(iso\)\.getTime\(\)\)/));
+check("P69907", "…and both date formatters test it first", () => countOf(C, /ok\(iso\) \?/g) === 2);
+check("P69908", "the four tiles ride the snapshot cache and the list is live", () => hasRaw(C, /compute-on-view snapshot cache/));
+check("P69909", "…and the screen says WHEN they were counted", () => has(C, /Counted at \{fmtTime\(summary\.cachedAt\)\}/));
+check("P69910", "Refresh forces a live recount, not a re-read of the same snapshot", () => has(C, /force \? "refresh=1" : ""/) && has(C, /onClick=\{\(\) => load\(true\)\}/));
+check("P69911", "…and an erase forces one too, so the erased guest stops being counted", () => has(C, /await load\(true\);/));
+check("P69912", "three tiles are real filters and the fourth deliberately is not", () => countOf(C, /seg="/g) === 3);
+check("P69913", "…and the un-tappable one is 'New (last 30 days)', with the reason written down", () => hasRaw(C, /it counts who FIRST\s*\n?\s*\/\/\s*CAME in 30 days|counts who FIRST/));
+check("P69914", "…and a tappable tile carries a mark, the pointer and aria-pressed", () => has(C, /aria-pressed=\{active\}/) && has(C, /fa-filter cust-tilemark/) && has(C, /cursor: "pointer"/));
+check("P69915", "the phone list is cards, measured with matchMedia, not a CSS breakpoint", () => has(C, /window\.matchMedia\("\(max-width: 640px\)"\)/));
+check("P69916", "…and the listener is removed on unmount", () => has(C, /mq\.removeEventListener\("change", sync\)/));
+check("P69917", "the restaurant column only exists for an owner with more than one", () => has(C, /const multiRest = rests\.length > 1;/) && has(C, /\{multiRest && <th/));
+check("P69918", "…and it uses the WHOLE scope from the server, not the rows on the page", () => has(C, /rests\.length > 1/) && !has(C, /new Set\(rows\.map\(\(c\) => c\.restaurant_id\)\)\.size > 1/));
+check("P69919", "the footer line asks each group its OWN head-count question", () => has(C, /seg === "regulars" \? summary\.returning/) && has(C, /seg === "new" \? Math\.max\(0, summary\.total - summary\.returning\)/));
+check("P69920", "…and never the whole-scope total for a filtered list", () => !has(C, /summary\.total > summary\.shown/));
+check("P69921", "…and only when the read really hit the 300 cap", () => has(C, /if \(rows\.length < LIST_PAGE \|\| segTotal === null \|\| segTotal <= rows\.length\) return null;/));
+check("P69922", "the footer quotes what was ACTUALLY searched for, cleaned the same way", () => has(C, /const searched = safeSearch\(search\);/) && has(C, /match\{rows\.length === 1 \? "" : "es"\} for “\{searched\}”/));
+check("P69923", "…using the same cleaner the route runs on ?q=", () => has(C, /import \{ safeSearch \} from "@\/lib\/searchText"/));
+check("P69924", "the footer is a plain function, not a component declared inside render", () => has(C, /const listFoot = \(gap: number\) =>/));
+check("P69925", "the first load is immediate and later ones are debounced by one effect", () => has(C, /if \(firstRun\.current\) \{ firstRun\.current = false; load\(\); return; \}/));
+check("P69926", "…so mount does not fire two back-to-back requests", () => countOf(C, /useEffect\(\(\) => \{[\s\S]{0,80}load\(\);\s*\}, \[load\]\)/g) === 0);
+check("P69927", "the 60s backstop is paused while the tab is hidden", () => has(C, /setInterval\(\(\) => \{ if \(!document\.hidden\) load\(\); \}, 60_000\)/));
+check("P69928", "…and it restarts and reloads on becoming visible again", () => has(C, /const onVis = \(\) => \{ if \(document\.hidden\) stop\(\); else \{ load\(\); start\(\); \} \};/));
+check("P69929", "…and the interval and the listener are both cleaned up", () => has(C, /return \(\) => \{ stop\(\); document\.removeEventListener\("visibilitychange", onVis\); \};/));
+check("P69930", "a withheld section is not named — the page goes back to the dashboard", () => has(C, /router\.replace\("\/owner"\)/));
+check("P69931", "…with replace, not push, so Back does not bounce him into it again", () => !has(C, /router\.push\("\/owner"\)/));
+check("P69932", "…and nothing at all renders while the redirect runs", () => has(C, /\{disabled \? null : \(/));
+check("P69933", "the erase confirm says what is DELETED and what is KEPT", () => has(C, /Deleted for good:/) && has(C, /Kept: bills they were already named on/));
+check("P69934", "…and says why a bill cannot be changed", () => has(C, /the law `\s*\+ `requires it to be kept/));
+check("P69935", "an erase in flight disables its own button", () => has(C, /disabled=\{erasing === `\$\{c\.restaurant_id\}:\$\{c\.phone\}`\}/));
+check("P69936", "…and never disables anyone else's", () => countOf(C, /erasing === `\$\{c\.restaurant_id\}:\$\{c\.phone\}`/g) === 4);
+check("P69937", "the erase button stops the row's own click from opening the record", () => countOf(C, /e\.stopPropagation\(\); erase\(c\)/g) === 2);
+check("P69938", "closing the guest record works while it is still loading", () => has(C, /const closeDetail = useCallback\(\(\) => \{[\s\S]{0,220}setDetailBusy\(false\);/));
+check("P69939", "…every open is sequenced, so a slow reply cannot land under another name", () => has(C, /const mine = \+\+detailSeq\.current;/) && has(C, /if \(mine !== detailSeq\.current\) return;/));
+check("P69940", "…Escape closes it", () => has(C, /if \(e\.key === "Escape"\) closeDetail\(\)/));
+check("P69941", "…and the phone's own Back closes it, registered with the back manager", () => has(C, /useBackClose\("owner-customer-detail", !!detail \|\| detailBusy, closeDetail\)/));
+check("P69942", "…and there is a visible ✕ even while it loads", () => countOf(C, /aria-label="Close"/g) === 2);
+check("P69943", "a bill number is qualified by its restaurant only when there is more than one", () => has(C, /\{detail\.rows\.length > 1 && \(/));
+check("P69944", "a guest with more bills than the drawer shows is told so", () => has(C, /Showing their \{detail\.bills\.length\} most recent of \{nfmt\(detail\.bill_count\)\} bills\./));
+check("P69945", "a failed read is not an empty list — it says which it is", () => has(C, /this is a loading error, not &ldquo;no customers\.&rdquo;/));
+
+// ── B2 · Pay Later (P69946–P69980) ──────────────────────────────────────────────────────────────
+check("P69946", "the credit book is read-only; collecting happens in the manager panel", () => has(K, /Staff collect a tab from the manager panel/));
+check("P69947", "a figure that could not be read shows a dash, never ₹0", () => has(K, /summary\.collectedToday === null \? "—" : inr\(summary\.collectedToday\)/));
+check("P69948", "…and the same for the month", () => has(K, /summary\.collectedMonth === null \? "—" : inr\(summary\.collectedMonth\)/));
+check("P69949", "…and the reason ₹0 and 'we didn't read it' must differ is written down", () => hasRaw(K, /is a claim about the till/));
+check("P69950", "the partial note names which figure went missing and offers Try again", () => has(K, /\{partialNote\(partial\)\}/) && has(K, /Try again/));
+check("P69951", "…and it is cleared on every load, so a blip disappears by itself", () => has(K, /setPartial\(Array\.isArray\(j\.partial\) \? j\.partial : \[\]\)/));
+check("P69952", "an unreadable date is a dash, and an unreadable age is a dash", () => has(K, /const ageDays = \(iso: string\) => \{\s*\n?\s*if \(!ok\(iso\)\) return "—";/));
+check("P69953", "…never 'oldest NaN days' or 'Invalid Date'", () => hasRaw(K, /NEVER "Invalid Date" OR "oldest NaN days"/));
+check("P69954", "an old tab carries its own colour past 30 and 60 days", () => has(K, /d >= 60 \? "var\(--adm-danger, #e5484d\)" : d >= 30 \? "var\(--adm-warn, #c98a2b\)" : null/));
+check("P69955", "…and the WORDS do not change, so colour adds emphasis rather than meaning", () => has(K, /oldest \{ageDays\(iso\)\}/));
+check("P69956", "…and it has hover text for anyone who cannot see the colour", () => has(K, /title=\{tone \? "This tab has been open a long time" : undefined\}/));
+check("P69957", "the tiles count EVERY open bill while the list is the biggest 500", () => has(K, /j\.listCapped \? \{ of: j\.summary\?\.peopleCount \|\| 0, showing: Number\(j\.peopleShown\) \|\| 0 \} : null/));
+check("P69958", "…and the screen says so, as a plain statement rather than a warning", () => has(K, /The figures above count everyone\./));
+check("P69959", "a search that found nobody says WHERE it looked on a capped book", () => has(K, /No one matches that search among the \$\{shown\.showing\.toLocaleString\("en-IN"\)\} people who owe the most/));
+check("P69960", "…and gives the ordinary sentence on an ordinary book", () => has(K, /: "No one matches that search\."/));
+check("P69961", "a failed read is not an empty book", () => has(K, /this is a loading error, not &ldquo;nobody owes anything\.&rdquo;/));
+check("P69962", "…and the loading state is distinguished from both", () => has(K, /customers === null && !err \?/));
+check("P69963", "R34 is respected — this page never hides itself when the module reads off", () => hasRaw(K, /R34/) && !has(K, /moduleOff/));
+check("P69964", "…and the reason is quoted, on his own words", () => hasRaw(K, /if the feature is on by me, it will stay on/));
+check("P69965", "R35 is respected — there is no 'oldest first' ordering control", () => hasRaw(K, /R35/) && !has(K, /oldest first/i));
+check("P69966", "the 60s backstop is paused while hidden here too", () => has(K, /setInterval\(\(\) => \{ if \(!document\.hidden\) load\(\); \}, 60_000\)/));
+check("P69967", "…and cleaned up on unmount", () => has(K, /document\.removeEventListener\("visibilitychange", onVis\)/));
+check("P69968", "the search filters the list already on the page, without a new request", () => has(K, /const rows = \(customers \|\| \[\]\)\.filter/));
+check("P69969", "…on name or phone, case-insensitively", () => has(K, /\(c\.name \|\| ""\)\.toLowerCase\(\)\.includes\(q\) \|\| \(c\.phone \|\| ""\)\.toLowerCase\(\)\.includes\(q\)/));
+check("P69970", "each person's row is a button that says whether it is open", () => has(K, /aria-expanded=\{open\.has\(c\.id\)\}/));
+check("P69971", "…and the chevron follows the state", () => has(K, /fa-chevron-\$\{open\.has\(c\.id\) \? "down" : "right"\}/));
+check("P69972", "a long name is ellipsised rather than pushing the money off the row", () => has(K, /whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"/));
+check("P69973", "money is tabular, so the column of figures lines up", () => countOf(K, /fontVariantNumeric: "tabular-nums"/g) >= 2);
+check("P69974", "a person with no mobile says 'no mobile', not an empty gap", () => has(K, /\{c\.phone \? showPhone\(c\.phone\) : "no mobile"\}/));  // shape moved by item 5; the CLAIM is unchanged
+check("P69975", "the restaurant chip only appears for an owner with more than one", () => has(K, /const multi = new Set\(\(customers \|\| \[\]\)\.map\(\(c\) => c\.restaurant_id\)\)\.size > 1;/) && has(K, /\{multi \? </));
+check("P69976", "one bill reads 'bill' and two read 'bills'", () => has(K, /\{c\.billCount\} bill\{c\.billCount === 1 \? "" : "s"\}/));
+check("P69977", "a bill with no number says 'Bill' rather than '#null'", () => has(K, /\{b\.bill_no != null \? <b style=\{\{ color: "var\(--text,inherit\)" \}\}>#\{b\.bill_no\}<\/b> : "Bill"\}/));
+check("P69978", "a bill with no table says T? rather than 'Tundefined'", () => has(K, /\{b\.table_number \|\| "\?"\}/));
+check("P69979", "the border colour token is the COLOUR one, never the whole-border shorthand", () => !has(K, /1px solid var\(--border\)/));
+check("P69980", "…and the file explains why, because no text check could catch it", () => hasRaw(K, /`--border` IS A WHOLE BORDER, NOT A COLOUR/));
+
+// ── B3 · Feedback & complaints (P69981–P70020) ──────────────────────────────────────────────────
+check("P69981", "a rating above 5 or below 0 cannot take the screen down", () => has(I, /const filled = Math\.max\(0, Math\.min\(5, Math\.round\(Number\(n\) \|\| 0\)\)\)/));
+check("P69982", "…and the spoken label still reports the real number", () => has(I, /aria-label=\{`\$\{n\} out of 5`\}/));
+check("P69983", "…and the empty half of a star row is a different colour from the filled half", () => has(I, /<span style=\{\{ color: "var\(--border-c, #ccc\)" \}\}>\{"★"\.repeat\(5 - filled\)\}/));
+check("P69984", "a tab the admin switched off has no button at all", () => has(I, /\{!ratingsOff && \(/) && has(I, /\{!issuesOff && \(/));
+check("P69985", "…and the page moves off a tab that turns out to be off", () => has(I, /if \(tab === "ratings" && ratingsOff && !issuesOff\) setTab\("issues"\)/));
+check("P69986", "…with no latch, so it cannot decide before the replies arrive", () => !has(I, /decided\.current/));
+check("P69987", "both sections off sends him back to the dashboard, naming nothing", () => has(I, /if \(bothOff\) router\.replace\("\/owner"\)/));
+check("P69988", "…and renders nothing while that runs", () => has(I, /\{bothOff \? null : \(/));
+check("P69989", "the complaints badge is the SERVER's head-count, not a count of the page", () => has(I, /const openCount = openSrv \?\? shownOpen;/));
+check("P69990", "…and falls back to the page only when the server says it could not count", () => has(I, /const countUnread = Array\.isArray\(j\.partial\) && j\.partial\.includes\("openCount"\)/));
+check("P69991", "marking handled moves the badge at once, and never below zero", () => has(I, /Math\.max\(0, s\.unhandled \+ \(acknowledged \? -1 : 1\)\)/));
+check("P69992", "…and only when the state actually flips", () => has(I, /if \(was === acknowledged\) return s;/));
+check("P69993", "a failed Mark handled is surfaced and the true state restored", () => has(I, /throw new Error\(j\.error \|\| "Couldn't save — please try again\."\)/));
+check("P69994", "a failed Resolve rolls the row back rather than reverting silently", () => has(I, /setIssues\(\(cur\) => \(cur \|\| \[\]\)\.map\(\(i\) => \(i\.id === id \? \{ \.\.\.i, status: prev \} : i\)\)\)/));
+check("P69995", "…and puts the count back too", () => countOf(I, /setOpenSrv\(\(n\) => \(n === null \? n : Math\.max\(0, n \+/g) === 2);
+check("P69996", "a note tells the server what it was editing from, so a co-owner is not overwritten", () => has(I, /"X-LFH-Expect": JSON\.stringify\(\{ table: "feedback", id, fields: \{ staff_note: was \} \}\)/));
+check("P69997", "…and a clash is read out in plain words", () => has(I, /c\?\.plain \? `\$\{c\.plain\}\$\{c\.todo \? ` \$\{c\.todo\}` : ""\}`/));
+check("P69998", "…and the editor only closes once the save really landed", () => /if \(!res\.ok\) \{[\s\S]{0,340}setErr\(null\); setNoteFor\(null\); setNoteVal\(""\);/.test(CODE[I]));
+check("P69999", "a note is length-capped in the box, not only on the server", () => has(I, /maxLength=\{500\}/));
+check("P70000", "a database id never reaches the screen where a person's name goes", () => has(I, /actorLabel\(r\.acknowledged_by\)/) && has(I, /actorTitle\(r\.acknowledged_by\)/));
+check("P70001", "…and the shared helper does it, not a local copy", () => has(I, /import \{ actorLabel, actorTitle \} from "@\/lib\/ownerActor"/) && !has(I, /function handledBy/));
+check("P70002", "a staff photo is only rendered when it is really an http(s) address", () => has(I, /i\.image_url && \/\^https\?:\\\/\\\/\/i\.test\(i\.image_url\)/));
+check("P70003", "…and a voice note the same way", () => has(I, /i\.audio_url && \/\^https\?:\\\/\\\/\/i\.test\(i\.audio_url\)/));
+check("P70004", "…and the photo link opens with noopener", () => has(I, /rel="noopener noreferrer"/));
+check("P70005", "…and audio does not download until it is played", () => has(I, /preload="none"/));
+check("P70006", "the ratings list says when it is only part of the list", () => has(I, /const ratingsCapped = ratingsShown >= RATINGS_PAGE && ratingsOf > ratingsShown;/));
+check("P70007", "…and asks the right total for the filter that is on", () => has(I, /rFilter === "unhandled" \? \(summary\?\.unhandled \?\? 0\) : \(summary\?\.total \?\? 0\)/));
+check("P70008", "the complaints list says so too, and whether open ones are past the end", () => has(I, /are still open, so some open ones are past the end of this page/));
+check("P70009", "…and says the opposite honestly when they are not", () => has(I, /Open ones are listed first, so none of those is hidden below this\./));
+check("P70010", "the two page caps are named constants that quote the route's limits", () => has(I, /const RATINGS_PAGE = 200;/) && has(I, /const ISSUES_PAGE = 300;/));
+check("P70011", "the three dates all test the parse before formatting", () => has(I, /const okDate = \(iso: string \| null \| undefined\) => !!iso && Number\.isFinite\(new Date\(iso\)\.getTime\(\)\)/));
+check("P70012", "…and 'resolved' is only printed when the date is readable", () => has(I, /okDate\(i\.resolved_at\) \? ` · resolved \$\{dOnly\(i\.resolved_at as string\)\}` : ""/));
+check("P70013", "a low rating is coloured differently from a good one", () => has(I, /const col = low \? "var\(--adm-danger, #e5484d\)" : r\.rating === 3 \? "#f59e0b" : "var\(--adm-ok, #16a34a\)"/));
+check("P70014", "a long comment wraps rather than stretching the card", () => has(I, /overflowWrap: "anywhere", wordBreak: "break-word"/));
+check("P70015", "…and that style is applied to every free-text field on the screen", () => countOf(I, /\.\.\.wrap/g) >= 5);
+check("P70016", "a handled rating is dimmed but still readable", () => has(I, /opacity: r\.acknowledged \? 0\.72 : 1/));
+check("P70017", "the 60s backstop reloads BOTH halves and pauses while hidden", () => has(I, /if \(!document\.hidden\) loadAll\(\); \}, 60_000\)/));
+check("P70018", "the scope pin rides on every call, so a second tab cannot hijack this one", () => has(I, /const scp = scopePin \? `\?scope=\$\{scopePin\}&rid=\$\{scopePin\}\$\{asSuffix\(\)\}` : ""/));
+check("P70019", "'To handle' asks the SERVER, so older unhandled rows stay reachable", () => has(I, /rFilter === "unhandled" \? \(scp \? `\$\{scp\}&filter=unhandled` : "\?filter=unhandled"\) : scp/));
+check("P70020", "the two partial lists feed ONE sentence, deduplicated", () => has(I, /const partial = \[\.\.\.new Set\(\[\.\.\.rPartial, \.\.\.iPartial\]\)\];/));
+
+// ── B4 · the Inventory door and the embed (P70021–P70060) ───────────────────────────────────────
+check("P70021", "the door resolves an owner's restaurants in ONE settings read", () => has(P, /const effective = await inventoryEffectiveByRid\(ids\);/));
+check("P70022", "…never a loop of ladder calls, and the reason is written down", () => !has(P, /for \(const id of ids\)/) && hasRaw(P, /ONE settings read for the whole estate/));
+check("P70023", "…and only restaurants where the module is really on are offered", () => has(P, /const withModule = ids\.filter\(\(id\) => effective\[id\]\);/));
+check("P70024", "a ?rid the owner does not own is ignored, not trusted", () => has(P, /selected = qRid && withModule\.includes\(qRid\) \? qRid : withModule\[0\];/));
+check("P70025", "the admin act-as branch is never module-gated — admin is top power", () => /\} else if \(store\.get\(ADMIN_ACT_COOKIE\)\?\.value && \(await tokenIsValid[\s\S]{0,600}if \(!selected\) redirect/.test(CODE[P]) && !/\} else if \(store\.get\(ADMIN_ACT_COOKIE\)[\s\S]{0,600}inventoryEffective|\} else if \(store\.get\(ADMIN_ACT_COOKIE\)[\s\S]{0,600}inventoryLadder/.test(CODE[P]));
+check("P70026", "…and it still checks the admin token, not just the act-as cookie", () => has(P, /await tokenIsValid\(store\.get\(AUTH_COOKIE\)\?\.value\)/));
+check("P70027", "a restaurant with no name falls back to a word, never 'undefined'", () => has(P, /name: nameById\.get\(id\) \|\| "Restaurant"/));
+check("P70028", "nothing to show sends him back to the dashboard, naming no feature", () => has(P, /if \(!selected\) redirect\("\/owner"\)/));
+check("P70029", "…and the old 'ask your administrator' screen is deleted, not restyled", () => !has(P, /ask your administrator/));
+check("P70030", "…and R36 and his own words are recorded beside the redirect", () => hasRaw(P, /it will not even show that/));
+check("P70031", "the skin is read from the owner cookie and defaults to dark", () => has(P, /store\.get\("aevidine_skin"\)\?\.value === "light" \? "light" : "dark"/));
+check("P70032", "the embed is mounted imperatively, so it adds no history entry", () => has(U, /const mount = useEmbedFrame\(embedSrc, liveSkin, \[rid, view\]\)/));
+check("P70033", "…and the reason is written down, because a JSX iframe swallowed a Back press", () => hasRaw(U, /adds NO browser-history entry/));
+check("P70034", "the live skin reaches the embed by message, never by changing its src", () => hasRaw(U, /by message \(never via src: that reloads it\)/));
+check("P70035", "…so the src is built from the skin the frame was BORN with", () => has(U, /const bornSkin = useRef\(liveSkin\)\.current;/));
+check("P70036", "the embed is scoped to one restaurant and opened in inventory-only mode", () => has(U, /invonly=1/) && has(U, /rid=\$\{encodeURIComponent\(rid\)\}/));
+check("P70037", "a one-restaurant owner never sees the estate screen", () => has(U, /const multi = restaurants\.length > 1;/) && has(U, /useState<"estate" \| "one">\(multi \? "estate" : "one"\)/));
+check("P70038", "only ONE estate read is in flight at a time", () => has(U, /if \(estInFlight\.current && !force\) return;/));
+check("P70039", "…and a forced Refresh always goes, because that is its whole job", () => has(U, /const loadEstate = useCallback\(async \(force\?: boolean\) => \{/) && has(U, /&& !force\) return;/));
+check("P70040", "…and the flag is released in a finally, so a failure cannot lock it", () => has(U, /finally \{ estInFlight\.current = false; setBusy\(false\); \}/));
+check("P70041", "there is no polling on this screen at all", () => !has(U, /setInterval/));
+check("P70042", "…and the file says the snapshot serves opens and ↻ forces a recompute", () => hasRaw(U, /No polling: the snapshot cache serves opens/));
+check("P70043", "an estate total is summed from the SAME rows the boxes are drawn from", () => has(U, /est\.totals\.stockValue/) && has(U, /est\.estate\.map/));
+check("P70044", "a restaurant whose figures did not read keeps its box and shows a sentence", () => has(U, /Couldn&apos;t read this one — press Refresh\./));
+check("P70045", "…rather than claiming ₹0 of stock", () => hasRaw(U, /"₹0 of stock" for a full storeroom is a claim/));
+check("P70046", "…and its warning chips are suppressed, because they were not read either", () => has(U, /\{!r\.unread && !!r\.negativeCount &&/) && has(U, /\{!r\.unread && !r\.negativeCount && !!r\.lowCount &&/));
+check("P70047", "the estate line says how many restaurants the figures cover", () => has(U, /These figures cover <b>\{est\.countedOf \? est\.countedOf\.counted : est\.estate\.length\}<\/b>/));
+check("P70048", "…and how many have stock switched off", () => has(U, /\{est\.offCount\} more \{est\.offCount === 1 \? "has" : "have"\} stock switched off/));
+check("P70049", "…and says so plainly when none of them has it on", () => has(U, /None of your restaurants has stock switched on yet\./));
+check("P70050", "'below zero' is explained as an un-entered delivery, with what to do", () => has(U, /Almost always a delivery that was never entered/));
+check("P70051", "the low-stock list is worst-first, so 'what do I reorder' is answerable", () => has(U, /\[\.\.\.data\.low\]\.sort\(\(a, b\) => \(a\.par \? a\.have \/ a\.par : 1\) - \(b\.par \? b\.have \/ b\.par : 1\)\)/));
+check("P70052", "…and its bar is clamped to 0–100, so a bad ratio cannot overflow the track", () => has(U, /Math\.max\(0, Math\.min\(100, Math\.round\(\(i\.have \/ i\.par\) \* 100\)\)\)/));
+check("P70053", "…and a par of zero does not divide by zero", () => has(U, /i\.par > 0 \? Math\.max/));
+check("P70054", "a share bar falls back to nothing when its total is zero", () => has(U, /const pct = of > 0 \? Math\.max\(2, Math\.round\(\(value \/ of\) \* 100\)\) : 0;/));
+check("P70055", "each card's heading total is the DATABASE's figure, not a sum of its rows", () => has(U, /<CardHead icon="🗑️" title="Wasted" total=\{s\.waste\}/) && has(U, /title="Expenses by kind" total=\{s\.expenses\}/));
+check("P70056", "…and a capped list says how many it is holding of how many there are", () => has(U, /Showing the \$\{data\.expenses\.length\} most recent slips of \$\{monthLabel\}\. The figure above counts every one of them\./));
+check("P70057", "…and the bills card the same", () => has(U, /Showing \$\{data\.purchases\.length\} of \$\{s\.purchasesCount\} in \$\{monthLabel\}/));
+check("P70058", "a struck-out expense stays visible, struck through, and says why", () => has(U, /textDecoration: e\.voided_at \? "line-through" : "none"/) && has(U, /· struck out\{e\.void_reason \? `: \$\{e\.void_reason\}` : ""\}/));
+check("P70059", "…and so does a voided purchase", () => has(U, /textDecoration: p\.voided_at \? "line-through" : "none"/));
+check("P70060", "a raw database date never reaches this screen", () => has(U, /const shortDate = \(d\?: string \| null\) =>/) && has(U, /timeZone: IST/));
+
+const bad = results.filter((r) => r.res !== "✅");
+console.log(`BLOCK B · ${count()} checks · ${results.length - bad.length} ✅ · ${bad.length} not-green`);
+for (const b of bad) console.log(`  ${b.res} ${b.id} — ${b.what}`);
+
+try {
+  const { writeFileSync: __w, mkdirSync: __m } = await import("node:fs");
+  __m(".claude/sweep/t16-rows", { recursive: true });
+  __w(".claude/sweep/t16-rows/B.json", JSON.stringify(results, null, 1));
+} catch (e) { console.error("could not write rows:", e.message); }
