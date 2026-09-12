@@ -103,11 +103,15 @@ export default function OwnerStaffPage() {
   const [, forceRerender] = useState(0);
   // Inline rename / edit-phone editor: which row is open + its draft values.
   const [editing, setEditing] = useState<{ id: string; name: string; phone: string } | null>(null);
-  // Two views of the same page: the PEOPLE (a roster you open a profile from) and the POWERS
-  // (what managers here may do). Splitting them stopped the page being one long scroll where
-  // the person list was buried under toggles. ?tab=powers deep-links the second one.
-  const [tab] = useState<"team" | "powers">(() =>
-    "team"); // powers moved to the admin panel; this page is the roster only
+  // THE `tab` STATE IS GONE (sweep #8 T15, 2026-09-04). It was declared as `"team" | "powers"`,
+  // initialised to "team" by a function that could return nothing else, never given a setter, and
+  // read by exactly one `{tab === "team" && …}` that was therefore always true. The comment above it
+  // described the two-view page in the present tense — "the PEOPLE … and the POWERS … ?tab=powers
+  // deep-links the second one" — over its own one-line obituary, so the file both promised a Powers
+  // view and admitted it had been removed, in adjacent lines. Nothing reads `?tab` anywhere in the
+  // product. The Powers tab left in the access rebuild (owner, 2026-07-31: "only admin will have all
+  // this permission"); its CSS was deleted 2026-08-19 and its controls 2026-08-04. This is the last
+  // of it — "a new way replaces the old one", finished rather than left half-standing.
   // Synchronous re-entry guard so a fast double-click on "Add" can't fire twice before
   // React flushes the disabled state (the exact race that showed a raw duplicate-key error).
   const addingRef = useRef(false);
@@ -541,6 +545,30 @@ export default function OwnerStaffPage() {
                           onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
                         <button className="ost-btn" disabled={busy} onClick={() => saveEdit(s)}>Save</button>
                         <button className="ost-mini" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
+                        {/* ── THE ONE EDIT ON THIS ROW THAT STOPS SOMEONE SIGNING IN, AND IT SAID NOTHING
+                            (sweep #8 T15, 2026-09-04) ────────────────────────────────────────────────
+                            The first box IS the login. `/api/owner/staff` → action `edit` runs the typed
+                            value through normalizeLoginName and writes BOTH `name` and `username`, and
+                            its own comment says why that matters: "a rename means the name that person
+                            has always typed no longer works". It even logs a `staff_rename` row with
+                            both names, precisely so "my login stopped working" has an answer.
+                            Every other control on this row that costs somebody their access says so
+                            before it happens — Reset password ("Their current login stops working"),
+                            Disable ("logged out immediately"), the role picker ("logged out and must
+                            sign in again"). This one, which does the same thing, was a bare pair of
+                            boxes and a Save button. And it is quieter than all of them: no token bump,
+                            so the person stays signed in and only discovers it at their NEXT sign-in,
+                            hours later, with nothing connecting the two.
+                            A confirm() would be wrong here — the same editor edits the phone number,
+                            which is harmless and frequent, and a dialog on every phone edit is the
+                            noise that gets dialogs dismissed unread. So the warning appears only while
+                            the name has actually been changed, and it names both sides of the change. */}
+                        {editing.name.trim() && editing.name.trim() !== (s.name || s.username) && (
+                          <div className="ost-renamewarn">
+                            This is their <b>login name</b>: after saving they sign in as{" "}
+                            <b>{editing.name.trim()}</b>, and <b>{s.username}</b> stops working. Tell them before they next sign in.
+                          </div>
+                        )}
                       </div>
                     )}
                     {/* PER-USER WAITER PERMISSIONS WERE REMOVED FROM HERE (owner, 2026-08-04).
@@ -571,8 +599,7 @@ export default function OwnerStaffPage() {
             </div>
 
 
-            {/* ── TEAM tab: the roster ───────────────────────────────────────────── */}
-            {tab === "team" && <>
+            {/* ── The roster. There is no second view; see the note where `tab` used to live. ── */}
             {/* A HEADING WITH NOTHING UNDER IT SAYS NOTHING (T13 sweep, 2026-08-27 — read the
                 screenshot). Search for someone who is DISABLED and every match lands in the group
                 below, so this read: "Team", then blank, then "Disabled · 1 — cannot sign in". The
@@ -713,7 +740,6 @@ export default function OwnerStaffPage() {
                 </details>
               )}
             </form>
-            </>}
           </div>
         );
       })}
@@ -746,7 +772,15 @@ export default function OwnerStaffPage() {
         .ost-find { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-height: 40px;
           padding: 0 11px; border: var(--border); border-radius: 10px; background: var(--card); color: var(--muted); font-size: 12.5px; }
         .ost-find:focus-within { border-color: var(--accent); }
-        .ost-find input { font: inherit; font-size: 13px; border: 0; outline: none; background: none; color: var(--fg, inherit); min-width: 0; width: 210px; }
+        /* 240px, NOT 210 (sweep #8 T15, 2026-09-04). Its own placeholder — "Find someone — name,
+           phone or role" — measures 230px in this font, so at 210 the box cut the last two words and
+           the strip read "Find someone — name, phone o". The wrong half of the screen, which is why
+           three visual sweeps walked past it: on the A35 the input is flex-grown inside a
+           full-width row and gets 288px, so it only ever clipped on the WIDE view. 240 clears the
+           real measurement with a little room, and costs nothing — the field is pushed right by
+           margin-left:auto on a strip with one tab in it. Measured, not guessed: the guard
+           re-measures the placeholder against the box rather than pinning this number. */
+        .ost-find input { font: inherit; font-size: 13px; border: 0; outline: none; background: none; color: var(--fg, inherit); min-width: 0; width: 240px; }
         .ost-find input::-webkit-search-cancel-button { filter: grayscale(1); opacity: .6; }
         .ost-find .ost-x { margin-left: 0; }
         @media (max-width: 560px) {
@@ -789,6 +823,10 @@ export default function OwnerStaffPage() {
         .ost-nokitchen { font-size: 11.5px; color: var(--muted); }
         .ost-actions { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; margin-top: 8px; }
         .ost-editrow { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: var(--border); }
+        /* Amber, not red: nothing is wrong and nothing is lost — it is a consequence the owner has to
+           know before they press Save. Full width so it sits UNDER the boxes rather than squeezing
+           them, and it reads at 360px without the row growing when it is absent. */
+        .ost-renamewarn { flex-basis: 100%; margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--adm-warn); }
         .ost-mini { font: inherit; font-size: 11.5px; font-weight: 700; padding: 5px 9px; border-radius: 7px; border: var(--border); background: var(--card); color: var(--fg, inherit); cursor: pointer; }
         .ost-mini:hover:not(:disabled) { border-color: var(--accent); }
         /* DANGER IS VISIBLE WITHOUT A MOUSE (2026-08-05). This was :hover-only, so on the owner's

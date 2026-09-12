@@ -32,7 +32,7 @@ The owner cockpit used to have a second person screen: `app/owner/staff/[id]/pag
 six tabs, with its own hand-written permission list that had drifted from the model (three waiter
 rows missing — table types, khata, banquet — khata gated on the wrong module, and **no manager rows
 at all**, so an owner could not see what their own manager was allowed to do). That page is gone. It
-is now a 38-line mount point that renders THIS component.
+is now a 60-line mount point that renders THIS component. (It was 38 when this line was written; the pin-handling notes that keep `?rid=` and `?as=` alive on the way back to the roster grew it. Re-count with `wc -l`, do not trust the number — sweep #8 T15, 2026-09-04.)
 
 **How one component serves two consoles.** `StaffProfile` takes an optional `host` (`ProfileHost`):
 four functions — `load`, `patch`, `photo?`, `remove?` — plus a `can` set. Omit it and you get the
