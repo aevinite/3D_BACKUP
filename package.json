@@ -175,7 +175,7 @@
     "verify:tablet-parity": "node scripts/verify-tablet-parity.mjs",
     "verify:tablet-wants-in": "node scripts/verify-tablet-wants-in.mjs",
     "verify:tablet-taps": "node scripts/verify-tablet-taps.mjs",
-    "test": "npm run -s test:money && npm run -s test:errors && npm run -s test:units",
+    "test": "npm run -s test:money && npm run -s test:errors && npm run -s test:netretry && npm run -s test:units",
     "verify:closed-session": "node scripts/verify-closed-session-orders.mjs",
     "verify:skin-ink": "node scripts/verify-skin-ink.mjs",
     "verify:look-ink": "node scripts/verify-look-ink.mjs",
@@ -224,7 +224,8 @@
     "verify:bill-ledger": "node --experimental-strip-types --no-warnings scripts/verify-bill-ledger-sweep.mjs",
     "verify:t25-doors": "node scripts/verify-t25-login-and-panel-apis.mjs",
     "verify:t25-doors-live": "node scripts/verify-t25-login-and-panel-apis.mjs --live",
-    "verify:t25-writes": "node scripts/verify-t25-editor-writes.mjs"
+    "verify:t25-writes": "node scripts/verify-t25-editor-writes.mjs",
+    "test:netretry": "node --test tests/net-retry.test.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"

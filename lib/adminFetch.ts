@@ -4,6 +4,10 @@
 // an `error` field, or a thrown network error all as failures with a readable message — so
 // callers just check `res.ok` and show `res.error` (usually via useToast), never guessing.
 import { deadline, isDeadline, TOOK_TOO_LONG } from "@/lib/partialRead";
+// A blip on the way to our own server is not news about the person's internet. retryFetch makes the
+// quiet second attempt that the owner used to have to make by hand with the Try again button
+// (2026-09-12) — reads only; a POST/PATCH/DELETE through here still goes out exactly once.
+import { retryFetch } from "@/lib/netRetry";
 
 export type AdminResult<T> = { ok: true; data: T } | { ok: false; error: string; status: number };
 
@@ -17,7 +21,7 @@ export async function adminFetch<T = unknown>(url: string, opts?: RequestInit): 
     // A caller's OWN signal always wins — some admin screens cancel a read when the person moves on,
     // and replacing their signal would break that.
     const signal = opts?.signal ?? deadline(ADMIN_DEADLINE_MS);
-    const r = await fetch(url, { cache: "no-store", ...opts, ...(signal ? { signal } : {}) });
+    const r = await retryFetch(url, { cache: "no-store", ...opts, ...(signal ? { signal } : {}) });
     let body: unknown = null;
     try { body = await r.json(); } catch { /* non-JSON response */ }
     const err = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null;

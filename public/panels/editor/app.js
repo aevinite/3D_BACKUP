@@ -626,7 +626,11 @@ async function api(method, path, body, opts) {
   const run = (async () => {
     let res;
     try {
-      res = await fetch(url, {
+      // netretry.js retries a GET that hit a blip before we ever call it a network problem — the
+      // owner was shown "your network is not good" for three seconds on a healthy connection and
+      // had to press Try again himself (2026-09-12). Writes are never retried; they left above,
+      // via the outbox. Falls back to plain fetch if the script did not load.
+      res = await (window.LFH_NET ? window.LFH_NET.fetch : fetch)(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: body ? JSON.stringify(body) : undefined, // turn the body object into JSON text to send

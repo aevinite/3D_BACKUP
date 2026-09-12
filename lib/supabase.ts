@@ -4,6 +4,11 @@
 
 // `createClient` is Supabase's helper that builds that connection for us.
 import { createClient } from "@supabase/supabase-js";
+// Every browser database READ goes through the fetch below, which makes this the one place that can
+// stop a single lost packet from becoming "your network is not good" on a guest's phone. retryFetch
+// retries GETs only — supabase-js sends `.rpc()` as POST, so joining a table, the shared cart,
+// calling a waiter and placing an order are all untouched and still go out exactly once.
+import { retryFetch } from "./netRetry";
 
 // The web address of our Supabase project. It comes from an environment
 // variable (set in .env.local) so the secret isn't hard-coded in the source.
@@ -98,6 +103,6 @@ export const supabase = createClient(url, anon, {
   global: {
     // A caller that passes its own signal always wins (the same rule lib/supabaseAdmin.ts
     // follows); otherwise we ASK for a deadline and accept "this browser can't make one".
-    fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ?? restDeadline() }),
+    fetch: (input, init) => retryFetch(input, { ...init, signal: init?.signal ?? restDeadline() }),
   },
 });

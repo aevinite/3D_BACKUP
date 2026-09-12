@@ -194,7 +194,11 @@ const api = async (method, path, body, opts) => {
   const url = "/api/tablet" + ridQ(path);
   let r;
   try {
-    r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    // netretry.js retries a GET that hit a blip before we ever call it a network problem — the
+    // owner was shown "your network is not good" for three seconds on a healthy connection and had
+    // to press Try again himself (2026-09-12). Writes are never retried; they left above, via the
+    // outbox. Falls back to plain fetch if the script did not load.
+    r = await (window.LFH_NET ? window.LFH_NET.fetch : fetch)(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   } catch (netErr) {
     netErr.offline = true; // no reply at all → offline, not a broken server
     throw netErr;
