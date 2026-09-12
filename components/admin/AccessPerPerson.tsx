@@ -15,7 +15,7 @@
  *     instead of a switch that would save and do nothing.
  * Both live in staff_users.permissions and are written through /api/owner/staff. */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { type TreeState } from "@/lib/accessTree";
+import { expectHeader, type TreeState } from "@/lib/accessTree";
 // The rows each role has now live in lib/staffCaps, shared with the person's PROFILE panel
 // (components/admin/StaffProfile) and with the admin write route. One list, three screens —
 // this used to be a private copy here, and a second copy would be free to drift.
@@ -70,7 +70,7 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
 
   const person = people.find((u) => u.id === personId) || people[0];
 
-  const setOverride = (u: Staff, key: string, value: string) => {
+  const setOverride = (u: Staff, key: string, value: string, label?: string) => {
     // "default" REMOVES the person's own setting so they follow their role again — sending
     // an empty string is how the staff API clears a key.
     const sent = value === "default" ? "" : value;
@@ -86,11 +86,36 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
     // admin route, which is what docs/STAFF-PROFILE.md has always said ("one list, three screens":
     // this tab, the profile, and app/api/admin/users).
     fetch("/api/admin/users", {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        // FIRST SAVE WINS ON THIS TAB TOO (sweep #8 T23, 2026-09-06). The General tab beside this
+        // one has sent an expectation on every switch since 2026-08-10, and the person's profile
+        // sends one on their details, their job and their pay — this dropdown, which decides what
+        // one person may DO, was the last write on the Access screen with no gate at all. Two
+        // admins on the same person set opposite answers and the second silently won.
+        //
+        // expectHeader(), not JSON.stringify(): a header must be ISO-8859-1 and several rows are
+        // named with an em dash, which would make fetch() throw the whole request away.
+        // `permissions.<key>` is the jsonb sub-key form; an ABSENT key compares equal to "", so
+        // "was on the restaurant's default" is itself a previous value worth holding you to.
+        "X-LFH-Expect": expectHeader({
+          table: "staff_users", id: u.id,
+          fields: { [`permissions.${key}`]: (u.permissions || {})[key] ?? "" },
+          ...(label ? { label } : {}),
+        }),
+      },
       body: JSON.stringify({ id: u.id, action: "set_permissions", permissions: { [key]: sent } }),
     })
-      .then((r) => {
-        if (!r.ok) { setErr("That change didn't save."); setSaving("err"); load(rid); return; }
+      .then(async (r) => {
+        if (!r.ok) {
+          // 409 = another admin got there first. Say it in THEIR words, not "that change didn't
+          // save" — the sentence lib/clash.ts writes names the row and what it says now.
+          const j = await r.json().catch(() => ({} as any));
+          const c = j?.clash as { plain?: string; todo?: string } | undefined;
+          setErr(c?.plain ? `${c.plain}${c.todo ? ` ${c.todo}` : ""}` : "That change didn't save.");
+          setSaving("err"); load(rid); return;
+        }
         setErr(""); setSaving("saved"); setTimeout(() => setSaving(""), 1200);
       })
       .catch(() => { setErr("That change didn't save — the connection dropped."); setSaving("err"); load(rid); });
@@ -166,7 +191,7 @@ const overrideCount = (u: Staff) => {
   return n ? String(n) : "";
 };
 
-function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null; onSet: (u: Staff, key: string, v: string) => void }) {
+function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null; onSet: (u: Staff, key: string, v: string, label?: string) => void }) {
   // THE SAME STRUCTURE AS ACCESS → MANAGER (owner, 2026-08-02: "inside permission, there will
   // be the same thing — manager menu, permission for manager and manager setting"). The groups
   // and rows come from the one tree, so a row added to the Manager section appears here by
@@ -237,7 +262,7 @@ function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null
                     {capStates(pin).map((s) => (
                       <button key={s} role="radio" aria-checked={value === s}
                         className={`${value === s ? "on" : ""} ${s === "default" ? "def" : ""}`}
-                        onClick={() => onSet(person, key, s)}>
+                        onClick={() => onSet(person, key, s, node.name)}>
                         {s === "default" && defaultReads ? `Default · ${defaultReads}` : STATE_LABEL[s]}
                       </button>
                     ))}
