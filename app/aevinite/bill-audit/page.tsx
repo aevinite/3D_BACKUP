@@ -33,7 +33,12 @@ type Data = {
 type TrailEvent = { action: string; actor: string | null; detail: string | null; at: string };
 type InvEvent = { event: string; no: number | null; reason: string | null; actor: string | null; at: string };
 type CNote = { no: number; amount: number; reason: string | null; actor: string | null; at: string };
-type Expanded = { trail: TrailEvent[]; invoiceHistory: InvEvent[]; creditNotes: CNote[] } | "loading";
+// `failed` is the half that was missing: an expand whose read did not come back used to arrive here
+// as three empty arrays, and three empty arrays are how this screen says "nothing ever happened to
+// this bill". On the ledger built to prove no sale quietly vanished, "I could not read it" and
+// "there is nothing" must not look alike — the sibling Change log states that rule in its own words
+// ("a silent zero is the failure mode that matters most") and its endpoint sends null for it.
+type Expanded = { trail: TrailEvent[]; invoiceHistory: InvEvent[]; creditNotes: CNote[]; failed?: boolean } | "loading";
 
 // `tone` is drawn as TEXT (the state label, its icon, the stat card). On the LIGHT console these
 // mid-tones on white measured 2.15-2.28:1, so every place that paints one passes it as --hue and
@@ -197,16 +202,26 @@ export default function AdminBills() {
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setMoreBusy(false); }
   };
 
+  // ONE READ OF ONE BILL'S HISTORY, and it says out loud when it did not work. `res.ok` is checked:
+  // a 500 answers `{ error }`, and `j.trail || []` turned that into "No recorded changes for this
+  // bill." — a confident denial, on the three sections a person opens a bill to read.
+  const loadTrail = useCallback(async (sessionId: string) => {
+    try {
+      const res = await fetch("/api/admin/bills?trail=" + sessionId, { cache: "no-store" });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error || "Couldn't load.");
+      setExp((t) => ({ ...t, [sessionId]: { trail: j.trail || [], invoiceHistory: j.invoiceHistory || [], creditNotes: j.creditNotes || [] } }));
+    } catch {
+      setExp((t) => ({ ...t, [sessionId]: { trail: [], invoiceHistory: [], creditNotes: [], failed: true } }));
+    }
+  }, []);
+
   const expand = async (b: Bill) => {
     const next = open === b.sessionId ? null : b.sessionId;
     setOpen(next);
     if (next && !exp[b.sessionId]) {
       setExp((t) => ({ ...t, [b.sessionId]: "loading" }));
-      try {
-        const res = await fetch("/api/admin/bills?trail=" + b.sessionId, { cache: "no-store" });
-        const j = await res.json();
-        setExp((t) => ({ ...t, [b.sessionId]: { trail: j.trail || [], invoiceHistory: j.invoiceHistory || [], creditNotes: j.creditNotes || [] } }));
-      } catch { setExp((t) => ({ ...t, [b.sessionId]: { trail: [], invoiceHistory: [], creditNotes: [] } })); }
+      await loadTrail(b.sessionId);
     }
   };
 
@@ -247,9 +262,9 @@ export default function AdminBills() {
       const res = await fetch("/api/admin/bills", { method: "POST", headers: { "Content-Type": "application/json", "X-LFH-Action-Id": actionId }, body: JSON.stringify({ action: "credit_note", sessionId: b.sessionId, amount, reason: reason.trim() }) });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Failed to issue credit note.");
-      const r2 = await fetch("/api/admin/bills?trail=" + b.sessionId, { cache: "no-store" });
-      const j2 = await r2.json();
-      setExp((t) => ({ ...t, [b.sessionId]: { trail: j2.trail || [], invoiceHistory: j2.invoiceHistory || [], creditNotes: j2.creditNotes || [] } }));
+      // Through the same door, so a re-read that fails after a credit note was issued cannot make
+      // the note look as though it was never recorded.
+      await loadTrail(b.sessionId);
     } catch (e) { alert(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
   };
 
@@ -337,7 +352,11 @@ export default function AdminBills() {
 
       {/* Filters */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <button className="blz-chip" onClick={() => setState("")} style={chip(state === "")} title="Every bill loaded on this page \u2014 use the dates or the search to reach older ones">All <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? rows.length : "\u2014"}</span></button>
+        {/* A REAL EM DASH, NOT `\u2014` (T22 sweep, 2026-09-06). A JSX string ATTRIBUTE is not a
+            JavaScript string literal — it carries no backslash escapes — so this tooltip printed the
+            six characters `\u2014` to anyone who hovered the All chip. The two `{"\u2014"}` below are
+            inside expressions, where the escape IS processed, which is why only this one leaked. */}
+        <button className="blz-chip" onClick={() => setState("")} style={chip(state === "")} title="Every bill loaded on this page — use the dates or the search to reach older ones">All <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? rows.length : "\u2014"}</span></button>
         {ORDER.map((k) => (
           <button key={k} className="blz-chip" onClick={() => setState(k)} style={chip(state === k, META[k].tone)}>
             <span className="hue-ink" style={{ ["--hue" as string]: META[k].tone, display: "inline-flex" }}><Ico n={META[k].icon} s={14} /></span>
@@ -421,6 +440,7 @@ export default function AdminBills() {
             // labelled rather than fatal.
             const m = META[b.state] || { label: String(b.state || "Unknown"), tone: "#8b94a7", icon: "chev" as IconName };
             const isOpen = open === b.sessionId;
+            const ex = exp[b.sessionId];
             const del = b.state === "deleted";
             return (
               <div key={b.sessionId} style={{ borderBottom: "1px solid var(--adm-line, rgba(255,255,255,0.06))", background: del ? "color-mix(in srgb, #ef4444 8%, transparent)" : undefined }}>
@@ -502,14 +522,21 @@ export default function AdminBills() {
                       )}
                     </div>
 
+                    {ex !== "loading" && ex?.failed && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--adm-warn)", background: "color-mix(in srgb, var(--adm-warn) 10%, transparent)", margin: "12px 0 0", fontSize: 12.5 }}>
+                        <span>Couldn&apos;t read this bill&apos;s history just now — the three lists below are <b>not</b> empty, they are unknown.</span>
+                        <button className="adm-btn" style={{ marginLeft: "auto" }} onClick={() => { setExp((t) => ({ ...t, [b.sessionId]: "loading" })); loadTrail(b.sessionId); }}>Try again</button>
+                      </div>
+                    )}
+
                     <SecHead icon="invoice" label="Invoice history" />
-                    <InvoiceHistory e={exp[b.sessionId]} gens={b.invoiceGens} />
+                    <InvoiceHistory e={ex} gens={b.invoiceGens} />
 
                     <SecHead icon="reopen" label="Credit notes" />
-                    <CreditNotes e={exp[b.sessionId]} />
+                    <CreditNotes e={ex} />
 
                     <SecHead icon="log" label="What happened to this bill" />
-                    <Trail e={exp[b.sessionId]} openedAt={b.openedAt} rest={b.restaurantName} />
+                    <Trail e={ex} openedAt={b.openedAt} rest={b.restaurantName} />
 
                     <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {del ? (
@@ -590,7 +617,8 @@ function SecHead({ icon, label }: { icon: IconName; label: string }) {
 function InvoiceHistory({ e, gens }: { e: Expanded | undefined; gens: number }) {
   if (e === "loading" || e === undefined) return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>;
   const inv = e.invoiceHistory;
-  if (!inv.length) return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>Invoice not generated for this bill.</div>;
+  if (!inv.length) if (e.failed) return <div style={{ color: "var(--adm-warn)", fontSize: 12.5 }}>Couldn&rsquo;t read the invoice history. Not an empty list — an unread one.</div>;
+  return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>Invoice not generated for this bill.</div>;
   return (
     <>
       <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 8 }}>Generated <b style={{ color: "var(--text)" }}>{gens}</b> time{gens === 1 ? "" : "s"}{gens > 1 ? " — re-issued after a void." : "."}</div>
@@ -615,7 +643,8 @@ function InvoiceHistory({ e, gens }: { e: Expanded | undefined; gens: number }) 
 function CreditNotes({ e }: { e: Expanded | undefined }) {
   if (e === "loading" || e === undefined) return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>;
   const cn = e.creditNotes;
-  if (!cn.length) return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>No credit notes on this bill.</div>;
+  if (!cn.length) if (e.failed) return <div style={{ color: "var(--adm-warn)", fontSize: 12.5 }}>Couldn&rsquo;t read the credit notes. Not an empty list — an unread one.</div>;
+  return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>No credit notes on this bill.</div>;
   const total = cn.reduce((s, c) => s + c.amount, 0);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -634,7 +663,8 @@ function CreditNotes({ e }: { e: Expanded | undefined }) {
 function Trail({ e, openedAt, rest }: { e: Expanded | undefined; openedAt: string | null; rest: string }) {
   if (e === "loading" || e === undefined) return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>Loading trail…</div>;
   const t = e.trail;
-  if (!t.length) return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>No recorded changes for this bill.</div>;
+  if (!t.length) if (e.failed) return <div style={{ color: "var(--adm-warn)", fontSize: 12.5 }}>Couldn&rsquo;t read what happened to this bill. Not an empty list — an unread one.</div>;
+  return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>No recorded changes for this bill.</div>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
       {t.map((ev, i) => (

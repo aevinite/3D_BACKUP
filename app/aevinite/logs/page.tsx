@@ -413,8 +413,14 @@ export default function AdminLogs() {
             <div style={{ flex: "1 1 260px", minWidth: 200 }}>
               <b style={{ fontSize: 13 }}>Keep the Audit for</b>
               <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+                {/* THE WARNING HAS TO AGREE WITH ITS OWN SENTENCE (T22 sweep, 2026-09-06). This read
+                    `>= 8`, and the offered windows are 1 / 3 / 5 / 7 / 10 — so choosing SEVEN drew a
+                    red warning whose own words are "records are normally kept 6–8 years". Seven is
+                    inside that range, and docs/COMPLIANCE-GUARDRAILS.md says the same thing ("Records
+                    retention 6–8 years"), so the screen was contradicting itself and the rule it
+                    quotes. The line is where the doc puts it: below six is short. */}
                 {auditYears == null ? "…"
-                  : auditYears >= 8
+                  : auditYears >= 6
                     ? "Removals older than this are cleared automatically. Anything newer is kept — nothing here can be deleted by hand."
                     : `⚠ Records are normally kept 6–8 years. At ${auditYears} year${auditYears === 1 ? "" : "s"} you would no longer have the removal trail for older bills.`}
               </div>
@@ -507,7 +513,17 @@ function OpsTable({ rows, err, onRetry, scopedName, capped, onSendToClaude, onRe
   if (rows.length === 0) return <div className="adm-empty">No staff actions {scopedName ? `for ${scopedName}` : "yet"}.</div>;
   return (
     <>
-    <div className="adm-logwrap">
+    {/* NO SIDEWAYS SCROLL, ANYWHERE (owner, standing) — T22 sweep, 2026-09-06.
+        `.adm-logwrap` turns into `overflow-x:auto` with a 540px minimum row below 560px, so on a
+        390px phone this row measured 540px and the WHEN column sat at x=490-541: entirely off the
+        screen, reachable only by dragging the row sideways, with nothing saying it was there. On a
+        log whose whole job is answering "who did this, and when", "when" is the wrong column to
+        lose. The Audit tab below was rebuilt to stack for exactly this reason (globals.css,
+        `.aud-stack`, T7 pass 2), and the two sibling screens next door — the Bills ledger and the
+        Change log — were both folded in the T18 sweep. This tab and Customers were left behind.
+        `aud-stack` is that same mechanism, reused rather than re-invented: one block per row, in
+        reading order, column heads hidden because there are no longer any columns to head. */}
+    <div className="adm-logwrap aud-stack">
       <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>Panel</div><div>Action</div><div>When</div></div>
       {rows.map((a) => {
         const isErr = a.level === "error";
@@ -700,7 +716,19 @@ function CustTable({ data, err, onRetry }: { data: CustData | null; err: boolean
 
   return (
     <>
-      <div className="adm-logwrap" style={{ marginBottom: 16 }}>
+      {/* Stacked on a phone for the same reason as Operations above — this row measured 540px too,
+          so "Did" and "When" were both off a 390px screen. Its five columns need a word in front of
+          them once the heads are gone: "#4" and "Guest" on their own lines say nothing. ::before
+          rather than markup, so the desktop table keeps exactly the DOM (and the screen-reader
+          reading order) it had — the same technique the Change log uses. */}
+      <style>{`
+        @media (max-width: 560px) {
+          .logs-cust .adm-logrow > div:nth-child(2)::before { content: "table "; opacity: .65 }
+          .logs-cust .adm-logrow > div:nth-child(3)::before { content: "role "; opacity: .65 }
+          .logs-cust .adm-logrow > div:nth-child(4)::before { content: "did "; opacity: .65 }
+        }
+      `}</style>
+      <div className="adm-logwrap aud-stack logs-cust" style={{ marginBottom: 16 }}>
         <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>Guest</div><div>Table</div><div>Role</div><div>Did</div><div>When</div></div>
         {members.length === 0 ? <div className="adm-empty">No guests in sessions yet.</div> : members.map((m) => {
           const did = byMember.get(m.id) || { n: 0, calls: 0 };
