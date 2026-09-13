@@ -48,6 +48,7 @@ never treat it as a description of what exists.
 | `HRMEX-HR-PAYROLL-STUDY.md` | the study itself — what HR and payroll would mean for a restaurant this size. |
 | `HRMEX-MAP-AND-FLOWCHART.md` | the same study as a map: who does what, in what order. |
 | `HRMEX-SCREEN-BY-SCREEN.md` | the same study screen by screen, so a build could start from it. |
+| `LOYALTY-PLAN.md` | loyalty costed and phased. The NON-guest-mode version is the one to build first (owner, 2026-09-13): points on the printed bill, ₹0, no guest mode required. The guest-mode version is PARKED in its §3 — deferred, not rejected. |
 
 ## HISTORY — kept for the "why", never to follow
 
