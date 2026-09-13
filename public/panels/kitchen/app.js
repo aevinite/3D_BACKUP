@@ -1775,9 +1775,13 @@ function waitingWords() {
   if (!n) return { n: 0, stuck: false, text: "none — everything has printed", cls: "ok" };
   const ms = Number(w.oldestMs || 0);
   const stuck = ms >= (state.stuckAfterMs || 60000);
+  // PAST A DAY IT SAYS DAYS (owner, 2026-09-13: "it tells 4hr maybe it's been 3,4 day"). "76h ago"
+  // is a number a cook has to convert; "3d ago" is a dead printer, said once. Same thresholds as
+  // lib/printBoardWords.ts and the manager panel's fmtWaited — change all three together.
   const age = ms < 60000 ? "just now"
     : ms < 3600000 ? Math.round(ms / 60000) + " min ago"
-    : Math.round(ms / 3600000) + "h ago";
+    : ms < 86400000 ? Math.round(ms / 3600000) + "h ago"
+    : Math.round(ms / 86400000) + "d ago";
   return {
     n, stuck, age, cls: stuck ? "bad" : "ok",
     text: `${n} ticket${n === 1 ? "" : "s"} — oldest ${age}`,

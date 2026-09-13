@@ -467,6 +467,54 @@ check(!/PROFILE_ROLES|My profile/.test(kpanel.slice(kpanel.indexOf("function ope
   "…and the menu offers NO profile — the kitchen has none, and that has been ruled three times",
   "a profile appeared in the kitchen menu: ruled out 2026-07-29, re-confirmed 2026-08-05 and again in lib/staffProfileShared.ts. Do not add it");
 
+// ── 10. THE TIME SENTENCES, AND THE WAY OUT OF A BACKLOG (owner, 2026-09-13) ───────────────────
+//
+// *"It tells 4hr maybe it's been 3,4 day and all it only show time… I have not been able to delete
+// the queue which pend up till now even after restarting queue — there should be button of delete or
+// mark all till now as printed, so that all don't print together."*
+//
+// Three rules came out of that morning, and each of them is one line of code that is very easy to
+// write back the old way:
+//   • an age NEVER stops at hours — "76 hours" is a number nobody converts into "since Tuesday";
+//   • the printing log prints a DAY, not only a clock, for anything that is not today;
+//   • a backlog can be CLEARED, and clearing never claims the paper printed.
+const words = read("lib/printBoardWords.ts");
+const admPrint = read("app/aevinite/printing/page.tsx");
+const printApi = read("app/api/admin/printing/[...path]/route.ts");
+check(/export function waitedWords/.test(words) && /86_400_000/.test(words) && /days/.test(words),
+  "the shared age wording knows about days, not just hours (lib/printBoardWords.ts)",
+  "waitedWords() no longer says days — a queue stuck since Tuesday goes back to reading '76 hours'");
+check(/export function whenWords/.test(words) && /Yesterday/.test(words) && /Asia\/Kolkata/.test(words),
+  "…and whenWords() puts a DAY on anything that is not today, in the restaurant's own zone",
+  "whenWords() lost its day (or its time zone) — a clock alone cannot tell this morning from last week");
+// Every surface that says how long paper has been waiting, and the day threshold it must know.
+for (const [file, src] of [
+  ["public/panels/editor/app.js", epanel],
+  ["public/panels/kitchen/app.js", kpanel],
+])
+  check(/86400000/.test(src),
+    `${file} says DAYS when the printer has been silent that long`,
+    `${file} has an age that stops at hours — the owner's 2026-09-13 complaint, written straight back`);
+check(/whenWords\(j\.created_at\)/.test(admPrint) && !/toLocaleTimeString\("en-IN"[^)]*\)\}<\/td>/.test(admPrint),
+  "the admin console's What-has-printed log prints the day through whenWords()",
+  "the printing log went back to a bare clock — 07:14 am says nothing about WHICH 07:14 am");
+check(/fmtJobWhen\(j\.created_at\)/.test(epanel),
+  "…and the manager panel's copy of that log does the same",
+  "the manager panel's printing log is back to a bare clock (and its own time zone)");
+check(/seg\[0\] === "queue" && seg\[1\] === "clear"/.test(printApi),
+  "a backlog can be cleared in one press (POST printing/queue/clear)",
+  "the clear-the-queue verb is gone — stopping the queue only HOLDS the paper, and restarting it prints days of it at once");
+{
+  const i = printApi.indexOf('seg[0] === "queue" && seg[1] === "clear"');
+  const body = i < 0 ? "" : printApi.slice(i, i + 1400);
+  check(!!body && /status: "dismissed"/.test(body) && !/status: "done"/.test(body) && !/\.delete\(/.test(body),
+    "…and clearing DISMISSES the tickets — it never deletes them and never calls them printed",
+    "clearing the queue deletes rows or marks them printed: the log would then say paper came out that never did");
+}
+check(/queue\/clear/.test(admPrint) && /Clear the \{st\.waiting\}/.test(admPrint),
+  "the Printing screen has the button that does it, counting what is waiting",
+  "the admin's Clear-the-waiting-tickets button is gone — the queue can be stopped with no way to empty it");
+
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — read this file's header before 'fixing' the code\n`
   : "\n✓ a ticket is a row: it prints on a covered window, on either screen, exactly once\n");

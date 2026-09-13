@@ -302,6 +302,41 @@ const inrExact = (v) => {
 // reads shifted times that disagree with the IST business-day logic (one-time-zone rule).
 const fmtWhen = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "";
 const fmtClock = (ts) => ts ? new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "";
+// ── HOW LONG, AND WHEN — the same two sentences the admin console prints ──────────────────────
+// The TS copy is lib/printBoardWords.ts (waitedWords / whenWords); this file is a plain browser
+// script and cannot import it, so it carries the same shape by hand. Change one, change the other
+// in the same commit.
+//
+// Owner, 2026-09-13, on a printing board that said "4 hours" over slips he believed were days old:
+// *"it tells 4hr maybe it's been 3,4 day and all it only show time."* An age that stops at hours
+// ("76 hours") is a number nobody converts, and a clock with no day ("07:14 am") cannot tell this
+// morning from last Tuesday — which is the only question that log is read for.
+const fmtWaited = (ms) => {
+  const n = Number(ms || 0);
+  if (!n || n < 0) return "";
+  if (n < 60000) return "under a minute";
+  if (n < 3600000) return Math.round(n / 60000) + " minutes";
+  if (n < 86400000) return Math.round(n / 3600000) + " hours";
+  const d = Math.round(n / 86400000);
+  return d === 1 ? "a whole day" : d + " days";
+};
+// NOT fmtWhen() above: that one always prints the day, which is right for a bill but noise on a
+// log where most rows are from the last hour. This says the clock for today and the day for
+// anything older — the difference a person actually needs.
+const fmtJobWhen = (ts) => {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
+  const t = fmtClock(ts);
+  // en-CA is YYYY-MM-DD — the calendar day compared IN THE RESTAURANT'S ZONE, never the reader's.
+  const day = (x) => x.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const that = day(d), today = day(new Date());
+  if (that === today) return t;
+  if (that === day(new Date(Date.now() - 86400000))) return "Yesterday \u00b7 " + t;
+  const opts = { day: "numeric", month: "short", timeZone: "Asia/Kolkata" };
+  if (that.slice(0, 4) !== today.slice(0, 4)) opts.year = "numeric";
+  return d.toLocaleDateString("en-IN", opts) + " \u00b7 " + t;
+}
 // el: turn a string of HTML into a real, clickable page element we can insert.
 const el = (html) => {
   const t = document.createElement("template");
@@ -13642,7 +13677,7 @@ function printerAlerts() {
       // "for 11m ago" — timeAgo() already carries the "ago", so the sentence has to be built around
       // it, not in front of it. Written out in words because a manager reads this at a glance.
       text: `${n} kitchen ticket${n === 1 ? "" : "s"} waiting to print — the oldest has been waiting ${
-        Number(w.oldestMs) < 3600000 ? Math.round(Number(w.oldestMs) / 60000) + " minutes" : Math.round(Number(w.oldestMs) / 3600000) + " hours"
+        fmtWaited(w.oldestMs)
       }. Tell the kitchen to read the orders off their screen; every ticket still prints, in order, once the printer works.`,
       at: new Date(Date.now() - Number(w.oldestMs)).toISOString(),
     });
@@ -14088,7 +14123,7 @@ function formPrinting(s) {
   // ── 4 · WHAT HAS PRINTED ───────────────────────────────────────────────────────────────────
   const jobWord = (j) => j.status === "done" ? `<span style="color:var(--green)">printed</span>`
     : j.status === "failed" ? `<span style="color:var(--red)">gave up after ${j.attempts}</span>`
-    : j.status === "dismissed" ? `<span class="muted">nothing to print</span>`
+    : j.status === "dismissed" ? `<span class="muted">${/^(cleared|cancelled)/.test(j.error || "") ? "taken out — never printed" : "nothing to print"}</span>`
     : `<span style="color:var(--amber,#f5a524)">${esc(j.status)}</span>`;
   // HOW FAR BEHIND (owner, 2026-08-27) — the same fact the kitchen's 🖨 sheet and the floor strip
   // show, in the same words, from the same server field. A count on its own is not information:
@@ -14096,9 +14131,7 @@ function formPrinting(s) {
   const sk = B.stuck || { n: 0, oldestMs: null, afterMs: 60000 };
   const skStuck = Number(sk.n) > 0 && Number(sk.oldestMs || 0) >= Number(sk.afterMs || 60000);
   // A DURATION, not a timestamp: "nothing since 14 min ago" is two ways of saying when at once.
-  const skAge = !sk.oldestMs ? "" : Number(sk.oldestMs) < 60000 ? "under a minute"
-    : Number(sk.oldestMs) < 3600000 ? Math.round(Number(sk.oldestMs) / 60000) + " minutes"
-    : Math.round(Number(sk.oldestMs) / 3600000) + " hours";
+  const skAge = fmtWaited(sk.oldestMs);
   // Numbered by what came BEFORE it: choosing a computer adds a step that choosing a screen does not,
   // so this is 5 one way and 4 the other. The admin console numbers it the same way, from the same
   // rule, because two boards that number one setup differently are two setups to learn.
@@ -14123,7 +14156,7 @@ function formPrinting(s) {
           <td style="padding:6px 8px">${esc(L.kind[j.kind] || j.kind)}</td>
           <td style="padding:6px 8px">${esc(j.printer || "—")}</td>
           <td style="padding:6px 8px">${jobWord(j)}${j.error ? `<div class="muted" style="font-size:11.5px">${esc(j.error)}</div>` : ""}</td>
-          <td style="padding:6px 8px" class="muted">${esc(new Date(j.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }))}</td>
+          <td style="padding:6px 8px;white-space:nowrap" class="muted">${esc(fmtJobWhen(j.created_at))}</td>
         </tr>`).join("")}</tbody>
       </table></div>`}
     <div style="margin-top:10px"><button type="button" class="btn" data-pw="reload">Refresh</button></div>

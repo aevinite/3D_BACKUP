@@ -117,3 +117,68 @@ export const WHO_CHOICES = [
   { id: "off", label: "Nobody" },
 ] as const;
 
+// ── HOW LONG, AND WHEN — the two time sentences every printing screen prints ──────────────────
+//
+// Owner, 2026-09-13, looking at a board that said "Nothing has come out for 4 hours" over a list of
+// slips he thought were three or four days old: *"it tells 4hr maybe it's been 3,4 day and all it
+// only show time."* Both halves of that were real faults:
+//
+//  1. THE AGE STOPPED AT HOURS. Every copy of the wording ended `Math.round(ms / 3600000) + " hours"`,
+//     so a queue stuck since Tuesday read "76 hours" — a number nobody converts in their head — and
+//     a board read at a glance looks like a morning's backlog rather than a dead printer.
+//  2. THE LOG SHOWED A CLOCK AND NO DAY. "07:14 am" is the same nine characters whether the ticket
+//     is from this morning or last week, so the one table you read to answer "when did this stop"
+//     could not tell those apart. A time with no day is not a timestamp.
+//
+// Declared HERE because this file has no imports — the server, the admin console (a client
+// component) and anything else on the TS side share these exact words. The two panel files
+// (public/panels/editor/app.js, public/panels/kitchen/app.js) are plain browser scripts that cannot
+// import, so they carry their own copies of the same shape; if you change the thresholds here,
+// change them there in the same commit, and keep this file named in their comments.
+const IST = "Asia/Kolkata";
+
+/**
+ * HOW LONG SOMETHING HAS BEEN WAITING, in a sentence: "under a minute", "14 minutes", "4 hours",
+ * "3 days". Never a bare hour count past a day — the day is what makes a person act.
+ */
+export function waitedWords(ms: number | null | undefined): string {
+  const n = Number(ms || 0);
+  if (!n || n < 0) return "";
+  if (n < 60_000) return "under a minute";
+  if (n < 3_600_000) return `${Math.round(n / 60_000)} minutes`;
+  if (n < 86_400_000) return `${Math.round(n / 3_600_000)} hours`;
+  const d = Math.round(n / 86_400_000);
+  return d === 1 ? "a whole day" : `${d} days`;
+}
+
+/** The same fact where there is only room for a few characters (the all-restaurants list). */
+export function waitedShort(ms: number | null | undefined): string {
+  const n = Number(ms || 0);
+  if (!n || n < 0) return "";
+  if (n < 60_000) return "under a minute";
+  if (n < 3_600_000) return `${Math.round(n / 60_000)} min`;
+  if (n < 86_400_000) return `${Math.round(n / 3_600_000)}h`;
+  return `${Math.round(n / 86_400_000)}d`;
+}
+
+/**
+ * WHEN A JOB HAPPENED — a clock for today, a DAY as well for anything older.
+ *
+ * Always Asia/Kolkata, like the bill, the kitchen ticket and the banquet sheet (the fault fixed on
+ * this log on 2026-09-04): the restaurant's day is the only day that means anything, and the
+ * reader's laptop may be anywhere. The day boundary is compared in that zone too — comparing
+ * against the browser's midnight is how a 1 am ticket ends up labelled "Yesterday" in Mumbai.
+ */
+export function whenWords(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const time = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: IST });
+  // en-CA is YYYY-MM-DD, which sorts and compares as a plain string — the calendar day in IST.
+  const day = (x: Date) => x.toLocaleDateString("en-CA", { timeZone: IST });
+  const that = day(d), today = day(now);
+  if (that === today) return time;
+  if (that === day(new Date(now.getTime() - 86_400_000))) return `Yesterday · ${time}`;
+  const sameYear = that.slice(0, 4) === today.slice(0, 4);
+  return `${d.toLocaleDateString("en-IN", { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }), timeZone: IST })} · ${time}`;
+}
