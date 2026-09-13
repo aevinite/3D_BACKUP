@@ -461,7 +461,7 @@ Everything is a SINGLE Next app on **port 4000** (`npm run dev` / `START-ALL.bat
 The panels are routes inside it:
 
 - **/menu** — guest menu (`app/`). Scroll-spy category strip in `#sticky-header`.
-- **/aevinite** — the admin console (`app/aevinite/`), 23 pages: Access & permissions,
+- **/aevinite** — the admin console (`app/aevinite/`), 22 pages: Access & permissions,
   restaurants, owners, revenue, floor, bill-audit, rate limits, recycle bin, health, logs…
   It reads the `lfh_floor_state` brain for the live floor. **This is the password-gated
   console** (see Security gate). There is **no `/admin` route** — it was never renamed in
@@ -494,7 +494,7 @@ env vars are reliable in the Node runtime, which edge middleware could not promi
 actually guards what, verified route by route in the 2026-08-04 API sweep:
 
 - **`/aevinite` (the admin console)** — `app/aevinite/layout.tsx` checks `tokenIsValid` server-side.
-- **`/api/admin/**`** — every one of the 49 route files checks `tokenIsValid` (usually via a local
+- **`/api/admin/**`** — every one of the 51 route files checks `tokenIsValid` (usually via a local
   `admin(req)` / `requireAdmin(req)` helper), and in every handler the gate call precedes any
   database call. `/api/staff-login` stores the hashed `ADMIN_PASSWORD` cookie (`lib/staffAuth.ts`).
 - **`/api/{editor,kitchen,tablet,inventory}/**`** — `requireRole()` (`lib/userAuth.ts`), which ALSO
@@ -883,7 +883,7 @@ sections below rather than one long list, because each was written the day its b
 
 ## Routes
 
-There are **56** `page.tsx` routes, not four — count them with
+There are **55** `page.tsx` routes, not four — count them with
 `find app -name page.tsx | wc -l` rather than trusting a list in a document. The ones worth
 knowing by heart:
 

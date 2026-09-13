@@ -129,7 +129,12 @@ const COMPONENTS = {
 const PAGES = {
   home: "app/aevinite/page.tsx",
   access: "app/aevinite/access/page.tsx",
-  users: "app/aevinite/users/page.tsx",
+  // The Users roster moved out of app/ on 2026-09-13 — /aevinite/users is now a 308 route handler
+  // and the SCREEN is a component the merged /aevinite/people page renders. Every check below
+  // that reads CODE.users / SRC.users is about that screen, so it follows the screen.
+  users: "components/admin/UsersView.tsx",
+  owners: "components/admin/OwnersView.tsx",
+  people: "app/aevinite/people/page.tsx",
   analytics: "app/aevinite/analytics/page.tsx",
   revenue: "app/aevinite/revenue/page.tsx",
   customers: "app/aevinite/customers/page.tsx",
@@ -625,9 +630,20 @@ await phase("a bare YYYY-MM-DD is pinned to IST before it is read", () =>
   ok(/iso \+ "T00:00:00\+05:30"/.test(CODE.shared), "UTC midnight is 05:30 IST, and lands a day early behind UTC"));
 await phase("a negative amount reads −₹1,200, not ₹-1,200", () => ok(/v < 0 \? "−₹" : "₹"/.test(CODE.shared), "the sign belongs in front of the whole amount"));
 await phase("paise show only when there are paise", () => ok(/const hasPaise = Math\.abs\(Math\.round\(v\) - v\) > 0\.005;/.test(CODE.shared), "₹81,370 + ₹81,369 for two equal halves"));
-await phase("a person's OWN identity action never wears a Manager-PIN block", () =>
-  ok(/const SELF_ACTOR_ACTIONS = new Set\(\["login", "logout", "profile_setup", "profile_update", "password_change", "pin_set"\]\);/.test(CODE.shared),
-    "a login row is not a manager authorisation"));
+// Re-anchored 2026-09-13. This pinned the set's EXACT six-item literal, so it went red the moment
+// PR #443 legitimately WIDENED it (login_failed / login_denied / login_blocked joined the list —
+// all of them the same class of thing, and all of them correct). A guard that fails when the rule
+// it defends is strengthened teaches people to ignore it. The rule is "a person's own identity
+// action is in this set"; that is what is checked now, member by member, so the set can grow but
+// can never quietly LOSE one.
+await phase("a person's OWN identity action never wears a Manager-PIN block", () => {
+  const m = CODE.shared.match(/const SELF_ACTOR_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
+  if (!m) return ok(false, "SELF_ACTOR_ACTIONS is gone — every login row would read as a manager authorisation");
+  const have = new Set([...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]));
+  const must = ["login", "logout", "profile_setup", "profile_update", "password_change", "pin_set"];
+  const missing = must.filter((a) => !have.has(a));
+  return ok(missing.length === 0, `these are a person's OWN actions and are no longer exempt: ${missing.join(", ")}`);
+});
 await phase("an unknown action code is prettified, never printed raw", () =>
   ok(/export function actLabel/.test(CODE.shared), "`order_item_qty` between 'Placed order' and 'Signed in'"));
 await phase("the manager panel's internal name never reaches a chip", () =>
@@ -693,7 +709,12 @@ await phase("the loading screen leans only on globals.css", () =>
 await phase("…and it is sized so nothing shifts when the page lands", () => ok(/height: 26/.test(SRC.loading), "a jump on every navigation"));
 await phase("the error boundary records the exact page it happened on", () =>
   ok(/\$\{window\.location\.pathname\}\$\{digest\}/.test(CODE.error), "'admin page error' with no address is not actionable"));
-await phase("…and offers a way out that is not a reload", () => ok(/onClick=\{\(\) => reset\(\)\}/.test(CODE.error), "a dead end"));
+// Re-anchored 2026-09-13: PR #1314 made the button choose between reset() and a reload — a stale
+// CHUNK error cannot be cured by reset(), because it re-renders the same broken tree. The rule is
+// unchanged (there must be a way out that is not "reload the whole page"); only the shape moved,
+// so this now asserts reset() is REACHABLE from the button rather than that it is the only branch.
+await phase("…and offers a way out that is not a reload", () =>
+  ok(/onClick=\{[^}]*\breset\(\)/.test(CODE.error), "a dead end"));
 await phase("…and says the data is safe, because it is", () => ok(/Your data is safe — nothing was changed\./.test(SRC.error), "the honest sentence"));
 await phase("the admin layout gates on the cookie before anything renders", () =>
   ok(/const ok = await tokenIsValid\(store\.get\(AUTH_COOKIE\)\?\.value\);/.test(CODE.layout), "the gate is per-route, never in a middleware"));
@@ -902,7 +923,11 @@ console.log("\n── C · watching it run");
 const LIVE_PAGES = [
   ["/aevinite", "Dashboard"],
   ["/aevinite/access", "Access &amp; permissions"],
-  ["/aevinite/users", "Users &amp; access"],
+  // Was /aevinite/users → "Users &amp; access" until 2026-09-13, when the Owners and Users rosters
+  // merged behind one Owner/User switch. The old address is now a 308 (app/aevinite/users/route.ts),
+  // so this watches the page it redirects TO — a 308 would fail the "answers 200" phase below, and
+  // rightly: this band is about the screen an admin actually ends up looking at.
+  ["/aevinite/people", "Users &amp; owners"],
   ["/aevinite/analytics", "Platform analytics"],
   ["/aevinite/revenue", "Platform revenue"],
   ["/aevinite/customers", "Customers"],
@@ -1156,10 +1181,26 @@ await phase("…and a ?focus= key that names no row still serves the page", asyn
   const r = await getText("/aevinite/access?focus=definitely_not_a_row");
   return ok(r.status === 200, `status ${r.status}`);
 });
-await phase("a nonsense ?staff= id on Users still serves the list", async () => {
+// The Users roster moved into /aevinite/people?tab=users on 2026-09-13 (the Owner/User merge) and
+// the old address became a redirect. This phase follows the OLD address on purpose — it is the one
+// written down in bookmarks — and now asserts three things where it used to assert one:
+//   · a nonsense ?staff= id still serves the list rather than taking the page down;
+//   · the redirect lands on the USERS half, not whichever half happens to be first;
+//   · the ?staff= deep link SURVIVES the redirect. It nearly did not: the first version of the
+//     redirect dropped the query string, which would have quietly turned every saved link to a
+//     PERSON into a link to the list.
+await phase("a nonsense ?staff= id on Users still serves the list, and the deep link survives the move", async () => {
   if (NO_LIVE) return skip("--no-live");
-  const r = await getText("/aevinite/users?staff=00000000-0000-0000-0000-000000000000");
-  return ok(r.status === 200 && r.body.includes("Users &amp; access"), `status ${r.status}`);
+  const ID = "00000000-0000-0000-0000-000000000000";
+  // `get` is redirect:"manual", so this is the hop itself — exactly what we want to inspect.
+  const hop = await get(`/aevinite/users?staff=${ID}`);
+  const to = hop.headers?.get?.("location") || "";
+  if (!/\/aevinite\/people\?/.test(to)) return ok(false, `the old address did not redirect (status ${hop.status}, location "${to}")`);
+  if (!to.includes(`staff=${ID}`)) return ok(false, `the redirect DROPPED the ?staff= deep link: "${to}"`);
+  if (!/tab=users/.test(to)) return ok(false, `the redirect did not land on the Users half: "${to}"`);
+  // …and the page it lands on really renders, rather than redirecting into a 500.
+  const r = await getText(to.replace(/^https?:\/\/[^/]+/, ""));
+  return ok(r.status === 200 && r.body.includes("Users &amp; owners"), `landing page: status ${r.status}`);
 });
 await phase("a nonsense ?range= on analytics falls back to the default window", async () => {
   if (NO_LIVE) return skip("--no-live");

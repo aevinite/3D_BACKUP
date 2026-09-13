@@ -1948,7 +1948,7 @@ await phase("That door is told the click came from the bin, and ONLY the bin eve
   if (!/fromBin\?: boolean/.test(shared) && !/fromBin/.test(shared)) return "the bin opt-in is no longer its own argument";
   const senders = [];
   for (const f of ["app/aevinite/recycle/page.tsx", "app/aevinite/restaurants/page.tsx",
-                   "app/aevinite/owners/page.tsx", "app/aevinite/page.tsx"]) {
+                   "components/admin/OwnersView.tsx", "app/aevinite/page.tsx"]) {
     const c = strip(read(f));
     if (/openRestaurantPanel\([^)]*,\s*(true|rr\.binned|r\.binned)\s*\)/.test(c) || /bin=1/.test(c)) senders.push(f);
   }

@@ -158,14 +158,30 @@ function quotedStrings(src) {
 // ── 3 · A FILE A SCRIPT NAMES MUST EXIST ─────────────────────────────────────────────────────────
 // Most guards read product source by path and fall back to "" on a miss, which turns every check
 // about that file into a silent pass. Naming a path that has moved is the verify:cache fault exactly.
+//
+// ── EXCEPT WHEN BEING GONE IS THE POINT (2026-09-13) ────────────────────────────────────────────
+// "A new way replaces the old one" is a standing rule here, so several guards assert that a retired
+// path is ABSENT — `check(!exists("app/pair/page.tsx"), "the Allow page is DELETED, not left
+// standing")`. Those lines name a file that must not exist, and flagging them told the truth
+// backwards: the check was working exactly as designed, and this reported it as rot. Worse, the only
+// ways to "fix" it are to point the obituary at a live file or delete the check — both of which
+// remove the guard that stops the deleted thing coming back.
+//
+// So a path inside a NEGATED existence test is skipped. It is deliberately narrow: only `!exists(`
+// / `!existsSync(` immediately before the path on the same line. A path named anywhere else on that
+// line is still checked, and a genuinely rotted path in an ordinary read still fails.
 {
   const RX = /["'`]((?:app|lib|components|public|supabase|tests|scripts|\.github)\/[A-Za-z0-9_.\/\[\]@-]+\.(?:tsx?|jsx?|mjs|css|sql|md|json|html|js|yml|sh))["'`]/g;
+  const OBITUARY = /!\s*exists(?:Sync)?\s*\(\s*(?:join\([^)]*?,\s*)?$/;
   const bad = [];
   for (const f of scriptFiles) {
     const seen = new Set();
     for (const [ln, line] of codeLines(read(f))) {
       for (const m of line.matchAll(RX)) {
         const rel = m[1];
+        // "this file must NOT exist" — an obituary, not a stale pointer. Judged from the text
+        // immediately before the path, so it cannot swallow an unrelated read later on the line.
+        if (OBITUARY.test(line.slice(0, m.index))) continue;
         if (seen.has(rel)) continue;
         seen.add(rel);
         if (!existsSync(join(ROOT, rel))) bad.push(`${f}:${ln} — names ${rel}, which does not exist`);

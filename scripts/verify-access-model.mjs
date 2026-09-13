@@ -853,7 +853,7 @@ else ok("the read/write route derives every allow-list from the model");
 // Two halves, and both have to hold: the server still demands it, and the form still asks for it.
 {
   const assign = read("lib/tableAssign.ts");
-  const form = read("app/aevinite/users/page.tsx");
+  const form = read("components/admin/UsersView.tsx");
   const route = read("app/api/admin/users/route.ts");
   const demanded = /Pick at least one table for this waiter/.test(assign) && /newWaiterTables/.test(route);
   const bad = [];

@@ -161,6 +161,10 @@ export const ACT_LABEL: Record<string, string> = {
   login: "Signed in", logout: "Signed out", profile_setup: "Completed profile", profile_update: "Updated profile",
   pin_set: "Set PIN", password_change: "Changed password",
   user_create: "Created user", user_delete: "Deleted user", user_reset_password: "Reset password",
+  // Uncovering somebody else's password is its own door on the admin console (owner,
+  // 2026-09-13) — these three say what happened without ever naming the value.
+  admin_reveal_unlocked: "Uncovered passwords", admin_reveal_denied: "Wrong password on the uncover gate",
+  admin_reveal_password: "Looked at a password",
   user_enable: "Enabled user", user_disable: "Disabled user", user_set_role: "Changed role", user_set_access: "Changed access",
   order_add_item: "Added a dish", order_item_qty: "Changed quantity", order_item_note: "Edited a note",
   order_item_delete: "Removed a dish", order_delete: "Deleted a bill", order_move: "Moved order",

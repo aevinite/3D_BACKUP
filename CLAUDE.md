@@ -146,11 +146,11 @@ built to switch to subdomains by config, not rewrite. Redis/queues/replicas are 
 - Next 16.3.4 App Router (async params), React 19.2.8, TS strict, Tailwind 4, GSAP (npm only).
   `<model-viewer>` via CDN inside `components/PublicModelViewer.tsx`. GLBs on Supabase Storage.
 - **ONE app on port 4000** (`npm run dev`). Panels are routes: `/menu` guest · `/aevinite` admin
-  console (23 pages, password-gated; there is NO `/admin` route) · `/manager` + `/editor` (both
+  console (22 pages, password-gated; there is NO `/admin` route) · `/manager` + `/editor` (both
   embed `public/panels/editor/` — a "manager panel" bug = edit `app.js` there) · `/kitchen` ·
   `/tablet` · `/owner` (16 pages) · `/login`, `/staff-login`. Panel APIs live at
   `app/api/<name>/[...path]/route.ts`.
-- **56 page routes** (`find app -name page.tsx | wc -l`) and **THREE guest menu doors** — `/menu`,
+- **55 page routes** (`find app -name page.tsx | wc -l`) and **THREE guest menu doors** — `/menu`,
   `/r/<slug>/menu`, `/q/<code>` — every guest rule must hold in all three (PR #761's lesson).
 - Menu data via `lib/menu.ts` (anon key); categories/filters are DB-driven; multilingual via
   `lib/i18n.ts`. **A re-seed re-runs EVERY migration with no ledger** — prefer
@@ -167,7 +167,7 @@ percent-escapes are damaged used to answer a bare HTTP 500 from inside Next's ow
 any page or error boundary could run, so it is turned into the guest "this menu isn't available"
 screen instead. Full story: `docs/CLAUDE-DETAIL.md` → Security gate. **Do not move any gate into
 it.** The gate stays per-route: `/aevinite` layout +
-all 49 `/api/admin/*` routes check `tokenIsValid` before any DB call (re-counted 2026-08-31 after the dead
+all 51 `/api/admin/*` routes check `tokenIsValid` before any DB call (re-counted 2026-08-31 after the dead
 `restaurants/panels` route was retired — it answered a constant and its POST was already 410;
 `find app/api/admin -name route.ts | wc -l` must equal the number that grep `tokenIsValid`); panel APIs use
 `requireRole()` (re-checks entitlement every request); `/api/owner/*` uses `ownerScope()`.

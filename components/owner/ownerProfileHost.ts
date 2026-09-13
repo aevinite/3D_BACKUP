@@ -92,6 +92,8 @@ export function ownerProfileHost(userId: string, scopePin: string | null, asPin:
     // address … they need nothing here." Aevidine's console opens the SAME component as a modal over
     // a page, so it leaves this absent and keeps its layer.
     pageHosted: true,
-    can: { pin: false, signIn: false, role: false, visitAsPerson: false, accessLink: false },
+    // showPassword stays FALSE here on purpose (owner, 2026-09-13). The admin console can read a
+    // password back; the owner cockpit embeds this same profile and does not get that door with it.
+    can: { pin: false, signIn: false, role: false, visitAsPerson: false, accessLink: false, showPassword: false },
   };
 }

@@ -255,7 +255,7 @@ export default function AdminAnalytics() {
           {tile({
             icon: "fa-user-group", label: "Active staff",
             value: t ? nf.format(t.totalStaff) : "…",
-            href: "/aevinite/users", title: "Manage users",
+            href: "/aevinite/people?tab=users", title: "Manage users",
             sub: "manager · kitchen · tablet · owner",
           })}
         </div>

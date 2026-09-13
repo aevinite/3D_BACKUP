@@ -121,10 +121,13 @@ const UNDECIDED = new Map([
 // source. If the expiry column goes, or the sweeper starts filtering by restaurant, the entry fails
 // like any other missing table.
 const SELF_CLEARING = new Map([
-  ["print_pairings", {
+  // Was print_pairings / lib/printPair.ts until 2026-09-13 — migration 380 DROPPED that table and
+  // replaced it with this one when the setup code replaced the Allow page. Same shape, same reason:
+  // a short-lived handshake row that the module sweeps platform-wide on every new code.
+  ["print_setup_codes", {
     expiry: "expires_at",
-    sweeper: "lib/printPair.ts",
-    why: "a print-helper handshake (mig 368), dead in 10 minutes; lib/printPair.ts deletes every expired row platform-wide at the start of each new pairing, so a purged restaurant's rows are gone within the hour whatever anyone does",
+    sweeper: "lib/printSetupCode.ts",
+    why: "a print-helper setup code (mig 380), dead in minutes; lib/printSetupCode.ts deletes every expired row platform-wide at the start of each new code, so a purged restaurant's rows are gone within the hour whatever anyone does",
   }],
 ]);
 
@@ -178,8 +181,17 @@ for (const [t, c] of SELF_CLEARING) {
   //     that filtered by restaurant_id would never reach a purged restaurant's leftovers.
   let src = "";
   try { src = readFileSync(join(root, c.sweeper), "utf8"); } catch { }
-  const sweep = new RegExp(`from\\("${t}"\\)[\\s\\S]{0,200}?\\.delete\\(\\)[\\s\\S]{0,200}?\\.lt\\(\\s*"${c.expiry}"`).test(src);
-  const scoped = new RegExp(`from\\("${t}"\\)[\\s\\S]{0,200}?\\.delete\\(\\)[\\s\\S]{0,200}?restaurant_id`).test(src);
+  // ── JUDGE THE SWEEPING STATEMENT, NOT THE WHOLE FILE (2026-09-13) ─────────────────────────────
+  // `scoped` used to scan the entire source for any `.delete()` mentioning restaurant_id, which is
+  // a different question from the one this check asks. lib/printSetupCode.ts holds TWO deletes: the
+  // platform-wide expiry sweep (which is what makes the table self-clearing) and, in a different
+  // function, "kill this restaurant's previous live code" — a perfectly ordinary scoped delete. The
+  // second one made the first look restaurant-filtered, and the entry failed while the table really
+  // was clearing itself. So: find the sweep statement, then ask whether THAT statement is scoped.
+  const sweepRe = new RegExp(`from\\("${t}"\\)[\\s\\S]{0,200}?\\.delete\\(\\)[\\s\\S]{0,200}?\\.lt\\(\\s*"${c.expiry}"[\\s\\S]{0,200}?;`);
+  const m = src.match(sweepRe);
+  const sweep = !!m;
+  const scoped = sweep && /restaurant_id/.test(m[0]);
   if (!sweep) fail(`${c.sweeper} no longer sweeps expired ${t} rows — ${t} is not self-clearing any more and needs a line in admin_purge_restaurant()`);
   else if (scoped) fail(`${c.sweeper} now sweeps ${t} per restaurant, so a purged restaurant's rows would never be reached — ${t} needs a purge line`);
   else pass(`${t} is left out of the purge on purpose, and it really does clear itself: ${c.why}`);

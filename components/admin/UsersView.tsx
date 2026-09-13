@@ -1,4 +1,7 @@
 "use client";
+// components/admin/UsersView.tsx — the USER half of Admin → "Users & owners" (merged there
+// 2026-09-13; it was its own page at /aevinite/users until then, and that address still works —
+// it redirects. Unchanged apart from the "Show password" block in a person's edit panel.)
 // /aevinite/users — the admin's staff-user manager. Create logins for the three
 // panels (manager / kitchen / tablet); then EVERYTHING about an existing user
 // (rename, role, password, enable/disable, self-reset, delete) lives inside a
@@ -32,7 +35,7 @@ const field: React.CSSProperties = { boxSizing: "border-box", padding: "10px 12p
 const btn = (bg: string): React.CSSProperties => ({ padding: "10px 14px", borderRadius: 9, border: 0, background: bg, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", minHeight: 40 });
 const label: React.CSSProperties = { display: "grid", gap: 4, fontSize: 12, color: "var(--muted)" };
 
-export default function AdminUsers() {
+export default function UsersView() {
   const [users, setUsers] = useState<User[]>([]);
   const [restaurants, setRestaurants] = useState<{ id: string; name: string }[]>([]);
   const [err, setErr] = useState("");
@@ -175,7 +178,6 @@ export default function AdminUsers() {
   return (
     <div className="usp">
       <UsersStyle />
-      <h1 className="adm-page-h">Users &amp; access</h1>
       <p className="adm-page-sub">Every staff login across your restaurants. Search a person, or filter by restaurant / role — then tap them to edit. (Owners are assigned on the Restaurants page.)</p>
 
       {err ? <div className="usp-banner err">{err}</div> : null}

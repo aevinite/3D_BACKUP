@@ -7,13 +7,25 @@
 // tablet accounts — with the password beside it, and one button that prints the lot as a clean
 // handover sheet he can give a client.
 //
+// COVERED UNTIL HE ASKS (owner, 2026-09-13). The passwords do not arrive with the page. The card
+// loads every name, role and login id, marks which rows HAVE a stored password, and covers the
+// values behind one box: type the admin password, and they show for five minutes. Signing in to the
+// console is the right bar for reading a restaurant's bills; it is not the right bar for reading
+// back a client's password off a screen anybody could be standing behind. lib/revealGate.ts.
+//
 // THE ONE THING THAT IS NOT POSSIBLE, SAID ON SCREEN RATHER THAN HIDDEN. A password created before
 // migration 330 was never stored in a readable form (only its one-way hash), so it cannot be shown
-// — by anyone. Those rows say "not stored yet" and offer **Show**, which sets a NEW password and
-// keeps it readable from then on. That is a real change to a live login, so it asks first and says
-// plainly that anyone signed in on it will have to sign in again. Everything created or changed
-// from now on — including a staff member changing their own password in their panel — is readable
-// here without touching anything.
+// — by anyone, uncovered or not, and no amount of typing the admin password changes that. Those
+// rows say so and offer **Set a new one**, which mints a password and keeps it readable from then
+// on. Everything created or changed since — including a staff member changing their own password in
+// their panel — is readable here without touching anything.
+//
+// AND CHANGING A PASSWORD NO LONGER EMPTIES THE FLOOR (owner, 2026-09-13: "the table and the
+// password change no relation"). A new password decides who may sign in NEXT time; `token_version`
+// decides who is signed in NOW. They were tied together, so a handover reset signed out the kitchen
+// mid-service — and the server refused while any table was open to stop it. Both are gone: the
+// sign-out is a tick you have to put IN, off by default, and the card just says how many tables are
+// live so the decision is made with the number in front of you.
 //
 // PRINTING. No pop-up window (a blocked pop-up is the silent-tap bug this same sweep is fixing):
 // the sheet renders in a normal modal and a `@media print` block hides the rest of the console, so
@@ -24,15 +36,24 @@ import { adminFetch } from "@/lib/adminFetch";
 import { CopyButton } from "@/components/admin/CopyButton";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { useToast } from "@/components/admin/toast";
+import { RevealChip, RevealUnlock, useReveal } from "@/components/admin/useReveal";
 
 type Login = {
   id: string; role: string; roleLabel: string; name: string; username: string;
-  active: boolean; primary: boolean; password: string | null;
+  active: boolean; primary: boolean;
+  /** The value — only ever present while the console is uncovered. */
+  password: string | null;
+  /** Whether a readable copy EXISTS at all. Answered even while covered, because "this row will
+   *  print blank" is the question you ask before deciding to uncover anything. */
+  hasPassword: boolean;
 };
 type Data = {
   restaurant: { id: string; name: string; slug: string; active: boolean; binned: boolean; guestUrl: string };
   logins: Login[];
   vaultReady: boolean;
+  unlocked: boolean;
+  /** Live tables this second — null when the count could not be read. Advice, never a veto. */
+  openTables: number | null;
   generatedAt: string;
 };
 
@@ -49,6 +70,9 @@ function personName(l: Login, restaurantName: string): boolean {
 
 export default function CredentialsCard({ restaurantId }: { restaurantId: string }) {
   const toast = useToast();
+  // The shared console-wide uncover window. `unlocked` here and `d.unlocked` from the last read are
+  // two different moments in time; the hook is the live one and it is what the card draws from.
+  const { unlocked, configured } = useReveal();
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -63,23 +87,36 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
   }, [restaurantId]);
   useEffect(() => { load(); }, [load]);
 
+  // The values live on the SERVER's side of the gate — they were never sent while covered, so there
+  // is nothing on this page to un-hide. Crossing the line in EITHER direction re-reads: uncovering
+  // fetches the passwords for the first time, and re-covering throws the copy in this component's
+  // memory away rather than leaving it sitting in a closed card.
+  const wasUnlocked = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (wasUnlocked.current === null) { wasUnlocked.current = unlocked; return; }
+    if (wasUnlocked.current === unlocked) return;
+    wasUnlocked.current = unlocked;
+    void load();
+  }, [unlocked, load]);
+
   const owners = (d?.logins || []).filter((l) => l.role === "owner");
   const panels = (d?.logins || []).filter((l) => l.role !== "owner");
 
-  // Set a new password for ONE login and show it. Confirmed first — this ends that person's
-  // current sessions, which is the honest cost of making an old password printable.
-  const reveal = async (l: Login) => {
+  // Mint a NEW password for ONE login and show it — the only route for a row that never had a
+  // readable copy. `signOut` is the caller's decision and defaults to off: a handover wants the new
+  // password on paper, not the person's tablet dropped to a login screen.
+  const reveal = async (l: Login, signOut: boolean) => {
     setConfirmId("");
     setBusy(l.id);
-    const r = await adminFetch<{ password: string }>("/api/admin/restaurants/credentials", {
+    const r = await adminFetch<{ password: string; signedOut: boolean }>("/api/admin/restaurants/credentials", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
-      body: JSON.stringify({ restaurant_id: restaurantId, user_id: l.id }),
+      body: JSON.stringify({ restaurant_id: restaurantId, user_id: l.id, signOut }),
     });
     setBusy(null);
     if (r.ok) {
-      setD((p) => (p ? { ...p, logins: p.logins.map((x) => (x.id === l.id ? { ...x, password: r.data.password } : x)) } : p));
-      toast(`New password set for ${l.name}.`);
+      setD((p) => (p ? { ...p, logins: p.logins.map((x) => (x.id === l.id ? { ...x, password: r.data.password, hasPassword: true } : x)) } : p));
+      toast(`New password set for ${l.name}.${r.data.signedOut ? " They have been signed out." : " Their screens stayed signed in."}`);
     } else toast(r.error || "Couldn't set a password.", "err");
   };
 
@@ -88,28 +125,31 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
   // all of them — and it is deliberately NOT the primary button on the card: the ordinary reason to
   // open this card is to READ the sheet, not to change every password on it.
   //
-  // The confirmation spells out the cost in the words that actually matter — everyone signed out — and
-  // the SERVER refuses outright while any table is open, so the dangerous case cannot be reached by
-  // pressing through a dialog. If it refuses, the reason it gives is shown as-is: it already names how
-  // many tables are open and what to do instead.
+  // The confirm step is now a real DECISION rather than a warning to press through, because the
+  // dangerous half is opt-in: the tick says whether the screens in the building get signed out, and
+  // the line under it says how many tables are live this second. Off, this changes nothing anybody
+  // is currently looking at. See the note above resetAll() in the route.
   const [resetAllStep, setResetAllStep] = useState<0 | 1>(0);
+  const [alsoSignOut, setAlsoSignOut] = useState(false);
   const resetAll = async () => {
     setResetAllStep(0);
     setBusy("__all__");
-    const r = await adminFetch<{ reset: number; logins: Login[]; failed?: string[] }>("/api/admin/restaurants/credentials", {
+    const signOut = alsoSignOut;
+    const r = await adminFetch<{ reset: number; logins: Login[]; failed?: string[]; signedOut: boolean }>("/api/admin/restaurants/credentials", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
-      body: JSON.stringify({ restaurant_id: restaurantId, action: "reset_all" }),
+      body: JSON.stringify({ restaurant_id: restaurantId, action: "reset_all", signOut }),
     });
     setBusy(null);
+    setAlsoSignOut(false);
     if (!r.ok) { toast(r.error || "Couldn't set the passwords.", "err"); return; }
     // Re-read rather than patching row by row: the answer carries every new password and the sheet
     // has to show exactly what the server stored, not what this component hoped it stored.
     await load();
     if (r.data.failed?.length) {
-      toast(`${r.data.reset} password${r.data.reset === 1 ? "" : "s"} set — but ${r.data.failed.length} failed (${r.data.failed.join(", ")}). Press Show on those.`, "err");
+      toast(`${r.data.reset} password${r.data.reset === 1 ? "" : "s"} set — but ${r.data.failed.length} failed (${r.data.failed.join(", ")}). Press Set a new one on those.`, "err");
     } else {
-      toast(`New passwords set for all ${r.data.reset} logins. Everyone has been signed out.`);
+      toast(`New passwords set for all ${r.data.reset} logins.${r.data.signedOut ? " Everyone has been signed out." : " Every screen stayed signed in."}`);
     }
   };
 
@@ -134,27 +174,19 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
             Everyone who can sign in to this restaurant. Print this as a handover sheet for the client.
           </p>
         </div>
+        <RevealChip />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="adm-btn" onClick={load} title="Reload">
             <i className="fas fa-rotate-right" style={{ marginRight: 7 }} aria-hidden="true" />Refresh
           </button>
-          {resetAllStep === 0 ? (
-            <button className="adm-btn" onClick={() => setResetAllStep(1)} disabled={!d || d.logins.length === 0 || busy === "__all__"}
-              title="Give every login here a new password, for a handover">
-              <i className="fas fa-key" style={{ marginRight: 7 }} aria-hidden="true" />
-              {busy === "__all__" ? "Setting…" : "New passwords for all"}
-            </button>
-          ) : (
-            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <button className="adm-btn danger" onClick={resetAll}>
-                <i className="fas fa-key" style={{ marginRight: 7 }} aria-hidden="true" />
-                Yes — reset all {d?.logins.length} and sign everyone out
-              </button>
-              <button className="adm-btn" onClick={() => setResetAllStep(0)}>Cancel</button>
-            </span>
-          )}
-          <button className="adm-btn primary" onClick={openSheet} disabled={!d || d.logins.length === 0}
-            title="Open a printable handover sheet">
+          <button className="adm-btn" onClick={() => setResetAllStep(1)}
+            disabled={!d || d.logins.length === 0 || busy === "__all__" || !unlocked}
+            title={unlocked ? "Give every login here a new password, for a handover" : "Uncover the passwords first"}>
+            <i className="fas fa-key" style={{ marginRight: 7 }} aria-hidden="true" />
+            {busy === "__all__" ? "Setting…" : "New passwords for all"}
+          </button>
+          <button className="adm-btn primary" onClick={openSheet} disabled={!d || d.logins.length === 0 || !unlocked}
+            title={unlocked ? "Open a printable handover sheet" : "Uncover the passwords first"}>
             <i className="fas fa-print" style={{ marginRight: 7 }} aria-hidden="true" />Print handover sheet
           </button>
         </div>
@@ -163,6 +195,58 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
       {err && (
         <div className="adm-empty" style={{ marginTop: 12 }}>
           Couldn&rsquo;t load the logins. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button>
+        </div>
+      )}
+
+      {/* COVERED. Shown above the list rather than instead of it — the roster is useful on its own
+          (who exists, which rows will print filled in), and hiding the whole card behind a password
+          box would make "who can sign in here?" cost a password too. */}
+      {d && d.vaultReady && !unlocked && configured !== null && (
+        <div className="pw-cover">
+          <RevealUnlock note="Type the admin password — the same one you signed in with — to read these for 5 minutes. They cover themselves again automatically." />
+        </div>
+      )}
+
+      {/* THE ONE PRESS, AS A DECISION. The tick is the whole point: with it off nothing anybody is
+          looking at right now changes, which is what a handover actually wants. */}
+      {resetAllStep === 1 && d && (
+        <div className="pw-cover pw-decide" role="group" aria-label="New passwords for every login">
+          <b style={{ fontSize: 14 }}>
+            Give all {d.logins.length} login{d.logins.length === 1 ? "" : "s"} at {d.restaurant.name} a new password?
+          </b>
+          <p className="hint" style={{ margin: "3px 0 0" }}>
+            Each one gets a fresh password, stored so it can be printed. The old passwords stop working.
+          </p>
+          <label className="pw-tick">
+            <input type="checkbox" checked={alsoSignOut} onChange={(e) => setAlsoSignOut(e.target.checked)} />
+            <span>
+              <b>Also sign everyone out of their screens</b>
+              <span className="hint" style={{ display: "block", marginTop: 2 }}>
+                {alsoSignOut
+                  ? "Every manager, kitchen and waiter screen at this restaurant drops to the login page the moment you press the button."
+                  : "Leave this off and every screen keeps working exactly as it is — the new passwords apply the next time somebody signs in."}
+              </span>
+            </span>
+          </label>
+          {/* The number, not a veto (owner, 2026-09-13). It only matters to the ticked case, so it
+              only appears there — a table count beside a decision it cannot affect is noise. */}
+          {alsoSignOut && (
+            <p className="pw-live" style={{ color: d.openTables ? "var(--adm-warn)" : "var(--muted)" }}>
+              <i className={`fas fa-${d.openTables ? "triangle-exclamation" : "circle-check"}`} style={{ marginRight: 7 }} aria-hidden="true" />
+              {d.openTables === null
+                ? "Couldn't check how many tables are open right now."
+                : d.openTables === 0
+                  ? "No tables are open right now — nobody is mid-service."
+                  : `${d.openTables} table${d.openTables === 1 ? " is" : "s are"} open right now. Those screens will go to the login page.`}
+            </p>
+          )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+            <button className={`adm-btn ${alsoSignOut ? "danger" : "primary"}`} onClick={resetAll}>
+              <i className="fas fa-key" style={{ marginRight: 7 }} aria-hidden="true" />
+              {alsoSignOut ? `Set all ${d.logins.length} and sign everyone out` : `Set all ${d.logins.length} new passwords`}
+            </button>
+            <button className="adm-btn" onClick={() => { setResetAllStep(0); setAlsoSignOut(false); }}>Cancel</button>
+          </div>
         </div>
       )}
 
@@ -178,7 +262,7 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
         <div className="adm-empty" style={{ marginTop: 12 }}>Loading logins…</div>
       ) : d && d.logins.length === 0 ? (
         <div className="adm-empty" style={{ marginTop: 12 }}>
-          This restaurant has no logins yet. Create them on the <a href="/aevinite/users" style={{ color: "var(--accent)" }}>Users</a> page.
+          This restaurant has no logins yet. Create them on the <a href="/aevinite/people?tab=users" style={{ color: "var(--accent)" }}>Users</a> page.
         </div>
       ) : d ? (
         <div className="pw-list">
@@ -193,26 +277,48 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
                 {!l.active ? <span className="adm-chip" style={{ marginLeft: 6, fontSize: 10 }}>suspended</span> : null}
               </span>
               <span className="pw-user" style={mono}>{l.username}</span>
+              {/* FOUR STATES, AND TELLING THEM APART IS THE WHOLE JOB OF THIS CELL:
+                    · the value            — uncovered, and a readable copy exists
+                    · covered              — a copy EXISTS, the console is just covered (dots, not
+                                             a promise; the row will print filled in)
+                    · never stored         — no copy has ever existed. Uncovering changes nothing
+                                             here; only minting a new password does.
+                    · mid-confirm          — about to mint one, with the sign-out decision in view */}
               <span className="pw-pass">
                 {l.password ? (
                   <>
                     <b style={mono}>{l.password}</b>
                     <CopyButton className="adm-btn" style={{ fontSize: 11, padding: "3px 8px", marginLeft: 8 }} text={l.password} />
                   </>
+                ) : l.hasPassword ? (
+                  // Dots + a lock, never a bare blank: a blank cell and "there is no password" look
+                  // identical, and they are opposite facts about the handover you are about to print.
+                  <span className="adm-muted" style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12 }}>
+                    <b style={{ ...mono, letterSpacing: 2, fontSize: 14 }} aria-hidden="true">••••••••••</b>
+                    <span className="pw-sr">Saved, and covered</span>
+                    <i className="fas fa-lock" style={{ fontSize: 10.5, opacity: .8 }} aria-hidden="true" title="Covered — uncover above" />
+                  </span>
                 ) : confirmId === l.id ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span className="adm-muted" style={{ fontSize: 11.5 }}>Set a new one? They&rsquo;ll be signed out.</span>
-                    <button className="adm-btn primary" style={{ fontSize: 11.5, padding: "3px 9px" }} onClick={() => reveal(l)}>Yes, set it</button>
-                    <button className="adm-btn" style={{ fontSize: 11.5, padding: "3px 9px" }} onClick={() => setConfirmId("")}>Cancel</button>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                    <span className="adm-muted" style={{ fontSize: 11.5 }}>Mint a new one —</span>
+                    <button className="adm-btn primary" style={{ fontSize: 11.5, padding: "4px 9px", minHeight: 30 }}
+                      onClick={() => reveal(l, false)} title="They stay signed in on every screen">
+                      keep them signed in
+                    </button>
+                    <button className="adm-btn danger" style={{ fontSize: 11.5, padding: "4px 9px", minHeight: 30 }}
+                      onClick={() => reveal(l, true)} title="Ends every session this person has open">
+                      and sign them out
+                    </button>
+                    <button className="adm-btn" style={{ fontSize: 11.5, padding: "4px 9px", minHeight: 30 }} onClick={() => setConfirmId("")}>Cancel</button>
                   </span>
                 ) : (
                   <>
-                    <span className="adm-muted" style={{ fontSize: 12 }}>not stored — can&rsquo;t be read back</span>
-                    <button className="adm-btn" style={{ fontSize: 11.5, padding: "3px 9px", marginLeft: 8 }}
-                      disabled={busy === l.id || !d.vaultReady}
+                    <span className="adm-muted" style={{ fontSize: 12 }}>never stored — no copy exists</span>
+                    <button className="adm-btn" style={{ fontSize: 11.5, padding: "4px 9px", marginLeft: 8, minHeight: 30 }}
+                      disabled={busy === l.id || !d.vaultReady || !unlocked}
                       onClick={() => setConfirmId(l.id)}
-                      title="Set a new password for this login and show it here">
-                      {busy === l.id ? "Setting…" : "Show"}
+                      title={unlocked ? "Mint a password for this login and show it here" : "Uncover the passwords first"}>
+                      {busy === l.id ? "Setting…" : "Set a new one"}
                     </button>
                   </>
                 )}
@@ -220,11 +326,12 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
             </div>
           ))}
           <p className="hint" style={{ margin: "10px 0 0" }}>
-            A password set before this feature existed can&rsquo;t be read back — nothing kept a readable
-            copy of it. <b>Show</b> gives that login a new password and keeps it visible from then on.
-            <b> New passwords for all</b> does the same thing to every login here in one press, for a
-            handover — it signs everyone out, so it is refused while any table is open.
-            Passwords changed by staff in their own panel appear here automatically.
+            A password set before this feature existed can&rsquo;t be read back — nothing ever kept a
+            readable copy of it, so uncovering does not help those rows. <b>Set a new one</b> mints a
+            password for that login and keeps it visible from then on; <b>New passwords for all</b>
+            does it to every login here in one press, for a handover. Neither signs anybody out unless
+            you tick the box that says so. Passwords changed by staff in their own panel appear here
+            automatically. Everything is stored encrypted — this card is the only screen that can open it.
           </p>
         </div>
       ) : null}
@@ -238,6 +345,15 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
       )}
 
       <style>{`
+        .pw-cover{margin-top:12px;padding:14px;border:var(--border);border-radius:12px;background:var(--bg)}
+        .pw-decide{display:grid;gap:9px}
+        .pw-tick{display:flex;gap:10px;align-items:flex-start;cursor:pointer;padding:9px 10px;border:var(--border);border-radius:10px;background:var(--card)}
+        .pw-tick input{margin:2px 0 0;width:18px;height:18px;flex:0 0 18px;cursor:pointer;accent-color:var(--accent)}
+        .pw-tick:focus-within{outline:2px solid var(--accent);outline-offset:1px}
+        .pw-live{margin:0;font-size:12.5px}
+        /* Visible to a screen reader, not on screen: the dots are decoration, and "Saved, and
+           covered" is the fact they stand for. */
+        .pw-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
         .pw-list{margin-top:12px}
         .pw-row{display:grid;grid-template-columns:132px minmax(90px,1fr) 130px minmax(210px,1.3fr);gap:10px;align-items:center;padding:10px 0;border-bottom:var(--border);font-size:13px}
         .pw-row:last-of-type{border-bottom:0}

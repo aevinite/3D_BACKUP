@@ -77,8 +77,12 @@ const EXEMPT = {
     ['.eq("token_hash", hashAgentToken(t))', "a helper's token is globally unique and IS the thing that identifies its restaurant — the row read here is what supplies the rid"],
     ['.eq("id", agent.id)', "updates the agent row that the scoped read above returned, by its own primary key"],
   ],
-  "lib/printPair.ts": [
-    ['.eq("id", made.id)', "updates the row this function itself just created, by its own primary key"],
+  // Was keyed on lib/printPair.ts until 2026-09-13. Migration 380 retired the Allow-page handshake
+  // and `print_pairings` with it; the identical statement now lives in the file that replaced it, so
+  // the exemption follows the statement rather than the filename. The REASON is unchanged and still
+  // true: it writes back to the row this same function created a line earlier, by primary key.
+  "lib/printSetupCode.ts": [
+    ['.eq("id", made.id)', "updates the print_agents row this function itself just created, by its own primary key"],
   ],
   "lib/removalAudit.ts": [
     ['.eq("id", Stri', "reads the bill numbers of the session the caller is already acting on, to write them into the audit row"],

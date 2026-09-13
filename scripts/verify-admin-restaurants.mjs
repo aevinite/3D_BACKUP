@@ -46,7 +46,7 @@ const bad = (m) => { console.log("  ✗ " + m); failed++; };
 const want = (cond, m) => (cond ? ok(m) : bad(m));
 
 const REST = read("app/aevinite/restaurants/page.tsx");
-const OWN = read("app/aevinite/owners/page.tsx");
+const OWN = read("components/admin/OwnersView.tsx");
 const SET = read("app/aevinite/settings/page.tsx");
 const BILL = read("app/aevinite/billing/page.tsx");
 const BIN = read("app/aevinite/recycle/page.tsx");
@@ -391,7 +391,7 @@ want(/Admin only:/.test(CARD) && /table QR links at all/.test(CARD),
   // A locked field must not need a tooltip to be readable. The name was clipped with an ellipsis
   // and the only way to read it was a native title — which always draws down-and-right, onto the
   // Role picker (owner, with a screenshot). Both halves are guarded: no clipping, name-first title.
-  const USERS = read("app/aevinite/users/page.tsx");
+  const USERS = read("components/admin/UsersView.tsx");
   const lockedBox = (USERS.match(/\{scopedName \? \([\s\S]{0,1400}?\n {10}\) : \(/) || [""])[0];
   want(!/whiteSpace: "nowrap"/.test(lockedBox) && !/textOverflow: "ellipsis"/.test(lockedBox),
     "the locked Restaurant field shows the whole name instead of clipping it with an ellipsis");

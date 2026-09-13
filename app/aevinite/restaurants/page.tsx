@@ -1301,7 +1301,7 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
         <p className="hint" style={{ margin: "8px 0 0" }}>
           <i className="fas fa-circle-info" style={{ marginRight: 7 }} aria-hidden="true" />
           This restaurant already has an owner, but that account is <b>suspended or in the recycle bin</b>, so
-          it isn&rsquo;t in the list above. <a href="/aevinite/owners">Open Owners</a> to see who it is —
+          it isn&rsquo;t in the list above. <a href="/aevinite/people?tab=owners">Open Owners</a> to see who it is —
           picking somebody here replaces them.
         </p>
       )}
@@ -1315,7 +1315,7 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
           {" "}&mdash; {coOwnersNoPrimary.join(", ")}. Each of them sees its numbers today. What is missing is
           only the <b>primary</b> badge, which is the name this console shows in lists. Picking somebody above
           gives them that badge; it takes nothing away from the others.{" "}
-          <a href="/aevinite/owners">Open Owners</a> to change who is linked.
+          <a href="/aevinite/people?tab=owners">Open Owners</a> to change who is linked.
         </p>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
@@ -1421,7 +1421,7 @@ function EnterCard({ restaurant }: { restaurant: Restaurant }) {
       {/* Group 2 — its people. */}
       <div style={{ marginTop: 14, paddingTop: 14, borderTop: "var(--border)" }}>
         <div style={grpLabel}>Its people</div>
-        <a className="adm-btn" href="/aevinite/users" title="Create or manage staff, managers & owners">
+        <a className="adm-btn" href="/aevinite/people?tab=users" title="Create or manage staff, managers & owners">
           <i className="fas fa-user-plus" style={{ marginRight: 7 }} aria-hidden="true" />Manage staff &amp; create users
         </a>
       </div>
