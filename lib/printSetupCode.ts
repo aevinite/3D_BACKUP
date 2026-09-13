@@ -125,22 +125,34 @@ export async function issueSetupCode(
  * setup — the board still says a code is live and how long it has — they have only lost the digits,
  * and the honest answer to that is a fresh code, not a second copy of a secret.
  */
-export async function liveCodeState(restaurantId: string): Promise<{ live: boolean; expiresAt: string | null }> {
+export async function liveCodeState(restaurantId: string): Promise<{
+  live: boolean; expiresAt: string | null; oldFileAt: string | null;
+}> {
   const row = (await sb.from("print_setup_codes")
-    .select("expires_at")
+    .select("expires_at, refused_old_file_at")
     .eq("restaurant_id", restaurantId).is("claimed_at", null)
     .gte("expires_at", new Date().toISOString())
-    .order("expires_at", { ascending: false }).limit(1).maybeSingle()).data as { expires_at: string } | null;
-  return { live: !!row, expiresAt: row?.expires_at || null };
+    .order("expires_at", { ascending: false }).limit(1).maybeSingle()).data as
+      { expires_at: string; refused_old_file_at: string | null } | null;
+  return {
+    live: !!row,
+    expiresAt: row?.expires_at || null,
+    // The ONE thing an old helper cannot tell the person itself (mig 381).
+    oldFileAt: row?.refused_old_file_at || null,
+  };
 }
 
 export type ClaimMachine = {
   fingerprint?: unknown; hostname?: unknown; printers?: unknown; os?: unknown;
+  /** The stamp the helper file carries, derived from its own text (printHelperScript.helperVersion).
+   *  A claim with NO stamp can only come from a file made before 2026-09-13 — see the refusal in
+   *  claimSetupCode, and mig 381 for the whole story. */
+  helper?: unknown;
 };
 
 export type ClaimResult =
   | { ok: true; token: string; name: string; restaurant: string; agentId: string }
-  | { ok: false; reason: "bad" | "used" | "expired" | "failed"; error: string };
+  | { ok: false; reason: "bad" | "used" | "expired" | "failed" | "oldfile"; error: string };
 
 /**
  * The helper redeems the code the person typed.
@@ -171,6 +183,24 @@ export async function claimSetupCode(rawCode: string, machine: ClaimMachine): Pr
   if (row.claimed_at) return { ...wrong, reason: "used" };
   if (new Date(row.expires_at).getTime() < Date.now()) return { ...wrong, reason: "expired" };
 
+  // ── AN OUT-OF-DATE FILE IS ITS OWN ANSWER, AND IT COSTS NOTHING (mig 381) ──────────────────
+  // Checked AFTER the code is known good, deliberately: an unstamped claim with a WRONG code must
+  // still read exactly like any other wrong code, or this becomes a way to tell real codes apart.
+  //
+  // Refused WITHOUT spending it. That is the whole point. When this was silent, an old helper
+  // burned the code, left a dead computer row behind and said nothing — so the next try did the
+  // same thing, and the owner photographed the identical error twice. Now the code on his screen
+  // survives with its clock still running, nothing is created, and the BOARD can say why: an old
+  // helper cannot show our message, because reading it is the thing that is broken in it.
+  if (!String(machine.helper || "").trim()) {
+    await sb.from("print_setup_codes")
+      .update({ refused_old_file_at: new Date().toISOString() }).eq("id", row.id);
+    return {
+      ok: false, reason: "oldfile",
+      error: "This helper file is out of date. On the Printing screen, press Copy under the helper file, paste it over the file on this computer, save it, and run it again — your setup code is still good.",
+    };
+  }
+
   const hostname = clean(machine.hostname, 80);
   // WIN THE ROW FIRST. Nothing is created until this update matches — see the note above.
   const won = await sb.from("print_setup_codes")
@@ -197,6 +227,32 @@ export async function claimSetupCode(rawCode: string, machine: ClaimMachine): Pr
   // (Inherited from mig 368's approvePairing, which had the identical filter. It mattered less then:
   // re-linking meant pressing Allow in a browser, and the error landed on a page rather than on a
   // person at a till.)
+  // ── A SETUP THAT NEVER FINISHED MUST NOT KEEP THE MACHINE'S NAME (2026-09-13) ──────────────
+  // Seen on the owner's own PC. His helper redeemed a code, a row called INFINITE was created, and
+  // the old file could not read the token back — so that row sat there having NEVER said hello, and
+  // the next attempt came back as "INFINITE (2)". Left alone, every failed setup permanently eats
+  // the real name of the machine, and the board fills with (2), (3), (4).
+  //
+  // A GHOST IS NARROWLY DEFINED, because getting this wrong would rename a working computer: it has
+  // never said hello AT ALL, and it is older than the ten minutes any setup code can live. A machine
+  // that genuinely joined says hello seconds later — the helper's own next act — so nothing real
+  // can sit in that window.
+  //
+  // It is RENAMED AND RETIRED, never deleted: print_agents rows are kept so the record of what
+  // printed where stays readable (mig 341), and a revoked row still holds its name against the
+  // UNIQUE index. The new name says plainly what it was.
+  const ghostCut = new Date(Date.now() - SETUP_CODE_TTL_MS).toISOString();
+  const ghosts = ((await sb.from("print_agents").select("id, name")
+    .eq("restaurant_id", row.restaurant_id).eq("name", wanted)
+    .is("last_seen_at", null).is("revoked_at", null)
+    .lt("created_at", ghostCut).limit(20)).data || []) as { id: string; name: string }[];
+  for (const g of ghosts) {
+    await sb.from("print_agents").update({
+      name: `${g.name} (never started, ${new Date().toISOString().slice(0, 10)})`,
+      revoked_at: new Date().toISOString(),
+    }).eq("id", g.id);
+  }
+
   const taken = ((await sb.from("print_agents").select("name")
     .eq("restaurant_id", row.restaurant_id).limit(500)).data || []) as { name: string }[];
   const names = new Set(taken.map((t) => t.name));

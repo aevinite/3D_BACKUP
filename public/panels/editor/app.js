@@ -13940,6 +13940,14 @@ function setupCodeCard() {
   const live = ((state.printBoard || {}).setupCode) || {};
   const mineLeft = mine ? setupCodeLeft(mine.expiresAt) : null;
   const liveLeft = live.expiresAt ? setupCodeLeft(live.expiresAt) : null;
+  // THE ONE THING AN OLD HELPER CANNOT SAY FOR ITSELF (mig 381). Reading our reply is exactly what
+  // is broken in a file from before 2026-09-13, so its own window can only show an error. The code
+  // is not spent by such an attempt, so this sits above one that still works.
+  const oldFile = live.oldFileAt
+    ? `<p class="hint" style="margin:0 0 11px"><b>That computer is running an out-of-date helper file.</b>
+         Nothing was used up — the code below still works. Press <b>Copy</b> on the helper file lower down,
+         paste it over the file on that computer, save it, and run it again.</p>`
+    : "";
   const body = mineLeft
     // Big, monospaced and widely spaced: it is read ALOUD down a phone as often as it is typed.
     ? `<div class="pw-code">
@@ -13954,7 +13962,7 @@ function setupCodeCard() {
              <b data-pw-left>${esc(liveLeft)}</b>. If you have lost it, show a new one — the old one stops
              working the moment you do.</p>`
         : "";
-  return `${body}
+  return `${oldFile}${body}
     <button type="button" class="btn primary" data-pw="setupcode">
       ${mineLeft || liveLeft ? "Show a new setup code" : "Show a setup code"}
     </button>

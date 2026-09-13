@@ -16,6 +16,8 @@
 // whether paper came out. Everything else stays server-side, which is why the machine is set up
 // once and never revisited — a change to the bill, the routing or the paper size needs no visit.
 
+import { createHash } from "node:crypto";
+
 export type HelperOs = "mac" | "windows" | "linux";
 
 export type HelperScriptArgs = {
@@ -168,6 +170,8 @@ banner() {
   echo ""
   echo "    Site       $SITE"
   echo "    Computer   $(scutil --get ComputerName 2>/dev/null || hostname)"
+  # THE ONE LINE THAT ANSWERS "is this the current file?" from a photograph.
+  echo "    Version    __HELPER_VERSION__"
   echo "    Printers   $1"
   echo ""
 }
@@ -300,7 +304,7 @@ link_up() {
     # this machine appears on it — nobody should have to wait for a first hello to be able to say
     # which printer prints the bills.
     answer="$(curl -s -m 25 -X POST "$SITE/api/print-agent/pair/claim" -H "content-type: application/json" \\
-      -d "{\\"code\\":\\"$tidied\\",\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"mac\\",\\"printers\\":$(printers_json)}")"
+      -d "{\\"code\\":\\"$tidied\\",\\"helper\\":\\"__HELPER_VERSION__\\",\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"mac\\",\\"printers\\":$(printers_json)}")"
     if [ -z "$answer" ]; then
       line "Could not reach $SITE. Check this computer is online, then try again."
       continue
@@ -628,6 +632,7 @@ echo   ================================================
 echo.
 echo     Site       %SITE%
 echo     Computer   %HOST%
+echo     Version    __HELPER_VERSION__
 echo.
 echo     This computer is not set up to print yet.
 echo.
@@ -652,7 +657,7 @@ echo.
 echo     Checking that code...
 REM The printer list travels WITH the code, so the Printing screen's dropdowns are full the moment
 REM this machine appears on it.
-powershell -NoProfile -Command "%PSPRINTERS%; $c=((Get-Content '%WORK%\\typed.txt' -Raw) -replace '[^A-Za-z0-9]','').ToUpper(); @{ code=$c; fingerprint='%FP%'; hostname='%HOST%'; os='windows'; printers=$out } | ConvertTo-Json -Compress -Depth 4" > "%WORK%\\claim.json" 2>nul
+powershell -NoProfile -Command "%PSPRINTERS%; $c=((Get-Content '%WORK%\\typed.txt' -Raw) -replace '[^A-Za-z0-9]','').ToUpper(); @{ code=$c; helper='__HELPER_VERSION__'; fingerprint='%FP%'; hostname='%HOST%'; os='windows'; printers=$out } | ConvertTo-Json -Compress -Depth 4" > "%WORK%\\claim.json" 2>nul
 del /q "%WORK%\\typed.txt" 2>nul
 REM ── NO CARET BEFORE THE PIPE, AND IT IS NOT A STYLE CHOICE (found on a real Windows PC,
 REM    2026-09-13). Inside a for /f "usebackq" command the text is handed to cmd, and a pipe that
@@ -712,6 +717,7 @@ echo   ================================================
 echo.
 echo     Site       %SITE%
 echo     Computer   %HOST%
+echo     Version    __HELPER_VERSION__
 echo.
 echo     Linked. Waiting for something to print.
 echo     You can minimise this window - it must stay running.
@@ -890,7 +896,7 @@ link_up() {
   while [ $n -lt 5 ]; do
     n=$((n+1))
     echo ""
-    echo "  This computer is not set up to print yet."
+    echo "  This computer is not set up to print yet.  (file __HELPER_VERSION__)"
     echo "  On the Aevidine Printing screen press \\"Show a setup code\\","
     echo "  then type the six characters here. It lasts ten minutes,"
     echo "  and nobody signs in on this computer."
@@ -900,7 +906,7 @@ link_up() {
     tidied="$(tidy_code "$typed")"
     [ -z "$tidied" ] && continue
     answer="$(curl -s -m 25 -X POST "$SITE/api/print-agent/pair/claim" -H "content-type: application/json" \\
-      -d "{\\"code\\":\\"$tidied\\",\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"linux\\",\\"printers\\":$(printers_json)}")"
+      -d "{\\"code\\":\\"$tidied\\",\\"helper\\":\\"__HELPER_VERSION__\\",\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"linux\\",\\"printers\\":$(printers_json)}")"
     if [ -z "$answer" ]; then echo "  Could not reach $SITE. Check this computer is online."; continue; fi
     case "$answer" in
       *'"ok":true'*)
@@ -1011,8 +1017,33 @@ while :; do
 done
 `;
 
+/**
+ * ── WHICH COPY OF THIS FILE IS THAT MACHINE RUNNING? (2026-09-13) ────────────────────────────
+ *
+ * THE FAULT THIS ENDS, and it cost the owner two rounds of the same photo. A caret bug was fixed
+ * and shipped; he ran the file again and got the IDENTICAL error, because the copy on his Desktop
+ * was still the old one. Nothing on his screen, in his screenshot, or on our board could tell an
+ * old copy from a new one — the two fail the same way and look the same doing it. The server knew
+ * something was wrong (his code was accepted at 15:43:20, a computer row was created, and it never
+ * came back) and had no way to say what.
+ *
+ * So the file carries a stamp, and it is DERIVED FROM ITS OWN TEXT rather than typed by hand:
+ * a version somebody has to remember to bump is a version that is wrong exactly when it matters.
+ * Change one character of any branch below and its stamp changes by itself.
+ *
+ * The SITE line is masked out before hashing, so the same file has the same stamp on backup, on the
+ * live site and on localhost — otherwise "is this the current file?" would have three answers.
+ */
+export function helperVersion(os: HelperOs): string {
+  const body = os === "windows" ? windows({ origin: "X" }) : os === "linux" ? linux({ origin: "X" }) : mac({ origin: "X" });
+  // …and the stamp itself is stripped before hashing, or inserting it would change what it is OF.
+  const bare = body.replace(/^(SITE=|set "SITE=|echo\s+Version|  echo "    Version).*$/gm, "");
+  return createHash("sha256").update(bare).digest("hex").slice(0, 7);
+}
+
 export function helperScript(os: HelperOs, a: HelperScriptArgs): string {
-  return os === "windows" ? windows(a) : os === "linux" ? linux(a) : mac(a);
+  const text = os === "windows" ? windows(a) : os === "linux" ? linux(a) : mac(a);
+  return text.replace(/__HELPER_VERSION__/g, helperVersion(os));
 }
 
 /** What the person must do with that text, per machine. The admin console shows these beside it and

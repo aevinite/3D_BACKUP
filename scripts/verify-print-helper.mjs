@@ -601,6 +601,60 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   check(/\.eq\("restaurant_id", restaurantId\)\.is\("claimed_at", null\)/.test(codeLib),
     "…and issuing a new one kills the live one, so two codes are never working at once",
     "issueSetupCode stopped clearing the previous live code: a screen left open in an office keeps a second working code behind it");
+  // ── WHICH COPY OF THE FILE IS THAT MACHINE RUNNING (mig 381) ──────────────────────────────
+  // The owner photographed the SAME error twice, an hour apart, with the fix already live — because
+  // the copy on his Desktop was the old one and NOTHING could tell them apart. The server knew
+  // (his code was accepted, a row was created, it never came back) and had no way to say it.
+  // ⚠️ PER BRANCH, AND IT MUST BE **ECHOED**. The first version of this check only asked that the
+  // placeholder existed somewhere in the file — so deleting both banner lines left it matching the
+  // copies inside the CLAIM BODY and the guard printed ok. Proved by sabotage (2026-09-13).
+  // The banner is the whole point: the server can be told the version by the claim, but only a line
+  // the window PRINTS can answer the question from a photograph, which is how this fault was
+  // reported twice in the first place.
+  {
+    const branchOf = (name) => {
+      const i = script.indexOf(`const ${name} = (a: HelperScriptArgs) =>`);
+      if (i < 0) return "";
+      const j = script.indexOf("\n`;", i);
+      return j < 0 ? script.slice(i) : script.slice(i, j);
+    };
+    const mute = ["mac", "windows", "linux"].filter((os) => {
+      const b = branchOf(os);
+      if (!b) return true;
+      return !b.split("\n").some((l) => /__HELPER_VERSION__/.test(l) && /^\s*(echo|  echo)/.test(l));
+    });
+    check(mute.length === 0 && /export function helperVersion/.test(script),
+      "every helper file PRINTS its stamp, where a photograph of the window will show it",
+      `the ${mute.join(", ") || "helper"} file does not print its version: an old copy and a new one fail the same way and look the same doing it, which is how the same error was photographed twice after it had been fixed`);
+  }
+  check(/createHash\("sha256"\)\.update\(bare\)/.test(script),
+    "…and the stamp is DERIVED from the file's own text, so it cannot be forgotten",
+    "the helper version is typed by hand again — a number somebody has to remember to bump is wrong exactly when it matters");
+  // Counted loosely on purpose: the three files quote it three different ways (two shells through
+  // an escaped JSON body, PowerShell through a hashtable), and pinning each spelling would make this
+  // go red for a quoting change that is perfectly correct.
+  check((script.match(/helper[^,]{0,12}__HELPER_VERSION__/g) || []).length >= 3,
+    "…and all three files SEND it when they redeem a code",
+    "a helper redeems a code without saying which copy of the file it is — the server is blind again");
+  check(/reason: "oldfile"/.test(codeLib) && /refused_old_file_at/.test(codeLib),
+    "a claim with no stamp is refused as an out-of-date file, and the board is told",
+    "an old helper is treated like any other claim: it spends the code, leaves a dead computer row, and nothing anywhere says why");
+  {
+    // THE REFUSAL MUST COST NOTHING. That is the whole value of it.
+    const fn = code(codeLib).slice(code(codeLib).indexOf("export async function claimSetupCode"));
+    const refuse = fn.indexOf('reason: "oldfile"');
+    const spend = fn.indexOf('claimed_at: new Date().toISOString()');
+    check(refuse > 0 && spend > 0 && refuse < spend,
+      "…and it is refused BEFORE the code is spent, so the one on screen still works",
+      "the out-of-date refusal happens after the code is spent — the person loses the code AND gets no answer");
+  }
+  check(/never started/.test(codeLib) && /\.is\("last_seen_at", null\)/.test(codeLib),
+    "a setup that never finished gives the machine's name back instead of keeping it for ever",
+    "a failed setup keeps the computer's real name, so the next try is (2) and the board fills with (3), (4)");
+  check(/\.lt\("created_at", ghostCut\)/.test(codeLib),
+    "…and only once it is older than any code could be, so a machine still connecting is never renamed",
+    "the ghost rule has no age bound: a computer that claimed a token seconds ago can be retired out from under itself");
+
   check(/rateAllowed\("print_setup_code"/.test(agentApi) && /status: 429/.test(agentApi),
     "…and a machine guessing codes meets a wall that is also the alarm",
     "the claim endpoint lost its rate limit — nothing counts or reports somebody working through codes");
@@ -720,7 +774,7 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   check(/Show a setup code/.test(page) && /Show a setup code/.test(epanel),
     "both boards have the same 'Show a setup code' button, in the same words",
     "one of the two printing boards lost the setup-code button — that board can no longer set a computer up at all");
-  check(/setupCode\?: \{ live: boolean; expiresAt: string \| null \}/.test(page)
+  check(/setupCode\?: \{[^}]*expiresAt: string \| null/.test(page)
     && /left<\/div>|left<\/span>|\} left/.test(page) && /data-pw-left/.test(epanel),
     "…and each shows a live countdown, so nobody has to guess how long they have",
     "a setup code is shown with no clock: 'ten minutes' said once, beside a code somebody is carrying to another room, is a number they then have to guess");
