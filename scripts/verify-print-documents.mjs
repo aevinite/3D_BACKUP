@@ -990,8 +990,17 @@ console.log("\n§Q · the app decides how often a computer checks in");
       return !idle.test(b) || "the old fixed wait is still there, so the interval it reads does nothing";
     });
     P(`…and the ${os} file reads it AFTER the answer that carries it`, () => {
-      const hello = b.indexOf("print-agent/hello");
-      const reads = b.indexOf("pollMs");
+      /* ⚠️ COMMENTS FIRST. This is about the order things RUN in, and a comment runs at no point at
+         all — so the text is stripped of REM / :: / # lines before either position is taken.
+         Found on 2026-09-13: a REM block explaining a Windows quoting fix happened to mention
+         "pollMs" while describing the three reads that were already correct, and it sits above the
+         print loop. The raw indexOf found that sentence first and this phase reported that the
+         helper reads its interval before the answer arrives — of a file where nothing had moved.
+         This guard's siblings in verify-print-helper strip comments for exactly this reason, and
+         the note at the top of THAT file records the same trap happening four times. */
+      const runnable = b.split("\n").filter((l) => !/^\s*(REM\b|::|#)/i.test(l)).join("\n");
+      const hello = runnable.indexOf("print-agent/hello");
+      const reads = runnable.indexOf("pollMs");
       if (hello < 0 || reads < 0) return "cannot find both the hello and the read";
       return reads > hello
         || "it reads the interval before the answer has landed — it would always fall back to 2s and look like it worked while ignoring the app for ever";

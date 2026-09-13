@@ -2202,14 +2202,53 @@ if (!browser) {
     }
   }
 
-  // THE TOGGLE'S WHOLE POINT: you see the setup for the mode you chose, and NOT the other one.
+  // THE PICKER'S WHOLE POINT: you see the setup for the way you chose, and NOT the other one.
   // The owner asked for it in those words — "only option which is selected setting for that option
   // will be shown" — so it is measured on the rendered screen, not in the source.
+  //
+  // ⚠️ THE WAY IS CHOSEN BY CLICKING A TAB NOW, NOT BY THE DATA (2026-09-13). Until the two-card
+  // menu landed, the board worked out which setup to show from the routes alone, so setting the
+  // routes was enough to drive it. It is not any more: the board opens on "computer" whenever the
+  // restaurant has ANY computer (page.tsx — `computerOn || agents.length > 0`), and this sweep
+  // always has one of its own. So the "screen" pass was measuring the COMPUTER tab, reported that
+  // the screen setup was missing, and the phase after it compared a tab with itself and said the
+  // picker hides nothing. Both were true of the sweep, not of the product.
+  //
+  // Clicking the tab is also the better test: it drives the control a person presses instead of
+  // arranging data and hoping the board agrees.
   const modeCounts = {};
+  const WAY_TAB = { computer: "A computer prints", screen: "A screen prints" };
   for (const m of ["computer", "screen"]) {
     await phase(`choosing "${m}" shows that setup and hides the other one`, async () => {
       await asShape(m);
       const page = await openAdmin("dark", 1440);
+      // Press the tab, exactly as a person would. It is found by the WORDS on it, so a class name
+      // changing underneath does not quietly turn this phase into a no-op.
+      //
+      // AND IT IS WAITED FOR, NOT GUESSED AT. openAdmin() ends on a fixed 400ms pause, which is
+      // plenty once the route is warm and is not on the first open of a fresh browser — measured:
+      // the "computer" pass reported "there is no tab to press" while the very same page, given six
+      // seconds, had it. A phase that races the screen it is measuring reports faults that belong to
+      // the harness, which is the one thing this file must not do.
+      try {
+        await page.waitForFunction(
+          `[...document.querySelectorAll("main.adm-main button")].some((x) => (x.innerText || "").includes(${JSON.stringify(WAY_TAB[m])}))`,
+          null, { timeout: 20000 });
+      } catch { /* reported as a missing tab below, which is the honest reading if it never arrives */ }
+      const hit = await page.evaluate(`(() => {
+        const want = ${JSON.stringify(WAY_TAB[m])};
+        const b = [...document.querySelectorAll("main.adm-main button")].find((x) => (x.innerText || "").includes(want));
+        if (!b) return false;
+        b.click();
+        return true;
+      })()`);
+      if (!hit) { await page.close(); return `there is no "${WAY_TAB[m]}" tab on the board to press`; }
+      // …and wait for the PANEL the tab opens, rather than a fixed pause: React has to re-render
+      // before there is anything to measure.
+      try {
+        await page.waitForFunction(`!!document.querySelector('main.adm-main [role="tabpanel"]')`, null, { timeout: 10000 });
+      } catch { /* the assertion below says which setup is missing, in words */ }
+      await page.waitForTimeout(300);
       const seen = await page.evaluate(`(() => {
         const root = document.querySelector("main.adm-main") || document.body;
         const vis = (el) => (typeof el.checkVisibility !== "function"
@@ -2227,11 +2266,61 @@ if (!browser) {
         : (wantsStation || "the screen setup is not on the screen after choosing it");
     });
   }
-  await phase("…and choosing one mode is genuinely LESS to read, not the same screen twice", () =>
-    (modeCounts.computer && modeCounts.screen)
-      ? (modeCounts.computer !== modeCounts.screen
-         || `both modes show ${modeCounts.computer} controls — the toggle hides nothing, which is the complaint he made about the old screen`)
-      : "the counts were never taken");
+  // ⚠️ ONE DATA SHAPE, BOTH TABS — and that is the whole strength of this phase (2026-09-13).
+  // It used to compare the two passes ABOVE, which each set the routes differently before looking.
+  // So the two screens could differ because the DATA differed, not because the picker hid anything:
+  // proved by sabotage — the tab was made to change nothing at all, both passes then rendered the
+  // same tab, and this phase still went green because asShape() had changed the kitchen-slip line
+  // underneath it. A phase that can pass for the wrong reason is not protecting the rule.
+  //
+  // So: fix the data, then press one tab and the other, and require that each setup is on its own
+  // screen and NOT on the other one. That is the owner's sentence — "you only see the option you
+  // have selected" — asked of the control that does it.
+  await phase("…and choosing one way is genuinely LESS to read, not the same screen twice", async () => {
+    if (!browser) return "skip: no browser to look at the rendered screen";
+    await asShape("computer");                       // one shape, unchanged for both looks
+    const page = await openAdmin("dark", 1440);
+    const look = async (label) => {
+      await page.waitForFunction(
+        `[...document.querySelectorAll("main.adm-main button")].some((x) => (x.innerText || "").includes(${JSON.stringify(label)}))`,
+        null, { timeout: 20000 });
+      await page.evaluate(`(() => {
+        const b = [...document.querySelectorAll("main.adm-main button")].find((x) => (x.innerText || "").includes(${JSON.stringify(label)}));
+        if (b) b.click();
+      })()`);
+      await page.waitForTimeout(600);
+      return page.evaluate(`(() => {
+        const root = document.querySelector("main.adm-main") || document.body;
+        const vis = (el) => (typeof el.checkVisibility !== "function"
+          || el.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true }))
+          && el.getBoundingClientRect().width > 0;
+        return { text: root.innerText,
+          controls: [...root.querySelectorAll("button, select, input, a")].filter(vis).length };
+      })()`);
+    };
+    const onComputer = await look(WAY_TAB.computer);
+    const onScreen = await look(WAY_TAB.screen);
+    await page.close();
+
+    const helperOn = (t) => /print-helper\.(command|bat|sh)|the helper file/i.test(t);
+    const stationOn = (t) => /print-station\.(command|bat|sh)/i.test(t);
+    const problems = [];
+    // ⚠️ WHAT IS *NOT* ASSERTED HERE, and why. On this one shape the computer owns the kitchen
+    // slips, so the SCREEN way is genuinely off — and an off way correctly shows its own "switch it
+    // on" state rather than a setup. Demanding the station file on that tab would be demanding the
+    // board lie. (My first version did exactly that and reported the board broken; phases 329–330
+    // above are where each setup is checked ON THE TAB THAT OWNS IT, with that way on.)
+    //
+    // The rule that holds on ANY shape is the owner's own sentence — "you only see the option you
+    // have selected" — and its load-bearing half is the HIDING.
+    if (!helperOn(onComputer.text)) problems.push("the computer tab does not show the helper file");
+    if (stationOn(onComputer.text)) problems.push("the computer tab ALSO shows the screen's launcher");
+    if (helperOn(onScreen.text)) problems.push("the screen tab still shows the helper file — the picker hides nothing");
+    if (onComputer.controls === onScreen.controls) {
+      problems.push(`both tabs show ${onComputer.controls} controls on the same data — the picker hides nothing`);
+    }
+    return problems.length === 0 || problems.join(" · ");
+  });
   await phase("…and neither mode is a wall of controls (he called the old one 'too much complicated')", () => {
     const worst = Math.max(modeCounts.computer || 0, modeCounts.screen || 0);
     return worst <= 40 || `the busier mode puts ${worst} controls on one screen`;
@@ -2573,34 +2662,58 @@ if (!browser) {
   await phase("with no computer set up, the printer dropdown is DISABLED", () =>
     /disabled=\{busy === "routes" \|\| agents\.length === 0\}/.test(admPage)
     || "the dropdown stays live with nothing to choose from");
-  await phase("…and it SAYS why, on hover and to a screen reader", () =>
-    /title=\{agents\.length === 0 \? "Set a computer up in step \d+ first/.test(admPage) && /aria-describedby/.test(admPage)
-    || "it is greyed out with no explanation — which is worse than not being there");
-  // ── …AND THE STEP IT SENDS YOU TO IS THE STEP THE COMPUTER IS ACTUALLY ON ───────────────────
+  // ⚠️ THE RULE, NOT THE SENTENCE (re-pointed 2026-09-13). This pinned the exact words "Set a
+  // computer up in step N first" — and the two-card menu stopped numbering the cards, so the board
+  // now says "Add the computer in the card above first". The RULE never changed: a control that is
+  // greyed out has to say why, on hover AND to a screen reader. Freezing the wording made this red
+  // for an improvement, which is the thing the note twelve lines down already warns about.
+  await phase("…and it SAYS why, on hover and to a screen reader", () => {
+    const t = /title=\{agents\.length === 0 \? "([^"]+)"/.exec(admPage);
+    if (!t) return "the disabled dropdown has no title at all — it greys out in silence";
+    // …and the sentence has to be an EXPLANATION, not a label: it must name the thing that is
+    // missing, or "say why" is satisfied by any words at all.
+    if (!/computer/i.test(t[1])) return `it says "${t[1]}" — which never mentions the computer that is missing`;
+    return /aria-describedby/.test(admPage)
+      || "a title alone: somebody using a screen reader is given a dead control and no reason";
+  });
+  // ── …AND A SENTENCE THAT SENDS YOU SOMEWHERE NAMES SOMEWHERE THAT EXISTS ───────────────────
   // T11 sweep #8, 2026-09-04. The phase above used to pin the WHOLE sentence, "Set a computer up in
   // step 3 first" — and step 3 is "Which printer gets which paper", the card the dropdown is already
-  // in. The computer is step 2. So the guard was not protecting the rule ("say why"), it was
-  // freezing a wrong number in place: three sentences on that screen sent a beginner to the step
-  // they were standing on, and this check went green over all of them for as long as they were
-  // there. Judge a guard by what it ASSERTS, not by whether it is green.
+  // in. The computer was step 2. So the guard was not protecting the rule ("say why"), it was
+  // freezing a wrong number in place: three sentences sent a beginner to the step they were standing
+  // on, and the check went green over all of them. Judge a guard by what it ASSERTS.
   //
-  // So the number is no longer hard-coded here either. It is read out of lib/printBoardWords.ts —
-  // the one place the step headings are declared — and every "step N" the screen quotes has to name
-  // a step that really holds what the sentence claims. This is the check that would have caught it.
-  await phase("…and every 'step N' on the screen names the step that really holds it", () => {
+  // ⚠️ RE-POINTED 2026-09-13, and the reason is the same lesson one turn later. The two-card menu
+  // stopped NUMBERING the cards — `STEPS.two` is "The computer that prints", with no "2 ·" — so the
+  // old check found no numbers to read and declared the board broken, when the board had simply
+  // stopped needing them. It reported an improvement as a fault for exactly as long as it stood.
+  //
+  // The rule underneath outlives both shapes: **a sentence that sends a person to another card must
+  // name a card that exists.** So this reads the headings out of lib/printBoardWords.ts, the one
+  // place they are declared, and checks whichever kind of pointer the board is currently using:
+  //   · while the cards are NUMBERED — every "step N" quoted on screen names the card that really
+  //     holds the thing the sentence is about (the original check, kept intact for that day);
+  //   · while they are NAMED — no "step N" may be quoted at all, because there is no step N to go
+  //     to, and a number a beginner cannot find on the screen is worse than no pointer.
+  await phase("…and every sentence that points somewhere names somewhere that exists", () => {
     const words = read("lib/printBoardWords.ts");
     const stepNo = (key) => {
       const m = new RegExp(key + ':\\s*"(\\d+)').exec(words);
       return m ? m[1] : null;
     };
     const computer = stepNo("two"), routes = stepNo("three");
-    if (!computer || !routes) return "lib/printBoardWords.ts no longer numbers its own steps — nothing can be checked against";
+    const quoted = [...admPage.matchAll(/(?:[Ss]et (?:a|the) computer up in|dropdowns in) step (\d+)/g)];
+
+    if (!computer || !routes) {
+      // The cards are NAMED, not numbered. Nothing may quote a step number.
+      return quoted.length === 0
+        || quoted.map((m) => `"…step ${m[1]}"`).join(" · ")
+           + " — the board stopped numbering its cards, so these send a beginner looking for a number that is not on the screen";
+    }
     const bad = [];
-    // "set a/the computer up in step N" must point at the card the COMPUTER is on.
     for (const m of admPage.matchAll(/[Ss]et (?:a|the) computer up in step (\d+)/g)) {
       if (m[1] !== computer) bad.push(`"set a computer up in step ${m[1]}" — the computer is step ${computer}`);
     }
-    // "the dropdowns in step N" must point at the card the printer dropdowns are on.
     for (const m of admPage.matchAll(/dropdowns in step (\d+)/g)) {
       if (m[1] !== routes) bad.push(`"the dropdowns in step ${m[1]}" — they are in step ${routes}`);
     }
