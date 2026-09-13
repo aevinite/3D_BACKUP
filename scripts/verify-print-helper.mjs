@@ -1182,13 +1182,35 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
   }
   // 3 · macOS TCC DOES NOT LET A BACKGROUND ITEM READ ~/Desktop — and the guide tells everybody to
   //     save the file there. A start-up item pointing at the Desktop is refused every single time.
-  check(/local run="\$HOME_DIR\/helper\.command"/.test(script) && /cp -f "\$SELF" "\$run"/.test(script),
+  check(/local run="\$HOME_DIR\/helper\.command"/.test(script) && /cp -f "\$SELF" "\$run\.new"/.test(script),
     "…and it runs from a COPY in its own folder, because macOS refuses a background item the Desktop",
     "the Mac's start-up item points at wherever the person saved the file — on any modern macOS that is the Desktop, which TCC blocks, so it can never restart itself");
 
-  check(/ThrottleInterval<\/key><integer>300</.test(script),
-    "…and the Mac's auto-start does not re-run it every ten seconds while it is unlinked",
-    "the LaunchAgent lost its ThrottleInterval: an unlinked machine re-runs this file 360 times an hour writing a log nobody asked for");
+  // TEN SECONDS, NOT FIVE MINUTES. The case that matters is a helper that died mid-service, and a
+  // restaurant cannot wait five minutes for its kitchen slips. The unlinked case — the reason a long
+  // throttle was tried first — waits on its own inside link_up instead.
+  check(/ThrottleInterval<\/key><integer>10</.test(script) && /sleep 50\n    return 1/.test(script),
+    "…and a helper that died mid-service is back in ten seconds, while an unlinked one waits quietly",
+    "the LaunchAgent's restart delay is long again, or the unlinked path stopped waiting: either a restaurant waits minutes for its printing after a crash, or an unlinked machine re-runs this file six times a minute");
+  // AND THE ITEM IT WRITES MUST NOT KILL THE COPY launchd IS RUNNING. `launchctl unload` on your own
+  // job stops you dead — the helper came up, unloaded itself, and launchd reported a clean exit 0
+  // while the restaurant's computer never polled once (measured on a real Mac, 2026-09-13).
+  check(/cmp -s "\$PLIST\.new" "\$PLIST"/.test(script) && /cat > "\$PLIST\.new"/.test(script),
+    "…and launchd is only told about the item when it has actually changed, so it never unloads itself",
+    "install_autostart unloads and reloads the job on every start: the copy launchd started is IN that job, so it kills itself every time and the computer never polls");
+  // A REAL REFUSAL, NOT A BLIP. Deleting the token on any non-ok answer means a moment of bad wifi
+  // unlinks a restaurant's printer and costs them a fresh setup code.
+  // BOTH FILES, COUNTED. Breaking only the Mac's left this green because the Linux one still
+  // matched — proved by sabotage. Two shells, two copies of the rule, two counts.
+  check((script.match(/if \[ "\$HCODE" != "200" \] && \[ "\$HCODE" != "401" \]/g) || []).length >= 2
+    && (script.match(/if \[ "\$HCODE" != "401" \]/g) || []).length >= 2,
+    "…and only the site actually refusing the code (401) counts as being unlinked",
+    "the helper throws its own token away on ANY answer that is not ok:true — an empty reply, a timeout or a 502 mid-deploy then unlinks a restaurant's printer and it needs a new setup code");
+  // Counted in both files, for the same reason as the check above.
+  check((script.match(/cp -f "\$SELF" "\$run\.new"/g) || []).length >= 2
+    && (script.match(/mv -f "\$run\.new" "\$run"/g) || []).length >= 2,
+    "…and its own copy is written aside and moved into place, never over a running one",
+    "the helper copies itself straight over the file launchd is executing: that shell then reads nonsense mid-run, which is how it came to throw its own token away");
 
   // 2 · A REFUSED TOKEN CLEARS ITSELF. It used to tell a restaurant to go and delete a file inside a
   // hidden folder, so the real outcome was a machine that never printed again and nobody knowing why.
