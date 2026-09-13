@@ -17,7 +17,7 @@ import { SkelList } from "@/components/admin/Skeleton";
 // THE WORDS ARE SHARED WITH THE RESTAURANT'S OWN SCREEN (owner, 2026-08-27: "the UI/UX is also not
 // identical"). Four steps, three kinds of paper, one sentence each — declared once in
 // lib/printBoardWords.ts and printed verbatim by both boards, so they cannot drift apart again.
-import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, paperLabel } from "@/lib/printBoardWords";
+import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, paperLabel, waitedWords, waitedShort, whenWords } from "@/lib/printBoardWords";
 
 type Rest = { id: string; slug: string; name: string };
 type Paper = { name?: string; wMm: number; hMm: number };
@@ -76,7 +76,9 @@ function Overview({ over, onOpen }: { over: Over; onOpen: (id: string) => void }
     return 4;
   };
   const rows = [...over.rows].sort((a, b) => rank(a) - rank(b) || b.waiting - a.waiting || a.name.localeCompare(b.name));
-  const age = (ms: number | null) => !ms ? "" : ms < 60000 ? "under a minute" : ms < 3600000 ? `${Math.round(ms / 60000)} min` : `${Math.round(ms / 3600000)}h`;
+  // ONE COPY OF THE WORDS, and it knows about days (lib/printBoardWords.ts). This used to stop at
+  // hours, so a shop whose printer died on Tuesday sat in this list reading "76h".
+  const age = (ms: number | null) => waitedShort(ms);
   const seen = (r: OverRow) =>
     !r.computers ? "no computer yet"
     : r.connected ? `awake · seen ${r.secondsAgo ?? 0}s ago`
@@ -823,7 +825,33 @@ const PANEL_GROUPS: [ string, string ][] = [
                   Stop the queue
                 </button>
               )}
+              {/* ── THE WAY OUT OF A BACKLOG (owner, 2026-09-13) ────────────────────────────────
+                  "I have not been able to delete the queue which pend up till now even after
+                  restarting queue… so that all don't print together." Stopping the queue is only
+                  half an answer — it HOLDS the paper, and restarting it prints every held ticket at
+                  once. This is the other half: the waiting ones are taken out for good.
+                  They are DISMISSED, not deleted and never marked printed — the rows and their
+                  reason stay in the log below, because a log that says a ticket printed when it did
+                  not is worse than no log. Nothing about the orders, the bills or the money moves. */}
+              {(st.waiting || 0) > 0 ? (
+                <button className="adm-btn danger" style={{ fontSize: 12 }} disabled={!!busy}
+                  onClick={async () => {
+                    if (!confirm(`Clear ${st.waiting} waiting ticket${st.waiting === 1 ? "" : "s"}?\n\nThey will never print — this is how you stop a whole backlog coming out at once when the printer comes back.\n\nThe orders themselves are untouched and stay on the kitchen screen, and every cleared ticket stays in the list below with its reason. New orders from now on print normally.`)) return;
+                    const d = await post("queue/clear", {});
+                    if (d) { toast(`Cleared ${(d as { cleared?: number }).cleared ?? 0} — none of them will print.`, "ok"); void load(); }
+                  }}>
+                  Clear the {st.waiting} waiting {st.waiting === 1 ? "ticket" : "tickets"}
+                </button>
+              ) : null}
             </div>
+            {/* Said where the button is, because "I restarted it and they all came out" is exactly
+                what happened to him. */}
+            {(st.waiting || 0) > 0 ? (
+              <p className="adm-muted" style={{ margin: "-6px 0 12px", fontSize: 12 }}>
+                Restarting the queue does not empty it — every waiting ticket still prints, in order.
+                Clearing takes them out for good, so only new orders come out.
+              </p>
+            ) : null}
             {/* HOW FAR BEHIND, not just how many (owner, 2026-08-27: "'the printer is off' and 'the
                 printer is off and eleven orders are stacked up' stop looking the same"). The same
                 field, the same words and the same threshold as the kitchen's own 🖨 sheet and the
@@ -832,10 +860,9 @@ const PANEL_GROUPS: [ string, string ][] = [
             {st.stuck && st.stuck.n > 0 ? (() => {
               const sk = st.stuck as Stuck;
               const stuck = (sk.oldestMs ?? 0) >= sk.afterMs;
-              // A DURATION, not a timestamp: "nothing since 14 min ago" says when twice.
-              const age = !sk.oldestMs ? "" : sk.oldestMs < 60000 ? "under a minute"
-                : sk.oldestMs < 3600000 ? `${Math.round(sk.oldestMs / 60000)} minutes`
-                : `${Math.round(sk.oldestMs / 3600000)} hours`;
+              // A DURATION, not a timestamp: "nothing since 14 min ago" says when twice. Past a day
+              // it says DAYS — see lib/printBoardWords.ts for why "76 hours" was a real complaint.
+              const age = waitedWords(sk.oldestMs);
               return (
                 <div className="adm-state" style={{ marginBottom: 12 }}>
                   <div className={`adm-state-row ${stuck ? "warn" : "yes"}`}>
@@ -869,7 +896,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                         <td style={{ padding: "6px 8px" }}>
                           {j.status === "done" ? <span style={{ color: "var(--adm-ok, #30a46c)" }}>printed</span>
                             : j.status === "failed" ? <span style={{ color: "var(--adm-danger, #e5484d)" }}>gave up after {j.attempts}</span>
-                            : j.status === "dismissed" ? <span className="adm-muted">nothing to print</span>
+                            : j.status === "dismissed" ? <span className="adm-muted">{/^(cleared|cancelled)/.test(j.error || "") ? "taken out — never printed" : "nothing to print"}</span>
                             : <span style={{ color: "var(--adm-warn, #f5a524)" }}>{j.status}{j.attempts ? ` · try ${j.attempts + 1}` : ""}</span>}
                           {j.error ? <div className="adm-muted" style={{ fontSize: 11.5 }}>{j.error}</div> : null}
                         </td>
@@ -881,8 +908,12 @@ const PANEL_GROUPS: [ string, string ][] = [
                             banquet sheets are all pinned to Asia/Kolkata. It is the same fault the
                             printed bill had fixed on 2026-08-05, the banquet sheet on 2026-08-06 and
                             the kitchen ticket on 2026-08-17; this log was the one left on device
-                            time. One time zone everywhere, like the money and the logs. */}
-                        <td style={{ padding: "6px 8px" }} className="adm-muted">{new Date(j.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}</td>
+                            time. One time zone everywhere, like the money and the logs.
+                            AND A DAY, NOT JUST A CLOCK (owner, 2026-09-13: "it only show time").
+                            "07:14 am" reads the same whether the slip is from this morning or last
+                            Tuesday — which is the very question this table exists to answer.
+                            whenWords() adds the day to anything that is not today. */}
+                        <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }} className="adm-muted">{whenWords(j.created_at)}</td>
                         {/* ONE TICKET AT A TIME. "Take it out" DISMISSES it — the row and its reason
                             stay, so "why did table 6's slip never come out" still has an answer
                             months later. Nothing here deletes anything. */}

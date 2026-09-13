@@ -16,7 +16,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import {
   agentsView, createAgent, readRoutes, writeRoutes, mintAgentToken,
-  PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch,
+  PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch, waitingCount,
 } from "@/lib/printHelpers";
 // The board itself — headings, words, paper sizes and the four steps — is shared with the panel, so
 // the two screens cannot drift into two different products (owner, 2026-08-27: "the UI/UX is also
@@ -411,6 +411,34 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     if (!upd.data) return err("Only a ticket that failed or was cancelled can go back in.", 404);
     await logAction("admin", "print_switch", { restaurant_id: rid, detail: "put a ticket back in the printing queue" });
     return NextResponse.json({ ok: true });
+  }
+  // ── CLEAR WHAT IS WAITING — the way out of a backlog (owner, 2026-09-13) ──────────────────
+  //
+  // *"I have not been able to delete the queue which pend up till now even after restarting queue —
+  // there should be button of delete or mark all till now as printed, so that all don't print
+  // together."* Stopping the queue was only ever half an answer: it holds the paper back, and the
+  // moment it restarts every held ticket comes out at once, which for a printer that has been dead
+  // since Tuesday is a metre of stale slips for food that was cooked, served and paid for.
+  //
+  // DISMISSED, NEVER DELETED and never called "printed". Same rule as one ticket's "Take it out"
+  // above: the row and its reason stay, so "why did table 6's slip never come out" still has an
+  // answer months later. Calling them printed would be the one thing this app must never do — put a
+  // word in the log that did not happen.
+  //
+  // It touches PAPER ONLY. No order, no bill, no sale and no number moves: a kitchen slip that never
+  // printed is a piece of paper that never existed, and the orders are all still on the kitchen
+  // screen where the cooks read them.
+  if (seg[0] === "queue" && seg[1] === "clear") {
+    // Counted first, because the update is deliberately written WITHOUT `.select()` — a restaurant
+    // three days behind can have hundreds of rows waiting and nothing here needs them.
+    const n = await waitingCount(rid);
+    if (!n) return NextResponse.json({ ok: true, cleared: 0 });
+    const upd = await sb.from("print_jobs")
+      .update({ status: "dismissed", done_at: new Date().toISOString(), error: "cleared from the queue by Aevidine — this ticket was never printed" })
+      .eq("restaurant_id", rid).in("status", ["queued", "printing"]);
+    if (upd.error) return err("Could not clear the queue.");
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: `cleared ${n} waiting ticket${n === 1 ? "" : "s"} from the printing queue — none of them printed` });
+    return NextResponse.json({ ok: true, cleared: n });
   }
   // STOP / RESTART THE WHOLE QUEUE. Deliberately NOT the same as switching printing off: tickets go
   // on being made and go on waiting, and the moment it restarts they come out. Switching printing
