@@ -1152,6 +1152,40 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     && /if \/I "%~1"=="\/auto" if not exist "%TOKENFILE%"/.test(script),
     "…and a copy that cannot be typed into steps aside instead of waiting for a code",
     "the helper prompts for a setup code with no terminal and nobody there — it will wait for ever and never say why");
+  // ── THREE FAULTS IN THE START-UP ITEM, ALL FOUND BY INSTALLING IT ON A REAL MAC ──────────
+  // (2026-09-13.) Every earlier check asked whether the item EXISTED. It did — perfectly, and
+  // uselessly, three different ways. None of them is visible without reading what launchd wrote and
+  // then asking launchd to run it.
+  //
+  // 1 · IN ZSH, $0 INSIDE A FUNCTION IS THE FUNCTION'S NAME. install_autostart read it to work out
+  //     where the script was, so the item named "<cwd>/install_autostart" — a file that has never
+  //     existed. launchd: "can't open input file".
+  {
+    // Two halves: the path IS captured at the top, and install_autostart never reaches for $0.
+    const topLevel = (script.match(/^SELF="\$\(cd "\$\(dirname "\$0"\)" && pwd\)\/\$\(basename "\$0"\)"$/gm) || []).length;
+    const bodies = [...script.matchAll(/install_autostart\(\) \{([\s\S]*?)\n\}/g)]
+      .map((m) => m[1].split("\n").filter((l) => !/^\s*#/.test(l)).join("\n"));
+    const reads0 = bodies.filter((b) => /\$0/.test(b)).length;
+    check(topLevel === 2 && bodies.length === 2 && reads0 === 0,
+      "the helper works out its own path at the TOP of the file, never inside a function",
+      `install_autostart reads $0 again (${reads0} of ${bodies.length} do, ${topLevel} of 2 files capture it at the top): in zsh that is the FUNCTION's name, so the start-up item points at a file called install_autostart and the helper never comes back after a reboot`);
+  }
+  // 2 · AN XML COMMENT MAY NOT CONTAIN A DOUBLE HYPHEN — and "--auto" is one. A plist with a
+  //     comment like that is invalid XML, so launchd keeps whatever job it had cached and ignores
+  //     every later edit: the file on disk looks right and none of it is in effect.
+  {
+    const i = script.indexOf("<?xml"), j = script.indexOf("PLISTEOF", i);
+    const plist = i < 0 ? "" : script.slice(i, j);
+    check(!!plist && !plist.includes("<!--"),
+      "the start-up item carries no XML comment, so it cannot be made invalid by a double hyphen",
+      "there is a comment inside the generated plist: an XML comment may not contain `--`, and `--auto` is one — launchd then silently keeps a stale job and every edit to the file does nothing");
+  }
+  // 3 · macOS TCC DOES NOT LET A BACKGROUND ITEM READ ~/Desktop — and the guide tells everybody to
+  //     save the file there. A start-up item pointing at the Desktop is refused every single time.
+  check(/local run="\$HOME_DIR\/helper\.command"/.test(script) && /cp -f "\$SELF" "\$run"/.test(script),
+    "…and it runs from a COPY in its own folder, because macOS refuses a background item the Desktop",
+    "the Mac's start-up item points at wherever the person saved the file — on any modern macOS that is the Desktop, which TCC blocks, so it can never restart itself");
+
   check(/ThrottleInterval<\/key><integer>300</.test(script),
     "…and the Mac's auto-start does not re-run it every ten seconds while it is unlinked",
     "the LaunchAgent lost its ThrottleInterval: an unlinked machine re-runs this file 360 times an hour writing a log nobody asked for");
