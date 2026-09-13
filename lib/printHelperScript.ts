@@ -116,6 +116,17 @@ const mac = (a: HelperScriptArgs) => `#!/bin/zsh
 #  is the reason.
 # ══════════════════════════════════════════════════════════════════════════════
 SITE="${safe(a.origin)}"
+# ── WHERE THIS FILE IS, WORKED OUT HERE AND NOWHERE ELSE ─────────────────────────────────────
+# IN ZSH, \$0 INSIDE A FUNCTION IS THE FUNCTION'S OWN NAME — not the script. install_autostart
+# used to read it inside itself, so the start-up item it wrote pointed at a file called
+# "install_autostart" in whatever directory the helper happened to be started from, and launchd
+# answered:
+#     /bin/zsh: can't open input file: …/install_autostart
+# The helper therefore NEVER came back after a reboot, while the window and the guide both promised
+# it would. Found by installing it for real on a Mac and reading the item it wrote (2026-09-13) —
+# every earlier test checked that the item EXISTED, which it did, perfectly and uselessly.
+# At the top level of a script \$0 is the script, so it is captured once, here.
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 WORK="$HOME/Library/Caches/aevidine-print"
 HOME_DIR="$HOME/.aevidine-print"
@@ -233,21 +244,50 @@ banner "\${PLIST_NAMES:-none found}"
 #     step means the shop opens, nothing prints, and nobody knows why.
 #   · KeepAlive restarts it if it ever dies mid-service. A Login Item does not.
 # Written every run and it is idempotent: if the file is already right, nothing happens.
+# ── AND NOT ONE COMMENT INSIDE THE PLIST ─────────────────────────────────────────────────────
+# An XML comment may not contain a double hyphen — so "--auto", written inside one, makes the whole
+# file invalid XML. launchd then keeps whatever job it had cached and silently ignores every later
+# edit, which is the worst way for a start-up item to fail: the file on disk looks right, and none
+# of it is in effect. (Mine did exactly that for a few hours on 2026-09-13. plistlib refuses to read
+# it, which is how it was caught.) The two notes that were in here live above this function now.
+#
+# ── ARGUMENTS: what each key is for ─────────────────────────────────────────────────────────
+#   --auto            nobody is watching this copy; with no token it steps aside rather than
+#                     waiting at a prompt in a window that does not exist (mig 380)
+#   KeepAlive         bring it back if it ever dies mid-service
+#   ThrottleInterval  five minutes between restarts. launchd's default is ten SECONDS, which is
+#                     right for a crash and wrong for a machine nobody has linked yet.
 install_autostart() {
-  local me="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  # ── IT RUNS FROM ITS OWN FOLDER, NEVER FROM THE DESKTOP ────────────────────────────────────
+  # macOS TCC does not let a background item read ~/Desktop, ~/Documents or ~/Downloads. The guide
+  # tells everybody to save this file on the DESKTOP — so a start-up item pointing there is refused
+  # by the system every single time:
+  #     /bin/zsh: can't open input file: /Users/<name>/Desktop/print-helper.command
+  # The file, the path and the plist were all perfect; the folder was the problem. Measured on a
+  # real Mac on 2026-09-13, after fixing two other faults that were hiding it.
+  #
+  # So the helper keeps a copy of itself in its own folder (already chmod 700) and the start-up item
+  # runs THAT. It also makes the promise survive somebody moving the Desktop file, renaming it, or
+  # putting it in the bin once it "looks like it is working" — which is the ordinary thing to do
+  # with a file you were told to type out once.
+  #
+  # Re-running the Desktop file after pasting a newer one refreshes the copy, so updating is still
+  # "paste, save, double-click" and nothing else.
+  local run="$HOME_DIR/helper.command"
+  if [ "$SELF" != "$run" ]; then
+    cp -f "$SELF" "$run" 2>/dev/null && chmod +x "$run" 2>/dev/null
+  fi
+  [ -x "$run" ] || run="$SELF"          # copy refused: better a start-up item that may be blocked
+  local me="$run"                      # the path came from SELF, at the top. Never work it out here.
   mkdir -p "$(dirname "$PLIST")"
   cat > "$PLIST" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.aevidine.print</string>
-  <!-- --auto says "nobody is watching this one": with no token it waits quietly instead of
-       sitting at a prompt in a window that does not exist (mig 380). -->
   <key>ProgramArguments</key><array><string>/bin/zsh</string><string>$me</string><string>--auto</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <!-- Five minutes between restarts. KeepAlive's default is ten SECONDS, which is the right answer
-       for a helper that died mid-service and the wrong one for a machine nobody has linked yet. -->
   <key>ThrottleInterval</key><integer>300</integer>
   <key>StandardErrorPath</key><string>$WORK/launchd.log</string>
 </dict></plist>
@@ -806,6 +846,10 @@ const linux = (a: HelperScriptArgs) => `#!/bin/sh
 #  is the reason.
 # ══════════════════════════════════════════════════════════════════════════════
 SITE="${safe(a.origin)}"
+# Captured HERE, at the top level, for the same reason the Mac's is: a shell's \$0 inside a
+# function cannot be trusted to be the script, and the start-up entry this writes is useless if it
+# names the wrong file. (POSIX sh gets this right where zsh does not — they now read alike.)
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 WORK="$HOME/.cache/aevidine-print"; LOG="$WORK/helper.log"; mkdir -p "$WORK"
 HOME_DIR="$HOME/.aevidine-print"; TOKEN_FILE="$HOME_DIR/token"; LOCK="$HOME_DIR/running.pid"
 AUTOSTART="$HOME/.config/autostart/aevidine-print.desktop"
@@ -872,7 +916,13 @@ say "helper started, talking to $SITE"
 
 # Starts itself at login, written by the helper rather than asked of a person (owner, 2026-08-27).
 install_autostart() {
-  me="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  # Runs from a copy in its own folder, like the Mac's. Linux has no TCC to work around, but the
+  # other half of the reason holds everywhere: a file somebody was told to type out once gets moved,
+  # renamed, or binned the moment it looks like it is working.
+  run="$HOME_DIR/helper.sh"
+  if [ "$SELF" != "$run" ]; then cp -f "$SELF" "$run" 2>/dev/null && chmod +x "$run" 2>/dev/null; fi
+  [ -x "$run" ] || run="$SELF"
+  me="$run"                            # the path came from SELF, at the top, like the Mac's
   mkdir -p "$(dirname "$AUTOSTART")"
   printf '%s\\n' "[Desktop Entry]" "Type=Application" "Name=Aevidine print helper" \\
     "Exec=/bin/sh \\"$me\\" --auto" "X-GNOME-Autostart-enabled=true" "NoDisplay=true" > "$AUTOSTART"
