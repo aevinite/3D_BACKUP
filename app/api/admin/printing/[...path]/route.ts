@@ -17,7 +17,10 @@ import { logAction } from "@/lib/oplog";
 import {
   agentsView, readRoutes, writeRoutes,
   PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch, waitingCount,
+  helperFor, isRoutableKind, type RoutableKind,
 } from "@/lib/printHelpers";
+// KIND_LABEL — one wording for the three papers, so the diary line reads the same as the board.
+import { KIND_LABEL } from "@/lib/printBoardWords";
 // The ten-minute code this screen hands out (mig 380). It is the ONLY way a computer joins a
 // restaurant's printing now — createAgent and mintAgentToken are no longer reachable from here.
 import { issueSetupCode } from "@/lib/printSetupCode";
@@ -448,6 +451,26 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     if (up.error) return err("Could not change the queue.");
     await logAction("admin", "print_switch", { restaurant_id: rid, detail: paused ? "printing queue STOPPED — tickets wait" : "printing queue restarted" });
     return NextResponse.json({ ok: true, paused });
+  }
+
+  // ── A REAL SAMPLE OF A REAL DOCUMENT, ON THE ROUTE THAT PRINTS IT (owner, 2026-09-14) ─────────
+  // The twin of the manager panel's verb, in the same file family and with the same rules — this
+  // board and that one are deliberately the same board, and a Test button that exists on only one of
+  // them is how they start drifting. Unlike the plain test page below it is addressed by the ROUTE,
+  // not by a picked printer: the whole point is to prove the paper a restaurant's bills actually
+  // come out on. Nothing is minted and nothing is recorded as a sale (lib/printDocs → testBand).
+  if (seg[0] === "test" && isRoutableKind(body.sample)) {
+    const sk = body.sample as RoutableKind;
+    const own = await helperFor(rid, sk);
+    if (!own.owned) return err("No computer is set to print that yet — choose a printer for it first.");
+    const q = await queueJob(rid, sk, { sample: true }, { requestedBy: "sample · admin" });
+    if ("error" in q) return err("Could not queue that sample.");
+    await logAction("admin", "print_test", { restaurant_id: rid, detail: `sample ${KIND_LABEL[sk] || sk} sent to “${own.printer}” on ${own.agent}` });
+    return NextResponse.json({
+      ok: true, id: q.id,
+      note: own.connected ? `Sample sent to ${own.printer} — paper should appear in a moment.`
+        : `Sample saved — it prints at ${own.printer} as soon as ${own.agent} is back.`,
+    });
   }
 
   if (seg[0] === "test") {

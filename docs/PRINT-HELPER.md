@@ -888,3 +888,114 @@ now files a printer problem and alerts the owner instead) · an
 order deleted before printing → prints nothing and is closed, not retried for ever · auto-print
 switched off mid-service → the helper idles and the ticket waits, then prints when switched back on ·
 a removed computer → cannot even ask.
+
+## 2026-09-14 — ONE WAY AT A TIME: the last print boxes are gone, and every screen says whether it is working
+
+> Owner: *"There are two modes, right? First, helper mode — the computer — and second, screen printing
+> where we use Chrome kiosk. Whenever the helper mode is on and Chrome is off, it should not pop up
+> the print. If the helper mode is set up and inside the helper mode KOT is set up, for the KOT there
+> shouldn't be the pop up of print… in the kitchen panel or stuff like that, if the screen printing is
+> off, there shouldn't be a pop up. … For the bill and banquet, if the printer is set up it should not
+> pop up that print thing. If it is not set up, then it's okay — but if it is set up then it should
+> not pop up. It should just notification that it is sent to the helper or computer, sent to the
+> printing queue… because it is already going to the helper's queue, so we don't want to give them
+> also the option to print. But if the printer is not decided, then there should be the pop up —
+> otherwise there would be an error, because there wouldn't be anything to print that."*
+>
+> And: *"On the manager panel and on the owner panel, when the helper is on, in the settings of both
+> panels you could able to see that everything is connected and everything is live. And if not
+> connected, you could able to see. … They can also test from there — print a KOT, print a bill, or
+> print a banquet bill."*
+
+### What was already true, and what was not
+
+The AUTOMATIC ticket has obeyed this since mig 341: `screenMayPrint` answers "no — a computer has it"
+and the kitchen board is offered nothing. The BILL and the BANQUET sheet have asked
+`POST /print/send` on every press since the same migration, and open their window only on `noRoute`.
+
+The gap was every 🖨 **a person presses**. Three buttons called the local print straight out, whatever
+the address book said:
+
+| Where he'd see it | What happened |
+|---|---|
+| Kitchen panel → any ticket → the 🖨 top-right | Chrome's print box, and a second copy of the ticket out of whatever printer that screen defaults to |
+| Kitchen panel → a delivery ticket → its 🖨 | the same, and a delivery ticket out of the counter's bill roll is a bag nobody packs |
+| Manager → Tables → ☰ → "Print / reprint a KOT" → "Prints here, on this device" | the first and biggest button on the sheet, whatever the routes said |
+| Waiter tablet → 🖨 on a KOT → "Print here" | a print box on a handheld that usually has no printer and that nobody is watching — a LOST ticket from the button meant to rescue one |
+
+All four ask first now, through one door per panel (`print/send`, kind `kot`). `noRoute` is the word
+that keeps every restaurant without a helper working exactly as before — which is the other half of
+his sentence and is asserted separately.
+
+**The escape hatch hides, it does not go** (his ruling, same day, when offered the choice): while the
+computer is answering there is ONE button; the moment it stops answering — or tickets stack up behind
+it — "print here instead" comes back, because that is when somebody needs paper now. The 🔔 bell has
+kept "Print here instead" for exactly that case since 2026-09-03.
+
+A delivery ticket has no `orders` row, so it travels as `payload.aggId` and is drawn by
+`lib/printDocs → kotHtmlForAggregator`.
+
+### "Is it working right now" — one answer, three screens
+
+`lib/printHelpers → paperStatus(rid)` writes the three rows ONCE: label, a green/red dot, a one-word
+state (LIVE · ASLEEP · OFF · SCREEN · WINDOW) and the whole sentence. The admin board, the manager
+panel and the owner panel render what they are handed and derive nothing. Three papers × three
+screens × green-or-red is nine chances to disagree about whether a restaurant is printing, and these
+boards have drifted apart twice already.
+
+**Only an unanswered COMPUTER is red.** A deliberate "Nobody" is green, and so is a bill that opens a
+window — those are decisions, and colouring a decision as a fault is the don't-cry-wolf rule.
+
+### Test prints a REAL document
+
+`kind: "test"` proves a printer is alive. It cannot answer the question a restaurant actually has —
+does the BILL fit this roll, did the banquet sheet come out A4 or A5. So Test queues a **real job of
+that kind on that kind's own route**, with `payload.sample = true`, and the helper's document
+endpoint draws it from the same `billdoc.js` every screen prints from.
+
+⚠️ **It may never be mistaken for a sale**, which is `testHtml`'s own rule read from the other side: a
+sale may never disappear, and a non-sale may never appear (`docs/COMPLIANCE-GUARDRAILS.md`). Three
+things keep it honest — a band top and bottom, **no bill number and no invoice number**, and nothing
+written anywhere but the `print_test` diary line.
+
+### Four faults found by printing one and LOOKING at it
+
+1. **The band landed before `<!doctype html>`.** `billDocHtml` emits the bill as a FRAGMENT — doctype,
+   title, style, content, and no `<html>`/`<head>`/`<body>` anywhere. Matching `<body…>` fell through
+   to `band + html`, the browser dropped into quirks mode, and the page printed as **72 bytes of
+   raster** where the same bill is 24,000. Every text assertion passed: "TEST PRINT" really was in the
+   file, because grep does not care where. (`withPaper` carries the same lesson from 2026-08-26 — the
+   bill has no `</head>` either.)
+2. **The sample bill printed ₹1,555 of dishes over a ₹0 TOTAL.** `billMoney` takes its figures from
+   the ORDER ROW's columns and the synthetic order carried none. `billData`'s own comment forbids
+   exactly this: rows and total may not disagree, reconcile to the rupee.
+3. **The sample banquet sheet said GST 0%** for a restaurant that charges 5% — its figures are frozen
+   on the bill row by design, so a sample shows nothing unless it is filled in from `bqTaxModel`.
+4. **The kitchen door was born without the admin-view rule.** The manager's twin got it in August and
+   the tablet's a day later; the check that enforces it was a list of two files, so a third panel
+   learning to send paper joined the fault and not the guard. The list is three long now.
+
+### Two things found on the owner's own screen
+
+- **The old "Kitchen · KOT printing" card was still on the manager's Settings**, beside the Printing
+  board — an auto-print toggle with **no permission check**, a sample print that opened Chrome's print
+  dialog, and a paragraph telling the reader to use Chrome in kiosk-printing mode as if it were the
+  only way. Its comment claimed it was *"hidden from everyone in this panel"*. It never was:
+  `settingsSections()` hides only what `managerSettingsOff()` names, and that can only ever return
+  tables · users · access. Deleted — his own words: *"there is two printing things, one is working and
+  one is just showing."*
+- **The owner's printing row lied on his own data.** `/api/owner/printing` answered for `ids[0]`, so an
+  owner whose first restaurant does not print saw NOTHING at all; and every row that was not the
+  answered one fell to a branch that states, in amber, *"no screen has taken it yet — tickets are
+  waiting"*. Pizza Palace showed that while a computer was printing its slips perfectly. This is the
+  third round of one restaurant's answer landing on another's row — every row now carries its own.
+
+### How it was checked
+
+`verify:print-helper` grew **201 → 232**, with **15 sabotage cases** run one at a time and every one
+caught. `verify:printing-sweep` is 506 phases (one rewritten: a kitchen slip may go through the bill
+door now, and the rule that survives is that an unknown kind and a foreign order are still refused).
+
+End to end on a virtual thermal printer built from the real ZJ-80 driver — 38 checks, including the
+three samples fetched by a real helper and pushed through a real CUPS queue: the kitchen slip arrived
+as **32,951 bytes** of raster, the bill as **41,606**, and both were read on the paper.

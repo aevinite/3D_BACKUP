@@ -23,7 +23,7 @@ import { agentByToken, helloAgent, claimNext, readRoutes, paperFor, PRINT_KINDS,
 import { claimSetupCode } from "@/lib/printSetupCode";
 import { rateAllowed, rateResetOnSuccess } from "@/lib/rateLimit";
 import { finishKotJob, tellSomebodyItGaveUp } from "@/lib/printQueue";
-import { kotHtmlForOrder, billHtmlForSession, banquetHtmlForBill, testHtml, withPaper } from "@/lib/printDocs";
+import { kotHtmlForOrder, billHtmlForSession, banquetHtmlForBill, testHtml, sampleHtmlFor, kotHtmlForAggregator, withPaper } from "@/lib/printDocs";
 
 export const dynamic = "force-dynamic";
 
@@ -258,7 +258,26 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     const payload = (job.payload && typeof job.payload === "object" ? job.payload : {}) as Record<string, unknown>;
 
     let html: string | null = null;
-    if (job.kind === "kot" && job.order_id) html = await kotHtmlForOrder(agent.restaurant_id, job.order_id, job.reprint !== false);
+    // ── A SAMPLE OF THIS EXACT PIECE OF PAPER (owner, 2026-09-14) ──────────────────────────────
+    // *"They can also test also from there that print a KOT, print a bill, or print a banquet
+    // bill."* The job is a REAL job of the real kind on the real route — that is deliberate, and
+    // the same reasoning as the plain test page: a test that takes a different path can pass while
+    // the path that matters is broken. So the only thing that differs is which builder draws it,
+    // and the paper size below is the route's own, which is the half of the test that matters most
+    // on the banquet sheet.
+    //
+    // Checked FIRST, above every other branch: a sample bill carries no sessionId and a sample KOT
+    // no order_id, so falling through would build nothing and the job would be closed as "nothing
+    // to print" — a Test button that silently does nothing.
+    if (payload.sample === true && (job.kind === "kot" || job.kind === "bill" || job.kind === "banquet")) {
+      html = await sampleHtmlFor(agent.restaurant_id, job.kind);
+    }
+    else if (job.kind === "kot" && job.order_id) html = await kotHtmlForOrder(agent.restaurant_id, job.order_id, job.reprint !== false);
+    // A DELIVERY / PARCEL ticket (mig 209). It is a kitchen slip in every way that matters and has no
+    // `orders` row at all, so it is addressed by `payload.aggId` — added 2026-09-14 with the kitchen
+    // board's delivery 🖨, which until then was the last button on that screen printing locally
+    // whatever the address book said.
+    else if (job.kind === "kot" && payload.aggId) html = await kotHtmlForAggregator(agent.restaurant_id, String(payload.aggId), job.reprint !== false);
     else if (job.kind === "bill" && payload.sessionId) html = await billHtmlForSession(agent.restaurant_id, String(payload.sessionId), { parcel: !!payload.parcel });
     // THE BANQUET SHEET. Missing until 2026-08-29, and it failed in the worst way there is: the
     // admin screen offers a Banquet line and lets a restaurant point it at a computer and a printer,

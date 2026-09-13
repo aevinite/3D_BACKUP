@@ -139,7 +139,19 @@ export async function pendingKotJobs(
   // panels simply never ask for them: `includeAuto` is opt-in from the caller's query string.
   if (!includeAuto) q = q.eq("reprint", true);
   if (opts?.minAgeMs) q = q.lt("created_at", new Date(Date.now() - opts.minAgeMs).toISOString());
-  const jobs = ((await q.order("created_at").limit(opts?.limit ?? 20)).data || []) as KotJobRow[];
+  const all = ((await q.order("created_at").limit(opts?.limit ?? 20)).data || []) as KotJobRow[];
+  // ── A SAMPLE TICKET BELONGS TO A COMPUTER AND TO NOBODY ELSE (2026-09-14) ──────────────────
+  // The Test buttons on the manager and owner panels queue a real kitchen-slip job carrying no
+  // order at all (lib/printDocs → sampleKotHtml) — that is how the sample comes out on the same
+  // paper, through the same route, as the real thing. A SCREEN must never be offered one: it has
+  // no order to draw, so the orphan branch below would read it as "the order was deleted" and
+  // close it, and the person who pressed Test would be told nothing while no paper appeared.
+  //
+  // Nothing today can reach that — the Test button only exists when a computer owns the paper, and
+  // a sample is queued with `reprint:false` so `includeAuto:false` already filters it out. This is
+  // the belt: `order_id === null` means "not a ticket for an order", which is the honest test, and
+  // it keeps working if either of those two facts changes.
+  const jobs = all.filter((j) => j.order_id);
   if (!jobs.length) return [];
 
   const oids = [...new Set(jobs.map((j) => j.order_id).filter(Boolean))] as string[];

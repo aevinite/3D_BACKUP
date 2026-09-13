@@ -1704,6 +1704,29 @@ function bindPrintingBoard(ed) {
         if (d) { toast(`Cleared ${Number(d.cleared || 0)} — none of them will print.`); await loadPrintBoard(); }
         return;
       }
+      // ── PRINT A REAL SAMPLE OF THIS DOCUMENT (owner, 2026-09-14) ──────────────────────────────
+      // Through the REAL route on the REAL paper, so it answers the question a plain test page
+      // cannot: does the bill fit this roll, did the banquet sheet come out the size we set. The
+      // button holds itself down while the server answers — a tap that looks like nothing happened
+      // is the one thing a tap may never do (verify:taps).
+      if (what === "sample") {
+        const kind = el.dataset.kind;
+        const was = el.textContent;
+        el.disabled = true; el.textContent = "Sending…";
+        const d = await post("test", { sample: kind });
+        el.disabled = false;
+        // BOTH PLACES, for the reason the setup-code Copy button states in full (owner,
+        // 2026-09-13): a toast at the bottom of a tall settings page can be off screen while the
+        // thumb is still up here on the button. Measured on the admin twin of this screen — the
+        // sample sent, the helper claimed it, and nothing where the person was looking said so.
+        if (d) {
+          toast(d.note || "Sent to the printer.");
+          el.textContent = "Sent \u2713";
+          el.classList.add("primary");
+          setTimeout(() => { el.textContent = was; el.classList.remove("primary"); }, 2200);
+        } else el.textContent = was;
+        return;
+      }
       if (what === "os") { state.printOs = el.dataset.os; renderEditor(); return; }
       if (what === "copy") {
         // TWO launcher files exist now (helper · print-station), so the button says which it is.
@@ -2516,11 +2539,31 @@ const SETTINGS_SECTIONS = [
   // waiter rota. Calling it "Access" would promise controls that live in the admin panel.
   { id: "access", label: "Sections", sub: "who serves which table", icon: "fa-users-rectangle", title: "Waiter sections" },
   { id: "billing", label: "Billing", sub: "invoice & tax", icon: "fa-file-invoice", title: "Billing settings" },
-  { id: "kitchen", label: "Kitchen", sub: "KOT printing", icon: "fa-fire-burner", title: "Kitchen settings" },
+  // ── "KITCHEN · KOT PRINTING" WAS DELETED HERE ON 2026-09-14, AND IT WAS NEVER HIDDEN ──────────
+  // It was a whole second printing card on this same Settings list: an auto-print toggle, a
+  // "🖨 Preview a sample KOT" that opened Chrome's print dialog on this screen, and a paragraph
+  // telling the reader to "launch its Chrome in kiosk printing mode for silent prints".
+  //
+  // THE COMMENT UNDER IT SAID IT WAS "hidden from everyone in this panel by his 2026-07-31
+  // decision". It was not. settingsSections() hides a row only when managerSettingsOff() names it,
+  // and that function can only ever return tables · users · access (lib/accessTree →
+  // MANAGER_SETTINGS) — the string "kitchen" does not appear in that file at all. So every manager
+  // has been seeing both cards since the Printing board shipped, which is the owner's own words
+  // back at us: *"there is two printing things, one is working and one is just showing."*
+  //
+  // Three separate reasons it had to go, not one:
+  //   · it is the OLD WAY beside the new one, and a new way replaces the old (owner, 2026-08-29);
+  //   · its toggle wrote `auto_print_kot` with NO permission check, so a manager the admin had
+  //     deliberately not given "May set the printers up" could still stop the kitchen printing;
+  //   · its instructions were wrong — kiosk-printing Chrome is one of the TWO ways, and this card
+  //     told everybody it was the only one, beside a board offering them a computer.
+  // Its one live control lives in the Printing row below, on the Kitchen slips line, where it is
+  // the SAME decision as the address book (lib/printHelpers → syncKotSwitch). The sample print is
+  // replaced by the three Test buttons there, which print through the real route on the real paper.
+  // Do not put a printing card back on this list: there is one Printing row, and this is it.
   // PRINTING IS ITS OWN ROW, AND IT IS VISIBLE TO EVERYONE (owner, 2026-08-18: the printer setup
   // "should be shown in kitchen panel able to see the whole thing inside the setting, manager also
-  // and owner"). It is NOT the "kitchen" row above: that one holds the admin-owned switches and is
-  // hidden from everyone in this panel by his 2026-07-31 decision. This row holds no admin setting —
+  // and owner"). This row holds no admin setting —
   // it SHOWS where printing stands (in plain words), and — for the ONE person the admin has given
   // "May set the printers up" — it is where the computer with the printer sets ITSELF up (2026-08-27).
   // Everyone else still sees the same four cards with no buttons.
@@ -2687,23 +2730,6 @@ function formGeneral(s) {
   </div>`;
   }
   if (sec === "printing") return formPrinting(s);
-  if (sec === "kitchen") {
-    return `
-  <div class="card"><h3>Kitchen printing</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      This is for the <b>kitchen</b>, not the bill. When ON, the kitchen screen auto-prints a
-      <b>KOT (kitchen order ticket)</b> — the dishes to make, no prices — the moment a new order
-      arrives, so cooks never have to click. Set up the kitchen device's printer first and launch
-      its Chrome in "kiosk printing" mode for silent prints. Leave OFF until the printer is ready.
-    </p>
-    ${s.auto_print_kot_allowed
-      ? toggle("Auto-print the KOT when a new order arrives", "auto_print_kot", s.auto_print_kot === true)
-      : `<div class="hint">Auto-print isn't enabled for this restaurant yet — ask your admin to turn it on.</div>`}
-    <button type="button" class="btn" id="kotPreviewBtn" style="margin-top:14px">🖨 Preview a sample KOT</button>
-    <p style="color:var(--muted);font-size:12px;margin:8px 0 0">Opens a test ticket and the print dialog — use it to check the printer &amp; the ticket layout.</p>
-  </div>
-`;
-  }
   if (sec === "sessions") {
     return `
   <div class="card"><h3>Dining sessions — NEW</h3>
@@ -7409,8 +7435,6 @@ function bindEditor() {
     });
   };
 
-  // Kitchen settings: "Preview a sample KOT" test-print button.
-  { const kb = document.getElementById("kotPreviewBtn"); if (kb) kb.onclick = previewSampleKOT; }
   // Settings → Printing offers the same per-device Yes/No the floor strip does, so it is bound on the
   // same helper — one handler, two places, no chance of one of them going dead.
   // "GST on this price" (mig 270): keep the worked example under the picker true to BOTH
@@ -7828,78 +7852,12 @@ async function save() {
   }
 }
 
-// removeRecord: permanently delete the currently-selected dish/category/filter.
-async function removeRecord() {
-  const it = state.sel;
-  // Use the app's own styled confirm dialog (every other delete does), not the
-  // browser's plain native popup — keeps the look consistent.
-  if (!(await confirmDialog(`Delete "${recLabel(it)}"?`, "Delete"))) return;
-  const kind = state.tab; // the deleted record's kind (items/categories/filters)
-  const restored = { ...it }; // snapshot for Undo
-  try {
-    const _wq = await api("DELETE", "/" + state.tab + "/" + encodeURIComponent(recKey(it)));
-    // If we just deleted the category the Dishes list is filtered by, clear the filter —
-    // otherwise the Dishes tab filters to a category that no longer exists (looks empty).
-    if (state.tab === "categories" && state.catFilter === recKey(it)) state.catFilter = "";
-    state.sel = null;
-    state.isNew = false;
-    await loadAll();
-    renderEditor();
-    // Undo — re-creates the record from the snapshot (safety net for a misclick).
-    //
-    // THE RESTORE'S OWN ANSWER, NOT THE DELETE'S (sweep #8 T6, 2026-09-03). The toast below used to
-    // be handed `_wq`, which is what the DELETE returned — so deleting while online and then pressing
-    // Undo after the signal dropped said a plain "Restored ✓" over a write that had only been saved on
-    // this device. The queue line exists precisely so nobody walks away believing a saved write is a
-    // sent one, and it has to be asked of the write it is describing.
-    //
-    // The note lives HERE, above the closure, and not between the payload and the call: the
-    // `payload.__create = true` line is what tells verify:clash-coverage this write is exempt (an undo
-    // re-creating a deleted row has no concurrent edit to overwrite), and that guard reads only the
-    // three lines either side of the call. Comments pushed in between made a covered write look bare.
-    const undoRec = async () => {
-      try {
-        const payload = { ...restored }; delete payload.created_at; delete payload.updated_at; payload.__create = true;
-        const _undoQ = await api("POST", "/" + kind, payload);
-        okToast(_undoQ, "Restored ✓");
-        if (state.tab === kind) { await loadAll(); renderList(); renderEditor(); }
-      } catch (e) { toast("Couldn't undo: " + e.message, "err"); }
-    };
-    if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted "${recLabel(restored)}"`, sub: "Tap undo to restore it", icon: "🗑️", seconds: 5, onUndo: undoRec });
-    else toast(`Deleted "${recLabel(restored)}"`, "ok", { label: "Undo", fn: undoRec }, 6000);
-  } catch (e) {
-    toast("Delete failed: " + e.message, "err");
-  }
-}
-
-// previewSampleKOT: a test print of THE REAL kitchen ticket, with made-up dishes.
-//
-// Owner, 2026-08-02: "the sample of KOT — why does it come in 2 parts? It should come in one
-// part, as the real KOT we have decided." It used to be its OWN little template (a centred
-// 280px box with its own <h2>/<hr> styling and no @page rule), so the browser applied its
-// default page margins and the ticket broke across two pieces of paper — and it could drift
-// from the real ticket at any time. There is now ONE template: kotTicketHtml() below, used by
-// this preview AND by every real print, through the same hidden-iframe print path. What the
-// owner tests is exactly what the kitchen will get.
-function previewSampleKOT() {
-  const when = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const rest = (billIdentity(state.data.settings).name) || (state.data.restaurant || {}).name || "Kitchen";
-  const lines = [
-    { qty: 2, title: "Margherita Pizza", note: "" },
-    { qty: 1, title: "Garlic Bread", note: "" },
-    { qty: 1, title: "Coke", note: "no ice" },
-  ].map((r) => kotLineHtml(r)).join("");
-  printTicketHtml(kotTicketHtml({
-    title: "Sample KOT",
-    rname: rest,
-    head: "KITCHEN TICKET · SAMPLE",
-    kot: "SAMPLE",
-    tableLabel: tablePrintLabel(5),
-    when,
-    linesHtml: lines,
-    extraHtml: `<div style="text-align:center;font-size:12px;margin-top:10px">— sample test print —</div>`,
-  }));
-}
+// previewSampleKOT() lived here and was DELETED on 2026-09-14 with the "Kitchen · KOT printing"
+// settings card that was its only caller (see the obituary in SETTINGS_SECTIONS). It printed a
+// made-up ticket on THIS screen through Chrome's print dialog — which is the one thing the owner
+// asked to stop happening on a restaurant whose helper owns the kitchen slips. What replaces it
+// prints the same document on the REAL printer, through the REAL route, on the REAL paper size:
+// Settings → Printing → "Is it working right now" → Test (lib/printDocs → sampleKotHtml).
 
 // ---------- v2 dining sessions: live board ----------
 // membersOf / itemsOf: pull just the members (or ordered items) that belong to a
@@ -13663,7 +13621,16 @@ async function sendKotToKitchen(o) {
   try {
     const r = await api("POST", "/print-jobs", { order_id: o.id });
     if (r && r.queued) toast("Saved ✓ — the kitchen prints it the moment you're back online.", "ok");
-    else toast(`KOT #${o.kot_no ?? "—"} sent to the kitchen printer — it comes out marked DUPLICATE.`, "ok");
+    else {
+      // NAME THE PRINTER WHEN THERE IS ONE (owner, 2026-09-14). "Sent to the kitchen printer" was
+      // written when a kitchen had one printer and a screen to print from. A restaurant running the
+      // helper has a printer with a NAME, and "did my ticket go anywhere?" is answered by that name
+      // — the same sentence /print/send gives for a bill.
+      const own = printOwner("kot");
+      toast(own
+        ? `KOT #${o.kot_no ?? "—"} ${own.connected ? "sent to " + own.printer : "saved — it prints at " + own.printer + " as soon as " + own.agent + " is back"} — marked DUPLICATE.`
+        : `KOT #${o.kot_no ?? "—"} sent to the kitchen printer — it comes out marked DUPLICATE.`, "ok");
+    }
   } catch (e) { toast("Couldn't send it to the kitchen: " + e.message, "err"); }
 }
 function openReprintKotPicker(t) {
@@ -13679,7 +13646,12 @@ function openReprintKotPicker(t) {
   wrap.querySelector(".tbl-modal-close").onclick = closeM;
   wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
   const bodyEl = wrap.querySelector(".dish-edit-body");
-  const render = () => {
+  // THE SERVER'S ANSWER, ASKED ONCE WHEN A KOT IS PICKED. `printOwner("kot")` below is this panel's
+  // own copy, filled by the /print-jobs/pending poll — and a copy of THIS answer is precisely what
+  // opened a print window over somebody's work on a tab whose poll had not landed (2026-08-29). So
+  // the copy is only the fallback and the server is the truth: undefined = not asked yet.
+  let ownAsked;
+  const render = async () => {
     if (!picked) {
       bodyEl.innerHTML = os.map((o) => {
         const nd = orderItemRows(o).reduce((s, r) => s + (parseInt(r.qty, 10) || 1), 0);
@@ -13688,12 +13660,40 @@ function openReprintKotPicker(t) {
       bodyEl.querySelectorAll("[data-reprint]").forEach((b) => (b.onclick = () => { picked = os.find((x) => x.id === b.dataset.reprint) || null; render(); }));
       return;
     }
-    bodyEl.innerHTML = `<div class="muted" style="font-size:12px;margin:0 2px 8px">KOT #${picked.kot_no != null ? esc(picked.kot_no) : "—"} — print it where?</div>
-      <button class="btn" data-printhere style="display:flex;gap:10px;align-items:center;width:100%;margin:0 0 8px;padding:12px 14px"><span>🖨</span><span style="text-align:left"><b>Print KOT</b><br><small>Prints here, on this device</small></span></button>
-      <button class="btn" data-printkitchen style="display:flex;gap:10px;align-items:center;width:100%;margin:0 0 8px;padding:12px 14px"><span>👨‍🍳</span><span style="text-align:left"><b>Reprint KOT — in the kitchen</b><br><small>Comes out of the kitchen printer, marked DUPLICATE</small></span></button>
+    // ── WHEN A COMPUTER OWNS THE KITCHEN SLIPS, THERE IS ONE ANSWER, NOT TWO (owner, 2026-09-14) ──
+    // *"We don't want to give them also option to print — it is already going to the helper's queue."*
+    // "Prints here, on this device" used to be the FIRST and biggest button on this sheet whatever
+    // the address book said, so a restaurant running the helper got Chrome's print box on the till
+    // screen — a second copy of the ticket, out of whatever printer that machine defaults to.
+    //
+    // THE ESCAPE HATCH STAYS, AND IT HIDES (his ruling, same day). A printer that has gone quiet with
+    // tickets stacking up behind it is exactly when somebody needs paper NOW, and the 🔔 bell already
+    // keeps "Print here instead" for that one case. So: gone while the computer is answering, back
+    // the moment it is not — never a permanent second button.
+    if (ownAsked === undefined) {
+      try {
+        const r = await api("POST", "/print/send", { kind: "kot" });
+        ownAsked = r && r.printer ? r : null;
+      } catch (e) { ownAsked = printOwner("kot"); }
+      if (!picked) return;                       // they pressed Back while we were asking
+    }
+    const own = ownAsked || null;
+    const stuckNow = (() => {
+      const pr = (state.summary && state.summary.printer) || null;
+      const w = pr && pr.waiting;
+      const after = pr && typeof pr.stuckAfterMs === "number" ? pr.stuckAfterMs : 60000;
+      return !!(w && Number(w.n) > 0 && Number(w.oldestMs || 0) >= after);
+    })();
+    const hatch = !own || !own.connected || stuckNow;
+    const hereBtn = `<button class="btn" data-printhere style="display:flex;gap:10px;align-items:center;width:100%;margin:0 0 8px;padding:12px 14px"><span>🖨</span><span style="text-align:left"><b>${own ? "Print here instead" : "Print KOT"}</b><br><small>${own ? "On this screen — only because " + esc(own.agent) + " is not answering" : "Prints here, on this device"}</small></span></button>`;
+    bodyEl.innerHTML = `<div class="muted" style="font-size:12px;margin:0 2px 8px">KOT #${picked.kot_no != null ? esc(picked.kot_no) : "—"} — ${own ? "it prints on <b>" + esc(own.printer) + "</b>" : "print it where?"}</div>
+      ${own ? "" : hereBtn}
+      <button class="btn" data-printkitchen style="display:flex;gap:10px;align-items:center;width:100%;margin:0 0 8px;padding:12px 14px"><span>${own ? "🖨" : "👨‍🍳"}</span><span style="text-align:left"><b>${own ? "Print on " + esc(own.printer) : "Reprint KOT — in the kitchen"}</b><br><small>${own ? "Goes straight to " + esc(own.agent) + " — nothing opens here" : "Comes out of the kitchen printer, marked DUPLICATE"}</small></span></button>
+      ${own && hatch ? hereBtn : ""}
       <button class="btn" data-printback style="width:100%">‹ Back</button>`;
     bodyEl.querySelector("[data-printback]").onclick = () => { picked = null; render(); };
-    bodyEl.querySelector("[data-printhere]").onclick = () => { const o = picked; closeM(); printKotTicket(o); toast(`KOT #${o.kot_no ?? "—"} sent to print`, "ok"); };
+    { const hb = bodyEl.querySelector("[data-printhere]");
+      if (hb) hb.onclick = () => { const o = picked; closeM(); printKotTicket(o); toast(`KOT #${o.kot_no ?? "—"} sent to print`, "ok"); }; }
     bodyEl.querySelector("[data-printkitchen]").onclick = async () => { const o = picked; closeM(); await sendKotToKitchen(o); };
   };
   render();
@@ -14019,6 +14019,39 @@ function formPrinting(s) {
       <span class="pw-val">${on ? "YES" : "NO"}</span>
       <span class="muted" style="font-size:12px">${esc(who)}</span>
     </div>`;
+  // ── 0 · IS IT WORKING RIGHT NOW ─────────────────────────────────────────────────────────────
+  //
+  // Owner, 2026-09-14: *"you could able to see that everything is connected and everything is live…
+  // and if not connected, you could able to see… they can also test from there — print a KOT, print
+  // a bill, or print a banquet bill."*
+  //
+  // FIRST ON THE PAGE, above every setting, because it is the only question anybody opens this
+  // screen in a hurry to answer. Everything below it is setup; this is the answer.
+  //
+  // The rows are NOT worked out here. They arrive from the server (lib/printHelpers → paperStatus),
+  // which is the same function the owner panel's card and the admin board read — those boards have
+  // drifted apart twice before, and three papers × three screens × green-or-red is nine chances to
+  // do it again. This function's whole job is to draw what it is handed.
+  //
+  // Red means ONE thing: this paper has somewhere to go and that somewhere is not answering, so
+  // paper is piling up while every other screen looks fine. A deliberate "Nobody" is green — it is a
+  // decision, and colouring a decision as a fault is crying wolf (his rule, 2026-08-27).
+  const liveRows = Array.isArray(B.live) ? B.live : [];
+  const stepLive = !liveRows.length ? "" : `<div class="card"><h3>Is it working right now</h3>
+    <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
+      Where each piece of paper comes out, and whether that printer is answering this second.
+      ${may ? "Press <b>Test</b> to print a real sample of that document — the real layout, on the real paper, with a TEST band across it. Nothing is charged and nothing is recorded as a sale." : ""}
+    </p>
+    <div class="pw-state">
+      ${liveRows.map((r) => `<div class="pw-state-row ${r.ok ? "yes" : "no"}">
+        <span class="pw-dot" aria-hidden="true"></span>
+        <span class="who"><b>${esc(r.label)}</b><br>${esc(r.words)}</span>
+        <span class="pw-val">${esc(r.state || "")}</span>
+        ${may && r.canTest ? `<button type="button" class="btn" style="padding:4px 11px;min-height:34px" data-pw="sample" data-kind="${esc(r.kind)}">Test</button>` : `<span class="muted" style="font-size:12px">${r.via === "computer" ? "" : "no printer to test"}</span>`}
+      </div>`).join("")}
+    </div>
+  </div>`;
+
   const step1 = `<div class="card"><h3>${esc(STEP.one || "1 · Is printing switched on")}</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
       A kitchen slip is put in a queue by the server the moment an order is sent, so it can never be
@@ -14322,7 +14355,7 @@ function formPrinting(s) {
   // it explained a setup this panel can no longer perform, in different words from the board above.
   const guide = "";
 
-  return step1 + step2setup + step3 + stepScreen + step4 + guide;
+  return stepLive + step1 + step2setup + step3 + stepScreen + step4 + guide;
 }
 
 // One pass of the queue: what is waiting → claim it → print it → say what happened.

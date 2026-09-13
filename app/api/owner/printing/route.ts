@@ -14,7 +14,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScopeOr503 } from "@/lib/ownerScope";
-import { agentsView, readRoutes, waitingCount, PRINT_KINDS } from "@/lib/printHelpers";
+import { agentsView, readRoutes, waitingCount, PRINT_KINDS, paperStatus, helperFor, queueJob, isRoutableKind } from "@/lib/printHelpers";
+import { KIND_LABEL } from "@/lib/printBoardWords";
+import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +28,28 @@ export async function GET(req: NextRequest) {
   // is simply told no, the same way every other owner route answers. `all: true` is the admin.
   const scope = g.scope;
   const ids = scope.all ? [] : scope.ids;
-  const target = rid && (scope.all || ids.includes(rid)) ? rid : ids[0];
+  // ── AND IF NOBODY NAMED ONE, PICK A RESTAURANT THAT ACTUALLY PRINTS (owner, 2026-09-14) ──────
+  // It was `ids[0]` — the owner's FIRST restaurant, whichever that happens to be. If that one has
+  // printing switched off, this route answers `allowed:false`, which the page treats as "the feature
+  // is withheld" and draws nothing at all — for an owner whose OTHER restaurants print perfectly.
+  //
+  // Measured on his own account: seven restaurants, two of them printing, and the whole "where your
+  // paper comes out right now" box was absent because restaurant number one was not one of the two.
+  // The rows above it then had no answer to read and fell to the screen branch, which states in
+  // amber that nothing has picked the tickets up. One wrong pick, two wrong screens.
+  //
+  // So: the `?rid=` when it is in scope, else the first restaurant in scope that printing is
+  // actually switched on for, and only then the old fall-back. One extra indexed read, on ids the
+  // scope has already resolved.
+  let target = rid && (scope.all || ids.includes(rid)) ? rid : "";
+  if (!target) {
+    const printsQ = scope.all
+      ? await sb.from("settings").select("restaurant_id").eq("auto_print_kot_allowed", true).limit(1)
+      : ids.length
+        ? await sb.from("settings").select("restaurant_id").in("restaurant_id", ids.slice(0, 50)).eq("auto_print_kot_allowed", true).limit(1)
+        : { data: [] };
+    target = ((printsQ.data || [])[0] as { restaurant_id?: string } | undefined)?.restaurant_id || ids[0] || "";
+  }
   if (!target) return NextResponse.json({ allowed: false });
 
   // ── R36 SAYS HIDE WHAT IS WITHHELD — IT DOES NOT SAY HIDE WHAT WE FAILED TO READ (T20 sweep #7,
@@ -51,7 +74,15 @@ export async function GET(req: NextRequest) {
   const s = sq.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
   if (s?.auto_print_kot_allowed !== true) return NextResponse.json({ allowed: false });
 
-  const [agents, routes, waiting] = await Promise.all([agentsView(target), readRoutes(target), waitingCount(target)]);
+  const [agents, routes, waiting, live] = await Promise.all([
+    agentsView(target), readRoutes(target), waitingCount(target),
+    // "IS IT WORKING RIGHT NOW" — the same three rows the manager panel draws, from the same
+    // function (lib/printHelpers → paperStatus). Owner, 2026-09-14: *"on the manager panel and on
+    // the owner panel… you could able to see that everything is connected and everything is live."*
+    // Computed there and not here on purpose: this card and the manager's have to agree, and the
+    // way they stopped agreeing the first time was each working it out from `routes` itself.
+    paperStatus(target),
+  ]);
   return NextResponse.json({
     // ── WHICH RESTAURANT THIS IS ABOUT (T20 round 2, 2026-08-31) ──────────────────────────────────
     // This route answers for ONE restaurant — `target` above, which is the `?rid=` when it is in
@@ -80,5 +111,95 @@ export async function GET(req: NextRequest) {
       const a = r.agent ? agents.find((x) => x.id === r.agent) : null;
       return { kind: k, printer: r.printer, computer: a?.name || null, connected: !!a?.connected };
     }).filter((r) => r.printer),
+    live,
+    // ── AND THE SAME ANSWER FOR *EVERY* RESTAURANT THE ROW LIST SHOWS (owner, 2026-09-14) ────────
+    //
+    // THIS IS THE THIRD TIME ONE RESTAURANT'S PRINTING ANSWER HAS APPEARED ON ANOTHER'S ROW. T20
+    // fixed the first two by making this route SAY which restaurant it answered for, so the page
+    // could stop applying it to all of them. That was right and it left a hole underneath: the page
+    // renders one row per restaurant with printing on, and for every row that is NOT the answered
+    // one it fell through to the screen branch — which does not say "we don't know", it says
+    // "tickets print on the kitchen screen · no screen has taken it yet — tickets are waiting",
+    // in amber, as a warning.
+    //
+    // Measured on the owner's own data, 2026-09-14: Pizza Palace's row said exactly that while a
+    // computer was printing its slips perfectly. A confident wrong answer dressed as an alarm is
+    // worse than the borrowed printer name T20 removed, because somebody acts on it.
+    //
+    // WHAT IT COSTS. Two indexed reads per restaurant (paperStatus), only for restaurants the admin
+    // has actually switched printing ON for, capped at 12 — the page's own list is built from the
+    // same set, so this is one answer per row it draws and never more. A one-restaurant owner (which
+    // is nearly all of them) pays exactly what it paid before. The poll is 15s and already stops
+    // when the tab is hidden.
+    perRestaurant: await (async () => {
+      const scoped = scope.all
+        ? ((await sb.from("settings").select("restaurant_id")
+            .eq("auto_print_kot_allowed", true).limit(12)).data || []).map((r) => (r as { restaurant_id: string }).restaurant_id)
+        : ids.slice(0, 12);
+      const on = scope.all ? scoped : ((await sb.from("settings").select("restaurant_id")
+        .in("restaurant_id", scoped).eq("auto_print_kot_allowed", true).limit(12)).data || [])
+        .map((r) => (r as { restaurant_id: string }).restaurant_id);
+      return Object.fromEntries(await Promise.all(
+        on.map(async (id) => [id, id === target ? live : await paperStatus(id)] as const),
+      ));
+    })(),
+  });
+}
+
+// ── POST — print a real sample of a real document ────────────────────────────────────────────
+//
+// Owner, 2026-09-14: *"they don't have to print a test KOT — they can also test from there that
+// print a KOT, print a bill, or print a banquet bill."*
+//
+// THIS IS THE FIRST THING THE OWNER PANEL HAS EVER POSTED ABOUT PRINTING, and the comment at the
+// top of this file says why it held none: printing is hardware, and which computer prints what is
+// the admin's to grant. That rule is intact. A test print CHANGES NOTHING — no route, no switch, no
+// setting, no row — it puts one clearly-marked sheet of paper through the setup that already
+// exists. The owner is the person standing at the counter asking "is the printer working?", and
+// until now the only way to find out was to ring up a real order.
+//
+// Everything that keeps it honest is in lib/printDocs → testBand: a band top and bottom, no bill
+// number, no invoice number, nothing written anywhere. It cannot be mistaken for a sale and it
+// cannot become one.
+export async function POST(req: NextRequest) {
+  const g = await ownerScopeOr503(req);
+  if (g.resp) return g.resp;
+  const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+  const rid = String(body.rid || new URL(req.url).searchParams.get("rid") || "");
+  const scope = g.scope;
+  const ids = scope.all ? [] : scope.ids;
+  // THE SCOPE DECIDES, NEVER THE BODY — the same rule the GET above follows. An owner asking about a
+  // restaurant that is not theirs is simply told no.
+  const target = rid && (scope.all || ids.includes(rid)) ? rid : ids[0];
+  if (!target) return NextResponse.json({ error: "Not your restaurant." }, { status: 403 });
+
+  const kind = String(body.sample || "");
+  if (!isRoutableKind(kind)) return NextResponse.json({ error: "There is no such kind of paper." }, { status: 400 });
+
+  // The same entitlement gate as the GET: with printing not allowed for this restaurant, this route
+  // reveals nothing and does nothing (R36 — the owner never sees what is withheld).
+  const sq = await sb.from("settings").select("auto_print_kot_allowed").eq("restaurant_id", target).maybeSingle();
+  if (sq.error) {
+    return NextResponse.json({ error: "Couldn't reach your printing setup just now — please try again.", transient: true }, { status: 503 });
+  }
+  if ((sq.data as { auto_print_kot_allowed?: boolean } | null)?.auto_print_kot_allowed !== true) {
+    return NextResponse.json({ error: "Not your restaurant." }, { status: 403 });
+  }
+
+  const own = await helperFor(target, kind);
+  if (!own.owned) {
+    return NextResponse.json({ error: "No computer is set to print that yet — choose a printer for it first." }, { status: 409 });
+  }
+  const q = await queueJob(target, kind, { sample: true }, { requestedBy: "sample · owner" });
+  if ("error" in q) return NextResponse.json({ error: "Could not send that sample to the printer." }, { status: 500 });
+  await logAction("owner", "print_test", {
+    restaurant_id: target,
+    detail: `sample ${KIND_LABEL[kind] || kind} to ${own.printer} on ${own.agent}`,
+  });
+  return NextResponse.json({
+    queued: true, printer: own.printer, agent: own.agent, connected: !!own.connected,
+    note: own.connected
+      ? `Sample sent to ${own.printer}.`
+      : `Saved — the sample prints at ${own.printer} as soon as ${own.agent} is back.`,
   });
 }

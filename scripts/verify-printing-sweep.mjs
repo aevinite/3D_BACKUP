@@ -2567,9 +2567,32 @@ if (!browser) {
     });
   }
 
-  await phase("only a bill or a banquet sheet can be sent this way", async () => {
+  // ── A KITCHEN SLIP GOES THROUGH THIS DOOR TOO, SINCE 2026-09-14 ──────────────────────────────
+  // This phase used to assert the opposite — "only a bill or a banquet sheet can be sent this way" —
+  // and it was right until the owner asked for the last popup to go: *"if the helper mode is set up
+  // and inside the helper mode KOT is set up, for the KOT there shouldn't be the pop up of print."*
+  // The three 🖨 buttons a PERSON presses now ask this door first, so the door had to learn the kind.
+  //
+  // The rule that has NOT changed is the one worth keeping: a kind this door does not know is still
+  // refused (next phase), and a KOT is still refused unless it is a real, live order of this
+  // restaurant's — which is what the two phases below now prove instead.
+  await phase("a kitchen slip may be sent this way now, and asking who owns it queues nothing", async () => {
+    // Set the shape EXPLICITLY. The loop above leaves the routes wherever its last case put them, so
+    // a probe run against that would answer `noRoute` and pass without proving anything — a phase
+    // that cannot fail is not a phase.
+    await asShape("computer");
     const r = await send("kot", {});
-    return r.status === 400 || `a kitchen slip was accepted through the bill door (${r.status})`;
+    if (r.status !== 200) return `the 'who owns this' probe was refused (${r.status})`;
+    if (r.body.queued) return "the probe queued a job — asking is not printing";
+    if (!r.body.printer) return `the probe did not name the printer: ${JSON.stringify(r.body).slice(0, 110)}`;
+    const before = (await jobsFor("kot"))[0]?.id || null;
+    const again = await send("kot", {});
+    const after = (await jobsFor("kot"))[0]?.id || null;
+    return (again.status === 200 && before === after) || "asking twice made a job";
+  });
+  await phase("…and a kitchen slip for an order that is not this restaurant's is refused", async () => {
+    const r = await send("kot", { orderId: "00000000-0000-0000-0000-0000000000cc" });
+    return r.status === 404 || `it answered ${r.status} ${JSON.stringify(r.body).slice(0, 90)}`;
   });
   await phase("…and a made-up kind is refused too", async () => {
     const r = await send("payslip", {});

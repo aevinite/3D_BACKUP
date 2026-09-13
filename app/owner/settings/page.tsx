@@ -17,10 +17,33 @@ type PrintingState = {
   allowed: boolean; on: boolean; waiting: number;
   computers: { name: string; connected: boolean; secondsAgo: number | null; printers: string[] }[];
   routes: { kind: string; printer: string | null; computer: string | null; connected: boolean }[];
+  /** "IS IT WORKING RIGHT NOW" — one row per paper, green or red, in the words a restaurant uses
+   *  (owner, 2026-09-14). Written by lib/printHelpers → paperStatus, which is the SAME function the
+   *  manager panel's board reads: this card and that one must never be able to disagree about
+   *  whether a restaurant is printing. Optional so an older deployment's answer still parses. */
+  /** The same three rows for EVERY restaurant this page lists, keyed by restaurant id (owner,
+   *  2026-09-14). Without it a row that is not the answered one falls through to a screen branch
+   *  that states, in amber, that nothing has picked the tickets up — see round 5 in the map below.
+   *  Optional so an older deployment's answer still parses. */
+  perRestaurant?: Record<string, {
+    kind: string; label: string; ok: boolean;
+    via: "computer" | "screen" | "off" | "none";
+    state: "LIVE" | "ASLEEP" | "OFF" | "SCREEN" | "WINDOW";
+    agent: string | null; printer: string | null; connected: boolean; secondsAgo: number | null;
+    words: string; canTest: boolean;
+  }[]>;
+  live?: {
+    kind: string; label: string; ok: boolean;
+    via: "computer" | "screen" | "off" | "none";
+    state: "LIVE" | "ASLEEP" | "OFF" | "SCREEN" | "WINDOW";
+    agent: string | null; printer: string | null; connected: boolean; secondsAgo: number | null;
+    words: string; canTest: boolean;
+  }[];
 };
-const KIND_WORDS: Record<string, string> = {
-  kot: "Kitchen slips", bill: "Bills", banquet: "Banquet sheets", label: "Parcel labels", test: "Test pages",
-};
+// KIND_WORDS lived here and was DELETED on 2026-09-14 with the `printing.routes` list that was its
+// only reader. The three papers now arrive from the server already LABELLED, out of the one
+// constant every printing screen shares (lib/printBoardWords → KIND_LABEL) — a second copy of those
+// four words on this page is exactly how two screens end up calling the same paper two things.
 
 type Data = {
   name: string; isAdmin: boolean; canChangePassword: boolean;
@@ -101,6 +124,30 @@ export default function OwnerSettings() {
     } catch { /* leave whatever we had; this card never blocks the page */ }
   }, [scp]);
   useEffect(() => { loadPrinting(); }, [loadPrinting]);
+  // ── PRINT A SAMPLE, AND SAY WHAT HAPPENED ───────────────────────────────────────────────────
+  // The only thing this page has ever POSTED about printing, and it changes nothing: no route, no
+  // switch, no row (see the note on POST in app/api/owner/printing/route.ts). The button holds
+  // itself down while the server answers, because a tap that looks like nothing happened is the one
+  // thing a tap may never do.
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testSays, setTestSays] = useState<string>("");
+  /** Which Test has just answered. The sentence under the rows says WHAT happened; this is so the
+   *  control the thumb is on says THAT something happened, without having to look away. */
+  const [sentKind, setSentKind] = useState<string | null>(null);
+  const sendSample = useCallback(async (kind: string) => {
+    setTesting(kind); setTestSays("");
+    try {
+      const r = await fetch("/api/owner/printing", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sample: kind, rid: printing?.restaurantId || undefined }),
+      });
+      const j = await r.json().catch(() => null);
+      setTestSays(r.ok ? (j?.note || "Sent to the printer.") : (j?.error || "Couldn't send that just now — try again."));
+      if (r.ok) { setSentKind(kind); setTimeout(() => setSentKind((v) => (v === kind ? null : v)), 2200); }
+    } catch {
+      setTestSays("Couldn't reach us just now — check the connection and try again.");
+    } finally { setTesting(null); }
+  }, [printing]);
   // IT KEPT ASKING WITH THE TAB HIDDEN, AND WITH NOTHING ON SCREEN TO ASK FOR (T13 sweep,
   // 2026-08-27 — measured: 4 requests in 40s with the tab in front, and 2 more in the next 35s
   // after the tab was hidden).
@@ -192,6 +239,15 @@ export default function OwnerSettings() {
       </div>
 
       {/* ═══ KITCHEN PRINTING (owner, 2026-08-18) ═══
+          ⚠️ NARROWED (owner, 2026-09-14) — see docs/REJECTED-IDEAS.md. The rule below ("the owner
+          panel holds NO printing controls") is INTACT and still enforced: nothing on this page
+          changes a route, a switch, an entitlement or a row. What he asked for and got is a
+          STATEMENT — the three papers, live, in the words a restaurant uses — and one action that
+          alters nothing: a test print. His words: *"on the manager panel and on the owner panel…
+          you could able to see that everything is connected and everything is live. And if not
+          connected, you could able to see… they can also test from there — print a KOT, print a
+          bill, or print a banquet bill."* Do NOT add the routes, the entitlement, auto_print_kot or
+          a "which screen prints" picker here — those are still the admin's, and the card says so.
           "Tell me how the printer will work and inside the setting how it will be… it should be shown
           in kitchen panel… manager also and owner. Also a quick written guide… it should take me to
           the page." The owner panel holds NO printing controls on purpose — automatic printing and
@@ -236,9 +292,25 @@ export default function OwnerSettings() {
             // The route now echoes `restaurantId`, so the match is explicit. `!printing.restaurantId`
             // keeps an older deployment's answer working (it falls back to the screen branch, which
             // is what a restaurant with no helper shows anyway) rather than trusting it blindly.
-            const kotHelper = (printing && printing.restaurantId === p.restaurant_id)
-              ? (printing.routes.find((r) => r.kind === "kot" && r.printer) || null)
-              : null;
+            // ── ROUND 5 (owner, 2026-09-14): AND NOW EVERY ROW HAS ITS OWN ANSWER ───────────────
+            // Rounds 2 and 4 stopped this row borrowing ANOTHER restaurant's printer, by matching on
+            // `restaurantId`. What they left behind: a row that is not the answered one fell to the
+            // `else` below, which does not say "we don't know" — it says "tickets print on the
+            // kitchen screen · no screen has taken it yet — tickets are waiting", in amber, as a
+            // warning. Seen on his own data: Pizza Palace said exactly that while a computer was
+            // printing its slips perfectly. A confident wrong answer dressed as an alarm is worse
+            // than the borrowed name, because somebody acts on it.
+            //
+            // The route now answers for every restaurant this list draws (`perRestaurant`), so each
+            // row reads its own. The single-restaurant `routes` match stays as the fall-back for an
+            // older deployment that has not got the new field yet.
+            const mine = printing?.perRestaurant?.[p.restaurant_id] || null;
+            const kotLive = mine ? mine.find((r) => r.kind === "kot") || null : null;
+            const kotHelper = kotLive && kotLive.via === "computer"
+              ? { printer: kotLive.printer, computer: kotLive.agent, connected: kotLive.connected }
+              : (!mine && printing && printing.restaurantId === p.restaurant_id)
+                ? (printing.routes.find((r) => r.kind === "kot" && r.printer) || null)
+                : null;
             return (
             <div key={p.restaurant_id} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", border: "var(--border)", borderRadius: 9, padding: "8px 11px" }}>
               <b style={{ fontSize: 13 }}>{p.name || "This restaurant"}</b>
@@ -336,15 +408,48 @@ export default function OwnerSettings() {
                 {c.printers.length ? <span className="adm-muted" style={{ fontSize: 12 }}>· {c.printers.join(" · ")}</span> : null}
               </div>
             ))}
-            {printing.routes.length ? (
+            {/* ── THE THREE PAPERS, LIVE, WITH A WAY TO TEST EACH ONE (owner, 2026-09-14) ──────
+                *"You could able to see that everything is connected and everything is live. And if
+                not connected, you could able to see… they can also test from there — print a KOT,
+                print a bill, or print a banquet bill."*
+
+                THIS REPLACES the `printing.routes` list that stood here, which showed only the lines
+                a PRINTER was named on: a restaurant whose bills open a window saw no bill row at
+                all, which reads as "bills are not set up" rather than "bills print the ordinary
+                way". These rows answer for all three papers however each one is set up, and they are
+                not worked out on this page — they arrive from the server already written, from the
+                same function the manager panel's board reads.
+
+                Red means one thing only: this paper has somewhere to go and that somewhere is not
+                answering. A deliberate "Nobody" is green, because it is a decision, not a fault. */}
+            {(printing.live?.length ?? 0) > 0 ? (
               <div style={{ marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-                {printing.routes.map((r) => (
-                  <div key={r.kind} style={{ display: "flex", gap: 8, fontSize: 13, padding: "3px 0", flexWrap: "wrap" }}>
-                    <span className="adm-muted" style={{ minWidth: 130 }}>{KIND_WORDS[r.kind] || r.kind}</span>
-                    <b>{r.printer}</b>
-                    {r.computer ? <span className="adm-muted">on {r.computer}{r.connected ? "" : " (asleep — waiting)"}</span> : null}
+                {printing.live!.map((r) => (
+                  <div key={r.kind} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, padding: "5px 0", flexWrap: "wrap" }}>
+                    <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", flex: "0 0 auto", background: r.ok ? "#30a46c" : "#e5484d" }} />
+                    <b style={{ minWidth: 112 }}>{r.label}</b>
+                    {/* THE WORD, NOT ONLY THE COLOUR — WCAG 1.4.1, and a dot is not read aloud. */}
+                    <span style={{ fontWeight: 700, fontSize: 11, letterSpacing: ".06em", minWidth: 56 }}>{r.state}</span>
+                    <span className="adm-muted" style={{ flex: "1 1 150px", minWidth: 0 }}>{r.words}</span>
+                    {r.canTest ? (
+                      <button
+                        type="button" className="adm-btn"
+                        style={{ padding: "4px 11px", minHeight: 32, fontSize: 12.5, flex: "0 0 auto" }}
+                        disabled={testing === r.kind}
+                        onClick={() => sendSample(r.kind)}
+                      >{testing === r.kind ? "Sending\u2026" : sentKind === r.kind ? "Sent \u2713" : "Test"}</button>
+                    ) : null}
                   </div>
                 ))}
+                {/* Say what the button DOES before it is pressed. A test print that a member of staff
+                    could mistake for a real bill is the one way this could go wrong, so the answer is
+                    on the screen as well as across the paper. */}
+                <p className="adm-muted" style={{ fontSize: 12, margin: "7px 0 0" }}>
+                  <b>Test</b> prints one real sample of that document — the real layout, on the real
+                  paper — with a <b>TEST</b> band across the top and bottom. Nothing is charged,
+                  no bill number is used and nothing is recorded as a sale.
+                </p>
+                {testSays ? <p style={{ fontSize: 12.5, margin: "6px 0 0", fontWeight: 600 }}>{testSays}</p> : null}
               </div>
             ) : null}
             <p className="adm-muted" style={{ fontSize: 12, marginTop: 9 }}>

@@ -844,9 +844,65 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // the question itself, against the table the bill actually belongs to.
     if (a === "print" && b === "send") {
       const kind = String((body as Record<string, unknown>)?.kind || "");
-      if (kind !== "bill") return err("Only a bill can be sent this way from the tablet.", 400);
-      const own = await helperFor(rid, "bill");
+      if (kind !== "bill" && kind !== "kot") return err("Only a bill or a kitchen slip can be sent this way from the tablet.", 400);
+      const own = await helperFor(rid, kind);
       if (!own.owned) return ok({ noRoute: true });
+      // ── A KITCHEN SLIP FROM THE HANDHELD (owner, 2026-09-14) ──────────────────────────────────
+      // The waiter's 🖨 sheet offered "Print here, on this device" unconditionally, which on a
+      // restaurant whose helper owns the kitchen slips is a print box on a tablet nobody is watching
+      // — the exact lost-ticket shape the panel's own comments warn about. Now the sheet asks first
+      // and this answers: a durable row with NO computer named, so `claimNext` applies the address
+      // book at claim time, identical to the manager's door.
+      //
+      // IT CARRIES THE SECTION CHECK TOO, exactly like the bill below it. My first version said in a
+      // comment that "section rules do not apply — a KOT belongs to the kitchen, not to a table's
+      // money", and that was wrong twice over: the shared gate cannot resolve ("print","send") at
+      // all (see the header above), so a branch that skips the question has NO question asked of it;
+      // and a waiter holding tables 1–5 re-ringing table 20's ticket is the same trespass as
+      // printing its bill. `waiterTables` returns null for the admin, for a manager or owner looking
+      // in, and for every restaurant with sections switched off, so it costs one lookup only for a
+      // real sectioned waiter.
+      if (kind === "kot") {
+        const orderId = String((body as Record<string, unknown>)?.orderId || (body as Record<string, unknown>)?.order_id || "");
+        // ── ASKING IS NOT PRINTING ────────────────────────────────────────────────────────────
+        // No order id = the 🖨 sheet opening and asking "who owns the kitchen slips?" so it knows
+        // whether to draw the "print here" escape hatch at all. It queues nothing and writes
+        // nothing. A separate `probe` flag would be a second thing to get wrong; "no document named"
+        // already means exactly this, and the `noRoute` answer above has already covered the
+        // restaurant with no helper before we ever reach here.
+        if (!orderId) {
+          return ok({ printer: own.printer, agent: own.agent, connected: !!own.connected });
+        }
+        const o = (await sb.from("orders").select("id, status, kot_no, table_number, deleted_at")
+          .eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; status?: string; kot_no?: number | null; table_number?: unknown; deleted_at?: string | null } | null;
+        if (!o) return err("That KOT isn't on this restaurant's board any more.", 404);
+        if (o.status === "cancelled") return err("That KOT was cancelled — there is nothing to reprint.");
+        if (o.deleted_at) return err("That KOT was deleted — it can't be sent to the printer.");
+        {
+          const psLimit = await waiterTables(actor, rid);
+          if (psLimit !== null && !allows(psLimit, o.table_number)) {
+            return err(notYoursMessage(String(o.table_number ?? "")), 403);
+          }
+        }
+        if (!g.user && (body as Record<string, unknown>)?.force !== true) {
+          return ok({ adminView: true, printer: own.printer, agent: own.agent });
+        }
+        const ins = await sb.from("print_jobs").insert({
+          restaurant_id: rid, kind: "kot", order_id: orderId,
+          reprint: (body as Record<string, unknown>)?.reprint !== false,
+          requested_by: (g.user?.name || g.user?.username || "waiter").slice(0, 80),
+        }).select("id").maybeSingle();
+        if (ins.error || !ins.data) return err("Could not send that to the printer.", 500);
+        await logAction("tablet", "kot_reprint_sent", {
+          restaurant_id: rid, device_id: dev, order_id: orderId,
+          table_number: o.table_number != null ? String(o.table_number) : null,
+          detail: `KOT #${o.kot_no ?? "—"} sent to ${own.printer} on ${own.agent}`,
+        });
+        return ok({ queued: true, id: (ins.data as { id: string }).id,
+          printer: own.printer, agent: own.agent, connected: !!own.connected,
+          note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back` });
+      }
       const sid = String((body as Record<string, unknown>)?.sessionId || "");
       if (!sid) return err("Which bill?", 400);
       // `table_number` rides along for the section check below, and `bill_no` so the diary line

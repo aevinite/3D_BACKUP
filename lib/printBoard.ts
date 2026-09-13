@@ -14,8 +14,8 @@
 // It holds no gate of its own. Every caller is already behind its own door — tokenIsValid for the
 // admin route, requireRole + managerCan("print_setup") for the panel route.
 import {
-  agentsView, readRoutes, waitingCount, agentForDevice, ROUTABLE_KINDS,
-  type AgentView, type PrintRoutes, type PaperSize, type RoutableKind,
+  agentsView, readRoutes, waitingCount, agentForDevice, ROUTABLE_KINDS, paperStatus,
+  type AgentView, type PrintRoutes, type PaperSize, type RoutableKind, type PaperStatus,
 } from "@/lib/printHelpers";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { waitingToPrint, STUCK_AFTER_MS } from "@/lib/printQueue";
@@ -71,6 +71,11 @@ export type BoardState = {
    *  live, 6 min left" and offer a fresh one. Handing back a second copy of a live secret to anyone
    *  who reloads the page would undo the point of hashing it. */
   setupCode: { live: boolean; expiresAt: string | null; oldFileAt: string | null };
+  /** "IS IT WORKING RIGHT NOW" — one row per paper, green or red, in the words a restaurant uses
+   *  (owner, 2026-09-14). Derived from `routes` + `agents` by lib/printHelpers → paperStatus, NOT
+   *  re-derived on the screen: the manager board and the owner panel show the same three rows, and
+   *  two screens working the answer out for themselves is how they disagreed the first time. */
+  live: PaperStatus[];
 };
 
 const JOB_COLS = "id, kind, status, printer, printed_by, attempts, error, created_at, done_at";
@@ -107,7 +112,7 @@ export const helperFiles = (origin: string) =>
 /** Everything both boards draw, in ONE set of reads. Scoped by restaurant, column lists, hard
  *  limits — the egress rule, same as every other read in this app. */
 export async function printBoardState(rid: string, opts?: { deviceId?: string | null; recent?: number }): Promise<BoardState> {
-  const [agents, routes, waiting, setRow, jobs, stuck, setupCode] = await Promise.all([
+  const [agents, routes, waiting, setRow, jobs, stuck, setupCode, live] = await Promise.all([
     agentsView(rid),
     readRoutes(rid),
     waitingCount(rid),
@@ -120,6 +125,11 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     // One indexed row, two columns, scoped to this restaurant — it rides along with the six reads
     // this board already makes rather than costing a round trip of its own.
     liveCodeState(rid),
+    // The three status rows. It makes its own pair of reads rather than being handed `routes` and
+    // `agents` — deliberately: the owner route calls it on its own, and a version that only works
+    // when somebody remembers to pass it two arguments is a version that goes stale in one of the
+    // two places. Two extra indexed reads on a board that already makes seven.
+    paperStatus(rid),
   ]);
   const s = (setRow.data || {}) as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean };
   const dv = String(opts?.deviceId || "").trim();
@@ -144,6 +154,7 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     printing: { allowed: s.auto_print_kot_allowed === true, on: s.auto_print_kot === true },
     thisComputer: dv ? agents.find((a) => a.owner_device === dv) || null : null,
     setupCode,
+    live,
   };
 }
 
