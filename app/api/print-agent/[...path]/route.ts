@@ -20,7 +20,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { agentByToken, helloAgent, claimNext, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
-import { startPairing, pollPairing } from "@/lib/printPair";
+import { claimSetupCode } from "@/lib/printSetupCode";
+import { rateAllowed, rateResetOnSuccess } from "@/lib/rateLimit";
 import { finishKotJob, tellSomebodyItGaveUp } from "@/lib/printQueue";
 import { kotHtmlForOrder, billHtmlForSession, banquetHtmlForBill, testHtml, withPaper } from "@/lib/printDocs";
 
@@ -34,14 +35,14 @@ const err = (m: string, status = 400) => NextResponse.json({ error: m }, { statu
 // it is the price of paper appearing without anybody watching a screen.
 const POLL_MS = 2000;
 
-// The site the helper must talk to, taken from THIS request rather than a constant, so a pairing
-// started on backup points at backup and one on the live site points at the live site.
-const originOf = (req: NextRequest) => {
-  const h = req.headers;
-  const proto = h.get("x-forwarded-proto") || "https";
-  const host = h.get("x-forwarded-host") || h.get("host") || "";
-  return host ? `${proto}://${host}` : new URL(req.url).origin;
-};
+// WHICH MACHINE IS TYPING, for the guessing wall below. There is no login here and no cookie, so
+// the address the request came from is the only subject there is. Behind Vercel the first entry of
+// x-forwarded-for is the client; a missing header falls back to one shared bucket, which is the
+// safe direction — it can only ever count MORE attempts together, never fewer.
+const askerOf = (req: NextRequest) =>
+  (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
+  || req.headers.get("x-real-ip")
+  || "unknown";
 
 async function whoIsAsking(req: NextRequest): Promise<AgentRow | null> {
   const t = req.headers.get("x-lfh-agent") || req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
@@ -66,30 +67,44 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   const { path } = await ctx.params;
   const seg = (path || []).map(String);
 
-  // ── PAIRING COMES BEFORE THE GATE, because an unpaired helper has nothing to be gated by ──────
+  // ── THE SETUP CODE COMES BEFORE THE GATE, because an unlinked helper has nothing to be gated by ─
   //
-  // These two verbs are the ONLY unauthenticated ones in this file, and neither grants anything:
-  //   · pair/start — a machine describes itself and gets a code + a private secret. The row it
-  //     creates can do exactly one thing: be shown to a signed-in human for approval (mig 368).
-  //   · pair/poll  — asks "am I in yet?", and answers with the token exactly ONCE, and only to the
-  //     process holding that private secret. A wrong secret is answered identically to a code that
-  //     does not exist, so this cannot be used to discover codes.
+  // `pair/claim` is the ONLY unauthenticated verb in this file. The person at the printer types the
+  // six-character code the Printing screen showed them, and the helper trades it for its token.
   //
-  // The restaurant is chosen by the APPROVER, never by the helper. Nothing here can join a
-  // restaurant on its own.
-  if (seg[0] === "pair" && seg[1] === "start") {
+  // IT REPLACED A LOGIN ON THE SHOP'S PC (owner, 2026-09-13: *"instead of login make something else
+  // otherwise the waiter will also do that printing thing"*). The old handshake — pair/start,
+  // pair/poll and the /pair Allow page (mig 368) — is deleted, not disabled: it asked for a STAFF
+  // login on the restaurant's own counter machine, and the staff login is the waiter's login too.
+  //
+  // The restaurant was chosen when the code was made, by somebody already signed in on the Printing
+  // screen. Nothing here can join a restaurant on its own; that boundary is unchanged.
+  if (seg[0] === "pair" && seg[1] === "claim") {
     const b = await req.json().catch(() => ({})) as Record<string, unknown>;
-    const r = await startPairing({
+    // A WALL, AND IT IS ALSO THE ALARM. Twenty tries in ten minutes from one address is somebody
+    // guessing, and the owner hears about it through the ordinary limits channel. Fail-OPEN like
+    // every other caller of this helper: a limiter blip must never stop a restaurant setting up its
+    // own printer.
+    if (!await rateAllowed("print_setup_code", askerOf(req), { label: "Printer setup code" })) {
+      return NextResponse.json({
+        ok: false,
+        error: "Too many tries. Wait ten minutes, then press “Show a setup code” again on the Printing screen.",
+      }, { status: 429, headers: { "Cache-Control": "no-store" } });
+    }
+    const r = await claimSetupCode(String(b.code || ""), {
       fingerprint: b.fingerprint, hostname: b.hostname, printers: b.printers, os: b.os,
-      origin: originOf(req),
     });
-    if ("error" in r) return err(r.error, 500);
-    return NextResponse.json(r);
-  }
-  if (seg[0] === "pair" && seg[1] === "poll") {
-    const b = await req.json().catch(() => ({})) as Record<string, unknown>;
-    const r = await pollPairing(String(b.code || ""), String(b.secret || ""));
-    return NextResponse.json(r);
+    // ── A CODE THAT WORKED CLEARS THE COUNTER ──────────────────────────────────────────────
+    // The same rule, for the same recorded reason, as a staff login (lib/rateLimit.ts, owner
+    // 2026-07-29): a wall like this exists to stop repeated WRONG tries, so proving you hold a real
+    // code must reset it. Without this the count is of ATTEMPTS, and setting up eight machines in
+    // one sitting — which is exactly what Aevidine does for a new client, from one address — walls
+    // the ninth. Wrong-code bursts never reach this line, so they still count and still wall.
+    if (r.ok) await rateResetOnSuccess("print_setup_code", askerOf(req));
+    // 200 EITHER WAY, with `ok` carrying the answer. The helper is four lines of shell on three
+    // operating systems reading this with `sed` and `findstr`; a status code it has to branch on is
+    // a fourth thing to get wrong on Windows. `ok:false` is unambiguous in all three.
+    return NextResponse.json(r, { headers: { "Cache-Control": "no-store" } });
   }
 
   const agent = await whoIsAsking(req);

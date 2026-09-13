@@ -13,6 +13,27 @@ owner looks, with cache busting, before claiming anything.
 
 ---
 
+- [x] **The printer helper stopped asking for a login** (2026-09-13, mig 380). His words:
+  *"when I'm setting up helper it tells me to login wtf, helper is separate thing it will work on the
+  pc itself then why login and which role to login"*, then *"still instead of login make something
+  else otherwise the waiter will also do that printing thing and make completely diff login not
+  this"*, then the shape: *"you can generate code for each restaurant from printing menu and like the
+  helper ask for that code and that generated code only works for 10 min."*
+  **Where it lives:** admin console → **Printing** → the card *"Set a computer up — one code, ten
+  minutes"*, and the manager panel → **Settings → Printing** → the same card. He presses **Show a
+  setup code**, six characters appear with a countdown, and that is what the helper asks for on the
+  computer at the printer. **Nobody signs in on that machine, ever.**
+  The Allow page (`/pair`) and its door are DELETED, with the two other doors that could still mint a
+  printing credential. Four faults went with them, including a signed-in manager being told *"Sign in
+  on this computer first"* for ever, because `print_setup` is OFF by default and the server answered
+  "not signed in" for "no permission".
+  **Checked, not claimed:** 173 `verify:print-helper` checks with all 11 sabotage cases caught · 488
+  printing-sweep phases against a running app, 0 failed · the REAL generated helper run on a Mac in a
+  pty (it prompted, took the code typed lower-case with a space, linked, wrote its token, installed
+  its own auto-start, echoed no token) · both boards driven in Chrome at 1280px and 390px, code
+  rendered and clock ticking, no console errors. Two faults were found BY driving it: a machine could
+  not re-link under its own name, and the screen that handed out the code lost the machine.
+
 ## 2026-08-22 — the two sweep items he picked (owner: *"can do the B one can do D also"*)
 
 The T29 sweep left four things as decisions rather than building them. He chose two. Both built,

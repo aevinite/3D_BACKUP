@@ -4302,6 +4302,27 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
    carried by a WORD as well as a colour (WCAG 1.4.1 — colour alone is not an answer). Built from the
    console's own tokens so both skins get their own palette. */
 .adm-over { display: grid; gap: 7px; }
+/* ── THE SETUP CODE (mig 380) ────────────────────────────────────────────────────────────────
+   Six characters somebody reads off this screen and types on another machine — often reading it
+   ALOUD down a phone. So: big, monospaced, widely tracked, and one colour. `tabular-nums` and the
+   letter-spacing are what stop "K7M P2X" from being read back as five characters or seven.
+   It sits in the accent, never in red or green: this is a thing to USE, not a state to read. */
+.adm-setupcode { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  border-radius: 12px; padding: 14px 16px; margin: 0 0 12px; }
+.adm-setupcode-digits { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 30px; font-weight: 700; letter-spacing: .14em; font-variant-numeric: tabular-nums;
+  color: var(--accent); line-height: 1.1; word-break: break-all; }
+.adm-setupcode-side { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.adm-setupcode-left { font-size: 12.5px; opacity: .72; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 390px: the digits and the countdown stop competing for one line rather than the code wrapping. */
+@media (max-width: 430px) {
+  .adm-setupcode { gap: 10px; padding: 12px 13px; }
+  .adm-setupcode-digits { font-size: 25px; letter-spacing: .1em; }
+  .adm-setupcode-side { margin-left: 0; width: 100%; }
+}
+
 .adm-over-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
   padding: 12px 14px; min-height: 58px; border: var(--border); border-radius: 12px; background: var(--card);
   color: inherit; font: inherit; cursor: pointer; transition: background .13s, box-shadow .13s; }

@@ -136,6 +136,9 @@ export const ACT_LABEL: Record<string, string> = {
   // The print HELPER — a computer, not a screen, doing the printing (mig 341). Plain English, like
   // every other line in this log: a manager reading it should never meet a code.
   print_helper_added: "Added a computer that can print", print_helper_recoded: "Gave a printing computer a new code",
+  // mig 380 — the ten-minute code a computer types in to join the printing. The row records that a
+  // code was handed out and by whom, never the code: it is stored hashed for exactly that reason.
+  print_setup_code_issued: "Showed a setup code for a printing computer",
   print_helper_removed: "Removed a computer from printing", print_routes_changed: "Changed which printer gets which paper",
   print_switch: "Changed a printing switch", print_test: "Sent a test page to a printer",
   print_sent: "Sent something to a printer", print_sent_by_admin: "Aevidine sent something to this restaurant's printer",

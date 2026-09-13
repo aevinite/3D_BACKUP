@@ -9,6 +9,10 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const read = (p) => { try { return readFileSync(p, "utf8"); } catch { return ""; } };
+// "IS THIS FILE STILL HERE" IS ITS OWN QUESTION, and read() cannot answer it: a deleted file and an
+// empty one both come back "". Three checks below assert that something was DELETED, and they would
+// pass for ever against a read() of a path that was never there.
+const exists = (p) => { try { readFileSync(p); return true; } catch { return false; } };
 // EVERY "this must NOT appear" test runs against code with the comments stripped. Four checks in this
 // file tripped on their own explanations while it was being written — the ESC/POS one, the awaited
 // gate, the parity harness and the owner read — and a guard that fails because of the sentence
@@ -521,47 +525,119 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "a pile-up line reads 'since N min ago' — two ways of saying when, in one sentence");
 }
 
-// ── 8d · ONE FILE, ZERO TYPING (mig 368, owner 2026-08-27) ────────────────────────────────────
-// "There wouldn't be one key for all restaurants… or maybe a pairing code or whatever" → and then,
-// picking between typing six digits and pressing one button: "zero typing one, yeah".
+// ── 8d · ONE FILE, ONE TYPED CODE, NO LOGIN ON THE SHOP'S PC (mig 380) ───────────────────────
+// Owner, 2026-09-13: "instead of login make something else otherwise the waiter will also do that
+// printing thing and make completely diff login not this", then: "you can generate code for each
+// restaurant from printing menu and like the helper ask for that code and that generated code only
+// works for 10 min."
+//
+// ⚠️ THE mig-368 ALLOW PAGE IS GONE, and these checks are its replacement, not a relaxation of it.
+// That handshake asked a restaurant's counter machine for a STAFF login — the same login a waiter
+// has — and answered "sign in" to anybody signed in without print_setup, for ever. The security
+// boundary it DID have is the one kept below: the restaurant is decided by the screen, never by the
+// machine.
 {
-  const mig368 = read("supabase/migrations/368_a_helper_pairs_itself_no_code_to_carry.sql");
-  const pairLib = read("lib/printPair.ts");
-  const pairApi = read("app/api/pair/route.ts");
-  const pairPage = read("app/pair/page.tsx");
+  const mig380  = read("supabase/migrations/380_a_setup_code_replaces_the_allow_page.sql");
+  const codeLib = read("lib/printSetupCode.ts");
+  const agentApi = read("app/api/print-agent/[...path]/route.ts");
   const script = read("lib/printHelperScript.ts");
-  const board = read("lib/printBoard.ts");
+  const board  = read("lib/printBoard.ts");
 
-  check(/create table if not exists public\.print_pairings/i.test(mig368) && /secret_hash/.test(mig368)
-    && /enable row level security/i.test(mig368),
-    "a handshake is a short-lived row, and that table is staff-only (RLS on, no policies)",
-    "mig 368 lost print_pairings or its RLS");
+  check(/create table if not exists public\.print_setup_codes/i.test(mig380)
+    && /code_hash\s+text not null unique/i.test(mig380)
+    && /enable row level security/i.test(mig380),
+    "a setup code is a short-lived row in a staff-only table (RLS on, no policies), stored HASHED",
+    "mig 380 lost print_setup_codes, its unique code_hash, or its RLS");
+  check(/drop table if exists public\.print_pairings/i.test(mig380),
+    "…and mig 368's handshake table went WITH the page that used it",
+    "print_pairings is still there with nothing reading it — an approved-but-uncollected row still holds a one-time printing token behind a door nobody opens ('a new way replaces the old one')");
+  check(/delete from print_setup_codes\s+where restaurant_id = p_rid/i.test(mig380),
+    "…and a purge clears it, like every other tenant table (the mig 346/354/369 trap)",
+    "admin_purge_restaurant does not clear print_setup_codes — the ON DELETE CASCADE it declares has not fired since mig 309, so a purged restaurant keeps a code_hash for ever");
 
-  // THE FILE CARRIES NO SECRET. This is the whole point: it is what lets one file serve every
-  // restaurant, and it is the owner's own ask.
+  // THE FILE CARRIES NO SECRET. This is what lets one file serve every restaurant, and it is the
+  // owner's own ask — unchanged by mig 380, which moved the secret to a code that is TYPED, not
+  // baked in.
   check(!/CODE="\$\{safe\(a\.code\)\}"/.test(script) && !/set "CODE=\$\{safe\(a\.code\)\}"/.test(script),
     "the helper file has no token baked into it — one file works for every restaurant",
     "a per-restaurant secret is back in the generated helper: the file cannot then be hosted, reused or emailed, and it puts a long-lived credential in a text file on a shop counter");
-  check(/pair\/start/.test(script) && /pair\/poll/.test(script) && /TOKEN_FILE/.test(script),
-    "…it pairs ITSELF and writes its own token to its own disk",
-    "the helper stopped pairing itself, so somebody has to carry a code to the machine again");
+  check(/pair\/claim/.test(script) && /TOKEN_FILE/.test(script) && /TOKENFILE/.test(script),
+    "…it ASKS for a setup code once and writes its own token to its own disk",
+    "the helper stopped redeeming a setup code, so a computer cannot join a restaurant at all");
+  check(!/pair\/start/.test(script) && !/pair\/poll/.test(script)
+    && !/open "\$PU"/.test(script) && !/start "" "%PU%"/.test(script) && !/xdg-open "\$PU"/.test(script),
+    "…and it opens NO BROWSER, so nobody is asked to sign in on the computer at the printer",
+    "the helper opens a browser again: that is the staff-login-on-the-shop-PC flow the owner threw out, and it also cannot work on a headless machine");
+  // COMMENTS STRIPPED: the code that REMOVED these two verbs explains what it removed and names
+  // them to do it. A guard that trips on its own obituary is a guard the next person deletes — this
+  // file's own header says so, and it happened again right here.
+  check(!/pair\/start/.test(code(agentApi)) && !/pair\/poll/.test(code(agentApi)) && /seg\[1\] === "claim"/.test(agentApi),
+    "the helper's door has ONE unauthenticated verb — redeem a code — and the old two are deleted",
+    "pair/start or pair/poll is back on the agent API: they mint and hand out a token through a page that no longer exists");
 
-  // THE THREE THINGS THAT MAKE IT SAFE. Each is a rule, and each was driven in the sweep.
-  check(/secret_hash !== hash\(secret\)/.test(code(pairLib)) && /state: "expired"/.test(pairLib),
-    "the token is collected with a secret only the helper holds, and a wrong one is answered like an unknown code",
-    "the pairing poll stopped checking the private secret, or now tells the difference between a wrong secret and a missing row — which turns it into a way to discover codes");
-  check(/collected_at/.test(code(pairLib)) && /not\("token_once", "is", null\)/.test(pairLib),
-    "…and it is collected exactly ONCE, with a spent pairing saying so",
-    "a replayed poll can collect the token twice, or a spent pairing answers 'waiting' for ever (the sweep found that one)");
-  check(/tokenIsValid/.test(pairApi) && /managerCan\(/.test(pairApi) && /print_setup/.test(pairApi),
-    "…and only a signed-in human may approve one — the admin, or a manager with print_setup",
-    "the Allow door lost its gate: a stranger could adopt a machine into a restaurant");
-  check(/who\.kind === "admin" \? String\(body\.rid \|\| ""\) : who\.restaurantId/.test(pairApi),
-    "…and a manager can only ever adopt into their OWN restaurant (the body's rid is ignored for them)",
-    "the Allow door trusts a restaurant id from the request for staff — any manager could attach a machine to somebody else's shop");
-  check(/signedIn: false/.test(pairApi) && /Sign in on this computer first/.test(pairPage),
-    "a signed-out browser is told to sign in, not offered the button",
-    "the Allow page offers its button to somebody who is not signed in");
+  // THE FOUR THINGS THAT MAKE A TYPED CODE SAFE. Each is a rule, and each is what the owner is
+  // trading against "no login on the shop PC".
+  check(/createHash\("sha256"\)/.test(codeLib) && /code_hash: hash\(code\)/.test(codeLib)
+    && !/code_hash: code\b/.test(codeLib),
+    "the code is stored hashed — a database row can never be turned back into a working code",
+    "lib/printSetupCode.ts stores the code in the clear: it is a live credential for ten minutes, and anything that can read the table could then attach a machine to that restaurant");
+  check(/\.is\("claimed_at", null\)\s*\n?\s*\.select\("id"\)/.test(codeLib)
+    || /\.eq\("id", row\.id\)\.is\("claimed_at", null\)/.test(codeLib),
+    "…and it is spent by a FILTERED update, so two computers racing means the second gets nothing",
+    "the claim stopped being a filtered update — two helpers typing one code both get a token, and half a restaurant's tickets come out in the wrong room");
+  // RE-LINKING THE SAME MACHINE IS THE COMMONEST PATH, and it was broken. Found by running the real
+  // helper on 2026-09-13: unlink a computer, run the file again, type a fresh code, and it answered
+  // "There is already a computer with that name" — a database word, to a person standing at a
+  // printer, with nothing they could do about it. print_agents is UNIQUE (restaurant_id, name)
+  // across ALL rows and revoked rows are KEPT on purpose (mig 341), so a name check that filters
+  // them out picks a name the database will refuse.
+  check(!/\.eq\("restaurant_id", row\.restaurant_id\)\.is\("revoked_at", null\)/.test(codeLib)
+    && /already a computer with that name/i.test(codeLib),
+    "a machine re-linking under its own name is renamed, never refused — revoked rows count too",
+    "claimSetupCode filters revoked rows out of its name check again, or dropped the retry: unlink a computer, run the helper, type a fresh code, and the person at the printer is shown a uniqueness error");
+  check(/expires_at/.test(codeLib) && /SETUP_CODE_TTL_MS = 10 \* 60_000/.test(codeLib),
+    "…and it dies in ten minutes, which is the owner's own number",
+    "the ten-minute life is gone from lib/printSetupCode.ts — a code left on a screen stays usable");
+  check(/\.eq\("restaurant_id", restaurantId\)\.is\("claimed_at", null\)/.test(codeLib),
+    "…and issuing a new one kills the live one, so two codes are never working at once",
+    "issueSetupCode stopped clearing the previous live code: a screen left open in an office keeps a second working code behind it");
+  check(/rateAllowed\("print_setup_code"/.test(agentApi) && /status: 429/.test(agentApi),
+    "…and a machine guessing codes meets a wall that is also the alarm",
+    "the claim endpoint lost its rate limit — nothing counts or reports somebody working through codes");
+
+  // WHO MAY HAND ONE OUT. This is the whole of the owner's objection: not the waiter.
+  check(/seg\[0\] === "setup-code"/.test(code(adminR)) && /issueSetupCode/.test(adminR),
+    "the admin console can hand out a code, behind the same tokenIsValid as every other verb here",
+    "the admin console lost the setup-code verb");
+  check(/b === "setup-code"/.test(code(eroute)) && /issueSetupCode\(rid, \{/.test(eroute),
+    "…and so can a restaurant's own screen, behind print_setup — the person the owner named",
+    "the manager panel lost the setup-code verb, so a restaurant cannot set its own printer up without Aevidine");
+  check(/managerCan\(g, rid, "print_setup"\)/.test(code(eroute)),
+    "…and that permission is asked on the SERVER before a code exists, so hiding the button is never the only guard",
+    "the panel's printing verbs stopped asking print_setup — a waiter's own login would reach the code");
+  check(!/issueSetupCode\([^)]*body\./.test(eroute),
+    "…and the panel's code is for THEIR restaurant, never an id out of the request",
+    "the panel's setup-code verb takes a restaurant id from the body — one manager could attach a machine to somebody else's shop");
+
+  // THE OLD CREDENTIAL MINTERS ARE DELETED, not left switched off. All three answered with a
+  // PERMANENT agent token and no screen had called any of them since mig 368.
+  check(!/"newcode"/.test(adminR) && !/mintAgentToken/.test(code(adminR)) && !/createAgent\(rid, name\)/.test(code(adminR)),
+    "the admin console has no other way to mint a printing credential",
+    "POST /agents or agents/:id/newcode is back: two unreachable doors that each hand out a permanent printing token beside a new one is the exact thing 'a new way replaces the old one' forbids");
+  check(!/createAgent\(/.test(code(eroute)) && !/panelScriptsFor/.test(eroute),
+    "…and neither does the manager panel",
+    "the panel's this-computer verb can conjure a print_agents row with a permanent token again");
+  check(!exists("app/pair/page.tsx") && !exists("app/api/pair/route.ts"),
+    "the Allow page and its door are DELETED, not left standing",
+    "app/pair or app/api/pair is back — that is the staff login on a shop's counter PC, and the page that told a signed-in manager to sign in");
+
+  // BOTH BOARDS SAY THE SAME THING, which is this whole area's standing rule.
+  check(/setupCode/.test(board) && /liveCodeState/.test(board),
+    "one read answers 'is a code live' for BOTH boards",
+    "the boards read the live-code state separately again — two screens, two answers about one code");
+  check(!/\bcode\b\s*:\s*(made|row)\.code\b/.test(code(board)),
+    "…and the board payload never carries the code itself, only whether one is live",
+    "the printing board sends the setup code to every reader of the board — it is shown once, on purpose");
 
   // THE MACHINE NAMES ITSELF, and starts itself.
   check(/scutil --get ComputerName/.test(script) && /%COMPUTERNAME%/.test(script),
@@ -623,7 +699,6 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
 {
   const mcan = read("lib/managerCan.ts");
   const printApi = code(adminR);
-  const pairPage = read("app/pair/page.tsx");   // its own read — the 8d block's copy is scoped to it
 
   // 1 · THE PICKER AND THE GATE MUST RESOLVE THE SAME RULE. The Printing board offered a manager
   // whose own page said no — it read the restaurant-wide grant alone, so a person switched off
@@ -639,14 +714,19 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "…reading the person's own override AND the feature cap, not just the restaurant default",
     "the picker stopped reading staff_users.permissions or access_config, so one of the three rungs is missing from its answer");
 
-  // 2 · THE ALLOW PAGE MUST NOT SEND A MANAGER TO OUR PASSWORD WALL. The printing board lives in two
-  // places, and the person standing at the printer is usually the manager.
-  check(/who === "admin"/.test(pairPage) && /href="\/manager"/.test(pairPage),
-    "after linking a computer, a manager is sent to their OWN panel, not to the Aevidine console",
-    "the Allow page's last button goes to /aevinite for everybody again — a manager hits a staff-password screen at the exact moment the guide says to go and choose printers, which reads like their own login just failed");
-  check(/Settings → Printing/.test(pairPage),
-    "…and is told in words where to find it",
-    "the Allow page no longer says WHERE the printing board is on the manager's own panel");
+  // 2 · THE CODE IS SHOWN ONCE, AND BOTH BOARDS SAY SO (mig 380 — it replaced the Allow page, and
+  // the review point it answered: the person standing at the printer is usually the manager, so the
+  // restaurant's own screen must be able to do the whole job).
+  check(/Show a setup code/.test(page) && /Show a setup code/.test(epanel),
+    "both boards have the same 'Show a setup code' button, in the same words",
+    "one of the two printing boards lost the setup-code button — that board can no longer set a computer up at all");
+  check(/setupCode\?: \{ live: boolean; expiresAt: string \| null \}/.test(page)
+    && /left<\/div>|left<\/span>|\} left/.test(page) && /data-pw-left/.test(epanel),
+    "…and each shows a live countdown, so nobody has to guess how long they have",
+    "a setup code is shown with no clock: 'ten minutes' said once, beside a code somebody is carrying to another room, is a number they then have to guess");
+  check(!/localStorage[^\n]*printCode|printCode[^\n]*localStorage/.test(epanel),
+    "…and the code is never written anywhere that outlives the page",
+    "the manager panel stores the setup code in localStorage — a ten-minute secret that outlives its ten minutes on a shared till");
 
   // 3 · THE GUIDE OPENS BESIDE THE WORK, like the four other places that offer it.
   check(/print-setup\.html" target="_blank"/.test(page),
@@ -883,46 +963,54 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     "lib/printQueue.ts lost the wrote() helper — every write would be silent again");
 }
 
-// ── 8f · THE ALLOW PAGE TELLS THE TRUTH WHEN IT CANNOT ASK (T4 sweep #8, items 3, 4 and 9) ────────
-// A person is standing at a printer, on a machine a program just opened this page on. Three things
-// were wrong there and each is one line of the shape below.
+// ── 8f · THE HELPER MUST NOT BREAK WHEN NOBODY IS WATCHING (mig 380) ─────────────────────────
+//
+// This block replaces the one that guarded the Allow page's three "tell the truth when you cannot
+// ask" states (T4 sweep #8, items 3, 4 and 9). That page is deleted; the problem it was solving is
+// not, it has only moved to the machine at the printer. Setting up now means somebody TYPING, so
+// every path where nobody can type has to be an answer rather than a hang.
 {
-  const pairPage = read("app/pair/page.tsx");
-  const pairApi = read("app/api/pair/route.ts");
+  const script = read("lib/printHelperScript.ts");
 
-  // 3 · "we could not ask" had no card, so it fell through to "sign in" — for somebody already
-  // signed in, about a problem that has nothing to do with signing in. Measured headless before
-  // the fix: the card read "Sign in on this computer first".
-  // ASSERT THE CARD, NOT THE SENTENCE. Found by SABOTAGE (T4 round 3): "Could not reach the site"
-  // appears TWICE in this file — once as the card's heading and once in the POST failure handler's
-  // setErr — so deleting the card's own heading left this check matching the OTHER copy and the
-  // guard stayed green over the removed card. Anchor on the branch that RENDERS it instead.
-  check(/const \[unreachable, setUnreachable\] = useState\(false\);/.test(pairPage)
-    && /if \(unreachable\) return \([\s\S]{0,400}<h1>Could not reach the site<\/h1>/.test(pairPage),
-    "the Allow page has its own card for 'this computer is not getting an answer'",
-    "app/pair/page.tsx lost the unreachable card — a network fault reads as 'sign in' again");
-  check(/if \(!r\.ok\) \{ setUnreachable\(true\); return; \}/.test(pairPage),
-    "…and a 5xx from our own door counts as that, not as 'not signed in'",
-    "the Allow page trusts the body of a non-2xx answer again, so a 503 reads as signed-out");
-  check(pairPage.indexOf("if (unreachable) return") < pairPage.indexOf('if (!st) return <p className="pr-lead">Reading…'),
-    "…and that card is chosen before the 'Reading…' placeholder",
-    "the unreachable card sits after the Reading… fallback, so it can never be reached");
+  // 1 · AN AUTO-STARTED COPY HAS NOBODY WATCHING IT. Sitting at a prompt inside a minimised window
+  // looks, from the outside, exactly like a helper running perfectly and never printing.
+  // ⚠️ ASSERT THE THREE ENTRIES, NOT THE WORD. The first version of this check was `/--auto/` — and
+  // this file's own header, twenty lines up, EXPLAINS --auto, so deleting it from every launcher
+  // left the check matching a comment and printing ok. Proved by sabotage (2026-09-13): the plist
+  // and the Windows shortcut both lost it and the guard stayed green. Each launcher is named.
+  check(/<string>--auto<\/string>/.test(script)                       // the Mac LaunchAgent
+    && /\$s\.Arguments='\/auto';/.test(script)                        // the Windows Startup shortcut
+    && /"Exec=\/bin\/sh[^\n]*--auto"/.test(script),                     // the Linux .desktop entry
+    "the auto-start entry marks itself, on all three systems",
+    "an auto-start entry stopped passing --auto (or /auto): a machine nobody has linked yet waits at a prompt in a window that does not exist, which from the outside looks exactly like a helper running fine and never printing");
+  check(/\[ "\$AUTO" = "1" \] \|\| \[ ! -t 0 \]/.test(script)
+    && /if \/I "%~1"=="\/auto" if not exist "%TOKENFILE%"/.test(script),
+    "…and a copy that cannot be typed into steps aside instead of waiting for a code",
+    "the helper prompts for a setup code with no terminal and nobody there — it will wait for ever and never say why");
+  check(/ThrottleInterval<\/key><integer>300</.test(script),
+    "…and the Mac's auto-start does not re-run it every ten seconds while it is unlinked",
+    "the LaunchAgent lost its ThrottleInterval: an unlinked machine re-runs this file 360 times an hour writing a log nobody asked for");
 
-  // 4 · the door had no answer for a database flap: every neighbour catches AuthDbError, this one
-  // let it escape as an unclassified 500.
-  check(/AuthDbError/.test(pairApi) && /reason: "pair_busy"/.test(pairApi) && /status: 503/.test(pairApi),
-    "the Allow door answers 503 with a code when the database will not say who is asking",
-    "app/api/pair lost its AuthDbError branch — a database blip is an unclassified 500 again");
-  check((pairApi.match(/who\.kind === "busy"/g) || []).length === 2,
-    "…on the read AND on the press, since both ask who is there",
-    "only one of GET/POST in app/api/pair handles the busy case");
+  // 2 · A REFUSED TOKEN CLEARS ITSELF. It used to tell a restaurant to go and delete a file inside a
+  // hidden folder, so the real outcome was a machine that never printed again and nobody knowing why.
+  check((script.match(/rm -f "\$TOKEN_FILE"/g) || []).length >= 2 && /del \/q "%TOKENFILE%"/.test(script),
+    "an unlinked computer throws its dead token away by itself, on all three systems",
+    "the helper keeps a token the site has already refused, and asks a restaurant to delete a file in a hidden folder");
+  check((script.match(/if link_up; then continue; fi/g) || []).length >= 2 && /goto askcode/.test(script),
+    "…and asks for a fresh setup code there and then, if somebody is sitting at it",
+    "an unlinked helper no longer offers to re-link: the only way back is finding the token file by hand");
 
-  // 9 · the page asked its own door once per keystroke, because the two defaults it fills in were
-  // dependencies of the function that fills them.
-  check(/\}, \[code\]\);/.test(pairPage) && /setName\(\(cur\) => cur \|\| /.test(pairPage)
-    && /setRid\(\(cur\) => cur \|\| /.test(pairPage),
-    "…and it asks the door once per open, not once per character typed",
-    "app/pair/page.tsx put `name`/`rid` back in load()'s dependencies — every keystroke asks the door again");
+  // 3 · THE ONE-AT-A-TIME LOCK MUST NOT LOCK OUT A SETUP. The auto-started copy holds the lock, and
+  // it is exactly the copy that has nothing to do on a machine with no token.
+  check(/if \[ -s "\$TOKEN_FILE" \]; then/.test(script),
+    "a second copy stands aside only when this machine actually has a token to share",
+    "the single-instance lock turns away the copy somebody just started to type a code into — the auto-started one holds it, and it is the one with nothing to do");
+
+  // 4 · THE TYPED VALUE NEVER REACHES A COMMAND LINE ON WINDOWS. A quote or an ampersand pasted out
+  // of a chat window is how a .bat file stops being the file you wrote.
+  check(/typed\.txt/.test(script) && /-replace '\[\^A-Za-z0-9\]',''/.test(script),
+    "…and Windows reads what was typed from a file, stripped to letters and digits",
+    "the Windows helper puts the typed code straight on a PowerShell command line");
 }
 
 // ── 8j · A .bat CANNOT READ A VALUE IT SET IN THE SAME BLOCK (T11 sweep #8, 2026-09-04) ───────────
@@ -970,7 +1058,12 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     txt.split("\n").forEach((raw, n) => {
       // drop REM/:: comment lines and blank out ${…} interpolations
       if (/^\s*(REM|::)/i.test(raw)) return;
-      const ln = raw.replace(/\$\{[^}]*\}/g, "X");
+      // `echo(` IS NOT A BLOCK (2026-09-13). It is cmd's own idiom for echoing a value that might
+      // be empty or start with something echo would swallow, and this counter read its "(" as an
+      // opened block — after which EVERY later line looked like it was inside one, and this check
+      // reported twenty-odd faults that were not there. A guard that invents failures is a guard
+      // the next person switches off. Blanked before anything else counts parens.
+      const ln = raw.replace(/\$\{[^}]*\}/g, "X").replace(/\becho\(/gi, "echo ");
       for (const m of ln.matchAll(/%([A-Za-z_][A-Za-z0-9_]*)(?::[^%]*)?%/g)) {
         const v = m[1].toUpperCase();
         if (depth > 0 && stack.some((set) => set.has(v))) {

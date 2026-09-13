@@ -500,13 +500,15 @@ R("P11772", "T24", "lib/taxFiling.ts's splitTax gives the LAST line the remainde
   const halves = m.taxComponents?.length ? Math.round(parts * 100) === Math.round(m.tax * 100) : true;
   return (lastGetsRest && halves) || `taxFiling last-gets-remainder:${lastGetsRest} · the parts add to ${parts}, the tax is ${m.tax}`;
 });
-R("P27100", "T24", "the helper's front door refuses a pairing request that carries no one-time code", () => {
-  // Written by another terminal as an open question. Read as code: pair/start is reached only
-  // through a code the admin generated, and the answer is a one-time code, never a standing one.
+R("P27100", "T24", "the helper's front door refuses a join that carries no setup code", () => {
+  // Written by another terminal as an open question. Read as code (and re-read after mig 380
+  // replaced the Allow-page handshake with a typed code): the ONE unauthenticated verb is
+  // pair/claim, it is reached only with a code somebody on the Printing screen handed out, and it
+  // answers ok:false for anything else.
   const c = codeOnly(AG);
   const seg = c.slice(c.indexOf('seg[0] === "pair"'), c.indexOf('seg[0] === "hello"') + 1 || undefined);
-  const gated = /pair_code|code\b/.test(seg) && /err\(/.test(seg);
-  return gated || "the pairing door accepts a request that names no code at all";
+  const gated = /claimSetupCode\(/.test(seg) && /body\.code/.test(seg) && /rateAllowed\(/.test(seg);
+  return gated || "the joining door accepts a request that names no code at all, or counts no attempts";
 });
 
 // ══ T27 · the words on the screen ═══════════════════════════════════════════════════════════

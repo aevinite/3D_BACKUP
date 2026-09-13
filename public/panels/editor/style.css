@@ -5096,6 +5096,29 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
 .pw-row label { color: var(--muted); }
 
 /* A printer this computer has reported, with its own test button. */
+/* ── THE SETUP CODE (mig 380) ─────────────────────────────────────────────────────────────────
+   Six characters read off this screen and typed on the computer at the printer — often read ALOUD
+   down a phone. Big, monospaced and widely tracked so "K7M P2X" cannot be read back as five
+   characters or seven. The same shape as the admin console's .adm-setupcode, deliberately: one
+   board in two places (owner, 2026-08-27). Drawn in the accent, never red or green — this is a
+   thing to USE, not a state to read. */
+.pw-code { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--card, transparent));
+  border-radius: 12px; padding: 13px 15px; margin: 0 0 11px; }
+.pw-code-digits { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 29px; font-weight: 700; letter-spacing: .14em; font-variant-numeric: tabular-nums;
+  color: var(--accent); line-height: 1.1; word-break: break-all; }
+.pw-code-left { font-size: 12.5px; opacity: .72; font-variant-numeric: tabular-nums;
+  white-space: nowrap; margin-left: auto; }
+/* 390px — the phone he checks. The countdown drops under the digits rather than the code wrapping
+   mid-way, which is the one thing that would make it unreadable. */
+@media (max-width: 430px) {
+  .pw-code { gap: 9px; padding: 11px 12px; }
+  .pw-code-digits { font-size: 25px; letter-spacing: .1em; }
+  .pw-code-left { margin-left: 0; width: 100%; }
+}
+
 .pw-printer { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted);
   border: 1px solid var(--line); border-radius: 9px; padding: 6px 10px; }
 .pw-printer b { color: var(--text); }

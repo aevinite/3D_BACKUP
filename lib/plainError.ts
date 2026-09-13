@@ -152,6 +152,9 @@ export const RATE_LABELS: Record<string, string> = {
   otp_request: "OTP requests",
   // mig 277 — the "change my password" box, the one credential check that had no wall.
   password_change: "Change-password attempts",
+  // mig 380 — the ten-minute code a helper types to join a restaurant's printing. It is the one
+  // wall with no name behind it: there is no login on that machine, so the subject is an address.
+  print_setup_code: "Printer setup code",
 };
 const PLATFORM_WORDS: Record<string, [string, string]> = {
   kitchen_can_accept_platform: ["the kitchen can now accept delivery-app orders", "the kitchen can no longer accept delivery-app orders"],

@@ -20,13 +20,37 @@ export type HelperOs = "mac" | "windows" | "linux";
 
 export type HelperScriptArgs = {
   origin: string;      // the site the helper talks to, e.g. https://www.aevinite.shop
-  /** NO LONGER USED and deliberately kept out of the file (mig 368, owner 2026-08-27: "there
-   *  wouldn't be one key for all restaurants… or maybe a pairing code or whatever" → "zero typing
-   *  one, yeah"). The helper holds no secret now: it pairs itself and writes its own token to its
-   *  own disk, which is what makes ONE file work for every restaurant. */
+  /** NO LONGER USED and deliberately kept out of the file (mig 368, kept out again by mig 380).
+   *  The helper holds no secret: it ASKS for a ten-minute setup code on its first run and trades it
+   *  for its own token, which is what makes ONE file work for every restaurant. */
   code?: string;
   label?: string;      // what the person called this computer, for the log only
 };
+
+// ── HOW A COMPUTER JOINS A RESTAURANT (mig 380) ───────────────────────────────────────────────
+//
+// Owner, 2026-09-13: *"instead of login make something else otherwise the waiter will also do that
+// printing thing"*, then: *"you can generate code for each restaurant from printing menu and like
+// the helper ask for that code and that generated code only works for 10 min."*
+//
+// It used to open a browser on this machine and wait for somebody signed in THERE to press Allow.
+// That asked a restaurant's counter PC for a STAFF LOGIN — the same login a waiter has — which is
+// the thing he objected to, and it also stranded anyone signed in without the print_setup switch on
+// a page that just said "sign in" for ever.
+//
+// Now: a person on the Printing screen presses "Show a setup code", the helper asks for it once,
+// and nobody ever signs in on this machine. Three things follow from that, and all three are in
+// every one of the scripts below:
+//
+//  · A PERSON MUST BE ABLE TO TYPE. A copy started by the auto-start entry has nobody watching it,
+//    so it is passed --auto (mac/linux) or /auto (Windows) and simply exits or waits quietly when
+//    there is no token, instead of sitting at a prompt in a window nobody will ever look at.
+//  · A REFUSED TOKEN CLEARS ITSELF. When the site says this computer was unlinked, the token file is
+//    deleted and the helper asks for a fresh code — it used to tell the person to go and delete a
+//    file inside a hidden folder, which is not a thing a restaurant does.
+//  · THE LOCK STANDS ASIDE FOR A SETUP. A second copy normally steps back so two helpers never share
+//    one token — but a copy with NO token has nothing to step back for, and the auto-started one
+//    holding the lock is exactly what would otherwise stop somebody re-linking the machine.
 
 // ── THE ONE PIECE WINDOWS CANNOT DO BY ITSELF ────────────────────────────────────────────────
 // Windows has no built-in way to print a PDF silently to a NAMED printer. macOS and Linux have `lp`;
@@ -105,13 +129,20 @@ chmod 700 "$HOME_DIR"
 # double-clicking it while the automatic one is already running would put two helpers on one token.
 # Nothing would print twice — the claim is atomic — but they would fight for every job and the log
 # would be unreadable. So a second copy says so and steps aside.
+# …EXCEPT WHEN THIS MACHINE HAS NO TOKEN (mig 380). The copy holding the lock is then an
+# auto-started one with nothing to do, and standing aside would leave the person who just came to
+# re-link this computer with no way to type a code. Whoever can type wins.
 if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
-  echo ""
-  echo "  The Aevidine print helper is ALREADY RUNNING on this computer."
-  echo "  Nothing to do — you can close this window."
-  echo ""
-  sleep 6
-  exit 0
+  if [ -s "$TOKEN_FILE" ]; then
+    echo ""
+    echo "  The Aevidine print helper is ALREADY RUNNING on this computer."
+    echo "  Nothing to do — you can close this window."
+    echo ""
+    sleep 6
+    exit 0
+  fi
+  kill "$(cat "$LOCK" 2>/dev/null)" >/dev/null 2>&1
+  sleep 1
 fi
 echo $$ > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT INT TERM
@@ -206,9 +237,14 @@ install_autostart() {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.aevidine.print</string>
-  <key>ProgramArguments</key><array><string>/bin/zsh</string><string>$me</string></array>
+  <!-- --auto says "nobody is watching this one": with no token it waits quietly instead of
+       sitting at a prompt in a window that does not exist (mig 380). -->
+  <key>ProgramArguments</key><array><string>/bin/zsh</string><string>$me</string><string>--auto</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <!-- Five minutes between restarts. KeepAlive's default is ten SECONDS, which is the right answer
+       for a helper that died mid-service and the wrong one for a machine nobody has linked yet. -->
+  <key>ThrottleInterval</key><integer>300</integer>
   <key>StandardErrorPath</key><string>$WORK/launchd.log</string>
 </dict></plist>
 PLISTEOF
@@ -216,40 +252,65 @@ PLISTEOF
   launchctl load "$PLIST" >/dev/null 2>&1
 }
 
-# ── PAIRING: the helper links ITSELF, and nobody types anything (mig 368) ─────────────────────
-# This file holds NO secret, which is what lets ONE file work for every restaurant. On its first run
-# it describes itself, opens the browser on THIS machine, and waits for a person to press Allow. The
-# token it gets back is written here and used for ever after.
-CODE=""
-[ -f "$TOKEN_FILE" ] && CODE="$(cat "$TOKEN_FILE" 2>/dev/null)"
+# ── LINKING: one setup code, typed once, and nobody signs in here (mig 380) ───────────────────
+# Owner, 2026-09-13: "you can generate code for each restaurant from printing menu and like the
+# helper ask for that code and that generated code only works for 10 min."
+#
+# This file holds NO secret, which is what lets ONE file work for every restaurant. The code it asks
+# for is not a login: it signs nobody in, it reads nothing, it dies in ten minutes, and the first
+# computer to use it spends it. What comes back is this machine's own token, written here and used
+# for ever after — so nobody signs in on this computer, now or later.
+AUTO=0
+[ "$1" = "--auto" ] && AUTO=1
 
-if [ -z "$CODE" ]; then
-  line "This computer is not linked yet. Asking the site for a link…"
-  START="$(curl -s -m 25 -X POST "$SITE/api/print-agent/pair/start" -H "content-type: application/json" \\
-    -d "{\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"mac\\",\\"printers\\":$(printers_json)}")"
-  PC="$(echo "$START" | sed -n 's/.*"code":"\\([^"]*\\)".*/\\1/p')"
-  PS="$(echo "$START" | sed -n 's/.*"secret":"\\([^"]*\\)".*/\\1/p')"
-  PU="$(echo "$START" | sed -n 's/.*"pairUrl":"\\([^"]*\\)".*/\\1/p')"
-  if [ -z "$PC" ] || [ -z "$PS" ]; then
-    line "Could not reach $SITE. Check this computer is online, then start this again."
-    sleep 12; exit 1
+# A code the person typed, made into the code we issued: they will type the space the screen shows
+# ("K7M P2X"), or the dash they remember, or lower case on a laptop that autocapitalises. All the
+# same code. The server normalises it too — this half only keeps the window's own echo tidy.
+tidy_code() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:blank:]_-'; }
+
+link_up() {
+  # NOBODY IS WATCHING AN AUTO-STARTED COPY. Sitting at a prompt would look, from the outside,
+  # exactly like a helper that is running fine and simply never prints.
+  if [ "$AUTO" = "1" ] || [ ! -t 0 ]; then
+    say "not linked, and nobody can type here — start this file by hand to enter a setup code"
+    return 1
   fi
-  echo ""
-  line "Your browser is opening. In that page, press  ►  ALLOW"
-  line "If it did not open, go to:  $PU"
-  echo ""
-  open "$PU" >/dev/null 2>&1
-  # Ten minutes, the life of a pairing. Asking every 3s is 200 requests at worst and it means the
-  # window says "linked" the moment the person's finger leaves the button.
-  n=0
-  while [ $n -lt 200 ]; do
-    POLL="$(curl -s -m 15 -X POST "$SITE/api/print-agent/pair/poll" -H "content-type: application/json" \\
-      -d "{\\"code\\":\\"$PC\\",\\"secret\\":\\"$PS\\"}")"
-    case "$POLL" in
-      *'"state":"linked"'*)
-        CODE="$(echo "$POLL" | sed -n 's/.*"token":"\\([^"]*\\)".*/\\1/p')"
-        WHERE="$(echo "$POLL" | sed -n 's/.*"restaurant":"\\([^"]*\\)".*/\\1/p')"
-        NAME="$(echo "$POLL" | sed -n 's/.*"name":"\\([^"]*\\)".*/\\1/p')"
+  local typed tidied answer n=0
+  while [ $n -lt 5 ]; do
+    n=$((n+1))
+    echo ""
+    echo "    ─────────────────────────────────────────────────────"
+    echo "    This computer is not set up to print yet."
+    echo ""
+    echo "    On the Aevidine Printing screen, press"
+    echo "        \\"Show a setup code\\""
+    echo "    and type the six characters it shows, here."
+    echo ""
+    echo "    The code lasts ten minutes. Nobody signs in on this"
+    echo "    computer — not now, and not ever."
+    echo "    ─────────────────────────────────────────────────────"
+    echo ""
+    printf "    Setup code:  "
+    read typed || { echo ""; say "no code was typed"; return 1; }
+    tidied="$(tidy_code "$typed")"
+    if [ -z "$tidied" ]; then continue; fi
+    echo ""
+    line "Checking that code…"
+    # The printer list travels WITH the code, so the Printing screen's dropdowns are full the moment
+    # this machine appears on it — nobody should have to wait for a first hello to be able to say
+    # which printer prints the bills.
+    answer="$(curl -s -m 25 -X POST "$SITE/api/print-agent/pair/claim" -H "content-type: application/json" \\
+      -d "{\\"code\\":\\"$tidied\\",\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"mac\\",\\"printers\\":$(printers_json)}")"
+    if [ -z "$answer" ]; then
+      line "Could not reach $SITE. Check this computer is online, then try again."
+      continue
+    fi
+    case "$answer" in
+      *'"ok":true'*)
+        CODE="$(echo "$answer" | sed -n 's/.*"token":"\\([^"]*\\)".*/\\1/p')"
+        WHERE="$(echo "$answer" | sed -n 's/.*"restaurant":"\\([^"]*\\)".*/\\1/p')"
+        NAME="$(echo "$answer" | sed -n 's/.*"name":"\\([^"]*\\)".*/\\1/p')"
+        if [ -z "$CODE" ]; then line "The site answered oddly. Try again in a moment."; continue; fi
         printf '%s' "$CODE" > "$TOKEN_FILE"
         chmod 600 "$TOKEN_FILE"
         install_autostart
@@ -258,14 +319,23 @@ if [ -z "$CODE" ]; then
         line "    This computer is now \\"$NAME\\""
         line "    It will start again by itself every time this Mac is switched on."
         echo ""
-        break ;;
-      *'"state":"expired"'*)
-        line "That link expired before anybody pressed Allow. Start this file again."
-        sleep 12; exit 1 ;;
+        return 0 ;;
+      *)
+        # THE SERVER'S OWN SENTENCE, not one invented here: it is the half that knows whether the
+        # code was wrong, already used, or simply late, and a person retyping needs that difference.
+        line "$(echo "$answer" | sed -n 's/.*"error":"\\([^"]*\\)".*/\\1/p')"
+        ;;
     esac
-    n=$((n+1)); sleep 3
   done
-  if [ -z "$CODE" ]; then line "Nobody pressed Allow. Start this file again when you are ready."; sleep 12; exit 1; fi
+  line "That is five tries. Press \\"Show a setup code\\" again and start this file when you have it."
+  return 1
+}
+
+CODE=""
+[ -f "$TOKEN_FILE" ] && CODE="$(cat "$TOKEN_FILE" 2>/dev/null)"
+
+if [ -z "$CODE" ]; then
+  link_up || { sleep 10; exit 1; }
 else
   install_autostart
   line "Linked. Waiting for something to print — you can minimise this window."
@@ -279,8 +349,24 @@ while :; do
     -d "{\\"fingerprint\\":\\"$FP\\",\\"printers\\":$(printers_json)}")"
   case "$HELLO" in
     *'"ok":true'*) : ;;
-    *) line "This computer's link was removed on the site. Delete $TOKEN_FILE and start this file again to link it afresh."
-       sleep 30; continue ;;
+    # ── A REFUSED TOKEN CLEARS ITSELF (mig 380) ──────────────────────────────────────────────
+    # It used to say "delete $TOKEN_FILE and start this file again" — a hidden folder inside a home
+    # directory, which is not a thing a restaurant does, so the real outcome was a machine that
+    # never printed again and nobody knowing why. The dead token goes now, and if somebody is
+    # sitting here the helper simply asks for a fresh setup code.
+    *) rm -f "$TOKEN_FILE"
+       CODE=""
+       line "This computer was unlinked on the site."
+       if link_up; then continue; fi
+       # ── NOBODY TO TYPE: LET GO OF THE LOCK AND STOP ──────────────────────────────────────
+       # Waiting here in a loop was the obvious way to write this and it is the wrong one. This
+       # copy has no token and nobody watching it, so it can never do anything again — and while it
+       # sits there it HOLDS the single-instance lock, which is exactly what somebody walking up to
+       # re-link the machine needs. Exiting hands the lock over. The auto-start entry brings this
+       # file back on its own five-minute throttle, finds no token, and steps aside again, so
+       # nothing is lost by stopping.
+       say "stopping so somebody can run this file by hand and enter a setup code"
+       exit 0 ;;
   esac
 
   # ── HOW OFTEN THIS ASKS IS THE APP'S DECISION, NOT THIS FILE'S (2026-09-09) ─────────────────
@@ -420,6 +506,17 @@ set "TOKENFILE=%WORK%\\token.txt"
 set "LOCKFILE=%WORK%\\running.lock"
 if not exist "%WORK%" mkdir "%WORK%"
 
+REM ── NOBODY IS WATCHING AN AUTO-STARTED COPY (mig 380) ─────────────────────────────────────
+REM The Startup shortcut this file writes for itself passes /auto and opens the window MINIMISED.
+REM Setting a computer up now means TYPING a six-character code, so an auto-started copy with no
+REM token would sit at a prompt in a minimised window that nobody will ever restore - which, from
+REM the outside, looks exactly like a helper running perfectly and simply never printing. It steps
+REM out of the way instead, and leaves the lock free for the copy a person just double-clicked.
+if /I "%~1"=="/auto" if not exist "%TOKENFILE%" (
+  echo %DATE% %TIME%  auto-start with no setup code - waiting for somebody to run this by hand>>"%LOG%"
+  exit /b 0
+)
+
 REM ── ONE AT A TIME ─────────────────────────────────────────────────────────────────────────
 REM This file is started automatically at login from today, so a person double-clicking it while the
 REM automatic copy is already running would put two helpers on one token. Nothing prints twice (the
@@ -505,13 +602,24 @@ REM command line is a quoting minefield. The paper size is read per printer insi
 REM driver that refuses to answer must cost that one printer's size, never the whole list.
 set "PSPRINTERS=$out=@(); foreach($pr in Get-Printer){ $o=@{ name=$pr.Name; desc=$pr.DriverName }; try{ $c=Get-PrintConfiguration -PrinterName $pr.Name -ErrorAction Stop; $w=(Get-PrinterProperty -PrinterName $pr.Name -PropertyName 'PaperSizeWidth' -ErrorAction Stop).Value; $h=(Get-PrinterProperty -PrinterName $pr.Name -PropertyName 'PaperSizeHeight' -ErrorAction Stop).Value; if($w -gt 0 -and $h -gt 0){ $o.paper=@{ name=[string]$c.PaperSize; wMm=[math]::Round($w/100,1); hMm=[math]::Round($h/100,1) } } }catch{}; $out+=$o }"
 
-REM ── PAIRING: this file holds NO secret, so ONE file works for every restaurant (mig 368) ────
-REM On its first run it describes itself, opens the browser on THIS machine, and waits for somebody
-REM to press Allow. The token it gets back is written here and used for ever after.
+REM ── LINKING: one setup code, typed once, and nobody signs in here (mig 380) ───────────────
+REM Owner, 2026-09-13: "you can generate code for each restaurant from printing menu and like the
+REM helper ask for that code and that generated code only works for 10 min."
+REM
+REM This file holds NO secret, which is what lets ONE file work for every restaurant. It used to
+REM open a browser here and wait for somebody signed in ON THIS PC to press Allow - a STAFF login on
+REM a shop's counter machine, which is the same login a waiter has. Nobody signs in here any more.
 set "CODE="
 if exist "%TOKENFILE%" set /p CODE=<"%TOKENFILE%"
 if not "%CODE%"=="" goto haveCode
+set /a TRIES=0
 
+:askcode
+set /a TRIES+=1
+if %TRIES% GTR 5 (
+  echo     That is five tries. Press "Show a setup code" again and start this file when you have it.
+  timeout /t 15 /nobreak >nul & exit /b 1
+)
 cls
 echo.
 echo   ================================================
@@ -521,47 +629,58 @@ echo.
 echo     Site       %SITE%
 echo     Computer   %HOST%
 echo.
-echo     This computer is not linked yet. Asking the site for a link...
-powershell -NoProfile -Command "%PSPRINTERS%; @{ fingerprint='%FP%'; hostname='%HOST%'; os='windows'; printers=$out } | ConvertTo-Json -Compress -Depth 4" > "%WORK%\\start.json" 2>nul
-curl -s -m 25 -X POST "%SITE%/api/print-agent/pair/start" -H "content-type: application/json" --data-binary "@%WORK%\\start.json" > "%WORK%\\start.out" 2>nul
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\start.out' -Raw | ConvertFrom-Json).code"\`) do set "PC=%%i"
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\start.out' -Raw | ConvertFrom-Json).secret"\`) do set "PS=%%i"
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\start.out' -Raw | ConvertFrom-Json).pairUrl"\`) do set "PU=%%i"
-if "%PC%"=="" (
-  echo     Could not reach %SITE%. Check this computer is online, then start this again.
-  echo %DATE% %TIME%  pair/start failed>>"%LOG%"
-  timeout /t 12 /nobreak >nul & exit /b 1
-)
+echo     This computer is not set up to print yet.
 echo.
-echo     Your browser is opening.  In that page, press   ALLOW
-echo     If it did not open, go to:  %PU%
+echo     On the Aevidine Printing screen, press
+echo         "Show a setup code"
+echo     and type the six characters it shows, here.
 echo.
-start "" "%PU%"
-set /a PN=0
-:pairwait
-powershell -NoProfile -Command "@{ code='%PC%'; secret='%PS%' } | ConvertTo-Json -Compress" > "%WORK%\\poll.json" 2>nul
-curl -s -m 15 -X POST "%SITE%/api/print-agent/pair/poll" -H "content-type: application/json" --data-binary "@%WORK%\\poll.json" > "%WORK%\\poll.out" 2>nul
-findstr /C:"\\"state\\":\\"linked\\"" "%WORK%\\poll.out" >nul
-if not errorlevel 1 goto paired
-findstr /C:"\\"state\\":\\"expired\\"" "%WORK%\\poll.out" >nul
-if not errorlevel 1 (
-  echo     That link expired before anybody pressed Allow. Start this file again.
-  timeout /t 12 /nobreak >nul & exit /b 1
-)
-set /a PN+=1
-if %PN% GEQ 200 (
-  echo     Nobody pressed Allow. Start this file again when you are ready.
-  timeout /t 12 /nobreak >nul & exit /b 1
-)
-timeout /t 3 /nobreak >nul
-goto pairwait
+echo     The code lasts ten minutes. Nobody signs in on
+echo     this computer - not now, and not ever.
+echo.
+set "TYPED="
+set /p TYPED=  Setup code:  
+if "%TYPED%"=="" goto askcode
 
-:paired
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\poll.out' -Raw | ConvertFrom-Json).token"\`) do set "CODE=%%i"
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\poll.out' -Raw | ConvertFrom-Json).restaurant"\`) do set "WHERE=%%i"
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\poll.out' -Raw | ConvertFrom-Json).name"\`) do set "MYNAME=%%i"
+REM THE TYPED VALUE IS NEVER PUT ON A COMMAND LINE. It goes to a file and PowerShell reads it from
+REM there, which is also where it is stripped down to letters and digits: a person will type the
+REM space the screen shows ("K7M P2X"), or a dash, and somebody pasting from a chat can bring
+REM anything at all with it. A quote or an ampersand on a cmd.exe command line is how a .bat file
+REM stops being the file you wrote.
+>"%WORK%\\typed.txt" echo(!TYPED!
+echo.
+echo     Checking that code...
+REM The printer list travels WITH the code, so the Printing screen's dropdowns are full the moment
+REM this machine appears on it.
+powershell -NoProfile -Command "%PSPRINTERS%; $c=((Get-Content '%WORK%\\typed.txt' -Raw) -replace '[^A-Za-z0-9]','').ToUpper(); @{ code=$c; fingerprint='%FP%'; hostname='%HOST%'; os='windows'; printers=$out } | ConvertTo-Json -Compress -Depth 4" > "%WORK%\\claim.json" 2>nul
+del /q "%WORK%\\typed.txt" 2>nul
+curl -s -m 25 -X POST "%SITE%/api/print-agent/pair/claim" -H "content-type: application/json" --data-binary "@%WORK%\\claim.json" > "%WORK%\\claim.out" 2>nul
+del /q "%WORK%\\claim.json" 2>nul
+for %%A in ("%WORK%\\claim.out") do if %%~zA EQU 0 (
+  echo     Could not reach %SITE%. Check this computer is online, then try again.
+  echo %DATE% %TIME%  pair/claim got no answer>>"%LOG%"
+  timeout /t 6 /nobreak >nul
+  goto askcode
+)
+findstr /C:"\\"ok\\":true" "%WORK%\\claim.out" >nul
+if errorlevel 1 (
+  REM THE SERVER'S OWN SENTENCE, not one invented here: only it knows whether the code was wrong,
+  REM already used, or simply late, and a person retyping needs that difference.
+  for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw ^| ConvertFrom-Json).error"\`) do echo     %%i
+  del /q "%WORK%\\claim.out" 2>nul
+  timeout /t 5 /nobreak >nul
+  goto askcode
+)
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw ^| ConvertFrom-Json).token"\`) do set "CODE=%%i"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw ^| ConvertFrom-Json).restaurant"\`) do set "WHERE=%%i"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw ^| ConvertFrom-Json).name"\`) do set "MYNAME=%%i"
+del /q "%WORK%\\claim.out" 2>nul
+if "%CODE%"=="" (
+  echo     The site answered oddly. Try again in a moment.
+  timeout /t 6 /nobreak >nul
+  goto askcode
+)
 >"%TOKENFILE%" echo %CODE%
-del /q "%WORK%\\poll.out" "%WORK%\\start.out" "%WORK%\\poll.json" "%WORK%\\start.json" 2>nul
 echo     [ OK ]  Linked to %WHERE%
 echo             This computer is now "%MYNAME%"
 echo.
@@ -573,7 +692,7 @@ REM A shortcut in the Startup folder, written BY the helper. It used to be an in
 REM to follow ("Win+R, shell:startup, drag a shortcut in") - so it was skipped, and a skipped step
 REM means the shop opens, nothing prints, and nobody knows why. Rewritten every run; harmless if it
 REM is already there. WindowStyle 7 = minimised, so it never sits in front of anybody's work.
-powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Startup')+'\\Aevidine Print Helper.lnk'); $s.TargetPath='%~f0'; $s.WorkingDirectory='%~dp0'; $s.WindowStyle=7; $s.Description='Keeps this computer printing for Aevidine'; $s.Save()" >nul 2>&1
+powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Startup')+'\\Aevidine Print Helper.lnk'); $s.TargetPath='%~f0'; $s.Arguments='/auto'; $s.WorkingDirectory='%~dp0'; $s.WindowStyle=7; $s.Description='Keeps this computer printing for Aevidine'; $s.Save()" >nul 2>&1
 
 cls
 echo.
@@ -594,9 +713,17 @@ powershell -NoProfile -Command "%PSPRINTERS%; @{ fingerprint='%FP%'; printers=$o
 curl -s -m 20 -X POST "%SITE%/api/print-agent/hello" -H "x-lfh-agent: %CODE%" -H "content-type: application/json" --data-binary "@%WORK%\\hello.json" > "%WORK%\\hello.out" 2>nul
 findstr /C:"\\"ok\\":true" "%WORK%\\hello.out" >nul
 if errorlevel 1 (
-  echo %DATE% %TIME%  this computer's link was removed on the site - delete %TOKENFILE% and start again>>"%LOG%"
-  timeout /t 30 /nobreak >nul
-  goto loop
+  REM ── A REFUSED TOKEN CLEARS ITSELF (mig 380) ────────────────────────────────────────────
+  REM It used to tell the person to go and delete a file inside %LOCALAPPDATA%, which is not a
+  REM thing a restaurant does - so the real outcome was a machine that never printed again and
+  REM nobody knowing why. The dead token goes, and somebody sitting here is asked for a fresh
+  REM setup code. An auto-started copy has nobody to ask, so it steps aside for one that has.
+  echo %DATE% %TIME%  this computer was unlinked on the site>>"%LOG%"
+  del /q "%TOKENFILE%" 2>nul
+  set "CODE="
+  if /I "%~1"=="/auto" exit /b 0
+  set /a TRIES=0
+  goto askcode
 )
 
 REM ── HOW OFTEN THIS ASKS IS THE APP'S DECISION (2026-09-09) ───────────────────────────────────
@@ -732,43 +859,60 @@ install_autostart() {
   me="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
   mkdir -p "$(dirname "$AUTOSTART")"
   printf '%s\\n' "[Desktop Entry]" "Type=Application" "Name=Aevidine print helper" \\
-    "Exec=/bin/sh \\"$me\\"" "X-GNOME-Autostart-enabled=true" "NoDisplay=true" > "$AUTOSTART"
+    "Exec=/bin/sh \\"$me\\" --auto" "X-GNOME-Autostart-enabled=true" "NoDisplay=true" > "$AUTOSTART"
 }
 
-# ── PAIRING: no secret in this file, so ONE file works everywhere (mig 368) ───────────────────
+# ── LINKING: one setup code, typed once (mig 380) ─────────────────────────────────────────────
+# No secret in this file, so ONE file works everywhere. On a Pi with no desktop this is the branch
+# that matters most: the old flow needed a BROWSER on this machine, which a headless Pi does not
+# have, so setting one up meant reading a URL off the screen onto a phone. Typing six characters
+# needs nothing, and nobody signs in on this computer at all.
+AUTO=0
+[ "$1" = "--auto" ] && AUTO=1
+tidy_code() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:blank:]_-'; }
+
+link_up() {
+  if [ "$AUTO" = "1" ] || [ ! -t 0 ]; then
+    say "not linked, and nobody can type here — run this file by hand to enter a setup code"
+    return 1
+  fi
+  n=0
+  while [ $n -lt 5 ]; do
+    n=$((n+1))
+    echo ""
+    echo "  This computer is not set up to print yet."
+    echo "  On the Aevidine Printing screen press \\"Show a setup code\\","
+    echo "  then type the six characters here. It lasts ten minutes,"
+    echo "  and nobody signs in on this computer."
+    echo ""
+    printf "  Setup code: "
+    read typed || { say "no code was typed"; return 1; }
+    tidied="$(tidy_code "$typed")"
+    [ -z "$tidied" ] && continue
+    answer="$(curl -s -m 25 -X POST "$SITE/api/print-agent/pair/claim" -H "content-type: application/json" \\
+      -d "{\\"code\\":\\"$tidied\\",\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"linux\\",\\"printers\\":$(printers_json)}")"
+    if [ -z "$answer" ]; then echo "  Could not reach $SITE. Check this computer is online."; continue; fi
+    case "$answer" in
+      *'"ok":true'*)
+        CODE="$(echo "$answer" | sed -n 's/.*"token":"\\([^"]*\\)".*/\\1/p')"
+        WHERE="$(echo "$answer" | sed -n 's/.*"restaurant":"\\([^"]*\\)".*/\\1/p')"
+        [ -z "$CODE" ] && { echo "  The site answered oddly. Try again in a moment."; continue; }
+        printf '%s' "$CODE" > "$TOKEN_FILE"; chmod 600 "$TOKEN_FILE"
+        install_autostart
+        echo "  Linked to $WHERE. It will start again by itself at every login."
+        return 0 ;;
+      *)
+        echo "  $(echo "$answer" | sed -n 's/.*"error":"\\([^"]*\\)".*/\\1/p')" ;;
+    esac
+  done
+  echo "  That is five tries. Press \\"Show a setup code\\" again and run this when you have it."
+  return 1
+}
+
 CODE=""
 [ -f "$TOKEN_FILE" ] && CODE="$(cat "$TOKEN_FILE" 2>/dev/null)"
 if [ -z "$CODE" ]; then
-  echo "This computer is not linked yet. Asking the site for a link..."
-  START="$(curl -s -m 25 -X POST "$SITE/api/print-agent/pair/start" -H "content-type: application/json" \\
-    -d "{\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"linux\\",\\"printers\\":$(printers_json)}")"
-  PC="$(echo "$START" | sed -n 's/.*"code":"\\([^"]*\\)".*/\\1/p')"
-  PS="$(echo "$START" | sed -n 's/.*"secret":"\\([^"]*\\)".*/\\1/p')"
-  PU="$(echo "$START" | sed -n 's/.*"pairUrl":"\\([^"]*\\)".*/\\1/p')"
-  [ -z "$PC" ] && { echo "Could not reach $SITE. Check this computer is online."; sleep 10; exit 1; }
-  echo ""
-  echo "  Open this page on THIS computer and press ALLOW:"
-  echo "  $PU"
-  echo ""
-  # A Pi with no desktop has no browser to open — the URL above is then the whole instruction, which
-  # is why it is printed whether or not xdg-open works.
-  command -v xdg-open >/dev/null 2>&1 && xdg-open "$PU" >/dev/null 2>&1
-  n=0
-  while [ $n -lt 200 ]; do
-    POLL="$(curl -s -m 15 -X POST "$SITE/api/print-agent/pair/poll" -H "content-type: application/json" \\
-      -d "{\\"code\\":\\"$PC\\",\\"secret\\":\\"$PS\\"}")"
-    case "$POLL" in
-      *'"state":"linked"'*)
-        CODE="$(echo "$POLL" | sed -n 's/.*"token":"\\([^"]*\\)".*/\\1/p')"
-        printf '%s' "$CODE" > "$TOKEN_FILE"; chmod 600 "$TOKEN_FILE"
-        install_autostart
-        echo "Linked. It will start again by itself at every login."
-        break ;;
-      *'"state":"expired"'*) echo "That link expired. Start this file again."; sleep 10; exit 1 ;;
-    esac
-    n=$((n+1)); sleep 3
-  done
-  [ -z "$CODE" ] && { echo "Nobody pressed Allow. Start this file again."; sleep 10; exit 1; }
+  link_up || { sleep 10; exit 1; }
 else
   install_autostart
   echo "Linked. Waiting for something to print."
@@ -779,7 +923,15 @@ while :; do
     -H "content-type: application/json" -d "{\\"fingerprint\\":\\"$FP\\",\\"printers\\":$(printers_json)}")"
   case "$HELLO" in
     *'"ok":true'*) : ;;
-    *) say "this computer's link was removed on the site — delete $TOKEN_FILE and start again."; sleep 30; continue ;;
+    # Self-healing, same as the Mac: the dead token goes, and a person sitting here is asked for a
+    # fresh setup code instead of being told to delete a file in a hidden folder (mig 380).
+    *) rm -f "$TOKEN_FILE"; CODE=""
+       echo "This computer was unlinked on the site."
+       if link_up; then continue; fi
+       # Same as the Mac: a copy with no token and nobody watching it must LET GO of the lock, or
+       # it is the thing standing between this machine and being re-linked.
+       say "stopping so somebody can run this file by hand and enter a setup code"
+       exit 0 ;;
   esac
 
   # ── HOW OFTEN THIS ASKS IS THE APP'S DECISION, NOT THIS FILE'S (2026-09-09) ─────────────────

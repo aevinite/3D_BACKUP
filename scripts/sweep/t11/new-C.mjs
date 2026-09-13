@@ -258,22 +258,27 @@ R("a document that declares its own size is left alone", () => {
   const pd = read("lib/printDocs.ts");
   return /withPaper/.test(pd) && /@page/.test(pd) || "withPaper no longer reasons about a document's own size";
 });
-// ── 8 · the pairing door grants nothing ──────────────────────────────────────────────────────
-R("pair/start creates no computer — nothing can join a restaurant on its own", () => {
-  const pp = read("lib/printPair.ts");
-  return !/print_agents"\)\s*\.insert/.test(codeOnly(pp)) || "the unauthenticated door creates a working machine";
+// ── 8 · the joining door grants nothing on its own (mig 380) ─────────────────────────────────
+R("a setup code is never stored in the clear, so a row cannot be read back into a working code", () => {
+  const pp = read("lib/printSetupCode.ts");
+  return /code_hash: hash\(code\)/.test(codeOnly(pp)) && !/code_hash: code\b/.test(codeOnly(pp))
+    || "the code is stored as typed — for ten minutes it IS a credential, which is the trade against asking for a login";
 });
-R("…the restaurant is chosen by the APPROVER, never by the helper", () => {
-  const seg = AC.slice(AC.indexOf('seg[1] === "start"'), AC.indexOf('seg[1] === "poll"'));
-  return !/restaurant/i.test(seg.replace(/\/\/[^\n]*/g, "")) || "the machine names its own restaurant";
+R("…the restaurant is chosen when the code is MADE, never by the machine redeeming it", () => {
+  const seg = AC.slice(AC.indexOf('seg[1] === "claim"'), AC.indexOf('seg[0] === "hello"') + 1 || undefined);
+  return !/body\.(rid|restaurant)/i.test(seg.replace(/\/\/[^\n]*/g, "")) || "the machine names its own restaurant";
 });
-R("…and the token is handed over exactly once", () => {
-  const pp = codeOnly(read("lib/printPair.ts"));
-  return /claimed|used|once|token_taken|taken_at/i.test(pp) || "a pairing could be collected twice";
+R("…and one code makes exactly one computer", () => {
+  const pp = codeOnly(read("lib/printSetupCode.ts"));
+  return /\.is\("claimed_at", null\)/.test(pp) || "the claim is not a filtered update, so two machines racing both win";
 });
-R("…and a wrong secret reads the same as a code that does not exist", () => {
-  const pp = read("lib/printPair.ts");
-  return /identically|same|cannot be used to discover/i.test(pp) || "the two answers differ, which would let somebody tell codes apart";
+R("…and every refusal reads the same, so trying codes teaches nothing", () => {
+  // A wrong code, a spent one and one that ran out all answer with the SAME sentence. Telling them
+  // apart would turn this door into a way to find out which codes exist. (It was the pairing
+  // secret's job until mig 380; the rule outlived the mechanism.)
+  const pp = codeOnly(read("lib/printSetupCode.ts"));
+  return /const wrong: ClaimResult = \{/.test(pp) && /\.\.\.wrong, reason: "used"/.test(pp) && /\.\.\.wrong, reason: "expired"/.test(pp)
+    || "the refusals differ, which would let somebody tell a real code from a spent one";
 });
 // ── 9 · the four ticks, and nothing prints without them ──────────────────────────────────────
 R("printing must be allowed by Aevidine AND switched on by the restaurant", () => {

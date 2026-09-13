@@ -4,9 +4,13 @@
  *
  * WHY THIS EXISTS (T29 sweep #7, 2026-08-27). `.claude/sweep/LEDGER/INDEX.md` keeps a list titled
  * "Still genuinely unassigned", and it is not an administrative detail: a file no territory names
- * is a file that gets checked by luck rather than on purpose. `/pair` and `/api/pair` are the
- * newest members of that list — they landed after the territories were drawn — and between them
- * they are the whole of the zero-typing handshake a restaurant uses to let its own computer print.
+ * is a file that gets checked by luck rather than on purpose. The printer SETUP CODE is the newest
+ * member of that list — it landed after the territories were drawn — and it is the whole of how a
+ * restaurant lets its own computer print.
+ *
+ * It used to be `/pair` and `/api/pair`, the zero-typing Allow page (mig 368). Both were DELETED on
+ * 2026-09-13 (mig 380): they asked a restaurant's counter machine for a staff login, which is the
+ * waiter's login too. The button-geometry check below went with the page it measured.
  *
  * THE FAULT THAT PROMPTED IT. Every button label on the Allow page sat flush against the TOP edge
  * of its 52px button with 34px of dead space underneath, on every viewport. The rule asked for a
@@ -36,72 +40,64 @@ const ok = (m) => console.log("  ✓ " + m);
 const bad = (m, d) => { fails++; console.log("  ✗ " + m + (d ? "\n      " + d : "")); };
 const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
 
-/* ── /pair — the one screen a program opens on a shop's own computer ──────────────────── */
+/* ── the setup code — how a computer joins a restaurant's printing (mig 380) ──────────────
+ *
+ * ⚠️ THIS REPLACED /pair AND /api/pair, and the four checks that guarded them. The Allow page was
+ * deleted on 2026-09-13 on the owner's word — *"instead of login make something else otherwise the
+ * waiter will also do that printing thing"* — because it asked a restaurant's own counter machine
+ * for a STAFF login, which is the same login a waiter has. Its checks are not relaxed here, they
+ * are re-pointed: the boundary that mattered ("the machine never chooses its own restaurant") is
+ * the first one below.
+ *
+ * This territory is still unassigned in `.claude/sweep/LEDGER/INDEX.md`, which is why it is here.
+ */
 {
-  const page = read("app/pair/page.tsx");
-  const api = read("app/api/pair/route.ts");
-  want(page && api, "the Allow page and its door are both present",
-    "app/pair/page.tsx or app/api/pair/route.ts is missing",
+  const lib = read("lib/printSetupCode.ts");
+  const agentApi = read("app/api/print-agent/[...path]/route.ts");
+  const eroute = read("app/api/editor/[...path]/route.ts");
+  const adminApi = read("app/api/admin/printing/[...path]/route.ts");
+
+  want(!!lib && /pair\/claim|seg\[1\] === "claim"/.test(agentApi),
+    "a computer can join a restaurant's printing by redeeming a typed setup code",
+    "lib/printSetupCode.ts or the claim verb is missing",
     "Without them a restaurant cannot let its own computer print at all.");
 
-  // The console link must be reachable only for the person who can actually open the console.
-  // EVERY branch that the page draws a next-step button on must carry `who`. The page keeps it in
-  // state and only sets it when an answer has one, so a branch that omits it leaves an ADMIN with
-  // the manager's link. The success screen hides this — by then an earlier answer carried it — so
-  // it only shows for a machine that was already linked when the page first opened.
-  {
-    const drawsButton = [...api.matchAll(/return NextResponse\.json\(\{[^}]*\balready:\s*true[^}]*\}\)/g)].map((m) => m[0]);
-    want(drawsButton.length > 0 && drawsButton.every((b) => /\bwho\s*:/.test(b)),
-      "the already-linked answer carries who is asking, so its button can point the right way",
-      "GET /api/pair's already-linked answer does not carry `who`",
-      "app/pair/page.tsx picks that screen's next step with `who === \"admin\"`, and only learns `who`\n      " +
-      "from an answer that carries it. Omit it here and an Aevidine admin is sent to /manager — a\n      " +
-      "restaurant's own panel — instead of the console.");
-  }
-
-  // The two halves of the permission rule, restated here because this file is the one that reads
-  // the page: verify:print-helper covers the door, nothing covered the screen.
-  // WORD BOUNDARIES, not substrings. `tokenIsValidX` contains `tokenIsValid`, so renaming the
-  // call away kept this green — proven by breaking it.
-  want(/\btokenIsValid\s*\(/.test(api) && /\bmanagerCan\s*\(/.test(api) && /"print_setup"/.test(api),
-    "only the admin, or a manager who may set the printers up, can allow a computer",
-    "app/api/pair no longer asks both questions",
-    "This is the whole boundary of the handshake: the helper describes itself, but a signed-in human\n      " +
-    "decides which restaurant it joins.");
-  // NO `||`. The admin arm of that ternary was enough to keep this green while the STAFF arm was
-  // changed to trust the body — which is the whole thing the check exists to stop. Assert the
-  // staff arm explicitly.
-  want(/who\.kind === "admin" \? String\(body\.rid[^:]*:\s*who\.restaurantId/.test(api),
-    "a manager can still only ever adopt a computer into their OWN restaurant",
-    "app/api/pair now takes the restaurant from the request body for a staff member too",
+  // THE ONE BOUNDARY WORTH KEEPING FROM THE OLD HANDSHAKE. A helper can ask to be adopted; it can
+  // never say by whom. `restaurantId` reaches issueSetupCode from the SCREEN's own session.
+  want(/issueSetupCode\(\s*\n?\s*restaurantId: string/.test(lib)
+    || /export async function issueSetupCode\(\s*\n?\s*restaurantId: string/.test(lib),
+    "the restaurant is decided when the code is made, by the screen — never by the machine",
+    "issueSetupCode no longer takes the restaurant from its caller",
+    "A helper that could name its own restaurant could print at, and reprint the bills of, a shop\n      " +
+    "nobody gave it.");
+  want(!/issueSetupCode\([^)]*body\./.test(eroute),
+    "…and a manager's code is for their OWN restaurant, never an id out of the request",
+    "the panel's setup-code verb takes a restaurant id from the body",
     "Trusting the body's rid would let any manager attach a machine to somebody else's shop.");
-  want(!/secret/.test(read("app/pair/page.tsx")),
-    "the Allow page never handles the pairing's private secret",
-    "app/pair/page.tsx now mentions the pairing secret",
-    "Only the helper holds it. A browser that can see it is a browser that can adopt a machine.");
-}
 
-  // A LABEL MUST SIT IN THE MIDDLE OF ITS BUTTON. The `font:` shorthand RESETS line-height to
-  // `normal`, so a `line-height` written BEFORE it is silently thrown away. That is exactly what
-  // happened here: .pr-btn asked for `line-height: 52px` and then `font: inherit`, and every label
-  // on the page rendered flush against the top edge of a 52px button with 34px of dead space under
-  // it — measured on both a phone and a desktop, and invisible to every other guard, because the
-  // markup, the class names and the colours were all correct.
-  {
-    const pg = read("app/pair/page.tsx");
-    const blocks = [...pg.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]);
-    const clobbered = blocks.filter((b) => {
-      const lh = b.search(/(^|[;\s])line-height\s*:/);
-      const fo = b.search(/(^|[;\s])font\s*:\s*(?!inherit\s*;?\s*$)|(^|[;\s])font\s*:\s*inherit/);
-      return lh >= 0 && fo >= 0 && fo > lh;
-    });
-    want(clobbered.length === 0,
-      "no rule on the Allow page sets a line-height that the font shorthand then throws away",
-      `${clobbered.length} rule(s) declare line-height BEFORE a font shorthand, which resets it`,
-      (clobbered[0] || "").trim().slice(0, 140) +
-      "\n      Either move the line-height AFTER the shorthand, or centre with grid/flex — which also survives a\n      " +
-      "label that wraps to two lines, where a tall line-height would push the second line out of the box.");
-  }
+  // BOTH DOORS, WORD-BOUNDED. `tokenIsValidX` contains `tokenIsValid`, so a rename away from the
+  // call used to keep the old version of this check green — proven by breaking it.
+  want(/\btokenIsValid\s*\(/.test(adminApi) && /seg\[0\] === "setup-code"/.test(adminApi),
+    "the admin console's code verb is behind the console's own gate",
+    "app/api/admin/printing lost its gate or its setup-code verb");
+  want(/\bmanagerCan\s*\(/.test(eroute) && /"print_setup"/.test(eroute),
+    "…and the restaurant's own verb is behind print_setup, so a waiter's login reaches nothing here",
+    "app/api/editor no longer asks print_setup before the printing verbs",
+    "This is the whole of the owner's objection: the staff login is also the waiter's login, so it\n      " +
+    "could never be the door to deciding where a restaurant's paper comes out.");
+
+  // THE CODE IS A SECRET FOR TEN MINUTES, which is the cost of not asking for a login. It must
+  // therefore never be readable twice, and never be stored in the clear.
+  want(/code_hash: hash\(code\)/.test(lib) && !/code_hash: code\b/.test(lib),
+    "the code is stored hashed, so a row can never be turned back into a working code",
+    "lib/printSetupCode.ts stores the setup code in the clear");
+  want(/export async function liveCodeState/.test(lib)
+    && !/select\("[^"]*\bcode_hash\b[^"]*"\)[\s\S]{0,200}return \{ live/.test(lib),
+    "…and the 'is a code live' read never selects it — a reloaded board learns the clock, not the digits",
+    "liveCodeState reads the code itself",
+    "It is shown once, on purpose. A second copy handed to anyone who reloads the page undoes the\n      " +
+    "whole reason for hashing it.");
+}
 
 /* ── the help pictures the access screen teaches from ─────────────────────────────────── */
 {

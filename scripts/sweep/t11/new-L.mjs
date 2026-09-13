@@ -208,10 +208,11 @@ const seds = [...SRC.matchAll(/sed -n 's\/\.\*"(\w+)":"\\\\\(\[\^"\]\*\\\\\)"\.\
 const pull = (json, field) => sh(`printf '%s' ${JSON.stringify(json)} | sed -n 's/.*"${field}":"\\([^"]*\\)".*/\\1/p'`).out;
 
 R("the helper parses the server's answers by name, and every field it looks for is one the route sends", () => {
-  /* THE ROUTE IS NOT THE ONLY PLACE THAT ANSWERS. `pair/start` returns whatever startPairing()
-     built, and its shape is declared in lib/printPair.ts (`PairStart = { code, secret, pairUrl,
-     expiresInMs }`). Looking only in the route file called `pairUrl` a field nobody sends. */
-  const AG = read("app/api/print-agent/[...path]/route.ts") + read("lib/printPair.ts") + read("lib/printHelpers.ts");
+  /* THE ROUTE IS NOT THE ONLY PLACE THAT ANSWERS. `pair/claim` returns whatever claimSetupCode()
+     built, and its shape is declared in lib/printSetupCode.ts (`ClaimResult`). Looking only in the
+     route file called a field nobody sends. (It was lib/printPair.ts until mig 380 replaced the
+     Allow-page handshake with a typed setup code.) */
+  const AG = read("app/api/print-agent/[...path]/route.ts") + read("lib/printSetupCode.ts") + read("lib/printHelpers.ts");
   const missing = [...new Set(seds)].filter((f) => !new RegExp(`\\b${f}\\b`).test(AG));
   return missing.length === 0 || `it looks for field(s) the route never sends: ${missing.join(", ")}`;
 });

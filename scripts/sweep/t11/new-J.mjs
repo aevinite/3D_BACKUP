@@ -122,9 +122,25 @@ let AGENT = null;        // { id, token, name }
 const PRINTERS = [{ name: "Sweep-Roll-80", desc: "Virtual 80mm", paper: { name: "X72MM", wMm: 72, hMm: 200 } },
                   { name: "Sweep-Sheet-A4", desc: "Virtual A4", paper: { name: "A4", wMm: 210, hMm: 297 } }];
 
+/* ── A VIRTUAL COMPUTER, MADE THE WAY A REAL ONE IS (mig 380) ────────────────────────────────
+   These phases used to call `POST /agents`, which made a print_agents row and answered with its
+   permanent token. That endpoint is DELETED: no screen had called it since mig 368, and leaving an
+   unreachable door that mints a printing credential beside the new one is the thing "a new way
+   replaces the old one" forbids (owner, 2026-08-29).
+   So a virtual computer is made the way a real one is now — hand out a ten-minute setup code, then
+   redeem it — which also means these phases drive the path a restaurant actually walks instead of a
+   shortcut around it. The shape it returns is the old one, so every call site below is unchanged. */
+const makeAgent = async (name) => {
+  const c = await admin("/setup-code", { rid: RID });
+  if (!c.j?.code) return { ok: false, status: c.status, j: { error: "no setup code was handed out" } };
+  const r = await agentCall("/pair/claim", { body: { code: c.j.code, hostname: String(name), os: "test", printers: PRINTERS } });
+  if (!r.j?.ok) return { ok: false, status: r.status, j: { error: r.j?.error || "the code was refused" } };
+  return { ok: true, status: 200, j: { id: r.j.agentId, name: r.j.name, code: r.j.token } };
+};
+
 if (reachable) {
   SNAP = JSON.parse(JSON.stringify((await admin(`/state?rid=${RID}`)).j?.routes ?? {}));
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 ${Date.now()}` });
+  const made = await makeAgent(`Sweep T11 round5 ${Date.now()}`);
   if (made.j?.id) { AGENT = { id: made.j.id, token: made.j.code, name: made.j.name }; MADE.agents.push(made.j.id); }
 }
 const need = (fn) => async () => AGENT ? fn() : "the virtual computer could not be created, so nothing below it could run";
@@ -149,36 +165,38 @@ D("a code that is not a code is turned away the same way as no code at all", asy
   const b = await agentCall("/hello", { tok: "not-a-real-code", body: {} });
   return a.status === b.status || `no code → ${a.status}, an unusable code → ${b.status}`;
 });
-D("the two pairing verbs are the only ones that answer without a code, and neither hands anything over", async () => {
-  const r = await agentCall("/pair/start", { body: { fingerprint: "sweep-fp-" + Date.now(), hostname: "sweep-host", os: "test", printers: PRINTERS } });
-  if (r.status !== 200) return `pair/start answered ${r.status}`;
-  const keys = Object.keys(r.j || {}).sort();
-  if (r.j?.token) return "pair/start hands back a working token before any person has approved it";
-  return (keys.includes("code") && keys.includes("secret")) || `it answered ${keys.join(", ")}`;
+/* ⚠️ RE-POINTED BY mig 380 (2026-09-13). These phases used to drive `pair/start` + `pair/poll` —
+   the Allow-page handshake. Both verbs are DELETED, not disabled: the owner threw the flow out
+   ("instead of login make something else otherwise the waiter will also do that printing thing")
+   because it asked a shop's counter PC for a staff login. `pair/claim` replaced them: the machine
+   types a code a signed-in screen handed out. The RULES below are the same rules — nothing is
+   handed over without one, a machine never names its own restaurant, junk is answered not crashed —
+   asked of the door that exists. */
+D("the ONE verb that answers without a code hands nothing over without a real one", async () => {
+  const r = await agentCall("/pair/claim", { body: { code: "ZZZZZZ", hostname: "sweep-host", os: "test", printers: PRINTERS } });
+  if (r.status >= 500) return `it answered ${r.status}`;
+  if (r.j?.token) return "a made-up setup code was given a working token";
+  return r.j?.ok === false || `it answered ${JSON.stringify(r.j).slice(0, 120)}`;
 });
-D("…and the machine that starts pairing does not get to say which restaurant it joins", async () => {
-  const r = await agentCall("/pair/start", { body: { fingerprint: "sweep-fp2-" + Date.now(), hostname: "h", os: "test", printers: [], restaurant_id: RID, rid: RID } });
+D("…and the retired handshake really is gone, not merely unused", async () => {
+  const a = await agentCall("/pair/" + "start", { body: { hostname: "h", os: "test", printers: [] } });
+  const b = await agentCall("/pair/" + "poll", { body: { code: "ZZZZZZ", secret: "x" } });
+  // An unknown verb falls through to the token gate, which is a 401 — that is the shape of "there
+  // is no such door here", and either way neither may mint anything.
+  return (!a.j?.code && !a.j?.secret && !b.j?.token)
+    || `pair/start answered ${JSON.stringify(a.j).slice(0, 80)} · pair/poll ${JSON.stringify(b.j).slice(0, 80)}`;
+});
+D("…and the machine redeeming a code does not get to say which restaurant it joins", async () => {
+  const r = await agentCall("/pair/claim", { body: { code: "ZZZZZZ", hostname: "h", os: "test", printers: [], restaurant_id: RID, rid: RID } });
   return !(r.j?.restaurant_id || r.j?.rid) || "the answer names a restaurant the machine asked for";
 });
-D("a pairing that nobody has approved yet is answered honestly, not with a token", async () => {
-  const s = await agentCall("/pair/start", { body: { fingerprint: "sweep-fp3-" + Date.now(), hostname: "h", os: "test", printers: [] } });
-  const p = await agentCall("/pair/poll", { body: { code: s.j?.code, secret: s.j?.secret } });
-  return !p.j?.token || "a token came back for a pairing no person has approved";
-});
-D("…and asking about a pairing without its own secret is answered the same as asking about one that does not exist", async () => {
-  const s = await agentCall("/pair/start", { body: { fingerprint: "sweep-fp4-" + Date.now(), hostname: "h", os: "test", printers: [] } });
-  const noSecret = await agentCall("/pair/poll", { body: { code: s.j?.code, secret: "" } });
-  const noSuch = await agentCall("/pair/poll", { body: { code: "ZZZZZZ", secret: "" } });
-  return (noSecret.status === noSuch.status && JSON.stringify(noSecret.j) === JSON.stringify(noSuch.j))
-    || `${JSON.stringify(noSecret.j)} vs ${JSON.stringify(noSuch.j)}`;
-});
-D("a pairing request that describes nothing is still answered, not crashed", async () => {
-  const r = await agentCall("/pair/start", { body: {} });
+D("a claim that describes nothing is still answered, not crashed", async () => {
+  const r = await agentCall("/pair/claim", { body: {} });
   return r.status < 500 || `it answered ${r.status}`;
 });
 D("…and one carrying a hundred printers does not become a hundred rows the admin has to read", async () => {
   const many = Array.from({ length: 100 }, (_, i) => ({ name: `P${i}`, desc: "x" }));
-  const r = await agentCall("/pair/start", { body: { fingerprint: "sweep-fp5-" + Date.now(), hostname: "h", os: "test", printers: many } });
+  const r = await agentCall("/pair/claim", { body: { code: "ZZZZZZ", hostname: "h", os: "test", printers: many } });
   return r.status < 500 || `it answered ${r.status}`;
 });
 
@@ -503,7 +521,7 @@ D("clearing a line is not the same as switching it off — one says 'nobody yet'
   return (cleared?.via !== "off" && off?.via === "off") || `cleared reads ${JSON.stringify(cleared?.via)}, switched off reads ${JSON.stringify(off?.via)}`;
 }));
 D("removing a computer empties every line that named it, so no paper is silently unprinted", need(async () => {
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 doomed ${Date.now()}` });
+  const made = await makeAgent(`Sweep T11 round5 doomed ${Date.now()}`);
   if (!made.j?.id) return "a second virtual computer could not be created";
   MADE.agents.push(made.j.id);
   await agentCall("/hello", { tok: made.j.code, body: { fingerprint: "sweep-doomed", printers: PRINTERS } });
@@ -519,56 +537,73 @@ D("…and it is marked removed rather than deleted, because which machine printe
   const gone = (await sb.from("print_agents").select("id, revoked_at").eq("restaurant_id", RID).not("revoked_at", "is", null).limit(1)).data;
   return (gone && gone.length > 0) || "a removed computer leaves no row at all, so its tickets name nobody";
 }));
-D("a new code kills the old one the instant it is given out", need(async () => {
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 recode ${Date.now()}` });
+/* RE-POINTED BY mig 380: `newcode` is deleted. Re-linking a machine is ONE path now — unlink it,
+   hand out a fresh setup code, type it in — so the rule this phase always meant ("the old code stops
+   working the instant a new one exists, which is how a stolen or sold machine is dealt with") is
+   asked of that path instead. */
+D("a removed computer's code dies at once, and a fresh setup code gives it a working one", need(async () => {
+  const made = await makeAgent(`Sweep T11 round5 recode ${Date.now()}`);
   if (!made.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(made.j.id);
   const old = made.j.code;
   await agentCall("/hello", { tok: old, body: { printers: PRINTERS } });
-  const fresh = await admin(`/agents/${made.j.id}/newcode`, { rid: RID });
+  await admin(`/agents/${made.j.id}/revoke`, { rid: RID });
   const withOld = await agentCall("/hello", { tok: old, body: {} });
-  const withNew = await agentCall("/hello", { tok: fresh.j?.code, body: { printers: PRINTERS } });
+  const again = await makeAgent(`Sweep T11 round5 recode2 ${Date.now()}`);
+  if (again.j?.id) MADE.agents.push(again.j.id);
+  const withNew = await agentCall("/hello", { tok: again.j?.code, body: { printers: PRINTERS } });
   return (withOld.status === 401 && withNew.status === 200) || `old code → ${withOld.status}, new code → ${withNew.status}`;
 }));
 D("…and the replaced code does not inherit the old machine's 'used on two computers' warning", need(async () => {
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 fp ${Date.now()}` });
+  const made = await makeAgent(`Sweep T11 round5 fp ${Date.now()}`);
   if (!made.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(made.j.id);
   await agentCall("/hello", { tok: made.j.code, body: { fingerprint: "machine-one", printers: PRINTERS } });
   await agentCall("/hello", { tok: made.j.code, body: { fingerprint: "machine-two", printers: PRINTERS } });
-  const fresh = await admin(`/agents/${made.j.id}/newcode`, { rid: RID });
+  // A REPLACEMENT IS A NEW COMPUTER NOW (mig 380), so the thing that must start clean is the row a
+  // fresh setup code creates — it must not inherit the old machine's "used on two computers".
+  const fresh = await makeAgent(`Sweep T11 round5 fp2 ${Date.now()}`);
+  if (fresh.j?.id) MADE.agents.push(fresh.j.id);
   const h = await agentCall("/hello", { tok: fresh.j?.code, body: { fingerprint: "machine-three", printers: PRINTERS } });
   return !h.j?.warning || `a brand-new code already warns: ${JSON.stringify(h.j.warning)}`;
 }));
 D("one code used on two computers IS said out loud, because half the tickets would come out in the wrong room", need(async () => {
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 clash ${Date.now()}` });
+  const made = await makeAgent(`Sweep T11 round5 clash ${Date.now()}`);
   if (!made.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(made.j.id);
   await agentCall("/hello", { tok: made.j.code, body: { fingerprint: "clash-a", printers: PRINTERS } });
   const h = await agentCall("/hello", { tok: made.j.code, body: { fingerprint: "clash-b", printers: PRINTERS } });
   return (typeof h.j?.warning === "string" && /computer/i.test(h.j.warning)) || `it said ${JSON.stringify(h.j?.warning)}`;
 }));
-D("a computer must be given a name — an unnamed machine is one nobody can point paper at", need(async () => {
-  const r = await admin("/agents", { rid: RID, name: "   " });
-  return (!r.ok && /name/i.test(String(r.j?.error || ""))) || `${r.status}: ${JSON.stringify(r.j).slice(0, 110)}`;
+/* ⚠️ THE NAMING RULE INVERTED WITH mig 367/380, AND THAT IS THE POINT. Nobody is asked to invent a
+   computer name any more (owner, 2026-08-27: "what the fuck is a computer name") — the machine
+   reports its own hostname when it redeems the code. So "a name is required" and "a duplicate is
+   refused" are the OLD product: a person standing at a printer must never be shown a uniqueness
+   error, and a machine that reports nothing must still end up with something a person can point
+   paper at. The RENAME path is where a refusal still belongs, because there a person did type it. */
+D("a machine that reports no name still gets one — nobody is asked to invent a computer name", need(async () => {
+  const r = await makeAgent("   ");
+  if (r.j?.id) MADE.agents.push(r.j.id);
+  return (r.ok && String(r.j?.name || "").trim().length > 0)
+    || `${r.status}: ${JSON.stringify(r.j).slice(0, 110)}`;
 }));
-D("…and two computers cannot share one name, or a person choosing between them is guessing", need(async () => {
+D("…and two machines reporting the SAME name are told apart, not refused", need(async () => {
   const name = `Sweep T11 round5 twin ${Date.now()}`;
-  const a = await admin("/agents", { rid: RID, name });
-  if (a.j?.id) MADE.agents.push(a.j.id);
-  const b = await admin("/agents", { rid: RID, name });
-  if (b.j?.id) MADE.agents.push(b.j.id);
-  return !b.ok || "two computers on one restaurant now answer to the same name";
+  const a = await makeAgent(name); if (a.j?.id) MADE.agents.push(a.j.id);
+  const b = await makeAgent(name); if (b.j?.id) MADE.agents.push(b.j.id);
+  return (a.ok && b.ok && a.j.name !== b.j.name)
+    || `both came out as ${JSON.stringify(a.j?.name)} / ${JSON.stringify(b.j?.name)} — a person choosing between them is guessing`;
 }));
 D("renaming a computer to a name already taken says so, rather than failing quietly", need(async () => {
   const n1 = `Sweep T11 round5 r1 ${Date.now()}`, n2 = `Sweep T11 round5 r2 ${Date.now()}`;
-  const a = await admin("/agents", { rid: RID, name: n1 }); if (a.j?.id) MADE.agents.push(a.j.id);
-  const b = await admin("/agents", { rid: RID, name: n2 }); if (b.j?.id) MADE.agents.push(b.j.id);
+  const a = await makeAgent(n1); if (a.j?.id) MADE.agents.push(a.j.id);
+  const b = await makeAgent(n2); if (b.j?.id) MADE.agents.push(b.j.id);
   const r = await admin(`/agents/${b.j.id}/rename`, { rid: RID, name: n1 });
   return (!r.ok && /already/i.test(String(r.j?.error || ""))) || `${r.status}: ${JSON.stringify(r.j).slice(0, 110)}`;
 }));
 D("a computer that does not exist is answered 'no such computer', not 'could not load it'", need(async () => {
-  const r = await admin("/agents/00000000-0000-0000-0000-0000000000ff/newcode", { rid: RID });
+  // `newcode` was this phase's door until mig 380 deleted it; `revoke` carries the same branch.
+  const r = await admin("/agents/00000000-0000-0000-0000-0000000000ff/revoke", { rid: RID });
   return (r.status === 404 && /no such computer/i.test(String(r.j?.error || ""))) || `${r.status}: ${JSON.stringify(r.j).slice(0, 110)}`;
 }));
 
@@ -680,57 +715,59 @@ D("…and a ticket that failed says WHY on the board, in words", need(async () =
   return (!mine || /[a-z]{3}\s+[a-z]{3}/.test(msg)) || `it reads ${JSON.stringify(msg)}`;
 }));
 
-/* ══ J-8 · PAIRING, ALL THE WAY THROUGH ════════════════════════════════════════════════════
-   The route a restaurant actually walks: the file describes the machine, a person approves it on
-   screen, and only then does the machine get a code — once. */
-const startPair = () => agentCall("/pair/start", {
-  body: { fingerprint: `sweep-pair-${Date.now()}`, hostname: "sweep-host", os: "test", printers: PRINTERS } });
-D("a machine describing itself gets a code a person can read out, and a secret only it holds", need(async () => {
-  const r = await startPair();
-  const code = String(r.j?.code || "");
-  return (/^[A-Z0-9-]{4,12}$/.test(code) && String(r.j?.secret || "").length >= 16)
-    || `code ${JSON.stringify(r.j?.code)}, secret ${String(r.j?.secret || "").length} chars`;
+/* ══ J-8 · JOINING, ALL THE WAY THROUGH ═══════════════════════════════════════════════════
+   The route a restaurant actually walks (mig 380): somebody on the Printing screen presses "Show a
+   setup code", and the person at the printer types it into the helper. Nobody signs in on that
+   machine — the thing the owner threw the old handshake out for, 2026-09-13.
+   ⚠️ These phases used to drive pair/start + pair/poll + the /pair Allow page. Every RULE they
+   asserted is below, asked of the door that exists: the code is readable out loud, it does not last
+   for ever, two are never the same, and nothing is handed over before it is redeemed. */
+const newSetupCode = async () => (await admin("/setup-code", { rid: RID })).j || {};
+D("the screen hands out a code a person can read out loud", need(async () => {
+  const r = await newSetupCode();
+  return /^[A-HJ-NP-Z2-9]{6}$/.test(String(r.code || "")) || `it gave ${JSON.stringify(r.code)}`;
 }));
-D("…and a code a person reads out has no characters that look like each other", need(async () => {
-  const r = await startPair();
-  const code = String(r.j?.code || "");
+D("…and that code has no characters that look like each other", need(async () => {
+  const r = await newSetupCode();
+  const code = String(r.code || "");
   const confusing = [...code].filter((c) => "O0I1L".includes(c));
   return confusing.length === 0 || `the code is "${code}" — a person reading it out would say ${confusing.join(", ")} ambiguously`;
 }));
-D("…and it is handed a place to go and approve it, rather than being told to find one", need(async () => {
-  const r = await startPair();
-  return (typeof r.j?.pairUrl === "string" && r.j.pairUrl.includes("/pair")) || `it was given ${JSON.stringify(r.j?.pairUrl)}`;
+D("…and it is shown grouped, because six characters in a row are read back wrong", need(async () => {
+  const r = await newSetupCode();
+  return (typeof r.pretty === "string" && r.pretty.includes(" ") && r.pretty.replace(/ /g, "") === r.code)
+    || `it was shown as ${JSON.stringify(r.pretty)} for the code ${JSON.stringify(r.code)}`;
 }));
-D("…and the pairing does not last for ever unapproved", need(async () => {
-  const r = await startPair();
-  return (Number(r.j?.expiresInMs) > 0) || `it says it expires in ${JSON.stringify(r.j?.expiresInMs)}`;
+D("…and a code does not last for ever — ten minutes, his own number", need(async () => {
+  const r = await newSetupCode();
+  const ms = Number(r.expiresInMs);
+  return (ms === 10 * 60_000) || `it says it lasts ${ms} ms`;
 }));
-D("…and two machines starting at once get two different codes", need(async () => {
-  const [a, b] = await Promise.all([startPair(), startPair()]);
-  return (a.j?.code && b.j?.code && a.j.code !== b.j.code) || `both got ${JSON.stringify(a.j?.code)}`;
+D("…and two codes handed out in a row are never the same", need(async () => {
+  const a = await newSetupCode(); const b = await newSetupCode();
+  return (a.code && b.code && a.code !== b.code) || `both were ${JSON.stringify(a.code)}`;
 }));
-D("a pairing nobody has approved yet answers 'waiting', not a token", need(async () => {
-  const s = await startPair();
-  const p = await agentCall("/pair/poll", { body: { code: s.j?.code, secret: s.j?.secret } });
-  return (!p.j?.token && p.status === 200) || `${p.status}: ${JSON.stringify(p.j).slice(0, 90)}`;
+D("a code that has been handed out but not used creates NO computer — nothing can print yet", need(async () => {
+  const before = (await admin(`/state?rid=${RID}`)).j?.agents?.length ?? -1;
+  await newSetupCode();
+  const after = (await admin(`/state?rid=${RID}`)).j?.agents?.length ?? -2;
+  return (before === after) || `computers went ${before} → ${after} on a code nobody has used`;
 }));
-D("…and the machine that asks is never told which restaurant it MIGHT join", need(async () => {
-  const s = await startPair();
-  const p = await agentCall("/pair/poll", { body: { code: s.j?.code, secret: s.j?.secret } });
-  return !p.j?.restaurant || `it was told ${JSON.stringify(p.j.restaurant)} before anybody approved it`;
+D("…and the machine redeeming it is never told which restaurant it MIGHT join before it does", need(async () => {
+  const bad = await agentCall("/pair/claim", { body: { code: "ZZZZZZ", hostname: "sweep-host", os: "test" } });
+  return !bad.j?.restaurant || `a refused claim named ${JSON.stringify(bad.j.restaurant)}`;
 }));
-D("…and the pairing page a person opens is a real screen", need(async () => {
-  const s = await startPair();
-  const url = String(s.j?.pairUrl || "");
-  if (!url) return "no pairing address was given";
-  const r = await fetch(url.startsWith("http") ? url : BASE + url, { headers: adminHeaders(BASE) });
-  const t = r.ok ? await r.text() : "";
-  return (r.ok && t.length > 400) || `${r.status}, ${t.length} bytes`;
+D("…and redeeming it names the restaurant it joined, so the window can say where it landed", need(async () => {
+  const c = await newSetupCode();
+  const r = await agentCall("/pair/claim", { body: { code: c.code, hostname: `Sweep J8 ${Date.now()}`, os: "test", printers: PRINTERS } });
+  if (r.j?.agentId) MADE.agents.push(r.j.agentId);
+  return (r.j?.ok === true && typeof r.j.restaurant === "string" && r.j.restaurant.length > 0)
+    || `it answered ${JSON.stringify(r.j).slice(0, 120)}`;
 }));
 
 /* ══ J-9 · THE DOCUMENT, AND WHO MAY HAVE IT ═══════════════════════════════════════════════ */
 D("a document is only given to the computer the ticket was claimed by", need(async () => {
-  const other = await admin("/agents", { rid: RID, name: `Sweep T11 round5 other ${Date.now()}` });
+  const other = await makeAgent(`Sweep T11 round5 other ${Date.now()}`);
   if (!other.j?.id) return "a second virtual computer could not be created";
   MADE.agents.push(other.j.id);
   await agentCall("/hello", { tok: other.j.code, body: { fingerprint: "sweep-other", printers: PRINTERS } });
@@ -740,7 +777,7 @@ D("a document is only given to the computer the ticket was claimed by", need(asy
   return d.status === 409 || `the other machine was answered ${d.status}`;
 }));
 D("…and the refusal says which machine it belongs to, in words", need(async () => {
-  const other = await admin("/agents", { rid: RID, name: `Sweep T11 round5 other2 ${Date.now()}` });
+  const other = await makeAgent(`Sweep T11 round5 other2 ${Date.now()}`);
   if (!other.j?.id) return "a second virtual computer could not be created";
   MADE.agents.push(other.j.id);
   await agentCall("/hello", { tok: other.j.code, body: { printers: PRINTERS } });
@@ -772,7 +809,7 @@ D("the document carries the paper the ROUTE pins, in preference to what the mach
   return /210/.test(paper) || `the answer says the paper is ${JSON.stringify(paper)}`;
 }));
 D("…and a machine that reported no paper at all still gets a document", need(async () => {
-  const bare = await admin("/agents", { rid: RID, name: `Sweep T11 round5 nopaper ${Date.now()}` });
+  const bare = await makeAgent(`Sweep T11 round5 nopaper ${Date.now()}`);
   if (!bare.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(bare.j.id);
   await agentCall("/hello", { tok: bare.j.code, body: { fingerprint: "sweep-nopaper", printers: [{ name: "Sweep-Bare" }] } });
@@ -794,7 +831,7 @@ D("tickets are offered oldest first — a kitchen works in the order orders arri
   return JSON.stringify(got) === JSON.stringify(ids) || `queued ${ids.map((x) => x.slice(0, 6))} and was offered ${got.map((x) => x.slice(0, 6))}`;
 }));
 D("two computers asking at the same instant are never given the same ticket", need(async () => {
-  const other = await admin("/agents", { rid: RID, name: `Sweep T11 round5 race ${Date.now()}` });
+  const other = await makeAgent(`Sweep T11 round5 race ${Date.now()}`);
   if (!other.j?.id) return "a second virtual computer could not be created";
   MADE.agents.push(other.j.id);
   await agentCall("/hello", { tok: other.j.code, body: { fingerprint: "sweep-race", printers: PRINTERS } });
@@ -851,7 +888,7 @@ const auditSince = async (sinceIso) => {
 };
 D("adding a computer is written down, in words a person can read months later", need(async () => {
   const since = new Date(Date.now() - 2000).toISOString();
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 audit ${Date.now()}` });
+  const made = await makeAgent(`Sweep T11 round5 audit ${Date.now()}`);
   if (made.j?.id) MADE.agents.push(made.j.id);
   await new Promise((x) => setTimeout(x, 500));
   const rows_ = await auditSince(since);
@@ -859,7 +896,7 @@ D("adding a computer is written down, in words a person can read months later", 
   return (hit && /[a-z]{3}\s+[a-z]{3}/.test(String(hit.detail || ""))) || `the log says ${JSON.stringify(hit?.detail ?? "nothing")}`;
 }));
 D("…and removing one likewise", need(async () => {
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 audit2 ${Date.now()}` });
+  const made = await makeAgent(`Sweep T11 round5 audit2 ${Date.now()}`);
   if (!made.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(made.j.id);
   const since = new Date(Date.now() - 500).toISOString();
@@ -869,13 +906,15 @@ D("…and removing one likewise", need(async () => {
   const hit = rows_.find((x) => /print_helper_removed/.test(x.action || ""));
   return (hit && /[a-z]{3}\s+[a-z]{3}/.test(String(hit.detail || ""))) || `the log says ${JSON.stringify(hit?.detail ?? "nothing")}`;
 }));
-D("…and a new code likewise, because a replaced code is how a stolen machine is dealt with", need(async () => {
+D("…and handing out a setup code likewise, because that is how a machine gets in (mig 380)", need(async () => {
   const since = new Date(Date.now() - 500).toISOString();
-  const r = await admin(`/agents/${AGENT.id}/newcode`, { rid: RID });
-  if (r.j?.code) AGENT.token = r.j.code;
+  const r = await admin("/setup-code", { rid: RID });
   await new Promise((x) => setTimeout(x, 500));
   const rows_ = await auditSince(since);
-  return !!rows_.find((x) => /print_helper_recoded/.test(x.action || "")) || "replacing a printing code is not written down anywhere";
+  const hit = rows_.find((x) => /print_setup_code_issued/.test(x.action || ""));
+  if (!hit) return "handing out a printing setup code is not written down anywhere";
+  // AND THE CODE ITSELF IS NEVER IN IT. It is stored hashed for exactly that reason.
+  return !String(hit.detail || "").includes(String(r.j?.code || "\u0000")) || "the log carries the setup code itself";
 }));
 D("…and taking a ticket out of the queue by hand likewise", need(async () => {
   const q = await queueTest();
@@ -949,14 +988,14 @@ D("…and the helper is told that kind of paper is its job", need(async () => {
   return (h.j?.mine || []).includes("kot") || `it was told its jobs are ${JSON.stringify(h.j?.mine)}`;
 }));
 D("…and a machine that owns NOTHING is told so, rather than left guessing", need(async () => {
-  const idle = await admin("/agents", { rid: RID, name: `Sweep T11 round5 idle ${Date.now()}` });
+  const idle = await makeAgent(`Sweep T11 round5 idle ${Date.now()}`);
   if (!idle.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(idle.j.id);
   const h = await agentCall("/hello", { tok: idle.j.code, body: { printers: PRINTERS } });
   return (Array.isArray(h.j?.mine) && h.j.mine.length === 0) || `it was told ${JSON.stringify(h.j?.mine)}`;
 }));
 D("…and that machine is never offered work meant for another", need(async () => {
-  const idle = await admin("/agents", { rid: RID, name: `Sweep T11 round5 idle2 ${Date.now()}` });
+  const idle = await makeAgent(`Sweep T11 round5 idle2 ${Date.now()}`);
   if (!idle.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(idle.j.id);
   await agentCall("/hello", { tok: idle.j.code, body: { printers: PRINTERS } });
@@ -1005,24 +1044,24 @@ D("…and a reprint raises nothing — no band on a bill, no audit row, no quest
 
 /* ══ J-13 · THE LAST FOURTEEN — WHAT A RESTAURANT IS LEFT WITH WHEN SOMETHING IS WRONG ═════ */
 D("a machine whose code was replaced is told to link itself afresh, not just refused", need(async () => {
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 relink ${Date.now()}` });
+  const made = await makeAgent(`Sweep T11 round5 relink ${Date.now()}`);
   if (!made.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(made.j.id);
   const old = made.j.code;
-  await admin(`/agents/${made.j.id}/newcode`, { rid: RID });
+  await admin(`/agents/${made.j.id}/revoke`, { rid: RID });
   const h = await agentCall("/hello", { tok: old, body: {} });
   const msg = String(h.j?.error || h.text);
   return /link|again|afresh|not valid any more/i.test(msg) || `it was told ${JSON.stringify(msg).slice(0, 80)}`;
 }));
 D("…and the file it generated tells a person at that machine what to do about it", need(async () => {
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 relink2 ${Date.now()}` });
+  const made = await makeAgent(`Sweep T11 round5 relink2 ${Date.now()}`);
   if (!made.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(made.j.id);
   const texts = JSON.stringify(made.j.scripts || {});
   return /link this afresh|start this file again|Delete/i.test(texts) || "the file says nothing about what to do if the link is removed";
 }));
 D("a removed machine cannot claim work any more", need(async () => {
-  const made = await admin("/agents", { rid: RID, name: `Sweep T11 round5 revoked ${Date.now()}` });
+  const made = await makeAgent(`Sweep T11 round5 revoked ${Date.now()}`);
   if (!made.j?.id) return "a virtual computer could not be created";
   MADE.agents.push(made.j.id);
   await agentCall("/hello", { tok: made.j.code, body: { printers: PRINTERS } });
@@ -1037,7 +1076,7 @@ D("…and its past tickets are still readable, because a record nobody can look 
   return (gone && gone.length > 0 && !!gone[0].name) || "a removed machine leaves no name for its old tickets to point at";
 }));
 D("a machine reporting a ticket it does not own is refused, not believed", need(async () => {
-  const other = await admin("/agents", { rid: RID, name: `Sweep T11 round5 liar ${Date.now()}` });
+  const other = await makeAgent(`Sweep T11 round5 liar ${Date.now()}`);
   if (!other.j?.id) return "a second virtual computer could not be created";
   MADE.agents.push(other.j.id);
   await agentCall("/hello", { tok: other.j.code, body: { printers: PRINTERS } });

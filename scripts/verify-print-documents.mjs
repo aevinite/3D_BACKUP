@@ -359,7 +359,12 @@ for (const [what, src] of [["the helper", HELPER], ["the print station", STATION
        switched off, so it counts brackets now. */
     const win = (src.match(/const windows[\s\S]*?`;/) || [""])[0];
     if (!win) return true;
-    const lines = win.split("\n");
+    /* `echo(` IS NOT A BLOCK (2026-09-13, and verify:print-helper's twin of this walker had the
+       identical gap). It is cmd's own idiom for echoing a value that might be empty, and reading
+       its "(" as an opened block makes every line after it look nested — which is how this phase
+       came to condemn twenty correct lines at once. A guard that cries wolf on right code gets
+       switched off, which the comment above already says about this very check. */
+    const lines = win.replace(/\becho\(/gi, "echo ").split("\n");
     const depthBefore = [];
     let d = 0;
     for (const l of lines) {
@@ -857,7 +862,9 @@ const MIGS = [
   ["341 · a helper prints the paper", "print_agents",  ["printers", "last_seen_at"]],
   ["351 · a complaint knows its printer", "printer_events", ["printer"]],
   ["367 · a device sets up its own printer", "print_agents", ["owner_device"]],
-  ["368 · a helper pairs itself",  "print_pairings", ["code", "secret_hash"]],
+  /* mig 368's print_pairings was DROPPED by mig 380 with the Allow page that used it. The row it
+     leaves behind is the table a computer redeems a typed setup code from. */
+  ["380 · a computer types a setup code", "print_setup_codes", ["code_hash", "expires_at"]],
 ];
 const MIGSRC = (() => {
   try {
@@ -873,7 +880,7 @@ for (const [what, table, cols] of MIGS) {
       new RegExp(`${c}\\b`).test(MIGSRC) || `${c} is gone from every migration, so the code reading it reads nothing`);
   }
   P(`${what}: and the code actually reads ${table}`, () => {
-    const files = ["lib/printQueue.ts", "lib/printHelpers.ts", "lib/printBoard.ts", "lib/printPair.ts"];
+    const files = ["lib/printQueue.ts", "lib/printHelpers.ts", "lib/printBoard.ts", "lib/printSetupCode.ts"];
     return files.some((f) => read(f).includes(table)) || `no printing library mentions ${table} — either it is dead or something stopped using it`;
   });
 }

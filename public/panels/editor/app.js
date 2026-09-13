@@ -1702,6 +1702,20 @@ function bindPrintingBoard(ed) {
         if (d) { toast(`This screen now manages “${d.name}”.`); await loadPrintBoard(); }
         return;
       }
+      // ── SHOW A SETUP CODE (mig 380) ────────────────────────────────────────────────────────
+      // The answer is held in `state` and drawn once. It is never stored anywhere that survives
+      // this page: not localStorage, not the offline cache — a ten-minute secret that outlives its
+      // ten minutes on a shared till is the one way this design could go wrong.
+      if (what === "setupcode") {
+        const d = await post("setup-code", {});
+        if (d && d.code) {
+          state.printCode = { code: d.code, pretty: d.pretty, expiresAt: d.expiresAt };
+          // Re-read so the board's own "a code is live" line agrees with the card immediately.
+          await loadPrintBoard();
+          startPrintCodeTick();
+        }
+        return;
+      }
       // THESE TWO ASK IN THE PANEL, NOT WITH THE BROWSER'S OWN DIALOG (sweep #8 T6, 2026-09-03).
       // They were the last bare prompt() and confirm() left in this file, and this panel already owns
       // a themed replacement for each (promptDialog / confirmDialog, right at the top).
@@ -1726,7 +1740,7 @@ function bindPrintingBoard(ed) {
         const nm = (B().thisComputer || {}).name || "this computer";
         if (!(await confirmDialog(
           `Unlink \u201c${nm}\u201d? It stops printing at once, and anything routed to it needs a printer choosing again. `
-          + "To bring it back: double-click the helper file on that computer and press Allow.",
+          + "To bring it back: show a setup code, run the helper file on that computer, and type it in.",
           "Unlink"))) return;
         const d = await post("unlink", {});
         if (d) { toast("Unlinked."); await loadPrintBoard(); }
@@ -7389,6 +7403,10 @@ function bindEditor() {
   if (state.tab === "general" && state.settingsSection === "printing") {
     if (!state.printBoardLoaded && !state.printBoardLoading) loadPrintBoard();
     bindPrintingBoard(ed);
+    // The setup code's clock. Started HERE and not inside the card's own builder, because a builder
+    // that starts a timer runs once per render and would leave one behind every redraw. It stops
+    // itself the moment no countdown is on screen (see startPrintCodeTick).
+    if (ed.querySelector("[data-pw-left]")) startPrintCodeTick();
   }
 
   // ---- "Who serves which table" card (Settings → Access): waiter sections, mig 222 ----
@@ -7956,6 +7974,10 @@ const OP_ACTION_LABELS = {
   // The print HELPER — a computer, not a screen, doing the printing (mig 341). Plain English, like
   // every other line in this log: a manager reading it should never meet a code.
   print_helper_added: "Added a computer that can print", print_helper_recoded: "Gave a printing computer a new code",
+  // mig 380 — the ten-minute code a computer types in to join the printing. It says a code was
+  // handed out and by whom; it never carries the code itself, which is the one thing that must not
+  // be readable after the fact.
+  print_setup_code_issued: "Showed a setup code for a printing computer",
   print_helper_removed: "Removed a computer from printing", print_routes_changed: "Changed which printer gets which paper",
   print_switch: "Changed a printing switch", print_test: "Sent a test page to a printer",
   print_sent: "Sent something to a printer", print_sent_by_admin: "Aevidine sent something to this restaurant's printer",
@@ -13848,6 +13870,77 @@ let lastPrintedHere = null;   // { kot, table, at } — the bell row proves prin
 //
 // Everyone else sees exactly the same four cards with the answers stated as plain sentences and no
 // buttons — never as dead controls (owner, 2026-07-31: "there shouldn't be grayed out option also").
+// ── THE SETUP CODE (mig 380) ──────────────────────────────────────────────────────────────────
+//
+// Owner, 2026-09-13: *"instead of login make something else otherwise the waiter will also do that
+// printing thing"*, then: *"you can generate code for each restaurant from printing menu and like
+// the helper ask for that code and that generated code only works for 10 min."*
+//
+// This is the restaurant's own copy of the admin console's card, same words, same shape — the rule
+// this whole section lives under ("the UI/UX is also not identical", 2026-08-27).
+//
+// A waiter cannot reach it: this whole Printing section is behind print_setup, and the SERVER asks
+// for that permission again before it makes a code. Hiding is never the only guard.
+//
+// The code lives in `state.printCode` and nowhere else. It is stored hashed on the server, so a
+// panel reload loses the DIGITS but not the setup — the board still says a code is live and for how
+// long, and the honest answer to "I lost it" is a fresh code, never a second copy of a live one.
+let _printCodeTick = null;
+function setupCodeLeft(iso) {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return null;
+  const total = Math.ceil(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+function setupCodeCard() {
+  const mine = state.printCode || null;
+  const live = ((state.printBoard || {}).setupCode) || {};
+  const mineLeft = mine ? setupCodeLeft(mine.expiresAt) : null;
+  const liveLeft = live.expiresAt ? setupCodeLeft(live.expiresAt) : null;
+  const body = mineLeft
+    // Big, monospaced and widely spaced: it is read ALOUD down a phone as often as it is typed.
+    ? `<div class="pw-code">
+         <div class="pw-code-digits">${esc(mine.pretty)}</div>
+         <div class="pw-code-left"><span data-pw-left>${esc(mineLeft)}</span> left</div>
+       </div>`
+    : mine
+      ? `<p class="hint" style="margin:0 0 10px">That code has run out. Show a new one — they last ten minutes on purpose.</p>`
+      : liveLeft
+        ? `<p class="muted" style="font-size:12.5px;margin:0 0 10px">A code is already live for another
+             <b data-pw-left>${esc(liveLeft)}</b>. If you have lost it, show a new one — the old one stops
+             working the moment you do.</p>`
+        : "";
+  return `${body}
+    <button type="button" class="btn primary" data-pw="setupcode">
+      ${mineLeft || liveLeft ? "Show a new setup code" : "Show a setup code"}
+    </button>
+    <p class="muted" style="font-size:12px;margin:8px 0 0;line-height:1.6">
+      It is shown here once and nowhere else — we keep only a scrambled copy, so it can never be read
+      back off a screen or out of a log. The code works once, for one computer, for this restaurant.
+    </p>`;
+}
+// THE COUNTDOWN IS REPAINTED IN PLACE, not by re-rendering the section. Re-rendering every second
+// would throw away whatever the person was doing in the paper dropdowns beside it — the same reason
+// the floor strip patches its own numbers rather than redrawing the floor.
+function startPrintCodeTick() {
+  if (_printCodeTick) return;
+  _printCodeTick = setInterval(() => {
+    const spots = document.querySelectorAll("[data-pw-left]");
+    if (!spots.length) { clearInterval(_printCodeTick); _printCodeTick = null; return; }
+    const iso = (state.printCode && state.printCode.expiresAt)
+      || ((state.printBoard || {}).setupCode || {}).expiresAt;
+    const left = iso ? setupCodeLeft(iso) : null;
+    // It ran out while somebody was looking at it. Redraw ONCE so the card becomes "show a new one"
+    // instead of freezing on 0:00, then stop.
+    if (!left) {
+      clearInterval(_printCodeTick); _printCodeTick = null;
+      if (state.tab === "general" && state.settingsSection === "printing") renderEditor();
+      return;
+    }
+    spots.forEach((el) => { el.textContent = left; });
+  }, 1000);
+}
+
 function formPrinting(s) {
   const B = state.printBoard;
   // The board is fetched when this section opens (loadPrintBoard). Until it lands, say so — an
@@ -13924,7 +14017,7 @@ function formPrinting(s) {
       </div>
       <p class="muted" style="font-size:12px;margin:8px 0 0">
         “Unlink” stops this computer printing at once, and anything routed to it needs a printer
-        choosing again. To bring it back: double-click the helper file here and press <b>Allow</b>.
+        choosing again. To bring it back: show a setup code, run the helper file here, and type it in.
       </p>` : ""}
     ` : may ? `
       <div class="hint" style="margin-bottom:10px">
@@ -13933,10 +14026,10 @@ function formPrinting(s) {
         print box nobody is watching.
       </div>
       <p class="what" style="margin:0 0 8px">
-        Make the file below on that computer and double-click it. It opens a page that asks
-        <b>Allow?</b> — press it, and this section fills itself in.
-        <b>Nothing to name, nothing to copy across.</b>
+        Press <b>Show a setup code</b> below, make the helper file on that computer, and type the code
+        into it. <b>Nobody signs in on that computer</b> — not now, and not ever.
       </p>
+      ${setupCodeCard()}
       ${(B.agents || []).length ? `
         <details class="pw-more"><summary>Already set up? Say which of these computers this is</summary>
           <p class="what" style="margin-top:6px">Pick it and this screen takes over managing it — nothing is

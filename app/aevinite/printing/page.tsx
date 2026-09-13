@@ -45,6 +45,10 @@ type State = {
   paused?: boolean;
   files?: Record<string, { filename: string; autostart: string; text: string }>;
   stationFiles?: Record<string, { filename: string; firstRun: string; text: string }>;
+  /** Whether a ten-minute setup code is still live, and until when — NEVER the code (mig 380). It
+   *  is stored hashed, so a reloaded board can honestly know only this much, and that is enough:
+   *  it says "a code is live, 6 min left" and offers a fresh one. */
+  setupCode?: { live: boolean; expiresAt: string | null };
 };
 /** ONE ROW PER RESTAURANT (owner, 2026-08-27: "it will be messy when there will be too much
  *  restaurants… I could be able to differentiate all the restaurants"). */
@@ -167,6 +171,97 @@ function FileCard({ title, lead, files, os, setOs, copy, steps, footer }: {
           {f.text}
         </pre>
       </div>
+    </div>
+  );
+}
+
+/** HOW LONG IS LEFT, in the words a person says. Ticked by the card, not stored on the server:
+ *  the server sends an instant, and a clock is the screen's job. */
+function leftWords(ms: number): string {
+  if (ms <= 0) return "expired";
+  const total = Math.ceil(ms / 1000);
+  const m = Math.floor(total / 60), sec = total % 60;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/** ── THE SETUP CODE (mig 380) ─────────────────────────────────────────────────────────────────
+ *
+ *  Owner, 2026-09-13: *"you can generate code for each restaurant from printing menu and like the
+ *  helper ask for that code and that generated code only works for 10 min."* This card is the
+ *  "printing menu" half of that sentence.
+ *
+ *  It replaced a page that asked for a STAFF LOGIN on the restaurant's own counter machine — which
+ *  is the waiter's login too, and that is exactly what he objected to. Nobody signs in there now.
+ *
+ *  Three decisions that look like detail and are not:
+ *   · THE CODE IS SHOWN ONCE. It is stored hashed, so this component's state is the only copy. A
+ *     reload does not lose the SETUP — the board still says a code is live and for how long — it
+ *     loses the digits, and the honest answer to that is a fresh code, never a second copy.
+ *   · THE COUNTDOWN IS ON SCREEN, not implied. "Ten minutes" said once, next to a code somebody is
+ *     carrying to another room, is a number they have to guess at from then on.
+ *   · IT IS BIG AND SPACED. It is read out loud down a phone as often as it is typed, and the
+ *     alphabet already leaves out every character that sounds like another one.
+ */
+function SetupCodeCard({ live, onShow, busy }: {
+  live: { live: boolean; expiresAt: string | null } | undefined;
+  onShow: () => Promise<{ code: string; pretty: string; expiresAt: string } | null>;
+  busy: boolean;
+}) {
+  const [shown, setShown] = useState<{ pretty: string; code: string; expiresAt: string } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  // One second, and only while something is actually counting down — a timer left running behind a
+  // card with nothing on it is the kind of thing that is never noticed and never stops.
+  const ticking = !!shown || !!live?.expiresAt;
+  useEffect(() => {
+    if (!ticking) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [ticking]);
+
+  const mineMs = shown ? new Date(shown.expiresAt).getTime() - now : 0;
+  const liveMs = live?.expiresAt ? new Date(live.expiresAt).getTime() - now : 0;
+  const mineAlive = !!shown && mineMs > 0;
+
+  return (
+    <div className="adm-card" style={{ marginTop: 14 }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Set a computer up — one code, ten minutes</h2>
+      <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13, lineHeight: 1.6 }}>
+        Press the button, then type the code into the helper on the computer the printer is plugged
+        into. <b>Nobody signs in on that computer</b> — not now, and not ever. The code works once,
+        for one computer, for this restaurant only.
+      </p>
+
+      {mineAlive ? (
+        <div className="adm-setupcode">
+          <div className="adm-setupcode-digits" aria-label={`Setup code ${shown!.code.split("").join(" ")}`}>
+            {shown!.pretty}
+          </div>
+          <div className="adm-setupcode-side">
+            <div className="adm-setupcode-left">{leftWords(mineMs)} left</div>
+            <button className="adm-btn" style={{ fontSize: 12 }}
+              onClick={() => { void navigator.clipboard?.writeText(shown!.code); }}>Copy</button>
+          </div>
+        </div>
+      ) : shown ? (
+        <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--adm-warn, #f5a524)" }}>
+          <i className="fas fa-clock" aria-hidden="true" style={{ marginRight: 6 }} />
+          That code has run out. Show a new one — they last ten minutes on purpose.
+        </p>
+      ) : live?.live && liveMs > 0 ? (
+        <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
+          A code is already live for another <b>{leftWords(liveMs)}</b>. If you have lost it, show a
+          new one — the old one stops working the moment you do.
+        </p>
+      ) : null}
+
+      <button className="adm-btn primary" disabled={busy}
+        onClick={async () => { const d = await onShow(); if (d) setShown(d); }}>
+        {busy ? "Making one…" : mineAlive || (live?.live && liveMs > 0) ? "Show a new setup code" : "Show a setup code"}
+      </button>
+      <p className="adm-muted" style={{ fontSize: 12, margin: "10px 0 0", lineHeight: 1.6 }}>
+        It is shown here once and nowhere else — we keep only a scrambled copy, so it can never be
+        read back off a screen or out of a log. Lost it? Show a new one.
+      </p>
     </div>
   );
 }
@@ -558,8 +653,9 @@ const PANEL_GROUPS: [ string, string ][] = [
                 </p>
                 {agents.length === 0 ? (
                   <div className="adm-muted" style={{ fontSize: 13, padding: "6px 0 12px" }}>
-                    No computer has the helper yet. Make the file below on the machine the printer is
-                    plugged into, double-click it, and press <b>Allow</b> — it appears here by itself.
+                    No computer has the helper yet. Press <b>Show a setup code</b> below, make the helper
+                    file on the machine the printer is plugged into, and type that code into it — the computer
+                    appears here by itself.
                   </div>
                 ) : agents.map((a) => (
                   <div key={a.id} style={{ padding: "10px 0", borderTop: "1px solid var(--border)" }}>
@@ -579,9 +675,9 @@ const PANEL_GROUPS: [ string, string ][] = [
                             if (name && name.trim() && name !== a.name) { const d = await post(`agents/${a.id}/rename`, { name: name.trim() }); if (d) void load(); }
                           }}>Rename</button>
                         <button className="adm-btn danger" style={{ fontSize: 12 }} disabled={!!busy}
-                          title="Its code dies at once and anything routed to it needs choosing again. To bring it back: run the file on that computer and press Allow."
+                          title="Its code dies at once and anything routed to it needs choosing again. To bring it back: show a setup code, run the file on that computer, and type the code in."
                           onClick={async () => {
-                            if (!confirm(`Unlink “${a.name}”?\n\nIts code stops working at once, and any paper routed to it will need a printer choosing again.\n\nTo bring it back, run the helper file on that computer and press Allow.`)) return;
+                            if (!confirm(`Unlink “${a.name}”?\n\nIts code stops working at once, and any paper routed to it will need a printer choosing again.\n\nTo bring it back: show a setup code here, run the helper file on that computer, and type the code in.`)) return;
                             const d = await post(`agents/${a.id}/revoke`, {});
                             if (d) { toast(`${a.name} unlinked.`, "ok"); void load(); }
                           }}>Unlink</button>
@@ -612,17 +708,29 @@ const PANEL_GROUPS: [ string, string ][] = [
 
                   A line used to be five controls (On, Nobody, computer, printer, Save). It is one:
                   the options ARE the answers, grouped by machine, saved on change. */}
+              <SetupCodeCard live={st.setupCode} busy={busy === "setup-code"}
+                onShow={async () => {
+                  const d = await post("setup-code", {});
+                  if (!d) return null;
+                  // The board is re-read so its own "a code is live" line agrees with the card
+                  // immediately — two places saying different things about one code is the whole
+                  // fault this feature replaced.
+                  void load();
+                  return { code: String(d.code), pretty: String(d.pretty), expiresAt: String(d.expiresAt) };
+                }} />
               <FileCard title="The helper file — the same one for every restaurant"
-                lead={<>There is <b>nothing secret in it</b>, so keep it, email it, put it on a USB stick. It links
-                  itself the first time it runs: the browser opens and you press <b>Allow</b>. <b>Nothing is
-                  downloaded by hand</b> — a downloaded script is blocked outright by a Mac and warned about by Windows.</>}
+                lead={<>There is <b>nothing secret in it</b>, so keep it, email it, put it on a USB stick. The
+                  first time it runs it asks for the setup code above — that is the only thing anybody types.
+                  <b> Nothing is downloaded by hand</b> — a downloaded script is blocked outright by a Mac and
+                  warned about by Windows.</>}
                 files={st.files} os={os} setOs={setOs} copy={copy}
                 steps={(k: string) => [
                   <>On the computer with the printer, open <b>{k === "windows" ? "Notepad" : k === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</>,
                   <>Press <b>Copy</b> below and paste it in.</>,
                   <>Save it on the Desktop as <b>{st.files?.[k]?.filename}</b>{k === "windows" ? " with “Save as type: All Files”" : ""}.</>,
                   k === "mac" ? <>In Terminal, once: <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click it.</> : <>Double-click it.</>,
-                  <>A page opens in that computer&apos;s browser. Press <b>Allow</b>. That is the whole setup.</>,
+                  <>It asks <b>Setup code</b>. Type the six characters from above. That is the whole setup —
+                    <b> no sign-in on that computer</b>.</>,
                 ]}
                 footer={(k: string) => <><b>Starting up again:</b> {st.files?.[k]?.autostart}</>} />
               <div className="adm-card" style={{ marginTop: 14 }}>

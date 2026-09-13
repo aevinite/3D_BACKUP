@@ -15,16 +15,18 @@ import { adminFail } from "@/lib/adminFail";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import {
-  agentsView, createAgent, readRoutes, writeRoutes, mintAgentToken,
+  agentsView, readRoutes, writeRoutes,
   PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch, waitingCount,
 } from "@/lib/printHelpers";
+// The ten-minute code this screen hands out (mig 380). It is the ONLY way a computer joins a
+// restaurant's printing now — createAgent and mintAgentToken are no longer reachable from here.
+import { issueSetupCode } from "@/lib/printSetupCode";
 // The board itself — headings, words, paper sizes and the four steps — is shared with the panel, so
 // the two screens cannot drift into two different products (owner, 2026-08-27: "the UI/UX is also
 // not identical"). lib/printBoard.ts is the single copy.
 import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { STUCK_AFTER_MS } from "@/lib/printQueue";
 import { managerHasFlag } from "@/lib/managerCan";
-import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 import { queueJob } from "@/lib/printHelpers";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +38,6 @@ export const dynamic = "force-dynamic";
 // verify:print-helper fails if the await is ever dropped again.
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
-const OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
 // THE ID'S SHAPE, BEFORE IT REACHES A UUID COLUMN (T19 sweep #7, 2026-09-01). Every sibling admin
 // route checks this and this one did not: `?rid=nonsense` went straight into
 // `.eq("restaurant_id", rid)`, so every read behind the board was refused by the database and the
@@ -45,25 +46,16 @@ const OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
 const RID_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const needRid = (rid: string) => (!rid ? "Which restaurant?" : !RID_UUID.test(rid) ? "That isn't a restaurant." : null);
 
-/** The install text for every operating system, with this machine's own code already in it. Shown
- *  ONCE, when the code is minted or replaced: the code is stored only as a hash, so it cannot be
- *  read back later — a lost code is REPLACED, never recovered. That is deliberate, and the screen
- *  says so beside the button. */
-const scriptsFor = (origin: string, code: string, label: string) =>
-  Object.fromEntries(OS_LIST.map((os) => [os, {
-    filename: HELPER_FILENAME[os], autostart: HELPER_AUTOSTART[os],
-    text: helperScript(os, { origin, code, label }),
-  }]));
-
-// The site the helper must talk to: THIS deployment, taken from the request rather than a constant,
-// so a code minted on backup points at backup and one minted on the live site points at the live
-// site. A helper aimed at the wrong site is a machine that never prints and says nothing.
+// The site the helper file must talk to: THIS deployment, taken from the request rather than a
+// constant, so a file copied off backup points at backup and one copied off the live site points at
+// the live site. A helper aimed at the wrong site is a machine that never prints and says nothing.
 const originOf = (req: NextRequest) => {
   const h = req.headers;
   const proto = h.get("x-forwarded-proto") || "https";
   const host = h.get("x-forwarded-host") || h.get("host") || "";
   return host ? `${proto}://${host}` : new URL(req.url).origin;
 };
+
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   if (!(await admin(req))) return err("Not authorised", 401);
@@ -271,14 +263,36 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   const ridBad = needRid(rid);
   if (ridBad) return err(ridBad);
 
-  // ── add a computer ────────────────────────────────────────────────────────────────────────
-  if (seg[0] === "agents" && seg.length === 1) {
-    const name = String(body.name || "").trim();
-    if (!name) return err("Give the computer a name — “Shop's computer”, “My Mac”.");
-    const made = await createAgent(rid, name);
-    if ("error" in made) return err(made.error);
-    await logAction("admin", "print_helper_added", { restaurant_id: rid, detail: `computer “${name}” may now print` });
-    return NextResponse.json({ id: made.id, name, code: made.token, scripts: scriptsFor(originOf(req), made.token, name) });
+  // ── HAND OUT A SETUP CODE (mig 380) ───────────────────────────────────────────────────────
+  // The one way a computer joins this restaurant's printing. Owner, 2026-09-13: *"you can generate
+  // code for each restaurant from printing menu and like the helper ask for that code and that
+  // generated code only works for 10 min."*
+  //
+  // WHAT THIS REPLACED, and why both are gone rather than one being left switched off:
+  //   · `POST /agents` made a computer row and answered with its PERMANENT token, plus a helper file
+  //     with that token typed into it. No screen has called it since mig 368.
+  //   · `agents/:id/newcode` minted a replacement token for a machine. Also uncalled since mig 368 —
+  //     verify:print-helper has been asserting since then that no screen may show it again.
+  // Two unreachable doors that each mint a permanent printing credential are the worst thing to
+  // leave standing beside a new one ("a new way replaces the old one", owner 2026-08-29), so they
+  // were deleted with this verb, not beside it.
+  //
+  // The code is returned ONCE. It is stored hashed, so a board that lost it gets a fresh one — see
+  // lib/printSetupCode.ts for why that is the honest answer rather than a second copy.
+  if (seg[0] === "setup-code" && seg.length === 1) {
+    const made = await issueSetupCode(rid, { kind: "admin" });
+    if ("error" in made) return err(made.error, 500);
+    // The LOG NEVER CARRIES THE CODE. It records that one was handed out, which is the fact an
+    // owner reading their Activity list needs; the digits are the one thing that must not be
+    // readable after the fact.
+    await logAction("admin", "print_setup_code_issued", {
+      restaurant_id: rid,
+      detail: "a ten-minute setup code was handed out for a computer to join the printing",
+    });
+    return NextResponse.json(
+      { code: made.code, pretty: made.pretty, expiresAt: made.expiresAt, expiresInMs: made.expiresInMs },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   if (seg[0] === "agents" && seg[1] && seg[2] === "rename") {
@@ -287,24 +301,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     const up = await sb.from("print_agents").update({ name }).eq("id", seg[1]).eq("restaurant_id", rid).select("id").maybeSingle();
     if (up.error) return err(up.error.code === "23505" ? "There is already a computer with that name." : "Could not rename it.");
     return NextResponse.json({ ok: true });
-  }
-
-  // ── replace a lost code ───────────────────────────────────────────────────────────────────
-  // The old one stops working the instant this returns, which is also how a stolen or sold machine
-  // is dealt with: give the code to nobody and it is simply dead.
-  if (seg[0] === "agents" && seg[1] && seg[2] === "newcode") {
-    // Checked (item 21, 2026-09-01): "No such computer." for a read that merely failed sends him
-    // looking for a machine that is registered perfectly well.
-    const rowQ = await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle();
-    if (rowQ.error) return adminFail("that computer", rowQ.error, { action: "load" });
-    const row = rowQ.data as { id: string; name: string } | null;
-    if (!row) return err("No such computer.", 404);
-    const { token, hash } = mintAgentToken();
-    // The fingerprint is cleared with the code: the next machine to use it is the machine it now
-    // belongs to, so a replaced code does not inherit an old "used on two computers" warning.
-    await sb.from("print_agents").update({ token_hash: hash, fingerprint: null, seen_fingerprints: [] }).eq("id", row.id).eq("restaurant_id", rid);
-    await logAction("admin", "print_helper_recoded", { restaurant_id: rid, detail: `new printing code for “${row.name}”` });
-    return NextResponse.json({ code: token, scripts: scriptsFor(originOf(req), token, row.name) });
   }
 
   // ── remove a computer ─────────────────────────────────────────────────────────────────────
