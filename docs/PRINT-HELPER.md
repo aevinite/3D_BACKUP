@@ -587,6 +587,60 @@ ternary twice), it posts nothing, both setups stay reachable, and no YES/NO row 
 Measured on the real screen at 1440 and 390, dark and light, on both tabs: no text under 4.5:1, none
 under 11.5px, nothing clipped, no sideways scroll — with the measurer itself sabotage-checked first.
 
+## 2026-09-13 (same day) — it did not work on a real Windows PC, and why nothing here caught it
+
+> Owner, with a photo of the helper window on his own Windows machine:
+> *"right now the code is not working it's showing like this"* — and in the photo:
+> `Get-Content : A positional parameter cannot be found that accepts argument '^'.`
+
+**One character.** Four lines I added read the server's answer through PowerShell inside a
+`for /f "usebackq"` — and I wrote the pipe as `^|`. Inside `for /f`, the command text is handed to
+cmd, and **a pipe between double quotes is already literal**: there is nothing to escape. The caret
+went straight through to PowerShell as a stray argument.
+
+**Three reads in the same file have always used a plain `|` and have always worked** (`pollMs`, the
+job id, the printer). Mine did not match them. That is the whole fault.
+
+**Why it was worse than a broken message.** It broke all four reads of the join at once — the error
+sentence, the token, the restaurant and the computer name — and it failed in the most misleading way
+available: a **correct** code was **spent on the server**, the token read came back empty, the helper
+said *"The site answered oddly"* and went round again. **So every attempt burned a fresh code**, and
+neither screen said why.
+
+**Why nothing here caught it.** There is no Windows machine and no PowerShell on this side — §D of
+`verify:print-documents` already says this is the boundary that section works inside. Everything that
+COULD be checked was: the generated file was syntax-checked, walked for `%VAR%`-in-a-block, and the
+Mac half was run for real in a pty. None of that executes cmd.
+
+**What now stands in for a Windows machine**, in `verify:print-helper` block 8j:
+1. **no cmd escape (`^|` `^&` `^<` `^>`) inside a quoted `-Command`** — and deliberately *not* "no
+   caret at all", because `-replace '[^A-Za-z0-9]'` is a PowerShell character class and is correct;
+2. **every `for /f` read must match the exact shape of the three a real Windows PC has run.** With no
+   way to execute the platform, "it is identical to what works" is the strongest assertion available
+   — and it is the one that would have stopped this.
+
+Both were sabotaged four ways and caught every time.
+
+### And the code could not be copied — or rather, it could, silently
+
+> *"im also not able to copy the code or code is being copy but it not show button click animation
+> and also at bottom copied written"*
+
+The admin board's Copy called `navigator.clipboard.writeText` **directly**, bypassing the page's own
+`copy()` — so the code really was on the clipboard and **nothing on the screen moved**. The only way
+to find out was to paste somewhere and look. The manager panel had **no Copy button at all**.
+
+Both now go through the board's own copy helper: the button changes to **Copied ✓** and changes back
+by itself, *"Copied."* appears at the bottom, and a browser that **refuses** the clipboard is said out
+loud instead of looking identical to success. The answer lands in **both** places on purpose — a toast
+at the foot of a tall settings page can be off screen while the thumb is still up on the code.
+
+Driven in Chrome on both boards: the clipboard was read back and compared to the rendered code, the
+button's label was checked before, during and after, and the toast was counted. 13/13.
+`verify:print-helper` **173 → 184**. Three of the new checks were blind on their first write — one
+matched its own commented-out line, one matched the OTHER copy button's toast, one matched this
+file's own prose — and each is now anchored to the handler it guards, with comments stripped.
+
 ## Why the browser can never do this
 
 A web page cannot choose a printer. `window.print()` under Chrome's `--kiosk-printing` always

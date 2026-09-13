@@ -1723,6 +1723,27 @@ function bindPrintingBoard(ed) {
       // The answer is held in `state` and drawn once. It is never stored anywhere that survives
       // this page: not localStorage, not the offline cache — a ten-minute secret that outlives its
       // ten minutes on a shared till is the one way this design could go wrong.
+      // ── COPY, AND SAY SO ────────────────────────────────────────────────────────────────────
+      // Owner, 2026-09-13: *"im also not able to copy the code or code is being copy but it not
+      // show button click animation and also at bottom copied written"*. The answer lands in BOTH
+      // places on purpose: a toast at the bottom of a tall settings page can be off screen while
+      // the thumb is still up here on the code, so the control that was pressed says it too.
+      // A refusal is said out loud as well — a clipboard write can be blocked by the browser, and
+      // "nothing happened" is the one answer a tap may never give.
+      if (what === "copycode") {
+        const code = (state.printCode || {}).code || "";
+        if (!code) return;
+        try {
+          await navigator.clipboard.writeText(code);
+          el.textContent = "Copied \u2713";
+          el.classList.add("primary");
+          toast("Copied.");
+          setTimeout(() => { el.textContent = "Copy"; el.classList.remove("primary"); }, 1600);
+        } catch {
+          toast("Could not copy — read it off the screen instead.", "err");
+        }
+        return;
+      }
       if (what === "setupcode") {
         const d = await post("setup-code", {});
         if (d && d.code) {
@@ -13924,6 +13945,7 @@ function setupCodeCard() {
     ? `<div class="pw-code">
          <div class="pw-code-digits">${esc(mine.pretty)}</div>
          <div class="pw-code-left"><span data-pw-left>${esc(mineLeft)}</span> left</div>
+         <button type="button" class="btn" data-pw="copycode" style="min-width:78px">Copy</button>
        </div>`
     : mine
       ? `<p class="hint" style="margin:0 0 10px">That code has run out. Show a new one — they last ten minutes on purpose.</p>`
