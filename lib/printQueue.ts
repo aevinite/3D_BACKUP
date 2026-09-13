@@ -249,9 +249,9 @@ export async function finishKotJob(
    *  and cannot name it, and then the old behaviour stands. */
   printer?: string | null,
 ): Promise<{ found: boolean; orderId: string | null; reprint: boolean; attempts: number; parked: boolean; kotNo: number | null; tableNumber: string | null }> {
-  const job = (await sb.from("print_jobs").select("order_id, reprint, attempts")
+  const job = (await sb.from("print_jobs").select("order_id, reprint, attempts, status")
     .eq("id", id).eq("restaurant_id", rid).maybeSingle()).data as
-    { order_id?: string | null; reprint?: boolean; attempts?: number } | null;
+    { order_id?: string | null; reprint?: boolean; attempts?: number; status?: string } | null;
   if (!job) return { found: false, orderId: null, reprint: false, attempts: 0, parked: false, kotNo: null, tableNumber: null };
 
   const ord = job.order_id
@@ -287,6 +287,26 @@ export async function finishKotJob(
     } else {
       await wrote("closing every open printer complaint", sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open"));
     }
+    return { found: true, orderId: job.order_id ?? null, reprint: job.reprint !== false, attempts: job.attempts || 0, parked: false, kotNo: ord?.kot_no ?? null, tableNumber: ord?.table_number ?? null };
+  }
+
+  // ── A TICKET SOMEBODY TOOK OUT DOES NOT COME BACK (2026-09-13) ─────────────────────────────
+  // A failure USED to be requeued whatever state the row was in, and that quietly undid the two
+  // verbs that exist to stop paper: "Take it out" on one ticket, and "Clear the N waiting tickets"
+  // on a whole backlog (owner, same day: *"so that all don't print together"*). The race is small
+  // and real — a screen or a helper CLAIMS a ticket, the ticket is taken out a second later, then
+  // the attempt fails and reports back. Before this, that row went straight back to `queued` and
+  // came out later, which is the one thing the person pressing the button was trying to prevent,
+  // and it is inexplicable from the outside: they cleared the queue and a slip appeared anyway.
+  //
+  // Only the CLAIM is released. The row keeps the reason it was taken out — overwriting it with
+  // "print failed" would lose the answer to "why did this never print", which is what the log is
+  // for — and nobody is notified, because a ticket that was deliberately taken out has not gone
+  // wrong. A SUCCESS is still recorded as printed (above): if paper really came out, the log says
+  // so, whatever we had decided about it a moment earlier.
+  if (job.status === "dismissed") {
+    await wrote("releasing a ticket that was taken out", sb.from("print_jobs")
+      .update({ claimed_at: null }).eq("id", id).eq("restaurant_id", rid));
     return { found: true, orderId: job.order_id ?? null, reprint: job.reprint !== false, attempts: job.attempts || 0, parked: false, kotNo: ord?.kot_no ?? null, tableNumber: ord?.table_number ?? null };
   }
 
