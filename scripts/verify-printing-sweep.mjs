@@ -270,6 +270,19 @@ const tk = mint(); TOKEN = tk.t;
 for (const leftover of ["sweep-pc", "Sweep PC", "Perm PC", "Review PC", "Review PC 2"]) {
   try { await db(`print_agents?restaurant_id=eq.${RID}&name=eq.${encodeURIComponent(leftover)}`, { method: "DELETE" }); } catch {}
 }
+// ── AND THE ONES A RUN MAKES THROUGH THE REAL JOINING PATH (2026-09-13) ──────────────────────
+// Since the setup code replaced the Allow page, several phases create a computer by REDEEMING a
+// code — and a few of those run inside a phase that returns early on failure, so the id never
+// reaches `made.agents` and the row outlives the run. Found by looking at the board after a full
+// sweep: seven "Sweep …" computers sitting on a real restaurant's Printing screen.
+//
+// Prefix-scoped and restaurant-scoped, exactly like the list above: this file names every computer
+// it creates "Sweep …", so these deletes cannot reach a machine anybody relies on. (A LIKE with no
+// restaurant filter is how a cleanup turns into an outage — it is not one line shorter for a
+// reason.)
+for (const pattern of ["Sweep Machine*", "Sweep join PC*", "Sweep Relink PC*", "Sweep Old File PC*", "Sweep J8*", "Sweep T11*"]) {
+  try { await db(`print_agents?restaurant_id=eq.${RID}&name=like.${encodeURIComponent(pattern)}`, { method: "DELETE" }); } catch {}
+}
 // DELETE THE EXACT ROWS THIS RUN INSERTS. A sweep that leaves live setup codes behind is a sweep
 // that leaves working credentials behind, which is worse than an untidy table.
 try { await db(`print_setup_codes?claimed_host=in.("Sweep Machine","Sweep Machine 9","Sweep join PC","Sweep join PC 2","Sweep join PC 3","Review PC","Review PC 2","live-probe","probe")`, { method: "DELETE" }); } catch {}
@@ -3519,6 +3532,25 @@ for (const id of made.events) { try { await db(`printer_events?id=eq.${id}`, { m
 for (const id of made.jobs)   { try { await db(`print_jobs?id=eq.${id}`,   { method: "DELETE" }); } catch {} }
 for (const id of made.orders) { try { await db(`orders?id=eq.${id}`,       { method: "DELETE" }); } catch {} }
 for (const id of made.agents) { try { await db(`print_agents?id=eq.${id}`, { method: "DELETE" }); } catch {} }
+// …and by NAME as well as by id, for the rows a phase created and then returned early on, before
+// it could record the id. Same prefixes, same restaurant scope as the sweep-up at the top.
+for (const pattern of ["Sweep Machine*", "Sweep join PC*", "Sweep Relink PC*", "Sweep Old File PC*", "Sweep J8*", "Sweep PC*"]) {
+  try { await db(`print_agents?restaurant_id=eq.${RID}&name=like.${encodeURIComponent(pattern)}`, { method: "DELETE" }); } catch {}
+}
+// ── AND EVERY SETUP CODE THIS RUN HANDED OUT ────────────────────────────────────────────────
+// The sweep-up at the top deletes codes by `claimed_host`, which only ever matches the ones that
+// were REDEEMED — and this file mints far more than it redeems (the refusal phases, the "a new one
+// kills the old one" phase, the expiry phase). Measured after a clean full run: EIGHT live codes
+// left on the board, each good for ten minutes.
+//
+// That is the exact thing the note at the top says this file must not do — a sweep that leaves live
+// setup codes behind leaves working credentials behind. Scoped to the sweep's own restaurant, which
+// is the one it has been rewriting the printing settings of for the whole run.
+try { await db(`print_setup_codes?restaurant_id=eq.${RID}`, { method: "DELETE" }); } catch {}
+// The wall this run's deliberate wrong codes built, and the "somebody is guessing" problem it would
+// otherwise leave open on the admin's board (tests must not raise the owner's alarms).
+try { await db(`rate_limit_counters?key=eq.print_setup_code`, { method: "DELETE" }); } catch {}
+try { await db(`rate_limit_events?key=eq.print_setup_code`, { method: "DELETE" }); } catch {}
 // The manager permission section 6b switched on and off is the restaurant's, not ours (mig 367).
 if (permsWas !== null) { try { await db(`restaurants?id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ manager_permissions: permsWas }) }); } catch {} }
 stashClear();   // everything is back — a next run has nothing to heal.
