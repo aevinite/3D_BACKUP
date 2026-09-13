@@ -172,10 +172,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     // restaurant_id" should not have an exception nobody can see the reason for.
     const attempts = ((await sb.from("print_jobs").select("attempts").eq("id", job.id).eq("restaurant_id", agent.restaurant_id).maybeSingle()).data as { attempts?: number } | null)?.attempts || 0;
     const parked = attempts + 1 >= 5;
-    await sb.from("print_jobs").update({
+    // ── A PAGE SOMEBODY TOOK OUT DOES NOT COME BACK (2026-09-13) ──────────────────────────────
+    // `.in("status", …)` is the whole point of this line, and it is the same rule the kitchen-slip
+    // path keeps in lib/printQueue.finishKotJob: a bill or banquet sheet that was taken out of the
+    // queue — one ticket at a time, or a whole backlog through "Clear the N waiting tickets" — must
+    // not be put back by a failure reported a second later by the machine that had already claimed
+    // it. Without it, clearing the queue could still be followed by a page nobody asked for. The
+    // row keeps the reason it was taken out, and nobody is told: a page deliberately taken out has
+    // not gone wrong. (A SUCCESS above still marks it printed — if paper came out, the log says so.)
+    const back = await sb.from("print_jobs").update({
       status: parked ? "failed" : "queued", attempts: attempts + 1, claimed_at: null,
       error: String(body.error || "print failed").slice(0, 300),
-    }).eq("id", job.id).eq("restaurant_id", agent.restaurant_id);
+    }).eq("id", job.id).eq("restaurant_id", agent.restaurant_id)
+      .in("status", ["queued", "printing", "failed"]).select("id").maybeSingle();
+    if (!back.data) {
+      await sb.from("print_jobs").update({ claimed_at: null }).eq("id", job.id).eq("restaurant_id", agent.restaurant_id);
+      return NextResponse.json({ ok: true, parked: false, attempts, takenOut: true });
+    }
     // ── AND SOMEBODY IS TOLD, for a bill and a banquet sheet too (T11 sweep #8, 2026-09-04) ─────
     // The kitchen-slip branch above goes through finishKotJob, which files a printer problem and
     // pings the owner on the fifth failure. This branch — bills and banquet sheets — did neither, so

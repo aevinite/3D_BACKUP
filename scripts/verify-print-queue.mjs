@@ -515,6 +515,27 @@ check(/queue\/clear/.test(admPrint) && /Clear the \{st\.waiting\}/.test(admPrint
   "the Printing screen has the button that does it, counting what is waiting",
   "the admin's Clear-the-waiting-tickets button is gone — the queue can be stopped with no way to empty it");
 
+// ── 11. A TICKET TAKEN OUT DOES NOT COME BACK (2026-09-13) ─────────────────────────────────────
+// Both verbs that stop paper — "Take it out" on one ticket and "Clear the N waiting tickets" on a
+// backlog — were undone by a single line each: a failure reported by the screen or the helper that
+// had ALREADY CLAIMED the ticket put it straight back to `queued`. A person who cleared the queue
+// then watched a slip come out anyway, with nothing on any screen to explain it.
+const pqSrc = read("lib/printQueue.ts");
+const agentRoute = read("app/api/print-agent/[...path]/route.ts");
+check(/select\("order_id, reprint, attempts, status"\)/.test(pqSrc) && /job\.status === "dismissed"/.test(pqSrc),
+  "a failed KITCHEN SLIP that was taken out stays taken out (lib/printQueue.ts)",
+  "finishKotJob requeues a dismissed ticket — clearing the queue can be followed by a slip nobody asked for");
+{
+  const i = pqSrc.indexOf('job.status === "dismissed"');
+  const body = i < 0 ? "" : pqSrc.slice(i, i + 700);
+  check(!!body && /claimed_at: null/.test(body) && !/status: "queued"/.test(body) && !/tellSomebodyItGaveUp/.test(body),
+    "…it only releases the claim: the reason it was taken out is kept, and nobody is paged",
+    "the taken-out branch rewrites the row's reason or raises an alert — a ticket taken out on purpose has not gone wrong");
+}
+check(/\.in\("status", \["queued", "printing", "failed"\]\)/.test(agentRoute),
+  "…and the same holds for a BILL or a banquet sheet reported failed by a helper",
+  "the print-agent failure path requeues whatever it is handed, so a cleared bill can still print");
+
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — read this file's header before 'fixing' the code\n`
   : "\n✓ a ticket is a row: it prints on a covered window, on either screen, exactly once\n");
