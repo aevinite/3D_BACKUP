@@ -1290,3 +1290,30 @@ Nothing left over from this run.
         sorts first). Browser Back/Forward walk in and out of a restaurant properly.
       · Three guards that asserted the OLD shape were rewritten to assert the new behaviour, and each
         was sabotage-checked: reintroducing the fault turns them red with the right diagnosis.
+
+- [x] **"You also have to make the path workable… whenever I click printing in that path, I should
+      able to go to printing"** + **"make sure every path is clickable… check every single bit of
+      path of admin panel"** + **"there shouldn't be any underline"** (2026-09-13, same evening).
+      · **The click really works now.** Two crumbs in the console changed the address bar and left
+        the same screen sitting there — Printing's "Printing", and Access's "Access & permissions".
+        Both for the same reason, and it was invisible to a source-read because the markup was
+        perfect: the overview and one restaurant SHARE the address `/aevinite/printing`, and Next
+        does not remount a page for a same-route navigation, so a real `<Link>` to a real address
+        did nothing. Printing's crumb is wired to the same step as its "← All restaurants" button.
+      · **Access's section crumb is deliberately NOT a link** — that screen is always scoped to one
+        restaurant and has no all-restaurants view, so it named where you already were. It renders
+        as plain location text rather than pretending. (Say the word and Access can get an
+        all-restaurants landing like Printing's, which would make it a real destination.)
+      · **No underline.** One was tried, as the colour-blind-safe way to show which crumbs are a way
+        out; he said no. Clickability is carried by the pointer (`pointer` on links, `default` on the
+        crumb you are on), a hover fade, and a tooltip on each link saying what it does. A background
+        pill is impossible here — the gradient is clipped to the parent's text, so any child
+        background swallows the word.
+      · **Light skin was failing contrast** — the three gradient stops were written for dark and
+        reused, measuring 3.13 / 3.95 / 2.74 against 4.5:1. Same hues, darkened for light only:
+        6.25 / 6.63 / 5.86. And the crumb underline had in fact NEVER rendered anywhere, in the old
+        code either: a blanket `a { text-decoration: none !important }` at globals.css:2613 had been
+        eating it silently for months.
+      · **New guard `npm run verify:path`** — 56 checks that CLICK every crumb on every admin screen
+        and every drilled-in state. Sabotage-checked twice: putting the bug back names it in his own
+        terms ("the address moved and the screen did not"), and re-adding an underline turns 5 red.

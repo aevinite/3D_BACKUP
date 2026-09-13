@@ -994,12 +994,13 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   useCrumbs(showReport
     ? {
         onSection: onBack,
+        sectionTitle: "Back to the restaurants list",
         tail: [
-          { label: restaurant.name, href: `/aevinite/restaurants?focus=${encodeURIComponent(restaurant.slug)}`, onClick: () => setShowReport(false) },
+          { label: restaurant.name, href: `/aevinite/restaurants?focus=${encodeURIComponent(restaurant.slug)}`, onClick: () => setShowReport(false), title: `Back to ${restaurant.name}` },
           { label: "Full report" },
         ],
       }
-    : { onSection: onBack, tail: [{ label: restaurant.name }] });
+    : { onSection: onBack, sectionTitle: "Back to the restaurants list", tail: [{ label: restaurant.name }] });
 
   // Deep-link to a section: arriving with ?section=features|status|… (e.g. from the Repair
   // page's "Feature switches" / "Maintenance mode" quick levers) scrolls straight to that

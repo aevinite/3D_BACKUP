@@ -95,9 +95,14 @@ export default function AccessPage() {
   //
   // (Dashboard is in neither. It is a SIBLING section in the same sidebar, not a parent of
   // anything — it was only ever there because somebody typed it.)
+  // `sectionIsHere` on the direct route: this screen is ALWAYS scoped to one restaurant — there is
+  // no all-restaurants view of it — so "Access & permissions" as a link moved the address and
+  // changed nothing on screen. It is location text now, and the only things that look clickable on
+  // this path are the ones that really are. (Arriving from the list, the section crumb IS the last
+  // one anyway, and the two above it are live links back.)
   useCrumbs(fromRest
     ? { parents: restaurantParents(rest) }
-    : { tail: rest ? [{ label: rest.name }] : [] });
+    : { sectionIsHere: true, tail: rest ? [{ label: rest.name }] : [] });
 
   return (
     <div className="acc2">
