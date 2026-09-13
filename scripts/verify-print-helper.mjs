@@ -290,7 +290,9 @@ check(/tokenIsValid/.test(adminR)
   && !/if \(!admin\(req\)\)/.test(code(adminR)),
   "the admin printing API is gated on every verb — and the gate is AWAITED (a Promise is always truthy)",
   "an /api/admin/printing verb lost its gate, or tests tokenIsValid without awaiting it — which is the same as having no gate at all");
-check(/aevinite\/printing/.test(read("components/admin/AdminShell.tsx")),
+// The sidebar list moved to components/admin/nav.ts on 2026-09-13 (one list feeds the nav AND
+// the breadcrumb labels). AdminShell is still read so this stays green either way.
+check(/aevinite\/printing/.test(read("components/admin/nav.ts") + read("components/admin/AdminShell.tsx")),
   "…and the menu is reachable from the sidebar, not only by URL",
   "the Printing menu is gone from the admin nav");
 // The test is about PROSE, so the three shapes that are plainly code are stripped first: a key in a

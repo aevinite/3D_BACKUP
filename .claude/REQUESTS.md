@@ -1265,3 +1265,28 @@ Nothing left over from this run.
         tickets seeded on French House → "Clear the 2 waiting tickets" → its confirm → waiting 0.
         Every row seeded by the checks was deleted afterwards; the order borrowed for the tablet test
         was put back to its own status.
+
+- [x] **"The path is messed up… make sure the path logic is completely perfect. Redesign all"**
+      (2026-09-13, about the written line above every admin heading). Built and verified on backup:
+      · **The path is built from the walk that actually happened.** It used to be hard-coded per
+        page, so Printing said *"Restaurants › My Little French House › Printing"* to someone who had
+        opened Printing from the SIDEBAR — his words: *"there is first of all restaurants. I have
+        never gone to that. I'm in printing section."* Sidebar sections are siblings, not parents, so
+        a path now starts at the section you are in and only grows when you really drilled down.
+        From the sidebar: **Printing › My Little French House** · **Access & permissions › AANGAN
+        GARDEN RESTAURANT**. Through the list: **Restaurants › AANGAN GARDEN RESTAURANT › Access &
+        permissions**. Dashboard is in neither — it is a sibling nobody walked through.
+      · **Every screen has one now** — 22 of them, up from 4, and they are one component
+        (`components/admin/Crumbs.tsx`) fed by one list of screen names (`components/admin/nav.ts`)
+        that ALSO feeds the sidebar, so the two can never drift. The five hand-written breadcrumbs
+        are deleted.
+      · **Every crumb before the last is a live link, and the colours match.** On Printing the
+        restaurant name and the word "Printing" were plain `<span>`s: not clickable, and the console's
+        blue→violet→red path gradient could not reach them, which is why that screen's path looked
+        grey next to Access's. Both fixed by the shared markup.
+      · **"I refresh and it takes me to the previous screen"** — Printing kept the chosen restaurant
+        in React state only, so a refresh dropped you back on the all-restaurants overview. `?rid=`
+        is in the address now (Access too, which was silently landing you on whichever restaurant
+        sorts first). Browser Back/Forward walk in and out of a restaurant properly.
+      · Three guards that asserted the OLD shape were rewritten to assert the new behaviour, and each
+        was sabotage-checked: reintroducing the fault turns them red with the right diagnosis.

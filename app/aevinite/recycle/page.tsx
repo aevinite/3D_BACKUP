@@ -92,11 +92,6 @@ export default function RecycleBin() {
 
   return (
     <>
-      <nav className="adm-crumbs" aria-label="Breadcrumb" style={{ marginBottom: 14 }}>
-        <a href="/aevinite/restaurants">Restaurants</a>
-        <i className="fas fa-chevron-right sep" aria-hidden="true" />
-        <span className="cur">Recycle bin</span>
-      </nav>
       <h1 className="adm-page-h">Recycle bin</h1>
       <p className="adm-page-sub">
         Deleted restaurants and owners wait here. <b>Restore</b> any of them at any time, or open one to see what is

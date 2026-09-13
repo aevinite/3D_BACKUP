@@ -108,6 +108,9 @@ const COMPONENTS = {
   AccessSearch: "components/admin/AccessSearch.tsx",
   AccessTree: "components/admin/AccessTree.tsx",
   AdminShell: "components/admin/AdminShell.tsx",
+  // The sidebar LIST (and therefore every breadcrumb label) lives here since 2026-09-13.
+  adminNav: "components/admin/nav.ts",
+  adminCrumbs: "components/admin/Crumbs.tsx",
   BrandingCard: "components/admin/BrandingCard.tsx",
   CopyButton: "components/admin/CopyButton.tsx",
   CredentialsCard: "components/admin/CredentialsCard.tsx",
@@ -738,9 +741,12 @@ await phase("…and it fires an event so an already-mounted Restaurants page sti
   ok(/new CustomEvent\("adm:focus-restaurant"/.test(CODE.AdminShell), "router.push only changes the query"));
 await phase("…and it shows Retry rather than a stuck 'Loading…'", () => ok(/Couldn&rsquo;t load\./.test(SRC.AdminShell), "bug #7"));
 await phase("the sidebar names one screen ONE way", () =>
-  ok(/label: "Access & permissions"/.test(SRC.AdminShell), "'Access / Permissions' in the nav and 'Access & permissions' on the page"));
+  ok(/label: "Access & permissions"/.test(SRC.adminNav), "'Access / Permissions' in the nav and 'Access & permissions' on the page"));
+await phase("…and the path above a page is drawn from that SAME list, so the two cannot drift", () =>
+  ok(/from "@\/components\/admin\/nav"/.test(SRC.adminCrumbs) && /sectionChain/.test(SRC.adminCrumbs),
+    "a second hand-typed list of screen names is how Printing ended up with a path to a section nobody opened"));
 await phase("every nav entry points at a page that exists", () => {
-  const hrefs = [...SRC.AdminShell.matchAll(/href: "(\/aevinite[^"]*)"/g)].map((m) => m[1]);
+  const hrefs = [...SRC.adminNav.matchAll(/href: "(\/aevinite[^"]*)"/g)].map((m) => m[1]);
   const dead = hrefs.filter((h) => !existsSync(join(root, "app" + h.replace(/^\/aevinite/, "/aevinite") + "/page.tsx")) && h !== "/aevinite");
   return ok(dead.length === 0, `dead nav link(s): ${dead.join(", ")}`);
 });
@@ -880,9 +886,19 @@ await phase("…and the same fallback exists on the Access page's own icon set",
 await phase("the Access page keeps a suspended restaurant in the picker, labelled", () =>
   ok(/\$\{r\.name\} — suspended/.test(SRC.access), "you could not check a binned restaurant's permissions before restoring it"));
 await phase("…and it lists the live ones first", () => ok(/\.\.\.all\.filter\(\(x\) => x\.active !== false\), \.\.\.all\.filter\(\(x\) => x\.active === false\)/.test(CODE.access), "never silently mixed in"));
-await phase("the breadcrumb on the Access page names the restaurant you are configuring", () =>
-  ok(/\{rest\?\.name \|\| "Restaurant"\}/.test(SRC.access), "'which restaurant am I changing?'"));
-await phase("…and it survives the restaurant not having loaded yet", () => ok(/rest \? `\/aevinite\/restaurants\?focus=\$\{rest\.slug\}` : "\/aevinite\/restaurants"/.test(SRC.access), "a link to undefined"));
+// ── THE PATH ABOVE THE ACCESS SCREEN (rewritten 2026-09-13) ────────────────────────────────────
+// These two used to match the exact JSX of a hand-written breadcrumb — `{rest?.name || "Restaurant"}`
+// and its ternary href. That breadcrumb is gone: the console draws ONE path now, from the address
+// bar plus what the page declares (components/admin/Crumbs.tsx). A guard pinned to a code SHAPE
+// goes red for a refactor that changed nothing a person can see, so these assert the BEHAVIOUR the
+// owner actually asked for on 2026-09-13 — and they are stronger for it, because the old pair could
+// not have caught the fault he reported (a path that named a section he never opened).
+await phase("…and it survives the restaurant not having loaded yet", () =>
+  ok(/tail: rest \? \[\{ label: rest\.name \}\] : \[\]/.test(SRC.access),
+    "the crumb would name `undefined` in the beat before the restaurant list arrives"));
+await phase("…and the chosen restaurant is in the ADDRESS, so a refresh does not silently move you", () =>
+  ok(/u\.searchParams\.set\("rid", next\)/.test(SRC.access) && /pickRest\(e\.target\.value\)/.test(SRC.access),
+    "picking a restaurant moved React state only — a refresh dropped you onto whichever sorts first"));
 await phase("the Access page reads ?rid straight off the URL, so it needs no Suspense boundary", () =>
   ok(/new URLSearchParams\(typeof window !== "undefined" \? window\.location\.search : ""\)/.test(CODE.access), "useSearchParams forces one"));
 await phase("the four settings-tab sections the type advertises all have a card behind them", () =>
@@ -1356,6 +1372,51 @@ for (const [path] of LIVE_PAGES) {
     });
   }
 }
+
+// D4b — THE PATH ABOVE THE ACCESS SCREEN. These two drive the real page, so they live down here
+// with the other live phases: `BROWSER` and `withPage` are initialised further up this file, and
+// a phase declared before them threw "Cannot access 'BROWSER' before initialization" rather than
+// failing honestly — a guard that cannot run is not a guard.
+await phase("the path on the Access page names the restaurant you are configuring", async () => {
+  if (NO_LIVE) return skip("--no-live");
+  const res = await withPage(1280, 900, "dark", async (page) => {
+    await page.goto(BASE + "/aevinite/access", { waitUntil: "networkidle" }).catch(() => {});
+    await page.waitForTimeout(1500);
+    return page.evaluate(() => {
+      const n = document.querySelector('nav[aria-label="Breadcrumb"]');
+      const sel = document.querySelector(".acc2-rsel");
+      return { crumbs: n ? [...n.children].filter((e) => !e.classList.contains("sep")).map((e) => e.textContent.trim()) : null,
+               picked: sel ? sel.options[sel.selectedIndex]?.textContent.trim() : null };
+    });
+  });
+  if (res && res.skipped) return skip(res.skipped);
+  if (!res.crumbs) return ok(false, "there is no path above the Access screen at all");
+  if (!res.picked) return ok(false, "the restaurant picker did not render, so there is nothing to compare");
+  return ok(res.crumbs[res.crumbs.length - 1] === res.picked,
+    `the path ends at "${res.crumbs[res.crumbs.length - 1]}" while the picker says "${res.picked}"`);
+});
+await phase("…and walking in from Restaurants puts that list ABOVE it, walking in from the sidebar does not", async () => {
+  if (NO_LIVE) return skip("--no-live");
+  const res = await withPage(1280, 900, "dark", async (page) => {
+    const read = async (url) => {
+      await page.goto(BASE + url, { waitUntil: "networkidle" }).catch(() => {});
+      await page.waitForTimeout(1500);
+      return page.evaluate(() => {
+        const n = document.querySelector('nav[aria-label="Breadcrumb"]');
+        return n ? [...n.children].filter((e) => !e.classList.contains("sep")).map((e) => e.textContent.trim()) : null;
+      });
+    };
+    return { direct: await read("/aevinite/access"), viaRest: await read("/aevinite/access?from=rest") };
+  });
+  if (res && res.skipped) return skip(res.skipped);
+  // Straight from the sidebar: the path must NOT open at Restaurants — that is a walk nobody took,
+  // and it is the exact thing he called out ("I have never gone to that").
+  if (!res.direct) return ok(false, "no path when the screen is opened directly");
+  if (res.direct[0] === "Restaurants") return ok(false, `opened directly, the path still starts at Restaurants: ${res.direct.join(" > ")}`);
+  // Through the Restaurants list: it MUST, and the list must be a live link back.
+  if (!res.viaRest || res.viaRest[0] !== "Restaurants") return ok(false, `arrived from the list, the path is ${(res.viaRest || []).join(" > ") || "missing"}`);
+  return ok(true, "");
+});
 
 // D5 — no WORD on the rendered page is smaller than 9.5px, the house floor.
 //
