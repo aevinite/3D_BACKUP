@@ -641,6 +641,80 @@ button's label was checked before, during and after, and the toast was counted. 
 matched its own commented-out line, one matched the OTHER copy button's toast, one matched this
 file's own prose — and each is now anchored to the handler it guards, with comments stripped.
 
+## 2026-09-13 (third round) — the same photo twice, and why nothing could tell the copies apart (mig 381)
+
+> Owner, sending the identical error an hour after it was fixed and shipped: *"this again it's not
+> working bro"*.
+
+**He was running the old file, and there was no way for anybody to know that** — not from his
+screen, not from his photograph, not from our board. The two copies fail the same way and look the
+same doing it. That is the fault this section is about; the caret was only the thing underneath it.
+
+**The server knew and could not say.** The record is unambiguous: a code was made at 15:42:12,
+**claimed at 15:43:20 by `INFINITE`**, a `print_agents` row was created carrying all six of his real
+printers — *POSPrinter POS80*, *KOT Printer* — and it **never said hello**. An old helper cannot read
+the token out of the reply, so the shape of the failure was:
+
+- the code was **spent** → he had to fetch another one
+- a **dead computer row** was left → it littered the board and took the machine's name, so the next
+  attempt would have come back as *INFINITE (2)*
+- **nothing anywhere said why** → so the next attempt did exactly the same thing
+
+### Every file now carries a stamp, and it stamps itself
+
+`helperVersion(os)` hashes the file's own generated text — SITE line masked, so one file has one
+stamp on backup, live and localhost — and the result is printed in the banner:
+
+```
+    Site       https://3-d-backup.vercel.app
+    Computer   INFINITE
+    Version    1148654
+```
+
+**Derived, never typed.** A version somebody has to remember to bump is wrong exactly when it
+matters. Change one character of any branch and its stamp changes by itself. One line in a photo now
+answers the question that cost two rounds.
+
+### An unstamped claim is refused, and the refusal costs nothing
+
+A claim with no stamp can only come from a file made before today, so it is refused — **checked
+after the code is known good**, so an unstamped claim with a *wrong* code still reads exactly like
+any other wrong code and this cannot be used to tell real codes apart.
+
+| | before | now |
+|---|---|---|
+| the code | **spent** | **untouched** — the one on screen still works, clock still running |
+| the board | a dead row appears | nothing is created |
+| the reason | nowhere | `refused_old_file_at`, and **both boards say it in words** |
+
+That last row is the load-bearing one: an old helper **cannot** show our message, because reading it
+is the very thing that is broken in it. The only screen that can carry the answer is the one he is
+already looking at.
+
+### And a setup that never finished gives the name back
+
+His dead `INFINITE` row would have kept that name for ever, so every retry became *(2)*, *(3)*. A row
+that has **never said hello at all** and is **older than any setup code can live** is a ghost: it is
+renamed (`INFINITE (never started, 2026-09-13)`) and retired, freeing the real name. Narrow on
+purpose — a machine that genuinely joined says hello seconds later, as the helper's own next act, so
+nothing real can sit inside that window. Rows are renamed and retired, never deleted: the record of
+what printed where has to stay readable (mig 341).
+
+### Checked
+
+Driven against a running app with the **old file's exact request** — no `helper` field, his
+hostname, his printer list — and then the same code again from a stamped one: refused with a
+sentence · code not spent · no row created · board told · same code then works · **name taken back
+from the dead row** · the dead row kept, renamed, retired · hello succeeds, which the old one never
+could · a wrong code reads identically with or without a stamp. 9/9.
+
+`verify:print-helper` **184 → 191**, `verify:printing-sweep` **488 → 490 phases, 0 failed**. Eight
+sabotage cases, and **two were blind on the first write**: "the file carries a stamp" matched the
+copies inside the claim body while both banner lines were deleted (the banner is the whole point —
+the server can be *told* the version, but only a printed line answers a photograph), and the
+Windows check needed both of that file's banners removed before it would go red. Each is now
+asserted per file, on a line that is actually echoed.
+
 ## Why the browser can never do this
 
 A web page cannot choose a printer. `window.print()` under Chrome's `--kiosk-printing` always

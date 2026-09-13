@@ -70,7 +70,7 @@ export type BoardState = {
    *  this is everything a reloaded board can honestly know, and it is enough: it can say "a code is
    *  live, 6 min left" and offer a fresh one. Handing back a second copy of a live secret to anyone
    *  who reloads the page would undo the point of hashing it. */
-  setupCode: { live: boolean; expiresAt: string | null };
+  setupCode: { live: boolean; expiresAt: string | null; oldFileAt: string | null };
 };
 
 const JOB_COLS = "id, kind, status, printer, printed_by, attempts, error, created_at, done_at";

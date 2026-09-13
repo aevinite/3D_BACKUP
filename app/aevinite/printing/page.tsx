@@ -50,7 +50,7 @@ type State = {
   /** Whether a ten-minute setup code is still live, and until when — NEVER the code (mig 380). It
    *  is stored hashed, so a reloaded board can honestly know only this much, and that is enough:
    *  it says "a code is live, 6 min left" and offers a fresh one. */
-  setupCode?: { live: boolean; expiresAt: string | null };
+  setupCode?: { live: boolean; expiresAt: string | null; oldFileAt: string | null };
 };
 /** ONE ROW PER RESTAURANT (owner, 2026-08-27: "it will be messy when there will be too much
  *  restaurants… I could be able to differentiate all the restaurants"). */
@@ -208,7 +208,7 @@ function leftWords(ms: number): string {
  *     alphabet already leaves out every character that sounds like another one.
  */
 function SetupCodeCard({ live, onShow, copy, busy }: {
-  live: { live: boolean; expiresAt: string | null } | undefined;
+  live: { live: boolean; expiresAt: string | null; oldFileAt: string | null } | undefined;
   onShow: () => Promise<{ code: string; pretty: string; expiresAt: string } | null>;
   /** THE PAGE'S OWN copy(), not a bare navigator.clipboard call. It is the half that SAYS SO —
    *  "Copied." at the bottom of the screen, and a plain sentence when the browser refuses. The
@@ -246,6 +246,23 @@ function SetupCodeCard({ live, onShow, copy, busy }: {
         into. <b>Nobody signs in on that computer</b> — not now, and not ever. The code works once,
         for one computer, for this restaurant only.
       </p>
+
+      {/* ── THE ONE THING AN OLD HELPER CANNOT SAY FOR ITSELF (mig 381) ──────────────────────
+          Reading our reply is the very thing that is broken in a file from before 2026-09-13, so
+          its window shows a PowerShell error and nothing else — which is how the owner came to
+          photograph the identical failure twice, an hour apart, after it had been fixed. The code
+          is deliberately not spent by such an attempt, so this sits above a code that is still
+          good, and it says the only thing that helps: replace the file. */}
+      {live?.oldFileAt ? (
+        <p style={{ margin: "0 0 12px", padding: "10px 12px", borderRadius: 10, fontSize: 13, lineHeight: 1.6,
+          background: "color-mix(in srgb, var(--adm-warn, #f5a524) 12%, transparent)",
+          border: "1px solid color-mix(in srgb, var(--adm-warn, #f5a524) 45%, transparent)" }}>
+          <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ marginRight: 7 }} />
+          <b>That computer is running an out-of-date helper file.</b> Nothing was used up — the code
+          below still works. Press <b>Copy</b> on the helper file further down, paste it over the file
+          on that computer, save it, and run it again.
+        </p>
+      ) : null}
 
       {mineAlive ? (
         <div className="adm-setupcode">

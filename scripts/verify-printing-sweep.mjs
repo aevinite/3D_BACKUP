@@ -816,8 +816,11 @@ await phase("…and a print on ITS printer closes it", async () => {
 
   await setPerm(true);
   let sweptAgent = null, sweptCode = null;
+  // EVERY FAKE HELPER CARRIES A STAMP, like a real one. A claim with none is refused as an
+  // out-of-date file (mig 381) — which is the product working, and would make each of these phases
+  // fail for a reason that has nothing to do with what it is testing.
   const claimCode = (body) => fetch(BASE + "/api/print-agent/pair/claim", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ helper: "sweep", ...body }),
   }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
   /* ⚠️ RE-POINTED BY mig 380 (2026-09-13). This browser no longer REGISTERS a computer — that verb
      minted a print_agents row and a permanent token in a browser, and the owner replaced the whole
@@ -914,8 +917,9 @@ await phase("…and a print on ITS printer closes it", async () => {
 // printer is a code that one signed-in screen handed out, that dies in ten minutes, and that the
 // first machine to use it spends. Every refusal below is a rule.
 {
+  // A stamp, like a real helper — a claim with none is refused as an out-of-date file (mig 381).
   const claim = (body) => fetch(BASE + "/api/print-agent/pair/claim", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}),
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ helper: "sweep", ...(body || {}) }),
   }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
   const mintAdmin = () => api(`/api/admin/printing/setup-code`, { method: "POST", body: JSON.stringify({ rid: RID }) })
     .then(async (x) => ({ status: x.status, body: await x.json().catch(() => ({})) }));
@@ -1008,6 +1012,32 @@ await phase("…and a print on ITS printer closes it", async () => {
     if (ok2.body.agentId) made.agents.push(ok2.body.agentId);
     return (r.body.ok === false && ok2.body.ok === true)
       || `old code ok=${r.body.ok} · new code ok=${ok2.body.ok}`;
+  });
+  await clearWall();
+  await phase("a helper file from BEFORE the stamp is refused, and it costs nothing (mig 381)", async () => {
+    const c = (await mintAdmin()).body.code;
+    const before = ((await db(`print_agents?restaurant_id=eq.${RID}&select=id`)) || []).length;
+    // NO `helper` field — exactly the request an out-of-date file makes.
+    const r = await fetch(BASE + "/api/print-agent/pair/claim", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: c, hostname: "Sweep Old File PC", os: "windows" }),
+    }).then(async (x) => ({ status: x.status, body: await x.json().catch(() => ({})) }));
+    const after = ((await db(`print_agents?restaurant_id=eq.${RID}&select=id`)) || []).length;
+    const [row] = await db(`print_setup_codes?restaurant_id=eq.${RID}&select=claimed_at,refused_old_file_at&order=created_at.desc&limit=1`);
+    const problems = [];
+    if (r.body.reason !== "oldfile") problems.push(`it answered ${JSON.stringify(r.body).slice(0, 90)}`);
+    if (row?.claimed_at) problems.push("the code was spent — the person loses it AND gets no answer");
+    if (after !== before) problems.push(`a dead computer row was left behind (${before} → ${after})`);
+    if (!row?.refused_old_file_at) problems.push("nothing was recorded, so the board cannot say why nothing happened");
+    return problems.length === 0 || problems.join(" · ");
+  });
+  await phase("…and the SAME code then works from a stamped file", async () => {
+    const [row] = await db(`print_setup_codes?restaurant_id=eq.${RID}&select=id&claimed_at=is.null&order=created_at.desc&limit=1`);
+    if (!row) return "the refused code is gone — it should still have been good";
+    const c = (await mintAdmin()).body.code;
+    const r = await claim({ code: c, hostname: "Sweep Old File PC", os: "windows" });
+    if (r.body.agentId) made.agents.push(r.body.agentId);
+    return r.body.ok === true || JSON.stringify(r.body).slice(0, 120);
   });
   await clearWall();
   await phase("a computer that was unlinked can come straight back under its own name", async () => {
@@ -3276,8 +3306,9 @@ for (const g of ["verify:print-helper", "verify:print-queue", "verify:print-form
 // first machine that uses it; and it is stored hashed, so it cannot be recovered from the database.
 // This section proves each of those rather than trusting the migration's own comment.
 {
+  // A stamp, like a real helper — a claim with none is refused as an out-of-date file (mig 381).
   const claim = (body) => fetch(BASE + "/api/print-agent/pair/claim", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}),
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ helper: "sweep", ...(body || {}) }),
   }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
   const mintAs = (cookie) => fetch(BASE + "/api/editor/printing/setup-code", {
     method: "POST", headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },

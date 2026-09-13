@@ -93,6 +93,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     }
     const r = await claimSetupCode(String(b.code || ""), {
       fingerprint: b.fingerprint, hostname: b.hostname, printers: b.printers, os: b.os,
+      // The stamp the file carries. Absent = a copy from before 2026-09-13 (mig 381).
+      helper: b.helper,
     });
     // ── A CODE THAT WORKED CLEARS THE COUNTER ──────────────────────────────────────────────
     // The same rule, for the same recorded reason, as a staff login (lib/rateLimit.ts, owner
