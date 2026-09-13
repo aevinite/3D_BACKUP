@@ -103,7 +103,17 @@ git(LIVE, "fetch", "devsrc", "refs/remotes/origin/main:refs/remotes/devsrc/backu
 //                                                   competitor-research folder backup has never had).
 // Splitting them is what makes "replicate the whole thing" actually mean it: extras go away too.
 const inBackup = new Set(git(BACKUP, "ls-tree", "-r", "--name-only", PIN).split("\n").filter(Boolean));
-const allChanged = git(LIVE, "diff", "--name-only", "devsrc/backupmain").split("\n").filter(Boolean)
+// ── --no-renames, AND IT IS THE THIRD WAY THIS HAS SKIPPED A FILE (2026-09-13) ───────────
+// git pairs a moved file into ONE rename entry and `--name-only` prints only that pair's
+// DESTINATION. In this direction (backup → the live tree) the destination is the LIVE path, so a
+// file that MOVED in backup appeared here under its OLD name only: the old path fell into
+// `liveOnly` and was deleted, and the new path was never in `changed` at all, so it was never
+// copied. Measured on the Owners/Users roster move: components/admin/OwnersView.tsx and
+// UsersView.tsx were silently absent from a 75-file release, and the live build failed on
+// "Can't resolve '@/components/admin/OwnersView'" — which is exactly what step 6 is for, but it
+// should never have got that far. --no-renames makes git report a move as a plain delete + add,
+// so BOTH paths are seen and both are acted on.
+const allChanged = git(LIVE, "diff", "--name-only", "--no-renames", "devsrc/backupmain").split("\n").filter(Boolean)
   .filter((f) => !KEEP_LIVE.some((k) => f === k || f.startsWith(k + "/")));
 const changed = allChanged.filter((f) => inBackup.has(f));
 // A live-only file is only DELETED if it sits in a path the app is built from. Inside those, an extra
