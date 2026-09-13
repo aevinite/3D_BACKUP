@@ -11,62 +11,10 @@ import { useEffect, useRef, useState } from "react";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import NotificationBell from "@/components/admin/NotificationBell";
 import { useBackClose } from "@/lib/backStack";
-
-type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
-type NavGroup = { label: string; items: NavItem[]; quiet?: boolean };
-
-// Grouped nav: Operate (daily work) / Manage (tenants & access) / Platform /
-// Coming soon (quiet — placeholders, no dead ends).
-// (Owner 2026-07-04: "Command" reads wrong → Dashboard. The old global "Features"
-// page confused him — per-restaurant features already live in each restaurant's
-// detail + the Access-control hub, so the nav entry is gone; the page itself stays
-// reachable by URL until we delete it.)
-const GROUPS: NavGroup[] = [
-  {
-    label: "Operate",
-    items: [
-      { href: "/aevinite", label: "Dashboard", icon: "fa-table-columns", exact: true },
-      { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
-      { href: "/aevinite/analytics", label: "Analytics", icon: "fa-chart-pie" },
-      { href: "/aevinite/bill-audit", label: "Bills", icon: "fa-file-invoice-dollar" },
-      { href: "/aevinite/repair", label: "Repair & support", icon: "fa-screwdriver-wrench" },
-      { href: "/aevinite/logs", label: "Audit & logs", icon: "fa-scroll" },
-    ],
-  },
-  {
-    label: "Manage",
-    items: [
-      { href: "/aevinite/restaurants", label: "Restaurants", icon: "fa-store" },
-      // ONE ENTRY FOR EVERY PERSON (owner, 2026-09-13: "merge 2 section name it user and owner").
-      // "Owners" and "Users" were two sidebar entries answering the same question from two doors,
-      // so you had to know the person's role before you could find them. Now it is one screen with
-      // an Owner/User switch at the top. Both old addresses redirect into the right half of it.
-      { href: "/aevinite/people", label: "Users & owners", icon: "fa-users-gear" },
-      { href: "/aevinite/customers", label: "Customers", icon: "fa-user-group" },
-      { href: "/aevinite/recycle", label: "Recycle bin", icon: "fa-trash-can" },
-      // ONE NAME FOR THE SCREEN (sweep T6, 2026-08-10). The sidebar said "Access / Permissions"
-      // and the page you land on says "Access & permissions" — and the docs, the deep links and
-      // the owner all call it "Access". Two names for one screen is a small thing that makes
-      // every instruction about it ambiguous.
-      { href: "/aevinite/access", label: "Access & permissions", icon: "fa-key" },
-      // Printing is hardware, and hardware is granted, not chosen: which computers may print and
-      // what each of them prints lives here (owner, 2026-08-20: "maybe we can create whole new
-      // printing menu in the admin panel for setup and all").
-      { href: "/aevinite/printing", label: "Printing", icon: "fa-print" },
-    ],
-  },
-  {
-    label: "Platform",
-    items: [
-      { href: "/aevinite/revenue", label: "Revenue", icon: "fa-chart-line" },
-      { href: "/aevinite/usage", label: "Usage & cost", icon: "fa-gauge-high" },
-      { href: "/aevinite/billing", label: "Billing & plans", icon: "fa-file-invoice" },
-      { href: "/aevinite/health", label: "System health", icon: "fa-heart-pulse" },
-      { href: "/aevinite/rate-limits", label: "Rate limits", icon: "fa-shield-halved" },
-      { href: "/aevinite/settings", label: "Settings", icon: "fa-gear" },
-    ],
-  },
-];
+// The sidebar list and the breadcrumb labels are the SAME data now (components/admin/nav.ts), so
+// a screen can no longer be called one thing in the nav and another in the path above it.
+import { GROUPS, type NavItem } from "@/components/admin/nav";
+import { AdminCrumbs, CrumbProvider } from "@/components/admin/Crumbs";
 
 type Rest = { id: string; slug: string; name: string; active: boolean };
 
@@ -125,6 +73,7 @@ export default function AdminShell({ children, initialSkin }: { children: React.
   }, []);
 
   return (
+    <CrumbProvider>
     <div className="adm adx" data-skin={skin}>
       {navOpen && <div className="adx-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
       <aside className={"adx-side" + (navOpen ? " open" : "")} id="adminNav">
@@ -185,9 +134,13 @@ export default function AdminShell({ children, initialSkin }: { children: React.
           </div>
         </header>
 
-        <main className="adm-main"><div className="adx-wrap">{children}</div></main>
+        {/* ONE PATH, DRAWN ONCE, FOR ALL 22 SCREENS (owner, 2026-09-13). Pages no longer write
+            their own — they declare extra crumbs with useCrumbs() and this draws them. The
+            section name comes from the address bar, so it can never disagree with the sidebar. */}
+        <main className="adm-main"><div className="adx-wrap"><AdminCrumbs />{children}</div></main>
       </div>
     </div>
+    </CrumbProvider>
   );
 }
 

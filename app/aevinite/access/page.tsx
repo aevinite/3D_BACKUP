@@ -12,11 +12,12 @@
  * This replaced a 1000-line screen of 54 sub-checkboxes, 45 of which no server code read.
  * The rule now: a toggle exists only where lib/accessTree.ts says so. Spec:
  * docs/ACCESS-MODEL.md. */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AccessTree, { TreeStyle } from "@/components/admin/AccessTree";
 import { SearchStyle } from "@/components/admin/AccessSearch";
 import AccessPerPerson, { PerPersonStyle } from "@/components/admin/AccessPerPerson";
 import { SettingsSaveBar } from "@/components/admin/RestaurantSettings";
+import { useCrumbs, restaurantParents } from "@/components/admin/Crumbs";
 
 type Rest = { id: string; name: string; slug: string; active: boolean };
 
@@ -38,6 +39,17 @@ export default function AccessPage() {
   const [tab, setTab] = useState<"general" | "person">("general");
   const [fromRest, setFromRest] = useState(false);
 
+  // replaceState, never push: swapping restaurants on this screen is a sideways move, and Back
+  // should leave the screen rather than walk you through every restaurant you inspected.
+  const writeRid = useCallback((next: string) => {
+    try {
+      const u = new URL(window.location.href);
+      if (next) u.searchParams.set("rid", next); else u.searchParams.delete("rid");
+      window.history.replaceState(window.history.state, "", u.pathname + u.search + u.hash);
+    } catch {}
+  }, []);
+  const pickRest = useCallback((next: string) => { setRid(next); writeRid(next); }, [writeRid]);
+
   useEffect(() => {
     // ?rid / ?from read straight off the URL (no useSearchParams → no Suspense boundary),
     // matching how the restaurants page reads ?focus.
@@ -58,12 +70,34 @@ export default function AccessPage() {
         const list: Rest[] = [...all.filter((x) => x.active !== false), ...all.filter((x) => x.active === false)];
         setRests(list);
         const pick = list.find((x) => x.id === urlRid) || list[0];
-        if (pick) setRid(pick.id);
+        // ?rid= IS THE ADDRESS OF THIS SCREEN. Picking a restaurant used to move React state only,
+        // so a refresh silently dropped you back onto whichever restaurant happens to sort first —
+        // you could carry on editing permissions believing you were still on the one you chose.
+        // Same standing rule as the Restaurants page (2026-08-02) and Printing.
+        if (pick) { setRid(pick.id); if (pick.id !== urlRid) writeRid(pick.id); }
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const rest = rests.find((r) => r.id === rid);
+
+  // ── THE PATH, BUILT FROM THE WALK THAT ACTUALLY HAPPENED (owner, 2026-09-13) ──────────────────
+  // This screen used to print "Dashboard › Restaurants › <name> › Access" for everybody, including
+  // the admin who had just clicked "Access & permissions" in the sidebar and opened neither of the
+  // first two. His words: *"If I go to access and permission directly, then why the fuck the path
+  // is [four long]… inside the restaurant, you go to particular restaurant name and after the
+  // restaurant name, you go to access."* — i.e. that long path is RIGHT, but only for the person
+  // who really came in through the Restaurants list, and the URL is what tells us which is which:
+  //
+  //   sidebar → Access                       ?rid=…             Access & permissions › <name>
+  //   Restaurants → a restaurant → Access    ?rid=…&from=rest   Restaurants › <name> › Access & permissions
+  //
+  // (Dashboard is in neither. It is a SIBLING section in the same sidebar, not a parent of
+  // anything — it was only ever there because somebody typed it.)
+  useCrumbs(fromRest
+    ? { parents: restaurantParents(rest) }
+    : { tail: rest ? [{ label: rest.name }] : [] });
 
   return (
     <div className="acc2">
@@ -82,13 +116,6 @@ export default function AccessPage() {
           this page that was NOT in the server HTML — measured: `.at-box`, `.acc2-head` and
           `.app-wrap` were all present in the response body and `.as-field` was absent. */}
       <SearchStyle />
-      <nav className="adm-crumbs" style={{ marginBottom: 4 }}>
-        <a href="/aevinite">Dashboard</a><span className="sep">›</span>
-        <a href="/aevinite/restaurants">Restaurants</a><span className="sep">›</span>
-        <a href={rest ? `/aevinite/restaurants?focus=${rest.slug}` : "/aevinite/restaurants"}>{rest?.name || "Restaurant"}</a>
-        <span className="sep">›</span>
-        <span className="cur">Access</span>
-      </nav>
       {fromRest && rest && (
         <a className="adm-btn" href={`/aevinite/restaurants?focus=${rest.slug}`} style={{ margin: "10px 0 2px", display: "inline-flex", alignItems: "center", gap: 7 }}>
           <Icon n="arrowL" s={14} /> Back to {rest.name}
@@ -103,7 +130,7 @@ export default function AccessPage() {
           </p>
         </div>
         <div className="acc2-head-r">
-          <select className="acc2-rsel" value={rid} onChange={(e) => setRid(e.target.value)} aria-label="Restaurant">
+          <select className="acc2-rsel" value={rid} onChange={(e) => pickRest(e.target.value)} aria-label="Restaurant">
             {rests.map((r) => <option key={r.id} value={r.id}>{r.active === false ? `${r.name} — suspended` : r.name}</option>)}
           </select>
           <div className="acc2-tabs">

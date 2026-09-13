@@ -1653,9 +1653,25 @@ if (!ctx) {
     if ((j.trashed || []).length > 0) return true;
     return /No deleted restaurants/.test(rec.text) || "an empty bin renders blank";
   });
-  await phase("Recycle · the breadcrumb leads back to the Restaurants list", async () => {
-    const href = await rec.page.evaluate(() => document.querySelector(".adm-crumbs a")?.getAttribute("href"));
-    return href === "/aevinite/restaurants" || `crumb points at ${href}`;
+  // WAS: "the breadcrumb leads back to the Restaurants list" — it asserted that the crumb's first
+  // link is /aevinite/restaurants. That rule is RETIRED (owner, 2026-09-13). The Recycle bin is its
+  // own sidebar section, not a child of Restaurants, and a path that opens at another section
+  // describes a walk nobody took — his exact complaint about Printing and Access. So the check now
+  // asserts what is actually true of the console's one path: it NAMES the screen you are on, and it
+  // does not invent a parent above a top-level section.
+  await phase("Recycle · the path names this screen and invents no parent above it", async () => {
+    const p = await rec.page.evaluate(() => {
+      const n = document.querySelector('nav[aria-label="Breadcrumb"]');
+      if (!n) return null;
+      return {
+        cur: n.querySelector(".cur")?.textContent?.trim(),
+        crumbs: [...n.children].filter((e) => !e.classList.contains("sep")).map((e) => e.textContent.trim()),
+      };
+    });
+    if (!p) return "there is no path above the page at all";
+    if (p.cur !== "Recycle bin") return `the path ends at "${p.cur}", not the screen you are on`;
+    if (p.crumbs.length !== 1) return `a top-level section grew a parent: ${p.crumbs.join(" > ")}`;
+    return true;
   });
   const hasBinRow = await rec.page.evaluate(() => !!document.querySelector("[data-restaurant]"));
   if (hasBinRow) {
@@ -1997,7 +2013,10 @@ await phase("…and the route answers no write action no screen here can send", 
 await phase("The recycle bin is reachable from the Restaurants list", () =>
   /\/aevinite\/recycle/.test(read("app/aevinite/restaurants/page.tsx")) || "the bin has no way in");
 await phase("Billing and Usage are both reachable from the console's own navigation", () => {
-  const nav = read("app/aevinite/layout.tsx") + read("components/admin/AdminShell.tsx") + read("components/admin/shared.tsx");
+  // The sidebar list moved to components/admin/nav.ts on 2026-09-13 — one file now feeds BOTH the
+  // nav and the breadcrumb labels, so a screen cannot be called one thing in the sidebar and
+  // another in the path above it. This guard follows the list, not the file it used to live in.
+  const nav = read("app/aevinite/layout.tsx") + read("components/admin/nav.ts") + read("components/admin/AdminShell.tsx") + read("components/admin/shared.tsx");
   const miss = ["/aevinite/billing", "/aevinite/usage"].filter((u) => !nav.includes(u));
   return miss.length === 0 || `not in the navigation: ${miss.join(", ")}`;
 });

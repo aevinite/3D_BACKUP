@@ -43,7 +43,11 @@ const Unread = () => (
   <span className="adm-muted" style={{ fontStyle: "italic" }} title="This one figure couldn't be read — press Refresh">couldn&apos;t read</span>
 );
 
-export default function RestaurantReport({ restaurantId, restaurantName, onBack }: { restaurantId: string; restaurantName: string; onBack: () => void }) {
+// OBITUARY (2026-09-13): this took an `onBack` prop for its own breadcrumb link. The breadcrumb is
+// gone — the console draws ONE path now, declared by the screen that opens this view, so the way
+// back is "Restaurants › <name> › Full report" with both earlier crumbs live. Nothing else in here
+// ever called onBack, so the prop went with the markup that used it rather than sitting unread.
+export default function RestaurantReport({ restaurantId, restaurantName }: { restaurantId: string; restaurantName: string }) {
   const [range, setRange] = useState<Range>("7d");
   const [report, setReport] = useState<Report | null>(null);
   const [activity, setActivity] = useState<Action[] | null>(null);
@@ -68,12 +72,6 @@ export default function RestaurantReport({ restaurantId, restaurantName, onBack 
 
   return (
     <>
-      <nav className="adm-crumbs adx-noprint" aria-label="Breadcrumb" style={{ marginBottom: 14 }}>
-        <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>{restaurantName}</a>
-        <i className="fas fa-chevron-right sep" aria-hidden="true" />
-        <span className="cur">Full report</span>
-      </nav>
-
       <h1 className="adm-page-h">{restaurantName} — full report</h1>
       <p className="adm-page-sub">Every usage figure we have for this restaurant, scoped to just it. No food revenue — that&apos;s the owner panel&apos;s job.</p>
 

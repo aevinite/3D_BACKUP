@@ -10,10 +10,10 @@
 // It is the ADMIN's screen because printing is hardware: which computers may print, and what each
 // prints, is granted, not chosen by the restaurant. The owner is shown only what is allowed (R36).
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
 import { useBackClose } from "@/lib/backStack";
+import { useCrumbs } from "@/components/admin/Crumbs";
 import { SkelList } from "@/components/admin/Skeleton";
 // THE WORDS ARE SHARED WITH THE RESTAURANT'S OWN SCREEN (owner, 2026-08-27: "the UI/UX is also not
 // identical"). Four steps, three kinds of paper, one sentence each — declared once in
@@ -333,6 +333,51 @@ const PANEL_GROUPS: [ string, string ][] = [
   const [over, setOver] = useState<Over | null>(null);
   const [overErr, setOverErr] = useState("");
 
+  // ── "I REFRESH AND IT TAKES ME TO THE PREVIOUS SCREEN" (owner, 2026-09-13) ────────────────────
+  // Opening a restaurant here used to change REACT STATE and nothing else: the address bar still
+  // said /aevinite/printing with no restaurant in it, so a refresh — or the back button, or sending
+  // someone the link — dropped you back on the all-restaurants overview you had just left. That is
+  // the same standing rule the Restaurants page was fixed for on 2026-08-02 ("I refresh, why do I
+  // go back to the main thing?") and the Users & owners tabs on 2026-09-13; Printing was the screen
+  // still doing it. So the chosen restaurant is written to ?rid= the instant it changes.
+  //
+  // pushState for the DRILL-IN (overview → one restaurant) so Back steps out of it the way the
+  // "← All restaurants" button does; replaceState for a sideways SWAP between two restaurants, so
+  // Back doesn't walk you through every one you looked at. `writeRid` is also what the popstate
+  // listener below reads back, which is what makes the browser's own Back/Forward work at all.
+  const writeRid = useCallback((next: string, mode: "push" | "replace") => {
+    try {
+      const u = new URL(window.location.href);
+      if (next) u.searchParams.set("rid", next); else u.searchParams.delete("rid");
+      const url = u.pathname + u.search + u.hash;
+      if (mode === "push") window.history.pushState(window.history.state, "", url);
+      else window.history.replaceState(window.history.state, "", url);
+    } catch {}
+  }, []);
+
+  // NOT inside a setState updater. React calls an updater TWICE in development (StrictMode), and an
+  // updater that also writes the address bar therefore pushed TWO history entries per click — which
+  // made the browser's Back land on the restaurant you were already on. An updater must be pure;
+  // the side effect belongs out here, reading `rid` from the closure. (Caught by pressing Back in
+  // Chrome, not by the type-checker — it type-checked perfectly while doing the wrong thing.)
+  const go = useCallback((next: string) => {
+    if (next === rid) return;
+    writeRid(next, rid ? "replace" : "push");
+    setRid(next);
+    setSt(null); setLoadErr("");
+  }, [rid, writeRid]);
+
+  // Back/Forward move BETWEEN the overview and a restaurant, because both are real addresses now.
+  useEffect(() => {
+    const onPop = () => {
+      const q = new URLSearchParams(window.location.search);
+      setRid(q.get("rid") || "");
+      setSt(null); setLoadErr("");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     const urlRid = q.get("rid") || "";
@@ -344,8 +389,14 @@ const PANEL_GROUPS: [ string, string ][] = [
       // A restaurant is drilled into deliberately, from a row — that is what makes this screen a
       // place to WATCH from rather than a form to hunt through.
       const pick = all.find((x) => x.id === urlRid) || all.find((x) => x.slug === urlRid);
-      if (pick) setRid(pick.id); else setLoading(false);
+      // A ?rid= written as a SLUG (the older deep links do that) is normalised to the id in place,
+      // so the address bar, the picker and the path all name the same restaurant the same way.
+      if (pick) { setRid(pick.id); if (pick.id !== urlRid) writeRid(pick.id, "replace"); }
+      // A ?rid= that matches NOTHING (a deleted restaurant, a mistyped link) falls back to the
+      // overview — and the address is cleaned up, so a second refresh doesn't retry the dead id.
+      else { if (urlRid) writeRid("", "replace"); setLoading(false); }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const load = useCallback(async () => {
@@ -384,6 +435,14 @@ const PANEL_GROUPS: [ string, string ][] = [
 
   const rest = rests.find((r) => r.id === rid);
   const agents = st?.agents || [];
+
+  // THE PATH SAYS WHERE YOU ACTUALLY ARE: "Printing" on the overview, "Printing › <restaurant>"
+  // once you open one. It does NOT begin at Restaurants — you reached this screen from the
+  // sidebar, and inventing a walk through a section you never opened is the exact thing the owner
+  // called out on 2026-09-13. "Printing" is a live link back to the overview, which is the same
+  // step as the "← All restaurants" button beside it. (The shell adds the "Printing" crumb from
+  // the address bar — this only declares what hangs off it.)
+  useCrumbs({ tail: rid ? [{ label: rest?.name || "This restaurant" }] : [] });
 
   // ═══════════════════════════════════════════════════════════════════════════════════════════
   // THE TWO WAYS, AND WHETHER EACH ONE IS ON — READ OFF THE PAPER LINES, NEVER STORED
@@ -654,14 +713,6 @@ const PANEL_GROUPS: [ string, string ][] = [
 
   return (
     <>
-      <div className="adm-crumbs" style={{ marginBottom: 10 }}>
-        <Link href="/aevinite/restaurants">Restaurants</Link><span className="sep">›</span>
-        {/* No "…" placeholder on the overview: there is no restaurant to name yet, and an ellipsis
-            where a name belongs reads as "still loading" for ever. */}
-        {rid ? <><span>{rest?.name || "…"}</span><span className="sep">›</span></> : null}
-        <span>Printing</span>
-      </div>
-
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 className="adm-page-h" style={{ marginBottom: 4 }}>
@@ -709,10 +760,10 @@ const PANEL_GROUPS: [ string, string ][] = [
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "100%" }}>
           {rid ? (
             <>
-              <button className="adm-btn" onClick={() => { setRid(""); setSt(null); setLoadErr(""); }}>
+              <button className="adm-btn" onClick={() => go("")}>
                 ← All restaurants
               </button>
-              <select className="adm-input" value={rid} onChange={(e) => { setRid(e.target.value); }} style={{ flex: "1 1 180px", minWidth: 0, maxWidth: "100%" }}>
+              <select className="adm-input" value={rid} onChange={(e) => go(e.target.value)} style={{ flex: "1 1 180px", minWidth: 0, maxWidth: "100%" }}>
                 {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
             </>
@@ -740,7 +791,7 @@ const PANEL_GROUPS: [ string, string ][] = [
             </div>
           ) : null}
           {!over && !overErr ? <SkelList rows={6} label="Reading every restaurant" /> : null}
-          {over ? <Overview over={over} onOpen={(id) => { setRid(id); setSt(null); }} /> : null}
+          {over ? <Overview over={over} onOpen={(id) => go(id)} /> : null}
         </>
       ) : null}
 

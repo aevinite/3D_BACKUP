@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { openRestaurantPanel } from "@/components/admin/shared";
 import RestaurantReport from "@/components/admin/RestaurantReport";
+import { useCrumbs } from "@/components/admin/Crumbs";
 import CredentialsCard from "@/components/admin/CredentialsCard";
 import { CopyButton } from "@/components/admin/CopyButton";
 import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
@@ -984,6 +985,22 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   useBackClose("admin-rest-detail", true, onBack);
   useBackClose("admin-rest-report", showReport, () => setShowReport(false));
 
+  // THE PATH FOR A RESTAURANT YOU OPENED FROM THE LIST: Restaurants › <name>, and one step deeper
+  // while the full report is up. "Restaurants" closes the detail rather than navigating — this is
+  // one page swapping its own view, not two addresses — but it is written as a real <a href> so it
+  // still behaves like a link (middle-click, open-in-new-tab, and the path gradient, which is keyed
+  // on `a`). The report's own hand-written crumb is gone: it started at the restaurant name and so
+  // was the one path on the console with no way back to the list at all.
+  useCrumbs(showReport
+    ? {
+        onSection: onBack,
+        tail: [
+          { label: restaurant.name, href: `/aevinite/restaurants?focus=${encodeURIComponent(restaurant.slug)}`, onClick: () => setShowReport(false) },
+          { label: "Full report" },
+        ],
+      }
+    : { onSection: onBack, tail: [{ label: restaurant.name }] });
+
   // Deep-link to a section: arriving with ?section=features|status|… (e.g. from the Repair
   // page's "Feature switches" / "Maintenance mode" quick levers) scrolls straight to that
   // card instead of dumping the admin at the top of a long page and making them hunt for it
@@ -1046,7 +1063,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // permissions, and then away entirely on 2026-07-31. Nothing here reads them any more.)
 
   if (showReport) {
-    return <RestaurantReport restaurantId={restaurant.id} restaurantName={restaurant.name} onBack={() => setShowReport(false)} />;
+    return <RestaurantReport restaurantId={restaurant.id} restaurantName={restaurant.name} />;
   }
 
   return (
@@ -1054,13 +1071,6 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       {toast && (
         <div role="status" style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1002, background: "var(--adm-danger, #e5484d)", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, boxShadow: "0 6px 24px rgba(0,0,0,0.25)" }}>{toast}</div>
       )}
-      {/* Breadcrumb: Restaurants › <name> — matches the owner-view breadcrumb (.adm-crumbs)
-          so stepping back up is consistent everywhere inside a restaurant (owner request). */}
-      <nav className="adm-crumbs" aria-label="Breadcrumb" style={{ marginBottom: 14 }}>
-        <a href="/aevinite/restaurants" onClick={(e) => { e.preventDefault(); onBack(); }}>Restaurants</a>
-        <i className="fas fa-chevron-right sep" aria-hidden="true" />
-        <span className="cur">{restaurant.name}</span>
-      </nav>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 className="adm-page-h">{restaurant.name}</h1>
