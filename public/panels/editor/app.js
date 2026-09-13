@@ -1687,6 +1687,23 @@ function bindPrintingBoard(ed) {
     }
     el.onclick = async () => {
       if (what === "reload") { state.printBoard = state.printBoard || null; await loadPrintBoard(); return; }
+      // ── EMPTY A PILE-UP (owner, 2026-09-13) ──────────────────────────────────────────────────
+      // Only reachable when the server said this person may (accessTree → print_clear); the verb
+      // asks the same question again, because a hidden button has never been a gate. The panel's
+      // own confirm, not the browser's: a print-station Chrome answers window.confirm() false and
+      // shows alert() to nobody, so a native dialog here would silently drop the tap.
+      if (what === "clearqueue") {
+        const n = Number((state.printBoard || {}).waiting || 0);
+        const yes = await confirmDialog(
+          `Clear ${n} waiting ticket${n === 1 ? "" : "s"}? They will never print — this is how you stop a whole backlog coming out at once when the printer comes back. Nothing is deleted: each one stays in the list with its reason, and the orders stay on the kitchen screen.`,
+          "Clear them");
+        if (!yes) return;
+        el.disabled = true;
+        const d = await post("queue/clear", {});
+        el.disabled = false;
+        if (d) { toast(`Cleared ${Number(d.cleared || 0)} — none of them will print.`); await loadPrintBoard(); }
+        return;
+      }
       if (what === "os") { state.printOs = el.dataset.os; renderEditor(); return; }
       if (what === "copy") {
         // TWO launcher files exist now (helper · print-station), so the button says which it is.
@@ -11404,7 +11421,8 @@ function tablePanelParts(t, host = "float") {
     // shows "no dairy", identical to the tablet. This is what made the two detail
     // views disagree before (the popup showed only each item's own removals).
     const withAllergens = (o) => { const a = Array.isArray(o.allergies) ? o.allergies : []; return orderItemRows(o).map((r) => ({ ...r, removed: [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...a])] })); };
-    const when = (o) => o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    // Asia/Kolkata, like fmtClock above and like the paper — never the device's own zone (2026-09-13).
+    const when = (o) => o.created_at ? fmtClock(o.created_at) : "";
     const editing = editTables.has(String(t)); // staff EDIT mode for this table?
     // While editing, each KOT card gets allergen toggle chips ("avoid in all dishes")
     // + an "＋ Add dish" button. Allergy/add are PER-ORDER (per KOT). (owner, 2026-06-17)
@@ -14244,6 +14262,15 @@ function formPrinting(s) {
           : `The oldest has been waiting ${esc(skAge)} — they are going through normally.`}</span>
       <span class="pw-val">${skStuck ? "STUCK" : "OK"}</span>
     </div></div>` : ""}
+    ${(B.mayClear && Number(B.waiting || 0) > 0) ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px">
+        <button type="button" class="btn danger" data-pw="clearqueue">Clear the ${Number(B.waiting)} waiting ${Number(B.waiting) === 1 ? "ticket" : "tickets"}</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin:-4px 0 12px">
+        Use this when the printer has been dead for a while: the tickets waiting are taken out for good, so
+        they don't all come out at once when it starts working again. Nothing is deleted — each one stays in
+        the list below with its reason — and the orders stay on the kitchen screen.
+      </p>` : ""}
     ${!(B.recent || []).length ? `<p class="muted" style="font-size:13px;margin:0">Nothing has printed yet.</p>` : `
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
         <thead><tr style="text-align:left;color:var(--muted)">
