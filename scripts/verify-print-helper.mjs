@@ -793,16 +793,81 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "…the shared board carries no mode (and still carries both launcher files)",
     "lib/printBoard.ts is publishing a mode again, so the screens will start branching on it");
   check(!/adm-mode/.test(page) && !/pw-mode/.test(epanel),
-    "…neither printing screen renders a mechanism toggle",
+    "…neither printing screen renders the old mechanism toggle",
     "a mode toggle is back on one of the two printing screens");
   check(!/b === "mode"/.test(code(eroute)) && !/seg\[0\] === "mode"/.test(code(adminR)),
     "…and neither route will accept one",
     "a route accepts a 'mode' verb again: something can store a choice that nothing reads");
-  // WHAT MUST STILL BE TRUE: both setups have to be REACHABLE, or "no toggle" would be satisfied by
-  // a board that offers neither. The helper's card and the kitchen-screen card are both present.
-  check(/The computer that prints|STEPS\.two/.test(page) && /The kitchen screen|STEPS\.screen/.test(page),
-    "…while BOTH setups are on screen at once, which is the point of removing the choice",
-    "one of the two setups vanished with the toggle: a restaurant can no longer set up the thing it needs");
+
+  // ── ⚠️ INVERTED AGAIN, AND ONLY HALFWAY (owner, 2026-09-13) ─────────────────────────────────
+  //
+  // *"In the admin panel printer menu I told something, you made something different. I want both
+  // separate — on top of printer there should be 2 menu, one for screen printing by chrome kiosk and
+  // one for helper, and they should have colour of red or green according to they are on and off."*
+  //
+  // The check above this one used to read "…while BOTH setups are on screen at once, which is the
+  // point of removing the choice". That is the part he is objecting to: one long stacked column with
+  // nothing on it saying which way the restaurant actually prints. So the ADMIN board now shows one
+  // way at a time again, under two status cards.
+  //
+  // What must NOT come back with it is the thing 2026-08-31 actually killed: a STORED mode. The four
+  // checks above still guard that, and the two below are the new line — the picker has to be a
+  // MIRROR (derived, posts nothing, both can be green) and both ways have to stay reachable.
+  // The ON/OFF word has to be ON THE TAB ITSELF, not merely somewhere in the file: the first version
+  // of this check tested /"ON" : "OFF"/ against the whole page, and the board carries that ternary
+  // twice (the tab, and the "below: the setup for X, which is ON" line under it). Sabotaging the tab
+  // left the guard green — so it is tied to the tab's own `.w` span here.
+  //
+  // THE SHAPE IS HIS PICK, NOT A DEFAULT (owner, 2026-09-13): ten designs were built and shown on a
+  // preview port and he chose the UNDERLINE tab bar — *"I liked underline one."* So the class is
+  // asserted by name: a later "tidy-up" back into a boxed strip or a pair of cards is a silent
+  // reversal of a choice he made by looking at all ten.
+  check(/adm-waybar/.test(page) && /WAYS\.computer|WAYS\[id\]/.test(page)
+    && /className="w[^"]*">\{[^}]*\? "ON" : "OFF"\}/.test(page),   // allow extra classes (it carries .hue-ink)
+    "the admin board tops out with the two-way MENU — his underline bar — each way carrying an ON/OFF word as well as its colour",
+    "the two-way menu is gone from the admin Printing board, stopped being the underline bar he picked out of ten, or lost its ON/OFF word — leaving colour as the only signal, which is exactly what a colour-blind admin cannot read");
+  // ── AND THE WORD "YES" NEVER SITS ABOVE IT AGAIN (owner, 2026-09-13) ────────────────────────
+  // *"Why the fuck I'm on OFF one and on top it show YES it's on."* The entitlement switch used to
+  // render as a state row printing a big green YES, directly above a way-tab reading OFF — two
+  // different switches in the same words. It is a header chip now, worded "Printing allowed", and
+  // the only ON/OFF on this board belongs to the two ways.
+  // (Narrow on purpose: `adm-state-val` still renders in the log's STUCK/OK row, which is a
+  //  measurement of the queue and not a switch. What must never come back is the YES/NO PAIR.)
+  //
+  // WHERE THE ENTITLEMENT LIVES NOW (owner, 2026-09-13): *"I don't want this option printing allowed
+  // for this restaurant… there should be an on-and-off feature button after the underline toggle
+  // thing, and also make an i button and put this written info inside that, not here."* So it is one
+  // button on the tab row whose VERB carries the state, with the explanation inside the ⓘ popover
+  // beside it — not a status row, and not a chip repeating the word ON.
+  check(!/"YES" : "NO"/.test(page) && /className="acts"/.test(page) && /adm-ibtn/.test(page)
+    && /adm-pop/.test(page) && /post\("switch"/.test(page),
+    "…the tab row carries an ⓘ, and the restaurant-wide switch still exists somewhere on the board",
+    "the entitlement switch or its ⓘ has gone from the admin Printing board — or a YES/NO row is back, which is two different switches in the same words, the exact thing he swore at");
+  // ── EACH WAY SWITCHES ITSELF (owner, 2026-09-13: *"both should have separate on off, right now
+  // they have same"*) ────────────────────────────────────────────────────────────────────────────
+  // One button used to sit at the end of the row carrying the RESTAURANT-WIDE entitlement, so both
+  // tabs shared it. The row's button now acts on the tab you are standing on, by writing the very
+  // route rows the tab's colour is read from — so the word above the button and the button's own
+  // verb cannot drift apart. The entitlement moved into the ⓘ and onto the red banner.
+  check(/const flipWay = async \(id: WayId\)/.test(page) && /onClick=\{\(\) => void flipWay\(way\)\}/.test(page),
+    "…and the switch on the tab row belongs to THE WAY you are on, not to the whole restaurant",
+    "the per-way switch is gone: one button is serving both tabs again, which is the complaint that created it");
+  // AND IT NEVER INVENTS A PRINTER. Switching "a computer" ON would mean choosing a machine and a
+  // printer for somebody — the same trap writeMode fell into. It refuses, and says what to do.
+  check(/wayBlocked/.test(page) && /that is what switches a computer on/.test(page),
+    "…and switching the COMPUTER way on is refused with a reason rather than guessing a printer",
+    "the computer way can be switched on without naming a printer — something is guessing a machine, which is exactly what the deleted writeMode used to do");
+  check(/useBackClose\("admin-printing-info"/.test(page),
+    "…and that ⓘ closes on the phone's back button, like every other overlay in this console",
+    "the printing ⓘ popover stopped registering with lib/backStack: on a phone, Back would leave the page instead of closing it");
+  check(/setWay\(/.test(page) && !/post\("(mode|way)"/.test(code(page))
+    && !/printing\.mode/.test(code(page)),
+    "…and choosing one is a VIEW: it posts nothing and stores nothing, so it cannot disagree with the paper",
+    "the way-picker started writing something to the server — that is the stored mode coming back through the back door, and a stored mode can disagree with the routes");
+  check(/way === "computer"/.test(page) && /way === "screen"/.test(page)
+    && /The computer that prints|STEPS\.two/.test(page) && /The kitchen screen|Whose screen prints|STEPS\.screen/.test(page),
+    "…and BOTH setups are still reachable, one card-click apart",
+    "one of the two setups is no longer reachable on the admin board: a restaurant can no longer set up the thing it needs");
   check(/function FileCard/.test(page),
     "…and the two launcher cards on the console share ONE component",
     "the helper file card and the station file card are two copies of one markup again — which is exactly how the wording drifted the first time");

@@ -31,7 +31,8 @@ Kept honest by `npm run verify:pointers`: it fails if a guard named here has van
 |---|---|---|---|
 | `npm run verify:push` | type-check → lint → unit tests → all static guards → access model. The same set CI runs. | nothing | no |
 | `npm run typecheck` | `tsc --noEmit`. **`npm run lint` does NOT check types** — they are separate gates. | nothing | no |
-| `npm run test` | `test:money` + `test:errors` + `test:units` — 37 tests, ~0.1s. | nothing | no |
+| `npm run test` | `test:money` + `test:errors` + `test:netretry` + `test:units` — ~0.2s. | nothing | no |
+| `npm run test:netretry` | a read never cries "no internet" before a quiet retry has failed too, and a WRITE still goes out exactly once (owner, 2026-09-12). Drives the real `public/panels/netretry.js` and cross-checks `lib/netRetry.ts`. | nothing | no |
 | `npm run verify:static` | all 31 static guards. Runs **every** one and reports **every** failure — add `-- --quiet` for failures only. Inside `verify:push`. | nothing | no |
 | `npm run check:current` | is this folder level with `origin/main`? **Run before any audit or "X is broken" claim.** | nothing | no |
 

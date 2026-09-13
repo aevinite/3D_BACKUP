@@ -1,7 +1,7 @@
 # The print helper — one basket, many printers
 
 > **Status:** BUILT 2026-08-20 — six stages, each driven rather than read (23 + a real print + 16 + 14 + 14 + 12 checks).
-> Guarded by `npm run verify:print-helper` (132 checks, in `verify:static`) and `npm run verify:printing-sweep` (125 phases). Owner asked for it after the Aangan problem:
+> Guarded by `npm run verify:print-helper` (163 checks, in `verify:static`) and `npm run verify:printing-sweep` (125 phases). Owner asked for it after the Aangan problem:
 > one man is the owner AND the manager, sits in the owner panel in Manager mode, and the
 > kitchen's auto-print window kept pulling his screen away — while three printers hang off the
 > shop's computer (kitchen slips, bills, a small-paper A4 machine for banquet sheets).
@@ -428,6 +428,164 @@ token — and the three unattended paths were driven the same way.
 Two guards had the same **parser blind spot** and are fixed in this change: `echo(` is cmd.exe's own
 idiom for echoing a value, and both `%VAR%`-in-a-block walkers read its `(` as an opened block, after
 which every later line looked nested. One of them reported twenty correct lines as faults.
+## 2026-09-13 — the two ways, SEPARATED, each saying whether it is on
+
+> Owner: *"In the admin panel printer menu I told something, you made something different. I want
+> both separate — on top of printer there should be 2 menu, one for screen printing by chrome kiosk
+> and one for helper, and they should have colour of red or green according to they are on and off.
+> Design whole UI."*
+
+**What he was looking at.** Removing the toggle on 2026-08-31 left the admin board as one stacked
+column: the helper's computers, the helper's file, the three paper lines, the kitchen screen and the
+station file, all in a row — and **nothing on the screen saying which of the two ways this restaurant
+actually prints with.** Both halves were equally loud whether they applied or not, which is the same
+complaint he made on 2026-08-28 about twenty controls being on screen at once.
+
+**Second pass, same day, after he looked at it:** *"I want proper menu change on very top… and why
+the fuck I'm on OFF one and on top it show YES it's on."* Two fair hits, both fixed:
+- The ways were card **2**, under a step-1 card that existed only to hold the entitlement switch — so
+  the first thing on the page was a walk-through, not the choice. **The menu is now the first thing
+  under the title**, and the page below it is that one way's setup and nothing else. The numbered
+  steps inside each way are gone with it (`STEPS.two/three/screen` carry no numbers; `STEPS.one` and
+  `STEPS.four` still do, because the MANAGER's board is still one stacked list and shares them).
+- That step-1 card printed a big green **YES** two inches above a tab reading **OFF** — two different
+  switches (*may this restaurant print at all* vs *is the helper carrying paper*) in the same words.
+  The card is gone; the entitlement is a **chip in the header** reading "Printing allowed" /
+  "Printing is off for this restaurant". The words ON and OFF now belong to the two ways alone, and
+  `verify:print-helper` fails if a YES/NO pair comes back to this board.
+- And a fault found in my own screenshot of the rewrite: on a restaurant with printing switched
+  **off**, the screen tab still read a green **ON**, because the kitchen-slip line underneath was
+  untouched. The entitlement now multiplies both ways — no paper can come out, so neither way is on.
+
+**Third pass, same day:** *"It should be 2 small option, also it should sync with the UI/UX."* The
+two ways were big cards eating a third of the screen, in a console that already has ONE pattern for
+picking between views — `.adm-tabs`, the compact pill strip on Analytics, Logs and Floor. So the menu
+is no longer its own component: it **is** `.adm-tabs` (`className="adm-tabs adm-waytabs"`), with a
+status dot and the word ON/OFF added, and one line of explanation underneath for whichever way you
+are on. Two CSS traps, both found by measuring rather than looking:
+- `.adm-waytabs button` has the **same specificity** as `.adm-tabs button` and sat EARLIER in the
+  file, so the phone padding never applied — 26px tall tabs where a finger needs 34. Then `.adx
+  .adm-tabs button` (the console's own compact sizing) did it again, one level deeper. Every rule is
+  now `.adm-tabs.adm-waytabs`, and the phone ones are also `.adx`-prefixed AND placed after it.
+- The selected tab fills with the accent gold, where a tinted green/red measured **1.6:1** and the
+  shared pattern's own ink is **3.68:1** — under the 4.5 a 12px word needs. The selected tab's ON/OFF
+  gets a white chip of its own and keeps its colour: ~9:1, meaning intact.
+
+**Fourth pass — and the shape is HIS, off a real comparison.** Ten designs were built and served on
+the preview port (pill strip · soft buttons · outline chips · **underline tabs** · joined segment ·
+mini cards · a dropdown · a filled strip · a side list · badge tabs), each one live, each one
+flippable between ON/OFF so he could see every state. *"I liked underline one."* So the board carries
+design 4: `.adm-waybar` — no box, no fill, no container, just the two names on a hairline with an
+accent underline under the one whose setup is open. `verify:print-helper` asserts that class by name,
+because a later "tidy-up" back into a boxed strip would silently reverse a choice he made by looking
+at all ten. The `.adm-tabs.adm-waytabs` work from the third pass was deleted, not left switched off.
+
+**Fifth pass — the row got its own two controls, and the prose went inside an ⓘ.** *"I don't want
+this option 'printing allowed for this restaurant'. There should be an on-and-off feature button
+after the underline toggle thing, and also make an i button and put this written info inside that,
+not here."* So the header is navigation only again, and the tab row ends with **ⓘ** + one button
+whose verb carries the state (**Switch off** means it is currently on). The four lines that sat under
+the tabs — which way is open, whether it is on, what is true today, what that way even is, plus what
+the switch beside it does — are the ⓘ's content. It closes on the button, the ×, Escape, a click
+outside, and the phone's Back button (`lib/backStack → useBackClose`, like every overlay in this
+console); on a phone it is a bottom sheet, because `top:auto` alone left it covering the very tabs it
+explains. Two tap targets were measured and grown: the ⓘ (30 → 34, 38 on a phone) and the popover's ×
+(which flex had stretched to 194 × 19).
+
+**Sixth pass — each way switches ITSELF.** *"Both should have separate on off, right now they have
+same."* He was right: the one button on the row was the restaurant-wide entitlement, so both tabs
+shared it. The row's button now acts on the tab you are standing on, and it writes the very route rows
+the tab's colour is read from — so the word above the button and the button's own verb cannot drift:
+
+| | switch OFF writes | switch ON writes |
+|---|---|---|
+| **A screen prints** | kitchen slips → `via:"off"` — nothing prints them by itself, anywhere | clears the kitchen-slip line → back to the kitchen screen (works whether it was off **or** a computer had it) |
+| **A computer prints** | clears every paper that names a computer — slips fall back to the kitchen screen, bills and banquet sheets to whoever presses Print | **refused, with a reason.** Turning it on means naming a printer, and this screen must never guess one — the `writeMode` lesson. The button is disabled and says "pick a printer below". |
+
+The restaurant-wide entitlement moved **into the ⓘ** (and onto the red banner, which is the one
+moment it must not be behind anything). Driven end to end on a spare dev restaurant: screen ON → OFF
+→ ON with the stored row checked at each step, the computer tab's refusal read off the real button,
+then the restaurant put back to exactly the entitlement and route row it started with.
+
+**Seventh pass — one surface, and the switch proved at the database.** *"Make sure that on/off
+actually work, and change the UI/UX — it looks dark and unmerged, separate UI."*
+
+- **Merged.** The tabs were floating on the page background above a stack of separate cards, so the
+  dark page showed through between every block and the switcher belonged to nothing. The tabs are now
+  the HEAD of the panel they open: one `.adm-waycard`, the tab row across its top, the chosen way's
+  setup as hairline-separated `.adm-waysec` sections inside it. Both `FileCard` callers became
+  sections too — a card nested in a card drew a second border.
+- **Proved.** Driven on a spare dev restaurant, reading the column mig 335's trigger actually reads:
+  **Switch off → `settings.auto_print_kot` = false** (no slip is ever created), **Switch on → true**.
+  Then the restaurant was put back to the exact entitlement, route row and column it started with.
+- Two faults this turned up, both mine, both measured: a 5% accent wash on the tab strip pushed the
+  ON/OFF words to **2.67–3.08:1** and the ⓘ and switch to **3.65:1** in the LIGHT console — the wash
+  is gone, and the ON/OFF word now uses the console's own `--hue` + `.hue-ink` rule (the same one
+  `.rp`, `.own-av` and `.adm-chip` use to stay readable on the light skin) instead of a colour of its
+  own. And `verify:print-helper` was pinned to `className="w"` exactly, so adding `hue-ink` turned it
+  red for a spelling change — it takes extra classes now.
+
+**Eighth pass — a switched-off way is ONE LINE, and the dark-skin button was invisible.** *"In dark
+mode why the on button is like this… everything should be functional. When on, then only show the
+bottom thing, otherwise hide them — kind of like a dropdown: if you turn it on, the dropdown comes."*
+
+- **The button.** Measured, because a screenshot will not tell you: a plain `.adm-btn` in the DARK
+  console computes to `background: rgba(0,0,0,0)` with **no border** — on a card that is bare grey
+  text, not a control. It reads fine in the light skin, which is how it shipped. The two controls on
+  the tab row now carry their own outline; `.primary` keeps its fill, so "Switch on" is the loudest
+  thing on the row in both skins.
+- **The dropdown behaviour.** A way that is switched off now shows a single line saying so and what
+  turns it on — its setup is not rendered at all. Switching it on opens it.
+- **The one that cannot switch itself on.** A COMPUTER is switched on by a printer being named, and
+  that choice lives in the setup — so "Switch on" there OPENS the setup (and the tab stays honestly
+  **OFF**, with a line at the top saying so) rather than guessing a machine. Pressed again it reads
+  **Cancel** and shuts. There is no state where a button on that row does nothing.
+- Driven end to end on a spare restaurant: screen OFF → collapsed + `auto_print_kot` false → ON →
+  expanded + true; computer OFF → collapsed → opened (4 sections, tab still OFF) → Cancel; ⓘ opens,
+  Escape closes; the person dropdown, Refresh and Stop-the-queue all still answer. Restored exactly.
+- One more contrast fault caught on the way: "Cancel" kept the accent fill and measured **3.43:1**
+  white-on-orange. It is the outlined style now.
+
+**What it is.** The menu is two tabs on a hairline:
+
+| | **A computer prints** (the helper) | **A screen prints** (Chrome, out of the way) |
+|---|---|---|
+| green when | a computer is named for at least one paper, and that machine still exists | the kitchen slips are left to a screen — the kitchen panel, or one named person's |
+| red when | no paper is pointed at a computer | the slips are switched off, or a computer took them |
+| clicking it | opens *The computer that prints* + *Which printer gets which paper* + the helper file | opens *Whose screen prints the kitchen slips* + the print-station file |
+
+Under the strip, one small line names the way you are on, whether it is ON or OFF, what is true today
+and what that way actually is — so the tabs stay small without the teaching being lost.
+
+**⚠️ This is not the stored mode coming back, and the distinction is the whole design.** The deleted
+`settings.modules.printing.mode` was a SECOND ANSWER that could disagree with the routes; these cards
+are a **mirror** of the one answer, derived in the page from the same three route rows
+`lib/printHelpers.ts → resolveTarget` reads on the server. Nothing is posted, nothing is stored, and
+**both cards can be green at the same time** — a computer on the bills while the kitchen screen keeps
+the slips is an ordinary restaurant, and a real toggle could not express it. Turning the helper on
+still means naming a printer in step 4; turning the screen on still means leaving the slips alone.
+
+Three details that are deliberate:
+- **The colour is never the only signal.** Each card carries a dot, the word **ON**/**OFF**, and a
+  sentence naming what is true today ("Kitchen slips · Bills — printed by a computer").
+- **Selection is drawn in the accent, not in red/green.** "This way is working" and "this way's setup
+  is open below" are two different facts; drawing both in colour is how they get confused.
+- **A helper that is set up and ASLEEP stays green**, with an amber line inside it naming the machine.
+  Flipping it red would read as "nothing is set up" when the truth is "it is set up and the PC is off",
+  and the tickets are waiting on purpose (mig 335).
+
+The board lost its numbering with it — the menu is the structure now, and each way is two cards deep.
+The log at the bottom lost its hard-coded "5 ·" too. The manager's own board
+(`public/panels/editor/app.js`) is untouched and still one stacked, numbered list.
+
+Dead styling went with it: `.adm-mode` and `.adm-confirm` in `app/globals.css` had rendered nothing
+since 2026-08-31. Guarded by 4 new `verify:print-helper` checks (**160** total), each sabotage-tested
+— the menu exists, **the ON/OFF word is on the tab's own chip** (the first version of that check
+tested the whole file and stayed green when the chip was gutted, because the board carries that
+ternary twice), it posts nothing, both setups stay reachable, and no YES/NO row returns.
+
+Measured on the real screen at 1440 and 390, dark and light, on both tabs: no text under 4.5:1, none
+under 11.5px, nothing clipped, no sideways scroll — with the measurer itself sabotage-checked first.
 
 ## Why the browser can never do this
 
