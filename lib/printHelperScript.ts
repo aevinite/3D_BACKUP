@@ -255,8 +255,12 @@ banner "\${PLIST_NAMES:-none found}"
 #   --auto            nobody is watching this copy; with no token it steps aside rather than
 #                     waiting at a prompt in a window that does not exist (mig 380)
 #   KeepAlive         bring it back if it ever dies mid-service
-#   ThrottleInterval  five minutes between restarts. launchd's default is ten SECONDS, which is
-#                     right for a crash and wrong for a machine nobody has linked yet.
+#   ThrottleInterval  ten seconds between restarts — launchd's own default, and the right answer
+#                     for the case that actually matters: a helper that died in the middle of
+#                     service. Five minutes was tried first, to keep an UNLINKED machine from
+#                     re-running this file every ten seconds — but that traded ten quiet log lines
+#                     a minute for up to five minutes of a restaurant not printing, which is the
+#                     wrong way round. The unlinked case waits on its own instead (see link_up).
 install_autostart() {
   # ── IT RUNS FROM ITS OWN FOLDER, NEVER FROM THE DESKTOP ────────────────────────────────────
   # macOS TCC does not let a background item read ~/Desktop, ~/Documents or ~/Downloads. The guide
@@ -274,13 +278,19 @@ install_autostart() {
   # Re-running the Desktop file after pasting a newer one refreshes the copy, so updating is still
   # "paste, save, double-click" and nothing else.
   local run="$HOME_DIR/helper.command"
+  # WRITTEN ASIDE AND MOVED INTO PLACE, NEVER OVER THE TOP. cp onto the copy that launchd is
+  # RUNNING rewrites the very file that shell is still reading, and it then executes nonsense: seen
+  # on 2026-09-13, where it garbled the next answer badly enough that the helper concluded it had
+  # been unlinked and threw its own token away. mv swaps the name atomically — the running one
+  # keeps the file it started with and finishes it in peace.
   if [ "$SELF" != "$run" ]; then
-    cp -f "$SELF" "$run" 2>/dev/null && chmod +x "$run" 2>/dev/null
+    cp -f "$SELF" "$run.new" 2>/dev/null && chmod +x "$run.new" 2>/dev/null && mv -f "$run.new" "$run" 2>/dev/null
+    rm -f "$run.new" 2>/dev/null
   fi
   [ -x "$run" ] || run="$SELF"          # copy refused: better a start-up item that may be blocked
   local me="$run"                      # the path came from SELF, at the top. Never work it out here.
   mkdir -p "$(dirname "$PLIST")"
-  cat > "$PLIST" <<PLISTEOF
+  cat > "$PLIST.new" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -288,12 +298,31 @@ install_autostart() {
   <key>ProgramArguments</key><array><string>/bin/zsh</string><string>$me</string><string>--auto</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>ThrottleInterval</key><integer>300</integer>
+  <key>ThrottleInterval</key><integer>10</integer>
   <key>StandardErrorPath</key><string>$WORK/launchd.log</string>
 </dict></plist>
 PLISTEOF
-  launchctl unload "$PLIST" >/dev/null 2>&1
-  launchctl load "$PLIST" >/dev/null 2>&1
+  # ── ONLY TELL launchd ABOUT IT IF IT ACTUALLY CHANGED ──────────────────────────────────────
+  # This used to unload and reload the job every single time the helper started — and the copy
+  # launchd ITSELF started is inside that job, so "launchctl unload" killed the very process that
+  # was running the line. It came up, stopped itself, and launchd (KeepAlive, five-minute throttle)
+  # brought up another one to do the same thing. The helper looked installed, launchd reported a
+  # clean exit 0, and the restaurant's computer never polled once.
+  #
+  # Measured on 2026-09-13: started by hand it ran for ever; started by launchd it was gone within
+  # seconds, with an empty error log. The two are the same file — the difference is only that one of
+  # them is allowed to unload the job it is living in.
+  #
+  # Writing the file is idempotent, so comparing is enough: a copy launchd started writes exactly
+  # what is already there, changes nothing, and lives. A copy somebody double-clicks after pasting a
+  # NEWER file writes something different, and only then is launchd told.
+  if cmp -s "$PLIST.new" "$PLIST" 2>/dev/null; then
+    rm -f "$PLIST.new"
+  else
+    mv -f "$PLIST.new" "$PLIST" 2>/dev/null
+    launchctl unload "$PLIST" >/dev/null 2>&1
+    launchctl load "$PLIST" >/dev/null 2>&1
+  fi
 }
 
 # ── LINKING: one setup code, typed once, and nobody signs in here (mig 380) ───────────────────
@@ -316,7 +345,11 @@ link_up() {
   # NOBODY IS WATCHING AN AUTO-STARTED COPY. Sitting at a prompt would look, from the outside,
   # exactly like a helper that is running fine and simply never prints.
   if [ "$AUTO" = "1" ] || [ ! -t 0 ]; then
+    # WAITS BEFORE GIVING UP, so launchd's ten-second restart does not turn "this machine is not
+    # linked" into six log lines a minute. The ten seconds belong to a helper that CRASHED; this
+    # path is the other case, and it can afford to be patient.
     say "not linked, and nobody can type here — start this file by hand to enter a setup code"
+    sleep 50
     return 1
   fi
   local typed tidied answer n=0
@@ -388,9 +421,26 @@ fi
 
 # ── the loop: ask, print, report. Nothing clever, on purpose. ────────────────────────────────
 while :; do
-  HELLO="$(curl -s -m 20 -X POST "$SITE/api/print-agent/hello" -H "x-lfh-agent: $CODE" \\
-    -H "content-type: application/json" \\
+  # ── ONLY THE SITE SAYING "NO" COUNTS AS BEING UNLINKED (2026-09-13) ─────────────────────────
+  # This used to treat ANY answer that was not ok:true as "this computer was unlinked" and
+  # DELETE ITS OWN TOKEN. An empty answer does that. A timeout does that. A 502 while the site is
+  # deploying does that. So a moment of bad wifi in a restaurant could unlink the shop's printer and
+  # leave somebody needing a fresh setup code to get their printing back — from a blip that fixed
+  # itself in two seconds.
+  #
+  # Seen for real on 2026-09-13: re-running the file corrupted the copy the running helper was
+  # reading, its next answer came back garbled, and the helper threw its own token away.
+  #
+  # The HTTP code is read now, and only a 401 — the site's way of saying "that printing code is not
+  # valid any more" — is believed. Everything else is a blip: the token is kept, and it asks again.
+  HCODE="$(curl -s -m 20 -o "$WORK/hello.out" -w '%{http_code}' -X POST "$SITE/api/print-agent/hello" \\
+    -H "x-lfh-agent: $CODE" -H "content-type: application/json" \\
     -d "{\\"fingerprint\\":\\"$FP\\",\\"printers\\":$(printers_json)}")"
+  HELLO="$(cat "$WORK/hello.out" 2>/dev/null)"
+  if [ "$HCODE" != "200" ] && [ "$HCODE" != "401" ]; then
+    say "the site did not answer (HTTP \${HCODE:-none}) — keeping this computer's code and trying again"
+    sleep 30; continue
+  fi
   case "$HELLO" in
     *'"ok":true'*) : ;;
     # ── A REFUSED TOKEN CLEARS ITSELF (mig 380) ──────────────────────────────────────────────
@@ -398,7 +448,11 @@ while :; do
     # directory, which is not a thing a restaurant does, so the real outcome was a machine that
     # never printed again and nobody knowing why. The dead token goes now, and if somebody is
     # sitting here the helper simply asks for a fresh setup code.
-    *) rm -f "$TOKEN_FILE"
+    *) if [ "$HCODE" != "401" ]; then
+         say "the site answered oddly but did not refuse this computer — keeping its code"
+         sleep 30; continue
+       fi
+       rm -f "$TOKEN_FILE"
        CODE=""
        line "This computer was unlinked on the site."
        if link_up; then continue; fi
@@ -920,12 +974,21 @@ install_autostart() {
   # other half of the reason holds everywhere: a file somebody was told to type out once gets moved,
   # renamed, or binned the moment it looks like it is working.
   run="$HOME_DIR/helper.sh"
-  if [ "$SELF" != "$run" ]; then cp -f "$SELF" "$run" 2>/dev/null && chmod +x "$run" 2>/dev/null; fi
+  # Aside and moved into place, never over the top — see the Mac's note; cp onto a running script
+  # makes the running shell read nonsense.
+  if [ "$SELF" != "$run" ]; then
+    cp -f "$SELF" "$run.new" 2>/dev/null && chmod +x "$run.new" 2>/dev/null && mv -f "$run.new" "$run" 2>/dev/null
+    rm -f "$run.new" 2>/dev/null
+  fi
   [ -x "$run" ] || run="$SELF"
   me="$run"                            # the path came from SELF, at the top, like the Mac's
   mkdir -p "$(dirname "$AUTOSTART")"
+  # Written aside and only moved when it differs, like the Mac's — see the note there. Nothing on
+  # Linux has to be reloaded, but a file rewritten on every start is a file that can be caught
+  # half-written by whatever reads it next.
   printf '%s\\n' "[Desktop Entry]" "Type=Application" "Name=Aevidine print helper" \\
-    "Exec=/bin/sh \\"$me\\" --auto" "X-GNOME-Autostart-enabled=true" "NoDisplay=true" > "$AUTOSTART"
+    "Exec=/bin/sh \\"$me\\" --auto" "X-GNOME-Autostart-enabled=true" "NoDisplay=true" > "$AUTOSTART.new"
+  if cmp -s "$AUTOSTART.new" "$AUTOSTART" 2>/dev/null; then rm -f "$AUTOSTART.new"; else mv -f "$AUTOSTART.new" "$AUTOSTART" 2>/dev/null; fi
 }
 
 # ── LINKING: one setup code, typed once (mig 380) ─────────────────────────────────────────────
@@ -985,13 +1048,35 @@ else
 fi
 
 while :; do
-  HELLO="$(curl -s -m 20 -X POST "$SITE/api/print-agent/hello" -H "x-lfh-agent: $CODE" \\
-    -H "content-type: application/json" -d "{\\"fingerprint\\":\\"$FP\\",\\"printers\\":$(printers_json)}")"
+  # ── ONLY THE SITE SAYING "NO" COUNTS AS BEING UNLINKED (2026-09-13) ─────────────────────────
+  # This used to treat ANY answer that was not ok:true as "this computer was unlinked" and
+  # DELETE ITS OWN TOKEN. An empty answer does that. A timeout does that. A 502 while the site is
+  # deploying does that. So a moment of bad wifi in a restaurant could unlink the shop's printer and
+  # leave somebody needing a fresh setup code to get their printing back — from a blip that fixed
+  # itself in two seconds.
+  #
+  # Seen for real on 2026-09-13: re-running the file corrupted the copy the running helper was
+  # reading, its next answer came back garbled, and the helper threw its own token away.
+  #
+  # The HTTP code is read now, and only a 401 — the site's way of saying "that printing code is not
+  # valid any more" — is believed. Everything else is a blip: the token is kept, and it asks again.
+  HCODE="$(curl -s -m 20 -o "$WORK/hello.out" -w '%{http_code}' -X POST "$SITE/api/print-agent/hello" \\
+    -H "x-lfh-agent: $CODE" -H "content-type: application/json" \\
+    -d "{\\"fingerprint\\":\\"$FP\\",\\"printers\\":$(printers_json)}")"
+  HELLO="$(cat "$WORK/hello.out" 2>/dev/null)"
+  if [ "$HCODE" != "200" ] && [ "$HCODE" != "401" ]; then
+    say "the site did not answer (HTTP \${HCODE:-none}) — keeping this computer's code and trying again"
+    sleep 30; continue
+  fi
   case "$HELLO" in
     *'"ok":true'*) : ;;
     # Self-healing, same as the Mac: the dead token goes, and a person sitting here is asked for a
     # fresh setup code instead of being told to delete a file in a hidden folder (mig 380).
-    *) rm -f "$TOKEN_FILE"; CODE=""
+    *) if [ "$HCODE" != "401" ]; then
+         say "the site answered oddly but did not refuse this computer — keeping its code"
+         sleep 30; continue
+       fi
+       rm -f "$TOKEN_FILE"; CODE=""
        echo "This computer was unlinked on the site."
        if link_up; then continue; fi
        # Same as the Mac: a copy with no token and nobody watching it must LET GO of the lock, or
