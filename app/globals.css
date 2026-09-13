@@ -4356,35 +4356,168 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   .adm-over-row .what { flex: 1 1 100%; }
 }
 
-/* ── THE ONE TOGGLE (owner, 2026-08-28: "I want a simple toggle… you only see the option you have
-   selected"). Two big targets, each carrying its own one-line explanation, because the choice is a
-   MECHANISM and the names alone ("a computer" / "a screen") do not tell you what you get.
-   The chosen one is not marked by colour alone — a tick, a ring, a filled panel and bold weight
-   (WCAG 1.4.1). 64px minimum, because this is the most consequential control on the screen. */
-.adm-mode { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left;
-  flex: 1 1 260px; min-height: 64px; padding: 12px 15px; border-radius: 12px; border: var(--border);
-  background: var(--card); color: var(--muted); font: inherit; cursor: pointer;
-  transition: background .15s, box-shadow .15s; }
-.adm-mode b { font-size: 14px; font-weight: 650; color: var(--text); }
-.adm-mode small { font-size: 12px; line-height: 1.45; }
-.adm-mode:hover:not(.on) { background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
-.adm-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.adm-mode:disabled { opacity: .6; cursor: progress; }
+/* ── THE MENU AT THE VERY TOP (owner, 2026-09-13) ──────────────────────────────────────────────
+   THREE PASSES, and each one is worth knowing before touching this.
 
-/* ── THE CONFIRMATION, IN THE PAGE ──────────────────────────────────────────────────────────────
-   Owner, 2026-08-29: "whenever you switch, there is no UI for confirmation or stuff like that."
-   It was a browser confirm() — a grey box with no room to say what the switch actually costs, and
-   on a phone it covers the screen you are trying to read. This strip appears under the two mode
-   buttons, says what will change in the same words the screen uses, and puts Cancel first so the
-   safe answer is the one nearest the thumb. */
-.adm-confirm { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;
-  margin-top: 11px; padding: 12px 14px; border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-c, #888));
-  background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
-.adm-confirm .txt { flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px; }
-.adm-confirm .txt b { font-size: 13.5px; color: var(--text); }
-.adm-confirm .txt span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
-.adm-confirm .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+   1. *"On top of printer there should be 2 menu — one for screen printing by chrome kiosk and one
+      for helper, and they should have colour of red or green according to they are on and off."*
+   2. *"I want proper menu change on very top… and why the fuck I'm on OFF one and on top it show
+      YES it's on."* The ways were card TWO, under a step-1 card whose green **YES** (a different
+      switch: may this restaurant print at all) sat inches above a tab reading **OFF**. That card is
+      gone — the entitlement moved out (to a header chip, then to the button on the tab row; see the
+      fifth-pass note further down), and ON/OFF belongs to the ways alone.
+   3. *"It should be 2 small option, also it should sync with the UI/UX."* They were two big cards
+      eating a third of the screen in a console that already has ONE pattern for picking between
+      views: `.adm-tabs`, the pill strip on Analytics, Logs and Floor. So this is not a new
+      component — it IS `.adm-tabs`, with a status dot and the word ON/OFF added. Anything that
+      changes there changes here, which is the point.
+
+   WHY THE WORD IS PLAIN INK ON THE SELECTED TAB. `.adm-tabs button.active` fills with the accent
+   gold. A tinted green/red pill on gold measured ~1.6:1 — invisible — so on the selected tab the
+   DOT carries the colour and the word carries the meaning, in the same dark ink as its label.
+   Colour is never the only signal either way (WCAG 1.4.1).
+
+   Still not the stored mode deleted on 2026-08-31: nothing is posted, nothing is remembered against
+   the restaurant, and both tabs can read ON at once. lib/printBoardWords.ts → WAYS.
+
+   NOTE. `.adm-mode` and `.adm-confirm` stood here until 2026-09-13 and had rendered nothing since
+   that toggle was deleted — dead styling for a dead control, removed per "a new way replaces the
+   old one". */
+/* ── AND HE PICKED THE UNDERLINE (owner, 2026-09-13, fourth pass) ─────────────────────────────
+   Ten designs were built on :3891 and shown to him — pill strip, soft buttons, outline chips,
+   underline tabs, joined segment, mini cards, a dropdown, a filled strip, a side list, badge tabs.
+   *"I liked underline one."* So this is design 4: no box, no fill, no container — just the two names
+   on a hairline, and an accent underline on the one whose setup is open.
+
+   It is the quietest of the ten, which is the point: the switcher stops competing with the setup
+   underneath it, and the only colour left on the row is the red/green that MEANS something.
+
+   THE TWO THINGS THAT MAKE IT WORK, both of which are easy to lose in a "tidy up":
+   · the 3px underline sits on `margin-bottom:-1px`, so it covers the bar's own hairline and the tab
+     reads as attached to the page below rather than floating above a line;
+   · the phone padding is 10px/12px, NOT the desktop's 4px/11px. Text-only tabs are ~28px tall, and
+     a finger needs 34+. Measured, twice — see the two specificity notes in this file's history.
+
+   Colour is never the only signal: every tab carries the word ON or OFF beside its dot (WCAG 1.4.1).
+   Nothing here is a switch — clicking changes what is rendered below and posts nothing. The stored
+   printing mode deleted on 2026-08-31 (mig 372) stays deleted; lib/printBoardWords.ts → WAYS. */
+/* ── ONE SURFACE, NOT THREE (owner, 2026-09-13: *"change the UI/UX, it looks dark and unmerged,
+   separate UI"*) ───────────────────────────────────────────────────────────────────────────────
+   The tabs were floating on the page background between the header and a stack of separate cards,
+   so the switcher looked like it belonged to nothing and the dark page showed through between every
+   block. Now the tabs are the HEAD of the panel they open: one card, the tab row across its top on a
+   faintly tinted strip, and the chosen way's setup as hairline-separated sections inside it. The
+   underline still sits on the strip's own bottom edge, so the open tab is visibly attached to the
+   surface below it — which is the whole reason that design reads as tabs at all. */
+.adm-waycard { border: var(--border); background: var(--card); border-radius: 16px; overflow: hidden;
+  margin: 0 0 16px; }
+/* NO TINT ON THE STRIP. A 5% accent wash measured the ON/OFF words at 2.67-3.08:1 and the ⓘ and the
+   switch at 3.65:1 in the LIGHT console — the wash moves the background just far enough to push
+   every secondary colour under 4.5. The hairline under the row is enough of a head. */
+.adm-waycard .adm-waybar { margin: 0; padding: 4px 18px 0; gap: 26px; }
+/* ── THE WAY SWITCH HAS TO LOOK LIKE A BUTTON IN THE DARK SKIN TOO (owner, 2026-09-13: *"why the
+   on button is like this"*) ────────────────────────────────────────────────────────────────────
+   Measured, because it is invisible in a screenshot until you ask: a plain `.adm-btn` in the dark
+   console computes to `background: rgba(0,0,0,0)` with NO border — on a card that is bare grey text,
+   not a control. It reads fine in the light skin, which is how it shipped. So the two controls on
+   this row carry their own outline; `.primary` keeps its fill (that is the "switch it on" state and
+   should be the loudest thing on the row). */
+.adm-waybar .acts .adm-btn:not(.primary) {
+  border: 1px solid color-mix(in srgb, var(--text) 26%, transparent);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+.adm-waybar .acts .adm-btn:not(.primary):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 13%, transparent);
+}
+.adm-waybar .acts .adm-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── OFF MEANS THE SETUP IS NOT THERE (owner, 2026-09-13) ──────────────────────────────────────
+   *"When on, then only show the bottom thing — otherwise hide them. You know, kind of like a
+   dropdown: if you turn it on, the dropdown comes."* So a way that is switched off shows ONE line,
+   not a screenful of settings for something that is not running. Switching it on opens it. */
+.adm-wayshut { padding: 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  font-size: 13px; color: var(--muted); }
+.adm-wayshut .k { width: 9px; height: 9px; border-radius: 999px; flex: 0 0 auto;
+  background: var(--adm-danger, #e5484d); }
+.adm-waysec { padding: 16px 18px 18px; border-top: var(--border); }
+.adm-waysec:first-of-type { border-top: 0; }
+.adm-waysec > h2 { margin: 0 0 4px; font-size: 15.5px; }
+@media (max-width: 640px) {
+  .adm-waycard .adm-waybar { padding: 2px 10px 0; }
+  .adm-waysec { padding: 14px 13px 15px; }
+}
+.adm-waybar { display: flex; flex-wrap: wrap; gap: 26px; border-bottom: var(--border); margin: 0 0 14px; }
+.adm-waybar button { display: inline-flex; align-items: center; gap: 9px; margin-bottom: -1px;
+  padding: 4px 2px 11px; background: none; border: 0; border-bottom: 3px solid transparent;
+  color: var(--muted); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; }
+.adm-waybar button:hover:not(.active) { color: var(--text); border-bottom-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.adm-waybar button.active { color: var(--text); font-weight: 750; border-bottom-color: var(--accent); }
+.adm-waybar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.adm-waybar .dot { width: 9px; height: 9px; border-radius: 999px; flex: 0 0 auto; }
+.adm-waybar .w { font-size: 12px; font-weight: 850; letter-spacing: .07em; }
+.adm-waybar .on  .dot { background: var(--adm-ok, #30a46c); }
+.adm-waybar .off .dot { background: var(--adm-danger, #e5484d); }
+/* THE ON/OFF WORD USES THE CONSOLE'S OWN HUE-INK RULE, not a colour of its own: it passes the hue as
+   `--hue` and `.hue-ink` darkens it in the light skin (52% hue + black), exactly as .rp, .own-av and
+   .adm-chip already do. A plain `color:` here would out-specify that rule and measure ~2.7:1 on
+   white — which is what it did before this line. */
+.adm-waybar .on  .w { --hue: var(--adm-ok, #30a46c); }
+.adm-waybar .off .w { --hue: var(--adm-danger, #e5484d); }
+@media (max-width: 640px) {
+  .adm-waybar { gap: 14px; }
+  .adm-waybar button { flex: 1 1 auto; justify-content: center; padding: 10px 2px 12px; font-size: 13.5px; }
+}
+
+/* ── THE ⓘ, AND THE FEATURE SWITCH, BOTH ON THE TAB ROW (owner, 2026-09-13, fifth pass) ────────
+   *"I don't want this option 'printing allowed for this restaurant'. There should be an on-and-off
+   feature button after the underline toggle thing, and also make an i button and put this written
+   info inside that, not here."*
+
+   Two things left the page and came back smaller:
+   · `.adm-allow`, the entitlement chip in the header, is GONE — it is one button at the end of the
+     tab row now, and its verb carries the state ("Switch off" means it is currently on). What that
+     switch actually does is explained inside the ⓘ, not printed beside it;
+   · `.adm-pnow`, the four lines under the tabs (which way is open, whether it is on, what is true
+     today, what that way even is), is now the ⓘ's content. The page shows the setup; the ⓘ answers
+     "what am I looking at". Nothing was deleted — it moved.
+
+   The popover closes on Escape, on a click outside, on the ⓘ again, and on the phone BACK button
+   (lib/backStack → useBackClose, the same as every other overlay in this console). */
+.adm-waybar .acts { margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+  align-self: center; padding-bottom: 7px; position: relative; }
+/* 34px, not 30: measured at 390px, a 30px round button fails the finger rule this console's own
+   screenshot audit enforces (34 high, 24 wide). It goes to 38 on a phone, where it is the only way
+   into the explanation. */
+.adm-ibtn { width: 34px; height: 34px; border-radius: 999px; border: var(--border); background: var(--card);
+  color: var(--muted); font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.adm-ibtn:hover, .adm-ibtn[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
+.adm-ibtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.adm-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; width: min(420px, 86vw);
+  padding: 14px 16px; border-radius: 13px; border: var(--border); background: var(--card);
+  box-shadow: 0 18px 50px rgba(0,0,0,.38); font-size: 13px; line-height: 1.55; color: var(--muted);
+  text-align: left; }
+.adm-pop b { color: var(--text); }
+.adm-pop p { margin: 0 0 9px; }
+.adm-pop p:last-child { margin-bottom: 0; }
+.adm-pop .hd { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; font-size: 13.5px; }
+/* The × is a REAL target: flex:0 0 auto or the header's wrap stretches it to 194 x 19 (measured at
+   390px), which is both wrong-looking and too short to hit. */
+.adm-pop .hd .x { margin-left: auto; flex: 0 0 auto; width: 34px; height: 34px; margin-top: -5px; margin-right: -5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 0; color: var(--muted); font-size: 17px; cursor: pointer; line-height: 1; border-radius: 9px; }
+.adm-pop .hd .x:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+/* On a phone it is a sheet, not a 420px card hanging off the right edge of a 390px screen. */
+@media (max-width: 640px) {
+  .adm-waybar .acts { padding-bottom: 0; }
+  .adm-ibtn { width: 38px; height: 38px; }
+  /* A SHEET AT THE BOTTOM, not a card floating over the row you just tapped. `top:auto` alone left
+     it pinned near its static position, covering the very tabs it is explaining (measured at 390px).
+     Anchored to the bottom edge it behaves like every other phone sheet: thumb-near, and the thing
+     it describes stays visible above it. */
+  .adm-pop { position: fixed; left: 10px; right: 10px; bottom: 12px; top: auto; width: auto;
+    max-height: 70vh; overflow-y: auto; }
+}
 
 /* A SWITCHED-OFF FEATURE'S SETUP IS STILL READABLE, JUST NOT TOUCHABLE (owner, 2026-08-29: "if the
    printing is off, grey out the stuff which is at the bottom"). Dimmed rather than hidden, because
@@ -4392,10 +4525,7 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
    [disabled]` already blocks every control inside; this is only how that reads. */
 .adm-offblock { opacity: .45; filter: saturate(.4); transition: opacity .15s; }
 .adm-offblock .adm-card { pointer-events: none; }
-@media (max-width: 640px) { .adm-confirm .acts { width: 100%; } .adm-confirm .acts .adm-btn { flex: 1 1 auto; } }
-.adm-mode.on { background: color-mix(in srgb, var(--accent) 14%, var(--card));
-  box-shadow: inset 0 0 0 2px var(--accent); }
-.adm-mode.on b::before { content: "✓ "; color: var(--accent); font-weight: 800; }
+
 
 .adm-togglegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 9px; }
 /* ── New-restaurant create card (owner 2026-07-24): sectioned form + access setup ── */
@@ -4856,6 +4986,9 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .adx .adm-tabs { border-radius: 10px; }
 .adx .adm-tabs button { padding: 6px 13px; border-radius: 7px; font-size: 12.5px; }
 .adx .adm-tabs button.active { background: var(--accent); color: #fff; }
+/* (`.adx .adm-tabs.adm-waytabs` overrides stood here until the owner picked the underline design on
+   2026-09-13. They existed only to out-specify `.adx .adm-tabs button`; the underline bar is its own
+   class and needs none of it. Removed rather than left switched off — a new way replaces the old.) */
 .adx .adm-coming { box-shadow: var(--elev); border-radius: 14px; }
 .adx .adm-coming-ic { box-shadow: none; }
 .adx .adm-teaser { box-shadow: var(--elev); }

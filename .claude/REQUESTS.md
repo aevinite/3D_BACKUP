@@ -1129,3 +1129,102 @@ Nothing left over from this run.
       Driven headless: 20 browser checks at 1440 and 390px, the 727-phase admin sweep green, 12 guards
       green, typecheck clean. 10 stale guard paths repointed after the move.
       **AV live:** code released separately; its DB already has mig 330 and needs no migration.
+
+- [ ] **"In the admin panel printer menu I told something, you made something different. I want both
+      separate — on top of printer there should be 2 menu, one for screen printing by chrome kiosk and
+      one for helper, and they should have colour of red or green according to they are on and off.
+      Design whole UI."** (2026-09-13). BUILT, driven and **merged to backup** (this branch), after eight passes of his review.
+      · Admin → Printing → a restaurant now opens on a **MENU, first thing under the title**: two tabs,
+        *A computer prints (the helper)* and *A screen prints (Chrome, out of the way)*, each with a
+        green/red dot, the word ON or OFF, and a sentence naming what is true today. Below it, that one
+        way's setup and nothing else.
+      · **Second pass the same day** — *"why the fuck I'm on OFF one and on top it show YES it's on."*
+        The old "1 · Is printing switched on" card printed a green YES above a tab reading OFF, for a
+        different switch. That card is gone; the entitlement is a chip in the header ("Printing
+        allowed" / "Printing is off for this restaurant") and ON/OFF now belongs to the two ways alone.
+      · Found in my own screenshot: with printing switched off for a restaurant, the screen tab still
+        read ON. The entitlement now multiplies both ways — nothing prints, so neither way is on.
+      · **Third pass** — *"it should be 2 small option, also it should sync with the UI/UX."* The two
+        big cards became the console's OWN compact tab strip (`.adm-tabs`, as used on Analytics, Logs
+        and Floor) with a dot and the ON/OFF word added, plus one explaining line under it. Two CSS
+        specificity traps found by measuring: `.adm-waytabs button` ties with `.adm-tabs button` and
+        again with `.adx .adm-tabs button`, so the phone padding kept being flattened to 26px-tall
+        tabs; and the selected tab's gold fill left the status word at 3.68:1, now a white chip at ~9:1.
+      · **Fourth pass — he picked the shape himself.** Ten live designs were served on the preview port
+        with a control to flip each way's state; *"I liked underline one"* → design 4, `.adm-waybar`:
+        two names on a hairline, accent underline on the open one, dot + ON/OFF word for state. The
+        guard names that class, so a later tidy-up back into a boxed strip fails the build.
+      · The contrast measurer was itself wrong and was fixed: anything NOT inside a card walked up into
+        the console's radial-gradient background and was silently DROPPED as unmeasurable — so the
+        underline bar first reported "no faint text" without ever having been judged. It now composites
+        every gradient stop over the solid beneath and takes the worst ratio; sabotage caught at 1.01:1.
+      · **Fifth pass** — *"I don't want this option printing allowed for this restaurant… there should be
+        an on-and-off feature button after the underline toggle thing, and also make an i button and put
+        this written info inside that, not here."* The header chip is deleted; the tab row now ends with
+        an **ⓘ** and the feature switch. All the explaining prose moved inside the ⓘ (closes on the
+        button, ×, Escape, click-outside and the phone Back button via `useBackClose`; a bottom sheet on
+        a phone). Two tap targets measured and grown: the ⓘ 30→34px (38 on phone) and the × that flex had
+        stretched to 194×19.
+      · **Sixth pass** — *"both should have separate on off, right now they have same."* Right: the row's
+        button was the restaurant-wide entitlement, shared by both tabs. It now switches THE WAY you are
+        on, by writing the same route rows the tab's colour is read from. Screen off = slips `via:"off"`;
+        screen on = clear the line, back to the kitchen screen. Computer off = take every paper off the
+        computer; computer **on is refused with a reason**, because turning it on means naming a printer
+        and this screen must never guess one. The entitlement moved into the ⓘ and onto the red banner.
+        Driven on a spare dev restaurant (Demo Bistro), stored row checked at each step, then restored.
+      · **Seventh pass** — *"make sure that on/off actually work, and change the UI/UX, it looks dark and
+        unmerged, separate UI."* (a) PROVED at the database: switch off sets `settings.auto_print_kot`
+        false — the column mig 335's trigger reads, so no slip is ever created — and switch on sets it
+        true; spare restaurant restored exactly afterwards. (b) MERGED: tabs + that way's setup are now
+        ONE card (`.adm-waycard` + `.adm-waysec` sections), instead of a floating row above separate
+        cards with the dark page showing through. Found on the way: a 5% accent wash on the strip put
+        the ON/OFF words at 2.67–3.08:1 in the light console — removed, and the word now uses the
+        console's own `--hue`/`.hue-ink` rule.
+      · **Eighth pass** — *"in dark mode why the on button is like this… everything should be functional…
+        when on then only show the bottom thing, other hide them, kinda like a dropdown."* (a) A plain
+        `.adm-btn` in the DARK console has a transparent background and NO border — bare text, not a
+        button; the tab row's controls carry their own outline now. (b) A switched-off way renders ONE
+        line, not its setup; switching it on opens it. (c) The computer way cannot switch itself on
+        (that means naming a printer), so "Switch on" OPENS its setup and reads "Cancel" while open —
+        no dead button anywhere on the row. Driven end to end on Demo Bistro and restored exactly.
+      · The colour is **derived** from the three paper lines (the same rule `resolveTarget()` uses),
+        never stored — so **both can be green at once** and nothing can disagree with the paper. This
+        is deliberately NOT the mechanism toggle deleted on 2026-08-31; `verify:print-helper` now
+        asserts both halves (no stored mode · a picker that posts nothing · both setups reachable).
+      · Found and fixed while shooting it: with a person named, the kitchen-screen card still read
+        "Kitchen slips print on the kitchen screen already" four rows above a tick saying they print on
+        that person's screen. Three states, three sentences now.
+      Driven headless at 1440 and 390, dark and light, both tabs: no faint text (the measurer
+      sabotage-tested), no small targets, no sideways scroll. Preview left running on **:3891**.
+
+- [ ] **"reset all pass show this and handover pass sheet show pass as ---------  i want in data base
+      pass should be encrypted but in adin i can able to see them … when i print handover or click show
+      password it ask me for admin pin which we set right now for login … in owner panel owner detail
+      there should be show pass same in the user panel … merge 2 section name it user and owner and on
+      the top there is 2 option"** (2026-09-13). BUILT and driven on **:5003**, **not deployed**.
+      · **The `---------` was never a fault.** `password_hash` is one-way; the encrypted copy
+        (`password_shown`, mig 330, AES-256-GCM) only fills on write, so **54 of 59 logins predated it**
+        and no readable copy had ever existed. `scripts/backfill-readable-passwords.mjs` filled them:
+        16 diag/test logins keep their EXACT hard-coded passwords (each candidate verified against the
+        stored hash first, so nothing in `scripts/` broke), 38 got fresh ones. **59 of 59 readable now**,
+        and nobody was signed out. Re-running it is a no-op.
+      · **A second door in front of a password** — `lib/revealGate.ts`, `/api/admin/reveal`. The console
+        being open is not enough: the admin types the password again and the values uncover for
+        **5 minutes**, with a countdown chip and a Cover button. The cookie is an HMAC over its own
+        expiry, five wrong tries cools off for five minutes, and a covered read sends **no value at all**
+        — it is withheld by the server, not hidden by the screen (proved: 0 values for 13 logins).
+        `REVEAL_PASSWORD` is read first so the day the console moves to Google sign-in, this secret
+        becomes its own thing with no code change — his stated plan.
+      · **Show password** on the owner's detail pane and in a person's profile, one component
+        (`ShowPassword.tsx`), one endpoint. Admin console only — the owner cockpit embeds the same
+        profile and `can.showPassword` is false there.
+      · **The mid-service refusal is GONE** (*"the table and the password change no relation"*). It was
+        right about the danger and wrong about the cause, so the cause was removed: `signOut` is opt-in,
+        off by default, and a password change no longer touches `token_version`. `verify:read-guards`
+        §9 was rewritten to assert the NEW rule — stronger than what it replaced — and all four new
+        checks were sabotage-tested.
+      · **`/aevinite/owners` + `/aevinite/users` → one `/aevinite/people`** with an Owner/User switch
+        (tablist, arrow keys, `?tab=` in the address so a refresh stays put). Both old addresses
+        redirect; the two sidebar entries are gone, not hidden.
+      Driven headless: 20 checks green at 1440 and 390px, no sideways scroll, 44px targets, no JS
+      errors. Shots on the Desktop (`aevi-*.png`).

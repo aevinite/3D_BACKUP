@@ -2166,7 +2166,11 @@ if (!browser) {
     await page.goto(`${BASE}/aevinite/printing?rid=${RID}`, { waitUntil: "domcontentloaded" });
     // …and do not measure a skeleton. "Loading printing" is what the screen says before the board
     // arrives, and a half-drawn page produces faults that vanish a second later.
-    try { await page.waitForFunction(`/How does the paper come out/i.test((document.querySelector("main.adm-main")||{}).innerText||"")`, null, { timeout: 15000 }); }
+    // (2026-09-13: this waited for "How does the paper come out", the heading of the toggle card
+    //  DELETED on 2026-08-31 — so every shot since then timed out after 15s and measured whatever
+    //  had happened to render. It now waits for the two-way MENU's first tab, which is the first
+    //  thing on the board since 2026-09-13.)
+    try { await page.waitForFunction(`/A computer prints/i.test((document.querySelector("main.adm-main")||{}).innerText||"")`, null, { timeout: 15000 }); }
     catch { /* the phase below reports an empty screen honestly */ }
     await page.waitForTimeout(400);
     return page;

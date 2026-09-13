@@ -28,15 +28,66 @@ export type PaperSize = { name?: string; wMm: number; hMm: number };
 // toggle"*). Step 2 used to be "How does the paper come out?", the two big buttons. There is nothing
 // to ask: a computer prints if one is set up, and the kitchen screen prints the slips when none is.
 // So the steps are now the things a person actually DOES, in the order they do them.
+//
+// ── AND THE ADMIN BOARD NOW SHOWS ONE WAY AT A TIME (owner, 2026-09-13) ───────────────────────
+// *"on top of printer there should be 2 menu — one for screen printing by chrome kiosk and one for
+// helper, and they should have colour of red or green according to they are on and off."*
+// Step 2 is that pair of cards. It is NOT the old mechanism toggle coming back and it stores
+// nothing: both ways can read GREEN at the same time (a computer on the bills, the kitchen screen
+// on the slips), because each card only REPORTS what the paper lines already decided. What it
+// changes is which setup is on screen underneath — the "you only see the option you have selected"
+// half of his 2026-08-28 ask, which survived the toggle being deleted.
+//
+// Numbers 3 and 4 therefore appear TWICE across the two ways, never on screen together. The
+// manager's own board (public/panels/editor/app.js) is still one stacked list and hard-codes its
+// own numbers, so it is untouched by this.
+//
+// ── AND THEN THE NUMBERS CAME OFF (owner, 2026-09-13, second pass) ────────────────────────────
+// *"I want proper menu change on very top… I want menu at top, completely different menu."* The two
+// ways are now a MENU above everything, so the cards under it are that one way's setup and nothing
+// else — two cards deep, not a numbered walk through five. A number that restarts inside each tab
+// teaches nothing, and a number that runs 1→5 across two tabs is wrong on one of them.
+//
+// `one` and `four` are still NUMBERED and still shared: the MANAGER's board (public/panels/editor/
+// app.js) is one stacked list and hard-codes the rest of its own numbers, so it is untouched by
+// this. Guarded — verify:print-helper asserts the panel prints `1 · Is printing switched on`.
 export const STEPS = {
   one:   "1 · Is printing switched on",
-  two:   "2 · The computer that prints (optional)",
-  three: "3 · Which printer gets which paper",
+  two:   "The computer that prints",
+  three: "Which printer gets which paper",
   four:  "What has printed",
   // The kitchen screen needs no switching on, so its card is a statement and a file, not a step
   // with a decision in it.
-  screen: "4 · The kitchen screen",
+  screen: "Whose screen prints the kitchen slips",
 } as const;
+
+/**
+ * THE TWO WAYS PAPER COMES OUT, in the words a person would use — the top of the admin board.
+ *
+ * One sentence each, and neither is "better": a restaurant with a printer plugged into a back-office
+ * PC wants the helper; a restaurant with one screen in the kitchen and no spare machine wants the
+ * screen. The ON/OFF colour beside each is DERIVED from the paper lines (never stored), so nothing
+ * here can disagree with what actually prints — that was the whole reason the stored mode was
+ * deleted in the first place.
+ */
+export const WAYS = {
+  computer: {
+    title: "A computer prints",
+    tag: "the helper",
+    what: "A small helper program on the computer the printer is plugged into. It prints by itself — no window opens, nobody has to be signed in, and each kind of paper can have its own printer.",
+    onWhat: "A computer is named for the paper below, so that machine prints it.",
+    offWhat: "No computer is named for any paper yet.",
+  },
+  screen: {
+    title: "A screen prints",
+    tag: "Chrome, out of the way",
+    what: "The restaurant's own Chrome, opened out of the way with silent printing switched on. Nothing is installed, and it only ever prints the kitchen slips.",
+    onWhat: "The kitchen slips come out of a screen.",
+    offWhat: "No screen is printing the kitchen slips.",
+  },
+} as const;
+
+export type WayId = keyof typeof WAYS;
 
 /** The restaurant's words, never ours. "kot" means nothing to anybody outside this codebase. */
 export const KIND_LABEL: Record<string, string> = {
@@ -116,6 +167,7 @@ export const WHO_CHOICES = [
   { id: "screen", label: "A screen (a person)" },
   { id: "off", label: "Nobody" },
 ] as const;
+
 
 // ── HOW LONG, AND WHEN — the two time sentences every printing screen prints ──────────────────
 //

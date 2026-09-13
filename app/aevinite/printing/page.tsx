@@ -9,15 +9,17 @@
 //
 // It is the ADMIN's screen because printing is hardware: which computers may print, and what each
 // prints, is granted, not chosen by the restaurant. The owner is shown only what is allowed (R36).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
+import { useBackClose } from "@/lib/backStack";
 import { SkelList } from "@/components/admin/Skeleton";
 // THE WORDS ARE SHARED WITH THE RESTAURANT'S OWN SCREEN (owner, 2026-08-27: "the UI/UX is also not
 // identical"). Four steps, three kinds of paper, one sentence each — declared once in
 // lib/printBoardWords.ts and printed verbatim by both boards, so they cannot drift apart again.
-import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, paperLabel, waitedWords, waitedShort, whenWords } from "@/lib/printBoardWords";
+import { STEPS, WAYS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, paperLabel, waitedWords, waitedShort, whenWords } from "@/lib/printBoardWords";
+import type { WayId } from "@/lib/printBoardWords";
 
 type Rest = { id: string; slug: string; name: string };
 type Paper = { name?: string; wMm: number; hMm: number };
@@ -149,9 +151,12 @@ function FileCard({ title, lead, files, os, setOs, copy, steps, footer }: {
 }) {
   const f = files?.[os];
   if (!files || !f) return null;
+  // A SECTION, NOT A CARD OF ITS OWN (owner, 2026-09-13: "it looks dark and unmerged"). Both callers
+  // now live inside the way-card, so a nested card drew a second border and let the dark page show
+  // through between blocks.
   return (
-    <div className="adm-card" style={{ marginTop: 14 }}>
-      <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{title}</h2>
+    <div className="adm-waysec">
+      <h2 style={{ margin: "0 0 4px", fontSize: 15.5 }}>{title}</h2>
       <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>{lead}</p>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
         {Object.keys(files).map((k) => (
@@ -348,6 +353,92 @@ const PANEL_GROUPS: [ string, string ][] = [
   const rest = rests.find((r) => r.id === rid);
   const agents = st?.agents || [];
 
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // THE TWO WAYS, AND WHETHER EACH ONE IS ON — READ OFF THE PAPER LINES, NEVER STORED
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // Owner, 2026-09-13: *"on top of printer there should be 2 menu — one for screen printing by
+  // chrome kiosk and one for helper, and they should have colour of red or green according to they
+  // are on and off."*
+  //
+  // ⚠️ READ THIS BEFORE "RESTORING" ANYTHING: this is NOT the mechanism toggle that was deleted on
+  // 2026-08-31 (*"in admin panel also we don't need toggle"*, migration 372). That one STORED a
+  // choice — `settings.modules.printing.mode` — which could disagree with the routes, which is why
+  // `writeMode()` had to drag all three paper lines behind it. Nothing here is stored, nothing is
+  // posted, and the cards are a MIRROR: they answer the same question `resolveTarget()` answers on
+  // the server, off the same three route rows. The proof that it is a mirror and not a switch is
+  // that BOTH can be green at the same time — a computer on the bills while the kitchen screen
+  // keeps the slips is a perfectly ordinary restaurant.
+  //
+  // What the cards DO change is which setup is rendered underneath, which is the surviving half of
+  // his 2026-08-28 ask: *"you only see the option you have selected."*
+  //
+  // The rules below are copied from lib/printHelpers.ts → resolveTarget, and must not drift:
+  //   · via:"off"                      → nobody prints it
+  //   · an agent + printer that EXISTS → that computer prints it   (a removed machine does not count)
+  //   · anything else, for kitchen slips → a screen prints it
+  const agentById = (id: string | null | undefined) => agents.find((a) => a.id === id) || null;
+  const routedToComputer = (r: Route | undefined) =>
+    r?.via !== "off" && !!r?.agent && !!r?.printer && !!agentById(r.agent);
+  const computerKinds = (st?.kinds || []).filter((k) => routedToComputer(draft[k]));
+  const computerOn = computerKinds.length > 0;
+  // The machines actually carrying paper right now that are not answering. A helper being asleep
+  // does not turn the way OFF — the tickets wait for it on purpose (mig 335) — so it is said as a
+  // warning INSIDE the green card rather than by flipping the colour, which would read as "nothing
+  // is set up" when the truth is "it is set up and the PC is off".
+  const sleeping = [...new Set(computerKinds.map((k) => draft[k]?.agent))]
+    .map((id) => agentById(id)).filter((a): a is Agent => !!a && !a.connected);
+  const kotOnComputer = routedToComputer(draft.kot);
+  const kotOff = draft.kot?.via === "off";
+  const screenOn = !kotOff && !kotOnComputer;
+  // ── AND NEITHER WAY IS "ON" IF THE RESTAURANT MAY NOT PRINT AT ALL ─────────────────────────
+  // Caught in my own screenshot of this rewrite, on a restaurant with printing switched off: the
+  // screen tab still read a green ON, because the kitchen-slip line was untouched underneath. It is
+  // the SAME fault he had just sworn at, the other way round — a green word for something that
+  // cannot produce a single sheet of paper. The entitlement multiplies both ways, and the tab says
+  // so in words as well.
+  const wayOn = { computer: !!st?.printing.allowed && computerOn, screen: !!st?.printing.allowed && screenOn };
+
+  // WHICH SETUP IS OPEN. Local to this screen and this visit: it is a view, not a setting, so it is
+  // never sent anywhere and never remembered against the restaurant.
+  const [way, setWay] = useState<WayId>("computer");
+  const [wayPicked, setWayPicked] = useState(false);
+  // THE ⓘ. A popover, so it obeys every way a person expects to close one: the button again, the ×,
+  // Escape, a click outside, and the phone's BACK button — the last one through lib/backStack, which
+  // is what every other overlay in this console registers with.
+  const [info, setInfo] = useState(false);
+  // ── A WAY THAT IS OFF SHOWS ONE LINE, NOT A SCREENFUL (owner, 2026-09-13) ───────────────────
+  // *"When on, then only show the bottom thing — otherwise hide them. Kind of like a dropdown: if
+  // you turn it on, the dropdown comes."*
+  //
+  // Its setup is open when the way is ON — or when you asked for it by hand, which is the only way
+  // a COMPUTER can ever be set up: switching that one on means naming a printer, and the printer
+  // lives in the setup. So "Switch on" there OPENS it rather than guessing a machine, and the tab
+  // stays honestly OFF until a printer really is chosen. Nothing here is stored: it is a view.
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const popWrap = useRef<HTMLSpanElement | null>(null);
+  useBackClose("admin-printing-info", info, () => setInfo(false));
+  useEffect(() => {
+    if (!info) return;
+    const away = (e: MouseEvent) => { if (!popWrap.current?.contains(e.target as Node)) setInfo(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setInfo(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); };
+  }, [info]);
+  // It never survives a change of subject: a different restaurant, or a different way, is a
+  // different answer to "what am I looking at".
+  useEffect(() => { setInfo(false); }, [rid, way]);
+  useEffect(() => { setOpened({}); }, [rid]);
+  useEffect(() => { setWayPicked(false); }, [rid]);
+  // IT OPENS ON THE ONE THERE IS SOMETHING TO DO WITH. A restaurant with a computer (set up, or
+  // half set up) opens on the helper; a restaurant with no computer at all opens on the screen,
+  // which is the way its paper is coming out today.
+  useEffect(() => {
+    if (!st || wayPicked) return;
+    setWayPicked(true);
+    setWay(computerOn || agents.length > 0 ? "computer" : "screen");
+  }, [st, wayPicked, computerOn, agents.length]);
+
   const post = async (path: string, body: Record<string, unknown>) => {
     setBusy(path);
     const r = await adminFetch<Record<string, unknown>>(`/api/admin/printing/${path}`, {
@@ -365,6 +456,67 @@ const PANEL_GROUPS: [ string, string ][] = [
   /** The person the kitchen tickets belong to right now — looked up so the screen can say their
    *  name and which panel it means, instead of leaving an id in a dropdown as the only feedback. */
   const chosenPerson = (st?.people || []).find((x) => x.id === (draft.kot?.person || "")) || null;
+
+  /**
+   * ── EACH WAY HAS ITS OWN ON/OFF (owner, 2026-09-13: *"both should have separate on off, right now
+   * they have same"*) ─────────────────────────────────────────────────────────────────────────────
+   *
+   * He was right: one button sat at the end of the row and it was the RESTAURANT-WIDE entitlement,
+   * so both tabs shared it. Each tab now switches ITS OWN way, and the entitlement moved inside the
+   * ⓘ (and onto the red banner, which is the only time it is urgent).
+   *
+   * These switches write the SAME route rows the tabs read, so the colour above the button and the
+   * button's own verb can never disagree — there is still no second stored copy of anything.
+   *
+   *   A SCREEN, off → kitchen slips are `via:"off"`: nothing prints them by itself, anywhere.
+   *   A SCREEN, on  → clear the kitchen-slip line. It falls back to the kitchen screen, which is
+   *                   the default with nobody named. Works whether it was OFF or a computer had it.
+   *   A COMPUTER, off → clear every paper that names a computer. Kitchen slips fall back to the
+   *                   kitchen screen, bills and banquet sheets to whoever presses Print.
+   *   A COMPUTER, on  → REFUSED, on purpose. Turning it on means naming a printer, and this screen
+   *                   must never invent one (the writeMode lesson: going back to a computer does not
+   *                   guess a machine). The button says what to do instead.
+   */
+  const wayBlocked: Record<WayId, string> = {
+    computer: computerOn ? "" : agents.length
+      ? "Pick a printer for a paper below — that is what switches a computer on."
+      : "No computer has the helper yet. Set one up below, then choose which printer gets which paper.",
+    screen: "",
+  };
+  const flipWay = async (id: WayId) => {
+    if (id === "screen") {
+      if (screenOn) { setOpened((o) => ({ ...o, screen: false })); await saveOff("kot"); return; }
+      const d = await post("routes", { routes: { kot: null } });
+      if (d) { toast(kotOnComputer ? "Kitchen slips are back on the kitchen screen." : "Kitchen slips print on the kitchen screen again.", "ok"); void load(); }
+      return;
+    }
+    // A COMPUTER CANNOT BE SWITCHED ON BY A BUTTON — it is switched on by a printer being named, and
+    // this screen must never guess one. So "Switch on" opens the setup where that choice is made.
+    // Pressed while it is already open = "I have changed my mind", so it shuts again. There is no
+    // state where this button does nothing: a dead control is the thing he objected to in the first
+    // place, and "disabled because you already pressed me" is the worst kind.
+    if (!computerOn) { setOpened((o) => ({ ...o, computer: !o.computer })); return; }
+    const patch: Record<string, null> = {};
+    computerKinds.forEach((k) => { patch[k] = null; });
+    setOpened((o) => ({ ...o, computer: false }));
+    const d = await post("routes", { routes: patch });
+    if (d) { toast(`Taken off the computer: ${computerKinds.map((k) => KIND_LABEL[k] || k).join(", ")}.`, "ok"); void load(); }
+  };
+  /** Is this way's setup on screen? ON, or asked for by hand. */
+  const wayOpen = (id: WayId) => wayOn[id] || !!opened[id];
+
+  /** What is true for each way TODAY, in one sentence — the line under the tab strip. */
+  const wayState: Record<WayId, string> = {
+    computer: computerOn
+      ? `${computerKinds.map((k) => KIND_LABEL[k] || k).join(" · ")} come out of a computer.`
+      : agents.length ? "A computer is set up, but no paper is pointed at it yet."
+      : "No computer is named for any paper yet.",
+    screen: screenOn
+      ? (chosenPerson ? `Kitchen slips come out on ${chosenPerson.name}'s screen.`
+         : "Kitchen slips come out on the kitchen screen — anyone signed in there.")
+      : kotOff ? "Kitchen slips are switched off — no screen prints them."
+      : "A computer prints the kitchen slips instead.",
+  };
 
   /** "Nobody prints this" — saved as a decision, so screens say so instead of "no printer chosen". */
   const saveOff = async (kind: string) => {
@@ -516,6 +668,10 @@ const PANEL_GROUPS: [ string, string ][] = [
               </select>
             </>
           ) : null}
+          {/* (The entitlement chip stood here for one pass — "● Printing allowed for this
+              restaurant · Switch off". Owner, 2026-09-13: *"I don't want this option printing
+              allowed for this restaurant."* It is one button at the end of the tab row now, and what
+              it means lives inside the ⓘ beside it. The page header is back to navigation only.) */}
           <button className="adm-btn" onClick={() => (rid ? void load() : void loadOver())} disabled={loading}>
             <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
           </button>
@@ -550,105 +706,190 @@ const PANEL_GROUPS: [ string, string ][] = [
 
       {rid && st ? (
         <>
-          {/* ── 1 · is printing on at all ───────────────────────────────────────────────── */}
-          <div className="adm-card" style={{ marginTop: 14 }}>
-            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.one}</h2>
-            <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-              Off means the whole feature does not exist for them — no greyed-out buttons anywhere in
-              their panels, nothing at all. Whether kitchen slips actually come out is the{" "}
-              <b>Kitchen slips</b> line in step 3; it is the same switch, asked where it makes sense.
-            </p>
-            {/* THE SAME STATE-PAIR PATTERN AS THE ACCESS CARD (owner, 2026-08-26: "the printer menu ui
-                is also diff and shit too… make both the option looks on the both mode are clearly
-                visible and easy to access"). Two boards were describing the same two facts in two
-                visual languages — a person had to learn each one separately. One pattern, one place
-                to learn it: the fact on the left, YES/NO on the right, and the action only where
-                there is something to do. */}
-            <div className="adm-state">
-              {/* ONE FACT, ONE CONTROL. "The restaurant has auto-print on" used to sit here as a second
-                  row — and it is the SAME column the Kitchen slips line writes (settings.auto_print_kot),
-                  so two controls were editing one value in two places and disagreeing on screen. It
-                  moved down to step 3, where a person is already deciding what happens to kitchen
-                  slips. Removed 2026-08-27; do not put it back. */}
-              {[
-                { key: "allowed", on: st.printing.allowed, label: "Aevidine allows this restaurant to print", what: "Your switch, and only yours. Off means the whole feature does not exist for them." },
-              ].map((sw) => (
-                <div key={sw.key} className={`adm-state-row ${sw.on ? "yes" : "no"}`}>
-                  <span className="adm-state-dot" aria-hidden="true" />
-                  <span className="who"><b>{sw.label}</b><br />{sw.what}</span>
-                  <span className="adm-state-val">{sw.on ? "YES" : "NO"}</span>
-                  <button className={`adm-btn${sw.on ? "" : " primary"}`} style={{ fontSize: 12, minWidth: 82 }}
-                    disabled={busy === "switch"}
-                    onClick={async () => { const d = await post("switch", { [sw.key]: !sw.on }); if (d) void load(); }}>
-                    {sw.on ? "Switch off" : "Switch on"}
-                  </button>
+          {/* ═══════════════════════════════════════════════════════════════════════════════════
+              THE MENU — FIRST THING ON THE PAGE (owner, 2026-09-13, second pass)
+              ═══════════════════════════════════════════════════════════════════════════════════
+              *"I want proper menu change on very top… I want menu at top, completely different menu.
+              And why the fuck I'm on OFF one and on top it show YES it's on."*
+
+              WHAT WAS WRONG WITH THE FIRST TRY. The two ways were card number TWO, under a card
+              whose whole job was the entitlement switch — so the first thing on the page was a
+              numbered walk-through, not the choice. And that card printed a big green **YES** above
+              a tab reading **OFF**: two different switches (may this restaurant print at all · is
+              the helper carrying any paper) in the same words, inches apart. The "1 · Is printing
+              switched on" card is GONE from this board; its switch is the chip in the header above,
+              worded "Printing allowed", and the words ON and OFF now belong to the two ways alone.
+
+              WHAT IT IS. A menu, first thing under the title, and the page below it is that one
+              way's setup — nothing else. It is OUTSIDE the greyed-out block on purpose: when
+              printing is switched off for a restaurant you can still read both ways to decide
+              whether to switch it on, you just cannot change anything.
+
+              STILL NOT A STORED MODE (the thing deleted on 2026-08-31, migration 372). Nothing is
+              posted, nothing is remembered against the restaurant, and BOTH tabs can be green at
+              once — see the derivation above `post`, and lib/printBoardWords.ts → WAYS. */}
+          <div className="adm-waycard">
+          <div className="adm-waybar" role="tablist" aria-label="How this restaurant prints">
+            {(["computer", "screen"] as WayId[]).map((id) => (
+              <button key={id} type="button" role="tab" aria-selected={way === id}
+                className={way === id ? "active" : ""} onClick={() => setWay(id)}>
+                <span className={wayOn[id] ? "on" : "off"} style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
+                  <span className="dot" aria-hidden="true" />
+                  {WAYS[id].title}
+                  {/* THE WORD, not only the colour — about one man in twelve cannot tell this red
+                      from this green (WCAG 1.4.1), and a dot on its own is not read anyway. */}
+                  <span className="w hue-ink">{wayOn[id] ? "ON" : "OFF"}</span>
+                </span>
+              </button>
+            ))}
+
+            {/* ── AFTER THE TABS: what am I looking at, and does this restaurant print at all ─────
+                Owner, 2026-09-13: *"there should be an on-and-off feature button after the underline
+                toggle thing, and also make an i button and put this written info inside that, not
+                here."* Both sit at the end of the row, so the tabs stay the loudest thing on it. */}
+            <span className="acts" ref={popWrap}>
+              <button type="button" className="adm-ibtn" aria-expanded={info} aria-controls="print-way-info"
+                title="What am I looking at?" onClick={() => setInfo((v) => !v)}>
+                <i className="fas fa-info" aria-hidden="true" />
+                <span className="sr-only">What am I looking at?</span>
+              </button>
+              {/* THE VERB CARRIES THE STATE, and it belongs to THE TAB YOU ARE ON — "Switch off" is how
+                  you read that this way is currently on. Disabled where switching on would mean
+                  guessing a printer, and it says so rather than sitting there dead. */}
+              {/* PRIMARY ONLY WHEN IT IS THE ACTION. "Cancel" kept the filled style and measured
+                  3.43-3.94:1 for its white text on the accent — and it is not the thing you want
+                  pressed anyway once the setup is open. */}
+              <button className={`adm-btn${wayOn[way] || (way === "computer" && opened.computer) ? "" : " primary"}`}
+                style={{ fontSize: 12 }}
+                disabled={!!busy || !st.printing.allowed}
+                title={!st.printing.allowed ? "Printing is switched off for this restaurant — switch it on first."
+                  : (way === "computer" && !computerOn) ? (opened.computer ? "Close it again — nothing has changed." : wayBlocked.computer)
+                  : (wayOn[way]
+                    ? (way === "computer"
+                        ? "Take every paper off the computer. Kitchen slips go back to the kitchen screen; bills and banquet sheets go back to whoever presses Print."
+                        : "Stop kitchen slips printing by themselves anywhere. Orders still reach the kitchen screen to be read.")
+                    : "Let the kitchen screen print the kitchen slips again.")}
+                onClick={() => void flipWay(way)}>
+                {wayOn[way] ? "Switch off" : (way === "computer" && opened.computer) ? "Cancel" : "Switch on"}
+              </button>
+              {info ? (
+                <div className="adm-pop" id="print-way-info" role="dialog" aria-label="What am I looking at">
+                  <p className="hd">
+                    <b>{WAYS[way].title}</b>
+                    <span className={`w ${wayOn[way] ? "on" : "off"}`}
+                      style={{ fontSize: 12, fontWeight: 850, letterSpacing: ".07em",
+                               color: wayOn[way] ? "var(--adm-ok, #30a46c)" : "var(--adm-danger, #e5484d)" }}>
+                      {wayOn[way] ? "ON" : "OFF"}
+                    </span>
+                    <button type="button" className="x" aria-label="Close" onClick={() => setInfo(false)}>×</button>
+                  </p>
+                  <p>
+                    Everything below is the setup for this way.{" "}
+                    {!st.printing.allowed ? "Printing is switched off for this restaurant altogether, so neither way can be on."
+                      : wayOn[way] ? wayState[way]
+                      : `${wayState[way]} Setting it up below is what turns it on.`}
+                  </p>
+                  <p>{WAYS[way].what}</p>
+                  {way === "computer" && st.printing.allowed && sleeping.length ? (
+                    <p style={{ color: "var(--adm-warn, #f5a524)", fontWeight: 600 }}>
+                      <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ marginRight: 6 }} />
+                      {sleeping.map((a) => a.name).join(", ")} {sleeping.length === 1 ? "is" : "are"} asleep — that paper is waiting.
+                    </p>
+                  ) : null}
+                  {/* WHAT THE BUTTON BESIDE THIS DOES — it only shows a verb. */}
+                  <p>
+                    <b>The button beside this</b> switches <b>this way</b> on or off.{" "}
+                    {wayBlocked[way] || (wayOn[way]
+                      ? (way === "computer"
+                          ? "Switching it off takes every paper off the computer: kitchen slips go back to the kitchen screen, bills and banquet sheets back to whoever presses Print."
+                          : "Switching it off stops kitchen slips printing by themselves anywhere. Orders still reach the kitchen screen to be read.")
+                      : "Switching it on gives the kitchen slips back to the kitchen screen.")}
+                  </p>
+                  {/* THE RESTAURANT-WIDE SWITCH, one level down — it is not one of the two ways, it is
+                      whether printing exists for them at all (owner, 2026-09-13: he wanted the two ways
+                      to own the row). When it is OFF the red banner carries this same button, because
+                      that is the one moment it must not be hidden behind an ⓘ. */}
+                  <p style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                              paddingTop: 10, borderTop: "1px solid var(--border-c, rgba(128,128,128,.25))" }}>
+                    <span style={{ flex: "1 1 200px" }}>
+                      <b>The whole feature:</b>{" "}
+                      {st.printing.allowed
+                        ? "Aevidine allows this restaurant to print. Off means it stops existing for them — no greyed-out buttons in their panels, nothing at all."
+                        : "Printing is switched off for this restaurant, so neither way can be on."}
+                    </span>
+                    <button className={`adm-btn${st.printing.allowed ? "" : " primary"}`} style={{ fontSize: 12 }}
+                      disabled={busy === "switch"}
+                      onClick={async () => { const d = await post("switch", { allowed: !st.printing.allowed }); if (d) { setInfo(false); void load(); } }}>
+                      {st.printing.allowed ? "Switch printing off" : "Switch printing on"}
+                    </button>
+                  </p>
                 </div>
-              ))}
-            </div>
+              ) : null}
+            </span>
           </div>
 
-          {/* ── 2 · the computers ───────────────────────────────────────────────────────── */}
-          {/* ═══════════════════════════════════════════════════════════════════════════════════
-              2 + 3 · HOW THIS RESTAURANT PRINTS — ONE TOGGLE, AND ONLY ITS OWN SETTINGS
-              ═══════════════════════════════════════════════════════════════════════════════════
-              Owner, 2026-08-28, looking at the old version: "tell me what is this all setting for,
-              like no use… I want a simple toggle… and do one thing: you only see the option you have
-              selected — only the setting for that option will be shown."
+          {/* LOUD, because its card is gone. With the entitlement now a chip in the header, a quiet
+              grey line would be the only thing left saying why a whole screen of controls is dead.
+              It sits ABOVE the fieldset on purpose — inside it, `.adm-offblock` would dim the one
+              sentence that explains the dimming. */}
+          {!st.printing.allowed ? (
+            <div className="adm-card" style={{ marginTop: 0, marginBottom: 14, borderLeft: "3px solid var(--adm-danger, #e5484d)" }}>
+              <b>Printing is switched off for this restaurant.</b>{" "}
+              <span className="adm-muted">
+                The whole feature does not exist for them — no greyed-out buttons anywhere in their
+                panels, nothing at all. Neither way above can be on until you switch it on.
+              </span>{" "}
+              <button className="adm-btn primary" style={{ fontSize: 12, marginLeft: 4 }}
+                disabled={busy === "switch"}
+                onClick={async () => { const d = await post("switch", { allowed: true }); if (d) void load(); }}>
+                Switch printing on
+              </button>
+            </div>
+          ) : null}
 
-              WHAT IT WAS. Three papers × (two shape buttons + a computer + a printer + a paper size
-              + a screen + a person + a device) and FIVE Save buttons. About
-              twenty controls to answer one question, and every one of them on screen at once whether
-              it applied or not.
-
-              WHAT IT IS. One toggle picks the MECHANISM, and only that mechanism's setup renders —
-              the helper's computers and printers, or the Chrome station's one named person. The three
-              papers then answer the only thing left: which printer (or "nobody"). Nothing on screen
-              belongs to the other mode. That is the UI skill's progressive-disclosure rule, and it is
-              also just what he asked for in his own words.
-
-              ⚠️ THERE IS NO LONGER A MODE TOGGLE (2026-08-31). Another lane removed it and migration
-              372 dropped the dead `printing.mode` key: each paper line answers for itself — a
-              computer, a screen, or nobody — so a global mechanism switch was a second way to say the
-              same thing. This paragraph described what the toggle did while it existed; kept as the
-              record of why the screen looks the way it does, in the past tense. */}
-          {/* ── PRINTING IS OFF: everything below is dead, and it LOOKS dead ─────────────────
+          {/* ── PRINTING IS OFF: everything below is dead, and it LOOKS dead ────────────────────
               Owner, 2026-08-29: "if the printing is off, grey out the stuff which is at the bottom.
               This is the basic thing I don't have to tell you." Right — a screen that lets you set a
               printer up for a feature that is switched off is a screen that lies about what it does.
               The cards stay VISIBLE (so the setup can be read and understood before switching it on)
-              but nothing in them can be touched, and one line says why. */}
+              but nothing in them can be touched. The TAB STRIP is deliberately outside this: reading
+              both ways is how you decide whether to switch it on at all. */}
           <fieldset disabled={!st.printing.allowed} className={st.printing.allowed ? "" : "adm-offblock"}
             style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-          {!st.printing.allowed ? (
-            <p className="adm-muted" style={{ margin: "14px 0 0", fontSize: 13 }}>
-              <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 7 }} />
-              Printing is switched <b>off</b> for this restaurant, so none of the setup below does
-              anything yet. Switch it on above to use it.
+
+          {/* ── SWITCHED OFF? ONE LINE, NOT A SCREENFUL (owner, 2026-09-13) ──────────────────────
+              *"When on, then only show the bottom thing — otherwise hide them. Kind of like a
+              dropdown: if you turn it on, the dropdown comes."* A way that is not running has
+              nothing worth scrolling: it says so, and says what turns it on. */}
+          {st.printing.allowed && !wayOpen(way) ? (
+            <p className="adm-wayshut">
+              <span className="k" aria-hidden="true" />
+              <span style={{ flex: "1 1 240px" }}>
+                <b style={{ color: "var(--text)" }}>{WAYS[way].title}</b> is switched off.{" "}
+                {way === "screen"
+                  ? (kotOnComputer
+                      ? "A computer prints the kitchen slips instead — switch this on to give them back to a screen."
+                      : "No slip prints by itself, on any screen. Switching it on gives the kitchen slips back to the kitchen screen.")
+                  : "No computer prints anything for this restaurant. Switch it on to set one up and choose which printer gets which paper."}
+              </span>
             </p>
           ) : null}
 
-          {/* ═══════════════════════════════════════════════════════════════════════════════════
-              THERE IS NO "WHICH WAY?" CARD ANY MORE (owner, 2026-08-31)
-              ═══════════════════════════════════════════════════════════════════════════════════
-              It held two big buttons — "A computer (the helper)" / "A screen (this restaurant's own
-              Chrome)" — and an inline strip explaining what switching cost, because switching
-              rewrote all three paper lines.
-
-              *"in admin panel also we don't need toggle… with toggle gone it on and off will decide
-              that the helper will be on and off, and kitchen panel will always be on."*
-
-              So both setups are simply present, and each is true whenever it applies:
-                · the COMPUTER card is optional — set one up, or never look at it again
-                · the KITCHEN SCREEN card needs nothing switched on at all; it prints the slips
-                  whenever no computer is named for them
-              Nothing can contradict anything, because there is no stored choice left to disagree
-              with the routes. Do not re-add a mechanism toggle here. */}
-          {/* ── the chosen mode's SETUP — one of these two, never both ───────────────────────── */}
-          <>
-              <div className="adm-card" style={{ marginTop: 14 }}>
-                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.two}</h2>
+          {/* ── ONLY THE CHOSEN WAY'S SETUP — one of these two, never both ───────────────────── */}
+          {way === "computer" && wayOpen("computer") ? (
+          <div role="tabpanel">
+              {!computerOn ? (
+                <p className="adm-waysec" style={{ margin: 0, fontSize: 13, color: "var(--adm-warn, #f5a524)", fontWeight: 600 }}>
+                  <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 7 }} />
+                  {/* THE HONEST HALF OF "SWITCH ON". The tab still reads OFF, and it should: this way
+                      is not printing anything until a printer is named, which is the last step below. */}
+                  This way is still <b>off</b>. Add the computer, then give a paper a printer below — that is what switches it on.
+                </p>
+              ) : null}
+              <div className="adm-waysec">
+                <h2 style={{ margin: "0 0 4px", fontSize: 15.5 }}>{STEPS.two}</h2>
                 <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-                  It runs the helper and reports its own printers, so the dropdowns in step 3 are built from
+                  It runs the helper and reports its own printers, so the dropdowns in the card below are built from
                   what that machine really has — nobody types a printer name.
                 </p>
                 {agents.length === 0 ? (
@@ -733,8 +974,8 @@ const PANEL_GROUPS: [ string, string ][] = [
                     <b> no sign-in on that computer</b>.</>,
                 ]}
                 footer={(k: string) => <><b>Starting up again:</b> {st.files?.[k]?.autostart}</>} />
-              <div className="adm-card" style={{ marginTop: 14 }}>
-                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.three}</h2>
+              <div className="adm-waysec">
+                <h2 style={{ margin: "0 0 4px", fontSize: 15.5 }}>{STEPS.three}</h2>
                 <p className="adm-muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
                   Tick the papers the helper takes — those come out on their own, with no window. Anything
                   left on <b>normal</b> prints the way it always has: a window opens when somebody taps Print.
@@ -742,7 +983,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                 {agents.length === 0 ? (
                   <p style={{ margin: "0 0 4px", fontSize: 12.5, color: "var(--adm-warn, #f5a524)" }}>
                     <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6 }} />
-                    Set the computer up in step 2 first — the printers in these lists come from it.
+                    Add the computer in the card above first — the printers in these lists come from it.
                   </p>
                 ) : null}
                 {(st.kinds || []).map((kind) => {
@@ -758,7 +999,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                         </span>
                         <select className="adm-input" style={{ minWidth: 250, flex: "1 1 250px" }}
                           value={val} disabled={busy === "routes" || agents.length === 0}
-                          title={agents.length === 0 ? "Set a computer up in step 2 first — the printers come from it." : undefined}
+                          title={agents.length === 0 ? "Add the computer in the card above first — the printers come from it." : undefined}
                           aria-describedby={agents.length === 0 ? "no-computer-yet" : undefined}
                           onChange={(e) => void pickPrinter(kind, e.target.value)}>
                           <option value="off">{KIND_OFF_LABEL[kind] || "Nobody"}</option>
@@ -798,9 +1039,13 @@ const PANEL_GROUPS: [ string, string ][] = [
                     </div>
                   );
                 })}
-                {agents.length === 0 ? <span id="no-computer-yet" className="adm-muted" style={{ fontSize: 12 }}>Set a computer up in step 2 first — the printers come from it.</span> : null}
+                {agents.length === 0 ? <span id="no-computer-yet" className="adm-muted" style={{ fontSize: 12 }}>Add the computer in the card above first — the printers come from it.</span> : null}
               </div>
+          </div>
+          ) : null}
 
+          {way === "screen" && wayOpen("screen") ? (
+          <div role="tabpanel">
               {/* ═══ THE KITCHEN SCREEN — ON BY DEFAULT, NOTHING TO SWITCH ═════════════════════
                   *"kitchen panel will always be on and there will be guide for it"* (owner,
                   2026-08-31). So this card does not ask a question: it states what already happens,
@@ -811,8 +1056,8 @@ const PANEL_GROUPS: [ string, string ][] = [
                   other user will work as they work — from the manager panel you can print the
                   bill."* Naming somebody narrows the kitchen slips to their screen and touches
                   nothing else; bills and banquet sheets stay with whoever presses Print. */}
-              <div className="adm-card" style={{ marginTop: 14 }}>
-                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.screen}</h2>
+              <div className="adm-waysec">
+                <h2 style={{ margin: "0 0 4px", fontSize: 15.5 }}>{STEPS.screen}</h2>
                 {/* ── AND IT SAYS THE TRUE THING WHEN THE SLIPS ARE SWITCHED OFF ────────────────
                     T11 sweep #8, 2026-09-04. This line was two answers wide — a computer is named,
                     or the kitchen screen is doing it — and "Nobody" is a third answer the owner
@@ -838,13 +1083,30 @@ const PANEL_GROUPS: [ string, string ][] = [
                     Kitchen slips are switched <b>off</b> for this restaurant &mdash; no slip comes out by
                     itself, on any screen or any computer. Orders still reach the kitchen screen to be read.
                   </p>
+                ) : kotOnComputer ? (
+                  /* ── AND IT NAMES THE SCREEN IT ACTUALLY MEANS (2026-09-13) ────────────────────
+                     There was a FOURTH state this line got wrong, the mirror of the "off" one fixed
+                     on 2026-09-04: with a PERSON named it still read "Kitchen slips print on the
+                     kitchen screen already", four rows above a green tick saying they print on
+                     diagm1's manager panel. Seen on French House while shooting the new board. The
+                     card now answers in the same three shapes the way-card above it does, so the
+                     two cannot disagree. */
+                  <p style={{ margin: "0 0 4px", fontSize: 13 }}>
+                    <i className="fas fa-circle-info" aria-hidden="true" style={{ color: "var(--muted)", marginRight: 7 }} />
+                    A <b>computer</b> is set to print the kitchen slips, so it does that instead and no screen
+                    prints them. Change that on the other card if you want a screen to have them back.
+                  </p>
+                ) : chosenPerson ? (
+                  <p style={{ margin: "0 0 4px", fontSize: 13 }}>
+                    <i className="fas fa-circle-check" aria-hidden="true" style={{ color: "var(--adm-ok, #30a46c)", marginRight: 7 }} />
+                    Kitchen slips print on <b>{chosenPerson.name}</b>&apos;s screen &mdash; not on the kitchen
+                    screen. Set it back to <b>the kitchen screen</b> below to let anyone signed in there print them.
+                  </p>
                 ) : (
                   <p style={{ margin: "0 0 4px", fontSize: 13 }}>
                     <i className="fas fa-circle-check" aria-hidden="true" style={{ color: "var(--adm-ok, #30a46c)", marginRight: 7 }} />
                     Kitchen slips print on the <b>kitchen screen</b> already &mdash; there is nothing to switch on.
-                    {(draft.kot?.agent && draft.kot?.printer)
-                      ? " Right now a computer above is set to print them, so it does that instead."
-                      : " No computer is set to print them, so the kitchen screen is doing it."}
+                    No computer is set to print them, so the kitchen screen is doing it.
                   </p>
                 )}
                 <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
@@ -898,14 +1160,20 @@ const PANEL_GROUPS: [ string, string ][] = [
                   <>Sign in as {chosenPerson ? <b>{chosenPerson.name}</b> : "that person"} once. Leave it running — it stays out of the way.</>,
                 ]}
                 footer={(k: string) => <><b>The first time it runs:</b> {st.stationFiles?.[k]?.firstRun}</>} />
-          </>
+          </div>
+          ) : null}
 
           </fieldset>
+          </div>
 
           {/* ── 4 · what has happened ───────────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14, marginBottom: 30 }}>
             <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>
-              5 · {STEPS.four} — waiting: {st.waiting}
+              {/* NO NUMBER ANY MORE. The log belongs to BOTH ways and sits outside them, and the
+                  steps above it now end at 4 on the computer side and at 3 on the screen side — a
+                  hard-coded "5 ·" would be wrong on one of the two every time. (printBoardWords
+                  says exactly this: the last one is numbered by the caller, and that is why.) */}
+              {STEPS.four} — waiting: {st.waiting}
             </h2>
             <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
               The last few pieces of paper, and what became of them. Nothing here is a guess: a job says
