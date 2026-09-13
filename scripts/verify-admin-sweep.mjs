@@ -168,7 +168,7 @@ const SRC = {
   limits: read("app/aevinite/rate-limits/page.tsx"),
   dash: read("app/aevinite/page.tsx"),
   rests: read("app/aevinite/restaurants/page.tsx"),
-  owners: read("app/aevinite/owners/page.tsx"),
+  owners: read("components/admin/OwnersView.tsx"),
   shared: read("components/admin/shared.tsx"),
   modal: read("components/admin/LogDetailModal.tsx"),
   bell: read("components/admin/NotificationBell.tsx"),
@@ -525,7 +525,7 @@ for (const [key, f] of Object.entries({
   repair: "app/aevinite/repair/page.tsx", logs: "app/aevinite/logs/page.tsx",
   health: "app/aevinite/health/page.tsx", limits: "app/aevinite/rate-limits/page.tsx",
   dash: "app/aevinite/page.tsx", rests: "app/aevinite/restaurants/page.tsx",
-  owners: "app/aevinite/owners/page.tsx",
+  owners: "components/admin/OwnersView.tsx",
 })) {
   await phase(`${f} — a failed read is flagged, not silently empty`, () => {
     const src = CODE[key];
@@ -566,7 +566,7 @@ const internalHrefs = new Map();                                    // file → 
 for (const [key, f] of Object.entries({
   dash: "app/aevinite/page.tsx", logs: "app/aevinite/logs/page.tsx", repair: "app/aevinite/repair/page.tsx",
   health: "app/aevinite/health/page.tsx", limits: "app/aevinite/rate-limits/page.tsx",
-  rests: "app/aevinite/restaurants/page.tsx", owners: "app/aevinite/owners/page.tsx", bell: "components/admin/NotificationBell.tsx",
+  rests: "app/aevinite/restaurants/page.tsx", owners: "components/admin/OwnersView.tsx", bell: "components/admin/NotificationBell.tsx",
 })) {
   const hrefs = [...CODE[key].matchAll(/href=(?:"|\{`)(\/(?:aevinite|owner|manager|kitchen|tablet|r|q|login|staff-login)[^"`{}]*)/g)].map((m) => m[1]);
   internalHrefs.set(f, [...new Set(hrefs)]);
@@ -592,7 +592,7 @@ await phase("no admin link points at a page that only says the setting lives els
   if (!isPointerOnly) return true;
   const bad = [];
   for (const [f, hrefs] of internalHrefs) {
-    for (const h of hrefs) if (/^\/aevinite\/settings$/.test(h.split("?")[0]) && /Maintenance|maintenance/.test(CODE[Object.keys({}).length ? "" : Object.entries({ dash: "app/aevinite/page.tsx", logs: "app/aevinite/logs/page.tsx", repair: "app/aevinite/repair/page.tsx", health: "app/aevinite/health/page.tsx", limits: "app/aevinite/rate-limits/page.tsx", rests: "app/aevinite/restaurants/page.tsx", owners: "app/aevinite/owners/page.tsx", bell: "components/admin/NotificationBell.tsx" }).find(([, v]) => v === f)?.[0] || "dash"] || "")) bad.push(f);
+    for (const h of hrefs) if (/^\/aevinite\/settings$/.test(h.split("?")[0]) && /Maintenance|maintenance/.test(CODE[Object.keys({}).length ? "" : Object.entries({ dash: "app/aevinite/page.tsx", logs: "app/aevinite/logs/page.tsx", repair: "app/aevinite/repair/page.tsx", health: "app/aevinite/health/page.tsx", limits: "app/aevinite/rate-limits/page.tsx", rests: "app/aevinite/restaurants/page.tsx", owners: "components/admin/OwnersView.tsx", bell: "components/admin/NotificationBell.tsx" }).find(([, v]) => v === f)?.[0] || "dash"] || "")) bad.push(f);
   }
   return bad.length === 0 || `${bad.join(", ")} sends him to a sentence telling him the setting is somewhere else`;
 });
@@ -631,7 +631,7 @@ band = "F · every word a person reads";
 console.log("\n── F · every word a person reads ───────────────────────────────────────────────");
 const RAW_CODE_RENDER = /\{(?:a|row|r|m|x|s)\.(?:action|panel)\.replace\(\/_\/g/;
 for (const [key, f] of Object.entries({
-  logs: "app/aevinite/logs/page.tsx", repair: "app/aevinite/repair/page.tsx", owners: "app/aevinite/owners/page.tsx",
+  logs: "app/aevinite/logs/page.tsx", repair: "app/aevinite/repair/page.tsx", owners: "components/admin/OwnersView.tsx",
   shared: "components/admin/shared.tsx", modal: "components/admin/LogDetailModal.tsx",
   bell: "components/admin/NotificationBell.tsx", ownerAct: "app/owner/activity/page.tsx",
   health: "app/aevinite/health/page.tsx", limits: "app/aevinite/rate-limits/page.tsx", dash: "app/aevinite/page.tsx",

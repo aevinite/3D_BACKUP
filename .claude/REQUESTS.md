@@ -1095,3 +1095,37 @@ is kept in full above.**
         base rule below it. All three fixed; "Offline" still prints its word at 360px.
 
 Nothing left over from this run.
+
+- [ ] **"reset all pass show this and handover pass sheet show pass as ---------  i want in data base
+      pass should be encrypted but in adin i can able to see them … when i print handover or click show
+      password it ask me for admin pin which we set right now for login … in owner panel owner detail
+      there should be show pass same in the user panel … merge 2 section name it user and owner and on
+      the top there is 2 option"** (2026-09-13) — then **"do on av live too"**.
+      · **The `---------` was never a fault.** `password_hash` is one-way; the encrypted copy
+        (`password_shown`, mig 330, AES-256-GCM) only fills on write, so **54 of 59 logins predated it**
+        and no readable copy had ever existed. `scripts/backfill-readable-passwords.mjs` filled them:
+        16 diag/test logins keep their EXACT hard-coded passwords (each candidate verified against the
+        stored hash first, so nothing in `scripts/` broke), 38 got fresh ones. **59 of 59 readable**,
+        and nobody was signed out. Re-running it is a no-op.
+      · **A second door in front of a password** — `lib/revealGate.ts`, `/api/admin/reveal`. The console
+        being open is not enough: the admin types the password again and the values uncover for
+        **5 minutes**, with a countdown chip and a Cover button. The cookie is an HMAC over its own
+        expiry, five wrong tries cools off for five minutes (in memory — the DB limiter pings his
+        phone, and the person mistyping is him), and a covered read sends **no value at all**: proved,
+        0 values for 13 logins, with the writes refused 423 by the server.
+        `REVEAL_PASSWORD` is read before `ADMIN_PASSWORD`, so when the console moves to Google sign-in
+        that secret becomes its own thing with no code change — his stated plan.
+      · **Show password** on the owner's detail pane and in a person's profile — one component
+        (`ShowPassword.tsx`), one endpoint. Admin console only: `can.showPassword` is false in
+        `ownerProfileHost.ts`, so the owner cockpit's copy of the same profile does not inherit it.
+      · **The mid-service refusal is GONE** (*"the table and the password change no relation"*). It was
+        right about the danger and wrong about the cause, so the cause went: `signOut` is opt-in, off by
+        default, and a password change no longer touches `token_version`. `verify:read-guards` §9 was
+        rewritten to assert the NEW rule and all four checks sabotage-tested.
+      · **`/aevinite/owners` + `/aevinite/users` → one `/aevinite/people`** with an Owner/User switch
+        (tablist, arrow keys, `?tab=` in the address). Both old addresses are **308 route handlers** that
+        carry the query string — the first version dropped `?staff=`, which would have decayed every
+        saved link to a PERSON into a link to the list. `verify:admin-access-people` caught it.
+      Driven headless: 20 browser checks at 1440 and 390px, the 727-phase admin sweep green, 12 guards
+      green, typecheck clean. 10 stale guard paths repointed after the move.
+      **AV live:** code released separately; its DB already has mig 330 and needs no migration.

@@ -1,4 +1,8 @@
 "use client";
+// components/admin/OwnersView.tsx — the OWNER half of Admin → "Users & owners" (merged there
+// 2026-09-13; it was its own page at /aevinite/owners until then, and that address still works —
+// it redirects. The screen itself is unchanged apart from the "Show password" block added to the
+// detail pane, which the owner asked for in the same breath as the merge.)
 // /aevinite/owners — manage OWNER accounts platform-wide (redesign 2026-07-25:
 // two-pane "Roster", sibling of the Access + Users pages). One owner can own
 // 1..N restaurants; a restaurant can have MANY owners (the restaurant_owners join
@@ -18,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { CopyButton } from "@/components/admin/CopyButton";
 import StaffProfile from "@/components/admin/StaffProfile";
+import ShowPassword from "@/components/admin/ShowPassword";
 
 // primaryHolder / primaryBinned describe WHO holds the primary slot when it isn't this
 // owner — so a "Co-owner" badge can name the reason instead of looking like a bug (a
@@ -63,7 +68,7 @@ const seen = (iso: string | null) => {
 const panelHref = (rid: string, uid: string) =>
   `/api/admin/act-as/go?rid=${encodeURIComponent(rid)}&to=/owner&uid=${encodeURIComponent(uid)}`;
 
-export default function AdminOwners() {
+export default function OwnersView() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [rests, setRests] = useState<Rest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -165,7 +170,6 @@ export default function AdminOwners() {
       <div className="own-head">
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 220 }}>
-            <h1 className="adm-page-h" style={{ marginBottom: 2 }}>Owners</h1>
             <p className="adm-page-sub" style={{ marginBottom: 0 }}>One owner owns <b>1 or many</b> restaurants — and a restaurant can have <b>several owners</b>.</p>
           </div>
           <button style={btn("#3b82f6")} onClick={() => setShowCreate(true)}><i className="fas fa-plus" style={{ marginRight: 7, fontSize: 11 }} aria-hidden="true" />New owner</button>
@@ -191,9 +195,19 @@ export default function AdminOwners() {
 
         {/* Search + sort */}
         <div className="own-tools">
-          <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
+          {/* minWidth 260, not 180 (measured 2026-09-13). `.own-tools` wraps, so this number is
+              what decides WHEN. At 180 the sort control still fitted beside the search at 430px and
+              squeezed the input to 167px — narrower than its own placeholder, which then got cut off
+              mid-word on exactly one width. 260 is the placeholder plus its icon inset plus room to
+              type, so the sort drops to its own line instead of starving the field. */}
+          <div style={{ position: "relative", flex: 1, minWidth: 260 }}>
             <i className="fas fa-magnifying-glass" aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 12 }} />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search owners — or a restaurant to find its owner…" aria-label="Search owners or restaurants" style={{ ...field, paddingLeft: 32 }} />
+            {/* SHORT ENOUGH TO FIT THE PHONE HE TESTS (measured, 2026-09-13). The old placeholder
+                — "Search owners — or a restaurant to find its owner…" — needed 322px and had 286px at
+                360px, so it was cut off mid-word on every phone width. The explanation did not
+                disappear: it is the aria-label, which a screen reader reads in full and no width can
+                clip. A placeholder is a hint; it is the wrong place for a sentence. */}
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search owners or restaurants…" aria-label="Search owners, or a restaurant to find its owner" style={{ ...field, paddingLeft: 32 }} />
           </div>
           <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--muted)", whiteSpace: "nowrap" }}>
             <i className="fas fa-arrow-down-short-wide" aria-hidden="true" />
@@ -749,13 +763,20 @@ function OwnerDetail({ owner, rests, sharedName, onBack, busy, setBusy, onChange
       <div style={{ padding: 18, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}>
         {mErr ? <div className="hue-ink" style={{ ...card, padding: 12, borderColor: "#7f1d1d", ["--hue" as string]: "#fca5a5" }}>{mErr}</div> : null}
 
+        {/* WHAT THIS OWNER'S PASSWORD IS (owner, 2026-09-13: "in owner panel owner detail there
+            should be show pass"). It sits in the detail pane itself, not inside Full profile, because
+            the reason you are on this screen with a client on the phone is to read it out — and
+            "Reset password" below could only answer it by changing the answer. Covered until the
+            admin password is typed; components/admin/ShowPassword.tsx holds every rule. */}
+        <ShowPassword userId={owner.id} name={owner.name} onChanged={onChanged} />
+
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={actBtn} disabled={busy} onClick={() => setShowRename(true)}><i className="fas fa-pen" style={ic} aria-hidden="true" />Rename</button>
           <button style={actBtn} disabled={busy}
             onClick={() => setConfirm({
               tone: "blue", icon: "fa-key", ctaLabel: "Reset password", ctaTone: "blue",
-              title: `Reset ${owner.name}’s password?`, sub: "A new one-time password is generated and shown once.",
+              title: `Reset ${owner.name}’s password?`, sub: "A new one-time password is generated and shown once. To read the CURRENT one instead, use Show password above.",
               ownerChip: true,
               facts: [
                 { i: "fa-key", c: "#60a5fa", t: <>A <b>new password</b> is shown once — copy it right then</> },

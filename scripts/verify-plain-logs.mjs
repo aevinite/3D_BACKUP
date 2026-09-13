@@ -241,7 +241,7 @@ function checkNoRawErrorRender() {
     ["components/admin/LogDetailModal.tsx", "the shared log detail card"],
     ["components/admin/shared.tsx", "the Dashboard's Latest activity strip"],
     ["components/admin/NotificationBell.tsx", "the notification drawer"],
-    ["app/aevinite/owners/page.tsx", "an owner's activity trail"],
+    ["components/admin/OwnersView.tsx", "an owner's activity trail"],
     ["app/aevinite/repair/page.tsx", "the Repair board's problem rows"],
   ];
   for (const [f, what] of sites) {

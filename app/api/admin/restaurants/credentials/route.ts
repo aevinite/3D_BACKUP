@@ -10,13 +10,17 @@
 //   POST { restaurant_id, user_id }       → that ONE login gets a NEW password, stored readable,
 //                                           and returned. Used by "Show" on a login created before
 //                                           mig 330, whose original text does not exist anywhere.
-//   POST { restaurant_id, action:"reset_all" }
+//   POST { restaurant_id, action:"reset_all" [, signOut] }
 //                                         → EVERY login on this sheet gets a new password, in one
-//                                           press, for a handover. REFUSED while any table is open —
-//                                           see the note on resetAll() below.
+//                                           press, for a handover. Nobody is signed out unless
+//                                           signOut is asked for — see the note on resetAll().
 //
-// THE THREE RULES THIS ROUTE KEEPS:
-//   1. ADMIN ONLY. Same cookie as every other /api/admin/* route, checked before the first read.
+// THE FOUR RULES THIS ROUTE KEEPS:
+//   1. ADMIN ONLY, AND THEN UNCOVERED. Same cookie as every other /api/admin/* route, checked
+//      before the first read — AND a live uncover window on top of it (lib/revealGate.ts), because
+//      reading back a client's password is not the same act as reading their bills. A covered
+//      console still gets the sheet's names and login ids; the password column comes back null and
+//      `unlocked:false` tells the card to draw the "type the admin password" box instead.
 //      No panel API returns `password_shown`, and RLS keeps the column off anon/authenticated
 //      entirely — this handler is the only door.
 //   2. A PASSWORD IS NEVER LOGGED. The audit lines below name WHO was looked at or reset and by
@@ -28,6 +32,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import { openPassword, passwordFields, vaultReady } from "@/lib/passwordVault";
+import { REVEAL_COOKIE, REVEAL_LOCKED_MESSAGE, revealUnlocked } from "@/lib/revealGate";
 import { withIdempotency } from "@/lib/idempotency";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
@@ -60,6 +65,10 @@ type Row = {
 
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return err("unauthorized", 401);
+  // Covered is not an error — the sheet still loads, with every name, role and login id on it. Only
+  // the passwords are held back, so the card can show the whole shape of the handover and ask for
+  // the admin password once, at the moment he actually needs to read one.
+  const unlocked = await revealUnlocked(req.cookies.get(REVEAL_COOKIE)?.value);
   const rid = new URL(req.url).searchParams.get("restaurant_id") || "";
   if (!UUID.test(rid)) return err("invalid restaurant_id");
 
@@ -103,6 +112,19 @@ export async function GET(req: NextRequest) {
     ownerRows = (o.data || []) as Row[];
   }
 
+  // HOW BUSY THE RESTAURANT IS RIGHT NOW — a NUMBER on the card, not a veto (owner, 2026-09-13).
+  // The card offers a "sign everyone out too" tick beside the reset, and this is what lets it say
+  // "23 tables are open right now" in the moment he is deciding, instead of the server deciding for
+  // him after the fact. `head: true` means the row bodies never cross the wire — only the count.
+  const openQ = await sb.from("sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("restaurant_id", rid).in("status", ["open", "pending"]);
+  // A failed count only costs the sentence. It must NOT cost the sheet, and it must not silently
+  // read as zero — "no tables open" is the reassuring answer, and it is the one thing this may not
+  // invent. null renders as "couldn't check" beside the tick.
+  if (openQ.error) console.error("[admin/credentials] could not count open tables:", openQ.error.message);
+  const openTables = openQ.error ? null : (openQ.count ?? 0);
+
   // The primary owner wears the ★ on the sheet, the same badge the Owners roster uses. A failed read
   // only costs the badge, so it is reported and the sheet still prints (`primaryUnread` below).
   const primaryQ = await sb.from("restaurants").select("owner_user_id").eq("id", rid).maybeSingle();
@@ -121,9 +143,17 @@ export async function GET(req: NextRequest) {
     username: r.username,
     active: r.active === true,
     primary: r.role === "owner" && r.id === primaryId,
-    // null = created before mig 330, or the vault key changed. The card offers "Show" for those,
-    // which sets a new one — the original text is not recoverable and never was.
-    password: await openPassword(r.password_shown),
+    // `hasPassword` vs `password` are two different questions and the card needs both:
+    //   hasPassword:false → nothing readable was EVER kept (created before mig 330, or the vault
+    //                       key was rotated). No amount of typing the admin password shows it —
+    //                       the original text is not recoverable and never was. "Set a new one".
+    //   password:null with hasPassword:true → there IS one, the console is just covered.
+    // Sending `hasPassword` while covered is deliberate and costs nothing: it says whether a row
+    // will print filled-in or blank, which is the question you ask BEFORE uncovering anything.
+    ...(await (async () => {
+      const pw = await openPassword(r.password_shown);
+      return { hasPassword: pw !== null, password: unlocked ? pw : null };
+    })()),
   })));
   logins.sort((a, b) =>
     (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9)
@@ -146,6 +176,12 @@ export async function GET(req: NextRequest) {
     // false = no vault key on this deployment, so nothing can be stored or shown. The card says so
     // instead of silently offering a button that would reset a password for nothing.
     vaultReady: vaultReady(),
+    // false = the passwords are covered right now. Distinct from vaultReady, which is about the
+    // deployment and never changes while you look at it.
+    unlocked,
+    // How many tables are live this second — null when the count could not be read. Advice on the
+    // card, never a veto: see the note above resetAll().
+    openTables,
     // Only when true: the ★ could not be worked out, so its absence on the sheet means nothing.
     ...(primaryQ.error ? { primaryUnread: true } : {}),
     generatedAt: new Date().toISOString(),
@@ -155,6 +191,11 @@ export async function GET(req: NextRequest) {
 // POST — give ONE login a new password and keep it readable, so it can go on the sheet.
 async function postImpl(req: NextRequest) {
   if (!(await admin(req))) return err("unauthorized", 401);
+  // Every path below hands a readable password back, so all of them sit behind the uncover window.
+  // 423 Locked, never 403 — the card opens the "type the admin password" box on a 423 and shows a
+  // refusal on a 403, and telling a person to re-type a password when the real answer is "you may
+  // not" is the worst of both.
+  if (!(await revealUnlocked(req.cookies.get(REVEAL_COOKIE)?.value))) return err(REVEAL_LOCKED_MESSAGE, 423);
   if (!vaultReady()) return err("This deployment has no credential key set, so a password can't be stored for printing.", 409);
   let body: Record<string, unknown> = {};
   try { body = await req.json(); } catch { /* empty */ }
@@ -164,20 +205,9 @@ async function postImpl(req: NextRequest) {
   // ── ONE PRESS FOR THE WHOLE RESTAURANT (owner, 2026-08-31 — item 28) ─────────────────────────────
   // Handing a restaurant over used to mean pressing "Show" once per login, each with its own
   // confirmation: owner, manager, kitchen, waiter — four rounds of the same dialogue for one handover.
-  //
-  // ── THE GUARD, AND WHY IT IS NOT OPTIONAL ───────────────────────────────────────────────────────
-  // Giving a login a new password bumps `token_version`, which ENDS EVERY SESSION that person has.
-  // One login at a time, that is a decision about one person. All of them at once, it signs out
-  // everybody at that restaurant in the same instant — fine on a handover morning, a disaster in the
-  // middle of service, with the waiter's tablet and the kitchen screen going to the login page while
-  // food is on the pass.
-  //
-  // He asked for the button and was told that cost. So it exists, and it REFUSES while the restaurant
-  // is mid-service — any session still open on a table. That is the same signal the Repair Kit reads
-  // to decide whether a table is live, and it is the honest test: a restaurant with nobody sitting at
-  // a table is not serving anyone, so there is nothing to interrupt. The refusal says how many tables
-  // are open and offers the one-at-a-time route, which is unchanged and still works during service.
-  if (String(body.action || "") === "reset_all") return resetAll(req, rid);
+  // Nobody is signed out unless it is asked for — see the note above resetAll().
+  const signOut = body.signOut === true;
+  if (String(body.action || "") === "reset_all") return resetAll(rid, signOut);
 
   const userId = String(body.user_id || "");
   if (!UUID.test(userId)) return err("invalid user_id");
@@ -200,10 +230,14 @@ async function postImpl(req: NextRequest) {
   }
 
   const password = genPassword();
-  // token_version bump = every existing session on this account ends, which is the honest
-  // consequence of changing a password and is what the confirm step warns about.
+  // A token_version bump is what ends every existing session on this account. It is now OPT-IN, and
+  // the card says which of the two it is about to do — see rule 4 on resetAll() below.
   const wr = await sb.from("staff_users")
-    .update({ ...(await passwordFields(password)), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null })
+    .update({
+      ...(await passwordFields(password)),
+      ...(signOut ? { token_version: (u.token_version || 0) + 1 } : {}),
+      failed_count: 0, locked_until: null,
+    })
     .eq("id", userId).select("id").maybeSingle();
   if (wr.error) return adminFail("this login's new password", wr.error, { action: "save" });
   // Never report a password the database didn't take (the 2026-07-07 rule).
@@ -212,41 +246,42 @@ async function postImpl(req: NextRequest) {
   // The RECORD names who was changed and by whom. It never carries the password itself.
   await logAction("admin", "user_reset_password", {
     actor: "admin", restaurant_id: rid,
-    detail: `new password set for "${u.name || u.username}" (${u.role}) from the handover sheet`,
+    detail: `new password set for "${u.name || u.username}" (${u.role}) from the handover sheet`
+      + (signOut ? " · every session on that account ended" : " · their screens stayed signed in"),
   });
-  return NextResponse.json({ ok: true, password });
+  return NextResponse.json({ ok: true, password, signedOut: signOut });
 }
 
 /**
  * Every login on this restaurant's sheet gets a new password, in one press.
  *
- * Refused mid-service (see the note at the call site). Otherwise: the SAME single-login path, run for
- * each person, so there is one rule for what a new password does — a fresh readable copy, a bumped
- * `token_version`, and a cleared lockout. A person whose write fails is NAMED in the answer rather
- * than silently skipped: a handover sheet that is missing one password without saying so is the fault
- * this whole card was built to remove.
+ * ── WHY THERE IS NO LONGER A MID-SERVICE REFUSAL (owner, 2026-09-13) ────────────────────────────
+ * This used to REFUSE outright while any table was open, because giving every login a new password
+ * bumped `token_version` — which ends every session at once, sending the waiter's tablet and the
+ * kitchen screen to the login page with food on the pass. The refusal was right about the danger and
+ * wrong about the cause. He said so: *"the table and the password change no relation"*.
+ *
+ * He is right, and the fix is to MAKE it true rather than to argue. A password and a session are two
+ * different things: the hash decides who may sign in NEXT TIME, `token_version` decides who is signed
+ * in NOW. Changing one never had to change the other. So `signOut` is opt-in, and with it off — the
+ * default, and what a handover actually wants — every screen in the building stays exactly as it is,
+ * the new passwords simply apply the next time somebody signs in. There is then nothing for an open
+ * table to be interrupted BY, and nothing left for a guard to refuse.
+ *
+ * With `signOut` on, the eviction is back and it is the caller's stated intention; the card counts
+ * the open tables and says so on the button, but it does not overrule him.
+ *
+ * Otherwise unchanged: the SAME single-login path, run for each person, so there is one rule for what
+ * a new password does. A person whose write fails is NAMED in the answer rather than silently
+ * skipped — a handover sheet missing one password without saying so is the fault this card exists
+ * to remove.
  */
-async function resetAll(req: NextRequest, rid: string): Promise<NextResponse> {
+async function resetAll(rid: string, signOut: boolean): Promise<NextResponse> {
   if (!vaultReady()) return err("This deployment has no credential key set, so passwords can't be stored for printing.", 409);
 
   const rest = await sb.from("restaurants").select("id, name").eq("id", rid).maybeSingle();
   if (rest.error) return adminFail("this restaurant", rest.error, { action: "load" });
   if (!rest.data) return err("restaurant not found", 404);
-
-  // MID-SERVICE CHECK. A failed read REFUSES — deciding "nobody is sitting down" from a query that
-  // did not answer is the one direction this must never guess in, because the cost is a floor full of
-  // signed-out staff. Same status list the Repair Kit uses for "is this table live".
-  const openQ = await sb.from("sessions").select("table_number")
-    .eq("restaurant_id", rid).in("status", ["open", "pending"]).limit(500);
-  if (openQ.error) return adminFail("whether this restaurant is mid-service", openQ.error, { action: "load" });
-  const openTables = (openQ.data || []).length;
-  if (openTables > 0) {
-    return NextResponse.json({
-      error: `${rest.data.name} has ${openTables} table${openTables === 1 ? "" : "s"} open right now. Changing every password signs out every screen at once — the waiter tablet and the kitchen would go to the login page mid-service. Close the tables first, or use Show on one login at a time.`,
-      reason: "mid_service",
-      openTables,
-    }, { status: 409 });
-  }
 
   // Everyone on the sheet: this restaurant's own staff, plus every owner attached through the join
   // table. Exactly the same two reads the GET builds the sheet from, and they answer for themselves
@@ -277,7 +312,11 @@ async function resetAll(req: NextRequest, rid: string): Promise<NextResponse> {
   for (const p of people) {
     const password = genPassword();
     const wr = await sb.from("staff_users")
-      .update({ ...(await passwordFields(password)), token_version: (p.token_version || 0) + 1, failed_count: 0, locked_until: null })
+      .update({
+        ...(await passwordFields(password)),
+        ...(signOut ? { token_version: (p.token_version || 0) + 1 } : {}),
+        failed_count: 0, locked_until: null,
+      })
       .eq("id", p.id).select("id").maybeSingle();
     // Never report a password the database didn't take (the 2026-07-07 rule), and never let one
     // failure hide behind the others.
@@ -290,9 +329,9 @@ async function resetAll(req: NextRequest, rid: string): Promise<NextResponse> {
     actor: "admin", restaurant_id: rid,
     detail: `handover: new passwords set for ${set.length} login${set.length === 1 ? "" : "s"} at "${rest.data.name}"`
       + `${failed.length ? ` — ${failed.length} FAILED (${failed.join(", ")})` : ""}`
-      + " · every session on those accounts ended",
+      + (signOut ? " · every session on those accounts ended" : " · their screens stayed signed in"),
   });
-  return NextResponse.json({ ok: true, reset: set.length, logins: set, ...(failed.length ? { failed } : {}) });
+  return NextResponse.json({ ok: true, reset: set.length, logins: set, signedOut: signOut, ...(failed.length ? { failed } : {}) });
 }
 
 // A double-tap must not burn two passwords and leave the printed one wrong.

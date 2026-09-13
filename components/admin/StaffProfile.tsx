@@ -31,6 +31,7 @@ import { useAdminModal } from "@/components/admin/useAdminModal";
 import { openRestaurantPanel, actLabel } from "@/components/admin/shared";
 import { useScrollMemory } from "@/components/admin/useOverlayParam";
 import { expectHeader, type TreeState } from "@/lib/accessTree";
+import ShowPassword from "@/components/admin/ShowPassword";
 import {
   capGroupsForRole, capStates, capVisible, effectiveCap, roleDefault, roleValueLabel, countOverrides,
   type Cap, type CapValue,
@@ -86,6 +87,10 @@ export type ProfileHost = {
     visitAsPerson: boolean;
     /** link out to /aevinite → Access & permissions (admin console only) */
     accessLink: boolean;
+    /** read this person's password back (admin console only — /api/admin/reveal/password).
+     *  Least privilege, per the module checklist: the owner cockpit embeds this same profile and
+     *  must NOT gain a way to read its staff's passwords just because the admin has one. */
+    showPassword: boolean;
   };
 };
 
@@ -145,7 +150,7 @@ const adminHost = (userId: string): ProfileHost => ({
     const j = await r.json().catch(() => ({}));
     return { ok: r.ok, error: j.error };
   },
-  can: { pin: true, signIn: true, role: true, visitAsPerson: true, accessLink: true },
+  can: { pin: true, signIn: true, role: true, visitAsPerson: true, accessLink: true, showPassword: true },
 });
 
 const HostCtx = createContext<ProfileHost | null>(null);
@@ -442,6 +447,12 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
 
   return (
     <div className="stp-qa">
+      {/* WHAT IS THEIR PASSWORD — above "Reset password", because it is the question that gets
+          asked first and the old panel could only answer it by CHANGING the thing being asked
+          about (owner, 2026-09-13). Admin console only: see `can.showPassword`. */}
+      {host.can.showPassword ? (
+        <ShowPassword userId={p.id} name={p.name || p.username} onChanged={() => { reload(); onChanged?.(); }} />
+      ) : null}
       <button className="stp-btn" onClick={() => setPwOpen((o) => !o)}>🔒 Reset password</button>
       {pwOpen ? (
         <div className="stp-pop">
@@ -457,7 +468,7 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
             <button className="stp-btn pri sm" disabled={pw.trim().length < 6} onClick={() => resetPw(false)}>Set it</button>
             <button className="stp-btn sm" onClick={() => resetPw(true)}>Generate one</button>
           </div>
-          <div className="stp-hint">Setting a password signs them out on every device.</div>
+          <div className="stp-hint">Setting a password here signs them out on every device. To change it <b>without</b> signing anyone out, use <b>Show password</b> above.</div>
         </div>
       ) : null}
 

@@ -358,22 +358,32 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   else fail("the handover sheet ignores its owner-link read again — it would print with no owner login and look complete");
 }
 
-// ── 9 · THE ONE-PRESS PASSWORD RESET STAYS REFUSED MID-SERVICE (owner, 2026-08-31 — item 28) ─────
-// He asked for a single button that gives every login at a restaurant a new password, for a handover,
-// and he was told the cost before it was built: a new password bumps `token_version`, which ends every
-// session that person has — so all of them at once signs out the waiter's tablet and the kitchen screen
-// in the same instant. Fine on a handover morning. On a Friday night it is a floor of staff staring at
-// a login page with food on the pass.
+// ── 9 · A PASSWORD CHANGE MUST NOT EMPTY THE FLOOR (owner, 2026-08-31 → REWRITTEN 2026-09-13) ────
 //
-// So the button exists AND the server refuses while any table is open. That refusal is the whole
-// safety of the feature, it lives in one `if`, and it is exactly the kind of line a later
-// "simplification" removes because the happy path works without it. Checked here, in four parts, so
-// none of them can go quietly:
-//   · the mid-service read happens at all;
-//   · it refuses on a FAILED read too (guessing "nobody is sitting down" from a query that did not
-//     answer is the one direction this must never guess in);
-//   · the refusal is a 409 the screen can show, not a silent skip;
-//   · the one-at-a-time path is untouched, because that is what still works during service.
+// ⚠️ THIS SECTION USED TO ASSERT THE OPPOSITE, AND THE RULE UNDER IT CHANGED — not the danger.
+//
+// The original (2026-08-31): one button gives every login at a restaurant a new password, for a
+// handover. A new password bumped `token_version`, which ends every session that person has — so all
+// of them at once signed out the waiter's tablet and the kitchen screen in the same instant. Fine on
+// a handover morning; on a Friday night, a floor of staff staring at a login page with food on the
+// pass. So the server REFUSED while any table was open, and this section guarded that refusal.
+//
+// The owner deleted the refusal on 2026-09-13: *"the table and the password change no relation"*.
+// He is right about the cause, and the answer was to make it TRUE rather than to argue. A password
+// decides who may sign in NEXT time; `token_version` decides who is signed in NOW. Tying them
+// together was the original mistake — the refusal was a patch over it. Now the sign-out is opt-in
+// (`signOut`), off by default, so a handover reset interrupts nobody and there is nothing left for a
+// mid-service check to refuse.
+//
+// SO THE DANGER IS GUARDED IN A DIFFERENT PLACE, and these checks are strictly stronger than the
+// ones they replace — the old guard allowed the eviction to happen freely outside service hours;
+// this one requires the caller to ASK for it every time, in either path:
+//   · resetAll takes `signOut` and only bumps token_version when it is true;
+//   · the single-login reset does the same, so the two cannot drift apart;
+//   · nothing reintroduces an unconditional bump;
+//   · the vault check survives (resetting every password and being unable to print any is still
+//     the pointless-damage case it always was);
+//   · the one-at-a-time path still exists.
 {
   const CRED = "app/api/admin/restaurants/credentials/route.ts";
   const src = read(CRED);
@@ -382,17 +392,39 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
     ok("the whole-restaurant password reset is not built here — nothing to guard");
   } else {
     const impl = src.slice(src.indexOf("async function resetAll"));
-    if (/from\("sessions"\)[\s\S]{0,200}?\.in\(\s*"status"/.test(impl)) ok("reset_all asks whether the restaurant is mid-service before it touches a password");
-    else fail("reset_all no longer checks for open tables — one press would sign out every screen at a restaurant DURING SERVICE (item 28's whole safety)");
-    if (/openQ\.error[\s\S]{0,140}?return adminFail/.test(impl)) ok("reset_all refuses when it could not tell whether service is on");
-    else fail("reset_all decides 'nobody is sitting down' from a read it did not check — the one direction it must never guess in");
-    if (/reason:\s*"mid_service"[\s\S]{0,120}?status:\s*409/.test(impl)) ok("the mid-service refusal is a 409 with a sentence the console shows");
-    else fail("the mid-service refusal no longer answers a 409 the screen can render — a refusal nobody sees is not a refusal");
+    if (/async function resetAll\(\s*rid: string,\s*signOut: boolean/.test(impl))
+      ok("reset_all takes the sign-out decision as an argument — it cannot evict a floor by accident");
+    else fail("reset_all no longer carries an explicit signOut — a handover reset could sign out every screen again");
+
+    if (/signOut\s*\?\s*\{\s*token_version:/.test(impl))
+      ok("reset_all bumps token_version ONLY when the caller asked to sign everyone out");
+    else fail("reset_all's token_version bump is not behind signOut — every handover would empty the floor");
+
+    // The single-login path must keep the SAME rule, or the two doors mean different things.
+    const single = src.slice(src.indexOf("async function postImpl"), src.indexOf("async function resetAll"));
+    if (/signOut\s*\?\s*\{\s*token_version:/.test(single))
+      ok("…and the single-login reset follows the same rule, so the two doors can't drift apart");
+    else fail("the single-login reset bumps token_version unconditionally — one door evicts, the other doesn't");
+
+    // The unconditional bump must not sneak back in anywhere in this file.
+    if (!/token_version:\s*\((?:u|p)\.token_version \|\| 0\) \+ 1(?!\s*\})/.test(src.replace(/signOut \? \{ token_version: \((?:u|p)\.token_version \|\| 0\) \+ 1 \} : \{\}/g, "")))
+      ok("no unconditional token_version bump survives anywhere in the handover route");
+    else fail("an unconditional token_version bump is back — something signs people out without being asked");
+
     if (/vaultReady\(\)/.test(impl)) ok("reset_all refuses on a deployment with no credential key, rather than burning every password for nothing");
     else fail("reset_all no longer checks the credential vault — it would reset every password and be unable to print any of them");
-    // The per-login route must survive: it is the ONLY one that works while the restaurant is serving.
-    if (/const userId = String\(body\.user_id/.test(src)) ok("the one-login-at-a-time reset still exists — the only path that works mid-service");
-    else fail("the single-login reset is gone; during service there would be no way to reset one password at all");
+
+    if (/const userId = String\(body\.user_id/.test(src)) ok("the one-login-at-a-time reset still exists");
+    else fail("the single-login reset is gone; there would be no way to reset one password at all");
+
+    // NEW, and the reason the whole card is safe to leave on screen: the passwords are behind a
+    // second door, and it is checked on the READ as well as on the writes.
+    if (/revealUnlocked\([\s\S]{0,120}?return err\(REVEAL_LOCKED_MESSAGE, 423\)/.test(src))
+      ok("every write on the handover route is behind the uncover window, answering 423 when covered");
+    else fail("the handover route's writes are no longer behind the uncover window");
+    if (/const unlocked = await revealUnlocked\(/.test(src) && /password: unlocked \? pw : null/.test(src))
+      ok("…and a COVERED read sends no password value at all — it is withheld by the server, not hidden by the screen");
+    else fail("the covered read no longer withholds the password value on the server side");
   }
 }
 

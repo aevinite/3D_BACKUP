@@ -37,7 +37,11 @@ const GROUPS: NavGroup[] = [
     label: "Manage",
     items: [
       { href: "/aevinite/restaurants", label: "Restaurants", icon: "fa-store" },
-      { href: "/aevinite/owners", label: "Owners", icon: "fa-crown" },
+      // ONE ENTRY FOR EVERY PERSON (owner, 2026-09-13: "merge 2 section name it user and owner").
+      // "Owners" and "Users" were two sidebar entries answering the same question from two doors,
+      // so you had to know the person's role before you could find them. Now it is one screen with
+      // an Owner/User switch at the top. Both old addresses redirect into the right half of it.
+      { href: "/aevinite/people", label: "Users & owners", icon: "fa-users-gear" },
       { href: "/aevinite/customers", label: "Customers", icon: "fa-user-group" },
       { href: "/aevinite/recycle", label: "Recycle bin", icon: "fa-trash-can" },
       // ONE NAME FOR THE SCREEN (sweep T6, 2026-08-10). The sidebar said "Access / Permissions"
@@ -49,7 +53,6 @@ const GROUPS: NavGroup[] = [
       // what each of them prints lives here (owner, 2026-08-20: "maybe we can create whole new
       // printing menu in the admin panel for setup and all").
       { href: "/aevinite/printing", label: "Printing", icon: "fa-print" },
-      { href: "/aevinite/users", label: "Users", icon: "fa-users" },
     ],
   },
   {
