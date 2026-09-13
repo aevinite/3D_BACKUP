@@ -536,6 +536,44 @@ check(/\.in\("status", \["queued", "printing", "failed"\]\)/.test(agentRoute),
   "…and the same holds for a BILL or a banquet sheet reported failed by a helper",
   "the print-agent failure path requeues whatever it is handed, so a cleared bill can still print");
 
+// ── 12. WHO MAY EMPTY A PILE-UP IS A PERMISSION, NOT A GUESS (owner, 2026-09-13) ───────────────
+// *"You could able to see who is able to clear it out in access and permission."* So the row exists
+// on Access & permissions by name, default OFF, and the manager's own verb asks for THAT row — not
+// for print_setup, which is a different amount of trust (setting the printers up vs. deciding that a
+// hundred waiting tickets never print). The button is hidden when the answer is no, and the server
+// is asked again anyway, because hiding has never been a gate in this app.
+const accessTree = read("lib/accessTree.ts");
+const editorRoute = read("app/api/editor/[...path]/route.ts");
+check(/id: "print_clear", name: "May clear the printing queue", flag: "print_clear", mgrDef: false/.test(accessTree),
+  "Access & permissions carries \"May clear the printing queue\", default OFF",
+  "the print_clear row is gone from lib/accessTree.ts — nobody can see or decide who may empty a queue");
+// SCOPED TO THE VERB'S OWN BODY, and that matters: the board READ also calls
+// managerCan(…, "print_clear") to decide whether to draw the button, so a loose file-wide search
+// stayed green while the verb itself was re-pointed at print_setup. Caught by sabotaging it.
+{
+  const i = editorRoute.indexOf('a === "printing" && b === "queue" && c === "clear"');
+  const gate = i < 0 ? "" : editorRoute.slice(i, i + 400);
+  check(!!gate && /managerCan\(g, rid, "print_clear"\)/.test(gate) && /permDenied/.test(gate),
+    "…and the manager's clear verb itself asks for that permission on the server",
+    "the manager's queue/clear verb no longer checks print_clear — a hidden button would be the only guard");
+}
+{
+  const i = editorRoute.indexOf('a === "printing" && b === "queue" && c === "clear"');
+  const body = i < 0 ? "" : editorRoute.slice(i, i + 1500);
+  check(!!body && /status: "dismissed"/.test(body) && !/status: "done"/.test(body) && !/\.delete\(/.test(body),
+    "…and it DISMISSES the tickets, exactly like the admin's copy — never deletes, never says printed",
+    "the manager's clear deletes rows or marks them printed: the log would claim paper that never came out");
+  check(!!body && /error: `cleared from the queue by/.test(body),
+    "…and each row keeps a reason that starts with \"cleared\", which is what both logs read",
+    "the manager's clear writes no reason, or one the log cannot recognise");
+}
+check(/B\.mayClear && Number\(B\.waiting \|\| 0\) > 0/.test(epanel) && /what === "clearqueue"/.test(epanel),
+  "the manager panel shows the button only to a person who may, and wires it to the verb",
+  "the manager's Clear button is gone, or it renders for people who are not allowed to press it");
+check(/confirmDialog\(/.test(epanel.slice(epanel.indexOf('what === "clearqueue"'), epanel.indexOf('what === "clearqueue"') + 900)),
+  "…and it asks with the panel's OWN confirm, not the browser's (a print-station Chrome answers confirm() false)",
+  "the manager's clear uses a native dialog — on a kiosk/print-station Chrome the tap is dropped in silence");
+
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — read this file's header before 'fixing' the code\n`
   : "\n✓ a ticket is a row: it prints on a covered window, on either screen, exactly once\n");

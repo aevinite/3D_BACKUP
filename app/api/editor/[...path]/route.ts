@@ -55,7 +55,7 @@ import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint 
 // the admin console draws, narrowed to this computer — same file, same four steps, same words.
 import {
   agentForDevice, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
-  panelForRole,
+  panelForRole, waitingCount,
 } from "@/lib/printHelpers";
 // The ten-minute setup code a computer types in (mig 380) — the ONE way a machine joins this
 // restaurant's printing now that the Allow page is gone.
@@ -2293,6 +2293,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path[0] === "printing" && (path.length === 1 || path[1] === "state")) {
       const dv = deviceIdFrom(req);
       const maySetup = g.user ? await managerCan(g, rid, "print_setup") : true;
+      // ── AND WHETHER THIS PERSON MAY EMPTY A PILE-UP (owner, 2026-09-13) ─────────────────────
+      // Its own permission, not `maySetup`: setting the printers up and deciding that a hundred
+      // waiting tickets never print are different amounts of trust, and the owner asked for this
+      // one to be visible on Access & permissions by name. Sent so the button can be absent rather
+      // than refused — but the gate that matters is on the verb itself, below.
+      const mayClear = g.user ? await managerCan(g, rid, "print_clear") : true;
       const board = await printBoardState(rid, { deviceId: dv });
       return ok({
         ...board,
@@ -2303,6 +2309,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // so the panel can show whichever the mode calls for with no second round trip.
         stationFiles: stationFiles(originOfReq(req)),
         maySetup,
+        mayClear,
         deviceId: dv,
         // Which install text to show FIRST. The browser knows what it is running on, so nobody has to
         // pick their own operating system off a list and get it wrong — the other two stay one tap away.
@@ -5065,6 +5072,37 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // remove another restaurant's machine, or another machine in their own restaurant. Anything
     // wider than "this computer" stays with the admin, which is what the owner asked for — the
     // device does the setting up, Aevidine keeps the whole board.
+    // ── EMPTY THE QUEUE THAT HAS PILED UP (owner, 2026-09-13) ───────────────────────────────────
+    //
+    // Deliberately ABOVE the print_setup gate: this is its own permission (accessTree → print_clear,
+    // default OFF), because "I set the printers up" and "these hundred tickets never print" are
+    // different amounts of trust. Aevidine can always do it from the admin console; this is the same
+    // verb for the person standing at the dead printer at nine in the evening.
+    //
+    // DISMISSED, NEVER DELETED and never called printed — the same rule the admin's copy keeps
+    // (app/api/admin/printing). Every cleared ticket keeps its row and its reason in "What has
+    // printed", the orders are untouched on the kitchen screen, and no bill or number moves. The
+    // reason text starts with "cleared" because both boards read that word to say "taken out —
+    // never printed" instead of "nothing to print".
+    if (a === "printing" && b === "queue" && c === "clear") {
+      if (g.user && !(await managerCan(g, rid, "print_clear"))) return permDenied("clear the printing queue");
+      // Counted first: the update is written WITHOUT `.select()` on purpose — a restaurant three
+      // days behind can have hundreds of rows waiting and nothing here needs them.
+      const n = await waitingCount(rid);
+      if (!n) return ok({ cleared: 0 });
+      const who = g.user?.name || g.user?.username || "Aevidine";
+      const upd = await sb.from("print_jobs")
+        .update({ status: "dismissed", done_at: new Date().toISOString(), error: `cleared from the queue by ${who} — this ticket was never printed` })
+        .eq("restaurant_id", rid).in("status", ["queued", "printing"]);
+      if (upd.error) return err("Could not clear the queue.");
+      await logAction("editor", "print_switch", {
+        restaurant_id: rid, device_id: deviceIdFrom(req),
+        ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+        detail: `cleared ${n} waiting ticket${n === 1 ? "" : "s"} from the printing queue — none of them printed`,
+      });
+      return ok({ cleared: n });
+    }
+
     if (a === "printing") {
       if (g.user && !(await managerCan(g, rid, "print_setup"))) return permDenied("set the printers up");
       const dv = deviceIdFrom(req);

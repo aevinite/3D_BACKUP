@@ -273,6 +273,21 @@ const ACTIONS: ActionDef[] = [
   // re-route the kitchen slips is a restaurant where tickets go missing and nobody knows why.
   { id: "print_setup", name: "May set the printers up (from their own computer)", flag: "print_setup", mgrDef: false,
     what: "Adds a Printing page to their own Settings, on the computer the printer is plugged into: it can register that computer, get the little helper program's code, and choose which printer prints the kitchen slips, the bills and the banquet sheets. Give it to ONE person — the one sitting at that machine. Aevidine sees and can change everything they do, and nothing here lets them change any other restaurant." },
+  // MAY THIS PERSON EMPTY A QUEUE THAT HAS PILED UP (owner, 2026-09-13, after clearing a three-day
+  // backlog himself: *"you could able to see who is able to clear it out in access and permission"*).
+  //
+  // A THIRD amount of trust, and deliberately its own row for the same reason the two above are
+  // separate. Being the printer is "paper comes out of my machine"; setting the printers up is "I
+  // decide where the restaurant's paper comes out"; this one is "I decide that these tickets never
+  // come out at all". The person who needs it is whoever is standing at a dead printer at nine in
+  // the evening — ringing Aevidine to empty a queue is not a plan — but a restaurant where anybody
+  // can clear the queue is a restaurant where a rush of kitchen slips can be made to vanish.
+  //
+  // NOTHING IS DELETED BY IT, and that is what makes it safe to hand out at all: every cleared
+  // ticket keeps its row and its reason in "What has printed", the orders themselves are untouched,
+  // and no bill, number or sale moves. Default OFF — Aevidine names the person, as with the setup row.
+  { id: "print_clear", name: "May clear the printing queue", flag: "print_clear", mgrDef: false,
+    what: "Lets them empty a printing queue that has piled up behind a broken printer, from their own Printing page — the tickets waiting are taken out for good so they don't all come out at once when the printer is fixed. Nothing is deleted: every cleared ticket stays in the log with its reason, the orders stay on the kitchen screen, and no bill or number changes. Stopping and restarting the queue stays with Aevidine; this is only the way out of a pile-up." },
   // "Manage staff" LEFT this list (owner, 2026-08-01) — it is not one of the money actions, it is
   // its own thing, and one switch covering create/reset/delete was three very different amounts of
   // trust behind a single yes. It lives in "What a manager can manage", split up.
@@ -917,7 +932,7 @@ export const SECTIONS: Section[] = [
         // "more" — so a tidy lead-in ("What every manager starts with.") is all the ROW itself
         // would say, and the row would be less use than before. One sentence, all three rows.
         id: "mgr_may", name: "Permission for manager", bind: { t: "none" },
-        what: "What every manager in this restaurant starts with: the money actions — reopen a bill (and for how long), and discount a bill (and up to how much) — plus the two printing ones, whether their screen may be the one that prints the paper and whether they may set the printers up from their own computer. There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
+        what: "What every manager in this restaurant starts with: the money actions — reopen a bill (and for how long), and discount a bill (and up to how much) — plus the three printing ones, whether their screen may be the one that prints the paper, whether they may set the printers up from their own computer, and whether they may clear a printing queue that has piled up behind a broken printer. There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
         children: [
           ...ACTIONS.map(mgrAction),
           {

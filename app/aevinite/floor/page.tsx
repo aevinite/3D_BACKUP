@@ -14,7 +14,9 @@
 // blocks; skeletons shimmer while the first snapshot loads.
 import { useCallback, useEffect, useRef, useState } from "react";
 import Dropdown from "@/components/admin/Dropdown";
-import { openRestaurantPanel } from "@/components/admin/shared";
+// IST — the one time zone this product reasons in, declared once in shared.tsx so no screen keeps
+// its own copy (2026-09-13: this page's "Cancelled at" column was still on the reader's own clock).
+import { openRestaurantPanel, IST } from "@/components/admin/shared";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { SkelList } from "@/components/admin/Skeleton";
@@ -551,7 +553,7 @@ export default function AdminFloor() {
                             <span>{c.restaurantName}</span>
                             <span className="adm-muted">{c.table != null ? `#${c.table}` : "—"}</span>
                             <span className="adm-muted">{c.kot != null ? `#${c.kot}` : "—"}</span>
-                            <span style={{ textAlign: "right" }} className="adm-muted">{new Date(c.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+                            <span style={{ textAlign: "right" }} className="adm-muted">{new Date(c.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: IST })}</span>
                           </div>
                         ))}
                       </div>

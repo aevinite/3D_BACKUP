@@ -2010,7 +2010,11 @@ function renderPanel() {
   const newOrdersT = os.filter((o) => o.status === "received");
   const liveOrdersT = os.filter((o) => o.status !== "received" && o.status !== "cancelled");
   const newCards = newOrdersT.map((o) => {
-    const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    // THE RESTAURANT'S CLOCK, NOT THE TABLET'S (2026-09-13, the last three of the T11 sweep's
+    // time-zone family). `[]` means "whatever locale and zone this device is set to" — a tablet
+    // with its zone left on the factory default prints an order's arrival time hours out, beside a
+    // KOT number and a bill that are both pinned to Asia/Kolkata.
+    const when = o.created_at ? new Date(o.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "";
     const viaApp = !!o.member_id;
     const rows = dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("");
     return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}${orderControlsHtml(o)}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
