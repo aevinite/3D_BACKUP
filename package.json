@@ -42,6 +42,7 @@
     "verify:fixtures": "node scripts/verify-fixtures-clean.mjs",
     "verify:fixture-pickers": "node scripts/verify-fixture-pickers.mjs",
     "verify:ui": "node scripts/verify-ui-integrity.mjs",
+    "verify:path": "node scripts/verify-admin-path.mjs",
     "verify:server-only": "node scripts/verify-server-only-imports.mjs",
     "verify:abort-guard": "node scripts/verify-abort-guard.mjs",
     "verify:twins": "node scripts/verify-panel-twins.mjs",

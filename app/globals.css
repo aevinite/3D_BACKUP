@@ -4101,8 +4101,35 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   border-bottom: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
 }
 .adm-crumbs { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; flex-wrap: wrap; }
-.adm-crumbs a { color: var(--accent) !important; text-decoration: none; }
-.adm-crumbs a:hover { text-decoration: underline; }
+
+/* ── NO UNDERLINE ON THE PATH (owner, 2026-09-13) ─────────────────────────────────────────────
+   *"there shouldn't be underlined for the path. you could able to click it, but there shouldn't be
+   any underline."* An underline WAS tried here for one pass, as the colour-independent way to show
+   which crumbs are a way out; he does not want it, and a breadcrumb is a strong enough convention
+   on its own — the last crumb is where you are, everything before it goes back.
+
+   So clickability is carried by the three things that cost the line nothing:
+     · `cursor: pointer` — and `default` on the crumb you are already on, so the pointer itself
+       tells you which is which as it crosses the line;
+     · a HOVER FADE, which is the one visual change actually available here. A background pill is
+       NOT: this line's colour is a gradient clipped to the parent's text, and a background on a
+       child paints over that clip and swallows the word whole. Opacity leaves the clip intact;
+     · a `title` on every link saying what the click does ("Back to all restaurants").
+   Do not reintroduce text-decoration on `.adm-crumbs a`. */
+.adm-crumbs a {
+  color: var(--accent) !important;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: opacity .15s ease;
+}
+.adm-crumbs a:hover { opacity: .62; }
+/* A KEYBOARD USER GOT NOTHING AT ALL. In this console's skin the crumb text is painted transparent
+   and filled by the parent's gradient, so the browser's default focus ring — which follows the
+   text colour — was invisible on the one line whose whole job is orientation. An explicit ring,
+   offset so it never sits on the glyphs. `:focus-visible`, so a mouse click doesn't draw it. */
+.adm-crumbs a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.adm-crumbs .cur { text-decoration: none; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .adm-crumbs a { transition: none; } }
 /* A BREADCRUMB IS STILL A TAP TARGET. On a phone these links measured 77 × 16px — a fingertip is
    about 9mm across, so 16px is a third of what it needs (printing sweep §14, 2026-08-29). The extra
    height is given ONLY on small screens: a mouse pointer is one pixel and does not need it, and the
@@ -4879,7 +4906,24 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   color: transparent !important;
   -webkit-text-fill-color: transparent;
 }
-.adm.adx .adm-crumbs a:hover { text-decoration: underline; text-decoration-color: #8b5cf6; }
+/* ── THE SAME PATH, DARK ENOUGH TO READ ON WHITE ──────────────────────────────────────────────
+   The three gradient stops were written for the dark skin and reused unchanged on the light one,
+   where they measured 3.13 / 3.95 / 2.74 against the #f6f7f9 page. WCAG AA wants 4.5:1 for text
+   this size (13px bold is NOT "large text" — that starts at 18.66px bold), so the path was the
+   least readable line on every light-skin screen. It mattered more the moment this line went from
+   4 screens to 22. Same three hues, walked down in lightness until they clear the bar: 6.25 /
+   6.63 / 5.86. Darkening ONLY the light skin is the rule from `dark-mode-pairing` — the two
+   schemes are designed together, never one inverted from the other. */
+.adm.adx[data-skin="light"] .adm-crumbs {
+  /* background-IMAGE, never the `background` shorthand. The shorthand resets every background
+     longhand it does not mention — including the `background-clip: text` set two rules up — so
+     this same declaration written as `background:` painted the path as a SOLID GRADIENT BAR with
+     the words invisible inside it. Seen on screen, 2026-09-13; the contrast numbers were happy
+     because they were measured from the colour stops, not from what the light skin rendered. */
+  background-image: linear-gradient(90deg, #1d4ed8 0%, #6d28d9 50%, #be123c 100%);
+}
+.adm.adx[data-skin="light"] .adm-crumbs a:focus-visible { outline-color: #6d28d9; }
+.adm.adx .adm-crumbs a:focus-visible { outline-color: #8b5cf6; }
 /* Access panel: the AREA ICONS get their own VIOLET identity so the page isn't all-blue,
    and the SELECTED area's icon wears the full blue→violet→red spectrum. Blue base elsewhere. */
 .adm.adx .acc2-gi {

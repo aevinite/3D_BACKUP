@@ -442,7 +442,17 @@ const PANEL_GROUPS: [ string, string ][] = [
   // called out on 2026-09-13. "Printing" is a live link back to the overview, which is the same
   // step as the "← All restaurants" button beside it. (The shell adds the "Printing" crumb from
   // the address bar — this only declares what hangs off it.)
-  useCrumbs({ tail: rid ? [{ label: rest?.name || "This restaurant" }] : [] });
+  // "Whenever I click printing in that path, I should able to go to printing" (owner, 2026-09-13).
+  // It did not, and a <Link> was never going to: the overview and one restaurant share the address
+  // /aevinite/printing, and which you see is `rid` in React state. Next does not remount a page for
+  // a same-route navigation, so clicking "Printing" moved the address bar and left the restaurant
+  // sitting on screen. `onSection` is the page being TOLD — it runs the same step as the
+  // "← All restaurants" button beside it, so the two cannot disagree.
+  useCrumbs({
+    onSection: rid ? () => go("") : undefined,
+    sectionTitle: rid ? "Back to all restaurants" : undefined,
+    tail: rid ? [{ label: rest?.name || "This restaurant" }] : [],
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════════════════════
   // THE TWO WAYS, AND WHETHER EACH ONE IS ON — READ OFF THE PAPER LINES, NEVER STORED

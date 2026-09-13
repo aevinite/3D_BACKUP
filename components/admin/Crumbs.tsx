@@ -50,6 +50,8 @@ export type Crumb = {
   href?: string;
   /** For crumbs that step back INSIDE a page (closing a detail view) rather than navigating. */
   onClick?: () => void;
+  /** Says what the click DOES, on hover and to a screen reader ("Back to all restaurants"). */
+  title?: string;
 };
 
 export type CrumbSpec = {
@@ -70,6 +72,18 @@ export type CrumbSpec = {
    * behaviour kept, not a new idea.)
    */
   onSection?: () => void;
+  /** What tapping the section crumb does, in words — shown on hover, read out by a screen reader. */
+  sectionTitle?: string;
+  /**
+   * The section crumb names the place you are ALREADY at, so it must not pretend to be a way out.
+   *
+   * Access & permissions is the case: it is always scoped to one restaurant and there is no
+   * all-restaurants view of it, so `/aevinite/access` and `/aevinite/access?rid=…` are the same
+   * screen. As a link it moved the address bar and changed nothing on screen — measured
+   * 2026-09-13. A link that goes nowhere is worse than no link, so it renders as location text.
+   * (Printing is the opposite: its section crumb really does lead back to the overview.)
+   */
+  sectionIsHere?: boolean;
 };
 
 const EMPTY: CrumbSpec = {};
@@ -130,12 +144,17 @@ export function AdminCrumbs() {
   const chain = sectionChain(path);
   const crumbs: Crumb[] = [
     ...(spec.parents ?? []),
-    // onSection applies to the LAST section crumb — the section this page actually belongs to.
-    ...chain.map((s, i) => ({
-      label: s.label,
-      href: s.href,
-      ...(spec.onSection && i === chain.length - 1 ? { onClick: spec.onSection } : {}),
-    })),
+    // onSection / sectionIsHere apply to the LAST section crumb — the one this page belongs to.
+    ...chain.map((s, i) => {
+      const own = i === chain.length - 1;
+      if (own && spec.sectionIsHere) return { label: s.label };
+      return {
+        label: s.label,
+        href: s.href,
+        ...(own && spec.onSection ? { onClick: spec.onSection } : {}),
+        ...(own && spec.sectionTitle ? { title: spec.sectionTitle } : {}),
+      };
+    }),
     ...(spec.tail ?? []),
   ];
   // An address with no registered section (should not happen — every /aevinite page is in nav.ts)
@@ -157,9 +176,9 @@ export function AdminCrumbs() {
               // A step back INSIDE the page (closing a detail) is still written as an <a> with a
               // real href, so middle-click and "open in new tab" land somewhere sensible and the
               // gradient — which is keyed on `a` — reaches it.
-              <a href={c.href || path} onClick={(e) => { e.preventDefault(); c.onClick!(); }}>{c.label}</a>
+              <a href={c.href || path} title={c.title} onClick={(e) => { e.preventDefault(); c.onClick!(); }}>{c.label}</a>
             ) : (
-              <Link href={c.href!}>{c.label}</Link>
+              <Link href={c.href!} title={c.title}>{c.label}</Link>
             )}
           </Fragment>
         );
