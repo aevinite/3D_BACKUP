@@ -1228,3 +1228,40 @@ Nothing left over from this run.
         redirect; the two sidebar entries are gone, not hidden.
       Driven headless: 20 checks green at 1440 and 390px, no sideways scroll, 44px targets, no JS
       errors. Shots on the Desktop (`aevi-*.png`).
+
+- [x] **"It tells 4hr maybe it's been 3,4 day and all it only show time… I have not been able to
+      delete the queue which pend up till now even after restarting queue"** (2026-09-13, screenshot
+      of admin → Printing → *What has printed*). Four things, all merged and live on backup
+      (PRs #1315, #1316, #1321):
+      · **An age never stops at hours.** Four surfaces read "76 hours" for a printer dead since
+        Tuesday — admin board, manager's Printing card, manager's floor strip, kitchen 🖨 sheet.
+        They say "3 days" now (`waitedWords`/`waitedShort` in lib/printBoardWords.ts + one hand-kept
+        copy per panel file).
+      · **The log prints the DAY** — today a clock, then "Yesterday · 07:14 am", then
+        "11 Sept · 07:14 am", compared in Asia/Kolkata. The manager panel's copy was also on the
+        reader's own zone.
+      · **"Clear the N waiting tickets"** beside *Stop the queue*, plus a line saying restarting does
+        not empty it. Tickets are dismissed — never deleted, never called printed; each keeps its
+        reason ("taken out — never printed"). New verbs: `POST /api/admin/printing/queue/clear` and
+        (permission-gated) `POST /api/editor/printing/queue/clear`.
+      · **Found while checking around it:** a ticket taken out could COME BACK — a failure reported
+        by the screen/helper that had already claimed it requeued the row whatever state it was in.
+        Measured before/after through the real function; now only the claim is released, the reason
+        is kept, nobody is paged, and a cleared ticket that really printed is still logged as printed.
+
+- [x] **"You could able to see who is able to clear it out in access and permission, and do what is
+      left"** (2026-09-13). Both done, live on backup (PR #1321):
+      · **Access & permissions → Manager → Permission for manager → "May clear the printing queue"**
+        (`print_clear`), default OFF, its own row beside "May be the printer" and "May set the
+        printers up" — a third amount of trust, deliberately not folded into print_setup. With it on,
+        that person's manager panel (Settings → Printing) grows the same Clear button; the verb asks
+        `managerCan("print_clear")` server-side. **Left ON for French House on backup** so it can be
+        seen; every other restaurant, including the Aangan control, is at the OFF default.
+      · **The last three device-zone clocks** — admin → Live floor → "Cancelled at", the manager
+        panel's KOT card time, the waiter tablet's "New order · time" — are Asia/Kolkata now. All
+        three SEEN from a browser set to America/New_York: 07:14 am (not 09:44 pm), 04:34 pm (not
+        07:04 am) and "New order · 04:34 pm" (not 07:04 am), the last one on the live backup site.
+      · The whole thing was then driven END TO END ON THE LIVE SITE as the real manager: two aged
+        tickets seeded on French House → "Clear the 2 waiting tickets" → its confirm → waiting 0.
+        Every row seeded by the checks was deleted afterwards; the order borrowed for the tablet test
+        was put back to its own status.
