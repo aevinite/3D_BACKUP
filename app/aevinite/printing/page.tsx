@@ -51,6 +51,18 @@ type State = {
    *  is stored hashed, so a reloaded board can honestly know only this much, and that is enough:
    *  it says "a code is live, 6 min left" and offers a fresh one. */
   setupCode?: { live: boolean; expiresAt: string | null; oldFileAt: string | null };
+  /** "IS IT WORKING RIGHT NOW" — one row per paper, green or red, already worded (owner,
+   *  2026-09-14). Written by lib/printHelpers → paperStatus, which the manager panel and the owner
+   *  panel read too: this board and those two have to agree about whether a restaurant is printing,
+   *  and each screen working it out from `routes` for itself is how they disagreed the first time.
+   *  Optional so an older server's answer still parses — the block simply does not render. */
+  live?: {
+    kind: string; label: string; ok: boolean;
+    via: "computer" | "screen" | "off" | "none";
+    state: "LIVE" | "ASLEEP" | "OFF" | "SCREEN" | "WINDOW";
+    agent: string | null; printer: string | null; connected: boolean; secondsAgo: number | null;
+    words: string; canTest: boolean;
+  }[];
 };
 /** ONE ROW PER RESTAURANT (owner, 2026-08-27: "it will be messy when there will be too much
  *  restaurants… I could be able to differentiate all the restaurants"). */
@@ -317,6 +329,9 @@ const PANEL_GROUPS: [ string, string ][] = [
 ];
 
   const toast = useToast();
+  /** Which Test button has just answered — see the note on the button itself. Keyed per paper, so
+   *  pressing Bills does not put "Sent ✓" on the Kitchen slips button beside it. */
+  const [sent, setSent] = useState<Record<string, boolean>>({});
   const [rests, setRests] = useState<Rest[]>([]);
   const [rid, setRid] = useState("");
   const [st, setSt] = useState<State | null>(null);
@@ -540,8 +555,11 @@ const PANEL_GROUPS: [ string, string ][] = [
     setWay(computerOn || agents.length > 0 ? "computer" : "screen");
   }, [st, wayPicked, computerOn, agents.length]);
 
-  const post = async (path: string, body: Record<string, unknown>) => {
-    setBusy(path);
+  // `busyKey` exists because ONE path can be several buttons. `test` is now both the plain test page
+  // (one per printer) and the three document samples; keying the spinner on the path alone would put
+  // "Sending…" on all four at once, which reads as four prints on the way.
+  const post = async (path: string, body: Record<string, unknown>, busyKey?: string) => {
+    setBusy(busyKey || path);
     const r = await adminFetch<Record<string, unknown>>(`/api/admin/printing/${path}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rid, ...body }),
     });
@@ -954,6 +972,59 @@ const PANEL_GROUPS: [ string, string ][] = [
                 onClick={async () => { const d = await post("switch", { allowed: true }); if (d) void load(); }}>
                 Switch printing on
               </button>
+            </div>
+          ) : null}
+
+          {/* ── IS IT WORKING RIGHT NOW (owner, 2026-09-14) ─────────────────────────────────────
+              The same three rows the manager panel and the owner panel show, from the same function
+              (lib/printHelpers → paperStatus). It sits ABOVE the fieldset, like the "printing is
+              off" line, for the same reason: it is a STATEMENT, not a control, and dimming the one
+              block that says whether paper is coming out would be the wrong thing to grey.
+
+              The Test buttons print a real sample of that document through the real route on the
+              real paper — which is what a plain test page cannot do. Nothing is charged and nothing
+              is recorded as a sale; the rule is written out in full over lib/printDocs → testBand. */}
+          {st.printing.allowed && (st.live || []).length ? (
+            <div className="adm-card" style={{ marginTop: 0, marginBottom: 14 }}>
+              <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 8 }}>Is it working right now</div>
+              {(st.live || []).map((r) => (
+                <div key={r.kind} style={{ display: "flex", gap: 9, alignItems: "center", fontSize: 13, padding: "5px 0", flexWrap: "wrap" }}>
+                  <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", flex: "0 0 auto", background: r.ok ? "#30a46c" : "#e5484d" }} />
+                  <b style={{ minWidth: 118 }}>{r.label}</b>
+                  {/* THE WORD, NOT ONLY THE COLOUR — the same WCAG 1.4.1 reason the way-tabs carry
+                      ON/OFF beside their dot. */}
+                  <span className="hue-ink" style={{ fontWeight: 700, fontSize: 11.5, letterSpacing: ".06em", minWidth: 58 }}>
+                    {r.state}
+                  </span>
+                  <span className="adm-muted" style={{ flex: "1 1 150px", minWidth: 0 }}>{r.words}</span>
+                  {r.canTest ? (
+                    <button type="button" className="adm-btn" style={{ fontSize: 12, padding: "4px 11px", flex: "0 0 auto", minWidth: 78 }}
+                      disabled={busy === `sample:${r.kind}`}
+                      onClick={async () => {
+                        const d = await post("test", { sample: r.kind }, `sample:${r.kind}`);
+                        // SAY WHAT HAPPENED IN BOTH PLACES, for the reason the setup-code card
+                        // above already states in full (owner, 2026-09-13): a toast at the bottom of
+                        // a tall page can be off screen while the thumb is still up here on the
+                        // button. Measured on this very screen — the Test sent, the job queued, the
+                        // helper claimed it, and nothing on screen where the person was looking said
+                        // so. The toast still fires; the control that was pressed now answers too.
+                        if (d) {
+                          toast(String(d.note || "Sample sent."), "ok");
+                          setSent((v) => ({ ...v, [r.kind]: true }));
+                          setTimeout(() => setSent((v) => ({ ...v, [r.kind]: false })), 2200);
+                          void load();
+                        }
+                      }}>
+                      {busy === `sample:${r.kind}` ? "Sending\u2026" : sent[r.kind] ? "Sent \u2713" : "Test"}
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+              <p className="adm-muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
+                <b>Test</b> prints one real sample of that document — the real layout, on the real
+                paper — with a <b>TEST</b> band across the top and bottom. No bill number is used and
+                nothing is recorded as a sale.
+              </p>
             </div>
           ) : null}
 

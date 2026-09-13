@@ -1052,7 +1052,46 @@ function markOrderReady(orderId) {
 // demand — the safety net for a print-first kitchen when the printer jammed / ran out of paper
 // during the automatic print. It calls printKot directly (a local, no-network action), so it
 // does NOT touch the auto-print tracking (printedIds) and can be tapped as many times as needed.
-function reprintOrder(id) {
+// ── DOES A COMPUTER OWN THESE SLIPS? ASK, EVERY TIME (owner, 2026-09-14) ───────────────────────
+//
+// *"If the helper mode is set up and inside the helper mode, KOT is set up, for the KOT there
+// shouldn't be the pop up of print… in the kitchen panel or stuff like that, if the screen printing
+// is off, there shouldn't be a pop up."*
+//
+// A PLAIN fetch, never api() — the same reason the job claim below is one. api() hands a write to
+// the offline outbox, and a print replayed two hours later is a ticket for food that has already
+// gone out. Nothing here is worth replaying: if the send cannot happen now, printing HERE now is
+// the better answer, which is exactly what the caller does with `null`.
+//
+// Answers:
+//   · { queued }  — a computer took it. Nothing prints on this screen. This is the whole point.
+//   · { noRoute } — no computer owns kitchen slips. Print here, exactly as this screen always has.
+//   · null        — we could not ask (no signal, server down). Print here: paper beats silence.
+//   · throws      — the server REFUSED for a reason a person must read ("that KOT was cancelled").
+//                   Deliberately not swallowed: printing anyway would put food on a rail nobody
+//                   ordered, which is the one thing this whole path exists to prevent.
+async function askWhoPrints(body) {
+  try {
+    const r = await fetch("/api/kitchen" + ridQ("/print/send"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      credentials: "same-origin", body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => null);
+    if (r.ok) return j || { noRoute: true };
+    // A refusal the person must see. 5xx is the server having a bad moment, not a ruling — that
+    // falls through to the local print like a dead network, because a cook waiting for a ticket is
+    // not helped by a 502.
+    if (r.status >= 500) return null;
+    const e = new Error((j && j.error) || "Couldn't send that to the printer.");
+    e.refused = true;
+    throw e;
+  } catch (e) {
+    if (e && e.refused) throw e;
+    return null;                       // no reply at all → print here
+  }
+}
+
+async function reprintOrder(id) {
   const o = (state.orders || []).find((x) => x.id === id);
   if (!o) { toast("That order isn't on the board any more."); return; }
   const rows = (state.items || []).filter((it) => it.order_id === id); // empty for legacy orders → printKot falls back to o.items
@@ -1060,6 +1099,17 @@ function reprintOrder(id) {
   // once (printedIds). In a kitchen with no auto-print, this 🖨 button IS the first print, and
   // branding a first print "DUPLICATE" would be a lie on paper.
   const dup = printedIds.has(o.id);
+  // ── THE COMPUTER GETS FIRST REFUSAL, AND THERE IS NO WINDOW WHEN IT TAKES IT ─────────────────
+  let says = null;
+  try { says = await askWhoPrints({ orderId: id, reprint: dup }); }
+  catch (e) { toast(e.message, "err"); return; }
+  if (says && says.queued) {
+    // The ticket is a ROW now, and the row is what makes it come out exactly once — so this screen
+    // records nothing in printedIds. The helper brands the DUPLICATE, on the paper, from the flag
+    // sent above.
+    toast(says.note || ("Sent to " + (says.printer || "the printer")));
+    return;
+  }
   // Say what actually happened. This used to toast "Reprinting…" unconditionally while printKot
   // swallowed every failure, so a cook who tapped 🖨 after a paper jam was told the ticket was on
   // its way and no paper came out.
@@ -1079,13 +1129,22 @@ function reprintOrder(id) {
 // print document expects, and its own id is safe to keep in `printedIds`: the ids there are pruned
 // against the board's id set, and loadImpl() builds that set from BOTH orders and platform rows, so
 // a delivery ticket's id is never pruned while it is still on the board.
-function reprintPlatform(id) {
+async function reprintPlatform(id) {
   const p = (state.platform || []).find((x) => x.id === id);
   if (!p) { toast("That order isn't on the board any more."); return; }
   const meta = PLAT_META[p.source] || PLAT_META.other;
   const who = String(p.customer_name || "").trim();
   const label = meta.label + (who ? " · " + who : "");
   const dup = printedIds.has(p.id);
+  // A DELIVERY TICKET GOES TO THE COMPUTER TOO (owner, 2026-09-14). This was the last button on this
+  // screen still printing locally whatever the address book said — and a delivery ticket that comes
+  // out of a counter's bill roll instead of the kitchen's is a bag nobody packs. It travels as
+  // `aggId`, because a platform order has no `orders` row to hang a job on (lib/printDocs →
+  // kotHtmlForAggregator).
+  let says = null;
+  try { says = await askWhoPrints({ aggId: id, reprint: dup }); }
+  catch (e) { toast(e.message, "err"); return; }
+  if (says && says.queued) { toast(says.note || ("Sent to " + (says.printer || "the printer"))); return; }
   // The order shape printKot reads: kot_no, created_at and items all exist on an aggregator row.
   if (printKot(p, Array.isArray(p.items) ? p.items : [], state.restaurant, { reprint: dup, tableLabel: label })) {
     if (!dup) { printedIds.add(p.id); savePrintedIds(); }   // a manual FIRST print counts

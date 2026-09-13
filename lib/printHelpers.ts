@@ -23,6 +23,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { STALE_CLAIM_MS, wrote } from "@/lib/printQueue";
 import type { PaperSize } from "@/lib/printBoardWords";
+import { KIND_LABEL, KIND_OFF_LABEL } from "@/lib/printBoardWords";
 
 /** A helper that has not said hello inside this window is shown as not connected. It polls every
  *  ~2s, so 30s means "three quarters of a minute of silence" — long enough to survive a hiccup,
@@ -743,4 +744,98 @@ export function screenMayPrint(
   if (t.person && t.person !== (who.personId || "")) return { ok: false, why: "other_person" };
   if (t.device && t.device !== (who.deviceId || "")) return { ok: false, why: "other_device" };
   return { ok: true };
+}
+
+// ── "IS IT WORKING RIGHT NOW" — one answer, three papers, two panels ─────────────────────────
+//
+// Owner, 2026-09-14: *"on the manager panel and on the owner panel, when the helper is on, in the
+// settings of both panels you could able to see there is a printing thing and you could able to see
+// that everything is connected and everything is live. And if not connected, you could able to
+// see."*
+//
+// WHY IT IS HERE AND NOT ON EITHER SCREEN. Both boards already drew their own version of this
+// sentence out of `routes` + `agents`, and the two boards have drifted apart twice before (the
+// comment on the manager panel's formPrinting says so in as many words). Three papers × two panels
+// × "green or red" is six chances to disagree about whether a restaurant is printing. So the
+// sentence is written ONCE, here, beside `resolveTarget` — which is the function that actually
+// decides — and both panels render what they are handed.
+//
+// It answers for a SCREEN route and for OFF as well, not only for a computer. A board that lights up
+// green only when a helper exists would tell the commonest restaurant of all — the one whose kitchen
+// screen prints its slips and whose bills open a window — that nothing is working.
+export type PaperStatus = {
+  kind: RoutableKind;
+  /** "Kitchen slips" · "Bills" · "Banquet sheets" — KIND_LABEL, so one wording everywhere. */
+  label: string;
+  /** Green or red on the screen. TRUE means "this paper has somewhere to go and that somewhere is
+   *  answering"; a computer that has gone quiet is the one red that matters, because the tickets are
+   *  piling up behind it while everything else looks fine. A deliberate "Nobody" is not red — it is
+   *  a decision somebody made, and colouring a decision as a fault is crying wolf. */
+  ok: boolean;
+  via: "computer" | "screen" | "off" | "none";
+  agent: string | null;
+  printer: string | null;
+  connected: boolean;
+  secondsAgo: number | null;
+  /** The whole sentence, in the words a restaurant uses. */
+  words: string;
+  /** The ONE-WORD state, beside the coloured dot. It is here and not on each screen for the same
+   *  reason `words` is: three screens inventing their own word is three screens that can disagree.
+   *  And the word matters as much as the colour — about one man in twelve cannot tell this red from
+   *  this green (WCAG 1.4.1), and a dot on its own is not read by a screen reader at all.
+   *
+   *  "—" was the first version for a paper with nothing routed, and it was wrong on the screen: a
+   *  dash beside a green dot reads as "we don't know", when the truth is the ordinary, correct
+   *  behaviour for most restaurants — somebody presses Print and a window opens. It says WINDOW. */
+  state: "LIVE" | "ASLEEP" | "OFF" | "SCREEN" | "WINDOW";
+  /** May a REAL sample of this document be printed from the panel? Only when a computer owns it: a
+   *  screen route has no printer this server can name, and printing a sample into whatever the
+   *  browser defaults to proves nothing about the paper the restaurant actually uses. */
+  canTest: boolean;
+};
+
+export async function paperStatus(rid: string): Promise<PaperStatus[]> {
+  // ONE pair of reads for all three papers — the same reason targetsFor() exists. Asking per kind
+  // would be six reads on a screen that repaints every fifteen seconds.
+  const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
+  return ROUTABLE_KINDS.map((kind) => {
+    const t = resolveTarget(routes[kind], agents, kind);
+    const base = { kind, label: KIND_LABEL[kind] || kind };
+    if (t.kind === "computer") {
+      const mins = t.secondsAgo == null ? null : Math.round(t.secondsAgo / 60);
+      return {
+        ...base, via: "computer" as const, ok: t.connected,
+        state: (t.connected ? "LIVE" : "ASLEEP") as PaperStatus["state"],
+        agent: t.agent, printer: t.printer, connected: t.connected, secondsAgo: t.secondsAgo,
+        canTest: true,
+        words: t.connected
+          ? `${t.printer} — on ${t.agent}, answering now`
+          : `${t.printer} — ${t.agent} is not answering${mins == null ? "" : ` (last heard from ${mins < 60 ? mins + " min" : Math.round(mins / 60) + "h"} ago)`}. Anything for this printer is waiting, and prints the moment it is back.`,
+      };
+    }
+    if (t.kind === "off") {
+      return {
+        ...base, via: "off" as const, ok: true, state: "OFF" as const, agent: null, printer: null,
+        connected: false, secondsAgo: null, canTest: false,
+        words: KIND_OFF_LABEL[kind] || "Switched off on purpose.",
+      };
+    }
+    if (t.kind === "screen") {
+      const where = t.panel === "kitchen" ? "the kitchen screen"
+        : t.panel === "manager" ? "the manager screen"
+        : t.panel === "owner" ? "the owner screen" : "the waiter tablet";
+      return {
+        ...base, via: "screen" as const, ok: true, state: "SCREEN" as const, agent: null, printer: null,
+        connected: false, secondsAgo: null, canTest: false,
+        words: t.personName ? `${where} — ${t.personName}'s, and nobody else's` : `${where}, on whatever printer it is set to`,
+      };
+    }
+    // NOTHING IS ROUTED. For bills and banquet sheets that is the ordinary, correct answer for most
+    // restaurants — a window opens when somebody presses Print — so it is not a fault and not red.
+    return {
+      ...base, via: "none" as const, ok: true, state: "WINDOW" as const, agent: null, printer: null,
+      connected: false, secondsAgo: null, canTest: false,
+      words: "Whoever presses Print gets the window — no printer is set up for this one.",
+    };
+  });
 }

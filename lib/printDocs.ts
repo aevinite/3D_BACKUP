@@ -88,6 +88,53 @@ export async function kotHtmlForOrder(rid: string, orderId: string, reprint: boo
 }
 
 /**
+ * A kitchen ticket for a DELIVERY / PARCEL order — the other half of the 🖨 on the kitchen board.
+ *
+ * A platform order is not an `orders` row at all: it lives in `aggregator_orders` (mig 209), so it
+ * has no table and cannot carry an `order_id` on its print job. It is addressed by `payload.aggId`
+ * instead, and it is a KOT in every other respect — the panel prints it through the same
+ * `printKot()` with a different label, which is exactly what this mirrors.
+ *
+ * WHY IT EXISTS AT ALL (owner, 2026-09-14): the 🖨 on a delivery ticket was the last button on the
+ * kitchen screen that printed locally whatever the address book said, so a restaurant running the
+ * helper still got a print box — and the ticket came out of whatever printer that screen defaults
+ * to, which at a counter is usually the bill roll, not the kitchen's.
+ *
+ * The label is the CHANNEL plus the customer's name when the platform sent one — "ZOMATO · Ramesh"
+ * — because that is how a cook matches paper to bag. Held in step with the kitchen panel's own
+ * PLAT_META by verify:print-helper, the same way kotTableLabel is.
+ */
+const PLAT_LABEL: Record<string, string> = {
+  zomato: "ZOMATO", swiggy: "SWIGGY", takeaway: "WEBSITE", parcel: "PARCEL", other: "PLATFORM",
+};
+export async function kotHtmlForAggregator(rid: string, aggId: string, reprint: boolean): Promise<string | null> {
+  const [aggQ, setQ, restQ] = await Promise.all([
+    sb.from("aggregator_orders").select("id, source, customer_name, items, kot_no, created_at, status")
+      .eq("id", aggId).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select(IDENTITY_COLUMNS).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("restaurants").select("id, name").eq("id", rid).maybeSingle(),
+  ]);
+  const agg = aggQ.data as Record<string, unknown> | null;
+  // Same rule as an order that went away: a cancelled delivery is not cooked because a ticket was
+  // already in the basket.
+  if (!agg || agg.status === "cancelled") return null;
+  const settings = (setQ.data || {}) as Record<string, unknown>;
+  const who = String(agg.customer_name || "").trim();
+  const label = (PLAT_LABEL[String(agg.source || "other")] || PLAT_LABEL.other) + (who ? " \u00b7 " + who : "");
+  return BILLDOC.kotDocHtml({
+    title: "KOT " + String(agg.kot_no ?? "\u2014"),
+    rname: restName(settings, (restQ.data || {}) as Record<string, unknown>),
+    head: "KITCHEN TICKET",
+    kot: (agg.kot_no as number | null) ?? "\u2014",
+    tableLabel: label,
+    when: BILLDOC.kotWhen(agg.created_at as string),
+    lines: Array.isArray(agg.items) ? agg.items as Record<string, unknown>[] : [],
+    allergies: [],
+    reprint: !!reprint,
+  });
+}
+
+/**
  * A bill for one table session — the same document the manager panel opens in its print window,
  * assembled the same way (BILLDOC.billData does the money, the rows and the tax; nothing here
  * re-derives a figure).
@@ -251,4 +298,195 @@ export async function banquetHtmlForBill(rid: string, billId: string): Promise<s
     settings: (setQ.data || {}) as Record<string, unknown>,
     restaurant: (restQ.data || {}) as Record<string, unknown>,
   });
+}
+
+// ── THE SAMPLE DOCUMENTS — "print one and let me SEE that it comes out right" ─────────────────
+//
+// Owner, 2026-09-14: *"they don't have to print a test KOT. They can also test also from there
+// that print a KOT, print a bill, or print a banquet bill."*
+//
+// `testHtml()` above proves a PRINTER is alive. It cannot prove the thing a restaurant actually
+// worries about: that the BILL fits the roll, that the banquet sheet came out A4 and not A5, that
+// the kitchen ticket is not chopped down its right-hand edge. Those are layout questions, and only
+// the real template can answer them — which is why these go through `BILLDOC`, the same file every
+// screen and every helper prints from, rather than a hand-drawn imitation.
+//
+// ⚠️ AND THEY MAY NEVER BE MISTAKEN FOR A SALE. The comment on testHtml() states the rule in one
+// line — *"nothing that looks like a sale should ever come out of a printer without being one"* —
+// and a sample bill is exactly the document that could break it. Three things keep it honest, and
+// all three are load-bearing:
+//   · a band across the top AND the bottom saying so, drawn by testBand() below,
+//   · NO number: the sample session carries no bill_no and no invoice_no, so nothing is minted, no
+//     series moves and no gap appears (docs/NUMBERING.md),
+//   · nothing is written anywhere — no session, no order, no banquet_bills row, no audit line
+//     claiming a sale. The only record is `print_test` in the diary, which is what it is.
+// This is the compliance rule in docs/COMPLIANCE-GUARDRAILS.md read from the other side: a sale may
+// never disappear, and a NON-sale may never appear. Do not remove the band, do not give a sample a
+// number, and do not build the sample out of a real customer's row.
+
+/** The band. Injected AFTER the document is built, so billdoc.js never learns these exist — a
+ *  `test` flag inside the template is one `if` away from a real bill carrying it, and R37 (no
+ *  "Reprint · Duplicate" band on a guest's bill) is the record of how much he cares about that. */
+function testBand(html: string): string {
+  const band = '<div style="border:2px solid #000;text-align:center;font-weight:700;font-size:13px;'
+    + 'letter-spacing:1px;padding:4px 2px;margin:0 0 7px;font-family:ui-monospace,monospace">'
+    + "TEST PRINT — NOT A BILL<br/><span style=\"font-weight:400;font-size:11px;letter-spacing:0\">"
+    + "Nothing was ordered, charged or recorded.</span></div>";
+  const foot = '<div style="border-top:1px solid #000;text-align:center;font-size:11px;'
+    + 'padding-top:5px;margin-top:7px;font-family:ui-monospace,monospace">'
+    + "End of test print. If this page looks right, the printer is set up correctly.</div>";
+  // ── WHERE IT GOES, AND WHY IT IS NOT SIMPLY "AT THE TOP" ──────────────────────────────────
+  //
+  // THE BILL HAS NO <body> TAG. billdoc.js emits the kitchen ticket and the banquet sheet as full
+  // documents (`<!doctype html><html><head>…<body>`) and the BILL as a fragment — `<!doctype html>`,
+  // a `<title>`, a `<style>`, and then content, with no html/head/body element anywhere. My first
+  // version matched `<body…>` and fell back to `band + html`, which put the band IN FRONT OF THE
+  // DOCTYPE. A browser that meets content before the doctype drops into quirks mode and ignores it,
+  // and the printed page came out essentially blank: 72 bytes of raster where the same bill is
+  // 24,000.
+  //
+  // Nothing in the text told me. Every string assertion passed — "TEST PRINT" really was in the
+  // file — because grep does not care where. It took rendering the page to a real print head and
+  // LOOKING at it. (`withPaper` above carries the same lesson from 2026-08-26 in its own words: the
+  // bill has no `</head>` either, and the rule it added had to go at the very END for the same
+  // reason.)
+  //
+  // So: after `<body>` when there is one, else after the LAST `</style>` — which on a
+  // doctype-title-style fragment is exactly the point where content begins — and only if neither
+  // exists, in front, which at least prints something a person can see is a test.
+  const bodyTag = html.match(/<body[^>]*>/i);
+  let withHead;
+  if (bodyTag) withHead = html.replace(bodyTag[0], bodyTag[0] + band);
+  else {
+    const lastStyle = html.lastIndexOf("</style>");
+    withHead = lastStyle >= 0
+      ? html.slice(0, lastStyle + 8) + band + html.slice(lastStyle + 8)
+      : band + html;
+  }
+  return withHead.includes("</body>") ? withHead.replace("</body>", foot + "</body>") : withHead + foot;
+}
+
+/** Sample dishes. Deliberately awkward on purpose: a long name that must wrap rather than clip, a
+ *  quantity above one, a per-line note and a shared note — the four things a narrow roll gets
+ *  wrong. A test made of "Item 1 ×1" proves nothing about the paper it came out on. */
+const SAMPLE_LINES = [
+  { title: "Paneer Tikka Masala", qty: 2, price: 320, note: "less spicy" },
+  { title: "Butter Naan", qty: 4, price: 60 },
+  { title: "Hyderabadi Dum Biryani (Family)", qty: 1, price: 540 },
+  { title: "Masala Chaas", qty: 3, price: 45 },
+];
+
+/** A sample KITCHEN TICKET. Same builder as a real one, and NOT branded DUPLICATE — a test that
+ *  came out stamped "reprint" would teach a cook the wrong thing about the banner that matters. */
+export async function sampleKotHtml(rid: string): Promise<string> {
+  const [setQ, restQ] = await Promise.all([
+    sb.from("settings").select(IDENTITY_COLUMNS).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("restaurants").select("id, name").eq("id", rid).maybeSingle(),
+  ]);
+  const settings = (setQ.data || {}) as Record<string, unknown>;
+  return testBand(BILLDOC.kotDocHtml({
+    title: "TEST KOT",
+    rname: restName(settings, (restQ.data || {}) as Record<string, unknown>),
+    head: "KITCHEN TICKET",
+    kot: "TEST",
+    tableLabel: "T—",
+    when: BILLDOC.kotWhen(new Date().toISOString()),
+    lines: SAMPLE_LINES,
+    allergies: ["peanuts"],
+    reprint: false,
+  }));
+}
+
+/** A sample BILL — the restaurant's own name, logo settings, tax model, invoice prefix and paper,
+ *  with sample dishes and NO number. `billMoney` does the arithmetic exactly as it does on a real
+ *  bill, so the tax rows a restaurant is set up for are the tax rows that come out. */
+export async function sampleBillHtml(rid: string): Promise<string> {
+  const [setQ, restQ] = await Promise.all([
+    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("restaurants").select("*").eq("id", rid).maybeSingle(),
+  ]);
+  const settings = (setQ.data || {}) as Record<string, unknown>;
+  // ── THE ROWS AND THE TOTAL MUST RECONCILE TO THE RUPEE ────────────────────────────────────
+  // Found 2026-09-14 by printing one and looking at it: the paper listed 640, 240, 540 and 135 and
+  // then said **Subtotal ₹0 · TOTAL ₹0**, under the words TAX INVOICE. billMoney() takes the money
+  // from the ORDER ROW's own columns — `subtotal`, `taxable_base`, `discount` — and this synthetic
+  // order carried none of them, so every figure came out zero while the line rendering, which reads
+  // `items`, was perfectly right.
+  //
+  // It is not a cosmetic fault on a test page. billData's own comment states the rule: a bill's rows
+  // and its total "may not sit one filter apart from disagreeing (COMPLIANCE §3, reconcile to the
+  // rupee)" — and the whole point of this sample is that a restaurant can SEE what its bill looks
+  // like. One that cannot add up teaches them the product cannot add up.
+  //
+  // `tax_rate` is deliberately NOT set: leaving it off falls through to the restaurant's own tax
+  // model, which is exactly what the sample is for — it proves the tax rows THEY are set up for.
+  const subtotal = SAMPLE_LINES.reduce((n, l) => n + l.qty * l.price, 0);
+  const order = {
+    id: "sample", status: "served", items: SAMPLE_LINES,
+    subtotal, taxable_base: subtotal, nontax_amount: 0, discount: 0,
+    created_at: new Date().toISOString(), deleted_at: null,
+  } as Record<string, unknown>;
+  return testBand(BILLDOC.billDocHtml({
+    ...BILLDOC.billData({
+      settings, restaurant: (restQ.data || {}) as Record<string, unknown>,
+      orders: [order],
+      // NO bill_no, NO invoice_no, NO invoice_at — the three fields that would make this look like
+      // an issued document. billData prints "—" where the number goes, and the band above says why.
+      session: { bill_no: null, invoice_no: null, invoice_at: null },
+      tableDisp: "T—",
+      autoPrint: false,
+    }),
+    noBar: true,
+  }));
+}
+
+/** A sample BANQUET SHEET — the big-paper one, which is the whole reason this test exists: an A4
+ *  sheet coming out of an A5 tray is invisible on every screen and obvious on the paper. Every
+ *  figure is handed in frozen, the same shape a real banquet_bills row carries. */
+export async function sampleBanquetHtml(rid: string): Promise<string> {
+  const [setQ, restQ] = await Promise.all([
+    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}, ${BANQUET_PAPER_COLUMNS}`)
+      .eq("restaurant_id", rid).maybeSingle(),
+    sb.from("restaurants").select("*").eq("id", rid).maybeSingle(),
+  ]);
+  const lines = SAMPLE_LINES.map((l) => ({ title: l.title, qty: l.qty, price: l.price }));
+  const subtotal = lines.reduce((s, l) => s + l.qty * l.price, 0);
+  // ── THE SAMPLE IS TAXED AT *THIS RESTAURANT'S* BANQUET RATE ────────────────────────────────
+  // A banquet sheet carries FROZEN figures (mig 239): the tax it prints is the tax stored on the
+  // bill row, not a rate recomputed at print time — which is exactly right for a real sheet issued
+  // months ago, and leaves a sample with nothing to show unless it is filled in here. Left empty it
+  // printed "GST 0%" on a restaurant that charges 5%, which is a worse lie on a sample than no tax
+  // row at all: the person is looking at this precisely to check their own setup.
+  //
+  // bqTaxModel() is the same function the real sheet and the Banquet screen use, and it already
+  // knows the fall-back — a restaurant with no banquet-specific components is taxed at its ordinary
+  // rate. One source, one answer.
+  const bqTm = BILLDOC.bqTaxModel((setQ.data || {}) as Record<string, unknown>) as
+    { rate: number; pct: number; components: { label: string; rate: number }[] };
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const taxLines = (bqTm.components || []).map((c) => ({
+    label: c.label, rate: c.rate, amt: round2(subtotal * (c.rate / 100)),
+  }));
+  const taxAmt = round2(taxLines.reduce((a, c) => a + c.amt, 0));
+  const bill = {
+    bill_no: null, issued_at: new Date().toISOString(),
+    cust_name: "Sample Customer", cust_person: "—", cust_phone: "", cust_addr: "", cust_gstin: "",
+    func: "Sample function", hall: "Main hall", pax: 80, focus: "",
+    fn_date: new Date().toISOString().slice(0, 10), fn_from: "19:00", fn_to: "23:00",
+    subtotal, discount: 0, tax: taxAmt, total: round2(subtotal + taxAmt), received: 0, advances: [],
+    tax_lines: taxLines, remark: "This sheet is a test — nothing was booked.",
+    prepared_by: "Printer test", table_number: null,
+  } as Record<string, unknown>;
+  return testBand(BILLDOC.banquetDocHtml({
+    bill, lines,
+    settings: (setQ.data || {}) as Record<string, unknown>,
+    restaurant: (restQ.data || {}) as Record<string, unknown>,
+  }));
+}
+
+/** One door for the three of them, so a caller never has to know which builder is which. */
+export async function sampleHtmlFor(rid: string, kind: "kot" | "bill" | "banquet"): Promise<string> {
+  if (kind === "kot") return sampleKotHtml(rid);
+  if (kind === "bill") return sampleBillHtml(rid);
+  return sampleBanquetHtml(rid);
 }

@@ -457,6 +457,101 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
+    // ── print/send — "does a COMPUTER own this ticket?" (owner, 2026-09-14) ──────────────────────
+    //
+    // *"If the helper mode is set up and inside the helper mode, KOT is set up, for the KOT there
+    // shouldn't be the pop up of print… in the kitchen panel or stuff like that, if the screen
+    // printing is off, there shouldn't be a pop up."*
+    //
+    // The 🖨 button on every ticket called the local print straight out, whatever the address book
+    // said — the one door on this screen that never asked. So a restaurant running the helper still
+    // got Chrome's print box the moment a cook tapped it, and a second copy of the ticket came out of
+    // whatever printer that screen happens to default to. Now the tap asks here first.
+    //
+    // `noRoute` is the normal answer for the commonest restaurant of all, the one with no helper: the
+    // panel then prints locally exactly as it always has, instantly, with no round trip that matters.
+    // It is the same shape and the same word as the manager and tablet doors, on purpose — one bill,
+    // one ticket, one road (docs/PRINT-HELPER.md).
+    //
+    // ASKED EVERY TIME, never cached. The panel DOES carry `state.helper`, refreshed on every board
+    // read — but the manager panel learned on 2026-08-29 what a cached "who owns this" answer costs:
+    // a fresh tab, a board read that has not landed yet, and the window opens over somebody's work
+    // while the helper sits idle. One small request per manual tap is cheaper than one wrong window.
+    if (a === "print" && b === "send") {
+      const orderId = String((body as Record<string, unknown>)?.orderId || (body as Record<string, unknown>)?.order_id || "");
+      const aggId = String((body as Record<string, unknown>)?.aggId || "");
+      if (!orderId && !aggId) return err("Which kitchen slip?", 400);
+      const own = await helperFor(rid, "kot");
+      if (!own.owned) return ok({ noRoute: true });
+      // ── THE ADMIN LOOKING IS NOT THE RESTAURANT PRINTING (owner, 2026-08-20) ──────────────────
+      // `g.user` is null when this is the Aevidine console viewing a restaurant's kitchen board.
+      // Their printers are theirs: nothing comes out of a paying client's roll because we opened
+      // their screen. This door was BORN without the rule on 2026-09-14 — the manager's twin got it
+      // in August and the tablet's a day later, and the check that enforces it was looking at those
+      // two files only, so a third panel learning to send paper joined the fault and not the guard.
+      // Before this change the 🖨 printed on OUR screen, which is exactly what `adminView` restores:
+      // the panel falls through to its local print. `force` is the deliberate way to help them
+      // ("their printer was stuck, send it again"), and it is audited under its own action.
+      if (!g.user && (body as Record<string, unknown>)?.force !== true) {
+        return ok({ adminView: true, printer: own.printer, agent: own.agent });
+      }
+      // ── A DELIVERY / PARCEL TICKET (mig 209) ──────────────────────────────────────────────────
+      // It is a kitchen slip with no table and no `orders` row, so it cannot carry an order_id — the
+      // column is a foreign key. It travels as `payload.aggId` and the helper's document endpoint
+      // draws it with kotHtmlForAggregator. Same guard: a cancelled delivery is not cooked because a
+      // ticket was already in the basket.
+      if (aggId) {
+        const p = must(await sb.from("aggregator_orders").select("id, status, kot_no, source")
+          .eq("id", aggId).eq("restaurant_id", rid).maybeSingle()) as
+          { id: string; status?: string; kot_no?: number | null; source?: string } | null;
+        if (!p) return err("That delivery order isn't on this restaurant's board any more.", 404);
+        if (p.status === "cancelled") return err("That order was cancelled — there is nothing to reprint.");
+        const insP = await sb.from("print_jobs").insert({
+          restaurant_id: rid, kind: "kot", payload: { aggId },
+          reprint: (body as Record<string, unknown>)?.reprint !== false,
+          requested_by: (g.user?.name || g.user?.username || "kitchen").slice(0, 80),
+        }).select("id").maybeSingle();
+        if (insP.error || !insP.data) return err("Could not send that to the printer.", 500);
+        await logAction("kitchen", g.user ? "kot_reprint_sent" : "print_sent_by_admin", {
+          ...adminMark, device_id: dev, restaurant_id: rid,
+          detail: `${String(p.source || "platform").toUpperCase()} KOT #${p.kot_no ?? "—"} sent to ${own.printer} on ${own.agent}`,
+        });
+        return ok({
+          queued: true, id: (insP.data as { id: string }).id,
+          printer: own.printer, agent: own.agent, connected: !!own.connected,
+          note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back`,
+        });
+      }
+      const o = must(await sb.from("orders").select("id, status, kot_no, table_number, deleted_at")
+        .eq("id", orderId).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; status?: string; kot_no?: number | null; table_number?: unknown; deleted_at?: string | null } | null;
+      if (!o) return err("That KOT isn't on this restaurant's board any more.", 404);
+      if (o.status === "cancelled") return err("That KOT was cancelled — there is nothing to reprint.");
+      if (o.deleted_at) return err("That KOT was deleted — it can't be sent to the printer.");
+      // A durable row with NO computer named: `claimNext` applies the address book at CLAIM time, so
+      // a ticket follows the kitchen-slip line even if it is re-pointed in the seconds between the
+      // tap and the paper. Same insert as the manager's "Reprint in the kitchen" since mig 269.
+      const ins = await sb.from("print_jobs").insert({
+        restaurant_id: rid, kind: "kot", order_id: orderId,
+        // The cook's screen is the one that knows whether this ticket has already been on paper, so
+        // it is the caller that decides the DUPLICATE banner (owner, 2026-08-04) — a first print
+        // branded "duplicate" is a lie on paper, and a second one that isn't gets food cooked twice.
+        reprint: (body as Record<string, unknown>)?.reprint !== false,
+        requested_by: (g.user?.name || g.user?.username || "kitchen").slice(0, 80),
+      }).select("id").maybeSingle();
+      if (ins.error || !ins.data) return err("Could not send that to the printer.", 500);
+      await logAction("kitchen", g.user ? "kot_reprint_sent" : "print_sent_by_admin", {
+        ...adminMark, order_id: orderId, device_id: dev, restaurant_id: rid,
+        table_number: o.table_number != null ? String(o.table_number) : null,
+        detail: `KOT #${o.kot_no ?? "—"} sent to ${own.printer} on ${own.agent}`,
+      });
+      return ok({
+        queued: true, id: (ins.data as { id: string }).id,
+        printer: own.printer, agent: own.agent, connected: !!own.connected,
+        note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back`,
+      });
+    }
+
     // orders/:id/accept — everything not served → preparing
     if (a === "orders" && c === "accept") {
       // .eq(restaurant_id, rid) on EVERY by-id write: sb is the service-role client (RLS

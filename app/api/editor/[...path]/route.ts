@@ -55,8 +55,11 @@ import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint 
 // the admin console draws, narrowed to this computer — same file, same four steps, same words.
 import {
   agentForDevice, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
-  panelForRole, waitingCount,
+  panelForRole, waitingCount, type RoutableKind,
 } from "@/lib/printHelpers";
+// KIND_LABEL — "Kitchen slips" / "Bills" / "Banquet sheets". One wording for the three papers, so a
+// diary line reads the same as the board the person pressed the button on.
+import { KIND_LABEL } from "@/lib/printBoardWords";
 // The ten-minute setup code a computer types in (mig 380) — the ONE way a machine joins this
 // restaurant's printing now that the Allow page is gone.
 import { issueSetupCode } from "@/lib/printSetupCode";
@@ -2946,7 +2949,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // keeps every restaurant working, including the ones that install nothing.
     if (a === "print" && b === "send") {
       const kind = String((body as Record<string, unknown>)?.kind || "");
-      if (kind !== "bill" && kind !== "banquet") return err("Only a bill or a banquet sheet can be sent this way.", 400);
+      // ── AND KITCHEN SLIPS TOO, SINCE 2026-09-14 ───────────────────────────────────────────────
+      // Owner: *"if the helper mode is set up and inside the helper mode, KOT is set up, for the KOT
+      // there shouldn't be the pop up of print… in the kitchen panel or stuff like that, if the
+      // screen printing is off, there shouldn't be a pop up."*
+      //
+      // The AUTOMATIC ticket already obeyed that — a screen offered nothing once a computer owned the
+      // slips (screenMayPrint). The three 🖨 buttons a PERSON presses did not: they called the local
+      // print straight out, so a restaurant with a perfectly good helper still got Chrome's print box
+      // the moment a cook tapped 🖨 on a ticket. That is the last door the mode could come apart at.
+      if (kind !== "bill" && kind !== "banquet" && kind !== "kot") {
+        return err("Only a kitchen slip, a bill or a banquet sheet can be sent this way.", 400);
+      }
       const own = await helperFor(rid, kind);
       if (!own.owned) return ok({ noRoute: true });
       // ── THE ADMIN LOOKING IS NOT THE RESTAURANT PRINTING (owner, 2026-08-20) ──────────────────
@@ -2959,6 +2973,54 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!g.user && (body as Record<string, unknown>)?.force !== true) {
         return ok({ adminView: true, printer: own.printer, agent: own.agent });
       }
+      // ── A KITCHEN SLIP IS A DIFFERENT ROW, AND DELIBERATELY SO ────────────────────────────────
+      // It is inserted the way the automatic ticket and "Reprint in the kitchen" already are — an
+      // ORDER ID and no computer named — rather than through queueJob(), which addresses a job at one
+      // machine. Leaving the address off is what lets `claimNext` apply the address book AT CLAIM
+      // TIME: if the kitchen-slip line is re-pointed at another printer in the seconds between the
+      // tap and the paper, the ticket follows it. That is also why a cancelled or deleted order is
+      // refused here in the same words the reprint endpoint has used since 2026-08-11 — one rule, and
+      // a cook can never be handed food nobody ordered.
+      if (kind === "kot") {
+        const orderId = String((body as Record<string, unknown>)?.orderId || (body as Record<string, unknown>)?.order_id || "");
+        // ── ASKING IS NOT PRINTING ────────────────────────────────────────────────────────────
+        // No order id = the reprint sheet opening and asking "who owns the kitchen slips?", so it
+        // knows whether to draw the "print here instead" escape hatch at all. Nothing is queued and
+        // nothing is written. It exists because the panel's OWN copy of that answer comes from a
+        // poll (/print-jobs/pending) that may not have landed yet — a fresh tab, the Bills tab
+        // opened from a link — and 2026-08-29 is the day this panel learned what a stale copy of
+        // this particular answer costs: a print window over somebody's work while the helper idles.
+        if (!orderId) {
+          return ok({ printer: own.printer, agent: own.agent, connected: !!own.connected });
+        }
+        const o = (await sb.from("orders").select("id, status, kot_no, table_number, deleted_at")
+          .eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; status?: string; kot_no?: number | null; table_number?: unknown; deleted_at?: string | null } | null;
+        if (!o) return err("That KOT isn't on this restaurant's board any more.", 404);
+        if (o.status === "cancelled") return err("That KOT was cancelled — there is nothing to reprint.");
+        if (o.deleted_at) return err("That KOT was deleted — it can't be sent to the printer.");
+        const ins = await sb.from("print_jobs").insert({
+          restaurant_id: rid, kind: "kot", order_id: orderId,
+          // The DUPLICATE banner is the caller's to decide, because only the screen knows whether
+          // this ticket has already been on paper — the kitchen's 🖨 brands a second tap, the
+          // manager's reprint picker always does (owner, 2026-08-04).
+          reprint: (body as Record<string, unknown>)?.reprint !== false,
+          requested_by: (g.user?.name || g.user?.username || "manager").slice(0, 80),
+        }).select("id").maybeSingle();
+        if (ins.error || !ins.data) return err("Could not send that to the printer.", 500);
+        await log("editor", "kot_reprint_sent", {
+          order_id: orderId, restaurant_id: rid, device_id: dev,
+          table_number: o.table_number != null ? String(o.table_number) : null,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `KOT #${o.kot_no ?? "—"} sent to ${own.printer} on ${own.agent}`,
+        });
+        return ok({
+          queued: true, id: (ins.data as { id: string }).id,
+          printer: own.printer, agent: own.agent, connected: !!own.connected,
+          note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back`,
+        });
+      }
+
       const payload: Record<string, unknown> = {};
       // What the diary line will call this piece of paper, filled in by whichever branch below
       // resolves it — so the log says "bill #218 for table 6", not just "bill".
@@ -5300,6 +5362,41 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
               : who === "screen" ? "this screen" : "nobody"}`,
         });
         return ok({ routes: saved.routes });
+      }
+
+      // ── A REAL SAMPLE OF A REAL DOCUMENT, ON THE ROUTE THAT PRINTS IT (owner, 2026-09-14) ─────
+      //
+      // *"They can also test also from there that print a KOT, print a bill, or print a banquet
+      // bill."*
+      //
+      // The plain test page below proves a PRINTER is alive. It cannot answer the question a
+      // restaurant actually has — does the BILL fit this roll, did the banquet sheet come out A4 or
+      // A5, is the kitchen slip chopped down its right edge. Only the real template on the real
+      // route can, so this queues a REAL job of that kind: same address book, same paper size, same
+      // builder. The only difference is `sample: true`, which the helper's document endpoint reads.
+      //
+      // It refuses unless a COMPUTER owns that paper, and that is not a technicality: a screen route
+      // has no printer this server can name, so a "sample" would go to whatever the browser happens
+      // to default to and prove nothing about the paper the restaurant uses.
+      //
+      // Nothing is minted and nothing is recorded as a sale — see the rule written out in full over
+      // lib/printDocs → testBand. The only record is this diary line.
+      if (b === "test" && isRoutableKind((body as Record<string, unknown>)?.sample)) {
+        const sk = (body as Record<string, unknown>).sample as RoutableKind;
+        const own = await helperFor(rid, sk);
+        if (!own.owned) return err("No computer is set to print that yet — choose a printer for it first.", 409);
+        const q = await queueJob(rid, sk, { sample: true },
+          { requestedBy: `sample ${sk} · ${g.user?.name || g.user?.username || "manager"}`.slice(0, 80) });
+        if ("error" in q) return err("Could not send that sample to the printer.", 500);
+        await logAction("editor", "print_test", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `sample ${KIND_LABEL[sk] || sk} to ${own.printer} on ${own.agent}`,
+        });
+        return ok({ queued: true, printer: own.printer, agent: own.agent, connected: !!own.connected,
+          note: own.connected
+            ? `Sample sent to ${own.printer}.`
+            : `Saved — the sample prints at ${own.printer} as soon as ${own.agent} is back.` });
       }
 
       // ── a test page on one of THIS computer's printers ────────────────────────────────────────

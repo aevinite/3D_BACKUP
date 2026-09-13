@@ -164,9 +164,27 @@ check(/from \$\{esc\(hlp\.agent\)\}|from " \+ esc\(hlp\.agent\)|esc\(hlp\.printe
   check(/Where your paper comes out right now/.test(ownerPage) && /kotHelper/.test(ownerPage),
     "…and the owner panel shows it, with the old screen-station line yielding to it (two answers to one question is worse than none)",
     "the owner panel no longer shows which computer prints, or contradicts itself by still naming a screen");
-  check(/print" && b === "send"/.test(tabletRoute) && /helperFor\(rid, "bill"\)/.test(tabletRoute),
+  // `helperFor(rid, kind)` since 2026-09-14 — the tablet's door now carries kitchen slips as well as
+  // bills, so pinning this to the literal string "bill" would fail for a change that made the two
+  // panels MORE alike, which is the fault a guard pinned to a code shape always has. What it must
+  // still prove is the thing the check is named after: the tablet asks the shared helperFor() the
+  // same way the manager does, and does not decide for itself.
+  check(/print" && b === "send"/.test(tabletRoute) && /helperFor\(rid, (?:"bill"|kind)\)/.test(tabletRoute)
+        && /kind !== "bill"/.test(tabletRoute),
     "a WAITER's bill takes the same road as a manager's",
     "the tablet prints a bill its own way again — the same bill must not behave differently depending on which panel issued it");
+  // ── AND A KITCHEN SLIP TAKES IT TOO (owner, 2026-09-14) ──────────────────────────────────────
+  // *"If the helper mode is set up… there shouldn't be the pop up of print."* The 🖨 sheet on the
+  // handheld offered "Print here, on this device" unconditionally — a print box on a tablet that
+  // usually has no printer and that nobody is watching, i.e. a LOST ticket from the button meant to
+  // rescue one. Both halves are asserted: the server door exists, and the sheet asks it before it
+  // draws the escape hatch.
+  check(/kind === "kot"/.test(code(tabletRoute)) && /kind !== "bill" && kind !== "kot"/.test(code(tabletRoute)),
+    "…and so does a WAITER's kitchen slip — the handheld asks who owns the paper instead of printing it here",
+    "the tablet can no longer send a kitchen slip to the computer that owns it, so its 🖨 is a print box again");
+  check(/print\/send", \{ kind: "kot" \}/.test(code(tabletPanel)) && /hatch \? hereBtn : ""/.test(code(tabletPanel)),
+    "…and 'Print here' only appears on the handheld when the computer is NOT answering",
+    "the waiter tablet offers 'print here' beside a working helper again — two printers, one ticket");
   check(/print\/send/.test(tabletPanel) && /openBillWindow/.test(tabletPanel) && !/sessionId: sid\b/.test(code(tabletPanel)),
     "…through the shared door, with its own window still the fallback",
     "the tablet's bill send is gone, or reaches for `sid` again — a variable from another function, which parses and throws the moment a waiter presses Print");
@@ -214,7 +232,11 @@ check(/from \$\{esc\(hlp\.agent\)\}|from " \+ esc\(hlp\.agent\)|esc\(hlp\.printe
 // Print put a sheet out at their shop, with no `print_sent_by_admin` row to trace it by. The guard
 // was green throughout, because it was only ever looking at one of the two files. So the list is
 // what is checked now: a THIRD panel that learns to send paper joins this array or fails here.
-for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", troute]]) {
+// …AND THE KITCHEN BOARD JOINED THE LIST ON 2026-09-14, the day it learned to send paper. It was
+// born without the rule, exactly as the tablet was — which is the whole reason this loop is a LIST
+// and not two hand-written checks. A third panel that learns to send paper joins the array or fails
+// here; the array is now three long.
+for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", troute], ["the kitchen board", kroute]]) {
   if (!/a === "print" && b === "send"/.test(code(src))) continue;   // this panel cannot send paper at all
   check(/adminView: true/.test(src) && /force/.test(src) && /print_sent_by_admin/.test(src),
     `${name}: the admin viewing a restaurant's panel prints NOTHING at their shop unless deliberately forced — and that is audited`,
@@ -225,9 +247,18 @@ for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", 
 // gate (lib/tableOfAction.affectedTables) does not recognise ("print","send") and its rule for an
 // unrecognised verb is refuse-everything, so this branch has to ask the question itself — which
 // means the question can also go missing without the shared gate noticing. (T10 sweep #7)
-check(/waiterTables\(actor, rid\)/.test(code(troute).split('a === "print" && b === "send"')[1]?.slice(0, 2000) || ""),
-  "…and a waiter with a section can only send their OWN tables' bills to the printer",
-  "the tablet's print/send has lost its section check — a waiter holding tables 1-5 can print table 20's bill");
+// COUNTED, NOT FOUND ONCE (2026-09-14). The branch now has TWO documents in it — a bill and a
+// kitchen slip — and each needs its own section question, because there is no shared gate behind
+// them to catch a branch that forgets. Looking for one occurrence inside a fixed 2,000-character
+// window passed while the second document had no check at all: the kot branch was written without
+// one, and this guard was green. So: both, and the window is the whole branch.
+{
+  const sendBranch = code(troute).split('a === "print" && b === "send"')[1]?.split('\n    if (a === "')[0] || "";
+  const asks = (sendBranch.match(/waiterTables\(actor, rid\)/g) || []).length;
+  check(asks >= 2,
+    "…and a waiter with a section can only send their OWN tables' bills AND kitchen slips to the printer",
+    `the tablet's print/send has lost a section check (${asks} of 2) — a waiter holding tables 1-5 can print table 20's paper`);
+}
 
 // ── 5b · THE LOG ANSWERS "WHICH BILL?", NOT JUST "WHICH PRINTER?" (owner, 2026-08-28) ─────────
 // He was offered a line on the bill card and answered "make log do that". The log could not: the
@@ -1368,6 +1399,225 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
       `${label.split(" → ")[1]} may use !VAR! — delayed expansion is switched on`,
       `${label} uses !VAR! without "setlocal enabledelayedexpansion" — the exclamation marks would print literally`);
   }
+}
+
+// ── 10 · ONE WAY AT A TIME: when a computer owns the paper, NO SCREEN OPENS A PRINT BOX ───────
+//
+// Owner, 2026-09-14: *"Whenever the helper mode is on and Chrome is off, it should not pop up the
+// print. If the helper mode is set up and inside the helper mode KOT is set up, for the KOT there
+// shouldn't be the pop up of print… in the kitchen panel or stuff like that, if the screen printing
+// is off, there shouldn't be a pop up. And for the bill and banquet, if the printer is set up it
+// should not pop up that print thing — it should just notify that it is sent to the helper. But if
+// the printer is not set up, then there should be the pop up, otherwise there would be an error."*
+//
+// The AUTOMATIC ticket obeyed this from the day the helper shipped (screenMayPrint). The buttons a
+// PERSON presses did not: three of them — the 🖨 on a kitchen ticket, the 🖨 on a delivery ticket,
+// and "Prints here, on this device" in the manager's reprint sheet — called the local print straight
+// out, whatever the address book said. That is the last door the two ways could come apart at, and
+// it is the one a cook actually touches.
+//
+// Both halves of his sentence are asserted here, because they are opposite faults: a popup where a
+// printer is set up, and NO popup where one is not.
+{
+  const doors = [
+    ["the kitchen panel", kpanel, /askWhoPrints/],
+    ["the manager panel", epanel, /print\/send", \{ kind: "kot" \}/],
+    ["the waiter tablet", read("public/panels/tablet/app.js"), /print\/send", \{ kind: "kot" \}/],
+  ];
+  for (const [name, src, re] of doors) {
+    check(re.test(code(src)),
+      `${name}: the 🖨 a person presses ASKS who owns the kitchen slips before it prints anything`,
+      `${name}: its 🖨 prints locally without asking — a restaurant running the helper gets a print box, and a second copy of the ticket out of the wrong printer`);
+  }
+  // …and the kitchen's own two buttons both go through it. `reprintOrder` is the ticket on the board
+  // and `reprintPlatform` is the delivery one — the second was the LAST button on that screen still
+  // printing locally, and it was missed on the first pass precisely because it is a different
+  // function with the same job.
+  for (const fn of ["reprintOrder", "reprintPlatform"]) {
+    const body = code(kpanel).split(`function ${fn}(`)[1]?.split("\n}")[0] || "";
+    check(/askWhoPrints/.test(body),
+      `the kitchen's ${fn === "reprintOrder" ? "ticket" : "delivery"} 🖨 asks before it prints`,
+      `${fn} prints on this screen without asking who owns the kitchen slips`);
+  }
+  // THE OTHER HALF, AND IT MATTERS JUST AS MUCH. "If the printer is not set up, then there should be
+  // the pop up — otherwise there would be an error." A version that simply stopped printing locally
+  // would break every restaurant that installs nothing, which is most of them. `noRoute` is the word
+  // that keeps them working, and each door must still fall through on it.
+  check(/noRoute/.test(code(kroute)) && /noRoute/.test(code(eroute)) && /noRoute/.test(code(troute)),
+    "…and a restaurant with NO computer still gets its window — `noRoute` is answered by all three doors",
+    "a print door has lost its noRoute fallback — a restaurant that installed nothing can no longer print at all");
+  // The escape hatch is allowed to exist and is NOT allowed to be permanent (his ruling, same day:
+  // hide it unless the printer is dead). Asserted on the manager sheet, where it is a named variable.
+  const sheet = code(epanel).split("function openReprintKotPicker(")[1]?.slice(0, 4000) || "";
+  check(/const hatch = !own \|\| !own\.connected \|\| stuckNow/.test(sheet) && /own && hatch \? hereBtn : ""/.test(sheet),
+    "…and 'print here instead' appears only when that computer is NOT answering, or paper is stacking up",
+    "the manager's reprint sheet offers 'print here' beside a working helper again — two printers, one ticket");
+}
+
+// ── 11 · THERE IS ONE PRINTING CARD IN THE MANAGER'S SETTINGS, NOT TWO ────────────────────────
+//
+// Owner, 2026-08-29 (STANDING): *"There is two printing things, one is working and one is just
+// showing."* On 2026-09-14 there were again: a "Kitchen · KOT printing" row sat on the same Settings
+// list as the Printing board, holding an auto-print toggle with NO permission check, a local sample
+// print that opened Chrome's print dialog, and a paragraph telling the reader to launch Chrome in
+// kiosk-printing mode as if that were the only way. Its own comment claimed it was "hidden from
+// everyone in this panel" — it never was: settingsSections() can only hide what managerSettingsOff()
+// names, and that function can only ever return tables · users · access.
+check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(epanel) && !/function previewSampleKOT/.test(epanel),
+  "the manager's Settings has ONE printing row — the old 'Kitchen · KOT printing' card is gone, not hidden",
+  "a second printing card is back on the manager's Settings list — that is the owner's 'two printing things' fault");
+// …and the claim that made it invisible for so long can never be made again: any row this list
+// hides must be a key managerSettingsOff() can actually return.
+{
+  const tree = read("lib/accessTree.ts");
+  const hideable = [...(tree.split("export const MANAGER_SETTINGS")[1] || "").split("];")[0].matchAll(/\{ key: "([a-z_]+)"/g)].map((m) => m[1]);
+  const listed = [...epanel.matchAll(/\{ id: "([a-z]+)", label: "[^"]+", sub:/g)].map((m) => m[1]);
+  const claimsHidden = listed.filter((id) => new RegExp(`id: "${id}"[\\s\\S]{0,400}?hidden from everyone`).test(epanel));
+  check(claimsHidden.every((id) => hideable.includes(id)),
+    "…and no settings row claims to be hidden by a permission that cannot hide it",
+    `a settings row says it is hidden from everyone but managerSettingsOff() can never name it: ${claimsHidden.filter((id) => !hideable.includes(id)).join(", ")}`);
+}
+
+// ── 12 · "IS IT WORKING RIGHT NOW" — one answer, three screens ────────────────────────────────
+//
+// Owner, 2026-09-14: *"On the manager panel and on the owner panel, when the helper is on, in the
+// settings of both panels you could able to see that everything is connected and everything is
+// live. And if not connected, you could able to see."*
+//
+// The rows are written ONCE (lib/printHelpers → paperStatus) and rendered by three screens. That is
+// the whole design: the admin board and the manager board have drifted apart twice already, and
+// three papers × three screens × green-or-red is nine chances to disagree about whether a restaurant
+// is printing. So no screen may work the answer out for itself.
+{
+  const helpers = read("lib/printHelpers.ts");
+  const ownerApi2 = read("app/api/owner/printing/route.ts");
+  const ownerPg2 = read("app/owner/settings/page.tsx");
+  check(/export async function paperStatus/.test(helpers) && /resolveTarget\(routes\[kind\], agents, kind\)/.test(helpers),
+    "the three status rows are written in ONE place, off the same resolver the paper itself obeys",
+    "paperStatus is gone or has started deciding who prints by itself, apart from resolveTarget");
+  for (const [name, src] of [["the admin board", page], ["the manager panel", epanel], ["the owner panel", ownerPg2]])
+    check(/Is it working right now/.test(src) || /printing\.live/.test(src),
+      `${name} shows whether each piece of paper is actually printing right now`,
+      `${name} no longer says whether printing is working — the owner asked for it on all of them`);
+  check(/paperStatus\(/.test(read("lib/printBoard.ts")) && /paperStatus\(target\)/.test(ownerApi2),
+    "…and both the board and the owner's own route read that one function, never their own copy",
+    "a screen has started deriving the printing status itself — that is how two boards come to disagree");
+  // ── AN OWNER WITH MORE THAN ONE RESTAURANT (owner, 2026-09-14) ─────────────────────────────
+  // Two faults, both measured on his own account, both of which made the owner's screen state
+  // something confidently wrong rather than say nothing:
+  //
+  //  1. The route picked `ids[0]` — the owner's FIRST restaurant, whichever that is. With printing
+  //     off there it answered `allowed:false`, which the page reads as "the feature is withheld"
+  //     and draws NOTHING — for an owner whose other restaurants print perfectly. Seven
+  //     restaurants, two printing, and the whole box was absent.
+  //  2. The row list then had no answer to read, and its `else` branch does not say "we don't
+  //     know" — it says "tickets print on the kitchen screen · no screen has taken it yet —
+  //     tickets are waiting", in amber, as a warning. Pizza Palace showed exactly that while a
+  //     computer was printing its slips. This is the THIRD round of one restaurant's printing
+  //     answer landing on another's row (T20 fixed rounds 2 and 4); it is the one that ends it,
+  //     because now every row the page draws has its own answer.
+  check(/auto_print_kot_allowed", true\)\s*\.limit\(1\)/.test(ownerApi2) || /eq\("auto_print_kot_allowed", true\)\.limit\(1\)/.test(ownerApi2),
+    "…and an owner whose FIRST restaurant does not print still sees the ones that do",
+    "the owner printing read is back to ids[0] — one restaurant with printing off hides the box for every other restaurant they own");
+  check(/perRestaurant:/.test(ownerApi2) && /perRestaurant\?\.\[p\.restaurant_id\]/.test(ownerPg2),
+    "…and every restaurant on that list reads its OWN answer, so no row can state another's",
+    "the owner's printing rows share one restaurant's answer again — the row that is not it claims, in amber, that nothing is printing");
+  // A DELIBERATE "Nobody" IS NOT RED. Colouring a decision as a fault is the don't-cry-wolf rule
+  // (owner, 2026-08-27), and it is the difference between a board people believe and one they stop
+  // reading. Only an unanswered COMPUTER is red.
+  const ps = helpers.split("export async function paperStatus")[1] || "";
+  check(/via: "off" as const, ok: true/.test(ps) && /via: "screen" as const, ok: true/.test(ps) && /ok: t\.connected/.test(ps),
+    "…and only a computer that is NOT answering shows red — a deliberate 'Nobody' is a decision, not a fault",
+    "the status rows have started showing red for a setting somebody chose on purpose");
+}
+
+// ── 13 · THE TEST PRINTS A REAL DOCUMENT, AND IT CAN NEVER BE MISTAKEN FOR A SALE ─────────────
+//
+// Owner, 2026-09-14: *"They can also test from there — print a KOT, print a bill, or print a banquet
+// bill."* A plain test page proves a PRINTER is alive; it cannot answer whether the BILL fits the
+// roll or whether the banquet sheet came out A4. Only the real template on the real route can.
+//
+// Which makes this the one document in the product that looks like a sale and is not — the exact
+// thing lib/printDocs → testHtml says must never come out of a printer ("nothing that looks like a
+// sale should ever come out of a printer without being one"), and the suppression pattern
+// docs/COMPLIANCE-GUARDRAILS.md exists to prevent, read from the other side: a sale may never
+// disappear, and a NON-sale may never appear. Three things keep it honest and all three are checked.
+{
+  const docs = read("lib/printDocs.ts");
+  const sample = docs.split("function testBand")[1]?.split("\n}")[0] || "";
+  check(/TEST PRINT — NOT A BILL/.test(sample) && /End of test print/.test(sample),
+    "a sample document carries a TEST band at the TOP and at the BOTTOM of the paper",
+    "the sample bill has lost its TEST band — a document that looks like a sale and is not is the one thing that may never come off a printer");
+  const sb2 = docs.split("export async function sampleBillHtml")[1]?.split("\n}")[0] || "";
+  check(/bill_no: null, invoice_no: null, invoice_at: null/.test(sb2),
+    "…and it is given NO bill number and NO invoice number, so nothing is minted and no series moves",
+    "the sample bill has started carrying a number — that is a document in the series that is not a sale");
+  check(/testBand\(/.test(sb2),
+    "…and the sample bill is banded, not drawn bare",
+    "sampleBillHtml no longer bands its output");
+  // ── THE SAMPLE MUST ADD UP ────────────────────────────────────────────────────────────────
+  // Found by printing one and reading it: the paper listed four dishes and then said Subtotal ₹0,
+  // TOTAL ₹0, under the words TAX INVOICE. billMoney() takes its figures from the ORDER ROW's
+  // columns and the synthetic order carried none of them, while the LINES render from `items` and
+  // were right. billData's own comment forbids exactly this: rows and total may not disagree
+  // (COMPLIANCE §3, reconcile to the rupee). A sample that cannot add up teaches a restaurant that
+  // the product cannot add up.
+  check(/const subtotal = SAMPLE_LINES\.reduce/.test(sb2) && /subtotal, taxable_base: subtotal/.test(sb2),
+    "…and the sample's TOTAL is computed from its own lines, so the paper adds up",
+    "the sample bill's money columns are gone — it would print item rows over a ₹0 total, on a document headed TAX INVOICE");
+  // …AND THE BANQUET SHEET IS TAXED AT *THIS RESTAURANT'S* BANQUET RATE. Its figures are frozen on
+  // the bill row by design (mig 239), so a sample has nothing to show unless it is filled in. Left
+  // empty it printed "GST 0%" for a restaurant that charges 5% — a worse lie on a sample than no tax
+  // row at all, because the person is looking at it precisely to check their own setup.
+  {
+    const sq = docs.split("export async function sampleBanquetHtml")[1]?.split("\n}")[0] || "";
+    check(/BILLDOC\.bqTaxModel\(/.test(sq) && /tax: taxAmt/.test(sq) && /tax_lines: taxLines/.test(sq),
+      "…and the sample banquet sheet carries THIS restaurant's own banquet tax, not a flat zero",
+      "the sample banquet sheet prints GST 0% whatever the restaurant charges — the one thing a person opens it to check");
+  }
+  // ── THE BAND MUST LAND *INSIDE* THE DOCUMENT, NOT IN FRONT OF THE DOCTYPE ──────────────────
+  // Found 2026-09-14 by printing one and LOOKING at it. billdoc.js emits the kitchen ticket and the
+  // banquet sheet as full documents and the BILL as a fragment — doctype, title, style, content, no
+  // <body> anywhere. The first version matched `<body…>` and fell back to `band + html`, which put
+  // the band before the doctype: the browser dropped into quirks mode and the printed page came out
+  // as 72 bytes of raster instead of 24,000. EVERY TEXT ASSERTION PASSED — "TEST PRINT" really was
+  // in the file, because grep does not care where it is. Only the paper showed it.
+  check(/const lastStyle = html\.lastIndexOf\("<\/style>"\)/.test(sample) && /bodyTag\[0\] \+ band/.test(sample),
+    "…and the band lands inside the document — after <body>, or after the last </style> on the bill, which has no <body> at all",
+    "the TEST band is placed by matching <body> alone again — the bill has none, so the band lands before the doctype and the page prints blank");
+  // The same trap, stated as a fact about the templates, so a future reader does not have to
+  // rediscover it: the bill IS a fragment, and anything wrapping these documents must cope.
+  {
+    const bd = read("public/panels/billdoc.js");
+    const billFn = bd.split("function billDocHtml")[1]?.split("\n  function ")[0] || "";
+    const hasBody = /<body/.test(billFn);
+    check(!hasBody || /lastIndexOf\("<\/style>"\)/.test(sample),
+      "…and if the bill ever GAINS a <body>, the band still has a rule that finds it",
+      "billDocHtml now emits a <body> and the band placement was not revisited");
+  }
+  // The band is injected AFTER the document is built, so billdoc.js never learns these exist — a
+  // `test` flag inside the template is one `if` away from a real bill carrying one, and R37 is the
+  // record of how much the owner cares about that.
+  check(!/TEST PRINT/.test(read("public/panels/billdoc.js")),
+    "…and billdoc.js knows nothing about test bands, so a real bill can never grow one",
+    "the TEST band has been built into the shared bill template — R37 says a guest's bill carries no extra marks");
+  // It goes out on the REAL route, so the paper size it proves is the paper size the restaurant uses.
+  // A sample addressed at "test" would be measured against no route at all and prove nothing.
+  check(/payload\.sample === true && \(job\.kind === "kot" \|\| job\.kind === "bill" \|\| job\.kind === "banquet"\)/.test(code(agentR)),
+    "…and it is a REAL job of that kind, so it comes out on the route's own paper size",
+    "the sample no longer travels as its real kind — it would be printed against no route and prove nothing about the paper");
+  // A SCREEN MUST NEVER BE HANDED ONE. A sample kitchen slip has no order, so the screen's read would
+  // treat it as "the order was deleted" and close it — the person who pressed Test told nothing while
+  // no paper appeared.
+  check(/const jobs = all\.filter\(\(j\) => j\.order_id\)/.test(read("lib/printQueue.ts")),
+    "…and a screen is never offered a sample ticket, which it could only close as an orphan",
+    "pendingKotJobs hands sample tickets to screens again — Test would silently do nothing");
+  // Only a COMPUTER can be tested: a screen route has no printer this server can name, so a "sample"
+  // would go to whatever the browser defaults to and prove nothing.
+  for (const [name, src] of [["the manager panel", eroute], ["the admin console", adminR], ["the owner panel", read("app/api/owner/printing/route.ts")]])
+    check(/No computer is set to print that yet/.test(src),
+      `${name}: Test refuses unless a computer actually owns that paper`,
+      `${name}: Test can be pressed with no printer behind it, and would print into nowhere`);
 }
 
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────

@@ -3412,7 +3412,12 @@ async function sendKotToKitchen(o) {
   try {
     const r = await api("POST", "/print-jobs", { order_id: o.id });
     if (isQueued(r)) { toast(savedMsg(r)); return; }
-    toast(`KOT #${o.kot_no ?? "—"} sent to the kitchen printer — it comes out marked DUPLICATE.`);
+    // NAME THE PRINTER WHEN THERE IS ONE (owner, 2026-09-14) — "did my ticket go anywhere?" is
+    // answered by the printer's name, the same sentence /print/send gives for a bill.
+    const own = kotOwnerSays;
+    toast(own
+      ? `KOT #${o.kot_no ?? "—"} ${own.connected === false ? "saved — it prints at " + own.printer + " as soon as " + own.agent + " is back" : "sent to " + own.printer} — marked DUPLICATE.`
+      : `KOT #${o.kot_no ?? "—"} sent to the kitchen printer — it comes out marked DUPLICATE.`);
   } catch (e) { toast("Couldn't send it to the kitchen: " + errText(e), false); }
 }
 function renderReprintKotPicker(t) {
@@ -3429,17 +3434,41 @@ function renderReprintKotPicker(t) {
   document.querySelectorAll("[data-pickprint]").forEach((b) => (b.onclick = () => {
     const o = os.find((x) => x.id === b.dataset.pickprint);
     dropLayer();
-    if (o) renderReprintWhere(t, o);
+    if (o) renderReprintWhere(t, o);   // async — the sheet asks who owns the slips before it draws
   }));
 }
-function renderReprintWhere(t, o) {
-  const body = `<div class="muted small" style="margin-bottom:10px">KOT #${esc(o.kot_no ?? "—")} — print it where?</div><div class="pactions">
-      <button class="btn" style="text-align:left" data-printkitchen>👨‍🍳 <b>Reprint in the kitchen</b><br><small class="muted">Comes out of the kitchen's printer, marked DUPLICATE</small></button>
-      <button class="btn" style="text-align:left" data-printhere>🖨 <b>Print here</b><br><small class="muted">On this device, if it has a printer</small></button>
+// WHAT THE SERVER LAST SAID ABOUT WHO OWNS THE KITCHEN SLIPS. This tablet has no printing poll and
+// deliberately still does not get one (see the note on the bill above): it ASKS, once, when the
+// sheet opens, and remembers the answer only for as long as the sheet is on screen.
+let kotOwnerSays = null;
+async function renderReprintWhere(t, o) {
+  // ── "PRINT HERE" IS NOT AN EVERYDAY BUTTON ANY MORE (owner, 2026-09-14) ──────────────────────
+  // *"We don't want to give them also option to print — it is already going to the helper's queue."*
+  // A tablet almost never has a printer, so "Print here" on a restaurant whose helper owns the
+  // slips put the ticket in a print box on a handheld nobody was watching — a LOST ticket, from the
+  // button meant to rescue one. So it hides while a computer is answering, and comes back the moment
+  // that computer is not, which is the one case a waiter genuinely needs it (his ruling, same day).
+  //
+  // Asked with a HARMLESS probe: no orderId, so the server answers who owns the paper and queues
+  // nothing. A failure leaves `own` null, i.e. both buttons — the safe direction, because the worst
+  // case is the sheet a waiter has always seen.
+  let own = null;
+  try {
+    const r = await api("POST", "/print/send", { kind: "kot" });
+    // `{ noRoute: true }` — no computer owns the slips, so both buttons, exactly as before.
+    // `{ printer, agent, connected }` — a computer does. Nothing was queued either way.
+    own = r && r.printer ? r : null;
+  } catch (e) { own = kotOwnerSays; }
+  kotOwnerSays = own;
+  const hatch = !own || own.connected === false;
+  const hereBtn = `<button class="btn" style="text-align:left" data-printhere>🖨 <b>${own ? "Print here instead" : "Print here"}</b><br><small class="muted">${own ? "On this device — only because " + esc(own.agent || "that computer") + " is not answering" : "On this device, if it has a printer"}</small></button>`;
+  const body = `<div class="muted small" style="margin-bottom:10px">KOT #${esc(o.kot_no ?? "—")} — ${own ? "it prints on <b>" + esc(own.printer) + "</b>" : "print it where?"}</div><div class="pactions">
+      <button class="btn" style="text-align:left" data-printkitchen>${own ? "🖨" : "👨‍🍳"} <b>${own ? "Print on " + esc(own.printer) : "Reprint in the kitchen"}</b><br><small class="muted">${own ? "Goes straight to " + esc(own.agent) + " — nothing opens here" : "Comes out of the kitchen's printer, marked DUPLICATE"}</small></button>
+      ${hatch ? hereBtn : ""}
     </div>`;
   const { dropLayer } = renderPickerShell("Print it where?", body, "tablet-reprint-where", () => renderReprintKotPicker(t));
   document.querySelector("[data-printkitchen]").onclick = () => { dropLayer(); sendKotToKitchen(o); };
-  document.querySelector("[data-printhere]").onclick = () => {
+  { const hb = document.querySelector("[data-printhere]"); if (!hb) return; hb.onclick = () => {
     dropLayer();
     // NEVER A SILENT TAP. billdoc missing after a bad deploy, or a blocked iframe, both end here —
     // and the kitchen is still one tap away, so the message says so instead of just failing.
@@ -3451,7 +3480,7 @@ function renderReprintWhere(t, o) {
     toast(started
       ? `KOT #${o.kot_no ?? "—"} sent to print`
       : "This device couldn't start a print — send it to the kitchen instead.", started);
-  };
+  }; }
 }
 
 // Move a SINGLE order to another table's bill. Two taps: pick the order, pick the
