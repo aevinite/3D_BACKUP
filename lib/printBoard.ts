@@ -19,6 +19,9 @@ import {
 } from "@/lib/printHelpers";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { waitingToPrint, STUCK_AFTER_MS } from "@/lib/printQueue";
+// Is a ten-minute setup code still live (mig 380)? Read HERE so both boards get the same answer
+// from one place — the rule this whole file exists for.
+import { liveCodeState } from "@/lib/printSetupCode";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 import { stationScript, STATION_FILENAME, STATION_FIRST_RUN, type StationOs } from "@/lib/printStationScript";
 
@@ -63,6 +66,11 @@ export type BoardState = {
   /** The helper this browser set up, when a restaurant set itself up (mig 367). Null on the admin's
    *  screen and on any device that has not registered itself. */
   thisComputer: AgentView | null;
+  /** IS A SETUP CODE LIVE, AND UNTIL WHEN — never the code (mig 380). The code is stored hashed, so
+   *  this is everything a reloaded board can honestly know, and it is enough: it can say "a code is
+   *  live, 6 min left" and offer a fresh one. Handing back a second copy of a live secret to anyone
+   *  who reloads the page would undo the point of hashing it. */
+  setupCode: { live: boolean; expiresAt: string | null };
 };
 
 const JOB_COLS = "id, kind, status, printer, printed_by, attempts, error, created_at, done_at";
@@ -75,8 +83,9 @@ const OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
  * It used to be minted per computer with a 37-character token baked in, which is why it could not be
  * hosted, reused or emailed, and why the owner asked for exactly this (2026-08-27: "there wouldn't be
  * one key for all restaurants… maybe a pairing code or whatever"). Now the only thing in it that
- * varies is the SITE, so it is safe to show on any screen and to anybody: on its first run it pairs
- * itself, and a human presses Allow.
+ * varies is the SITE, so it is safe to show on any screen and to anybody: on its first run it asks
+ * for the ten-minute setup code the Printing screen hands out, and trades it for its own token
+ * (mig 380 — there is no Allow page and no login on that machine any more).
  */
 /** MODE B's file: one launcher per OS that opens the restaurant's own Chrome, out of the way, with
  *  silent printing on. Like the helper file it holds no secret — the person signs in once in the
@@ -98,7 +107,7 @@ export const helperFiles = (origin: string) =>
 /** Everything both boards draw, in ONE set of reads. Scoped by restaurant, column lists, hard
  *  limits — the egress rule, same as every other read in this app. */
 export async function printBoardState(rid: string, opts?: { deviceId?: string | null; recent?: number }): Promise<BoardState> {
-  const [agents, routes, waiting, setRow, jobs, stuck] = await Promise.all([
+  const [agents, routes, waiting, setRow, jobs, stuck, setupCode] = await Promise.all([
     agentsView(rid),
     readRoutes(rid),
     waitingCount(rid),
@@ -108,6 +117,9 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     // Kitchen slips only: they are the paper with a person standing over it, and a bill waiting two
     // seconds for somebody to press Print is not a pile-up.
     waitingToPrint(rid, "kot"),
+    // One indexed row, two columns, scoped to this restaurant — it rides along with the six reads
+    // this board already makes rather than costing a round trip of its own.
+    liveCodeState(rid),
   ]);
   const s = (setRow.data || {}) as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean };
   const dv = String(opts?.deviceId || "").trim();
@@ -131,6 +143,7 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     })(),
     printing: { allowed: s.auto_print_kot_allowed === true, on: s.auto_print_kot === true },
     thisComputer: dv ? agents.find((a) => a.owner_device === dv) || null : null,
+    setupCode,
   };
 }
 

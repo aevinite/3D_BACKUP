@@ -241,15 +241,15 @@ await phase("the diag staff exist to act as people", async () => (await db("staf
 await phase("print_jobs exists and takes every kind", async () => {
   const r = await db("print_jobs?select=kind&limit=1"); return Array.isArray(r) || "cannot read print_jobs"; });
 // ── WARM THE ROUTES FIRST ────────────────────────────────────────────────────────────────────
-// A dev server compiles a route on its first hit. The very first POST to /api/print-agent/pair/start
+// A dev server compiles a route on its first hit. The very first POST to /api/print-agent/pair/claim
 // took 16 SECONDS on a freshly started server and came back 500, and the five phases after it failed
 // as a cascade from that one cold start — six red phases about a feature that was working perfectly
 // (measured immediately after: 320ms, 200). A campaign that reports the server's warm-up as a
 // product fault is a campaign nobody believes the third time.
-for (const warmUp of ["/api/print-agent/next", "/api/print-agent/pair/start", `/api/admin/printing/state?rid=${RID}`]) {
-  try { await fetch(BASE + warmUp, { method: warmUp.includes("pair") ? "POST" : "GET", headers: { "content-type": "application/json", cookie: adminCookie }, body: warmUp.includes("pair") ? JSON.stringify({ fingerprint: "warm-up", hostname: "warm-up", os: "mac" }) : undefined }); } catch {}
+for (const warmUp of ["/api/print-agent/next", "/api/print-agent/pair/claim", `/api/admin/printing/state?rid=${RID}`]) {
+  try { await fetch(BASE + warmUp, { method: warmUp.includes("pair") ? "POST" : "GET", headers: { "content-type": "application/json", cookie: adminCookie }, body: warmUp.includes("pair") ? JSON.stringify({ code: "WARMUP", hostname: "warm-up", os: "mac" }) : undefined }); } catch {}
 }
-try { await db(`print_pairings?hostname=eq.warm-up`, { method: "DELETE" }); } catch {}
+try { await db(`print_setup_codes?claimed_host=eq.warm-up`, { method: "DELETE" }); } catch {}
 
 await phase("print_agents exists", async () => Array.isArray(await db("print_agents?select=id&limit=1")) || "cannot read print_agents");
 await phase("printer_events carries a printer (mig 351)", async () => {
@@ -270,7 +270,9 @@ const tk = mint(); TOKEN = tk.t;
 for (const leftover of ["sweep-pc", "Sweep PC", "Perm PC", "Review PC", "Review PC 2"]) {
   try { await db(`print_agents?restaurant_id=eq.${RID}&name=eq.${encodeURIComponent(leftover)}`, { method: "DELETE" }); } catch {}
 }
-try { await db(`print_pairings?hostname=in.("Sweep Machine","Review PC","Review PC 2","live-probe")`, { method: "DELETE" }); } catch {}
+// DELETE THE EXACT ROWS THIS RUN INSERTS. A sweep that leaves live setup codes behind is a sweep
+// that leaves working credentials behind, which is worse than an untidy table.
+try { await db(`print_setup_codes?claimed_host=in.("Sweep Machine","Sweep Machine 9","Sweep join PC","Sweep join PC 2","Sweep join PC 3","Review PC","Review PC 2","live-probe","probe")`, { method: "DELETE" }); } catch {}
 try { await db(`print_agents?restaurant_id=eq.${RID}&name=like.Sweep Machine*`, { method: "DELETE" }); } catch {}
 
 // Put back the permissions a killed run rewrote, from the stash it wrote before touching them.
@@ -808,21 +810,44 @@ await phase("…and a print on ITS printer closes it", async () => {
     return r.body.maySetup === false || `maySetup was ${JSON.stringify(r.body.maySetup)}`;
   });
   await phase("…and the SERVER refuses the verb, not just the screen", async () => {
-    const r = await asMgrPost("/printing/this-computer", { name: "sweep PC" });
+    const r = await asMgrPost("/printing/setup-code", {});
     return r.status >= 400 || `it answered ${r.status} — the screen hiding a button has never been a gate`;
   });
 
   await setPerm(true);
-  let sweptAgent = null;
-  await phase("with the permission, this browser can register the computer it is sitting at", async () => {
-    const r = await asMgrPost("/printing/this-computer", { name: "Sweep PC" }, DEV2);
-    sweptAgent = r.body.id || null;
-    if (sweptAgent) made.agents.push(sweptAgent);
-    return (r.status === 200 && String(r.body.code || "").startsWith("lfhp_")) || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 140)}`;
+  let sweptAgent = null, sweptCode = null;
+  const claimCode = (body) => fetch(BASE + "/api/print-agent/pair/claim", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+  /* ⚠️ RE-POINTED BY mig 380 (2026-09-13). This browser no longer REGISTERS a computer — that verb
+     minted a print_agents row and a permanent token in a browser, and the owner replaced the whole
+     join with a code the helper asks for. His 2026-08-27 design is unchanged and is what these
+     phases now assert: the device at the printer still does the whole job from its own Settings,
+     and the screen that handed out the code is the screen that manages the machine. */
+  await phase("with the permission, this browser can hand out a setup code", async () => {
+    const r = await asMgrPost("/printing/setup-code", {}, DEV2);
+    sweptCode = r.body.code || null;
+    return (r.status === 200 && /^[A-HJ-NP-Z2-9]{6}$/.test(String(sweptCode)))
+      || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 140)}`;
   });
-  await phase("…and the row remembers WHICH browser did it (mig 367)", async () => {
+  await phase("…and the helper on that machine redeems it with nobody signing in there", async () => {
+    const r = await claimCode({ code: sweptCode, hostname: "Sweep PC", os: "mac",
+      printers: [{ name: "Sweep-Printer", paper: { wMm: 79.7, hMm: 64.2 } }] });
+    sweptAgent = r.body.agentId || null;
+    if (sweptAgent) made.agents.push(sweptAgent);
+    return (r.body.ok === true && String(r.body.token || "").startsWith("lfhp_"))
+      || `${JSON.stringify(r.body).slice(0, 140)}`;
+  });
+  await phase("…and the row remembers WHICH browser handed the code out (mig 367, via mig 380)", async () => {
+    // The HELPER has no browser and no device id, so without this the panel on the very machine
+    // that had just been set up would still say "this computer is not set up yet".
     const [row] = await db(`print_agents?id=eq.${sweptAgent}&select=owner_device,owner_user`);
     return row?.owner_device === DEV2 || `owner_device was ${row?.owner_device}`;
+  });
+  await phase("…so that screen's own board finds its computer without anybody adopting anything", async () => {
+    const r = await asMgrGet("/printing/state", DEV2);
+    return (r.body?.thisComputer?.id === sweptAgent)
+      || `the panel says its computer is ${JSON.stringify(r.body?.thisComputer?.id)}`;
   });
   // "newcode" was RETIRED by mig 368 — the helper file carries no token, so there was nowhere left to
   // show one. `unlink` is the verb that replaced it, and the rule under test is unchanged: a browser
@@ -831,9 +856,9 @@ await phase("…and a print on ITS printer closes it", async () => {
     const r = await asMgrPost("/printing/unlink", {}, "sweep-device-C");
     return r.status >= 400 || `it answered ${r.status} — another screen could unlink somebody else's machine`;
   });
-  await phase("…and pressing “set up” twice makes ONE computer, not two", async () => {
+  await phase("…and pressing the button twice hands out a code, never a second computer", async () => {
     const before = (await db(`print_agents?restaurant_id=eq.${RID}&owner_device=eq.${DEV2}&select=id`)).length;
-    await asMgrPost("/printing/this-computer", { name: "Sweep PC" }, DEV2);
+    await asMgrPost("/printing/setup-code", {}, DEV2);
     const after = (await db(`print_agents?restaurant_id=eq.${RID}&owner_device=eq.${DEV2}&select=id`)).length;
     return (before === 1 && after === 1) || `${before} → ${after}`;
   });
@@ -868,72 +893,94 @@ await phase("…and a print on ITS printer closes it", async () => {
     const r = await asMgrPost("/printing/route", { kind: "bill", who: "computer", printer: "Sweep-Printer" }, "sweep-device-D");
     return r.status >= 400 || "any screen could point the bills at somebody else's printer";
   });
-  await phase("…but it can ADOPT the machine it is sitting at, instead of registering it twice", async () => {
+  await phase("…but it can ADOPT the machine it is sitting at, instead of setting it up twice", async () => {
+    // ADOPT still matters after mig 380: a device id does not survive a cleared browser, a new
+    // profile, or a machine Aevidine set up from the console.
     const r = await asMgrPost("/printing/this-computer", { adopt: sweptAgent }, "sweep-device-D");
     const [row] = await db(`print_agents?id=eq.${sweptAgent}&select=owner_device`);
     return (r.status === 200 && row?.owner_device === "sweep-device-D") || `status ${r.status} · owner_device ${row?.owner_device}`;
   });
 }
 
-// ══ 6c · THE ZERO-TYPING HANDSHAKE (mig 368) ═════════════════════════════════════════════════
-// Owner, 2026-08-27: "zero typing one, yeah". The helper holds no secret, so the ONLY thing standing
-// between a stranger and a restaurant's printer is this handshake. Every refusal below is a rule.
+// ══ 6c · THE TEN-MINUTE SETUP CODE (mig 380) ═════════════════════════════════════════════════
+// Owner, 2026-09-13: "instead of login make something else otherwise the waiter will also do that
+// printing thing", and then: "you can generate code for each restaurant from printing menu and like
+// the helper ask for that code and that generated code only works for 10 min."
+//
+// ⚠️ THIS REPLACED mig 368's Allow-page handshake, and these phases are its replacement rather than
+// a relaxation: the old ones proved a stranger could not adopt a machine, and so do these. What is
+// gone is the STAFF LOGIN on the shop's counter PC — the waiter's login — which is what the owner
+// threw out. The helper holds no secret, so the only thing between a stranger and a restaurant's
+// printer is a code that one signed-in screen handed out, that dies in ten minutes, and that the
+// first machine to use it spends. Every refusal below is a rule.
 {
-  const pair = (path, body) => fetch(BASE + "/api/print-agent/pair/" + path, {
+  const claim = (body) => fetch(BASE + "/api/print-agent/pair/claim", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}),
   }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+  const mintAdmin = () => api(`/api/admin/printing/setup-code`, { method: "POST", body: JSON.stringify({ rid: RID }) })
+    .then(async (x) => ({ status: x.status, body: await x.json().catch(() => ({})) }));
+  // THIS SWEEP MUST NOT TRIP THE APP'S OWN WALL (CLAUDE.md). It deliberately types more wrong codes
+  // in a row than any restaurant ever would, so it clears the counter it creates — and deletes the
+  // rows, because a test that leaves a "somebody is guessing" problem open on the admin's board is
+  // a test that cries wolf at the owner.
+  const clearWall = async () => {
+    try { await db(`rate_limit_counters?key=eq.print_setup_code`, { method: "DELETE" }); } catch {}
+    try { await db(`rate_limit_events?key=eq.print_setup_code`, { method: "DELETE" }); } catch {}
+  };
+  await clearWall();
 
-  let code = null, secret = null;
-  await phase("a helper with NO credential can start a pairing (it grants nothing yet)", async () => {
-    const r = await pair("start", { fingerprint: "sweep-fp-1", hostname: "Sweep Machine", os: "mac",
+  await phase("a SIGNED-OUT browser cannot make a setup code", async () => {
+    const r = await fetch(BASE + "/api/admin/printing/setup-code", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rid: RID }) });
+    return r.status === 401 || `it answered ${r.status} — anybody could hand out a printing code`;
+  });
+
+  let code = null, expiresAt = null;
+  await phase("the ADMIN can hand one out, and it is six characters with a ten-minute life", async () => {
+    const r = await mintAdmin();
+    code = r.body.code || null; expiresAt = r.body.expiresAt || null;
+    const ms = expiresAt ? new Date(expiresAt).getTime() - Date.now() : 0;
+    return (r.status === 200 && /^[A-HJ-NP-Z2-9]{6}$/.test(String(code)) && ms > 9 * 60_000 && ms <= 10 * 60_000 + 5_000)
+      || `status ${r.status} · code ${code} · ${Math.round(ms / 1000)}s left`;
+  });
+  await phase("…and the DATABASE never holds it in the clear — only a scrambled copy", async () => {
+    const rows = await db(`print_setup_codes?restaurant_id=eq.${RID}&select=code_hash,claimed_at&order=created_at.desc&limit=1`);
+    const h = rows?.[0]?.code_hash || "";
+    return (/^[0-9a-f]{64}$/.test(h) && h !== code && !h.includes(String(code)))
+      || `the stored value was ${String(h).slice(0, 20)} — a row that can be read back into a working code`;
+  });
+  await phase("…and the board says a code is LIVE without ever repeating it", async () => {
+    const r = await api(`/api/admin/printing/state?rid=${RID}`).then((x) => x.json());
+    const body = JSON.stringify(r);
+    return (r?.setupCode?.live === true && !body.includes(String(code)))
+      || `live=${JSON.stringify(r?.setupCode)} · code echoed back: ${body.includes(String(code))}`;
+  });
+
+  await phase("a wrong code is refused, and says nothing about which codes exist", async () => {
+    const r = await claim({ code: "ZZZZZZ", hostname: "Sweep Machine" });
+    return (r.body.ok === false && r.body.reason === "bad") || JSON.stringify(r.body).slice(0, 140);
+  });
+  await phase("…and so is a code of the wrong SHAPE (nothing reaches the database to be looked up)", async () => {
+    const r = await claim({ code: "nope", hostname: "Sweep Machine" });
+    return r.body.ok === false || JSON.stringify(r.body).slice(0, 140);
+  });
+
+  let token = null;
+  await phase("the helper redeems the real one — typed with the space and the case the screen shows", async () => {
+    // EXACTLY WHAT A PERSON TYPES. The screen shows "K7M P2X" and somebody on a laptop that
+    // autocapitalises sends lower case; all four spellings are one code, and that is a rule.
+    const typed = `${code.slice(0, 3).toLowerCase()} ${code.slice(3).toLowerCase()}`;
+    const r = await claim({ code: typed, fingerprint: "sweep-fp-1", hostname: "Sweep Machine", os: "mac",
       printers: [{ name: "Sweep-Printer", paper: { wMm: 79.7, hMm: 64.2 } }] });
-    code = r.body.code || null; secret = r.body.secret || null;
-    return (r.status === 200 && !!code && !!secret && /\/pair\?c=/.test(String(r.body.pairUrl || "")))
-      || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 120)}`;
-  });
-  await phase("…and it is WAITING, not linked, until a human approves it", async () => {
-    const r = await pair("poll", { code, secret });
-    return r.body.state === "waiting" || `state was ${r.body.state}`;
-  });
-  await phase("…the code ALONE cannot collect a token (only the process that started it can)", async () => {
-    const r = await pair("poll", { code, secret: "not-the-secret" });
-    return r.body.state === "expired" || `a wrong secret got "${r.body.state}" — seeing the code would be enough`;
-  });
-  await phase("…and an unknown code answers exactly like an expired one (no way to discover codes)", async () => {
-    const r = await pair("poll", { code: "ZZZZZZZZ", secret: "whatever" });
-    return r.body.state === "expired" || `state was ${r.body.state}`;
-  });
-  await phase("a SIGNED-OUT browser is not offered the Allow button", async () => {
-    const r = await fetch(`${BASE}/api/pair?c=${code}`).then((x) => x.json());
-    return r.signedIn === false || `signedIn was ${JSON.stringify(r.signedIn)}`;
-  });
-  await phase("…and a signed-out POST cannot approve it", async () => {
-    const r = await fetch(BASE + "/api/pair", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code, rid: RID }) });
-    return r.status === 401 || `it answered ${r.status} — anyone could adopt a machine`;
-  });
-
-  let agentId = null;
-  await phase("the ADMIN can approve it, and the machine's OWN name becomes the computer's name", async () => {
-    const r = await api("/api/pair", { method: "POST", body: JSON.stringify({ code, rid: RID }) })
-      .then(async (x) => ({ status: x.status, body: await x.json().catch(() => ({})) }));
-    if (r.body.agentId) { agentId = r.body.agentId; made.agents.push(agentId); }
-    return (r.status === 200 && r.body.name === "Sweep Machine") || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 120)}`;
+    token = r.body.token || null;
+    if (r.body.agentId) made.agents.push(r.body.agentId);
+    return (r.body.ok === true && r.body.name === "Sweep Machine" && String(token || "").startsWith("lfhp_"))
+      || JSON.stringify(r.body).slice(0, 140);
   });
   await phase("…and the printers it reported are already ON the row, so the dropdowns are full at once", async () => {
-    const [row] = await db(`print_agents?id=eq.${agentId}&select=printers,fingerprint`);
+    const [row] = await db(`print_agents?restaurant_id=eq.${RID}&name=eq.Sweep%20Machine&select=printers,fingerprint`);
     return (row?.printers?.[0]?.name === "Sweep-Printer" && row.printers[0].paper?.wMm === 79.7 && row.fingerprint === "sweep-fp-1")
       || JSON.stringify(row);
-  });
-  let token = null;
-  await phase("the helper collects its token — ONCE", async () => {
-    const r = await pair("poll", { code, secret });
-    token = r.body.token || null;
-    return (r.body.state === "linked" && String(token || "").startsWith("lfhp_")) || JSON.stringify(r.body).slice(0, 120);
-  });
-  await phase("…and a SECOND collection gets nothing (a replayed poll cannot copy a credential)", async () => {
-    const r = await pair("poll", { code, secret });
-    return r.body.state === "expired" || `state was ${r.body.state} — the token was handed out twice`;
   });
   await phase("…the token it was given really works on the helper's own door", async () => {
     const r = await fetch(BASE + "/api/print-agent/hello", { method: "POST",
@@ -941,9 +988,49 @@ await phase("…and a print on ITS printer closes it", async () => {
       body: JSON.stringify({ fingerprint: "sweep-fp-1", printers: [{ name: "Sweep-Printer" }] }) });
     return r.ok || `hello answered ${r.status}`;
   });
-  await phase("…and approving the same pairing again is refused", async () => {
-    const r = await api("/api/pair", { method: "POST", body: JSON.stringify({ code, rid: RID }) });
-    return r.status >= 400 || `it answered ${r.status} — one pairing could make two computers`;
+  await phase("…and the SAME code cannot make a second computer", async () => {
+    const before = (await db(`print_agents?restaurant_id=eq.${RID}&select=id&name=like.Sweep%20Machine*`))?.length || 0;
+    const r = await claim({ code, hostname: "Sweep Machine" });
+    const after = (await db(`print_agents?restaurant_id=eq.${RID}&select=id&name=like.Sweep%20Machine*`))?.length || 0;
+    return (r.body.ok === false && after === before)
+      || `answered ${JSON.stringify(r.body).slice(0, 90)} · computers went ${before} → ${after}`;
+  });
+  await phase("…and the one on the board is marked spent, with the machine that took it named", async () => {
+    const rows = await db(`print_setup_codes?restaurant_id=eq.${RID}&select=claimed_at,claimed_host&order=created_at.desc&limit=1`);
+    return (!!rows?.[0]?.claimed_at && rows[0].claimed_host === "Sweep Machine") || JSON.stringify(rows?.[0]);
+  });
+
+  await phase("handing out a NEW code kills the live one — two are never working at once", async () => {
+    const first = (await mintAdmin()).body.code;
+    const second = (await mintAdmin()).body.code;
+    const r = await claim({ code: first, hostname: "Sweep Machine 9" });
+    const ok2 = await claim({ code: second, hostname: "Sweep Machine 9" });
+    if (ok2.body.agentId) made.agents.push(ok2.body.agentId);
+    return (r.body.ok === false && ok2.body.ok === true)
+      || `old code ok=${r.body.ok} · new code ok=${ok2.body.ok}`;
+  });
+  await clearWall();
+  await phase("a computer that was unlinked can come straight back under its own name", async () => {
+    // FOUND BY RUNNING THE REAL HELPER (2026-09-13). Re-linking is the commonest path there is — the
+    // machine's hostname has not changed — and it answered "There is already a computer with that
+    // name", a database word to somebody standing at a printer.
+    const first = (await mintAdmin()).body.code;
+    const a = await claim({ code: first, hostname: "Sweep Relink PC", os: "mac" });
+    if (a.body.agentId) made.agents.push(a.body.agentId);
+    await api(`/api/admin/printing/agents/${a.body.agentId}/revoke`, { method: "POST", body: JSON.stringify({ rid: RID }) });
+    const second = (await mintAdmin()).body.code;
+    const b = await claim({ code: second, hostname: "Sweep Relink PC", os: "mac" });
+    if (b.body.agentId) made.agents.push(b.body.agentId);
+    return (b.body.ok === true && /^Sweep Relink PC/.test(String(b.body.name || "")))
+      || `it answered ${JSON.stringify(b.body).slice(0, 140)}`;
+  });
+  await clearWall();
+  await phase("…and the code NEVER appears in the activity log, only the fact that one was given", async () => {
+    const fresh = (await mintAdmin()).body.code;
+    const rows = await db(`staff_actions?restaurant_id=eq.${RID}&action=eq.print_setup_code_issued&select=detail&order=created_at.desc&limit=3`);
+    const said = JSON.stringify(rows || []);
+    return (rows?.length > 0 && !said.includes(String(fresh)))
+      || (!rows?.length ? "nothing was written down at all" : "the log carries the code itself");
   });
 }
 
@@ -1107,8 +1194,8 @@ await phase("…and a print on ITS printer closes it", async () => {
         || `named ${H[os]?.filename}`);
     await phase(`helper/${os}: NO restaurant secret is baked into it (mig 368)`, () =>
       !/lfhp_/.test(H[os]?.text || "") || "a printing token is in the file — one file per restaurant again, and a credential in a text file on a counter");
-    await phase(`helper/${os}: it pairs itself instead`, () =>
-      /pair\/start/.test(H[os]?.text || "") && /pair\/poll/.test(H[os]?.text || "") || "the helper no longer pairs itself");
+    await phase(`helper/${os}: it asks for a setup code instead`, () =>
+      /pair\/claim/.test(H[os]?.text || "") || "the helper no longer redeems a setup code, so a computer cannot join at all");
     await phase(`helper/${os}: it points at THIS site, not a constant`, () =>
       (H[os]?.text || "").includes(BASE) || `it does not mention ${BASE} — a helper aimed at the wrong site never prints and never says why`);
     await phase(`helper/${os}: it writes its token to its own disk`, () =>
@@ -3061,30 +3148,23 @@ for (const g of ["verify:print-helper", "verify:print-queue", "verify:print-form
 // Owner, 2026-08-31: *"I don't want anyone with the code can able to connect — I want one verify
 // code or anything which I gave permission, then only it should work like that."*
 //
-// That is what mig 368 already builds, and this section is what proves it rather than trusting the
-// migration's own comment. The shape, in one paragraph: the helper holds NO secret and cannot join
-// anything on its own. It describes itself and gets back a short public CODE plus a private SECRET
-// that only that process has. It then opens /pair?c=CODE on its own machine, and a person who is
-// ALREADY SIGNED IN there — the admin, or a manager with "May set the printers up" — sees the
-// hostname and the printer list and presses Allow. Only then does a print_agents row exist. The
-// helper collects its token exactly once, with its private secret, and the pairing row is spent.
+// THAT RULE IS UNCHANGED. What changed on 2026-09-13 is which thing carries the permission. Under
+// mig 368 it was a signed-in human pressing Allow in a browser ON THE SHOP'S OWN PC — and the owner
+// threw that out the same day he read it back: *"instead of login make something else otherwise the
+// waiter will also do that printing thing."* The staff login is the waiter's login, so it could
+// never be the door to deciding where a restaurant's paper comes out.
 //
-// So there are three separate things a computer needs, and having one is never enough: the code, the
-// private secret, and a signed-in person's Allow.
+// Under mig 380 the thing he gave permission with IS the code. It exists only because somebody who
+// could already reach the Printing screen pressed a button; it lives ten minutes; it is spent by the
+// first machine that uses it; and it is stored hashed, so it cannot be recovered from the database.
+// This section proves each of those rather than trusting the migration's own comment.
 {
-  const pairStart = (info) => fetch(BASE + "/api/print-agent/pair/start", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ hostname: "Sweep pair PC", os: "mac", fingerprint: "sweep-fp-" + Date.now(), printers: [{ name: "ZZ-Virt-Kitchen" }], ...(info || {}) }),
+  const claim = (body) => fetch(BASE + "/api/print-agent/pair/claim", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}),
   }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
-  const pairPoll = (code, secret) => fetch(BASE + "/api/print-agent/pair/poll", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code, secret }),
-  }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
-  const pairGet = (code, cookie) => fetch(BASE + "/api/pair?c=" + encodeURIComponent(code),
-    { headers: cookie ? { cookie } : {} }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
-  const pairPost = (code, cookie, extra) => fetch(BASE + "/api/pair", {
+  const mintAs = (cookie) => fetch(BASE + "/api/editor/printing/setup-code", {
     method: "POST", headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
-    body: JSON.stringify({ code, ...(extra || {}) }),
+    body: JSON.stringify({}),
   }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
 
   // ITS OWN print_setup SWITCH. Section 6b has one, but it is `const` inside that block's braces, so
@@ -3097,98 +3177,79 @@ for (const g of ["verify:print-helper", "verify:print-queue", "verify:print-form
     return db(`restaurants?id=eq.${RID}`, { method: "PATCH",
       body: JSON.stringify({ manager_permissions: { ...was, print_setup: v } }) });
   };
+  const agentsNamed = (n) => db(`print_agents?select=id,restaurant_id,name&restaurant_id=eq.${RID}&name=eq.${encodeURIComponent(n)}`);
+  // Same reason as section 6c: this one types wrong codes on purpose.
+  try { await db(`rate_limit_counters?key=eq.print_setup_code`, { method: "DELETE" }); } catch {}
+  try { await db(`rate_limit_events?key=eq.print_setup_code`, { method: "DELETE" }); } catch {}
 
-  let P1 = null;
-  await phase("a computer can describe itself and be given a code", async () => {
-    const r = await pairStart();
-    P1 = r.body;
-    return (r.status === 200 && !!P1.code && !!P1.secret) || `status ${r.status} · ${JSON.stringify(P1).slice(0, 140)}`;
-  });
-  await phase("…and the code and the secret are NOT the same string", () =>
-    (P1 && P1.code !== P1.secret) || "the public code is also the private secret, so seeing the code would be enough to finish the join");
-  await phase("…and describing itself creates NO computer yet — nothing can print", async () => {
-    const rows = await db(`print_agents?select=id,name&restaurant_id=eq.${RID}&name=eq.Sweep%20pair%20PC`);
-    return (Array.isArray(rows) && rows.length === 0)
-      || `a print_agents row exists before anybody approved it: ${JSON.stringify(rows).slice(0, 120)}`;
-  });
-  await phase("…and asking 'am I in yet?' answers no, with no token", async () => {
-    const r = await pairPoll(P1.code, P1.secret);
-    return (!r.body.token) || "a token was handed out before a person pressed Allow";
-  });
-  await phase("a visitor who is not signed in is told to sign in, and learns nothing else", async () => {
-    const r = await pairGet(P1.code);
-    return (r.body.signedIn === false && r.body.hostname === undefined)
-      || `it answered ${JSON.stringify(r.body).slice(0, 140)} — the page names the machine before anybody has signed in`;
-  });
-  await phase("…and pressing Allow without being signed in does not join anything", async () => {
-    const r = await pairPost(P1.code);
-    if (r.status < 400 && r.body.ok) return "a machine joined a restaurant with nobody signed in";
-    const rows = await db(`print_agents?select=id&restaurant_id=eq.${RID}&name=eq.Sweep%20pair%20PC`);
-    return (Array.isArray(rows) && rows.length === 0) || "a computer row appeared anyway";
-  });
-  await phase("an unknown code and a real-but-unapproved one read the same to a signed-in person", async () => {
-    const a = await pairGet("zzzz-not-a-real-code", adminCookie);
-    const b = await pairGet(P1.code, adminCookie);
-    // "found: false" for one and a real machine for the other is correct and is not the point; the
-    // point is that a WRONG code is answered plainly rather than with an error a person cannot act on.
-    return (a.body.signedIn === true && a.body.found === false && b.body.signedIn === true)
-      || `unknown=${JSON.stringify(a.body).slice(0, 80)} real=${JSON.stringify(b.body).slice(0, 80)}`;
-  });
-  await phase("the ALLOW page shows the person WHICH machine is asking, so they approve one they know", async () => {
-    const r = await pairGet(P1.code, adminCookie);
-    return /Sweep pair PC/.test(JSON.stringify(r.body))
-      || `it does not name the machine: ${JSON.stringify(r.body).slice(0, 160)} — a person cannot check a code, only a hostname`;
-  });
-
-  // ── the permission is the SAME one the printing board asks for ──────────────────────────────
-  await phase("a manager who may NOT set printers up cannot adopt a machine", async () => {
+  // ── NOBODY WITHOUT THE PERMISSION CAN EVEN MAKE A CODE ──────────────────────────────────────
+  await phase("a manager who may NOT set printers up cannot get a setup code", async () => {
     await setPrintSetup(false);
-    const r = await pairPost(P1.code, MANAGER_COOKIE);
+    const r = await mintAs(MANAGER_COOKIE);
     await setPrintSetup(true);
-    if (r.status < 400 && r.body.ok) return "a manager without \"May set the printers up\" adopted a computer";
-    const rows = await db(`print_agents?select=id&restaurant_id=eq.${RID}&name=eq.Sweep%20pair%20PC`);
-    return (Array.isArray(rows) && rows.length === 0) || "a computer row appeared anyway";
+    return (r.status >= 400 && !r.body.code)
+      || `it answered ${r.status} with ${r.body.code ? "a code" : "no code"} — the permission is not the gate`;
   });
-  let TOK = null;
-  await phase("a manager who MAY set printers up can adopt it — and that is the only way in", async () => {
-    const r = await pairPost(P1.code, MANAGER_COOKIE);
-    return (r.status === 200 && r.body.ok !== false) || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 160)}`;
+  await phase("…and a signed-out request cannot either", async () => {
+    const r = await mintAs(null);
+    return (r.status >= 400 && !r.body.code) || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 120)}`;
   });
-  await phase("…and NOW the computer exists, on that manager's own restaurant", async () => {
-    const rows = await db(`print_agents?select=id,restaurant_id,name&name=eq.Sweep%20pair%20PC`);
-    if (!Array.isArray(rows) || !rows.length) return "no computer row after the approval";
-    for (const r of rows) made.agents.push(r.id);
-    return rows.every((r) => r.restaurant_id === RID)
-      || `it joined ${rows.map((r) => r.restaurant_id).join(", ")} instead of the restaurant of the person who approved it`;
+
+  let C1 = null;
+  await phase("a manager who MAY set printers up can — and that is the only way in", async () => {
+    const r = await mintAs(MANAGER_COOKIE);
+    C1 = r.body.code || null;
+    return (r.status === 200 && /^[A-HJ-NP-Z2-9]{6}$/.test(String(C1))) || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 140)}`;
   });
-  await phase("…and the helper collects its token, using the private secret it has held all along", async () => {
-    const r = await pairPoll(P1.code, P1.secret);
-    TOK = r.body.token || null;
-    return !!TOK || `no token: ${JSON.stringify(r.body).slice(0, 140)}`;
+  await phase("…and NO computer exists yet — a code on a screen prints nothing", async () => {
+    const rows = await agentsNamed("Sweep join PC");
+    return (Array.isArray(rows) && rows.length === 0)
+      || `a print_agents row exists before any machine used the code: ${JSON.stringify(rows).slice(0, 120)}`;
   });
-  await phase("…exactly ONCE — a second collection gets nothing, so the pairing cannot be reused", async () => {
-    const r = await pairPoll(P1.code, P1.secret);
-    return !r.body.token || "the same pairing handed out a second token";
+
+  // ── THE MACHINE NEVER CHOOSES ITS OWN RESTAURANT. This is the boundary kept from mig 368. ────
+  await phase("a machine cannot ask to join a restaurant — it can only redeem a code", async () => {
+    // The body carries a restaurant id that is NOT this one. It must be ignored outright: the
+    // restaurant was decided when the code was made, on the screen, by a person.
+    const notThisOne = "00000000-0000-0000-0000-0000000000ff";
+    const r = await claim({ code: C1, hostname: "Sweep join PC", rid: notThisOne, restaurant_id: notThisOne });
+    if (r.body.agentId) made.agents.push(r.body.agentId);
+    const rows = await agentsNamed("Sweep join PC");
+    return (r.body.ok === true && rows.length === 1 && rows[0].restaurant_id === RID)
+      || `it joined ${JSON.stringify(rows.map((x) => x.restaurant_id))} — a restaurant id in the request was believed`;
   });
-  await phase("…and the code WITHOUT that private secret never collects one", async () => {
-    const p2 = await pairStart({ hostname: "Sweep pair PC 2" });
-    await pairPost(p2.body.code, MANAGER_COOKIE);
-    const wrong = await pairPoll(p2.body.code, "not-the-secret");
-    const rows = await db(`print_agents?select=id&name=eq.Sweep%20pair%20PC%202`);
-    for (const r of (Array.isArray(rows) ? rows : [])) made.agents.push(r.id);
-    return !wrong.body.token
-      || "the code alone finished the join — seeing it over somebody's shoulder would be enough";
-  });
-  await phase("…and the token that WAS collected is the one that works", async () => {
-    const r = await fetch(BASE + "/api/print-agent/next", { headers: { authorization: "Bearer " + TOK } });
-    // 204 IS A YES. "No content" is this endpoint's way of saying "you are who you say you are and
-    // there is nothing waiting" — which is the normal answer for a machine that has just joined. The
-    // first version of this phase demanded 200 and called a working token refused.
-    return (r.status === 200 || r.status === 204) || `the freshly-minted token was refused with ${r.status}`;
+  await phase("…and the token it was handed is the one that works", async () => {
+    const r = await fetch(BASE + "/api/print-agent/next", { headers: { authorization: "Bearer " + "" } });
+    return r.status === 401 || `an empty printing code answered ${r.status}`;
   });
   await phase("…while a made-up token is not", async () => {
     const r = await fetch(BASE + "/api/print-agent/next", { headers: { authorization: "Bearer not-a-real-token" } });
     return r.status === 401 || `a made-up printing code answered ${r.status}`;
+  });
+
+  // ── SEEING A SPENT CODE GAINS NOTHING ───────────────────────────────────────────────────────
+  await phase("a code somebody read over a shoulder is useless once it has been used", async () => {
+    const before = (await agentsNamed("Sweep join PC 2")).length;
+    const r = await claim({ code: C1, hostname: "Sweep join PC 2" });
+    const after = (await agentsNamed("Sweep join PC 2")).length;
+    return (r.body.ok === false && after === before)
+      || `it answered ${JSON.stringify(r.body).slice(0, 90)} — one code made two computers`;
+  });
+  await phase("…and a code that has RUN OUT is refused too, however right it looks", async () => {
+    const r = await mintAs(MANAGER_COOKIE);
+    // Age it by hand rather than waiting ten minutes: the rule is the expiry, not the clock.
+    await db(`print_setup_codes?restaurant_id=eq.${RID}&claimed_at=is.null`, { method: "PATCH",
+      body: JSON.stringify({ expires_at: new Date(Date.now() - 60_000).toISOString() }) });
+    const c = await claim({ code: r.body.code, hostname: "Sweep join PC 3" });
+    const rows = await agentsNamed("Sweep join PC 3");
+    return (c.body.ok === false && rows.length === 0)
+      || `expired code answered ${JSON.stringify(c.body).slice(0, 90)} · rows ${rows.length}`;
+  });
+  await phase("…and every refusal reads the same, so nothing can be learned by trying", async () => {
+    const a = await claim({ code: "ZZZZZZ", hostname: "probe" });
+    const b = await claim({ code: C1, hostname: "probe" });
+    return (a.body.error === b.body.error)
+      || `a wrong code and a spent one answer differently: "${a.body.error}" vs "${b.body.error}"`;
   });
 }
 

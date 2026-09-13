@@ -239,7 +239,12 @@ const PLACE: Record<string, Place> = {
   // rule that every row says where it happened (owner, 2026-08-12). Added on 2026-08-20 with the
   // two cancel_* rows above, which had the identical gap.
   print_helper_added: { area: "Aevidine console", screen: "Printing" },
+  // RETIRED with mig 380 — `agents/:id/newcode` is deleted. The row stays so the Activity log can
+  // still read old rows as English; a label removed is a past entry that prints as a raw key.
   print_helper_recoded: { area: "Aevidine console", screen: "Printing" },
+  // mig 380. Written from BOTH boards, so the area is the one the person was actually on: the
+  // restaurant's own Settings → Printing has its own entry below.
+  print_setup_code_issued: { area: "Aevidine console", screen: "Printing" },
   print_helper_removed: { area: "Aevidine console", screen: "Printing" },
   print_routes_changed: { area: "Aevidine console", screen: "Printing" },
   print_switch: { area: "Aevidine console", screen: "Printing" },

@@ -291,6 +291,144 @@ Guarded by 16 new `verify:print-helper` checks (**132** total) and 7 new sweep p
 0 failed) — including that a `nobody` line survives a mode change and that a mode change re-asserts
 auto-print.
 
+## 2026-09-13 — the LOGIN is gone: a ten-minute code the screen hands out (mig 380)
+
+> Owner, reading the report on the old setup: *"when I'm setting up helper it tells me to login wtf,
+> helper is separate thing it will work on the pc itself then why login and which role to login"*.
+> Then, ruling on it: *"still instead of login make something else otherwise the waiter will also do
+> that printing thing and make completely diff login not this"*. Then naming the shape himself:
+> *"you can generate code for each restaurant from printing menu and like the helper ask for that
+> code and that generated code only works for 10 min and all that."*
+
+**He was right, and the flow was worse than he knew.** mig 368's Allow page asked for a **staff
+login on the restaurant's own counter PC** — the same login a waiter has. A permission switch
+(`print_setup`) was doing the separating, and a permission switch is not a door. Four faults sat
+on top of that, and all four are gone with the page:
+
+| # | What a person saw | Why |
+|---|---|---|
+| 1 | a correctly signed-in manager told **"Sign in on this computer first"**, for ever | `/api/pair` answered `{signedIn:false}` for "no permission" as well as "not signed in". `print_setup` is default OFF, so this was the ORDINARY case. A kitchen login could never pass at all. |
+| 2 | signing in threw the pairing away | `/login` only honours `?next` when it **exactly equals** that role's home page, so `/pair?c=…` was dropped and the tab never came back. |
+| 3 | an existing session was a one-way trip | `/login` redirects a signed-in person straight to their panel without showing a form. |
+| 4 | both guides promised **no login** | `/print-setup.html` said *"no password to type"* and *"Someone has to sign in? **no**"*; the board's step 5 said *"Press Allow. That is the whole setup."* |
+
+### What it is now
+
+```
+the Printing screen — somebody is ALREADY signed in there      the computer at the printer
+──────────────────────────────────────────────────────       ───────────────────────────
+presses "Show a setup code" ──► one code, ten minutes         the helper asks for a code
+     shown ONCE, with a countdown ─── read it out ──────────► the person types it
+                                                               pair/claim
+the computer appears on the board ◄─────────────────────────── token written to its own disk
+```
+
+**Nobody signs in on that machine — not to set it up, and not afterwards.** The code is the separate
+door he asked for: it signs nobody in, reads nothing, lives ten minutes, is spent by the first
+machine that uses it, and the only act it can perform is attaching ONE computer to ONE restaurant's
+printing. A waiter cannot produce one — the Printing screen is behind the admin console or
+`print_setup`, exactly as before — and a waiter's own login now opens nothing here at all.
+
+### The trade, stated plainly
+
+The old code was **not** a secret: seeing it gained nothing, because a signed-in human still had to
+approve. **This one IS a secret for its ten minutes.** That is the price of not asking a shop's PC
+for a login, and it is priced down to:
+
+- **ten minutes**, his number · **single use** · **one live code per restaurant** (issuing a new one
+  kills the old one in the same breath, so two are never working at once)
+- **stored hashed** (`code_hash`, sha-256) — the database never holds the plaintext, so a row cannot
+  be read back into a working code, and a board that lost the digits gets a FRESH code, never a
+  second copy
+- **a wall that is also the alarm** — `print_setup_code`, 20 tries per 10 minutes per address, and a
+  code that WORKS clears the counter (the same rule, for the same recorded reason, as a staff login:
+  a wall exists to stop repeated wrong tries, so proving you hold a real code must reset it — without
+  it, setting eight machines up in one sitting from one address walls the ninth)
+- **an audit row that never carries the code** — `print_setup_code_issued` says one was handed out
+  and by whom; the digits are the one thing that must not be readable afterwards
+
+What a leaked code can do, inside its ten minutes: attach one machine to that ONE restaurant's
+printing. That machine can then print and reprint that restaurant's own tickets — nothing else in
+the app accepts an agent token. It appears on the Printing board **by name** the moment it is used,
+and one press of Unlink ends it. No other restaurant is reachable, ever.
+
+### Three doors were DELETED, not switched off
+
+"A new way replaces the old one" (owner, 2026-08-29). All three minted a **permanent** printing
+credential and **no screen had called any of them since mig 368**:
+
+| Gone | What it did |
+|---|---|
+| `/pair` + `/api/pair` | the Allow page and its door |
+| `POST /api/admin/printing/agents` | made a computer row and answered with its token, plus a helper file with that token typed in |
+| `agents/:id/newcode` | minted a replacement token (`verify:print-helper` had been asserting since mig 368 that no screen may show it) |
+| the create branch of the panel's `this-computer` | the same, from a manager's browser |
+
+`print_pairings` went with them — an approved-but-uncollected row still held a one-time token.
+
+### Two faults found by DRIVING it, and neither was visible in the code
+
+1. **A machine could not come back under its own name.** Unlink a computer, run the helper again,
+   type a fresh code → *"There is already a computer with that name."* A database word, to a person
+   standing at a printer, about the **commonest path there is** — re-linking, where the hostname has
+   not changed. `print_agents` is `UNIQUE (restaurant_id, name)` across **all** rows and revoked rows
+   are KEPT on purpose (mig 341), so the name check must not filter them out. It did. *(Inherited
+   from `approvePairing`, which had the identical filter — it mattered less when re-linking meant
+   pressing a button in a browser and the error landed on a page.)*
+2. **The screen that handed out the code lost the machine.** The panel finds its computer by
+   `owner_device`, and a HELPER has no browser — so a row born from a claim had none, and the panel
+   **on the very machine that had just been set up** still said *"this computer is not set up yet"*.
+   The device that ISSUED the code is the honest answer, and it is written on now. mig 367's promise
+   (*"that device will set up the printer… and that device will only get the option in settings"*) is
+   intact.
+
+A third came out of the sweep: the panel's code verb sat **below** the "this browser has no device
+id" line, so a panel whose device cookie had not been written was refused a code it had every right
+to — and told to reload the page, for a problem that was never its own. A setup code belongs to the
+restaurant, not to a browser; it sits above that line now.
+
+### The helper, when nobody is watching
+
+Setting up means somebody **typing**, so every path where nobody can type had to be an answer rather
+than a hang:
+
+- **an auto-started copy marks itself** — `--auto` (mac/linux), `/auto` (Windows) — and with no token
+  it steps aside instead of waiting at a prompt inside a minimised window nobody will ever restore,
+  which from the outside looks exactly like a helper running fine and never printing
+- **a refused token clears itself** and asks for a fresh code. It used to say *"delete
+  `$TOKEN_FILE` and start this file again"* — a hidden folder inside a home directory, which is not a
+  thing a restaurant does, so the real outcome was a machine that never printed again
+- **an unattended copy LETS GO of the lock** and stops. Waiting in a loop was the obvious way to
+  write it and the wrong one: that copy can never do anything again, and while it waits it holds the
+  single-instance lock — which is exactly what somebody walking up to re-link the machine needs
+- **the Mac's LaunchAgent throttles at 300s**, because KeepAlive's default is ten SECONDS and an
+  unlinked machine exits at once
+- **Windows never puts the typed value on a command line** — it goes to a file and PowerShell strips
+  it to letters and digits there. A quote or an ampersand pasted out of a chat is how a `.bat` stops
+  being the file you wrote
+- **the code is forgiving to type**: `K7M P2X` with the space, a dash, or lower case are all one code,
+  and the alphabet leaves out every character that sounds or looks like another (`0/O`, `1/I/l`)
+
+### How it was checked
+
+`verify:print-helper` **159 → 173** checks, and **all 11 sabotage cases caught** — the code stored in
+the clear, the unfiltered spend, the revoked-row name filter, the ten-minute life, two live codes,
+the missing wall, the Allow page restored, the helper opening a browser, each of the three auto-start
+entries losing its mark, `newcode` restored, and the panel trusting a `rid` from the request.
+*(The first version of the auto-start check was `/--auto/` and matched **this file's own explanation
+of `--auto`** — it stayed green while the plist and the Windows shortcut both lost it. Each launcher
+is named separately now.)*
+
+`verify:printing-sweep` **125 → 488 phases against a running app, 484 passed, 0 failed**, including
+the real end-to-end join, the re-link case, and the two permission sections. The **real generated
+helper** was then run on a Mac in a pty with HOME redirected: it prompted, took the code typed in
+lower case with a space, linked, wrote its token, installed its own auto-start, and never echoed the
+token — and the three unattended paths were driven the same way.
+
+Two guards had the same **parser blind spot** and are fixed in this change: `echo(` is cmd.exe's own
+idiom for echoing a value, and both `%VAR%`-in-a-block walkers read its `(` as an opened block, after
+which every later line looked nested. One of them reported twenty correct lines as faults.
+
 ## Why the browser can never do this
 
 A web page cannot choose a printer. `window.print()` under Chrome's `--kiosk-printing` always

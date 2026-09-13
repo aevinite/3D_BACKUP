@@ -209,6 +209,16 @@ for (const [file, needle, what] of [
 {
   // path → why it is deliberately named although it is not in this checkout.
   const KNOWN_GONE = {
+    // The Allow page and its door, deleted by mig 380 on 2026-09-13. GUARD-MAP names them in its
+    // own obituary sentence — the row that used to cover them now covers lib/printSetupCode.ts —
+    // because "this is what that check used to be" is exactly what a person reading a guard map
+    // needs, and a sentence that named nothing would send them hunting for the old checks.
+    "app/pair":     "the Allow page (mig 368), deleted by mig 380 — it asked a shop's counter PC for a staff login",
+    // Named by the REJECTED-IDEAS row that records the reversal, in the sentence that says it was
+    // replaced. "lib/printSetupCode.ts (which replaced lib/printPair.ts)" is exactly the pointer a
+    // person following that decision needs; writing it without the old name would lose the thread.
+    "lib/printPair.ts": "mig 368's pairing library, replaced by lib/printSetupCode.ts at mig 380",
+    "app/api/pair": "its door, deleted with it; the setup code (lib/printSetupCode.ts) replaced both",
     ".claude/deploy.lock":            "exists only while a deploy holds it — that is the whole mechanism",
     ".claude/verify-everything.lock": "same: a pid lock that exists only while the suite is running",
     ".claude/sweep/shots/T23/":       "written BY the run that is being described — gitignored, so a fresh checkout never has it",

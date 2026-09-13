@@ -130,6 +130,12 @@ try {
 const orphans = [];
 for (const f of files) {
   if (f.endsWith("scripts/verify-rejected-ideas.mjs")) continue;   // this file talks ABOUT the marker
+  // A FILE GIT KNOWS AND THE DISK DOES NOT IS AN ORDINARY STATE, NOT A CRASH (2026-09-13). `git
+  // ls-files` lists a tracked file that has been deleted but not yet staged — the middle of any
+  // piece of work that removes one — and this read threw ENOENT, so the whole guard died with a
+  // node stack instead of saying anything. Nothing here needs that file: it is looking for stray
+  // REJECTED comments, and a file that is gone has none.
+  if (!existsSync(`${ROOT}/${f}`)) continue;
   const src = readFileSync(`${ROOT}/${f}`, "utf8");
   if (!/REJECTED \(owner,/.test(src)) continue;
   // it must point back at the doc, so a reader can find the decision and the date

@@ -237,27 +237,39 @@ S("…and an empty name is refused rather than leaving a machine nobody can poin
   const r = await admin(`/agents/${AGENT.id}/rename`, { rid: RID, name: "   " });
   return (!r.ok && /name/i.test(String(r.j?.error || ""))) || `${r.status}: ${JSON.stringify(r.j).slice(0, 90)}`;
 });
-S("asking for a new code gives one, and hands back the file to run with it", async () => {
-  const r = await admin(`/agents/${AGENT.id}/newcode`, { rid: RID });
-  if (r.j?.code) AGENT.token = r.j.code;
-  return (r.ok && !!r.j?.code && !!r.j?.scripts) || `${r.status}: ${Object.keys(r.j || {}).join(", ")}`;
+/* ⚠️ RE-POINTED BY mig 380 (2026-09-13). These four rows drove `agents/:id/newcode`, which minted a
+   replacement token and handed back a helper file with it typed in. Both the verb and the
+   file-with-a-token are deleted — the owner replaced the whole join with a ten-minute code the
+   Printing screen hands out and a person types into the helper ("instead of login make something
+   else otherwise the waiter will also do that printing thing"). The rules these rows were really
+   about survive, and are asked of the door that exists. */
+S("asking for a setup code gives one, and it is six characters a person can read out", async () => {
+  const r = await admin("/setup-code", { rid: RID });
+  return (r.ok && /^[A-HJ-NP-Z2-9]{6}$/.test(String(r.j?.code || "")))
+    || `${r.status}: ${JSON.stringify(r.j).slice(0, 90)}`;
 });
-S("…and the file it hands back names the same site the screen is on", async () => {
-  const r = await admin(`/agents/${AGENT.id}/newcode`, { rid: RID });
-  if (r.j?.code) AGENT.token = r.j.code;
-  const texts = JSON.stringify(r.j?.scripts || {});
+S("…and it has no characters that look like each other, because it is read out loud", async () => {
+  const r = await admin("/setup-code", { rid: RID });
+  const confusing = [...String(r.j?.code || "")].filter((c) => "O0I1L".includes(c));
+  return confusing.length === 0
+    || `the code is "${r.j?.code}" — somebody reading it down a phone would say ${confusing.join(", ")} ambiguously`;
+});
+S("…and the helper file this screen hands out names the same site the screen is on", async () => {
+  const st = await state();
+  const texts = JSON.stringify(st?.files || {});
   return texts.includes("localhost:4311") || `the file points at something else: ${(/https?:\/\/[a-z0-9.:-]+/i.exec(texts) || ["nothing"])[0]}`;
 });
-S("…and the file carries NO code at all, because it pairs itself instead", async () => {
-  /* THE OPPOSITE OF WHAT THIS ROW FIRST ASSERTED, and the opposite is the recorded decision. A
-     downloaded file holding a restaurant's printing code is a secret in a Downloads folder; this
-     one asks to be paired and a person approves it on screen (mig 368), which is also why the
-     guide teaches typing it out rather than downloading it at all. */
-  const r = await admin(`/agents/${AGENT.id}/newcode`, { rid: RID });
-  if (!r.j?.code) return `no code came back: ${r.status}`;
-  AGENT.token = r.j.code;
-  const texts = JSON.stringify(r.j.scripts || {});
-  return !texts.includes(r.j.code) || "the file a restaurant downloads has the printing code baked into it";
+S("…and that file carries NO code at all, because the code is typed in instead", async () => {
+  /* THE OPPOSITE OF WHAT THIS ROW FIRST ASSERTED, and the opposite is the recorded decision. A file
+     holding a restaurant's printing code is a secret sitting on a shop counter; this one is the SAME
+     text for every restaurant and asks for a ten-minute code on its first run (mig 368, then 380),
+     which is also why the guide teaches typing it out rather than downloading it at all. */
+  const fresh = await admin("/setup-code", { rid: RID });
+  const st = await state();
+  const texts = JSON.stringify(st?.files || {});
+  if (!fresh.j?.code) return `no setup code came back: ${fresh.status}`;
+  return (!texts.includes(fresh.j.code) && !/lfhp_/.test(texts))
+    || "the helper file has a printing credential baked into it";
 });
 S("the queue can be stopped and restarted from this screen", async () => {
   const a = await admin("/queue", { rid: RID, paused: true });
@@ -276,8 +288,9 @@ S("every refusal this screen's own API gives is a sentence, never a code", async
   const tries = [
     ["/routes", { rid: RID, routes: { bill: { via: "computer", agent: AGENT.id, printer: "nope" } } }],
     ["/test", { rid: RID, agentId: "", printer: "" }],
-    ["/agents", { rid: RID, name: "" }],
-    ["/agents/00000000-0000-0000-0000-0000000000ff/newcode", { rid: RID }],
+    // `POST /agents` and `newcode` are deleted (mig 380). `revoke` carries the same "no such
+    // computer" branch, and it is still reachable, which is what this row needs.
+    ["/agents/00000000-0000-0000-0000-0000000000ff/revoke", { rid: RID }],
     ["/job/00000000-0000-0000-0000-0000000000ff/retry", { rid: RID }],
   ];
   const bad = [];

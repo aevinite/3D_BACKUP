@@ -10,7 +10,10 @@ import { sendOwnerAlert, alertText } from "@/lib/alerts";
 
 export type RateKey =
   | "guest_order" | "staff_login" | "admin_login" | "manager_pin"
-  | "waiter_call" | "join_session" | "otp_request" | "password_change";
+  | "waiter_call" | "join_session" | "otp_request" | "password_change"
+  // mig 380 — redeeming a printer setup code. No login exists on that machine, so the subject is
+  // the address it came from rather than a person.
+  | "print_setup_code";
 
 // Friendly names for the phone ping (the DB rule labels aren't loaded here). MOVED to
 // lib/plainError.ts on 2026-09-02 and re-exported here so existing readers are unchanged: the

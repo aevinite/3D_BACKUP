@@ -54,9 +54,12 @@ import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint 
 // SETTING THE PRINTERS UP FROM THE MACHINE THAT HAS THEM (mig 367, owner 2026-08-27). The same board
 // the admin console draws, narrowed to this computer — same file, same four steps, same words.
 import {
-  agentForDevice, createAgent, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
+  agentForDevice, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
   panelForRole,
 } from "@/lib/printHelpers";
+// The ten-minute setup code a computer types in (mig 380) — the ONE way a machine joins this
+// restaurant's printing now that the Allow page is gone.
+import { issueSetupCode } from "@/lib/printSetupCode";
 import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
@@ -167,15 +170,6 @@ const osOfRequest = (req: NextRequest): HelperOs => {
   if (ua.includes("mac os") || ua.includes("macintosh")) return "mac";
   return "linux";
 };
-
-const PANEL_OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
-/** Shown ONCE, when a code is minted or replaced — it is stored only as a hash, so it can never be
- *  read back. A lost code is REPLACED, never recovered, and the screen says so beside the button. */
-const panelScriptsFor = (origin: string, code: string, label: string) =>
-  Object.fromEntries(PANEL_OS_LIST.map((os) => [os, {
-    filename: HELPER_FILENAME[os], autostart: HELPER_AUTOSTART[os],
-    text: helperScript(os, { origin, code, label }),
-  }]));
 
 // Gate: only a logged-in MANAGER (or the admin super-user) may touch this API.
 // Returns a 401 response to short-circuit, or null to let the handler proceed.
@@ -5074,6 +5068,38 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "printing") {
       if (g.user && !(await managerCan(g, rid, "print_setup"))) return permDenied("set the printers up");
       const dv = deviceIdFrom(req);
+
+      // ── HAND OUT A SETUP CODE, FROM THE RESTAURANT'S OWN SCREEN (mig 380) ────────────────────
+      // The same verb the admin console has, behind the same print_setup gate checked one line
+      // above — so the person the owner named on 2026-08-27 ("that device is connected to the
+      // printer, so it will be easy for that device to set up the printer") can still do the whole
+      // job without Aevidine, and a waiter still reaches nothing here.
+      //
+      // ⚠️ IT SITS ABOVE THE DEVICE-ID LINE ON PURPOSE (caught by the printing sweep, phase 469).
+      // Every other verb in this block acts on "the computer THIS browser set up", so it genuinely
+      // needs to know which browser is asking. A setup code does not: it belongs to the restaurant,
+      // and the device id is only a nicety for the log. Below that line, a panel whose device cookie
+      // had not been written yet was refused a code it had every right to — and the reply told the
+      // person to reload the page, for a problem that was never theirs.
+      //
+      // The code is scoped to THEIR restaurant and nobody else's: `rid` here is the signed-in
+      // person's own restaurant, never a value from the body.
+      if (b === "setup-code") {
+        const made = await issueSetupCode(rid, {
+          kind: g.user ? "staff" : "admin",
+          userId: g.user?.id || null,
+          deviceId: dv || null,
+        });
+        if ("error" in made) return err(made.error, 500);
+        // The digits are never logged — only that a code was handed out, and by whom.
+        await logAction("editor", "print_setup_code_issued", {
+          restaurant_id: rid, ...(dv ? { device_id: dv } : {}),
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: "a ten-minute setup code was handed out for a computer to join the printing",
+        });
+        return ok({ code: made.code, pretty: made.pretty, expiresAt: made.expiresAt, expiresInMs: made.expiresInMs });
+      }
+
       if (!dv) return err("This browser has no device id yet — reload the page and try again.", 400);
 
       // ── "This is the computer with the printer" ───────────────────────────────────────────────
@@ -5116,14 +5142,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           }
           return ok({ already: true, id: mine.id, name });
         }
-        const made = await createAgent(rid, name, { deviceId: dv, userId: g.user?.id || null });
-        if ("error" in made) return err(made.error, 400);
-        await logAction("editor", "print_helper_added", {
-          restaurant_id: rid, device_id: dv,
-          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-          detail: `computer “${name}” set itself up to print`,
-        });
-        return ok({ id: made.id, name, code: made.token, scripts: panelScriptsFor(originOfReq(req), made.token, name) });
+        // ── THIS BROWSER CANNOT CONJURE A COMPUTER ANY MORE (mig 380) ──────────────────────────
+        // It used to fall through here and mint a print_agents row with a permanent token, handing
+        // back a helper file with that token typed into it. No screen has called that branch since
+        // mig 368 retired the token-carrying file — it was a live credential minter behind a door
+        // nobody opened, which is exactly what "a new way replaces the old one" is about.
+        //
+        // A computer joins by REDEEMING A SETUP CODE now, which is the same one path the admin
+        // console uses, so there is one story to tell and one thing to guard. This branch is
+        // reachable only when the button is pressed on a browser that has no computer of its own,
+        // and the honest answer to that is the instruction, not a row.
+        return err("Press “Show a setup code” below, then type that code into the helper on the computer with the printer.", 400);
       }
 
       // ── UNLINK THIS COMPUTER ──────────────────────────────────────────────────────────────────
@@ -5132,10 +5161,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // there was nowhere left to show one — a button that mints a credential nothing displays is
       // worse than no button.
       //
-      // Re-linking is now ONE path, the same one as a first-time setup: unlink here, double-click the
-      // file there, press Allow. Routes pointing at it are emptied in the same breath, because a route
-      // naming a machine that can no longer print would leave paper silently unprinted, and an EMPTY
-      // line at least says "no printer chosen" on screen.
+      // Re-linking is now ONE path, the same one as a first-time setup: unlink here, press "Show a
+      // setup code", and type it into the helper on that computer (mig 380 — there is no Allow page
+      // any more). Routes pointing at it are emptied in the same breath, because a route naming a
+      // machine that can no longer print would leave paper silently unprinted, and an EMPTY line at
+      // least says "no printer chosen" on screen.
       if (b === "unlink") {
         const mine = await agentForDevice(rid, dv);
         if (!mine) return err("This computer is not set up here.", 404);

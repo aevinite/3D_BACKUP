@@ -883,7 +883,7 @@ sections below rather than one long list, because each was written the day its b
 
 ## Routes
 
-There are **57** `page.tsx` routes, not four — count them with
+There are **56** `page.tsx` routes, not four — count them with
 `find app -name page.tsx | wc -l` rather than trusting a list in a document. The ones worth
 knowing by heart:
 
