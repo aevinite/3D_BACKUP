@@ -771,6 +771,19 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   // 2 · THE CODE IS SHOWN ONCE, AND BOTH BOARDS SAY SO (mig 380 — it replaced the Allow page, and
   // the review point it answered: the person standing at the printer is usually the manager, so the
   // restaurant's own screen must be able to do the whole job).
+  // ── A COMPUTER THAT IS LINKED BUT UNUSED IS "HALF DONE", NOT "OFF" (2026-09-13) ───────────
+  // Found by driving the whole join on a real restaurant: link a computer, reload, and the board
+  // HID the machine you had just linked — the card read OFF, the printer dropdowns that are the
+  // only way to finish were behind a button called "Switch on", and a line said "no computer prints
+  // anything for this restaurant". Every part was telling the truth; together they said "nothing
+  // happened", which is where the owner would have been standing for a fourth time having done
+  // everything right.
+  check(/id === "computer" && agents\.length > 0 && !computerOn/.test(code(page)),
+    "a computer that is linked but has no paper yet keeps its setup on screen",
+    "the board hides the computer somebody has just linked: they see OFF, no machine, and the dropdowns that finish the job behind a button called Switch on");
+  check(/Linked, but not printing anything yet/.test(page) && /Choose a printer on the lines just below/.test(page),
+    "…and says, beside that computer, what is left to do",
+    "the half-done state has no words on it — the card says connected, the card below offers dropdowns, and nothing joins the two");
   check(/Show a setup code/.test(page) && /Show a setup code/.test(epanel),
     "both boards have the same 'Show a setup code' button, in the same words",
     "one of the two printing boards lost the setup-code button — that board can no longer set a computer up at all");

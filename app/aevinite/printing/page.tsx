@@ -534,8 +534,25 @@ const PANEL_GROUPS: [ string, string ][] = [
     const d = await post("routes", { routes: patch });
     if (d) { toast(`Taken off the computer: ${computerKinds.map((k) => KIND_LABEL[k] || k).join(", ")}.`, "ok"); void load(); }
   };
-  /** Is this way's setup on screen? ON, or asked for by hand. */
-  const wayOpen = (id: WayId) => wayOn[id] || !!opened[id];
+  /** Is this way's setup on screen? ON, asked for by hand — or HALF DONE.
+   *
+   *  ── THE THIRD CASE IS THE ONE THAT MATTERS (2026-09-13) ────────────────────────────────────
+   *  A computer that is linked but has no paper pointed at it yet is not "off", it is **half set
+   *  up** — and it was the worst state on this board to be in. The card read `OFF`, the machine you
+   *  had just linked was nowhere on screen, and the printer dropdowns that are the only way to
+   *  finish were behind a button called "Switch on". Every screen was telling the truth; together
+   *  they said "nothing happened".
+   *
+   *  Found by driving the whole join on Pizza Palace: link a computer, reload, and the board hides
+   *  the computer you just linked. That is exactly where the owner would have been standing for a
+   *  fourth time, having done everything right.
+   *
+   *  The strip already says it in words — "A computer is set up, but no paper is pointed at it yet"
+   *  — so this only makes the screen agree with its own sentence. It is not "on": `wayOn` is
+   *  untouched, the card still reads OFF, and it goes green only when a printer is actually named.
+   */
+  const wayOpen = (id: WayId) =>
+    wayOn[id] || !!opened[id] || (id === "computer" && agents.length > 0 && !computerOn);
 
   /** What is true for each way TODAY, in one sentence — the line under the tab strip. */
   const wayState: Record<WayId, string> = {
@@ -970,6 +987,19 @@ const PANEL_GROUPS: [ string, string ][] = [
                     ) : null}
                   </div>
                 ))}
+                {/* ── LINKED, BUT NOT YET DOING ANYTHING ────────────────────────────────────────
+                    The state a person lands in the moment their computer joins, and the one that
+                    reads as "nothing happened": the machine is right there, connected, and not a
+                    sheet of paper is pointed at it. The card above says it is connected, the card
+                    below offers the dropdowns — and nothing joined the two. Said here, beside the
+                    computer it is about, because that is where the eye already is. */}
+                {agents.length > 0 && !computerOn ? (
+                  <p style={{ margin: "10px 0 0", fontSize: 12.5, lineHeight: 1.6, color: "var(--adm-warn, #f5a524)" }}>
+                    <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6 }} />
+                    <b>Linked, but not printing anything yet.</b> Choose a printer on the lines just below —
+                    that is what starts it.
+                  </p>
+                ) : null}
               </div>
 
               {/* ═══ 4 · ONE DROPDOWN PER PAPER ═════════════════════════════════════════════════
