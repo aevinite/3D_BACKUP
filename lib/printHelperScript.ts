@@ -654,6 +654,16 @@ REM The printer list travels WITH the code, so the Printing screen's dropdowns a
 REM this machine appears on it.
 powershell -NoProfile -Command "%PSPRINTERS%; $c=((Get-Content '%WORK%\\typed.txt' -Raw) -replace '[^A-Za-z0-9]','').ToUpper(); @{ code=$c; fingerprint='%FP%'; hostname='%HOST%'; os='windows'; printers=$out } | ConvertTo-Json -Compress -Depth 4" > "%WORK%\\claim.json" 2>nul
 del /q "%WORK%\\typed.txt" 2>nul
+REM ── NO CARET BEFORE THE PIPE, AND IT IS NOT A STYLE CHOICE (found on a real Windows PC,
+REM    2026-09-13). Inside a for /f "usebackq" command the text is handed to cmd, and a pipe that
+REM    sits between DOUBLE QUOTES is already literal - there is nothing to escape. Writing a caret
+REM    in front of it passes the caret straight through to PowerShell, which answers:
+REM        Get-Content : A positional parameter cannot be found that accepts argument "^".
+REM    ...so all four reads below failed: the error message, the token, the restaurant and the
+REM    computer name. A CORRECT code was spent on the server and then rejected here for want of a
+REM    token, which put the person in a loop that burned a fresh code every time round.
+REM    The three older reads in this file (pollMs, job id, printer) always used a plain pipe and
+REM    always worked; these now match them. Guarded by verify:print-helper block 8j.
 curl -s -m 25 -X POST "%SITE%/api/print-agent/pair/claim" -H "content-type: application/json" --data-binary "@%WORK%\\claim.json" > "%WORK%\\claim.out" 2>nul
 del /q "%WORK%\\claim.json" 2>nul
 for %%A in ("%WORK%\\claim.out") do if %%~zA EQU 0 (
@@ -666,14 +676,14 @@ findstr /C:"\\"ok\\":true" "%WORK%\\claim.out" >nul
 if errorlevel 1 (
   REM THE SERVER'S OWN SENTENCE, not one invented here: only it knows whether the code was wrong,
   REM already used, or simply late, and a person retyping needs that difference.
-  for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw ^| ConvertFrom-Json).error"\`) do echo     %%i
+  for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw | ConvertFrom-Json).error"\`) do echo     %%i
   del /q "%WORK%\\claim.out" 2>nul
   timeout /t 5 /nobreak >nul
   goto askcode
 )
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw ^| ConvertFrom-Json).token"\`) do set "CODE=%%i"
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw ^| ConvertFrom-Json).restaurant"\`) do set "WHERE=%%i"
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw ^| ConvertFrom-Json).name"\`) do set "MYNAME=%%i"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw | ConvertFrom-Json).token"\`) do set "CODE=%%i"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw | ConvertFrom-Json).restaurant"\`) do set "WHERE=%%i"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\claim.out' -Raw | ConvertFrom-Json).name"\`) do set "MYNAME=%%i"
 del /q "%WORK%\\claim.out" 2>nul
 if "%CODE%"=="" (
   echo     The site answered oddly. Try again in a moment.

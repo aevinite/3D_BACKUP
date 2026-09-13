@@ -724,6 +724,37 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     && /left<\/div>|left<\/span>|\} left/.test(page) && /data-pw-left/.test(epanel),
     "…and each shows a live countdown, so nobody has to guess how long they have",
     "a setup code is shown with no clock: 'ten minutes' said once, beside a code somebody is carrying to another room, is a number they then have to guess");
+  // ── COPYING THE CODE MUST SAY SO, ON BOTH BOARDS ──────────────────────────────────────────
+  // Owner, 2026-09-13: *"im also not able to copy the code or code is being copy but it not show
+  // button click animation and also at bottom copied written"*. The first version called
+  // `navigator.clipboard.writeText` directly and never told anybody: the code really was on the
+  // clipboard and nothing on the screen moved, so the only way to find out was to paste somewhere
+  // and look. A tap is never dropped in silence — and a browser that REFUSES the clipboard has to
+  // be said out loud too, which a bare call cannot do either.
+  //
+  // BOTH PLACES, deliberately: a toast at the bottom of a tall settings page can be off screen
+  // while the thumb is still up on the code, so the control that was pressed answers as well.
+  check(/copy: \(t: string\) => void \| Promise<void>/.test(page) && /await copy\(shown!\.code\)/.test(page)
+    && !/navigator\.clipboard\?\.writeText/.test(code(page)),
+    "the admin board's Copy goes through the page's own copy(), so it toasts and says when it cannot",
+    "the setup code's Copy calls the clipboard directly again: it copies in total silence, and a refusal is invisible");
+  // ⚠️ SCOPED TO THE HANDLER, NOT THE FILE. This panel has a SECOND copy button — the helper
+  // file's — and its own `toast("Copied.")`, so a file-wide search stayed green while the setup
+  // code's toast was deleted. Proved by sabotage (2026-09-13). Read the handler's own block.
+  {
+    const h = code(epanel);
+    const i = h.indexOf('what === "copycode"');
+    const block = i < 0 ? "" : h.slice(i, i + 900);
+    check(/data-pw="copycode"/.test(epanel) && !!block
+      && /Copied \\u2713/.test(block) && /toast\("Copied\."\)/.test(block) && /Could not copy/.test(block),
+      "…and the manager panel has the same button, which changes to Copied, toasts, and says when it cannot",
+      "the manager panel's setup code has no Copy button, or its own handler copies without saying so");
+  }
+  // COMMENTS STRIPPED: commenting the line out left it matching, so the guard passed over a button
+  // that no longer changes at all. Same sabotage run.
+  check(/setCopied\(true\)/.test(code(page)) && /setCopied\(false\)/.test(code(page)),
+    "…and the button itself changes, then changes back on its own",
+    "the Copy button never changes, so the only feedback is a toast that may be off screen");
   check(!/localStorage[^\n]*printCode|printCode[^\n]*localStorage/.test(epanel),
     "…and the code is never written anywhere that outlives the page",
     "the manager panel stores the setup code in localStorage — a ten-minute secret that outlives its ten minutes on a shared till");
@@ -1146,6 +1177,65 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
   check(trouble.length === 0,
     "no Windows script reads a value with %VAR% inside the block that set it (that value is always the old one)",
     "a .bat reads a same-block value with %VAR%, which cmd expands before the block runs: " + trouble.join(" | "));
+
+  // ── ...AND NO cmd ESCAPE INSIDE A QUOTED PowerShell COMMAND ───────────────────────────────
+  //
+  // FOUND ON A REAL WINDOWS PC (2026-09-13, the owner's photo of the helper window):
+  //
+  //     Checking that code...
+  //     Get-Content : A positional parameter cannot be found that accepts argument '^'.
+  //
+  // cmd does NOT process `^` inside double quotes — there is nothing to escape there — so a `^|`
+  // written inside a `-Command "…"` payload is handed to PowerShell as a stray caret argument and
+  // the read comes back empty.
+  //
+  // WHY THIS EARNED A GUARD. It broke all FOUR reads of the join at once (the error message, the
+  // token, the restaurant, the computer name) and it failed in the worst possible way: a CORRECT
+  // code was SPENT on the server, the token read came back empty, the helper said "the site
+  // answered oddly" and went round again — so every attempt burned a fresh code and nothing on
+  // either screen said why. Three older reads in the same file (pollMs, job id, printer) have
+  // always used a plain `|` and have always worked; this asserts every read agrees with them.
+  //
+  // NOT "no caret at all": `-replace '[^A-Za-z0-9]'` is a PowerShell character class and is
+  // correct. Only the cmd ESCAPES are wrong inside quotes, and those are what this looks for.
+  {
+    const bad = [];
+    for (const [label, txt] of targets) {
+      txt.split("\n").forEach((raw, n) => {
+        if (/^\s*(REM|::)/i.test(raw)) return;
+        // every  -Command "…"  payload on this line
+        for (const m of raw.matchAll(/-Command\s+"((?:[^"]|"")*)"/g)) {
+          const hit = m[1].match(/\^[|&<>^]/g);
+          if (hit) bad.push(`${label} line ${n + 1}: ${hit.join(" ")} inside a quoted -Command  ·  ${raw.trim().slice(0, 80)}`);
+        }
+      });
+    }
+    check(bad.length === 0,
+      "no Windows script escapes a cmd character inside a quoted PowerShell command (cmd does not read them there — the program does)",
+      "a .bat writes a cmd escape (^| ^& ^< ^>) inside a quoted -Command: the caret reaches the program as a stray argument and the whole read comes back empty — " + bad.join(" | "));
+  }
+
+  // ── EVERY for /f READ HAS THE SAME SHAPE AS THE ONES A REAL WINDOWS PC HAS RUN ────────────
+  // There is no Windows machine on this side (this file's own §D note says so), so "it matches the
+  // three that are proven to work" is the strongest thing that CAN be asserted here — and it is
+  // what would have caught the caret before it ever reached a shop.
+  {
+    // `targets` holds the TS SOURCE of the batch template, so every backtick still carries the
+    // backslash that keeps it inside the template literal — hence the optional \\ below. Written
+    // once here rather than un-escaping the whole file, which would hide other escaping mistakes.
+    const shape = /^for \/f "usebackq tokens=\*" %%i in \(\\?`powershell -NoProfile -Command "[^"]*"\\?`\) do (set "[A-Za-z]+=%%i"|echo\s+%%i)\s*$/;
+    const off = [];
+    for (const [label, txt] of targets) {
+      txt.split("\n").forEach((raw, n) => {
+        const line = raw.trim();
+        if (!/^for \/f.*usebackq/i.test(line)) return;
+        if (!shape.test(line)) off.push(`${label} line ${n + 1}: ${line.slice(0, 90)}`);
+      });
+    }
+    check(off.length === 0,
+      "every for /f PowerShell read is the same shape as the three a real Windows PC has run",
+      "a for /f read drifted from the proven shape — this is the one platform nothing here can execute, so matching what works is the whole assurance: " + off.join(" | "));
+  }
   // …and delayed expansion is actually switched on, or !VAR! is just literal text.
   for (const [label, txt] of targets) {
     if (!txt) continue;

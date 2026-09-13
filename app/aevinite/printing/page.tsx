@@ -207,12 +207,23 @@ function leftWords(ms: number): string {
  *   · IT IS BIG AND SPACED. It is read out loud down a phone as often as it is typed, and the
  *     alphabet already leaves out every character that sounds like another one.
  */
-function SetupCodeCard({ live, onShow, busy }: {
+function SetupCodeCard({ live, onShow, copy, busy }: {
   live: { live: boolean; expiresAt: string | null } | undefined;
   onShow: () => Promise<{ code: string; pretty: string; expiresAt: string } | null>;
+  /** THE PAGE'S OWN copy(), not a bare navigator.clipboard call. It is the half that SAYS SO —
+   *  "Copied." at the bottom of the screen, and a plain sentence when the browser refuses. The
+   *  first version of this button called the clipboard directly: the code really was copied and
+   *  nothing on the screen moved, so the only way to find out was to paste somewhere and look
+   *  (owner, 2026-09-13: "im also not able to copy the code or code is being copy but it not show
+   *  button click animation and also at bottom copied written"). A tap is never dropped in silence. */
+  copy: (t: string) => void | Promise<void>;
   busy: boolean;
 }) {
   const [shown, setShown] = useState<{ pretty: string; code: string; expiresAt: string } | null>(null);
+  // The button's own answer, beside the toast. A toast at the bottom of a tall page can be off
+  // screen while the thumb is up here on the code, so the control the person actually pressed says
+  // it too — the standing rule that an alert lands on the CONTROL, not the page.
+  const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   // One second, and only while something is actually counting down — a timer left running behind a
   // card with nothing on it is the kind of thing that is never noticed and never stops.
@@ -243,8 +254,12 @@ function SetupCodeCard({ live, onShow, busy }: {
           </div>
           <div className="adm-setupcode-side">
             <div className="adm-setupcode-left">{leftWords(mineMs)} left</div>
-            <button className="adm-btn" style={{ fontSize: 12 }}
-              onClick={() => { void navigator.clipboard?.writeText(shown!.code); }}>Copy</button>
+            <button className={`adm-btn${copied ? " primary" : ""}`} style={{ fontSize: 12, minWidth: 74 }}
+              onClick={async () => {
+                await copy(shown!.code);
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1600);
+              }}>{copied ? "Copied ✓" : "Copy"}</button>
           </div>
         </div>
       ) : shown ? (
@@ -260,7 +275,7 @@ function SetupCodeCard({ live, onShow, busy }: {
       ) : null}
 
       <button className="adm-btn primary" disabled={busy}
-        onClick={async () => { const d = await onShow(); if (d) setShown(d); }}>
+        onClick={async () => { const d = await onShow(); if (d) { setShown(d); setCopied(false); } }}>
         {busy ? "Making one…" : mineAlive || (live?.live && liveMs > 0) ? "Show a new setup code" : "Show a setup code"}
       </button>
       <p className="adm-muted" style={{ fontSize: 12, margin: "10px 0 0", lineHeight: 1.6 }}>
@@ -949,7 +964,7 @@ const PANEL_GROUPS: [ string, string ][] = [
 
                   A line used to be five controls (On, Nobody, computer, printer, Save). It is one:
                   the options ARE the answers, grouped by machine, saved on change. */}
-              <SetupCodeCard live={st.setupCode} busy={busy === "setup-code"}
+              <SetupCodeCard live={st.setupCode} copy={copy} busy={busy === "setup-code"}
                 onShow={async () => {
                   const d = await post("setup-code", {});
                   if (!d) return null;
