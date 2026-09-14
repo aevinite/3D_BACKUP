@@ -483,7 +483,12 @@ const run = async () => {
     // which is a framework behaviour rather than a rule of ours. A source check would keep passing
     // the day Next stops honouring it. This asks the served document.
     {
-      for (const path of ["/item/no-such-dish-zz", "/r/french-house/item/no-such-dish-zz"]) {
+      // THE MENU DOOR IS IN THIS LIST TOO (sweep #9 T1, item 1). The two dish doors were fixed on
+      // 2026-09-02 and this guard was written for exactly them; the door a printed QR code opens was
+      // never added, and it was still answering `<title>Aevidine — Restaurant OS</title>` with the
+      // platform's sales description on a production build. That boundary is also what a restaurant
+      // whose Menu master switch is OFF serves, which is the commonest way a real diner reaches it.
+      for (const path of ["/item/no-such-dish-zz", "/r/french-house/item/no-such-dish-zz", "/r/no-such-place-zz/menu"]) {
         let head = null, status = 0;
         try {
           const res = await fetch(BASE + path, { redirect: "follow" });
@@ -499,12 +504,13 @@ const run = async () => {
         const desc = (head.match(/<meta name="description" content="([^"]*)/) || [])[1] || "";
         const brandInHead = /Aevidine/i.test(head);
         status === 404 && !brandInHead
-          ? ok(`a dead dish link names no platform brand in the tab or the share preview (${path} → 404, title "${title}")`)
+          ? ok(`a dead guest link names no platform brand in the tab or the share preview (${path} → 404, title "${title}")`)
           : bad(`${path} answered ${status} and its <head> still says: title "${title}" / description "${desc.slice(0, 60)}"`,
             "a guest who opens a stale dish link reads OUR company in their browser tab, and a forwarded "
             + "link previews as our sales pitch under the restaurant's name. The fix is a `metadata` export "
-            + "in BOTH app/item/[slug]/not-found.tsx and app/r/[restaurant]/item/[slug]/not-found.tsx, which "
-            + "verify:3d-viewer requires to stay byte-identical.");
+            + "in EACH guest not-found boundary: app/item/[slug]/not-found.tsx and "
+            + "app/r/[restaurant]/item/[slug]/not-found.tsx (which verify:3d-viewer requires to stay "
+            + "byte-identical), and app/r/[restaurant]/menu/not-found.tsx.");
       }
     }
 
