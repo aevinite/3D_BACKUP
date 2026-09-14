@@ -1167,3 +1167,64 @@ two matched the *other* operating system's copy and one matched its own obituary
 the same fault three times in one day. `verify:print-scenarios` 183. A UI-load pass reads every
 printing screen ~96 times while fourteen slips and a bill are in flight, and asserts no bad status,
 no row without words, no red for the wrong reason, and no heading that disagrees with its own rows.
+
+## 2026-09-14 (fourth round) — "does it get every job instantly, one by one, as fast as possible?"
+
+> Owner: *"Make sure that whatever the printing job, the helper gets it instantly. One by one, send
+> it to the printer and the printer will hold the queue to print, and that printing will happen fast
+> and sending should be as fast as possible, and one by one in the queue only. Does it do all this?"*
+
+Checked point by point, with numbers rather than opinion.
+
+| his ask | before this round | now |
+|---|---|---|
+| the printer holds the queue | ✅ (earlier today) | ✅ |
+| sent **one by one** to the printer | ✅ sequential `lp` / Sumatra | ✅ |
+| **in order** | ✅ mac/linux; ⚠️ **Windows could invert** | ✅ all three |
+| **sending as fast as possible** | ⚠️ the round held every ready page | ✅ each goes when *it* is ready |
+| the helper gets it **instantly** | 1.93s average | **1.59s** — bounded by the 2s poll |
+
+### Each page goes the moment THAT page is ready
+
+The round rendered everything, then submitted everything. A page finished in 1.5s sat idle until its
+slowest sibling caught up. Nothing was bought by it: the ORDER is kept by the submit loop being
+**sequential**, not by the renders ending together. Each render now leaves a marker and the submit
+loop walks the batch in order, waiting only for the page it is about to hand over.
+
+### A Windows ordering bug this round INTRODUCED, and fixed
+
+Raising the per-printer cap to two was safe on mac and linux, which submit from one ordered loop. On
+Windows each lane is a **separate process that renders and submits its own job** — so two lanes for
+one printer could reach it in either order. A kitchen's tickets are expected in the order they were
+rung. Each lane is now told which job precedes it and waits for that lane's finished-flag before
+handing its own page over: renders still race, the handover does not. Bounded at thirty seconds,
+because a ticket slightly out of order is a far smaller fault than one that never comes out.
+
+Also caught: a `:label` written **inside a parenthesised block**, which cmd.exe does not reliably
+jump to — the same family as the `%VAR%`-inside-a-block fault this file already paid for once. Now
+guarded.
+
+### Hello was being paid on every single poll
+
+Measured: **379 ms against the live site, 452 ms locally** — about a fifth of the delay between a
+waiter sending an order and the computer hearing about it, paid **43,000 times a day per restaurant**
+for an answer that almost never changes. It carries the printer list, the seen-just-now stamp, the
+poll interval and the site's one way of saying "this computer is unlinked" — none of which need two
+seconds. It runs every fifth poll (~10s) now, comfortably inside the thirty seconds the board treats
+as connected. **Faster and cheaper at once:** tickets are noticed sooner because the poll is no
+longer queued behind a hello, and traffic drops by about a third.
+
+### What is left, and it is a deliberate cost
+
+The remaining ~1.6s is the **2-second poll**, and that number is a decision already recorded in this
+file: *"at 2s one helper is ~43,000 requests a day; twenty restaurants is ~864,000, each one a
+function call and a database read"* — which is why `pollMs` exists and why it **can only ever slow
+down**. Halving it to 1s would take pickup to about 0.8s and double that bill. Long-polling would cut
+requests but multiply function-seconds, which is the wrong trade on serverless. It is a price
+question, not a code one, so it stays where it was decided.
+
+### Checked
+
+`verify:print-helper` **253 → 263**, four sabotage cases on the new rules, all caught.
+`verify:print-scenarios` 183/183. A backlog of 8 slips + a bill finishes in **39.4s** against a floor
+of ~30s of pure printer time, with the bill out in **7.5s**.
