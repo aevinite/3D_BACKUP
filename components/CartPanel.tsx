@@ -1217,7 +1217,27 @@ export default function CartPanel() {
             ) : (scannedTable && tableNumber === scannedTable && (
               <div className="table-scanned-note">📍 Table {scannedTable} — from your table&apos;s QR. Tap to change if that&apos;s not right.</div>
             ))}
-            {/* The table-number input (required). Locked to read-only while in a session. */}
+            {/* The table-number input (required). Locked to read-only while in a session.
+
+                REJECTED (owner, 2026-09-14) — docs/REJECTED-IDEAS.md R55: do NOT remember this
+                restaurant's table count on the
+                phone so this box can still check an upper bound while offline (R55). It was offered
+                because a diner who opens the menu with no signal never reads `tableCount`, so
+                `validateTable` has no ceiling and the refusal only arrives when the saved order
+                finally sends. His answer corrects the premise, not the cost: *"diner will never type
+                the table no due to qr it will already be there, the type one is for the admin when
+                he can access any table through typing, otherwise user/guest will scan qr and they
+                will be locked to that particular table"*.
+
+                A GUEST DOES NOT TYPE A TABLE NUMBER. The QR carries it, `getScannedTable()`
+                pre-fills it, and a held session locks this field read-only (`lockedTable` below) —
+                so the case a cached count would protect is not a case a guest is in. The typed box
+                is the ADMIN/staff route to reach any table. Do not add a remembered table count, a
+                cached `tableCount` or an offline upper-bound check here, and do not re-report the
+                offline box as missing its bound. What was kept instead: the later refusal now says
+                something true and actionable (`unknown_table` shares `off_plan_table`'s sentence in
+                lib/guestOutbox.ts), and the guest doors draw the same table line the database does.
+                The field this is about is the `cart-table` input immediately below. */}
             <input
               type="text" inputMode="numeric" pattern="[0-9]*"
               // ── IT HAS TO FIT ON A 360px PHONE (sweep #8 T3, item 7) ─────────────────────────
