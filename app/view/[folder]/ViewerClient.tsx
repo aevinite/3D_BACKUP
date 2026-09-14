@@ -78,10 +78,18 @@ interface PublicConfig {
     carbs?: string;
     price?: string;
   };
-  // The camera angle + distance the editor's "Set front view" button captured,
-  // stored as a model-viewer camera-orbit string: "<theta>deg <phi>deg <radius>m"
-  // (e.g. "519.36deg 71.39deg 1.937m"). When present, the reveal spin lands
-  // exactly on this pose so the menu matches what was set in the editor.
+  // A saved camera angle + distance, as a model-viewer camera-orbit string:
+  // "<theta>deg <phi>deg <radius>m" (e.g. "519.36deg 71.39deg 1.937m"). When present, the reveal
+  // spin lands exactly on this pose instead of the default framing.
+  //
+  // NOTHING IN THIS REPOSITORY WRITES IT (checked 2026-09-14, owner's item 7). This comment used
+  // to name "the editor's Set front view button"; there is no such button, and no code anywhere
+  // sets this key. The only value that exists is typed by hand into
+  // `public/content/items/Waffle/config.json`, which is restaurant #1's own checked-in demo
+  // content — so exactly ONE dish in the product opens on a saved pose, and no other restaurant
+  // can ever have one (every tenant gets an empty config; see the config effect below).
+  // It is READ and honoured, so it is not dead — it simply has no producer. Kept deliberately:
+  // a future editor control would write exactly this key.
   frontView?: string;
   tags?: Array<{
     id: string;
