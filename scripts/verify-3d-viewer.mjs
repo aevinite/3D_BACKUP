@@ -810,10 +810,26 @@ console.log("\n── the 3D screen's reveal loop, and its four failure screens 
       "viewer plus one in the model wrapper; a fifth look is the thing this check exists to stop."
   );
   check(
-    "…and the two that are a dead end with a way out offer a real pill, not a bare text link",
-    (src[VIEWER].match(/className="try-again-btn"/g) || []).length === 3,
-    `${VIEWER} → the 3D-off screen, the config-error screen and the slow-model overlay each need ` +
-      "one .try-again-btn. A `text-[#6ddc8a]` link is invisible here — that class matches no rule."
+    "…and every dead end that HAS an honest way out offers a real pill, not a bare text link",
+    // FOUR since owner's item 5 (2026-09-14): the closed-restaurant screen gained one.
+    (src[VIEWER].match(/className="try-again-btn"/g) || []).length === 4,
+    `${VIEWER} → the closed-restaurant screen, the 3D-off screen, the config-error screen and the ` +
+      "slow-model overlay each need one .try-again-btn. A `text-[#6ddc8a]` link is invisible here — " +
+      "that class matches no rule."
+  );
+  // ── AND THE ONE WITH NO HONEST DESTINATION STILL OFFERS NONE (owner's item 5) ─────────────
+  // Two different things land a diner on "this menu isn't available": a restaurant we REACHED and
+  // that is closed, and a `?r=` slug that resolves to nothing. Only the first has somewhere honest
+  // to send them. A button on the second would point at the same unknown restaurant — which is
+  // exactly what app/item/[slug]/not-found.tsx's own rule forbids ("only offers a menu button once
+  // it knows the menu answers"). This check is what stops a later tidy-up giving both a button.
+  check(
+    "…and the dead end with NO honest destination still offers none",
+    /unavailable === "closed" && \(/.test(src[VIEWER]) &&
+      /useState<null \| "closed" \| "unknown">\(null\)/.test(src[VIEWER]),
+    `${VIEWER} → the two reasons that screen appears must stay apart, and only "closed" gets a way ` +
+      "out. Collapsing them back to one boolean is how a button that bounces to another dead end " +
+      "gets added."
   );
 }
 
@@ -842,11 +858,11 @@ console.log("\n── the 3D screen's reveal loop, and its four failure screens 
       "own 28px 24px cannot win that tie."
   );
   check(
-    "…and the pill that is the only way off two of those screens is a real 44px-class target",
+    "…and every one of those pills is a real 44px-class target",
     !resetStrips ||
       (/const CARD_BTN = \{ padding: "12px 24px" \}/.test(code) &&
-        (code.match(/style=\{CARD_BTN\}/g) || []).length === 3),
-    `${VIEWER} → all three .try-again-btn links need CARD_BTN inline. Without it the pill is 17px ` +
+        (code.match(/style=\{CARD_BTN\}/g) || []).length === 4),   // 4 since owner's item 5
+    `${VIEWER} → all four .try-again-btn links need CARD_BTN inline. Without it the pill is 17px ` +
       "tall — measured — against a 44px guideline, and it is clipped by the card it sits in."
   );
   check(
@@ -854,7 +870,10 @@ console.log("\n── the 3D screen's reveal loop, and its four failure screens 
     !resetStrips ||
       ((code.match(/style=\{CARD_EMOJI\}/g) || []).length === 4 &&
         (code.match(/style=\{CARD_TITLE\}/g) || []).length === 4 &&
-        (code.match(/style=\{(?:CARD_SUB|\{ margin: 0 \})\}/g) || []).length === 4),
+        // One of the four is a CONDITIONAL since owner's item 5 — the closed-restaurant screen
+        // needs the gap above its Back pill and the unknown one, which has no pill, does not.
+        // Matched so a deliberate choice between the two passes and an omission still fails.
+        (code.match(/style=\{(?:CARD_SUB|\{ margin: 0 \}|[^}]*\? CARD_SUB : \{ margin: 0 \})\}/g) || []).length === 4),
     `${VIEWER} → each of the four cards needs CARD_EMOJI, CARD_TITLE and a deliberate bottom margin ` +
       "on its message. With the reset in charge all four ran together as one block of text."
   );

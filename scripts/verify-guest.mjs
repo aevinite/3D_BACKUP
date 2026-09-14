@@ -132,8 +132,19 @@ check("P55219", "the placeholder category chips stop once the menu has loaded", 
   const n = (mv.match(/\(dbCategories\.length === 0 && !loaded\) \|\| visibleCategories\.length > 0/g) || []).length;
   return { ok: n === 2, note: `${n} of 2 places (the heading and the bar) gate the still-loading arm on !loaded, so eight grey chips cannot sit there for ever` };
 });
+// ── ASSERT THE RULE, NOT THE SPELLING (owner's item 5, 2026-09-14) ──────────────────────
+// This row demanded the literal `setUnavailable(true)`. The 3D screen now tells the two reasons
+// apart — `setUnavailable("unknown")` for a `?r=` slug that resolves to nothing, and
+// `setUnavailable("closed")` for a restaurant we reached that is switched off — so that only the
+// one with an honest destination offers a way out. The RULE this row exists for is unchanged and
+// is now stated more strictly: an unresolvable slug must raise the screen and must never fall
+// through to restaurant #1's dish, AND the Menu switch / Service mode must raise it too. Same
+// treatment, and the same reason, as row 261 and the reviews-gate row below: a guard pinned to a
+// spelling goes red for a change that keeps the behaviour it defends.
 check("24-27", "the viewer honours the Menu switch + maintenance, and never falls back to #1's dish", () =>
-  has(F.viewer, "s.menuEnabled", "s.serviceMode") && rx(F.viewer, /if \(!r\) \{[^}]*setUnavailable\(true\)/));
+  has(F.viewer, "s.menuEnabled", "s.serviceMode") &&
+  rx(F.viewer, /if \(!r\) \{[^}]*setUnavailable\((?!false|null)/) &&
+  rx(F.viewer, /!s\.menuEnabled \|\| s\.serviceMode[^}]*setUnavailable\((?!false|null)/));
 check(303, "the offline strip promises a queue on GUEST paths only", () =>
   has(F.notice, "(menu|item)") && !rx(F.notice, /setHasQueue\(\/\^\\\/r\\\/\/\.test/));
 check("122-127", "allergies and notes are gated at the SEND site, not only where they're saved", () =>

@@ -142,9 +142,24 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const [rid, setRid] = useState<string>(DEFAULT_RESTAURANT_ID);
   const features = useFeatures(rid); // 3D viewer / currency / language switches for THIS restaurant
   const [loadFailed, setLoadFailed] = useState(false); // did the 3D model give up loading for good?
-  // This dish's restaurant is closed to guests (menu switch off / maintenance), or the ?r=
-  // slug doesn't resolve at all. Either way: an honest message, never another tenant's dish.
-  const [unavailable, setUnavailable] = useState(false);
+  // WHY THIS SCREEN IS SHOWING, NOT JUST THAT IT IS (owner's item 5, 2026-09-14).
+  //
+  // Two different things land a diner here and they deserve different endings:
+  //   "closed"  — the restaurant is REAL and we reached it; its Menu switch is off, or it is in
+  //               Service mode. There is an honest place to send them: its own menu, which will
+  //               tell them the same thing in the restaurant's own words.
+  //   "unknown" — the `?r=` slug resolves to nothing. There is NO honest destination: every link
+  //               we could build points at the same unknown restaurant, and an unknown restaurant's
+  //               menu is another dead end. `app/item/[slug]/not-found.tsx`'s own rule is that a
+  //               way out is only offered "once it knows the menu answers" — so this one offers
+  //               none, and the sentence about asking a member of staff is the whole answer.
+  //
+  // Measured before this: the screen had ZERO tappable controls in BOTH cases, while its two
+  // siblings on this same screen (3D switched off, config failed) each had a Back button. On a
+  // link forwarded to a friend there is no history to go back to either, so a diner was stuck.
+  //
+  // null = this screen is not showing at all, which is the ordinary case.
+  const [unavailable, setUnavailable] = useState<null | "closed" | "unknown">(null);
   const [showInfo, setShowInfo] = useState(false);       // is the details sheet open?
   // Phone back button closes the details sheet first, not the whole viewer page
   // (every overlay must register with the back manager — audit fix 2026-07-06).
@@ -269,7 +284,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
         // leave rid at the #1 DEFAULT — so the viewer quietly showed FRENCH HOUSE's dish of
         // that slug (its name, description and price) under another restaurant's link. Say
         // "not available" instead of showing someone else's dish (guest sweep 2026-08-04).
-        if (!r) { if (!cancelled) setUnavailable(true); return; }
+        if (!r) { if (!cancelled) setUnavailable("unknown"); return; }
         {
           rid = r.id;
           if (!cancelled) { setRid(r.id); setRidReady(true); } // drive useFeatures(), and release the config effect
@@ -307,7 +322,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       // (guest sweep 2026-08-04). getSettings is cached per restaurant, so this is ~free.
       try {
         const s = await getSettings(rid);
-        if (!s.menuEnabled || s.serviceMode) { if (!cancelled) setUnavailable(true); return; }
+        if (!s.menuEnabled || s.serviceMode) { if (!cancelled) setUnavailable("closed"); return; }
       } catch { /* can't tell → carry on rather than hide a working dish */ }
       if (cancelled || !fromSlug) return;
       try {
@@ -973,7 +988,15 @@ export default function ViewerClient({ folder }: { folder: string }) {
           <div className="try-again-card" style={CARD_PAD}>
             <div className="try-again-emoji" style={CARD_EMOJI}>🍽️</div>
             <h2 className="try-again-title" style={CARD_TITLE}>This menu isn&apos;t available right now</h2>
-            <p className="try-again-sub" style={{ margin: 0 }}>Please ask a member of staff — they can bring you the menu for your table.</p>
+            <p className="try-again-sub" style={unavailable === "closed" ? CARD_SUB : { margin: 0 }}>Please ask a member of staff — they can bring you the menu for your table.</p>
+            {/* Only when we actually reached the restaurant — see the note on `unavailable`. An
+                unknown slug gets no button, because every destination we could build is the same
+                unknown restaurant. */}
+            {unavailable === "closed" && (
+              <Link href={backHref} className="try-again-btn" style={CARD_BTN}>
+                <i className="fas fa-arrow-left" aria-hidden="true"></i> {t.back}
+              </Link>
+            )}
           </div>
         </div>
       </div>
