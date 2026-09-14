@@ -896,6 +896,39 @@ async function live(base) {
   } finally { await b.close(); }
 }
 
+// ── REACHABLE WITHOUT A FINGER (owner, 2026-09-14 — items 1, 2 and 4) ────────────────────
+//
+// Three controls on the guest menu named themselves correctly and still could not be reached by
+// anyone who is not tapping with a finger. None was a crash and none showed up in any log, which
+// is exactly why nine sweeps walked past them. Each check below is one of those three, and each
+// would go red if the fix were undone.
+//
+// These read the CODE with comments stripped, like everything else in this file, so the prose
+// above can never satisfy them.
+
+check("P102051", "the call-waiter bell is a real button, not a box with a tap handler", () => {
+  const c = code("components/ChefCallButton.tsx");
+  return { ok: rx(c, /<button[\s\S]{0,200}className="chef-call"/) && !rx(c, /<div className="chef-call"/),
+    note: "a <div> is not focusable and is announced as nothing — a keyboard and a screen reader could not reach the one control that fetches a human" };
+});
+check("P102052", "…and it still names itself out loud", () =>
+  ({ ok: rx(code("components/ChefCallButton.tsx"), /aria-label="Call a waiter"/),
+     note: "the icon is aria-hidden, so the label is the only name this control has" }));
+check("P102053", "…and the bell has not MOVED — R29 says it stays stuck in its corner", () => {
+  const css = read("app/globals.css") || "";
+  const block = css.slice(css.indexOf(".chef-call {"), css.indexOf("}", css.indexOf(".chef-call {")));
+  return { ok: has(block, "position: fixed") && has(block, "bottom: calc(24px") && has(block, "right: calc(20px"),
+    note: "the owner reverted a fix that moved this bell and said do not change it again (docs/REJECTED-IDEAS.md R29)" };
+});
+check("P102054", "…and a <button>'s own default border, padding and font are neutralised", () => {
+  const css = read("app/globals.css") || "";
+  const block = css.slice(css.indexOf(".chef-call {"), css.indexOf("}", css.indexOf(".chef-call {")));
+  return { ok: has(block, "border: 0") && has(block, "padding: 0") && has(block, "font: inherit"),
+    note: "without these three the bell grows a grey outset ring and the icon shifts — the tag changed, the pixels must not" };
+});
+check("P102055", "a keyboard can SEE where it is on the bell", () =>
+  ({ ok: rx(read("app/globals.css") || "", /\.chef-call:focus-visible\s*\{[^}]*outline/),
+     note: "focus-visible only, so a tap never draws the ring" }));
 if (BASE) await live(BASE);
 
 // ── report ───────────────────────────────────────────────────────────────────────────────

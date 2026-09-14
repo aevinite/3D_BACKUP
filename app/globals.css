@@ -258,7 +258,16 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
   font-size: clamp(20px, 5vw, 24px); color: #1a0f0a; box-shadow: 0 12px 30px var(--accent-glow);
   z-index: 100; cursor: pointer; animation: chefFloat 3s ease-in-out infinite;
   transition: all 0.3s;
+  /* THESE THREE KEEP A <button> PIXEL-IDENTICAL TO THE <div> IT REPLACED (2026-09-14, item 1).
+     The bell became a real button so a keyboard and a screen reader can reach it. A browser
+     gives every button a default border, padding and font of its own, none of which the div
+     had — without these the bell grows a grey outset ring and the icon shifts. Measured at
+     360px and 1280px before and after: same box, same position, same glyph. */
+  border: 0; padding: 0; font: inherit; -webkit-appearance: none; appearance: none;
 }
+/* A visible ring for whoever is driving the page from a keyboard — and ONLY for them, so a
+   tap never draws it. Sits outside the circle so it cannot clip the icon. */
+.chef-call:focus-visible { outline: 3px solid var(--accent, #d4a574); outline-offset: 3px; }
 .chef-call:hover { transform: scale(1.15) rotate(10deg); box-shadow: 0 16px 40px var(--accent-glow); }
 .chef-call:active { transform: scale(0.95); }
 /* THE BELL MUST NOT SIT ON A DISH'S ADD BUTTON.
