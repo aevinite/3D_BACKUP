@@ -10,7 +10,6 @@ import type { Metadata } from "next";
 import MenuView from "@/components/MenuView";
 import GuestNotFound from "@/components/GuestNotFound";
 import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
-import { headers } from "next/headers";
 import { getSettings } from "@/lib/menu";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -82,11 +81,11 @@ export async function generateMetadata({ params }: { params: Promise<{ code: str
   // file IS #1's logo; a logo-less tenant still previews with no picture rather than wearing
   // somebody else's brand. Absolute, from the host this request arrived on, because a relative URL
   // in metadata resolves against a `metadataBase` this app has never set.
-  const h = await headers();
-  const host = h.get("x-forwarded-host") || h.get("host") || "";
-  const proto = h.get("x-forwarded-proto") || (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
-  const picture = hit.r.logoUrl
-    || (hit.r.id === DEFAULT_RESTAURANT_ID && host ? `${proto}://${host}/lfh-logo.png` : "");
+  // The flagship's own logo ships with the app, so it is a path, not a stored URL. Relative on
+  // purpose: `metadataBase` in app/layout.tsx turns it into an absolute address from a CONFIGURED
+  // site address, never from the request's Host header — a visitor must not be able to decide where
+  // a preview picture points. See the note there.
+  const picture = hit.r.logoUrl || (hit.r.id === DEFAULT_RESTAURANT_ID ? "/lfh-logo.png" : "");
   return {
     title,
     description,

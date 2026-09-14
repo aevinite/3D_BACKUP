@@ -7,7 +7,6 @@
 import { notFound, redirect } from "next/navigation";
 import MenuView from "@/components/MenuView";
 import { getRestaurantBySlug, slugMovedTo, queryStringOf, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
-import { headers } from "next/headers";
 import { getSettings } from "@/lib/menu";
 
 // White-label: a guest's browser tab, its shared-link preview, AND its tab icon
@@ -62,15 +61,11 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   // bug the white-label rule exists to prevent — so a logo-less tenant still previews with no
   // picture, exactly as before.
   //
-  // ABSOLUTE, built from the host this request actually arrived on. A relative URL in metadata is
-  // resolved against `metadataBase`, which this app has never set, so it would come out pointing at
-  // localhost in every share. Reading the host also means a link shared from a custom domain
-  // previews from that domain rather than from a hard-coded one.
-  const h = await headers();
-  const host = h.get("x-forwarded-host") || h.get("host") || "";
-  const proto = h.get("x-forwarded-proto") || (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
-  const flagshipLogo = r.id === DEFAULT_RESTAURANT_ID && !r.logoUrl && host ? `${proto}://${host}/lfh-logo.png` : "";
-  const picture = r.logoUrl || flagshipLogo;
+  // The flagship's own logo ships with the app, so it is a path, not a stored URL. Relative on
+  // purpose: `metadataBase` in app/layout.tsx turns it into an absolute address from a CONFIGURED
+  // site address, never from the request's Host header — a visitor must not be able to decide where
+  // a preview picture points. See the note there.
+  const picture = r.logoUrl || (r.id === DEFAULT_RESTAURANT_ID ? "/lfh-logo.png" : "");
   // Give the restaurant its own browser-tab icon when it has a logo, instead of the one shared
   // platform favicon.
   const icons = picture ? { icon: picture } : undefined;

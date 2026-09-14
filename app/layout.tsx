@@ -27,7 +27,28 @@ import { RestaurantProvider } from "@/lib/restaurant-context";
 // The DEFAULT browser-tab title (staff/login/admin chrome). Each restaurant's guest
 // menu overrides this with its own name via generateMetadata (white-label), so a
 // guest sees the restaurant brand while the SaaS chrome stays "Aevidine".
+// WHERE A RELATIVE METADATA URL RESOLVES AGAINST, AND WHY IT IS CONFIGURED RATHER THAN READ OFF
+// THE REQUEST (2026-09-14). A share-preview picture has to be an ABSOLUTE address — a chat app
+// fetching the card is not sitting on our page, so "/lfh-logo.png" means nothing to it. Next builds
+// that absolute address from `metadataBase`, and with none set it quietly uses http://localhost:3000,
+// which would put a dead picture on every shared link.
+//
+// The first version of this built the address from the request's own Host header. A background
+// review was right to object: a request can arrive claiming any host it likes, and the preview
+// picture would then point at whatever it claimed — and worse if a response carrying it were ever
+// cached and handed to somebody else. So the base comes from the ENVIRONMENT, which a visitor
+// cannot influence: an explicitly configured site address first, then the Vercel project's own
+// production domain, then localhost for a dev machine. The cost of the safe version, stated plainly:
+// a link opened on a custom domain previews its picture from the configured domain rather than from
+// the domain it was opened on. Both are ours; only one of them can be forged.
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL
+  || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")
+  || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")
+  || "http://localhost:4000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Aevidine — Restaurant OS",
   description: "Aevidine — the all-in-one platform that runs your restaurant.",
 };
