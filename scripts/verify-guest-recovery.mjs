@@ -87,6 +87,26 @@ check("it refuses to guess when it can't tell the lines apart",
   /if \(!keptLines\.length \|\| !keptItems\.length\) return \{ ok: false, left: 0 \};/.test(outbox));
 check("the button is offered ONLY when it can genuinely do something",
   /o\.blocked && \(o\.lines \|\| \[\]\)\.length > 1/.test(badge));
+// ── …AND THE DISH IT NAMES IS THE ONE THE LAST REFUSAL NAMED (sweep #9 T3, item 3) ─────────────
+//
+// `blocked` / `blockedId` are what put that button on the row, and the flush only ever SETS them —
+// for sold_out, hidden_item and unknown_item. Nothing cleared them. So a basket refused for a
+// sold-out dish, retried by the diner, and refused the second time for something else entirely
+// (the table closed, the system was busy) kept the button — and tapping it DROPPED a dish nobody
+// had refused, then re-queued the rest into the same unchanged refusal.
+//
+// Checked as the RULE, not the spelling: a fresh go clears everything the previous attempt learned
+// about this row. The three counters were already cleared there for the same reason; these two
+// belong in the same sentence.
+{
+  const retry = (outbox.match(/export async function retryGuestFailed[\s\S]*?\n\}/) || [])[0] || "";
+  check("a fresh go really is a fresh go — all three attempt counters are cleared",
+    /tries = 0/.test(retry) && /netTries = 0/.test(retry) && /busyTries = 0/.test(retry));
+  check("…and so is the dish the previous refusal named, so 'Order the rest' can't drop an innocent line",
+    /blocked = undefined/.test(retry) && /blockedId = undefined/.test(retry));
+  check("…and that clearing really is inside retryGuestFailed, not merely somewhere in the file",
+    retry.length > 200);
+}
 
 console.log("\nBoth) the shared promises still hold");
 check("everything saved still carries a timer to send it", /ensureRetry\(\);/.test(outbox));

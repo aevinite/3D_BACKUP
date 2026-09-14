@@ -915,6 +915,27 @@ export async function retryGuestFailed(id: string) {
   // not just the 5xx one. Resetting only `tries` left the other two at their ceiling, so one tap
   // of Try again bought a single attempt and the order fell straight back into "Couldn't send".
   it.status = "queued"; it.error = undefined; it.tries = 0; it.netTries = 0; it.busyTries = 0;
+  // ── AND THE DISH THE LAST REFUSAL NAMED (sweep #9 T3, item 3) ────────────────────────────────
+  //
+  // `blocked` / `blockedId` are set by the flush when the server refuses the basket for ONE dish
+  // (sold_out · hidden_item · unknown_item), and they are what puts the "Order the rest" button on
+  // the row. They were NOT cleared here, and moveToFailed does not clear them either — it only
+  // ever sets them, and only for those three codes. So:
+  //
+  //   1. a saved basket is refused because "Paneer Tikka" sold out → blocked = "Paneer Tikka";
+  //   2. the diner taps Try again;
+  //   3. this attempt fails for something else entirely — the table was closed, the system was
+  //      busy, the session expired — and the row's error is now that new sentence;
+  //   4. …while `blocked` still says "Paneer Tikka", so "Order the rest" is offered beside a
+  //      refusal that had nothing to do with any dish. Tapping it DROPS Paneer Tikka from the
+  //      basket — a dish the diner ordered and nobody ever refused — and re-queues the rest,
+  //      which is then refused again for the unchanged real reason.
+  //
+  // A person asking for a fresh go is asking for a fresh go: the counters were already cleared
+  // here for exactly that reason, and this is the same sentence. If the new attempt is refused for
+  // a dish again, the flush sets both fields again from THAT refusal, which is the only honest
+  // source for them.
+  it.blocked = undefined; it.blockedId = undefined;
   retryStep = 0;                       // …and reset the backoff, so it goes now rather than in two minutes
   queued.push(it);
   await persist(it);
