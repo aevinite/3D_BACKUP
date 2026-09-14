@@ -152,11 +152,34 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         // Accept either ?table=5 or ?t=5.
         return params.get("table") || params.get("t");
       })();
-      // Keep only the digits (strip anything that isn't a number).
+      // Keep only the digits (strip anything that isn't a number), so a sticker that encoded
+      // "T5" or "Table 5" still lands on 5.
       const digits = (raw || "").replace(/\D/g, "");
-      if (digits) {
+      // ── A TABLE THAT CANNOT EXIST IS NOT REMEMBERED (owner, 2026-09-14, item 6) ─────────────
+      //
+      // The digits were believed whatever they came to. Measured: `?table=0` was saved as table 0,
+      // and no restaurant has a table 0 — `table_qr_codes` (mig 210) constrains a table to
+      // 1…500 and `settings.table_count` tops out at 500. So the app briefly believed a table
+      // that is not on any floor, and every screen downstream — the cart, the waiter call, the
+      // session join — carried that value about until the diner was asked to confirm.
+      //
+      // Nothing is lost by refusing it: with no scanned table the diner is asked which table they
+      // are at, which is exactly the recovery a mis-scanned sticker already has.
+      //
+      // `?table=-3` still reads as table 3, and that is deliberate rather than overlooked: after
+      // the strip it is indistinguishable from typing 3, which this door has always accepted and
+      // which the session's own approval step is what actually guards.
+      //
+      // A REFUSED VALUE IS STILL WIPED OUT OF THE ADDRESS. `?table=0` is exactly the thing that
+      // should not sit in the address bar waiting to be edited, so the value is refused for
+      // STORAGE and the cleanup below still runs.
+      const n = parseInt(digits, 10);
+      const usable = !!digits && Number.isFinite(n) && n >= 1 && n <= 500;
+      if (usable) {
         setScannedTable(digits);                                // remember it
         window.dispatchEvent(new Event("lfh:table-scanned"));   // tell the app
+      }
+      {
         // ── AND THE NUMBER LEAVES THE ADDRESS BAR (owner, 2026-08-30) ─────────────────────────
         // His words: *"instead of numbers for table, do you use some kind of code right? Because
         // people can't able to change the table number from top just by changing the URL."*
@@ -187,6 +210,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         //
         // `replaceState`, never `pushState`: the back button must not walk the diner through a
         // history entry that puts the number back.
+        //
+        // THE CLEANUP RUNS FOR ANY `?table=`, NOT ONLY A USABLE ONE (owner, 2026-09-14, item 6).
+        // It used to sit inside the "we got digits" branch, so `?table=abc` — nothing to store, and
+        // the diner will be asked which table they are at — was left sitting in the address bar
+        // where a number would have been wiped. Measured. Whatever arrived, the address comes out
+        // clean; only a value that could be a real table (1…500) is remembered.
         try {
           if (!qrTable && window.location.search) {
             const url = new URL(window.location.href);
