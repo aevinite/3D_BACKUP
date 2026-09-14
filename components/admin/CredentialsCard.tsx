@@ -91,11 +91,27 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
   // is nothing on this page to un-hide. Crossing the line in EITHER direction re-reads: uncovering
   // fetches the passwords for the first time, and re-covering throws the copy in this component's
   // memory away rather than leaving it sitting in a closed card.
+  // ── COVERING CLEARS THE SCREEN ITSELF; IT MUST NOT RE-READ (fixed 2026-09-14) ─────────────────
+  // This used to call load() in BOTH directions, and covering was a race it lost. `lock()` flips the
+  // shared state to covered FIRST and sends the DELETE after (so the screen reacts instantly), so
+  // the re-read this effect fired went out while the server still considered the console uncovered —
+  // and came back WITH every password, which the card then rendered. Pressing Cover left all nine
+  // passwords sitting on the page. Found by driving the deployed sites, not by reading the code:
+  // the server had correctly stopped serving them, so every API-level check passed.
+  //
+  // There is nothing to fetch when covering. The values are already here and the only job is to drop
+  // them, so drop them locally and make no request at all — a race needs two things in flight.
+  // Uncovering still re-reads, because those values were never sent in the first place.
   const wasUnlocked = useRef<boolean | null>(null);
   useEffect(() => {
     if (wasUnlocked.current === null) { wasUnlocked.current = unlocked; return; }
     if (wasUnlocked.current === unlocked) return;
     wasUnlocked.current = unlocked;
+    if (!unlocked) {
+      setD((p) => (p ? { ...p, unlocked: false, logins: p.logins.map((l) => ({ ...l, password: null })) } : p));
+      setConfirmId("");
+      return;
+    }
     void load();
   }, [unlocked, load]);
 
