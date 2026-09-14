@@ -458,7 +458,11 @@ console.log("\n── the 3D screen's animation loop ends when the screen does �
 check(
   "the connector-line loop refuses to re-arm once the 3D screen has gone",
   /const aliveRef = useRef\(true\)/.test(src[VIEWER]) &&
-    /const _loop = \(\) => \{[\s\S]{0,400}?if \(!aliveRef\.current\) return;/.test(src[VIEWER]),
+    // The signature is matched loosely on purpose. Item 1 (2026-09-14) gave _loop a generation
+    // parameter, and this check was pinned to `const _loop = () => {` — so it went red for a
+    // change that kept the very behaviour it defends. What matters is that the FIRST thing the
+    // loop does is ask whether the screen is still here.
+    /const _loop = \([^)]*\) => \{[\s\S]{0,400}?if \(!aliveRef\.current\) return;/.test(src[VIEWER]),
   `${VIEWER} → _loop() re-arms itself with requestAnimationFrame every frame. It must return ` +
     "early on !aliveRef.current, or a chain started near unmount runs for the life of the tab."
 );
@@ -627,16 +631,17 @@ check(
   );
 }
 
-// ── the dish page's two error cards are centred by INLINE STYLE, not by a utility class ──────
-// (sweep #7 T2, item 7.) Measured on the running page: with `flex flex-col items-center
-// justify-center min-h-genscreen p-4` on the container, `#detail-page` still computed to
-// `padding: 70px 0 0`, `align-items: normal`, `justify-content: normal`, and the heading sat at
-// x=0 — hard against the side of a 360px phone. `#detail-page` is an ID selector in
-// app/globals.css and Tailwind 4 puts its utilities in a layer those author rules outrank, so the
-// classes are inert here. An inline style cannot lose.
-{
-  const code = src[ITEM_CLIENT];
-}
+// ── OBITUARY: the dish page's two error cards ──────────────────────────────────────
+// Sweep #7's item 7 centred them by inline style because their utility classes did nothing. Owner's
+// item 12 (2026-09-02) then DELETED both cards, so there is nothing left to assert here — and the
+// block that used to do it was left behind as `{ const code = src[ITEM_CLIENT]; }`, which ran zero
+// checks while printing nothing. Removed 2026-09-14 (sweep #9 T2, item 2); a block that asserts
+// nothing is indistinguishable from one that was never reached.
+//
+// One thing that block got WRONG is worth keeping, because sweep #8 repeated it in sixteen ledger
+// rows: it blamed Tailwind's layer order for the inert classes. The real cause is simpler — there
+// are no utilities at all. See "the four screens written in a language this app does not speak"
+// below, which asserts the actual fact.
 
 // ── a screen must never spin forever — and the way it is kept has CHANGED (item 12, 2026-09-02) ──
 //
@@ -743,6 +748,117 @@ check(
     "getMenuItems(restaurantId, CARD_COLUMNS) must depend on BOTH. The reviews effect and the " +
     "Google-settings effect beside it already do."
 );
+
+console.log("\n── the 3D screen's reveal loop, and its four failure screens ────────────────────");
+
+// ── ONE LIVE CONNECTOR-LINE CHAIN, NOT ONE PER REPLAY (sweep #9 T2, 2026-09-14 — item 1) ─────
+// `aliveRef` stops every chain when the screen goes; it does not stop a SECOND chain starting while
+// the screen is still here. runFullSequence() runs on the first reveal, on entering AR, and on every
+// triple-tap — the gesture this screen's own hint pill advertises — and `requestRef` only ever held
+// the newest handle, so every replay left one more loop reading three elements per hotspot per frame.
+// MEASURED at 360×780: 936 layout reads per second after one reveal, 4,356 after three more
+// triple-taps. A generation counter retires the old chain; the cancel is the immediate half.
+{
+  const code = src[VIEWER].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the connector-line loop knows which chain it is, so a replay REPLACES the old one",
+    /const loopGenRef = useRef\(0\);/.test(code) &&
+      /const _loop = \(gen: number\) => \{/.test(code) &&
+      /gen !== loopGenRef\.current/.test(code) &&
+      /requestAnimationFrame\(\(\) => _loop\(gen\)\)/.test(code),
+    `${VIEWER} → _loop must take a generation, refuse to re-arm when a newer reveal has taken over, ` +
+      "and pass that generation to its own next frame. Without it every triple-tap adds a permanent " +
+      "animation-frame chain to a live screen."
+  );
+  check(
+    "…and the reveal retires the running chain before it starts its own",
+    /cancelAnimationFrame\(requestRef\.current\);\s*\n\s*_loop\(\+\+loopGenRef\.current\);/.test(code),
+    `${VIEWER} → runFullSequence's onComplete must cancel the pending frame and bump the generation ` +
+      "in the same breath as starting _loop. Bumping without cancelling leaves one wasted frame; " +
+      "cancelling without bumping leaves the old chain free to re-arm."
+  );
+}
+
+// ── THE FOUR SCREENS WRITTEN IN A LANGUAGE THIS APP DOES NOT SPEAK (item 2) ──────────────
+// `app/globals.css` is this app's only stylesheet and it does NOT import Tailwind, so no utility is
+// ever generated — `flex`, `p-4`, `text-white` and the rest match no rule anywhere. MEASURED on the
+// running 3D route: a fresh `<div class="flex p-4 text-white">` computes display:block, padding:0px,
+// color:rgb(60,42,30). Four guest screens were laid out entirely in those class names and rendered
+// as unstyled brown text in the top-left corner at 1.39:1 against the viewer's near-black canvas,
+// the "← Back" link included — the only way off two of them.
+//
+// Written as an EITHER/OR on purpose: if a later change genuinely imports Tailwind, utilities start
+// working and this check stands down rather than going red for no fault.
+{
+  const css = read("app/globals.css");
+  const tailwindIsReal = /@import\s+["']tailwindcss["']|@tailwind\s+utilities/.test(css);
+  const UTILITY = /className="[^"]*\b(?:flex|flex-col|items-center|justify-center|min-h-screen|h-full|text-center|p-4|p-8|mb-2|mb-4|text-xl|text-4xl|text-white|text-white\/50|font-bold|font-semibold|text-\[#)/;
+  for (const f of [VIEWER, PUBLIC_MV]) {
+    check(
+      `${f === VIEWER ? "the 3D screen's" : "the no-model card's"} failure screens are not laid out with classes that match no rule`,
+      tailwindIsReal || !UTILITY.test(src[f]),
+      `${f} → app/globals.css imports no Tailwind, so a utility class name here styles nothing. Use ` +
+        "the `.try-again-*` card the slow-model overlay on this same screen already wears, or inline styles."
+    );
+  }
+  check(
+    "all four failure screens wear the card this screen already owns, so there is one look and not two",
+    (src[VIEWER].match(/className="try-again-card"/g) || []).length === 4 &&
+      /className="try-again-card"/.test(src[PUBLIC_MV]),
+    `${VIEWER} → the unavailable, 3D-off, config-error and slow-model screens must all use ` +
+      `.try-again-card, and so must ${PUBLIC_MV}'s "3D view isn't ready" message. Four cards in the ` +
+      "viewer plus one in the model wrapper; a fifth look is the thing this check exists to stop."
+  );
+  check(
+    "…and the two that are a dead end with a way out offer a real pill, not a bare text link",
+    (src[VIEWER].match(/className="try-again-btn"/g) || []).length === 3,
+    `${VIEWER} → the 3D-off screen, the config-error screen and the slow-model overlay each need ` +
+      "one .try-again-btn. A `text-[#6ddc8a]` link is invisible here — that class matches no rule."
+  );
+}
+
+// ── THE CARD'S OWN SPACING, PUT BACK BY HAND (item 3) ─────────────────────────────
+// `app/globals.css` carries `.viewer-wrapper *{margin:0;padding:0;…}` — a universal reset at the same
+// (0,1,0) specificity as `.try-again-card`, declared LATER in the file, so it wins every tie. The
+// whole failure card therefore lost its padding and every margin inside it. MEASURED on the real
+// slow-model overlay with every GLB held open: card padding 0px against the stylesheet's 28px 24px,
+// and "Go back" — the only way off that screen — rendered 76×17px and clipped by the card's own
+// bottom edge. After: 124×41px, fully inside a padded card.
+//
+// Conditional on the reset still being there, so narrowing it at source retires this check instead
+// of breaking it.
+{
+  const css = read("app/globals.css");
+  const resetStrips = /\.viewer-wrapper \*\{[^}]*padding:\s*0/.test(css);
+  const code = src[VIEWER];
+  check(
+    "the failure card puts back the padding the viewer's own reset strips off it",
+    !resetStrips ||
+      (/const CARD_PAD = \{ padding: "28px 24px" \}/.test(code) &&
+        (code.match(/style=\{CARD_PAD\}/g) || []).length === 4 &&
+        /style=\{\{ padding: "28px 24px" \}\}/.test(src[PUBLIC_MV])),
+    `${VIEWER} → every .try-again-card must carry CARD_PAD inline (and ${PUBLIC_MV}'s its own copy) ` +
+      "while app/globals.css resets padding on every descendant of .viewer-wrapper. The stylesheet's " +
+      "own 28px 24px cannot win that tie."
+  );
+  check(
+    "…and the pill that is the only way off two of those screens is a real 44px-class target",
+    !resetStrips ||
+      (/const CARD_BTN = \{ padding: "12px 24px" \}/.test(code) &&
+        (code.match(/style=\{CARD_BTN\}/g) || []).length === 3),
+    `${VIEWER} → all three .try-again-btn links need CARD_BTN inline. Without it the pill is 17px ` +
+      "tall — measured — against a 44px guideline, and it is clipped by the card it sits in."
+  );
+  check(
+    "…and the emoji, the heading and the message keep the gaps between them",
+    !resetStrips ||
+      ((code.match(/style=\{CARD_EMOJI\}/g) || []).length === 4 &&
+        (code.match(/style=\{CARD_TITLE\}/g) || []).length === 4 &&
+        (code.match(/style=\{(?:CARD_SUB|\{ margin: 0 \})\}/g) || []).length === 4),
+    `${VIEWER} → each of the four cards needs CARD_EMOJI, CARD_TITLE and a deliberate bottom margin ` +
+      "on its message. With the reset in charge all four ran together as one block of text."
+  );
+}
 
 // Every overlay on these screens registers with the back-button manager.
 check(
