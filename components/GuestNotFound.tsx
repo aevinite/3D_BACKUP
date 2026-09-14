@@ -104,7 +104,19 @@ const CSS = `
   .gnf .stamp { animation: none; opacity: 1; transform: rotate(-11deg) }
 }`;
 
-export default function GuestNotFound() {
+// A DEAD PRINTED CODE IS THE THIRD GUEST DEAD END, AND IT NOW WEARS THE SAME DOCKET (owner,
+// 2026-09-14, item 3). `/q/<code>` drew its own screen: a plain cream page, a knife-and-fork emoji
+// and `system-ui`, while the two screens beside it were this order slip on the spike in the
+// restaurant's own typeface. Three guest dead ends, two designs, and the odd one out is the one a
+// diner reaches by scanning a sticker that has been replaced — the commonest of the three.
+//
+// The owner settled the look on 2026-08-26: one screen, one set of words. Its words are kept
+// exactly as they were — they were already right, and they are what a member of staff will be shown
+// when a diner holds up the phone.
+//
+// `variant="qr"` skips the menu-is-live question entirely: a dead code carries no slug, so there is
+// nothing to ask about and no button that could be offered.
+export default function GuestNotFound({ variant }: { variant?: "qr" } = {}) {
   const pathname = usePathname() || "";
   // /r/<slug>/... carries its restaurant in the path. The legacy /item/<slug> route IS
   // restaurant #1 by definition (same rule as lib/tenantStorage + restaurant-context).
@@ -113,23 +125,30 @@ export default function GuestNotFound() {
   // null = still asking · true = this restaurant's menu is live · false = it isn't.
   const [menuLive, setMenuLive] = useState<boolean | null>(null);
   useEffect(() => {
-    if (!slug) { setMenuLive(false); return; }
+    // A dead printed code has no slug to ask about, and no button it could be offered — so it never
+    // makes the request at all.
+    if (variant === "qr" || !slug) { setMenuLive(false); return; }
     let alive = true;
     fetch(`/api/r/${encodeURIComponent(slug)}/menu-data`, { cache: "no-store" })
       .then((r) => { if (alive) setMenuLive(r.ok); })
       .catch(() => { if (alive) setMenuLive(false); }); // offline / unreachable → don't promise a menu
     return () => { alive = false; };
-  }, [slug]);
+  }, [slug, variant]);
 
   // Two states. The menu-is-off case deliberately gets no button at all: there is nothing behind
   // it, and offering one would bounce a guest straight back to this screen.
+  const qr = variant === "qr";
   const off = menuLive === false;
-  const kind = off ? "Menu" : "Table";
-  const mark = off ? "—" : "404";
-  const status = off ? "not serving" : "no such table";
-  const stamp = off ? "Closed" : "Void";
-  const title = off ? "This menu isn’t available right now" : "That table doesn’t exist";
-  const sub = off
+  const kind = qr ? "Code" : off ? "Menu" : "Table";
+  const mark = qr || off ? "—" : "404";
+  const status = qr ? "not active" : off ? "not serving" : "no such table";
+  const stamp = qr || !off ? "Void" : "Closed";
+  const title = qr
+    ? "This QR code isn’t active"
+    : off ? "This menu isn’t available right now" : "That table doesn’t exist";
+  const sub = qr
+    ? "It may have been replaced with a new one. Please ask a member of staff to scan the current code for your table."
+    : off
     ? "Please ask a member of staff — they can bring you the menu or scan the current code for your table."
     : "The page you asked for isn’t here. If you’re sitting down, scan the QR code on your table again — or ask a member of staff.";
 
@@ -154,7 +173,7 @@ export default function GuestNotFound() {
           <p className="sub">{sub}</p>
           {/* Only offered once we KNOW the menu answers, so this can never bounce a guest
               straight back to this same screen. */}
-          {menuLive === true && slug && (
+          {!qr && menuLive === true && slug && (
             <a className="btn" href={`/r/${encodeURIComponent(slug)}/menu`}>Go to the menu</a>
           )}
         </div>
