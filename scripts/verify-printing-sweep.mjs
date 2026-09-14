@@ -3593,7 +3593,29 @@ try { await setRoutes(bagWas.printing?.routes || {}); } catch {}
 try { await db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ modules: bagWas, ...switchesWas }) }); } catch {}
 for (const id of made.events) { try { await db(`printer_events?id=eq.${id}`, { method: "DELETE" }); } catch {} }
 for (const id of made.jobs)   { try { await db(`print_jobs?id=eq.${id}`,   { method: "DELETE" }); } catch {} }
-for (const id of made.orders) { try { await db(`orders?id=eq.${id}`,       { method: "DELETE" }); } catch {} }
+// ── AN ORDER IS SOFT-DELETED, NEVER HARD-DELETED (2026-09-14) ────────────────────────────────
+// This was `DELETE`, wrapped in a bare catch, and it HAS NEVER WORKED ONCE: mig 331's CHECK refuses
+// a hard delete (`23514: an issued bill cannot be hard-deleted`) because a sale may never disappear,
+// and `catch {}` swallowed the 400 on every run for weeks. The bill came due on 2026-09-14 — the
+// owner's kitchen panel began grinding on 3,893 test orders, 1,456 of them left by THIS file.
+//
+// So: soft-delete and archive. lib/liveBoard.ts reads `archived = false AND deleted_at IS NULL`, so
+// this clears every board while the row survives, which is what the compliance rule requires. And
+// the result is COUNTED below rather than assumed — a cleanup nobody checks is a cleanup that can
+// quietly stop working, which is the whole story of this line.
+const gone = new Date().toISOString();
+for (const id of made.orders) {
+  try { await db(`orders?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true }) }); } catch {}
+}
+try {
+  const stragglers = await db(`orders?restaurant_id=eq.${RID}&placed_by=eq.sweep&archived=eq.false&deleted_at=is.null&select=id`);
+  if (stragglers.length) {
+    await db(`orders?restaurant_id=eq.${RID}&placed_by=eq.sweep&deleted_at=is.null`,
+      { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true }) });
+  }
+  const left = await db(`orders?restaurant_id=eq.${RID}&placed_by=eq.sweep&archived=eq.false&deleted_at=is.null&select=id`);
+  if (left.length) console.log(`  ⚠️  ${left.length} of this run's orders are STILL on the kitchen board — the clean-up did not work.`);
+} catch (e) { console.log(`  ⚠️  the order clean-up could not be confirmed: ${e.message}`); }
 for (const id of made.agents) { try { await db(`print_agents?id=eq.${id}`, { method: "DELETE" }); } catch {} }
 // …and by NAME as well as by id, for the rows a phase created and then returned early on, before
 // it could record the id. Same prefixes, same restaurant scope as the sweep-up at the top.

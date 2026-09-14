@@ -22,8 +22,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { STALE_CLAIM_MS, wrote } from "@/lib/printQueue";
-import type { PaperSize } from "@/lib/printBoardWords";
-import { KIND_LABEL, KIND_OFF_LABEL } from "@/lib/printBoardWords";
+import type { PaperSize, PrinterState } from "@/lib/printBoardWords";
+import { KIND_LABEL, KIND_OFF_LABEL, isPrinterState } from "@/lib/printBoardWords";
 // Which modules this restaurant actually has — ONE settings select for all of them (mig 320).
 import { allModuleLadders } from "@/lib/tableTags";
 
@@ -31,6 +31,39 @@ import { allModuleLadders } from "@/lib/tableTags";
  *  ~2s, so 30s means "three quarters of a minute of silence" — long enough to survive a hiccup,
  *  short enough that a dead helper is never reported as alive while paper piles up in the basket. */
 export const HELPER_STALE_MS = 30_000;
+
+/**
+ * ── A POLL IS A SIGN OF LIFE, NOT JUST A HELLO (2026-09-14) ──────────────────────────────────
+ *
+ * `last_seen_at` used to be written by `hello` and by nothing else, and that was safe only while
+ * hello was asked on every single poll. It is not any more: hello costs ~379ms and is now asked on
+ * every FIFTH round, because paying it 43,000 times a day per computer to learn nothing was the
+ * biggest single cost in an idle helper.
+ *
+ * Those two changes together made a fault nobody would have predicted from either one. A round does
+ * not return until the backlog is EMPTY — that is what makes a rush drain without waiting out a poll
+ * interval — so a helper printing eight slips stays inside one round for the best part of a minute.
+ * Five of those in a row without a hello is minutes of silence, and everything that reads
+ * HELPER_STALE_MS then says the computer is NOT CONNECTED: the manager's status rows, the owner's,
+ * the admin board, and `canTest`. The machine that is printing hardest is the one reported as
+ * asleep, which is exactly backwards, and exactly what the owner asked those rows to tell him
+ * ("you could able to see that everything is connected and everything is live").
+ *
+ * So ANY authenticated ask from a helper now counts as a sign of life — asking for work is at least
+ * as good evidence as saying hello. It is written at most once every ten seconds, which is what
+ * keeps it cheap: a helper polling every two seconds pays one small indexed update per five polls,
+ * not one per poll, and a helper that has stopped still goes quiet and still turns cold after 30s.
+ */
+export const SEEN_REFRESH_MS = 10_000;
+export async function touchAgent(id: string, lastSeenAt: string | null): Promise<void> {
+  if (lastSeenAt && Date.now() - new Date(lastSeenAt).getTime() < SEEN_REFRESH_MS) return;
+  // Through `wrote`, like every other write in this area — and for the exact fault this function
+  // exists to fix: if the stamp silently fails, the boards say NOT CONNECTED about a computer whose
+  // helper is polling perfectly, somebody is sent to troubleshoot a machine that is fine, and
+  // nothing anywhere says the write never landed. Not a throw: a print path that crashes leaves the
+  // ticket in a worse state than one that carries on.
+  await wrote("touchAgent seen-stamp", sb.from("print_agents").update({ last_seen_at: new Date().toISOString() }).eq("id", id));
+}
 
 // ── THERE IS NO BACKUP PRINTER (owner, 2026-08-30) ───────────────────────────────────────────
 // "What is this backup printer? We don't even need the backup printer — if there is a backup
@@ -123,14 +156,14 @@ const emptyRoutes = (): PrintRoutes =>
  *  route. It matters more than it looks: a PDF page that is a DIFFERENT SIZE from the paper in the
  *  printer is what makes a driver rotate the ticket or shrink it to half size — the exact fault the
  *  owner photographed on 2026-08-19. Page size and media are made to agree, always. */
-export type { PaperSize } from "@/lib/printBoardWords";
+export type { PaperSize, PrinterState } from "@/lib/printBoardWords";
 
 export type AgentRow = {
   id: string;
   restaurant_id: string;
   name: string;
   fingerprint: string | null;
-  printers: { name: string; desc?: string; paper?: PaperSize }[];
+  printers: { name: string; desc?: string; paper?: PaperSize; state?: PrinterState }[];
   last_seen_at: string | null;
   revoked_at: string | null;
   /** The browser that set this helper up from its OWN panel (mig 367), if a restaurant did rather
@@ -153,7 +186,7 @@ const asPaper = (v: unknown): PaperSize | undefined => {
 
 const AGENT_COLS = "id, restaurant_id, name, fingerprint, seen_fingerprints, printers, last_seen_at, revoked_at, owner_device, owner_user";
 
-const asPrinters = (v: unknown): { name: string; desc?: string; paper?: PaperSize }[] =>
+const asPrinters = (v: unknown): { name: string; desc?: string; paper?: PaperSize; state?: PrinterState }[] =>
   Array.isArray(v)
     ? v.map((p): Record<string, unknown> => (p && typeof p === "object" ? p as Record<string, unknown> : { name: p }))
         .map((p) => ({
@@ -166,6 +199,13 @@ const asPrinters = (v: unknown): { name: string; desc?: string; paper?: PaperSiz
           name: String(p.name ?? "").replace(/[\u0000-\u001f,"'\\]/g, "").trim().slice(0, 120),
           desc: p.desc ? String(p.desc).slice(0, 160) : undefined,
           paper: asPaper(p.paper),
+          // ── AND WHETHER IT IS GOING TO PRINT (owner, 2026-09-14) ─────────────────────────────
+          // Narrowed to the four words the type allows, for the same reason the name is scrubbed
+          // two lines up: this is a machine reporting about itself, so it is untrusted input that
+          // ends up in HTML. Anything else — including an OLD helper file, which sends no state at
+          // all — becomes `undefined`, and every board reads that as "not reported" rather than
+          // guessing. Guessing here would send somebody to a printer that is working.
+          state: isPrinterState(p.state) ? p.state : undefined,
         }))
         .filter((p) => p.name)
         .slice(0, 40)
@@ -892,7 +932,15 @@ export type PaperStatus = {
    *  "—" was the first version for a paper with nothing routed, and it was wrong on the screen: a
    *  dash beside a green dot reads as "we don't know", when the truth is the ordinary, correct
    *  behaviour for most restaurants — somebody presses Print and a window opens. It says WINDOW. */
-  state: "LIVE" | "ASLEEP" | "OFF" | "SCREEN" | "WINDOW";
+  /** ── AND "STOPPED", ADDED 2026-09-14 ─────────────────────────────────────────────────────
+   *  Nothing at all reaches a helper while printing is switched off or the queue is stopped: the
+   *  poll answers 204 for EVERY kind, bills and banquet sheets included, whatever the column is
+   *  called. Until this existed the rows read LIVE in that state — three green lines and three
+   *  working-looking Test buttons on a restaurant where no paper can come out, and a Test that
+   *  answered "paper should appear in a moment" and then never did.
+   *  That is the exact opposite of what these rows were asked for ("you could able to see that
+   *  everything is connected and everything is live"), so it gets its own word. */
+  state: "LIVE" | "ASLEEP" | "OFF" | "SCREEN" | "WINDOW" | "STOPPED";
   /** May a REAL sample of this document be printed from the panel? Only when a computer owns it: a
    *  screen route has no printer this server can name, and printing a sample into whatever the
    *  browser defaults to proves nothing about the paper the restaurant actually uses. */
@@ -922,10 +970,44 @@ export async function papersForRestaurant(rid: string): Promise<RoutableKind[]> 
   return ROUTABLE_KINDS.filter((k) => k !== "banquet" || ladders.banquet?.effective === true);
 }
 
+/**
+ * IS ANY PAPER GOING TO COME OUT AT ALL — the question above every per-paper question.
+ *
+ * It lived in app/api/print-agent as a private helper, where only the helper's own door could read
+ * it, and that is exactly how the boards came to say LIVE about a restaurant whose printing was
+ * switched off. One copy, here, read by the door AND by the status rows (a new way replaces the old
+ * one — the route's private copy was deleted in the same commit).
+ *
+ * The two reasons are kept apart because the fix differs: SWITCHED OFF means the tickets are never
+ * even made, STOPPED means they are made and waiting and will all come out at once when it restarts.
+ */
+export type PrintingRunning = { on: boolean; why: null | "off" | "paused" };
+export async function printingRunning(rid: string): Promise<PrintingRunning> {
+  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle())
+    .data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
+  if (s?.modules?.printing?.paused === true) return { on: false, why: "paused" };
+  if (s?.auto_print_kot === true && s?.auto_print_kot_allowed === true) return { on: true, why: null };
+  return { on: false, why: "off" };
+}
+
 export async function paperStatus(rid: string): Promise<PaperStatus[]> {
   // ONE pair of reads for the papers — the same reason targetsFor() exists. Asking per kind would be
   // six reads on a screen that repaints every fifteen seconds.
-  const [routes, agents, kinds] = await Promise.all([readRoutes(rid), agentsView(rid), papersForRestaurant(rid)]);
+  const [routes, agents, kinds, running] = await Promise.all([readRoutes(rid), agentsView(rid), papersForRestaurant(rid), printingRunning(rid)]);
+  // ── NOTHING IS LIVE WHILE NOTHING IS RUNNING (2026-09-14) ──────────────────────────────────
+  // Said once, above the per-paper answers, because it is true of every paper at once: the poll
+  // answers 204 for all three kinds while this is off. `canTest` goes with it — a Test button that
+  // queues a page nothing will ever fetch is worse than no button, because it reports success.
+  if (!running.on) {
+    return kinds.map((kind) => ({
+      kind, label: KIND_LABEL[kind] || kind, ok: false, via: "off" as const,
+      agent: null, printer: null, connected: false, secondsAgo: null,
+      state: "STOPPED" as const, canTest: false,
+      words: running.why === "paused"
+        ? "The queue is stopped. Tickets are still being made and are waiting — they all come out the moment it is restarted."
+        : "Printing is switched off for this restaurant, so no ticket is being made at all. Nothing will come out until it is switched back on.",
+    }));
+  }
   return kinds.map((kind) => {
     const t = resolveTarget(routes[kind], agents, kind);
     const base = { kind, label: KIND_LABEL[kind] || kind };

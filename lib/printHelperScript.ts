@@ -205,7 +205,7 @@ HOST="$(scutil --get ComputerName 2>/dev/null || hostname)"
 # shell halves now agree with it.
 jesc() { printf '%s' "\$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g'; }
 printers_json() {
-  local first=1 out="[" p desc media dims w h
+  local first=1 out="[" p desc media dims w h pst pstate
   for p in $(lpstat -e 2>/dev/null); do
     # The model as CUPS knows it. Split on spaces and "Zijiang ZJ-80" becomes "Zijiang" — the whole
     # value is one quoted field, so it is read as one.
@@ -222,9 +222,24 @@ printers_json() {
       dims="$(awk -v m="$media" '$0 ~ "^\\*PaperDimension "m"[/:]" { if (match($0, /"[0-9.]+ [0-9.]+"/)) { s=substr($0, RSTART+1, RLENGTH-2); split(s, a, " "); printf "%.1f %.1f", a[1]*25.4/72, a[2]*25.4/72; exit } }' "/etc/cups/ppd/$p.ppd")"
       w="\${dims%% *}"; h="\${dims##* }"
     fi
+    # ── AND WHETHER IT IS GOING TO PRINT (owner, 2026-09-14) ──────────────────────────────────
+    # *"Which printer are connected and which are online and all offline, all that stuff is not
+    # there only."* It was not hidden — it was never reported. This is the one extra call that
+    # answers it, and ONE call answers both halves: lpstat -l -p prints the "is idle / disabled"
+    # line AND the Alerts line under it.
+    #
+    #   disabled …        the queue is stopped. A person (or a backend error) stopped it.
+    #   Alerts: …offline… nothing is answering at the other end — switched off, or unplugged.
+    #
+    # Checked in that order because "disabled" is the state CUPS puts a queue INTO when the printer
+    # keeps refusing, so it is the more specific of the two. Anything else is ready.
+    pst="$(lpstat -l -p "$p" 2>/dev/null)"
+    pstate="ready"
+    case "$pst" in *disabled*) pstate="paused" ;; esac
+    [ "$pstate" = "ready" ] && case "$pst" in *offline*) pstate="offline" ;; esac
     [ $first -eq 0 ] && out="$out,"
     first=0
-    out="$out{\\"name\\":\\"$(jesc "$p")\\",\\"desc\\":\\"$(jesc "$desc")\\""
+    out="$out{\\"name\\":\\"$(jesc "$p")\\",\\"desc\\":\\"$(jesc "$desc")\\",\\"state\\":\\"$pstate\\""
     [ -n "$w" ] && [ -n "$h" ] && out="$out,\\"paper\\":{\\"name\\":\\"$(jesc "$media")\\",\\"wMm\\":$w,\\"hMm\\":$h}"
     out="$out}"
   done
@@ -531,7 +546,25 @@ render_one() {
   # AND ON A WATCHDOG, because Chrome's new headless mode DOES NOT EXIT after --print-to-pdf: it
   # writes the file and keeps running. Waiting for it plainly hung the helper for ever after the
   # very first ticket — measured 2026-08-20, thirteen Chromes deep.
+  # ── AND IT NEVER ASKS ABOUT THE KEYCHAIN (owner, 2026-09-14) ──────────────────────────────
+  # He was shown this, twice, by a test run of this very file:
+  #     "Keychain Not Found - A keychain cannot be found to store Chrome."   [Cancel] [Reset To Defaults]
+  # Chrome opens the login keychain on start-up to store its own encryption key. A PDF render stores
+  # no passwords and needs none of that, but Chrome asks anyway - and it asks with a MODAL, once per
+  # page, which on a restaurant's counter is printing stopping dead behind a dialog nobody is looking
+  # at.
+  # WHAT ACTUALLY CAUSED HIS was the TEST, not this file: the harness ran the helper with a throwaway
+  # HOME so it could not touch his real token, and Chrome then looked for the login keychain inside
+  # that throwaway folder and found none. His own helper has run for days without ever asking. So
+  # these two flags are a PRECAUTION, not a proven fix - said plainly because the dialog could not be
+  # reproduced on demand afterwards, and pretending otherwise would be worse than the dialog.
+  # Worth keeping anyway: this file is started by a LOGIN ITEM, so it can be running while the
+  # keychain is locked, and a modal in front of a headless render is printing stopping dead behind a
+  # window nobody is looking at. Both flags are long-standing and do one thing between them - keep
+  # Chrome out of the system password store, which a PDF render has no business in. Nothing about the
+  # paper changes. The harness stopped faking HOME for Chrome in the same commit.
   "$CHROME" --headless=new --disable-gpu --no-first-run --no-default-browser-check \\
+    --use-mock-keychain --password-store=basic \\
     --user-data-dir="$WORK/chrome-$ID" --no-pdf-header-footer --virtual-time-budget=4000 \\
     --print-to-pdf="$PDF" "file://$HTML" >/dev/null 2>&1 &
   CPID=$!
@@ -870,7 +903,18 @@ REM ── EVERY PRINTER, WITH ITS PAPER SIZE ───────────�
 REM Written to a file by PowerShell and posted with --data-binary, because a JSON blob on a cmd.exe
 REM command line is a quoting minefield. The paper size is read per printer inside a try/catch: a
 REM driver that refuses to answer must cost that one printer's size, never the whole list.
-set "PSPRINTERS=$out=@(); foreach($pr in Get-Printer){ $o=@{ name=$pr.Name; desc=$pr.DriverName }; try{ $c=Get-PrintConfiguration -PrinterName $pr.Name -ErrorAction Stop; $w=(Get-PrinterProperty -PrinterName $pr.Name -PropertyName 'PaperSizeWidth' -ErrorAction Stop).Value; $h=(Get-PrinterProperty -PrinterName $pr.Name -PropertyName 'PaperSizeHeight' -ErrorAction Stop).Value; if($w -gt 0 -and $h -gt 0){ $o.paper=@{ name=[string]$c.PaperSize; wMm=[math]::Round($w/100,1); hMm=[math]::Round($h/100,1) } } }catch{}; $out+=$o }"
+REM ── AND WHETHER EACH ONE IS GOING TO PRINT (owner, 2026-09-14) ───────────────────────────
+REM "Which printer are connected and which are online and all offline, all that stuff is not there
+REM only." Windows answers it in the object we already have: Get-Printer reports PrinterStatus and
+REM WorkOffline, so it costs no extra call at all.
+REM
+REM WorkOffline is checked FIRST and on purpose: "Use Printer Offline" is a Windows setting a person
+REM can tick by accident, the printer then reports Normal, and every job silently queues for ever.
+REM That is the single most common "it is connected but nothing prints" on Windows.
+REM
+REM Written with if/elseif and NOT a ternary: Windows 10 and 11 ship PowerShell 5.1, which has no
+REM ?: and no ?? - both are 7.0. A 5.1 parse error here would take the whole printer list with it.
+set "PSPRINTERS=$out=@(); foreach($pr in Get-Printer){ $o=@{ name=$pr.Name; desc=$pr.DriverName }; $ps=[string]$pr.PrinterStatus; $st='ready'; if($pr.WorkOffline -eq $true){ $st='offline' } elseif($ps -eq 'Offline'){ $st='offline' } elseif($ps -eq 'Paused'){ $st='paused' } elseif($ps -ne 'Normal' -and $ps -ne 'Idle' -and $ps -ne ''){ $st='offline' }; $o.state=$st; try{ $c=Get-PrintConfiguration -PrinterName $pr.Name -ErrorAction Stop; $w=(Get-PrinterProperty -PrinterName $pr.Name -PropertyName 'PaperSizeWidth' -ErrorAction Stop).Value; $h=(Get-PrinterProperty -PrinterName $pr.Name -PropertyName 'PaperSizeHeight' -ErrorAction Stop).Value; if($w -gt 0 -and $h -gt 0){ $o.paper=@{ name=[string]$c.PaperSize; wMm=[math]::Round($w/100,1); hMm=[math]::Round($h/100,1) } } }catch{}; $out+=$o }"
 
 REM ── LINKING: one setup code, typed once, and nobody signs in here (mig 380) ───────────────
 REM Owner, 2026-09-13: "you can generate code for each restaurant from printing menu and like the
@@ -1115,7 +1159,7 @@ REM
 REM PowerShell 5.1 is what Windows 10 and 11 ship, so this is written for it: no ternary, no
 REM null-coalescing, plain if/else - and no caret escapes inside the quoted -Command, because cmd
 REM does not read them there and the program receives them as stray arguments.
-powershell -NoProfile -Command "$a=@('--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--user-data-dir=%JPROF%','--no-pdf-header-footer','--virtual-time-budget=4000','--print-to-pdf=%JPDF%','file:///%JHTML:\\=/%'); $p=Start-Process -FilePath '%CHROME%' -ArgumentList $a -PassThru -WindowStyle Hidden; $last=-1; $stable=0; for($i=0; $i -lt 75; $i++){ Start-Sleep -Milliseconds 200; $s=0; if(Test-Path '%JPDF%'){ $s=(Get-Item '%JPDF%').Length }; if($s -gt 0 -and $s -eq $last){ $stable=$stable+1; if($stable -ge 2){ break } } else { $stable=0 }; $last=$s }; try{ $p.Kill() }catch{}" >nul 2>&1
+powershell -NoProfile -Command "$a=@('--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--use-mock-keychain','--password-store=basic','--user-data-dir=%JPROF%','--no-pdf-header-footer','--virtual-time-budget=4000','--print-to-pdf=%JPDF%','file:///%JHTML:\\=/%'); $p=Start-Process -FilePath '%CHROME%' -ArgumentList $a -PassThru -WindowStyle Hidden; $last=-1; $stable=0; for($i=0; $i -lt 75; $i++){ Start-Sleep -Milliseconds 200; $s=0; if(Test-Path '%JPDF%'){ $s=(Get-Item '%JPDF%').Length }; if($s -gt 0 -and $s -eq $last){ $stable=$stable+1; if($stable -ge 2){ break } } else { $stable=0 }; $last=$s }; try{ $p.Kill() }catch{}" >nul 2>&1
 REM ── WAIT ITS TURN, AND ONLY FOR THE HANDOVER ────────────────────────────────────────────────
 REM The page above was made while the other lanes made theirs - that part is meant to race. THIS is
 REM the part that may not: a printer's tickets must reach it in the order the app made them, and a
@@ -1232,8 +1276,17 @@ printers_json() {
       dims="$(awk -v m="$media" '$0 ~ "^\\*PaperDimension "m"[/:]" { if (match($0, /"[0-9.]+ [0-9.]+"/)) { s=substr($0, RSTART+1, RLENGTH-2); split(s, a, " "); printf "%.1f %.1f", a[1]*25.4/72, a[2]*25.4/72; exit } }' "/etc/cups/ppd/$p.ppd")"
       w="\${dims%% *}"; h="\${dims##* }"
     fi
+    # ── AND WHETHER IT IS GOING TO PRINT (owner, 2026-09-14) ──────────────────────────────────
+    # The Mac branch's own read, unchanged, for the same reason the paper size above is: Linux is
+    # CUPS too, so lpstat -l -p answers both halves in one call — the "is idle / disabled" line
+    # and the Alerts line under it. "disabled" is checked first because it is the state CUPS puts a
+    # queue into when the printer keeps refusing, so it is the more specific of the two.
+    pst="$(lpstat -l -p "$p" 2>/dev/null)"
+    pstate="ready"
+    case "$pst" in *disabled*) pstate="paused" ;; esac
+    [ "$pstate" = "ready" ] && case "$pst" in *offline*) pstate="offline" ;; esac
     [ $first -eq 0 ] && out="$out,"; first=0
-    out="$out{\\"name\\":\\"$(jesc "$p")\\",\\"desc\\":\\"$(jesc "$desc")\\""
+    out="$out{\\"name\\":\\"$(jesc "$p")\\",\\"desc\\":\\"$(jesc "$desc")\\",\\"state\\":\\"$pstate\\""
     [ -n "$w" ] && [ -n "$h" ] && out="$out,\\"paper\\":{\\"name\\":\\"$(jesc "$media")\\",\\"wMm\\":$w,\\"hMm\\":$h}"
     out="$out}"
   done
@@ -1397,7 +1450,11 @@ render_one() {
   [ -s "$HTML" ] || { say "job $ID: no document (already handled)"; : > "$WORK/rdy-$ID"; return; }
   # Same watchdog as the Mac: new-headless Chrome writes the PDF and then keeps running, so
   # waiting for it would hang the helper for ever after one ticket.
-  "$CHROME" --headless=new --disable-gpu --no-first-run --user-data-dir="$WORK/chrome-$ID" \\
+  # The same two flags as the Mac, and the note over them there explains why: a PDF render has no
+  # business in the system password store, and on Linux the same read can block on a locked gnome
+  # -keyring or kwallet. Nothing about the paper changes.
+  "$CHROME" --headless=new --disable-gpu --no-first-run --use-mock-keychain --password-store=basic \\
+    --user-data-dir="$WORK/chrome-$ID" \\
     --no-pdf-header-footer --virtual-time-budget=4000 --print-to-pdf="$PDF" "file://$HTML" >/dev/null 2>&1 &
   CPID=$!
   LAST=-1; STABLE=0; n=0

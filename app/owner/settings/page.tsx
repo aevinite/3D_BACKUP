@@ -15,7 +15,11 @@ type PrintingState = {
   // Optional so an older deployment's answer still parses; an absent id means "don't apply it".
   restaurantId?: string;
   allowed: boolean; on: boolean; waiting: number;
-  computers: { name: string; connected: boolean; secondsAgo: number | null; printers: string[] }[];
+  computers: { name: string; connected: boolean; secondsAgo: number | null;
+    printers: { name: string; state: string; paper?: { wMm: number; hMm: number } | null }[] }[];
+  /** The four words "ready / paused / not answering / not reported" are said in, from the server —
+   *  the same object the admin console and the manager panel read (owner, 2026-09-14). */
+  printerStates?: Record<string, { label: string; why: string; ok: boolean }>;
   routes: { kind: string; printer: string | null; computer: string | null; connected: boolean }[];
   /** "IS IT WORKING RIGHT NOW" — one row per paper, green or red, in the words a restaurant uses
    *  (owner, 2026-09-14). Written by lib/printHelpers → paperStatus, which is the SAME function the
@@ -405,9 +409,37 @@ export default function OwnerSettings() {
                     : c.secondsAgo == null ? "has never checked in"
                     : `asleep — last seen ${c.secondsAgo > 3600 ? Math.round(c.secondsAgo / 3600) + "h" : Math.round(c.secondsAgo / 60) + " min"} ago`}
                 </span>
-                {c.printers.length ? <span className="adm-muted" style={{ fontSize: 12 }}>· {c.printers.join(" · ")}</span> : null}
               </div>
             ))}
+            {/* ── AND WHICH OF ITS PRINTERS ARE ACTUALLY ON (owner, 2026-09-14) ────────────────
+                *"Which printer are connected and which are online and all offline, all that stuff
+                is not there only."* This line used to be the printer NAMES joined by dots, which
+                cannot answer the question the owner is standing there asking. Indented under its
+                computer, because "which computer is this printer plugged into" is half the answer. */}
+            {printing.computers.map((c) => (c.printers || []).map((pr) => {
+              const w = printing.printerStates?.[pr.state || "unknown"];
+              const grey = !w || pr.state === "unknown";
+              return (
+                <div key={`${c.name}/${pr.name}`} title={w?.why || ""}
+                  style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "3px 0 3px 18px", fontSize: 12.5 }}>
+                  <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", alignSelf: "center",
+                    background: w?.ok ? "#30a46c" : grey ? "#8b93a7" : "#e5484d" }} />
+                  <b>{pr.name}</b>
+                  {w ? <span style={{ fontWeight: 600, color: w.ok ? "#30a46c" : grey ? "#8b93a7" : "#e5484d" }}>{w.label}</span> : null}
+                  {/* Not repeated for "not reported": an older helper file says nothing about ANY of
+                      its printers, so a machine with six of them printed the same sentence six
+                      times. Said once under the list instead — seen on his own Mac, which runs a
+                      helper from before printers reported this. */}
+                  {w && pr.state && pr.state !== "unknown" ? <span className="adm-muted">{w.why}</span> : null}
+                </div>
+              );
+            }))}
+            {printing.computers.some((c) => (c.printers || []).some((pr) => !pr.state || pr.state === "unknown")) ? (
+              <p className="adm-muted" style={{ fontSize: 12, margin: "6px 0 0 18px" }}>
+                Some of these printers have not said whether they are switched on — that computer&rsquo;s printing
+                program is an older one. Everything still prints; ask us to refresh it and these lights come on.
+              </p>
+            ) : null}
             {/* ── THE THREE PAPERS, LIVE, WITH A WAY TO TEST EACH ONE (owner, 2026-09-14) ──────
                 *"You could able to see that everything is connected and everything is live. And if
                 not connected, you could able to see… they can also test from there — print a KOT,

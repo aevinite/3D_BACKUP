@@ -1317,3 +1317,40 @@ Nothing left over from this run.
       · **New guard `npm run verify:path`** — 56 checks that CLICK every crumb on every admin screen
         and every drilled-in state. Sabotage-checked twice: putting the bug back names it in his own
         terms ("the address moved and the screen did not"), and re-adding an underline turns 5 red.
+
+- [x] **"The code is visible all the time. Make sure there is a button which is written show the
+      code, then only code should be shown, in both worlds, because it is annoying… there should be
+      the list of computer connected or not, and when the computer is connected, in that computer
+      which printers are connected… right now which printer are connected and which are online and
+      all offline, all that stuff is not there only"** (owner, 2026-09-14, fifth printing round)
+      → built, seen in Chrome on all three screens at desktop and 390px, `verify:print-helper` 293
+        checks, `verify:print-speed` 519 phases. Full write-up: `docs/PRINT-HELPER.md` → "fifth round".
+      · **Per-printer state, which was never REPORTED at all** — not hidden, missing. The helper sent
+        a printer's name, model and paper size and nothing about whether it was switched on. Now four
+        words — **Ready · Paused · Not answering · Not reported** — read from `lpstat -l -p` on
+        mac/linux and from `Get-Printer`'s `WorkOffline`/`PrinterStatus` on Windows (no extra call).
+        Listed under each computer on **/aevinite/printing**, the **manager panel → Settings →
+        Printing** and the **owner panel → Settings → Kitchen printing**, from ONE set of words
+        (`PRINTER_STATE_WORDS`) sent to the panels, never a second copy in `app.js`.
+      · **"Not reported" is its own state** — an older helper file says nothing, and a file cannot be
+        pushed to a restaurant's PC; calling that "offline" would send somebody to a working printer.
+        The reason is said **once under the list**, not on every row (his own PC has six printers).
+      · **Both walls of code behind "Show the code"** — the admin console's two file cards (one
+        component, so both at once) and, the one that mattered, the **manager panel's print-station
+        file: 6,760 characters, 330px tall**, above the instructions for using it. Copy still works
+        while it is shut, because pasting is what the file is for.
+      · **Found by the new sweep, not by him:** the boards said **LIVE with working Test buttons on a
+        restaurant whose printing was switched off**, where `/next` answers 204 for every kind. New
+        state **STOPPED**, `printingOn` moved out of the print-agent route into one shared
+        `printingRunning()` (the private copy deleted), and all three Test verbs now refuse with the
+        reason instead of promising paper.
+      · **Found by reading:** a computer printing a rush reported itself **ASLEEP** on all three
+        boards — `last_seen_at` was written by `hello` alone, and hello moved to every fifth round
+        while a round runs until the backlog is empty. A poll is a sign of life now, at most one
+        small write per ten seconds.
+      · **My own mess, cleaned:** every printing sweep has been leaving its test orders behind for
+        weeks (a hard `DELETE` refused by mig 331, swallowed by a bare `catch {}`) — it reached
+        **3,893 test orders on his kitchen board** and made the panel grind. Both sweeps soft-delete
+        and archive now, count what is left, and a guard fails if a hard delete comes back. Also his
+        Mac was shown **"Keychain Not Found"** twice by the suite running the real helper under a
+        throwaway HOME; those chapters are **opt-in** (`--live-helper`) and link the real keychain.

@@ -65,6 +65,7 @@ import {
 import { KIND_LABEL } from "@/lib/printBoardWords";
 // The ten-minute setup code a computer types in (mig 380) — the ONE way a machine joins this
 import { printBoardState, stationFiles } from "@/lib/printBoard";
+import { printingRunning } from "@/lib/printHelpers";
 // Only the TYPE now — the station launcher card still opens on the right operating system.
 import type { HelperOs } from "@/lib/printHelperScript";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
@@ -5238,6 +5239,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // lib/printDocs → testBand. The only record is this diary line.
       if (b === "test" && isRoutableKind((body as Record<string, unknown>)?.sample)) {
         const sk = (body as Record<string, unknown>).sample as RoutableKind;
+        // NOTHING RUNNING MEANS NOTHING TO TEST — the same refusal as the admin console's, from the
+        // same one function. While printing is off the poll answers 204 for every kind, so a sample
+        // queued here is fetched by nobody; the row above already says STOPPED and hides the button,
+        // and a hidden button has never been the gate in this product.
+        const runE = await printingRunning(rid);
+        if (!runE.on) return err(runE.why === "paused"
+          ? "The printing queue is stopped, so nothing would come out. Restart it and try again."
+          : "Printing is switched off for this restaurant, so nothing would come out — ask Aevidine to switch it on.");
         const own = await helperFor(rid, sk);
         if (!own.owned) return err("No computer is set to print that yet — choose a printer for it first.", 409);
         const q = await queueJob(rid, sk, { sample: true },

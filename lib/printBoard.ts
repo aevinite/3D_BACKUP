@@ -30,7 +30,8 @@ import { stationScript, STATION_FILENAME, STATION_FIRST_RUN, type StationOs } fr
 export {
   STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, paperLabel, WHO_CHOICES,
 } from "@/lib/printBoardWords";
-import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, papersFor, PAPER_ELSEWHERE } from "@/lib/printBoardWords";
+import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, papersFor, PAPER_ELSEWHERE,
+  PRINTER_STATE_WORDS } from "@/lib/printBoardWords";
 
 export type BoardJob = {
   id: string; kind: string; status: string; printer: string | null; printed_by: string | null;
@@ -41,6 +42,11 @@ export type BoardState = {
   steps: typeof STEPS;
   kinds: readonly RoutableKind[];
   labels: { kind: Record<string, string>; what: Record<string, string>; off: Record<string, string> };
+  /** What "ready / paused / not answering / not reported" are CALLED (owner, 2026-09-14). Sent to
+   *  the panels rather than written out in app.js: public/panels is plain JavaScript and cannot
+   *  import lib/printBoardWords, so a second copy of these four words in the panel is exactly how
+   *  the two printing screens came to be "not identical" the first time. One source, three readers. */
+  printerStates: typeof PRINTER_STATE_WORDS;
   papers: typeof PAPER_PRESETS;
   /** The presets each kind can actually be told to use — the banquet sheet's list is empty, and
    *  `paperElsewhere` says where its size really lives. Sent per kind so the manager panel and the
@@ -155,6 +161,7 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     kinds,
     waitingBy,
     labels: { kind: KIND_LABEL, what: KIND_WHAT, off: KIND_OFF_LABEL },
+    printerStates: PRINTER_STATE_WORDS,
     papers: PAPER_PRESETS,
     papersByKind: Object.fromEntries(kinds.map((k) => [k, papersFor(k)])) as Record<string, typeof PAPER_PRESETS>,
     paperElsewhere: PAPER_ELSEWHERE,

@@ -47,6 +47,12 @@ const adminCookie = "lfh_staff_auth=" + createHash("sha256").update(env.ADMIN_PA
 const api = (path, init) => fetch(BASE + path, { ...init, headers: { "content-type": "application/json", cookie: adminCookie, ...(init?.headers || {}) } });
 const apiJson = (path, init) => api(path, init).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
 
+// Nothing answering on --base is "could not run", never "ran and found a fault". Without this the
+// first api() call threw a bare fetch error partway down the run, after the header had printed, and
+// 183 phases read as broken instead of not started — which is how a suite nobody trusts is made.
+const { requireUp } = await import("./sweep/appUp.mjs");
+await requireUp(BASE, "the print-scenarios grid");
+
 let n = 0, pass = 0, fail = 0;
 const fails = [];
 let SHAPE = "";
