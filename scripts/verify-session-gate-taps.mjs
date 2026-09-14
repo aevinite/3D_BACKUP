@@ -135,12 +135,20 @@ function run(src) {
   check(inlineRed === 0, `no screen in the sheet paints its refusal with a dark-skin-only hex (${inlineRed} found)`);
   const notes = (code.match(/className="sg-sub sg-note-bad"/g) || []).length;
   check(notes >= 5, `every screen that renders a refusal uses the skin-aware class (${notes} of 5)`);
+  // …and the two the basket carried, found by the same measurement (item 6).
+  const cart = readFileSync(join(ROOT, "components/CartPanel.tsx"), "utf8");
+  const cartRed = (cart.match(/#fca5a5/g) || []).length;
+  check(cartRed === 0, `the basket paints no guest-facing line with that dark-skin-only hex either (${cartRed} found)`);
   const css = readFileSync(join(ROOT, "app/globals.css"), "utf8");
   const base = css.indexOf(".sg-note-bad {");
   const light = css.indexOf('[data-theme="light"] .sg-note-bad');
   check(base > -1, "the class has a base rule");
   check(light > -1, "the class has a light-skin override");
   check(base > -1 && light > base, `the override sits BELOW its base, so it actually wins (base ${base}, override ${light})`);
+  for (const cls of ["guest-ink-bad", "guest-chip-bad"]) {
+    const b = css.indexOf(`.${cls} {`), l = css.indexOf(`[data-theme="light"] .${cls}`);
+    check(b > -1 && l > b, `.${cls} has a light-skin override, placed below its base (base ${b}, override ${l})`);
+  }
   return failed;
 }
 
