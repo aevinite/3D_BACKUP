@@ -9,7 +9,8 @@ import { cache } from "react";
 import type { Metadata } from "next";
 import MenuView from "@/components/MenuView";
 import GuestNotFound from "@/components/GuestNotFound";
-import { getRestaurantBySlug } from "@/lib/tenant";
+import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { headers } from "next/headers";
 import { getSettings } from "@/lib/menu";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -75,15 +76,26 @@ export async function generateMetadata({ params }: { params: Promise<{ code: str
   const description = hit.r.tagline
     ? `${hit.r.tagline} — view the menu and order at ${hit.r.name}.`
     : `View the menu and order at ${hit.r.name}.`;
+  // THE FLAGSHIP'S PICTURE, EXACTLY AS THE MENU DOOR DOES IT (owner, 2026-09-14, item 5). Restaurant
+  // #1 has no uploaded logo — its wordmark ships with the app — so its shared link previewed with a
+  // blank space where every other restaurant shows a logo. Only #1 gets this fallback, because the
+  // file IS #1's logo; a logo-less tenant still previews with no picture rather than wearing
+  // somebody else's brand. Absolute, from the host this request arrived on, because a relative URL
+  // in metadata resolves against a `metadataBase` this app has never set.
+  const h = await headers();
+  const host = h.get("x-forwarded-host") || h.get("host") || "";
+  const proto = h.get("x-forwarded-proto") || (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
+  const picture = hit.r.logoUrl
+    || (hit.r.id === DEFAULT_RESTAURANT_ID && host ? `${proto}://${host}/lfh-logo.png` : "");
   return {
     title,
     description,
-    ...(hit.r.logoUrl ? { icons: { icon: hit.r.logoUrl } } : {}),
+    ...(picture ? { icons: { icon: picture } } : {}),
     openGraph: {
       title,
       description,
       type: "website",
-      ...(hit.r.logoUrl ? { images: [{ url: hit.r.logoUrl }] } : {}),
+      ...(picture ? { images: [{ url: picture }] } : {}),
     },
   };
 }

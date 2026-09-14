@@ -6,7 +6,8 @@
 // QR codes can point at /r/<slug>/menu?table=N — MenuView reads ?table / ?t.
 import { notFound, redirect } from "next/navigation";
 import MenuView from "@/components/MenuView";
-import { getRestaurantBySlug, slugMovedTo, queryStringOf } from "@/lib/tenant";
+import { getRestaurantBySlug, slugMovedTo, queryStringOf, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { headers } from "next/headers";
 import { getSettings } from "@/lib/menu";
 
 // White-label: a guest's browser tab, its shared-link preview, AND its tab icon
@@ -48,9 +49,31 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   const description = r.tagline
     ? `${r.tagline} — view the menu and order at ${r.name}.`
     : `View the menu and order at ${r.name}.`;
-  // Give the restaurant its own browser-tab icon when it has uploaded a logo,
-  // instead of the one shared platform favicon.
-  const icons = r.logoUrl ? { icon: r.logoUrl } : undefined;
+  // ── THE FLAGSHIP HAD NO PICTURE ON ITS OWN SHARED LINK (owner, 2026-09-14, item 5) ────────────
+  //
+  // Every preview picture here comes from `logo_url`, the logo a restaurant UPLOADS. Restaurant #1
+  // has never uploaded one — its wordmark ships with the app as `public/lfh-logo.png`, which is why
+  // the menu, the search bar and the maintenance screen all look right while the SHARED LINK came
+  // out with a name, a tagline and a blank space where every other restaurant shows its logo.
+  // Measured on a production build: demo-bistro's link carries `og:image`, #1's did not.
+  //
+  // Only #1 gets this fallback, and that is the whole point: the file IS #1's logo. Handing it to a
+  // tenant with no logo of its own would put one restaurant's brand on another's link, which is the
+  // bug the white-label rule exists to prevent — so a logo-less tenant still previews with no
+  // picture, exactly as before.
+  //
+  // ABSOLUTE, built from the host this request actually arrived on. A relative URL in metadata is
+  // resolved against `metadataBase`, which this app has never set, so it would come out pointing at
+  // localhost in every share. Reading the host also means a link shared from a custom domain
+  // previews from that domain rather than from a hard-coded one.
+  const h = await headers();
+  const host = h.get("x-forwarded-host") || h.get("host") || "";
+  const proto = h.get("x-forwarded-proto") || (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
+  const flagshipLogo = r.id === DEFAULT_RESTAURANT_ID && !r.logoUrl && host ? `${proto}://${host}/lfh-logo.png` : "";
+  const picture = r.logoUrl || flagshipLogo;
+  // Give the restaurant its own browser-tab icon when it has a logo, instead of the one shared
+  // platform favicon.
+  const icons = picture ? { icon: picture } : undefined;
   return {
     title,
     description,
@@ -59,7 +82,7 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
       title,
       description,
       type: "website",
-      ...(r.logoUrl ? { images: [{ url: r.logoUrl }] } : {}),
+      ...(picture ? { images: [{ url: picture }] } : {}),
     },
   };
 }
