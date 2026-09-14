@@ -362,8 +362,14 @@ check("an ORDER still names its dishes, unchanged",
 say("\n9) A restaurant can change its own rules under a guest who already has the page open (item 3)");
 // The gate decides the geofence, whether a location check is needed and the table-number range.
 // A private map read in preference to asking froze all three for the life of the page.
+// THE RULE, NOT THE TWO LINES IT WAS ONCE WRITTEN ON (sweep #9 T3 round 2). This matched
+// `const s = await getSettings(rid);` immediately followed by the map write — and the read has
+// since been wrapped in a Promise.race with a deadline, which is strictly BETTER and broke the
+// adjacency. The product was right and the guard went red: the same count/spelling trap this file's
+// sibling (verify-guest-recovery) already carries a note about. What must hold is that the gate
+// ASKS, and that what it learns is put in the map; neither has to be one statement.
 check("the table gate ASKS for settings rather than serving its own map",
-  /const s = await getSettings\(rid\);\n\s*settingsByRid\.current\.set\(rid, s\);/.test(gate));
+  /await getSettings\(rid\)/.test(gate) && /settingsByRid\.current\.set\(rid,/.test(gate));
 check("…so there is no 'if (cached) use it' short-circuit left",
   !/const cached = settingsByRid\.current\.get\(rid\);/.test(gate));
 check("…and the map is still there as a FALLBACK, so a blip does not dead-end a diner",
@@ -722,11 +728,16 @@ flush();
   say("\n10) Every name box in the gate behaves the same");
   const boxes = gate.match(/<input className="sg-input"[\s\S]*?\/>/g) || [];
   const named = boxes.filter((b) => /value=\{name\}/.test(b));
-  check("all four name boxes were found", named.length === 4);
+  // EVERY name box, not "exactly four" (sweep #9 T3 round 2). A FIFTH one was added and it follows
+  // the rule perfectly — so the app became MORE compliant and this went red, which is the third
+  // time this project has recorded a check pinned to a COUNT failing on code that was right. The
+  // rule is "every name box in the gate behaves the same"; the number of them is not the rule.
+  // A floor is kept, so DELETING them all still fails — which is the part that matters.
+  check(`every name box in the gate was found (${named.length}, and there must be at least 4)`, named.length >= 4);
   check("…every one of them caps the name at 40",
-    named.length === 4 && named.every((b) => /maxLength=\{40\}/.test(b)));
+    named.length >= 4 && named.every((b) => /maxLength=\{40\}/.test(b)));
   check("…and every one of them submits on Enter, so the phone's Go key is never dead",
-    named.length === 4 && named.every((b) => /e\.key === "Enter"/.test(b)));
+    named.length >= 4 && named.every((b) => /e\.key === "Enter"/.test(b)));
 }
 
 // ── A REQUEST TO STAFF CARRIES THE NAME WE ALREADY HAVE (T4 s8, item 7) ───────────────────────────
@@ -829,6 +840,14 @@ flush();
   check("…and it never delays or fails what the diner was actually doing",
     /void renameMyReviews\(/.test(gname));
 }
+// ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
+//
+// `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
+// — while the file goes on running checks after it. So every result from there to the bottom was
+// COUNTED and never PRINTED: this guard reported "4 check(s) failed" while naming exactly one, and
+// the other three were invisible to whoever had to fix them. A count you cannot see is not a
+// finding. One last flush, so the tally and the list can never disagree again.
+flush();
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);
