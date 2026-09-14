@@ -945,6 +945,16 @@ check("P102057", "…and that key listener exists only WHILE the popup is open",
 check("P102058", "…and Escape removes its listener again", () =>
   ({ ok: rx(code("components/ChefPopup.tsx"), /removeEventListener\("keydown", onKey, true\)/),
      note: "same capture flag on the way out, or the listener is never actually removed" }));
+check("P102059", "the veg / non-veg badge is marked as a picture, so its name is read out", () => {
+  const c = code("components/VegIcon.tsx");
+  const svgs = c.match(/<svg[^>]*>/g) || [];
+  return { ok: svgs.length === 2 && svgs.every((t) => t.includes('role="img"') && t.includes("aria-label")),
+    note: `${svgs.length} <svg> tags; a bare svg has no implicit role, and several readers then drop its aria-label` };
+});
+check("P102060", "…and the badge still carries no colour of its own", () =>
+  ({ ok: !rx(code("components/VegIcon.tsx"), /#[0-9a-fA-F]{3,6}/),
+     note: "the green and the brown come from the restaurant's stylesheet, never from this file" }));
+
 if (BASE) await live(BASE);
 
 // ── report ───────────────────────────────────────────────────────────────────────────────
