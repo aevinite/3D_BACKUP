@@ -46,9 +46,28 @@ async function postImpl(req: NextRequest): Promise<Response> {
   if (error) { console.error("[guest/leave] RPC failed:", error.message); return busy(); }
 
   // Someone leaving changes the floor — a seat frees, and a head leaving hands the table over.
+  //
+  // ── …EXCEPT WHEN THEY HAD ALREADY LEFT (item 9) ────────────────────────────────────────────────
+  //
+  // `lfh_leave_session` (mig 146) answers `{ok:true, already_gone:true}` for a token that is no
+  // longer a live member, and that branch RETURNS BEFORE IT WRITES ANYTHING — no row removed, no
+  // waiter call resolved, no head transferred, no cart cleared. Every other path does write, and
+  // all of those genuinely change the floor.
+  //
+  // It is far from a rare answer here: this route exists for a leave the phone SAVED and delivers
+  // later, and the at-most-once wrapper is deliberately kept even though leaving twice is harmless
+  // — so a replay, a retry after a lost reply, or a diner the staff had already closed the table on
+  // all land on `already_gone`. Dropping the shared snapshot for those forces every manager, tablet
+  // and kitchen screen on the floor to recompute for something that did not happen. Migration 238
+  // exists precisely so one floor read is shared for 1.5 seconds instead of recomputed per panel,
+  // and its own note says not to simplify it back.
+  //
+  // The two sibling doors already check first — /api/guest/place-order through dropFloorIfPlaced()
+  // and /api/guest/call-waiter through callLanded(). This is the third door catching up with them.
   const rid = isUuid(b.restaurantId) ? (b.restaurantId as string) : "";
-  if (rid) invalidateFloor(rid);
-  else console.warn("[guest/leave] no resolvable restaurant — floor snapshot not dropped");
+  const leaveLanded = !(data && typeof data === "object" && (data as { already_gone?: unknown }).already_gone === true);
+  if (rid && leaveLanded) invalidateFloor(rid);
+  else if (!rid) console.warn("[guest/leave] no resolvable restaurant — floor snapshot not dropped");
 
   return NextResponse.json(data ?? { ok: false, reason: "empty" });
 }

@@ -132,6 +132,72 @@ check("the button is offered ONLY when it can genuinely do something",
     retry.length > 200);
 }
 
+console.log("\n#7-10) the four the owner picked on 2026-09-14");
+{
+  const menu = read("lib/menu.ts");
+  const tracker = read("components/OrderTracker.tsx");
+  const leave = read("app/api/guest/leave/route.ts");
+  const plan = read("lib/planTable.ts");
+  const place = read("app/api/guest/place-order/route.ts");
+  const bell = read("app/api/guest/call-waiter/route.ts");
+
+  // ── 7 · the order-status read has a ceiling, WITHOUT being able to cancel a live order ─────────
+  // The deadline is the easy half. The half that matters is that "I couldn't ask" stays apart from
+  // "this order is gone": `null` from getOrderStatus means gone, and three of those in a row mark
+  // the order CANCELLED on the diner's screen. A timeout answering `null` would have cancelled an
+  // order that was cooking — and navigator.onLine stays TRUE on a hung Wi-Fi, so the tracker's
+  // offline guard would not have saved it. Both halves are asserted, because the first without the
+  // second is worse than neither.
+  check("the order-status read carries a deadline like every other guest call",
+    /STATUS_TIMEOUT_MS/.test(menu) && /get_order_status[\s\S]{0,200}abortSignal/.test(menu));
+  check("…guarded, so reading AbortSignal.timeout cannot throw on an older phone",
+    /typeof AbortSignal\.timeout === "function"[\s\S]{0,300}STATUS_TIMEOUT_MS/.test(menu));
+  check("…and an unreachable read is RAISED, never returned as null (null means the order is gone)",
+    /isUnreachable\(error\)\) throw busyError/.test(menu));
+  check("…and the strip skips a round it could not ask, instead of counting it as 'gone'",
+    /catch \{ continue; \}/.test(tracker) && /nullCounts/.test(tracker));
+  check("…so the three-strikes rule that cancels a ghost order is still there and still counts only real answers",
+    /nullCounts\.current\[o\.id\] >= 3/.test(tracker));
+
+  // ── 8 · one round of the poll at a time ───────────────────────────────────────────────────────
+  check("the order strip runs one polling round at a time, not one per breadcrumb",
+    /let inFlight = false/.test(tracker) && /if \(inFlight\) return;/.test(tracker));
+  check("…and the guard is released even when a round throws",
+    /finally \{ inFlight = false; \}/.test(tracker));
+  check("…and an unmounted strip stops asking about the rest of the list",
+    /if \(cancelled\) break;/.test(tracker));
+
+  // ── 9 · leaving drops the shared floor read only when something changed ────────────────────────
+  // ASSERTED AT THE `if`, NOT AT THE DECLARATION. My first version of this check tested only that
+  // the file MENTIONED `leaveLanded` — so changing the call back to a bare `if (rid)` left the
+  // now-unused const sitting there and the check still passed. A sabotage run is what found it:
+  // removing the fix produced ZERO failures. The condition itself is the thing to read.
+  check("leaving drops the floor snapshot only when the leave really changed something",
+    /already_gone/.test(leave) && /if \(rid && leaveLanded\) invalidateFloor\(rid\)/.test(leave));
+  check("…and it cannot be satisfied by an unconditional drop sitting elsewhere in the file",
+    !/\n\s*if \(rid\) invalidateFloor\(rid\);/.test(leave));
+  check("…and all three guest doors now draw that line, not just two",
+    /dropFloorIfPlaced/.test(place) && /callLanded/.test(bell) && /leaveLanded/.test(leave));
+
+  // ── 10 · the app's table rule and the database's agree on the guest doors ──────────────────────
+  // The margin is kept for STAFF, who open parcel/takeaway counters numbered above the floor plan.
+  // A guest is locked to a floor table, so for them the floor plan is the line — the same line
+  // migration 281 draws inside lfh_place_order_public. Asserted as BOTH halves: strict where the
+  // guest is, and NOT strict where staff are, so a later "tidy-up" cannot quietly make counters
+  // unreachable for a waiter.
+  check("the table check can be strict, and says why in the file",
+    /opts\?: \{ strict\?: boolean \}/.test(plan) && /PLAN_MARGIN/.test(plan));
+  check("…the guest's ordering door is strict — the floor plan is the line",
+    /offPlanTable\(publicRid, b\.table, \{ strict: true \}\)/.test(place));
+  check("…the guest's bell is too",
+    /offPlanTable\(rid, b\.table, \{ strict: true \}\)/.test(bell));
+  {
+    const staff = read("app/api/editor/[...path]/route.ts") + read("app/api/tablet/[...path]/route.ts");
+    check("…and NEITHER staff door is strict, so a parcel counter above the floor plan still opens",
+      /offPlanTable\(rid, \(body as Record<string, unknown>\)\.table\)/.test(staff) && !/strict: true/.test(staff));
+  }
+}
+
 console.log("\nBoth) the shared promises still hold");
 check("everything saved still carries a timer to send it", /ensureRetry\(\);/.test(outbox));
 check("the online path is still untouched — offline is the only diversion",

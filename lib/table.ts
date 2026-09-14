@@ -38,6 +38,12 @@ export function validateTable(raw: string, tableCount: number): TableCheck {
   }
   // Only enforce the upper bound when we actually know the table count.
   // (If they typed a table higher than the restaurant has, reject it.)
+  //
+  // REJECTED (owner, 2026-09-14) — docs/REJECTED-IDEAS.md R55: do NOT make this bound work offline by caching the count on the
+  // phone (R55). With no signal `tableCount` is 0 and this check is skipped — offered as a gap, and
+  // it is not one: *"user/guest will scan qr and they will be locked to that particular table"*. A
+  // guest never types the number; the QR carries it. The typed box is the admin's way to reach any
+  // table, and `tableCount > 0` is the honest guard for the one caller that does know the count.
   if (tableCount > 0 && num > tableCount) {
     return {
       ok: false,

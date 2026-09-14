@@ -200,7 +200,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
   // A CODE, not the helper's sentence: the client owns the wording (lib/guestOutbox.ts
   // reasonMsg), and the helper's text names the restaurant's table count, which is a staff
   // detail rather than something to put in front of a diner.
-  const offPlan = await offPlanTable(publicRid, b.table);
+  const offPlan = await offPlanTable(publicRid, b.table, { strict: true });   // a guest is locked to a floor table (item 10)
   if (offPlan) return NextResponse.json({ ok: false, reason: "off_plan_table" }, { status: 400 });
   const clash = await replayClash(req, publicRid, "order", undefined, undefined, { table: b.table });
   if (clash) return clashJson(clash);

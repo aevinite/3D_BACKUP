@@ -95,7 +95,25 @@ export default function OrderTracker() {
   // the server can't push to us directly here.
   useEffect(() => {
     let cancelled = false; // flag so an in-flight check can bail if we unmount
+    // ── ONE ROUND AT A TIME (item 8) ────────────────────────────────────────────────────────────
+    //
+    // This poll is started by TWO things: a slow backup timer, and every `lfh:rt-tick` breadcrumb
+    // from the table. Nothing stopped them overlapping, and each round makes one request PER LIVE
+    // ORDER in sequence — so a busy table (several live orders, the kitchen moving them along, a
+    // breadcrumb per move) could have three or four full rounds in flight at once, all asking the
+    // same questions and all writing the same answers back.
+    //
+    // It was never WRONG — the round that finishes last writes onto a fresh read, which is the
+    // 2026-07-08 fix a few lines below — it was just several times the requests it needed, on a
+    // diner's phone, at exactly the busiest moment. A round already running is asking the very
+    // questions the new one would ask, so the new one is dropped rather than queued.
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return;   // a round is already asking exactly this
+      inFlight = true;
+      try { await pollOnce(); } finally { inFlight = false; }
+    };
+    const pollOnce = async () => {
       const list = read();
       // Only check orders that are still in progress and not too old.
       const live = list.filter(
@@ -117,8 +135,25 @@ export default function OrderTracker() {
       // So: remember only the fields THIS round changed, and apply them to a FRESH read.
       const learned = new Map<string, { status: OrderStatus; finalizedAt?: number }>();
       for (const o of live) {
-        const res = await getOrderStatus(o.id); // ask the server for this order's status
-        if (cancelled) continue;
+        // ── A ROUND WE COULD NOT ASK IS NOT AN ANSWER (item 7) ──────────────────────────────────
+        //
+        // getOrderStatus now carries a deadline, and it raises a BUSY error when the request was
+        // abandoned or never completed — deliberately NOT `null`, because `null` means "this order
+        // no longer exists on the server" and three of those in a row CANCEL the order on screen
+        // (the ghost-order fix below). A hung Wi-Fi keeps `navigator.onLine` true, so the offline
+        // guard below would not have caught it either: without this branch, adding the deadline
+        // would have let three slow polls cancel an order that was cooking perfectly well.
+        //
+        // Nothing is counted, nothing is written, nothing is said — the strip simply keeps what it
+        // has and asks again on the next tick, which is the honest thing to do when you did not
+        // get an answer.
+        let res: Awaited<ReturnType<typeof getOrderStatus>>;
+        try { res = await getOrderStatus(o.id); } // ask the server for this order's status
+        catch { continue; }                       // couldn't ask — not an answer about this order
+        // …and once this widget is gone, STOP — don't keep asking for the rest of the list.
+        // This was `continue`, so an unmounted tracker still made one request per remaining order
+        // before falling out of the loop. Same waste as the overlap above, in the same loop.
+        if (cancelled) break;
         if (!res) {
           // getOrderStatus returns null when the order no longer exists on the server
           // (staff deleted/voided it). Count this only while ONLINE (an offline stretch
