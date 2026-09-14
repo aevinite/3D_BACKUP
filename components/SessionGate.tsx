@@ -406,7 +406,25 @@ export default function SessionGate() {
     // silently — nobody is ever re-asked. submitNickname() resumes the SAME queued
     // action by calling act() again (the name now passes this gate). Tied to the
     // session: when a session is required, a name is too (owner, 2026-06-17).
-    if (!getNickname(s.token)) { setNote(""); setStep("nickname"); return; }
+    // ── A SCREEN SET ON A CLOSED SHEET IS A TAP THAT VANISHED (T4 sweep #9, item 1) ──────────────
+    // act() is normally reached with the sheet already open, but NOT always: the "connect"
+    // fast-path in onDo below calls act() directly, on purpose, so a diner who is already in an
+    // open, approved session can add a dish without a pop-up appearing at all. When that diner has
+    // no saved name for this session's token, this line used to set the name screen on a sheet
+    // that was never opened — `if (!open) return null` draws nothing, no result is ever reported,
+    // and the Add-to-cart gate keeps holding the dish. MEASURED on the rendered page: no sheet, no
+    // toast, and `lfh:session-done` never fires. The tap simply disappears.
+    //
+    // It is reachable on a real phone: getNickname() deliberately treats the PRE-session-scoping
+    // plain-string value as "no name" (see its own catch), so a device whose name was saved by an
+    // older build, sitting at a table it is already approved for, hits exactly this state on its
+    // first add-to-cart. Placing an ORDER from the same device was always fine — that path opens
+    // the sheet first — which is what makes the failure look random.
+    //
+    // Opening the sheet beside the step is the same thing the two refusal branches below already
+    // do ("the sheet may have been dismissed while the send was in flight"), for the same reason:
+    // a screen the diner has to act on must never be set on a sheet nobody can see.
+    if (!getNickname(s.token)) { setNote(""); setOpen(true); setStep("nickname"); return; }
     // "connect" has no server work: we only needed to get the guest in. Report
     // success so the Add-to-cart gate can carry out the held add, then close.
     if (p.action === "connect") { fireDone({ ok: true, action: "connect" }); close(); return; }
@@ -756,8 +774,20 @@ export default function SessionGate() {
     // place-order range check. (tableCount 0 = unknown → don't enforce.) (owner, 2026-06-22)
     const max = settingsRef.current?.tableCount || 0;
     if (max > 0 && Number(t) > max) { setNote(`This place has tables 1–${max}. Please check your table number.`); return; }
-    pending.current = { ...(pending.current as Pending), table: t };
-    rememberTable(t);
+    // ── "007" IS TABLE 7, AND THE FLOOR HAS NEVER HEARD OF "007" (T4 sweep #9, item 2) ───────────
+    // A table's identity everywhere — sessions, orders, bills, KOTs and the printed QR — is its
+    // NUMBER, stored as text and compared with `=` (migration 131 states this in its own header;
+    // lfh_table_status does `WHERE table_number = ...`). So a padded "007" matches nothing: the
+    // checks above both pass (it is all digits, and 7 is inside the range), and the diner is then
+    // carried to "Your table isn't open yet" for a table that does not exist — while the table
+    // they are actually sitting at is open two feet away. Worse, Request a waiter then puts "007"
+    // in front of the floor, so staff are sent to a table nobody can find.
+    // Canonicalising here is safe precisely because the range check above has already proved this
+    // is a plain positive integer inside 1..tableCount, and a table's number is never padded at
+    // the place it is created.
+    const table = String(Number(t));
+    pending.current = { ...(pending.current as Pending), table };
+    rememberTable(table);
     setNote("");
     beginFlow();
   };
@@ -1069,7 +1099,7 @@ export default function SessionGate() {
                 onClick={() => { setTableInput(""); setScannedTable(""); window.dispatchEvent(new Event("lfh:table-scanned")); }}>✕</button>
             )}
           </div>
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={startScan}><i className="fas fa-qrcode"></i>&nbsp;Scan QR</button>
             <button className="sg-btn gold" onClick={submitTable}>Continue</button>
@@ -1143,7 +1173,7 @@ export default function SessionGate() {
           <p className="sg-sub">A waiter opens your table once you&apos;re seated. Add your name and we&apos;ll let them know you&apos;re ready at table {pending.current?.table} — it usually takes a few minutes.</p>
           <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doRequestOpen(); }} autoFocus />
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={rescan}>Scan another table</button>
             <button className="sg-btn gold" onClick={doRequestOpen}>Request a waiter</button>
@@ -1163,7 +1193,7 @@ export default function SessionGate() {
           <p className="sg-sub">You&apos;ll be the head of this table. Add your name so the staff know who opened it — we&apos;ll only ask once for this visit.</p>
           <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitOpenName(); }} autoFocus />
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={submitOpenName}>Open table {pending.current?.table}</button>
           </div>
@@ -1181,7 +1211,7 @@ export default function SessionGate() {
           <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doJoinAsGuest(); }} autoFocus />
           {/* e.g. "couldn't reach the restaurant's system" after a failed join attempt */}
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={() => doJoinAsGuest()}>Ask to join this table</button>
           </div>
@@ -1201,7 +1231,7 @@ export default function SessionGate() {
           <p className="sg-sub">Just a name so the kitchen and your table know who&apos;s who — no real name or details needed. We&apos;ll only ask this once.</p>
           <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitNickname(); }} autoFocus />
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={submitNickname}>Continue</button>
           </div>

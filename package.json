@@ -229,7 +229,8 @@
     "verify:t25-writes": "node scripts/verify-t25-editor-writes.mjs",
     "test:netretry": "node --test tests/net-retry.test.mjs",
     "verify:print-speed": "node scripts/verify-print-speed.mjs",
-    "verify:t5s9": "node scripts/sweep/t5s9/rerun-foreign.mjs && node scripts/sweep/t5s9/rerun-t27-dictionary.mjs && node scripts/sweep/t5s9/new-static.mjs"
+    "verify:t5s9": "node scripts/sweep/t5s9/rerun-foreign.mjs && node scripts/sweep/t5s9/rerun-t27-dictionary.mjs && node scripts/sweep/t5s9/new-static.mjs",
+    "verify:session-gate": "node scripts/verify-session-gate-taps.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"

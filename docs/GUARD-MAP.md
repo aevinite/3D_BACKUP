@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **199** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **203** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 197 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -249,6 +249,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | **CREATE OR REPLACE of a function that already existed** | `verify:fix-survives` ← it asserts every earlier fix is still in the NEWEST definition. Three rewrites have silently dropped one (203/215 put a flat 5% tax back for 55 migrations; 190 dropped the pay-later day from four reports) | nothing | no |
 | a table storing a guest's phone number | `verify:personal-data` | nothing | no |
 | session / table ownership | `verify:table-ownership`, `verify:two-parties`, `verify:lifecycle`, `verify:closed-session` | `.env.local` | **YES** |
+| the guest's table sheet — a screen set on a closed sheet, a padded table number, a refusal only one skin can read | `verify:session-gate` | nothing | no |
 | realtime breadcrumbs (`lfh_rt_emit`) | `verify:realtime` | `.env.local` | **YES** |
 | anything at all, before a release | `verify:db-parity` ← the two databases must agree | `.env.local` | no |
 | **added a migration, or wondered whether an old one still holds** | `verify:migration-truth` ← a migration file is a promise ("after this ran, these objects exist") and nothing checked it object by object: 384 files, 1,104 declared functions, views, indexes and columns, each looked up in the live database. `verify:grants` asks WHO may run a function, `verify:db-parity` compares the two databases to each other — this one asks the plainest question, is the thing still there. Reads only. | `.env.local` | no |
