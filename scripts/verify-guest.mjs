@@ -929,6 +929,22 @@ check("P102054", "…and a <button>'s own default border, padding and font are n
 check("P102055", "a keyboard can SEE where it is on the bell", () =>
   ({ ok: rx(read("app/globals.css") || "", /\.chef-call:focus-visible\s*\{[^}]*outline/),
      note: "focus-visible only, so a tap never draws the ring" }));
+check("P102056", "the waiter popup closes on Escape, like the picker beside it", () => {
+  const c = code("components/ChefPopup.tsx");
+  return { ok: rx(c, /e\.key === "Escape"/) && rx(c, /addEventListener\("keydown", onKey, true\)/),
+    note: "there were three ways out and only the backdrop tap and the phone back button worked" };
+});
+check("P102057", "…and that key listener exists only WHILE the popup is open", () => {
+  const c = code("components/ChefPopup.tsx");
+  const i = c.indexOf('e.key === "Escape"');
+  const eff = c.lastIndexOf("useEffect(", i);
+  const end = c.indexOf("}, [open]);", i);
+  return { ok: eff > 0 && end > i && rx(c.slice(eff, i), /if \(!open\) return;/),
+    note: "a key listener on a screen with nothing open is the shape this project's own rules call out" };
+});
+check("P102058", "…and Escape removes its listener again", () =>
+  ({ ok: rx(code("components/ChefPopup.tsx"), /removeEventListener\("keydown", onKey, true\)/),
+     note: "same capture flag on the way out, or the listener is never actually removed" }));
 if (BASE) await live(BASE);
 
 // ── report ───────────────────────────────────────────────────────────────────────────────
