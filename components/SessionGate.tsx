@@ -23,7 +23,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // Reads the restaurant's settings (location rules, whether sessions are on, etc.).
 import { getSettings, placeSessionOrderSafe, isServerBusy, type Settings } from "@/lib/menu";
 // Lets us set the "default table" hint used by the cart and call-waiter.
-import { setScannedTable } from "@/lib/table";
+import { setScannedTable, validateTable } from "@/lib/table";
 // All the server helpers for the dining-session flow: store/read/clear the saved
 // session, check the guest's location, check/join a table, place an order, etc.
 import {
@@ -59,7 +59,7 @@ const rememberTable = (table: string) => {
 //  waiter together, replaced them. Dead screens read as live the next time this is edited.)
 type Step =
   | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "open_name" | "joining"
-  | "nickname" | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
+  | "nickname" | "access_name" | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
 // location" consent screen, so we only show it the FIRST time and go straight to
@@ -716,10 +716,41 @@ export default function SessionGate() {
       // simultaneous callers into ONE request, holds a short TTL, and — the part a private Map can
       // never have — it is DROPPED by invalidateSettings() when a realtime breadcrumb says the row
       // changed. A cache in front of a breadcrumb is the known way these updates die.
+      //
+      // ── AND A TAP NEVER SITS IN SILENCE WHILE THAT READ RUNS (T4 sweep #9, item 7) ──────────────
+      // Two separate holes, both measured on the rendered page with the settings read stalled:
+      //
+      //   1. NOTHING WAS ON SCREEN. Every screen this sheet can show is behind `setOpen(true)`,
+      //      and that came AFTER the read. So "Place order" and "Call a waiter" — which always end
+      //      up opening the sheet anyway — showed nothing at all for the whole read. Measured:
+      //      nothing at 3s, nothing at 8s, the honest "Connection trouble" screen at 16s. The
+      //      screen it lands on is right; the silence before it is not, and this file already has
+      //      a waiting screen for exactly this ("One moment…"). It is now opened FIRST for those
+      //      two, so the tap always answers instantly. `connect` deliberately stays silent — a
+      //      diner already at their table should get their dish added with no pop-up at all
+      //      (see the fast-path below), and flashing a sheet at them would be the noise that
+      //      design exists to avoid.
+      //
+      //   2. THE READ HAD NO DEADLINE OF ITS OWN. getSettings() → fetchSettings() in lib/menu.ts
+      //      is the one guest read with no AbortSignal (its siblings for orders and waiter calls
+      //      both have one), so a database that is UP but answering nothing — measured at 30-90
+      //      seconds in this app on 2026-07-31 — leaves the flow parked here with no way out. The
+      //      16 seconds above was Chrome's own request timeout deciding for us, not us. Racing it
+      //      is done HERE rather than inside getSettings() because that function is shared by
+      //      every guest screen and a deadline there is a bigger decision than this item.
+      //
+      //      8s, not the 15s that lib/session.ts uses: 15 is the deadline on a WRITE, where the
+      //      cost of giving up too early is a lost order. This one only gates a screen, and the
+      //      fallback below is generous — the last-known settings for this very restaurant.
+      const SETTINGS_DEADLINE_MS = 8000;
+      if (detail.action !== "connect") { setOpen(true); setStep("working"); }
       try {
         // THIS restaurant's settings, not "the first restaurant this tab ever asked about".
         const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
-        const s = await getSettings(rid);
+        const s = await Promise.race([
+          getSettings(rid),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("settings_timed_out")), SETTINGS_DEADLINE_MS)),
+        ]);
         settingsByRid.current.set(rid, s);
         settingsRef.current = s;
       } catch {
@@ -766,28 +797,25 @@ export default function SessionGate() {
   // The guest typed their table number (no QR scan yet). Validate it, remember it
   // so the cart + future adds prefill it (no re-asking), then run the join flow.
   const submitTable = () => {
-    const t = (tableInput || "").trim();
-    if (!/^\d+$/.test(t) || Number(t) < 1) { setNote("Please enter your table number."); return; }
-    // Limit to the tables that actually exist (1..tableCount) — otherwise a typo like
-    // "5555" creates a phantom table that has no open session and just dead-ends on
-    // the "we'll let staff know to open it" screen. Mirrors the waiter-call / tablet
-    // place-order range check. (tableCount 0 = unknown → don't enforce.) (owner, 2026-06-22)
-    const max = settingsRef.current?.tableCount || 0;
-    if (max > 0 && Number(t) > max) { setNote(`This place has tables 1–${max}. Please check your table number.`); return; }
-    // ── "007" IS TABLE 7, AND THE FLOOR HAS NEVER HEARD OF "007" (T4 sweep #9, item 2) ───────────
-    // A table's identity everywhere — sessions, orders, bills, KOTs and the printed QR — is its
-    // NUMBER, stored as text and compared with `=` (migration 131 states this in its own header;
-    // lfh_table_status does `WHERE table_number = ...`). So a padded "007" matches nothing: the
-    // checks above both pass (it is all digits, and 7 is inside the range), and the diner is then
-    // carried to "Your table isn't open yet" for a table that does not exist — while the table
-    // they are actually sitting at is open two feet away. Worse, Request a waiter then puts "007"
-    // in front of the floor, so staff are sent to a table nobody can find.
-    // Canonicalising here is safe precisely because the range check above has already proved this
-    // is a plain positive integer inside 1..tableCount, and a table's number is never padded at
-    // the place it is created.
-    const table = String(Number(t));
-    pending.current = { ...(pending.current as Pending), table };
-    rememberTable(table);
+    // ── ONE CHECKER, NOT A PRIVATE COPY OF IT (T4 sweep #9, item 5) ──────────────────────────────
+    // This used to spell out its own digits-only test, its own 1..tableCount range test and its own
+    // two messages, while `lib/table.ts` → validateTable() held exactly the same three rules for the
+    // basket's Place Order and the waiter-call popup. The old comment here even said it "mirrors"
+    // them — a mirror is the thing that drifts. They agreed when this was written and they did NOT
+    // agree by sweep #9: the shared one canonicalised nothing either, so fixing "007" had to be done
+    // twice (items 2 and 4) instead of once. Now there is one rule and one set of words for all
+    // three doors, which is the owner's standing "a new way replaces the old one".
+    //
+    // The wording a diner sees comes from the shared checker now, so it is the SAME sentence the
+    // basket and the bell already gave — including the better out-of-range one, which names the
+    // number they actually typed ("Table 9999 doesn't exist — we have tables 1–30…") instead of
+    // only the range. `tableCount` 0 still means "we don't know how many tables exist", and the
+    // upper bound is still skipped then.
+    const check = validateTable(tableInput, settingsRef.current?.tableCount || 0);
+    if (!check.ok) { setNote(check.message!); return; }
+    // check.value is the CANONICAL number — "007" comes back as "7". See lib/table.ts.
+    pending.current = { ...(pending.current as Pending), table: check.value };
+    rememberTable(check.value);
     setNote("");
     beginFlow();
   };
@@ -906,6 +934,20 @@ export default function SessionGate() {
     // "Someone". If they have ever given this restaurant a name — on a review, or at a table on an
     // earlier visit — it is here, and the pending-requests view names a person again.
     const who = name.trim() || getNickname(sess.current?.token) || getGuestName() || null;
+    // ── AND NOBODY IS CALLED "SOMEONE" ON THE FLOOR (T4 sweep #9, item 8) ────────────────────────
+    // The fallbacks above cover every diner who has ever given this restaurant a name — at a table,
+    // or on a review. The one case they cannot cover is the one sweep #8 wrote down and could not
+    // close: a brand-new phone tapping "Not at the restaurant? Call a waiter" on the very first
+    // screen, which has no name box on it. That request reached the manager's and the tablet's
+    // pending list as "Someone", and the owner's NAME-FIRST rule (2026-06-17) exists precisely so a
+    // waiter is sent to a PERSON.
+    //
+    // So we ask — once, on its own small screen, and only when there is genuinely nothing to use.
+    // A diner who has a name saved never sees it, which is why this is not more friction on the
+    // escape hatch: it is the same single question the "your table isn't open yet" screen already
+    // asks before it will tell staff anything, now applied to the other way of telling them.
+    // `type === "open"` is untouched — doRequestOpen() already refuses without a name.
+    if (!who && type === "access") { setNote(""); setOpen(true); setStep("access_name"); return; }
     const r = await requestAccess(p.table, type, who, null, ridRef.current);
     // NOBODY WAS TOLD IS NOT "WE'VE LET THE STAFF KNOW" (sweep 6 T3, 2026-08-17).
     //
@@ -931,6 +973,14 @@ export default function SessionGate() {
     setReqAt(Date.now());          // stamped only after requestLanded() said it really landed
     setStep("request_sent");
     } finally { reqBusy.current = false; }
+  };
+  // The access_name screen's button: keep the name for good, then send the request that was
+  // waiting on it. doRequest() re-reads `name`, so it now finds one and goes straight through.
+  const submitAccessName = () => {
+    if (!name.trim()) { setNote("Add your name so staff know who's asking."); return; }
+    setGuestName(name.trim(), ridRef.current); // their ONE name from now on (item 14)
+    setNote("");
+    doRequest("access");
   };
   // From the "not open" screen: tell staff, then keep waiting — proceedWhenOpen
   // (already running) auto-continues the moment they open the table. NAME-FIRST
@@ -1234,6 +1284,22 @@ export default function SessionGate() {
           {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={submitNickname}>Continue</button>
+          </div>
+        </>)}
+
+        {/* THE ONE NAME BOX ON THE WAITER-REQUEST PATH (item 8). Shown only when this device has no
+            name anywhere — a returning diner never sees it. Worded as the reason, not as a form:
+            the waiter has to find a person. */}
+        {step === "access_name" && (<>
+          <div className="sg-badge"><i className="fas fa-bell-concierge"></i></div>
+          <div className="sg-kicker">Calling a waiter</div>
+          <h3 className="sg-title">What should we call you?</h3>
+          <p className="sg-sub">Add your name so the waiter knows who they&apos;re looking for. We&apos;ll only ask once.</p>
+          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
+            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitAccessName(); }} autoFocus />
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
+          <div className="sg-actions">
+            <button className="sg-btn gold" onClick={submitAccessName}>Request a waiter</button>
           </div>
         </>)}
 

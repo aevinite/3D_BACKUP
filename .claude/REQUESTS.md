@@ -1354,3 +1354,40 @@ Nothing left over from this run.
         and archive now, count what is left, and a guard fails if a hard delete comes back. Also his
         Mac was shown **"Keychain Not Found"** twice by the suite running the real helper under a
         throwaway HOME; those chapters are **opt-in** (`--live-helper`) and link the real keychain.
+
+---
+
+## 2026-09-14 — sweep #9, terminal 4 (the guest's table sheet): *"ok good 1,2,3 do 4,5,6,7,10 solve 8,9"*
+
+Said to the four-part report from the table-session sweep. Items 1–3 were the problems already
+fixed and merged (PR #1345); 4–7 and 10 were mine to build; **8 and 9 were the two I had asked him
+to decide, and "solve" handed both decisions back to me.**
+
+- **Item 4 — "007" reaches the floor as "7" from every door.** Done once in `lib/table.ts`, the
+  shared checker, so the basket's Place Order and the waiter-call popup get it too. A table's
+  identity is its NUMBER (mig 131), compared with `=`, so a padded one matched nothing.
+- **Item 5 — ONE checker, not three.** The table sheet kept a private copy of the digits test, the
+  1..tableCount test and its own two messages. Deleted; it asks `validateTable()` now. **What he
+  will SEE:** the out-of-range sentence on that one screen is the shared one — *"Table 9999 doesn't
+  exist — we have tables 1–30. Please check your number."* — which the other two doors already used.
+- **Item 6 — the basket's "Sold out" chip and its "No milk" line** carried the same dark-skin-only
+  red item 3 measured at 1.9:1 on white. Two classes with a light-skin override.
+- **Item 7 — Place order and Call a waiter answer instantly now.** They showed NOTHING while the
+  first settings read ran (measured: nothing at 3s, nothing at 8s). The sheet's own "One moment…"
+  opens first, and that read has an 8-second deadline — it had none, being the one guest read with
+  no AbortSignal. Add-to-cart stays silent on purpose.
+- **Item 8 — nobody reaches the floor as "Someone".** MY CALL: the waiter-request path asks for a
+  name when this device has none anywhere. One small screen, shown once, never to a returning
+  diner. His NAME-FIRST rule (2026-06-17) is why.
+- **Item 9 — "you can't leave mid-meal" now expires with the meal.** MY CALL: keep the block, let
+  it go 90 minutes after the NEWEST order. In a restaurant that never marks dishes served, every
+  table was blocked for ever. Safe because leaving never takes the food off the bill (mig 232, and
+  the confirmation says so). **One number to change if his restaurants run longer:**
+  `STALE_MEAL_MS` in `components/SessionStatusWidget.tsx`.
+- **Item 10 — ALREADY BUILT, nothing done.** The live-order tracker's duplicate refresh was folded
+  into one on 2026-08-18 (`05bd9dbf`); sweep #6's idea list was stale, the code was not. Verified
+  by reading, not assumed.
+
+All six changes are guarded by **`npm run verify:session-gate`** (static — no key, no database, no
+app), whose `--self-test` proves each of **eleven** sabotages turns it red, including three that
+bend a second file on disk and put it back.

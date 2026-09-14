@@ -1637,6 +1637,23 @@ body.menu-frost .nav {
    weight is what wins, and one placed above would silently do nothing. */
 .sg-note-bad { color: #fca5a5; }
 [data-theme="light"] .sg-note-bad { color: color-mix(in srgb, #fca5a5 55%, #000); }
+/* ── THE SAME DARK-SKIN INK, IN THE BASKET (T4 sweep #9, item 6) ──────────────────────────────────
+   Two more places carried the same inline `color:#fca5a5` on a guest surface: the "Sold out" chip
+   on a basket line, and the "No milk" line under a dish. Measured the same way as the sheet's
+   refusal — fine on the dark card, washed out on the light one. Same cure, same reason: a
+   hard-coded hex cannot follow the skin. The chip also carries a hard-coded border of the same
+   red, so it moves together. */
+.guest-ink-bad { color: #fca5a5; }
+[data-theme="light"] .guest-ink-bad { color: color-mix(in srgb, #fca5a5 55%, #000); }
+.guest-chip-bad {
+  margin-left: 8px; font-size: 11px; font-weight: 700; white-space: nowrap;
+  border-radius: 6px; padding: 1px 6px;
+  color: #fca5a5; border: 1px solid rgba(252,165,165,0.5);
+}
+[data-theme="light"] .guest-chip-bad {
+  color: color-mix(in srgb, #fca5a5 55%, #000);
+  border-color: color-mix(in srgb, #fca5a5 70%, #000);
+}
 .sg-input { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; border: var(--border); background: rgba(128,90,60,0.08); color: var(--text); font-size: 15px; font-family: inherit; }
 .sg-input:focus { outline: none; border-color: var(--accent); }
 /* ── NO SPINNER ARROWS ON THE TABLE BOX (T4 sweep #8, item 15, owner 2026-09-02) ──────────────────

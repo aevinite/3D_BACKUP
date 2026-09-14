@@ -1021,7 +1021,7 @@ export default function CartPanel() {
                     <div className="cart-item-name">
                       {item.title}
                       {isSoldOut(item.id) && (
-                        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#fca5a5", border: "1px solid rgba(252,165,165,0.5)", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                        <span className="guest-chip-bad">
                           Sold out
                         </span>
                       )}
@@ -1045,7 +1045,7 @@ export default function CartPanel() {
                     )}
                     {/* Removed allergens shown in red (e.g. "No milk"). */}
                     {item.removed && item.removed.length > 0 && (
-                      <div className="cart-item-opts" style={{ color: "#fca5a5" }}>
+                      <div className="cart-item-opts guest-ink-bad">
                         No {item.removed.map((r) => allergenLabel(r).toLowerCase()).join(", ")}
                       </div>
                     )}

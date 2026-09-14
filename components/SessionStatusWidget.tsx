@@ -238,7 +238,36 @@ export default function SessionStatusWidget() {
         // "going on" — we use this to block leaving/switching (the guest must ask a
         // waiter to transfer the table instead of walking off with food in flight).
         const sItems = Array.isArray(state.items) ? (state.items as { status: string }[]) : [];
-        setOrderActive(sItems.some((i) => i.status !== "served"));
+        // ── …UNLESS THE FOOD STOPPED BEING "IN FLIGHT" HOURS AGO (T4 sweep #9, item 9) ───────────
+        // The block is right, and it is entirely correct in a restaurant where a waiter marks each
+        // dish served. In one where they do not — and plenty do not, on a busy night — "unserved"
+        // never becomes "served", so EVERY table stays blocked for ever: a diner who finished an
+        // hour ago still cannot leave or move, and the designed fallback ("ask a waiter to
+        // transfer you") stops being a fallback and becomes the only way out of every table.
+        //
+        // So the block now expires with the meal. The clock is the NEWEST order at the table, not
+        // the session's age: a party that ordered again ten minutes ago is genuinely mid-meal
+        // however long they have been sitting. Ninety minutes is deliberately far past any real
+        // service window for a dish still coming, so this cannot free a table whose food is
+        // actually on its way.
+        //
+        // Why letting go is safe when it does fire: LEAVING DOES NOT TAKE THE FOOD WITH IT. The
+        // confirmation says so in its own words — "Your order stays with the table for the bill" —
+        // and migration 232 keeps every order tied to its session regardless. The worst case is a
+        // diner leaving a party whose bill is unaffected, which is the thing they asked to do.
+        //
+        // Two honest limits, written down rather than hidden: this reads the PHONE's clock, so a
+        // device an hour fast could let go early (costing nothing, per the paragraph above); and
+        // if no order carries a readable time we keep blocking, because "I could not tell" must
+        // fall on the safe side.
+        const STALE_MEAL_MS = 90 * 60_000;
+        const sOrders = Array.isArray(state.orders) ? (state.orders as { created_at?: string }[]) : [];
+        const newestOrderAt = sOrders.reduce((newest, o) => {
+          const t = Date.parse(String(o?.created_at ?? ""));
+          return Number.isFinite(t) && t > newest ? t : newest;
+        }, 0);
+        const foodIsStale = newestOrderAt > 0 && Date.now() - newestOrderAt > STALE_MEAL_MS;
+        setOrderActive(sItems.some((i) => i.status !== "served") && !foodIsStale);
         // First time we see this session (you just got the table): show the full
         // card for 2s, then auto-shrink to the circle.
         if (introToken.current !== s.token) {
