@@ -879,6 +879,33 @@ console.log("\n── the 3D screen's reveal loop, and its four failure screens 
   );
 }
 
+// ── A HOTSPOT NEVER PRINTS A WORD WHERE A NUMBER BELONGS (owner's item 6, 2026-09-14) ─────
+// The old code tested `tag._tx` alone and then printed all three, so a callout carrying a precise
+// x and no y or z rendered `data-position="0.5 undefined undefined"`. The FIRST attempt at the fix
+// only tightened that test and pushed the same fault into the last fallback, where `tag.x` is
+// undefined too — measured as `"NaN NaN undefined"`. That is why this check asserts the whole
+// chain ends somewhere defined, not just that one branch was tightened.
+//
+// And the second half: a callout with one line of text used to draw a second, empty `<li>`, and
+// `.viewer-wrapper .hs-bullets li::before` paints a 4px green dot on it — a bullet pointing at
+// nothing. Neither config in the product has an empty line, so this is hardening, not a live fault.
+{
+  const code = src[PUBLIC_MV].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "a hotspot's position is three real numbers or a defined fallback — never `undefined`",
+    /Number\.isFinite/.test(code) && /\?\? "0 0 0"/.test(code) && !/return `\$\{tag\._tx\} \$\{tag\._ty\} \$\{tag\._tz\}`/.test(code.replace(/\s+/g, " ").replace(/fromPrecise[\s\S]*/, "")),
+    `${PUBLIC_MV} → every source of a hotspot position must be checked for three finite numbers, ` +
+      "and the chain must end in a defined point. Tightening only the first branch moves the fault " +
+      "to the last one — that is exactly what happened on the first attempt at this fix."
+  );
+  check(
+    "…and a bullet is only drawn where there are words",
+    /\[tag\.b1, tag\.b2\]\.filter\(/.test(code),
+    `${PUBLIC_MV} → the two hotspot lines must be filtered before they are drawn. An empty <li> is ` +
+      "not invisible here: the stylesheet paints a 4px dot on every one."
+  );
+}
+
 // Every overlay on these screens registers with the back-button manager.
 check(
   "the dish page's photo lightbox and the 3D details sheet both register with the back manager",

@@ -205,14 +205,40 @@ export default function PublicModelViewer({
               // fall back to just offsetting from the anchor a little.
               data-position={
                 (() => {
-                  if (tag._tx !== undefined) {
-                    return `${tag._tx} ${tag._ty} ${tag._tz}`;
-                  }
+                  // ── A POSITION IS THREE REAL NUMBERS, OR IT IS NOT A POSITION ───────────────
+                  // (owner's item 6, 2026-09-14.)
+                  //
+                  // This used to test `tag._tx` alone and then print all three, so a callout with a
+                  // precise x and no y or z came out as `data-position="0.5 undefined undefined"`.
+                  // The first attempt at this fix only tightened THAT test — and pushed the same
+                  // fault into the last fallback, where `tag.x` is undefined too: measured, it
+                  // produced `"NaN NaN undefined"`. Caught by driving it, not by reading it.
+                  //
+                  // So every source is checked the same way: three finite numbers or move on, and
+                  // `0 0 0` if nothing qualifies — a real point on the model, never a word.
+                  // `Number.isFinite` and not `|| 0`, because a saved **0** is a real coordinate
+                  // and the old `p[0] || 0` threw it away along with the blanks.
+                  //
+                  // Nothing in this repository writes `_tx/_ty/_tz`, and both config files that
+                  // exist fill `tagPosition` properly — so no data this product can produce reaches
+                  // any of this today. It is the belt, put on before something starts writing them.
+                  const triple = (a?: unknown, b?: unknown, c?: unknown) =>
+                    [a, b, c].every((v) => Number.isFinite(Number(v)) && v !== null && v !== "")
+                      ? `${Number(a)} ${Number(b)} ${Number(c)}`
+                      : null;
+                  const fromPrecise = triple(tag._tx, tag._ty, tag._tz);
+                  if (fromPrecise) return fromPrecise;
                   if (tag.tagPosition) {
-                    const p = tag.tagPosition.split(" ").map(Number);
-                    return `${p[0] || 0} ${p[1] || 0} ${p[2] || 0}`;
+                    // Per-part here, not all-or-nothing: a saved string is a list of coordinates
+                    // and a missing tail genuinely means 0, so "0.4" is x=0.4 — the one number
+                    // they gave is kept. (A half-filled `_tx` triple above is different: that is
+                    // one precise point, and half of one point means nothing.)
+                    const p = tag.tagPosition.trim().split(/\s+/);
+                    const n = (i: number) => (Number.isFinite(Number(p[i])) && p[i] !== undefined && p[i] !== "" ? Number(p[i]) : 0);
+                    return `${n(0)} ${n(1)} ${n(2)}`;
                   }
-                  return `${tag.x + 0.5} ${tag.y + 0.5} ${tag.z}`;
+                  const fromAnchor = triple(Number(tag.x) + 0.5, Number(tag.y) + 0.5, tag.z);
+                  return fromAnchor ?? "0 0 0";
                 })()
               }
               data-visibility-attribute="visible"
@@ -246,9 +272,17 @@ export default function PublicModelViewer({
                 <div className="hs-title">{tag.name}</div>
                 <div className="hs-card">
                   <div className="hs-icon">{tag.emoji}</div>
+                  {/* A BULLET ONLY WHERE THERE ARE WORDS (owner's item 6, 2026-09-14). Both lines
+                      were drawn unconditionally, so a callout with only one line of text still got
+                      a second `<li>` — and `.viewer-wrapper .hs-bullets li::before` in
+                      app/globals.css paints a 4px green dot on it. Measured by serving a tag with
+                      an empty `b2`: an 4px-tall empty row with a dot pointing at nothing. Neither
+                      config that exists has an empty line, and nothing in this repository writes a
+                      config, so no data reaches this today either. */}
                   <ul className="hs-bullets">
-                    <li>{tag.b1}</li>
-                    <li>{tag.b2}</li>
+                    {[tag.b1, tag.b2].filter((line) => String(line ?? "").trim() !== "").map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
                   </ul>
                 </div>
               </div>
