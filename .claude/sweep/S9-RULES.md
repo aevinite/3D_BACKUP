@@ -32,6 +32,30 @@ These rules are what make that safe.
      a lost tap or a silent failure, it is a problem. Otherwise it is an improvement. When still
      unsure, **do not build it** — list it.
 
+2b. **PICK YOUR NEW CHECKS BY MEASURING WHERE THE LEDGER IS THIN — NOT BY HAVING AN IDEA.**
+   (Owner, 2026-09-14, STANDING.) Before you write a single new check, count the existing rows
+   **per file in your territory, by SUBJECT**, across every ledger file — not by memory, not from
+   `ROW-COUNTS.json`, and not from any number typed in a document:
+
+   ```sh
+   cd .claude/sweep/LEDGER
+   for f in <each file you own>; do
+     n=$(grep -hE "^\| P[0-9]+ " T*.md | awk -F'|' -v k="$f" '$3 ~ k' | wc -l)
+     printf "%-24s %s\n" "$f" "$n"
+   done | sort -k2 -n
+   ```
+
+   **Aim your new checks at the top of that sorted list.** The files with the fewest rows are not
+   the unimportant ones — they are the ones no sweep prompt ever happened to name. Sweep #9's
+   terminal 5 ran this and found ten of its forty files carrying **1 to 6 rows each** across all
+   44 ledger files: the loading spinner, the background bubbles, the star picker and the
+   last-resort offline page among them. That is where its fifty went.
+
+   This is the rule that makes sweeps CONVERGE. Sweeps #1–#5 each invented a different set of
+   checks and five runs sampled five different slices; re-running the existing rows fixed half of
+   that, and measuring before extending fixes the other half. **Say the counts in your report**, so
+   the next terminal can see whether the thin corner stayed covered.
+
 3. **THERE IS NO QUOTA, AND FORCING A FINDING IS WORSE THAN FINDING NOTHING.**
    His words: *"if everything is okay, they don't have to force to get the thing, but they should
    have to check everything. And if there is problem, they have to list that's must."*

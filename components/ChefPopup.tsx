@@ -37,6 +37,16 @@ export default function ChefPopup() {
   // Phone back button closes the popup instead of leaving the site.
   useBackClose("chef-popup", open, () => setOpen(false));
 
+  // …and Escape closes it on a laptop. Separate effect with its own [open] dependency so the
+  // listener exists only while the popup is up: a key listener on a screen with nothing open is
+  // the shape this project's own rules call out, and it costs nothing to avoid.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [open]);
+
   // This runs once when the pop-up component first appears. It wires up the
   // pre-filling of the table number and listens for events that open/close it.
   useEffect(() => {
@@ -71,6 +81,18 @@ export default function ChefPopup() {
 
     // Listen for app-wide events: open the pop-up, close everything, a QR table
     // was scanned, or the session changed — and react to each.
+    // ESCAPE CLOSES IT, like every other dismissable thing on this screen (owner, 2026-09-14,
+    // item 2). There were three ways out and only two worked: tapping the dimmed backdrop, and
+    // the phone back button (useBackClose, above). Escape did nothing — measured by driving all
+    // three. The language picker sitting a few pixels away DOES close on Escape
+    // (components/NavPicker.tsx), so the two neighbouring popups behaved differently for no
+    // reason a person could guess. A phone has no Escape key, so this changes nothing there;
+    // it is for whoever opens the menu on a laptop.
+    //
+    // Bound on `document` in the CAPTURE phase for the same reason NavPicker binds its own: a
+    // handler further in can stop propagation, and a key press that does nothing is exactly the
+    // fault being fixed. It is added only WHILE the popup is open — see the [open] dependency on
+    // the effect below — so nothing listens on a screen with no popup on it.
     window.addEventListener("lfh:chef-call", handleOpen);
     window.addEventListener("lfh:close-all", handleClose);
     window.addEventListener("lfh:table-scanned", prefillScanned);
