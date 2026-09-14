@@ -27,8 +27,20 @@ import GuestNotFound from "@/components/GuestNotFound";
 // sentence mirrors GuestNotFound's own sub-copy, curly apostrophe included, so the page and its
 // head cannot read as two different products.
 //
-// A `metadata` export is enough here — verified on the running app, not assumed: with this in
-// place the served 404 carries exactly one <title> and one description, and they are these.
+// A `metadata` export is enough for the SERVED page — verified on the running app, not assumed:
+// the 404 carries exactly one <title> and one description, and they are these. That is the half
+// that matters for a forwarded link, because a crawler reads the served HTML and never runs React.
+//
+// BUT THE LIVE TAB SAYS SOMETHING ELSE, AND IT IS NOT A FAULT (owner's item 7, 2026-09-14).
+// MEASURED on all four doors: the served title is "Menu", and about 300 ms after React hydrates it
+// becomes the RESTAURANT's own — "My Little French House — Menu", "AANGAN GARDEN RESTAURANT — Menu",
+// "Sakura Sushi — Menu", "Pizza Palace — Menu". Next keeps the segment's generateMetadata alive on
+// the client even though the page called notFound(), so the route's own title wins on the live tab.
+//
+// Nothing here is wrong: every door shows its OWN restaurant, never another's, and never the
+// platform brand — which is the entire fault this file exists to fix. It is written down because
+// this comment used to read as though "Menu" were the whole story, and the next person to measure
+// the live tab would file the difference as a regression. It is not one.
 export const metadata = {
   title: "Menu",
   description: "This page isn’t available. Scan the QR code on your table, or ask a member of staff.",
