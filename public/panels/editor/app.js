@@ -2000,43 +2000,46 @@ function tableSeatingCardHtml(s) {
   </div>`;
 }
 
-// Guest QR links: one PERMANENT, table-scoped link per table (…/r/<slug>/menu?table=N). Each link is
-// hard-wired to its own table number — the QR you print on table 3 always opens table 3's menu, it
-// never expires, and it can't reach another table. Shown half (the meaningful tail) + a Copy button
-// that grabs the FULL url, so you can paste it into any QR-code maker.
+// ── OBITUARY: the per-table "Guest QR links" list, removed 2026-09-14 (owner) ────────────────
 //
-// ADMIN/OWNER-ONLY (owner 2026-07-29): printing/renewing a table's guest QR is an admin job —
-// the real manager panel doesn't show this card at all. It carries data-mgr-hide so XRAY_CONTROLS
-// hides it for a real manager and tints it (still usable) for a higher role looking in. The admin's
-// own copy — with permanent /q/<code> codes, a QR download and a print sheet — lives in the
-// restaurant detail's ⚙ Settings tab (components/admin/RestaurantSettings.tsx).
-function tableQrLinksCardHtml(s) {
-  const n = Math.max(1, parseInt(s.table_count, 10) || 12);
-  const names = s.table_names && typeof s.table_names === "object" ? s.table_names : {};
-  const seats = s.table_seats && typeof s.table_seats === "object" ? s.table_seats : {};
-  const slug = (state.data.restaurant || {}).slug || "";
-  const origin = location.origin;
-  if (!slug) return `<div class="card" data-mgr-hide="table_qr"><h3>Guest QR links</h3><p style="color:var(--muted);font-size:13px">Couldn't read this restaurant's web address yet — reload the panel and try again.</p></div>`;
-  let rows = "";
-  for (let i = 1; i <= n; i++) {
-    const nm = (names[String(i)] || "").trim();
-    const label = nm ? `${esc(nm)} <span class="muted" style="font-weight:400">(T${i})</span>` : `T${i}`;
-    const st = seatsForTable(s, i);
-    const full = `${origin}/r/${slug}/menu?table=${i}`;
-    rows += `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--panel-2);flex-wrap:wrap">
-      <span style="font-weight:700;font-size:13px;min-width:78px">${label}</span>
-      <span class="muted" style="font-size:12px;min-width:50px">${esc(st)} seats</span>
-      <code style="flex:1;min-width:130px;font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">…/r/${esc(slug)}/menu?table=${i}</code>
-      <button class="btn small" type="button" data-copy-link="${esc(full)}" title="Copy this table's full link">⧉ Copy</button>
-    </div>`;
-  }
+// This card printed one link per table and they differed by ONE CHARACTER:
+//
+//     …/r/<slug>/menu?table=1
+//     …/r/<slug>/menu?table=2
+//     …/r/<slug>/menu?table=3
+//
+// …with a Copy button and its own instruction to "paste it into any QR-code maker to print that
+// table's code". His words, 2026-09-14: *"if the table one, table two, table three, all the top
+// link of the Chrome, there shouldn't be just a number difference. Otherwise, everyone will go in
+// the top link and just change the number and go to another table."* He is right, and this card was
+// the one place in the product still handing a restaurant that shape to print.
+//
+// Its own blurb also claimed something untrue of that address — "table 3's link can never reach
+// table 6" — which is exactly what typing 6 in the address bar does.
+//
+// THE REPLACEMENT ALREADY EXISTED, which is why this is a deletion and not a rewrite. Migration 210
+// gave every table a private random code (8 characters from a 31-character alphabet, no 0/O/1/I/L,
+// about 1.1 × 10¹² combinations) and the guest link became `/q/<code>` — no number in the address at
+// all, nothing to increment. The admin console's restaurant detail → ⚙ Settings tab has carried the
+// whole job since: the `/q/<code>` link, a QR image download per table, a full print sheet, and a
+// "give this table a new code" button (components/admin/RestaurantSettings.tsx). Two ways to do one
+// job, and the old one was the unsafe one — a new way replaces the old one (owner, 2026-08-29).
+//
+// What stands in its place is a POINTER, not a second way: this panel is admin/owner-only ground
+// (data-mgr-hide="table_qr", owner 2026-07-29) and somebody who came here looking for the QR codes
+// must be told where they went rather than find the card simply gone.
+//
+// The delegated [data-copy-link] click handler that served this card's Copy buttons was removed in
+// the same commit — nothing else in this file ever emitted that attribute.
+function tableQrLinksCardHtml() {
   return `<div class="card" data-mgr-hide="table_qr"><h3>Guest QR links · one per table</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
-      A <b>permanent</b> link for each table — it always opens the guest menu for <b>that table only</b>
-      (table 3's link can never reach table 6), and it never expires. Tap <b>Copy</b> and paste it into
-      any QR-code maker to print that table's code. Links use this site's address (<code>${esc(origin)}</code>).
+    <p style="color:var(--muted);font-size:13px;margin:0;line-height:1.6">
+      Each table's QR now carries its <b>own private code</b> rather than its number, so no two
+      tables' links look alike and there is no number in the address for a guest to change.
+      Print them from the admin console: <b>Restaurants → this restaurant → ⚙ Settings → Guest QR
+      codes</b>, where you can copy a table's link, download its QR image, print the whole sheet,
+      or give one table a brand-new code.
     </p>
-    <div style="display:grid;gap:6px;max-height:360px;overflow-y:auto;padding-right:4px">${rows}</div>
   </div>`;
 }
 
@@ -2510,7 +2513,7 @@ function formGeneral(s) {
     <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
   </div>
   ${tableSeatingCardHtml(s)}
-  ${tableQrLinksCardHtml(s)}
+  ${tableQrLinksCardHtml()}
   `;
     // NOTE — there used to be an "Auto close / restart tables" card here. Removed 2026-08-01
     // (owner: "we don't even need that auto restart and auto close and all that option"). It let a
@@ -18586,17 +18589,9 @@ document.addEventListener("click", (e) => {
   if (zp && !e.target.closest("#xrayZones") && !e.target.closest("#xrayZonesBtn")) (zp._xrayClose || (() => zp.remove()))();
 });
 
-// Copy-to-clipboard for any [data-copy-link] button (the per-table Guest QR links). Delegated so it
-// works for every table row without per-render wiring. Clipboard API needs https/localhost; falls
-// back to a prompt() the owner can copy from if it's blocked.
-document.addEventListener("click", (e) => {
-  const cb = e.target.closest("[data-copy-link]");
-  if (!cb) return;
-  const url = cb.getAttribute("data-copy-link") || "";
-  const flash = () => { const o = cb.textContent; cb.textContent = "✓ Copied"; setTimeout(() => { cb.textContent = o; }, 1400); toast("Link copied", "ok"); };
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(flash).catch(() => window.prompt("Copy this table's link:", url));
-  else window.prompt("Copy this table's link:", url);
-});
+// (The delegated [data-copy-link] copy button handler lived here until 2026-09-14. It existed only
+// for the per-table "Guest QR links" list removed above, and nothing else in this file has ever
+// emitted that attribute — a dead listener on every click of the panel is not worth keeping.)
 
 // applyWhoami(w) — everything on this screen that depends on WHO is looking and WHAT the
 // restaurant currently allows them. Kept as a named function so it can run again, which is the
