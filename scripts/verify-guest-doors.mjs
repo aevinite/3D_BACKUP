@@ -66,6 +66,15 @@ if (HOOK) {
 }
 
 const read = (p) => { try { return readFileSync(join(ROOT, p), "utf8"); } catch { return ""; } };
+// ── CODE-ONLY, FOR THE ROWS THAT ARE ABOUT CODE (T1, 2026-09-15) ──────────────────────────────
+// `read()` returns the file as written, comments and all, and that is DELIBERATE for the rows here
+// that assert a written-down reason ("…and the reason is written down where the next reader will
+// see it"). But a row about what the code DOES must not be satisfiable by a line somebody commented
+// out. Sabotage-proved while checking the fix below: commenting out `settingsByRid.current.set(rid,
+// s);` left this guard green, because the text was still in the file.
+// Line comments are stripped BEFORE block comments — a `/*` inside a `//` line has hidden real code
+// from a stripper in this repo before.
+const codeOnly = (src) => src.replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
 let fail = 0;
 const out = [];
 const check = (name, ok) => { out.push((ok ? "  ok   " : "  FAIL ") + name); if (!ok) fail++; };
@@ -261,11 +270,26 @@ check("…and re-asks when it becomes ready",
 // geofence for the life of the page), so that exact string is gone while the rule this row exists
 // for — the gate can never answer with another restaurant's settings — is now stronger. Assert the
 // RULE: every touch of the map is keyed by a restaurant id, and nothing fills a single un-keyed ref.
-check("the table-session gate keeps settings PER RESTAURANT, never one set for the whole page",
-  /settingsByRid/.test(gate)
-  && /settingsByRid\.current\.set\(rid, s\)/.test(gate)
-  && /settingsByRid\.current\.get\(ridRef\.current/.test(gate)
-  && !/settingsByRid\.current\.(get|set)\(\)/.test(gate));
+// THE KEY, NOT THE NAME OF THE VARIABLE HOLDING IT (T1, 2026-09-15). This named `ridRef.current`
+// as the thing the map is read by. PR #1356 refactored the gate to settle the id once into
+// `settledRid` and read with that — same rule, better code — and this row went red on clean main,
+// where it is the fourth spelling-pinned row in this one file. A red verify:* refuses Write and
+// Edit for every session in this folder through the PostToolUse hook, so it is not a small thing.
+//
+// What must hold: every touch of the map carries a key, and nothing fills a single un-keyed ref.
+// Asked of the CODE, so a commented-out line cannot satisfy it.
+{
+  const code = codeOnly(gate);
+  const sets = code.match(/settingsByRid\.current\.set\(([^,)]*)/g) || [];
+  const gets = code.match(/settingsByRid\.current\.get\(([^)]*)\)/g) || [];
+  const keyed = (calls) => calls.length > 0 && calls.every((c) => {
+    const arg = c.slice(c.indexOf("(") + 1).trim();
+    return arg.length > 0 && /rid|restaurant/i.test(arg);
+  });
+  check("the table-session gate keeps settings PER RESTAURANT, never one set for the whole page",
+    /settingsByRid/.test(code) && keyed(sets) && keyed(gets)
+    && !/settingsByRid\.current\.(get|set)\(\)/.test(code));
+}
 check("…and there is no un-keyed `settingsRef.current || await getSettings` left",
   !/settingsRef\.current \|\| \(await getSettings/.test(gate));
 
@@ -368,8 +392,10 @@ say("\n9) A restaurant can change its own rules under a guest who already has th
 // adjacency. The product was right and the guard went red: the same count/spelling trap this file's
 // sibling (verify-guest-recovery) already carries a note about. What must hold is that the gate
 // ASKS, and that what it learns is put in the map; neither has to be one statement.
+// …AND ASKED OF THE CODE, NOT OF THE FILE (T1, 2026-09-15) — see codeOnly() at the top.
+const gateCode = codeOnly(gate);
 check("the table gate ASKS for settings rather than serving its own map",
-  /await getSettings\(rid\)/.test(gate) && /settingsByRid\.current\.set\(rid,/.test(gate));
+  /await getSettings\(rid\)/.test(gateCode) && /settingsByRid\.current\.set\(rid,/.test(gateCode));
 check("…so there is no 'if (cached) use it' short-circuit left",
   !/const cached = settingsByRid\.current\.get\(rid\);/.test(gate));
 check("…and the map is still there as a FALLBACK, so a blip does not dead-end a diner",
@@ -849,7 +875,15 @@ flush();
 // finding. One last flush, so the tally and the list can never disagree again.
 flush();
 if (fail) {
+  // …AND NAME THEM (T1, 2026-09-15). The trailing flush above prints every line, but a reader still
+  // had to scan 130 of them to find the failures. The tally now lists them, and says so if the
+  // number counted and the number printed ever disagree again — which is what the fault above
+  // looked like from the outside.
+  const failed = out.filter((l) => l.startsWith("  FAIL"));
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
+  for (const l of failed) console.log("   " + l.trim());
+  if (failed.length !== fail)
+    console.log(`   ⚠ ${fail - failed.length} counted failure(s) printed no line — a section is pushing into \`out\` after the last flush again.`);
   process.exit(HOOK ? 2 : 1);
 }
 console.log("\n✅ all guest-door checks passed — three doors, one restaurant; and nothing tells a diner something that isn't true.");
