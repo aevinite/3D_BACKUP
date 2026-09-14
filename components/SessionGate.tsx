@@ -23,7 +23,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // Reads the restaurant's settings (location rules, whether sessions are on, etc.).
 import { getSettings, placeSessionOrderSafe, isServerBusy, type Settings } from "@/lib/menu";
 // Lets us set the "default table" hint used by the cart and call-waiter.
-import { setScannedTable } from "@/lib/table";
+import { setScannedTable, validateTable } from "@/lib/table";
 // All the server helpers for the dining-session flow: store/read/clear the saved
 // session, check the guest's location, check/join a table, place an order, etc.
 import {
@@ -766,28 +766,25 @@ export default function SessionGate() {
   // The guest typed their table number (no QR scan yet). Validate it, remember it
   // so the cart + future adds prefill it (no re-asking), then run the join flow.
   const submitTable = () => {
-    const t = (tableInput || "").trim();
-    if (!/^\d+$/.test(t) || Number(t) < 1) { setNote("Please enter your table number."); return; }
-    // Limit to the tables that actually exist (1..tableCount) — otherwise a typo like
-    // "5555" creates a phantom table that has no open session and just dead-ends on
-    // the "we'll let staff know to open it" screen. Mirrors the waiter-call / tablet
-    // place-order range check. (tableCount 0 = unknown → don't enforce.) (owner, 2026-06-22)
-    const max = settingsRef.current?.tableCount || 0;
-    if (max > 0 && Number(t) > max) { setNote(`This place has tables 1–${max}. Please check your table number.`); return; }
-    // ── "007" IS TABLE 7, AND THE FLOOR HAS NEVER HEARD OF "007" (T4 sweep #9, item 2) ───────────
-    // A table's identity everywhere — sessions, orders, bills, KOTs and the printed QR — is its
-    // NUMBER, stored as text and compared with `=` (migration 131 states this in its own header;
-    // lfh_table_status does `WHERE table_number = ...`). So a padded "007" matches nothing: the
-    // checks above both pass (it is all digits, and 7 is inside the range), and the diner is then
-    // carried to "Your table isn't open yet" for a table that does not exist — while the table
-    // they are actually sitting at is open two feet away. Worse, Request a waiter then puts "007"
-    // in front of the floor, so staff are sent to a table nobody can find.
-    // Canonicalising here is safe precisely because the range check above has already proved this
-    // is a plain positive integer inside 1..tableCount, and a table's number is never padded at
-    // the place it is created.
-    const table = String(Number(t));
-    pending.current = { ...(pending.current as Pending), table };
-    rememberTable(table);
+    // ── ONE CHECKER, NOT A PRIVATE COPY OF IT (T4 sweep #9, item 5) ──────────────────────────────
+    // This used to spell out its own digits-only test, its own 1..tableCount range test and its own
+    // two messages, while `lib/table.ts` → validateTable() held exactly the same three rules for the
+    // basket's Place Order and the waiter-call popup. The old comment here even said it "mirrors"
+    // them — a mirror is the thing that drifts. They agreed when this was written and they did NOT
+    // agree by sweep #9: the shared one canonicalised nothing either, so fixing "007" had to be done
+    // twice (items 2 and 4) instead of once. Now there is one rule and one set of words for all
+    // three doors, which is the owner's standing "a new way replaces the old one".
+    //
+    // The wording a diner sees comes from the shared checker now, so it is the SAME sentence the
+    // basket and the bell already gave — including the better out-of-range one, which names the
+    // number they actually typed ("Table 9999 doesn't exist — we have tables 1–30…") instead of
+    // only the range. `tableCount` 0 still means "we don't know how many tables exist", and the
+    // upper bound is still skipped then.
+    const check = validateTable(tableInput, settingsRef.current?.tableCount || 0);
+    if (!check.ok) { setNote(check.message!); return; }
+    // check.value is the CANONICAL number — "007" comes back as "7". See lib/table.ts.
+    pending.current = { ...(pending.current as Pending), table: check.value };
+    rememberTable(check.value);
     setNote("");
     beginFlow();
   };

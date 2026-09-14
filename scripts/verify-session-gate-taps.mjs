@@ -17,12 +17,17 @@
 //      words. The sheet must use the class, and the class must have a light-skin override placed
 //      BELOW its base rule (a later rule of equal weight is what wins).
 //
-//   B. THE TABLE NUMBER THAT LEAVES submitTable IS THE ONE THE FLOOR USES.
+//   B. THE TABLE NUMBER THAT LEAVES ANY OF THE THREE DOORS IS THE ONE THE FLOOR USES.
 //      A table's identity everywhere is its NUMBER, kept as text and compared with `=`
 //      (migration 131's own header; lfh_table_status does `WHERE table_number = ...`). "007"
 //      passes the digits test and the 1..tableCount range test and then matches nothing, so the
 //      diner is parked on "your table isn't open yet" while their real table is open, and a
-//      waiter is called to a table that does not exist. submitTable must canonicalise.
+//      waiter is called to a table that does not exist.
+//      Three doors ask for a table number — the basket's Place Order, the waiter-call popup and
+//      this sheet — and there must be exactly ONE checker behind all three (owner's standing "a
+//      new way replaces the old one"). The sheet kept a private copy until sweep #9, which is why
+//      the same fix had to be made twice. So: the shared checker canonicalises, every caller uses
+//      the value it hands back, and the sheet holds no second copy of the rules.
 //
 // Static — no key, no database, no running app, so it is safe in the PostToolUse hook.
 //   node scripts/verify-session-gate-taps.mjs
@@ -99,32 +104,31 @@ function run(src) {
   check(/if \(state\.ok && sObj\?\.status === "open" && member\?\.approved\) \{ await act\(\); return; \}/.test(code),
     "the silent connect fast-path still calls act() with the sheet closed — the reason rule A exists");
 
-  console.log("B. the table number that leaves the box is the one the floor knows");
+  console.log("B. one checker behind all three doors, and it hands back a number the floor knows");
+  const shared = codeOnly(readFileSync(join(ROOT, "lib/table.ts"), "utf8"));
+  // the shared checker still enforces the two rules, and now canonicalises
+  check(/\/\^\\d\+\$\/\.test\(value\)/.test(shared), "the shared checker still refuses anything that is not all digits");
+  check(/tableCount > 0 && num > tableCount/.test(shared), "…and still refuses a number above the restaurant's own table count");
+  check(/return \{ ok: true, value: String\(num\) \};/.test(shared), "…and hands back the CANONICAL number, so \"007\" leaves as \"7\"");
+  check(!/return \{ ok: true, value \};/.test(shared), "…and never hands back the raw text it was given");
+  // the sheet delegates instead of keeping a copy
   const submit = bodyOf(code, "const submitTable = ()");
   if (!submit) { fail("could not find submitTable() — this guard names a function that has moved"); return failed; }
-  const canon = /String\(Number\((\w+)\)\)/.exec(submit);
-  check(!!canon, "submitTable turns the typed text into a canonical number");
-  if (canon) {
-    // …and it is the canonical value that is USED, not the raw one.
-    const after = submit.slice(submit.indexOf(canon[0]));
-    const assigned = /const (\w+) = String\(Number\(\w+\)\)/.exec(submit);
-    const name = assigned ? assigned[1] : null;
-    check(!!name, "the canonical number is given a name of its own");
-    if (name) {
-      // `{ ...x, table }` is the shorthand for `{ ...x, table: table }` — accept either.
-      const carried = name === "table"
-        ? new RegExp(`Pending\\), ${name} \\}|table: ${name}\\b`)
-        : new RegExp(`table: ${name}\\b`);
-      check(carried.test(after),
-        `the queued action carries the canonical number (\`${name}\`)`);
-      check(new RegExp(`rememberTable\\(${name}\\)`).test(after),
-        `the remembered default carries the canonical number (\`rememberTable(${name})\`)`);
-      check(!new RegExp(`rememberTable\\(t\\)|table: t[,\\s}]`).test(after),
-        "the raw typed text is not what anything downstream is given");
-    }
+  check(/validateTable\(tableInput,/.test(submit), "the table sheet asks the shared checker rather than testing the number itself");
+  check(!/\/\^\\d\+\$\/\.test/.test(submit), "…and keeps no private digits-only copy of that rule");
+  check(!/> max/.test(submit) && !/tableCount \|\| 0\);?$/.test(submit.split("\n").filter((l) => /> max/.test(l)).join("")), "…and keeps no private range copy of that rule");
+  check(/table: check\.value/.test(submit) && /rememberTable\(check\.value\)/.test(submit), "…and passes on the value the checker handed back, not the raw text");
+  // every OTHER door uses the value too, or canonicalising here would be pointless
+  for (const f of ["components/CartPanel.tsx", "components/ChefPopup.tsx"]) {
+    const other = codeOnly(readFileSync(join(ROOT, f), "utf8"));
+    const calls = (other.match(/validateTable\(/g) || []).length;
+    // The raw box lives in state as `tableNumber` / `tableDraft`; the checker's answer is taken
+    // into a local (`tableTrim`) or used as `check.value`. Only the RAW names are a fault here —
+    // an alias for `check.value` is not one, and reading it as one is how a guard cries wolf.
+    const raws = other.split("\n").filter((l) => /(table|p_table):\s*(tableNumber|tableDraft)\b/.test(l));
+    check(calls > 0, `${f} asks the shared checker (${calls} call(s))`);
+    check(raws.length === 0, `${f} hands on the checker's value, never the raw box (${raws.length} raw use(s))`);
   }
-  check(/\/\^\\d\+\$\/\.test\(t\)/.test(submit), "the digits-only test still runs before any of that");
-  check(/Number\(t\) > max/.test(submit), "the 1..tableCount range test still runs before any of that");
 
   console.log("C. the refusal line is readable on the light card too");
   const inlineRed = (src.match(/style=\{\{ color: "#fca5a5" \}\}/g) || []).length;
@@ -148,8 +152,8 @@ if (process.argv.includes("--self-test")) {
   console.log("\nSELF-TEST — each sabotage must turn this guard red");
   const sabotage = [
     ["the name screen set on a closed sheet", (s) => s.replace('setNote(""); setOpen(true); setStep("nickname");', 'setNote(""); setStep("nickname");')],
-    ["the padded table number passed straight through", (s) => s.replace("const table = String(Number(t));", "const table = t;")],
-    ["the canonical number computed and then ignored", (s) => s.replace("rememberTable(table);", "rememberTable(t);")],
+    ["the sheet growing its own copy of the rules again", (s) => s.replace("const check = validateTable(tableInput,", "const t = tableInput.trim(); if (!/^\\d+$/.test(t)) { setNote(\"no\"); return; }\n    const check = validateTable(tableInput,")],
+    ["the checker's value computed and then ignored", (s) => s.replace("rememberTable(check.value);", "rememberTable(tableInput);")],
     ["a refusal painted back in the dark-skin-only red", (s) => s.replace('className="sg-sub sg-note-bad"', 'className="sg-sub" style={{ color: "#fca5a5" }}')],
   ];
   for (const [what, bend] of sabotage) {
