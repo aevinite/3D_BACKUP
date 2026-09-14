@@ -133,7 +133,26 @@ export default function SessionGate() {
   // #1 keeps "My Little French House"; any other restaurant shows its own name
   // once resolved (null during the brief resolve window → we render no kicker
   // rather than flash French House). White-label leak fix, 2026-07-06.
-  const { name: restaurantName } = useRestaurantMeta();
+  const { name: restaurantName, ready: restaurantReady } = useRestaurantMeta();
+  // ── "WE DON'T KNOW WHICH RESTAURANT" IS NOT "RESTAURANT #1" (T4 sweep #9 round 2, item 13) ─────
+  // lib/restaurant-context answers a FAILED lookup with an empty id and `ready:false`, on purpose
+  // and after a fault the owner called "very imp": guessing #1 puts a diner's order on another
+  // restaurant's floor and in another restaurant's books. It was WATCHED happening on Aangan's own
+  // table-1 sticker.
+  //
+  // This sheet undid that in five places, all spelled `ridRef.current || DEFAULT_RESTAURANT_ID` —
+  // reading the rules, the fallback to the last-known rules, the retry, placing the order, and
+  // saving an order or a waiter call for later. The empty string is falsy, so every one of them
+  // turned "we do not know" straight back into restaurant #1.
+  //
+  // There is a second, wider window: `id` STARTS at restaurant #1 while a /r/<slug> lookup is in
+  // flight, so acting in that window also used #1's rules — its geofence, its table count, and
+  // whether table sessions are on at all. BanGate and CustomerGreeter already wait for `ready`
+  // for exactly this reason; this sheet did not.
+  //
+  // So: wait for the provider to settle, briefly, and refuse honestly if it never does.
+  const readyRef = useRef(restaurantReady);
+  useEffect(() => { readyRef.current = restaurantReady; }, [restaurantReady]);
   const brandLabel = restaurantName || (restaurantId === DEFAULT_RESTAURANT_ID ? "My Little French House" : null);
   // What the on-screen pop-up needs to remember:
   const [open, setOpen] = useState(false); // is the pop-up showing?
@@ -226,6 +245,22 @@ export default function SessionGate() {
   // point). afterLocation needs to trigger a silent re-join, so we reach it through
   // a ref — assigned once doJoinAsGuest exists — to avoid a forward reference.
   const joinGuestRef = useRef<(n?: string) => Promise<void> | void>(() => {});
+
+  // Wait for the restaurant to be SETTLED before doing anything keyed on it. Returns its id, or
+  // null when it never settles — never a guess. Six seconds covers the ordinary cold lookup with
+  // room to spare (the provider's own first retry is at ~2s); past that the provider has already
+  // told the diner itself and is still retrying in the background, so a screen here is the right
+  // place to stop.
+  const RESTAURANT_SETTLE_MS = 6000;
+  const settledRestaurant = async (): Promise<string | null> => {
+    if (readyRef.current && ridRef.current) return ridRef.current;
+    const until = Date.now() + RESTAURANT_SETTLE_MS;
+    while (Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 120));
+      if (readyRef.current && ridRef.current) return ridRef.current;
+    }
+    return null;
+  };
 
   // Stops whatever repeating check is currently running.
   const stopPoll = () => {
@@ -322,7 +357,10 @@ export default function SessionGate() {
     // Only the item lines + allergies travel to the server — no prices. The
     // server prices the whole bill itself (see lfh_place_order).
     const pl = p.payload as { items: unknown[]; allergies: string[]; lines?: { id: string; title: string }[]; track?: { tableNumber?: string; total?: number; itemCount?: number; items?: { title: string; qty: number }[] } };
-    const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
+    // No `|| DEFAULT_RESTAURANT_ID`: an order is the very thing that must never land on a guessed
+    // restaurant's floor. By the time an order can be placed the sheet has already settled the
+    // restaurant in onDo, so this is the real one.
+    const rid = ridRef.current;
     // ONE at-most-once key for this basket, shared by the online attempt AND anything saved for
     // later — the same rule the QR path has had since 2026-07-08. Without it, an order that
     // COMMITTED but whose reply was lost was sent again under a fresh identity and placed TWICE
@@ -443,7 +481,7 @@ export default function SessionGate() {
       try {
         // guarded, for the same reason as the order (item 2): once it is in the phone's queue it
         // will be sent, so a dismissed sheet must not report it cancelled.
-        const savedCall = await guarded(() => enqueueGuestCall({ mode: "session", token: s.token, restaurantId: ridRef.current || DEFAULT_RESTAURANT_ID, reason: note }));
+        const savedCall = await guarded(() => enqueueGuestCall({ mode: "session", token: s.token, restaurantId: ridRef.current, reason: note }));
         if (savedCall.e) throw savedCall.e;
         const q = savedCall.v!;
         fireDone({ ok: true, action: "call", queued: true });
@@ -744,9 +782,16 @@ export default function SessionGate() {
       //      fallback below is generous — the last-known settings for this very restaurant.
       const SETTINGS_DEADLINE_MS = 8000;
       if (detail.action !== "connect") { setOpen(true); setStep("working"); }
+      // …and the restaurant is settled BEFORE its rules are read, or the rules read are #1's.
+      const settledRid = await settledRestaurant();
+      if (!settledRid) {
+        setNote("We couldn't tell which restaurant this is — please reload the page, or ask a member of staff.");
+        setOpen(true); setStep("net_error");
+        return;
+      }
       try {
         // THIS restaurant's settings, not "the first restaurant this tab ever asked about".
-        const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
+        const rid = settledRid;
         const s = await Promise.race([
           getSettings(rid),
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error("settings_timed_out")), SETTINGS_DEADLINE_MS)),
@@ -756,7 +801,7 @@ export default function SessionGate() {
       } catch {
         // …and if that read fails but we knew this restaurant a moment ago, carry on with what we
         // knew rather than dead-ending a diner who was fine a moment before.
-        const known = settingsByRid.current.get(ridRef.current || DEFAULT_RESTAURANT_ID);
+        const known = settingsByRid.current.get(settledRid);
         if (known) settingsRef.current = known;
         else {
           setNote("We can't reach the restaurant's system right now — check your internet and retry.");
@@ -1013,8 +1058,12 @@ export default function SessionGate() {
   // if needed, then resume the normal flow from wherever it can pick up.
   const retryFlow = async () => {
     if (!settingsRef.current) {
+      const rid = await settledRestaurant();
+      if (!rid) {
+        setNote("We couldn't tell which restaurant this is — please reload the page, or ask a member of staff.");
+        return;
+      }
       try {
-        const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
         settingsRef.current = await getSettings(rid);
         settingsByRid.current.set(rid, settingsRef.current);
       } catch {

@@ -33,7 +33,17 @@ export function validateTable(raw: string, tableCount: number): TableCheck {
   // `/^\d+$/` is a pattern meaning "nothing but digits, start to finish" — so
   // "12" passes but "1a", "1.5" or "-3" don't. We also confirm it's a whole
   // number that's at least 1.
-  if (!/^\d+$/.test(value) || !Number.isInteger(num) || num < 1) {
+  //
+  // ── AND ONE A PHONE CAN HOLD EXACTLY (T4 sweep #9 round 2) ────────────────────────────────────
+  // `isSafeInteger`, not `isInteger`. Above 2^53-1 a JavaScript number stops being able to name
+  // every whole number, so `Number("99999999999999999999")` is 1e20 and `String()` of it is
+  // "100000000000000000000" — a DIFFERENT number from the one that was typed. With the table count
+  // known this was already refused by the range test below, but `tableCount` is 0 whenever the
+  // restaurant's settings have not loaded yet, and then a twenty-digit entry came back `ok` with
+  // digits nobody typed. That is the exact rule this checker exists for — the number that leaves
+  // here is the number the floor will be given — broken by the canonicalising added earlier the
+  // same day. No real table is anywhere near 2^53, so nothing legitimate is refused by this.
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(num) || num < 1) {
     return { ok: false, value: "", message: "Please enter a valid table number." };
   }
   // Only enforce the upper bound when we actually know the table count.

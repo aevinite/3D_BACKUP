@@ -1,5 +1,5 @@
 "use client";
-import { useRestaurantId, useRestaurantMeta } from "@/lib/restaurant-context";
+import { useRestaurantMeta } from "@/lib/restaurant-context";
 import { useFeatures } from "@/lib/features";
 import { DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 
@@ -89,8 +89,22 @@ const NEWS_MS = 3400;
 // SessionStatusWidget — the small floating card (draggable, collapsible) that tells
 // a guest they're connected to a table and lets them leave or switch tables.
 export default function SessionStatusWidget() {
-  const restaurantId = useRestaurantId();
-  const features = useFeatures(restaurantId); // hide the call-waiter button when waiter_calls is off
+  // ── AND THE CARD WAITS FOR THE RESTAURANT TOO (T4 sweep #9 round 2, item 13) ──────────────────
+  // `id` starts at restaurant #1 while a /r/<slug> lookup is in flight, and answers "" for good if
+  // that lookup fails. Reading either as though it were this restaurant is how the Aangan sticker
+  // fault happened: the widgets read #1's `sessionsEnabled`, which is ON, on a restaurant where it
+  // is OFF — so tapping "+" opened the join-a-table gate instead of adding the dish, and the basket
+  // stayed empty. The comment at the foot of the poll effect below fixed the LATER half of that (it
+  // re-runs when the id changes); this closes the window BEFORE the first answer is published.
+  const { id: restaurantId, ready: restaurantReady } = useRestaurantMeta();
+  // …and the SWITCHES are asked for under the same rule. This read is a hook, so it cannot be
+  // skipped with an `if` — but WHAT it is asked about can be withheld. Handing it the unsettled id
+  // means asking restaurant #1 which features a diner at another restaurant has, which is the same
+  // guess the effect below refuses to make; handing it an empty one asks about nobody, falls back
+  // to the defaults, and is replaced the moment the real id lands (the hook re-runs on its
+  // argument). Nothing on screen depends on it before then: the card draws nothing at all until
+  // `enabled && st`, and both of those are set by the settled effect below.
+  const features = useFeatures(restaurantReady ? restaurantId : ""); // hide the call-waiter button when waiter_calls is off
   // The current restaurant's slug, so "Change table" returns the guest to THIS
   // restaurant's menu (/r/<slug>/menu) instead of the bare /menu that always
   // meant restaurant #1 — the cross-tenant bounce the audit found (2026-07-06).
@@ -150,6 +164,10 @@ export default function SessionStatusWidget() {
     let alive = true; // guards against updating state after the component is gone
     let iv: ReturnType<typeof setInterval> | null = null; // the poll timer
     let onTick: (() => void) | null = null; // realtime nudge → refetch now
+    // Nothing is asked, and nothing is published, until we know WHICH restaurant we are asking
+    // about. The effect re-runs the moment it settles (both are in the dependency list), so this
+    // is a wait of a few hundred milliseconds, not a refusal.
+    if (!restaurantReady || !restaurantId) return;
     (async () => {
       // Is the session system even turned on? If not, we'll never show anything.
       let on = false;
@@ -292,7 +310,7 @@ export default function SessionStatusWidget() {
     // tableConnection, so gateAddToCart added straight to the cart and the guest was
     // NEVER prompted to open/join a table (owner: "open table isn't working"). Re-running
     // on the real id fixes it.
-  }, [restaurantId]);
+  }, [restaurantId, restaurantReady]);
 
   // ── PRESENCE HEARTBEAT (migration 099) ──────────────────────────────────────
   // While this guest's menu tab is VISIBLE and we're connected to an OPEN table,
