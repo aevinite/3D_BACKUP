@@ -196,8 +196,31 @@ export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: bool
   }
   switch (reason) {
     case "session_closed": return q ? "Your table was closed while you were offline." : "This table has been closed — please ask your server.";
-    case "not_approved": return q ? "You weren't approved to order on this table." : "You're not approved to order on this table yet.";
-    case "blocked": return "This order was blocked — please ask a member of staff.";
+    // ── AND THESE TWO HAD TO STOP SAYING "ORDER" (sweep #9 T3, item 2) ─────────────────────────
+    //
+    // WORDED_FOR_EVERY_KIND above is a carve-out list: the codes whose sentence is true of ANY
+    // saved thing, so they skip the per-kind branch and come down here. Two of the eight were
+    // not actually true of any saved thing — they named an ORDER — and both are reachable by a
+    // saved WAITER CALL, which is the one thing a diner taps when something is wrong:
+    //
+    //   · `blocked`      — lfh_call_waiter (mig 084, the seated door) and lfh_call_waiter_table
+    //                      (mig 334, the QR door) BOTH answer it for a blocked table or phone.
+    //                      The diner tapped a bell in a dead spot and read
+    //                      "This ORDER was blocked — please ask a member of staff."
+    //   · `not_approved` — lfh_call_waiter answers it for a guest the head has not approved yet.
+    //                      They read "You weren't approved to ORDER on this table."
+    //
+    // This is the same fault sweep #8's item 3 was written to end ("a saved call is not an order,
+    // and nor is leaving a table") — it simply survived inside the carve-out list, because the
+    // list was chosen by reading the sentences and these two read as general.
+    //
+    // The fix keeps them in the carve-out, because the REASON is worth telling the diner and the
+    // per-kind fallback would throw it away ("Couldn't send your call for a server" says nothing
+    // about a block). Instead the sentences say the true thing, which is about the TABLE and not
+    // about what the person was trying to do — so they are now correct for an order, a raised hand
+    // and an "I've left" alike.
+    case "not_approved": return q ? "You weren't approved on this table." : "You're not approved on this table yet — please ask your server.";
+    case "blocked": return "This table is blocked — please ask a member of staff.";
     case "otp_required": return q ? "Phone verification was needed." : "Please confirm your phone number first.";
     case "invalid_token": return q ? "Your table session expired." : "Your table session has expired — please scan the code again.";
     case "sold_out": return q

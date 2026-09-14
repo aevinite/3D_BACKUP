@@ -180,6 +180,37 @@ missing.length === 0
 derived.size >= 10
   ? ok(`the migration scan is alive — ${derived.size} refusal codes read out of the SQL`)
   : bad("the migration scan found almost nothing — it is asserting against an empty set", String(derived.size));
+// ── A CARVE-OUT SENTENCE MUST BE TRUE OF ANY SAVED THING (sweep #9 T3, item 2) ─────────────────
+//
+// WORDED_FOR_EVERY_KIND is the list of codes that SKIP the per-kind sentence, on the promise that
+// what the switch says is true of an order, a raised hand and an "I've left" alike. Two of the
+// eight broke that promise by naming an ORDER — `blocked` ("This order was blocked") and
+// `not_approved` ("You weren't approved to order on this table") — and both are reachable by a
+// saved WAITER CALL (lfh_call_waiter, mig 084; lfh_call_waiter_table, mig 334). So a diner who
+// tapped a bell in a dead spot read a refusal about an order they never placed.
+//
+// The promise is now CHECKED rather than trusted: every code in the carve-out is looked up in the
+// switch and its sentence must not name the one thing only an order is. A new code added to the
+// list with an order-shaped sentence goes red here instead of reaching a diner.
+{
+  const set = (outbox.match(/WORDED_FOR_EVERY_KIND = new Set\(\[([\s\S]*?)\]\)/) || [])[1] || "";
+  const codes = [...set.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  // The words that make a sentence about an ORDER and therefore untrue of a call or a leave.
+  const ORDER_WORDS = /\b(order|ordered|ordering|dish|dishes|basket|food)\b/i;
+  const offenders = [];
+  for (const c of codes) {
+    // Every arm for this code, including a fallthrough group — take the sentence the group returns.
+    const re = new RegExp(`case "${c}":[\\s\\S]{0,400}?return ([^\\n]+)`);
+    const arm = (outbox.match(re) || [])[1] || "";
+    for (const lit of arm.matchAll(/"([^"]{8,})"/g)) if (ORDER_WORDS.test(lit[1])) offenders.push(`${c}: "${lit[1]}"`);
+  }
+  codes.length >= 6
+    ? ok(`the ${codes.length} kind-neutral codes were all found in the switch`)
+    : bad("the carve-out list could not be read — this check is asserting nothing", String(codes.length));
+  offenders.length === 0
+    ? ok("…and not one of their sentences talks about an order to someone who raised a hand")
+    : bad("a kind-neutral refusal names an ORDER", offenders.join(" · "));
+}
 // …and the second net a CALL relies on really is there, so "call-only codes need no case" stays
 // a true statement rather than an excuse.
 /ask a member of staff\.["`]\s*\n?\s*:\s*\n?\s*"Couldn't tell the restaurant you'd left/.test(outbox)
