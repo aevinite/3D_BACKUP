@@ -425,6 +425,27 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
     if (/const unlocked = await revealUnlocked\(/.test(src) && /password: unlocked \? pw : null/.test(src))
       ok("…and a COVERED read sends no password value at all — it is withheld by the server, not hidden by the screen");
     else fail("the covered read no longer withholds the password value on the server side");
+
+    // ── AND THE SCREEN MUST LET GO OF WHAT IT ALREADY HAS (2026-09-14) ──────────────────────────
+    // The server half above was always right, and that is exactly why this was missed: every
+    // API-level check passed while pressing Cover left all nine passwords sitting on the page.
+    // `lock()` flips the shared state to covered BEFORE sending the DELETE (so the screen reacts at
+    // once), so a re-read fired from that flip goes out while the server still thinks it is
+    // uncovered — and comes back WITH the values, which the card then renders. Covering must
+    // therefore clear LOCALLY and make no request: a race needs two things in flight.
+    const card = read("components/admin/CredentialsCard.tsx");
+    const cover = card.slice(card.indexOf("const wasUnlocked"), card.indexOf("const owners ="));
+    if (/if \(!unlocked\)[\s\S]{0,400}?password: null/.test(cover))
+      ok("pressing Cover drops the passwords the CARD is already holding, not just the ones the server would send");
+    else fail("covering no longer clears the card's own copy — the values stay on screen after Cover");
+    // Precise, not greedy: the covering branch must RETURN before control can reach the load() that
+    // the uncovering branch uses. (A regex that just looked for "load() somewhere after if(!unlocked)"
+    // matched the uncovering call and failed on correct code — which is its own lesson about pinning
+    // a check to proximity instead of to control flow.)
+    const coverBranch = cover.slice(cover.indexOf("if (!unlocked)"), cover.indexOf("void load()"));
+    if (/return;/.test(coverBranch) && !/\bload\(\)/.test(coverBranch))
+      ok("…and it does so WITHOUT a re-read, so it cannot race the DELETE that covers the server");
+    else fail("covering re-reads again — that request races lock()'s DELETE and re-renders the passwords");
   }
 }
 
