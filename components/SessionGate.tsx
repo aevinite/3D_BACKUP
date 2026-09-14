@@ -774,8 +774,20 @@ export default function SessionGate() {
     // place-order range check. (tableCount 0 = unknown → don't enforce.) (owner, 2026-06-22)
     const max = settingsRef.current?.tableCount || 0;
     if (max > 0 && Number(t) > max) { setNote(`This place has tables 1–${max}. Please check your table number.`); return; }
-    pending.current = { ...(pending.current as Pending), table: t };
-    rememberTable(t);
+    // ── "007" IS TABLE 7, AND THE FLOOR HAS NEVER HEARD OF "007" (T4 sweep #9, item 2) ───────────
+    // A table's identity everywhere — sessions, orders, bills, KOTs and the printed QR — is its
+    // NUMBER, stored as text and compared with `=` (migration 131 states this in its own header;
+    // lfh_table_status does `WHERE table_number = ...`). So a padded "007" matches nothing: the
+    // checks above both pass (it is all digits, and 7 is inside the range), and the diner is then
+    // carried to "Your table isn't open yet" for a table that does not exist — while the table
+    // they are actually sitting at is open two feet away. Worse, Request a waiter then puts "007"
+    // in front of the floor, so staff are sent to a table nobody can find.
+    // Canonicalising here is safe precisely because the range check above has already proved this
+    // is a plain positive integer inside 1..tableCount, and a table's number is never padded at
+    // the place it is created.
+    const table = String(Number(t));
+    pending.current = { ...(pending.current as Pending), table };
+    rememberTable(table);
     setNote("");
     beginFlow();
   };
