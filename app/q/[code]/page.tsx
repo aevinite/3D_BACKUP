@@ -8,7 +8,8 @@
 import { cache } from "react";
 import type { Metadata } from "next";
 import MenuView from "@/components/MenuView";
-import { getRestaurantBySlug } from "@/lib/tenant";
+import GuestNotFound from "@/components/GuestNotFound";
+import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { getSettings } from "@/lib/menu";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -74,15 +75,26 @@ export async function generateMetadata({ params }: { params: Promise<{ code: str
   const description = hit.r.tagline
     ? `${hit.r.tagline} — view the menu and order at ${hit.r.name}.`
     : `View the menu and order at ${hit.r.name}.`;
+  // THE FLAGSHIP'S PICTURE, EXACTLY AS THE MENU DOOR DOES IT (owner, 2026-09-14, item 5). Restaurant
+  // #1 has no uploaded logo — its wordmark ships with the app — so its shared link previewed with a
+  // blank space where every other restaurant shows a logo. Only #1 gets this fallback, because the
+  // file IS #1's logo; a logo-less tenant still previews with no picture rather than wearing
+  // somebody else's brand. Absolute, from the host this request arrived on, because a relative URL
+  // in metadata resolves against a `metadataBase` this app has never set.
+  // The flagship's own logo ships with the app, so it is a path, not a stored URL. Relative on
+  // purpose: `metadataBase` in app/layout.tsx turns it into an absolute address from a CONFIGURED
+  // site address, never from the request's Host header — a visitor must not be able to decide where
+  // a preview picture points. See the note there.
+  const picture = hit.r.logoUrl || (hit.r.id === DEFAULT_RESTAURANT_ID ? "/lfh-logo.png" : "");
   return {
     title,
     description,
-    ...(hit.r.logoUrl ? { icons: { icon: hit.r.logoUrl } } : {}),
+    ...(picture ? { icons: { icon: picture } } : {}),
     openGraph: {
       title,
       description,
       type: "website",
-      ...(hit.r.logoUrl ? { images: [{ url: hit.r.logoUrl }] } : {}),
+      ...(picture ? { images: [{ url: picture }] } : {}),
     },
   };
 }
@@ -92,17 +104,17 @@ export default async function TableQrPage({ params }: { params: Promise<{ code: 
   const hit = await resolveCode(code);
   if (!hit) {
     // Friendly dead-code page (a regenerated/typo'd code) — not a bare 404.
-    return (
-      <main style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center", fontFamily: "system-ui, sans-serif" }}>
-        <div>
-          <div style={{ fontSize: 44, marginBottom: 10 }} aria-hidden="true">🍽️</div>
-          <h1 style={{ fontSize: 20, margin: "0 0 8px" }}>This QR code isn&rsquo;t active</h1>
-          <p style={{ fontSize: 14, opacity: 0.75, margin: 0, maxWidth: 340 }}>
-            It may have been replaced with a new one. Please ask a member of staff to scan the current code for your table.
-          </p>
-        </div>
-      </main>
-    );
+    //
+    // ONE SCREEN, ONE SET OF WORDS (owner, 2026-09-14, item 3). This used to be its own hand-built
+    // page: a plain cream background, a knife-and-fork emoji and `system-ui`, while the other two
+    // guest dead ends — a menu that is switched off, and a page that is not there — were the order
+    // slip on the spike in the restaurant's own typeface. Three dead ends, two designs, and the odd
+    // one out was the one a diner reaches by scanning a sticker that has been replaced.
+    //
+    // The wording below is unchanged; it moved into GuestNotFound's `qr` variant, which stamps the
+    // docket CODE / not active / VOID and offers no button, because a dead code carries no slug and
+    // there is nothing behind a button to offer.
+    return <GuestNotFound variant="qr" />;
   }
   return (
     <>

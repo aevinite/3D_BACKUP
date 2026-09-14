@@ -170,6 +170,52 @@ check("…while the table itself still reaches the app",
   /setScannedTable\(digits\)/.test(menuView) && /lfh:table-scanned/.test(menuView));
 check("every QR this app generates is the CODE door, not ?table=N",
   /\/q\/\$\{code\}/.test(read("components/admin/RestaurantSettings.tsx")));
+// ── …AND NOTHING ANYWHERE ELSE HANDS A RESTAURANT A NUMBER-SHAPED TABLE LINK TO PRINT ─────────
+//
+// The check above asked ONE file whether it does the right thing, and never asked the rest of the
+// product whether it does the wrong one. It passed for months while the manager/editor panel's
+// "Guest QR links · one per table" card listed
+//
+//     …/r/<slug>/menu?table=1   …/r/<slug>/menu?table=2   …/r/<slug>/menu?table=3
+//
+// each with a Copy button and its own instruction to "paste it into any QR-code maker to print that
+// table's code". Removed 2026-09-14 on the owner's word: *"if the table one, table two, table three,
+// all the top link of the Chrome, there shouldn't be just a number difference. Otherwise, everyone
+// will go in the top link and just change the number and go to another table."*
+//
+// DERIVED, NOT A HAND-TYPED LIST OF FILES — a list is what let one file sit outside the check. This
+// walks every source file the product ships, strips its comments (LINE comments first: a `/*` inside
+// a `//` line has hidden code from a stripper here before), and fails on any surviving construction
+// of a guest MENU address carrying a table number. `/state?table=` and `/summary?table=` in the
+// tablet panel are API calls, not a printed address, and do not match.
+// `check(name, ok)` here takes a BOOLEAN, so the scan is done first and its count goes in the name —
+// passing it a function would make the row pass whatever the answer was.
+const numberedTableLinks = (() => {
+  const roots = ["app", "components", "lib", "public/panels"];
+  const skip = /node_modules|\/vendor\/|\.min\.|\.map$/;
+  const files = [];
+  const walk = (d) => {
+    for (const e of readdirSync(join(ROOT, d), { withFileTypes: true })) {
+      const rel = d + "/" + e.name;
+      if (skip.test(rel)) continue;
+      if (e.isDirectory()) walk(rel);
+      else if (/\.(ts|tsx|js|jsx)$/.test(e.name)) files.push(rel);
+    }
+  };
+  roots.forEach(walk);
+  const bad = [];
+  for (const f of files) {
+    const bare = read(f)
+      .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1")   // line comments FIRST
+      .replace(/\/\*[\s\S]*?\*\//g, "");           // then block comments
+    if (/menu\?(table|t)=/.test(bare)) bad.push(f);
+  }
+  return { files: files.length, bad };
+})();
+check(`…and nothing anywhere else builds a per-table guest address out of the table NUMBER `
+  + `(${numberedTableLinks.files} shipped source files scanned${numberedTableLinks.bad.length ? ": " + numberedTableLinks.bad.join(", ") : ", 0 build one"})`,
+  numberedTableLinks.bad.length === 0);
+
 check("an OCCUPIED table still needs the head to let a second party in (auto_approve DEFAULT false)",
   (() => {
     const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => /\.sql$/.test(f));

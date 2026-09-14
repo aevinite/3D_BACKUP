@@ -152,11 +152,34 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         // Accept either ?table=5 or ?t=5.
         return params.get("table") || params.get("t");
       })();
-      // Keep only the digits (strip anything that isn't a number).
+      // Keep only the digits (strip anything that isn't a number), so a sticker that encoded
+      // "T5" or "Table 5" still lands on 5.
       const digits = (raw || "").replace(/\D/g, "");
-      if (digits) {
+      // ── A TABLE THAT CANNOT EXIST IS NOT REMEMBERED (owner, 2026-09-14, item 6) ─────────────
+      //
+      // The digits were believed whatever they came to. Measured: `?table=0` was saved as table 0,
+      // and no restaurant has a table 0 — `table_qr_codes` (mig 210) constrains a table to
+      // 1…500 and `settings.table_count` tops out at 500. So the app briefly believed a table
+      // that is not on any floor, and every screen downstream — the cart, the waiter call, the
+      // session join — carried that value about until the diner was asked to confirm.
+      //
+      // Nothing is lost by refusing it: with no scanned table the diner is asked which table they
+      // are at, which is exactly the recovery a mis-scanned sticker already has.
+      //
+      // `?table=-3` still reads as table 3, and that is deliberate rather than overlooked: after
+      // the strip it is indistinguishable from typing 3, which this door has always accepted and
+      // which the session's own approval step is what actually guards.
+      //
+      // A REFUSED VALUE IS STILL WIPED OUT OF THE ADDRESS. `?table=0` is exactly the thing that
+      // should not sit in the address bar waiting to be edited, so the value is refused for
+      // STORAGE and the cleanup below still runs.
+      const n = parseInt(digits, 10);
+      const usable = !!digits && Number.isFinite(n) && n >= 1 && n <= 500;
+      if (usable) {
         setScannedTable(digits);                                // remember it
         window.dispatchEvent(new Event("lfh:table-scanned"));   // tell the app
+      }
+      {
         // ── AND THE NUMBER LEAVES THE ADDRESS BAR (owner, 2026-08-30) ─────────────────────────
         // His words: *"instead of numbers for table, do you use some kind of code right? Because
         // people can't able to change the table number from top just by changing the URL."*
@@ -187,6 +210,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         //
         // `replaceState`, never `pushState`: the back button must not walk the diner through a
         // history entry that puts the number back.
+        //
+        // THE CLEANUP RUNS FOR ANY `?table=`, NOT ONLY A USABLE ONE (owner, 2026-09-14, item 6).
+        // It used to sit inside the "we got digits" branch, so `?table=abc` — nothing to store, and
+        // the diner will be asked which table they are at — was left sitting in the address bar
+        // where a number would have been wiped. Measured. Whatever arrived, the address comes out
+        // clean; only a value that could be a real table (1…500) is remembered.
         try {
           if (!qrTable && window.location.search) {
             const url = new URL(window.location.href);
@@ -1178,11 +1207,23 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   const nonEmptyCatSlugs = new Set(filteredItems.map((it) => it.category));
   const visibleCategories = categories.filter((c) => nonEmptyCatSlugs.has(c.slug));
 
-  // ── IS A FILTER ACTUALLY ON? ─────────────────────────────────────────────────────────────────
-  // Only the three NARROWING chips count. A sort re-orders the menu, it never hides a dish, so a
-  // sorted menu that shows nothing is not "no dishes match these filters". This is what lets the
-  // empty screen below tell the truth about WHY it is empty (guest sweep T1, sweep #8).
-  const anyFilterOn = !!(chefActive || favActive || dietActive);
+  // ── OBITUARY: `anyFilterOn`, removed 2026-09-14 (owner, item 7) ──────────────────────────────
+  //
+  // It existed for one job: when the menu came back with dishes but no SECTIONS, it decided whether
+  // the diner saw the dishes flat or the message "No dishes match these filters. Try turning a
+  // filter off." — the dishes only when no narrowing chip was on.
+  //
+  // The owner chose the dishes, whatever the chips say: *"do 7"*, against the question "which is
+  // more honest — the message that points at a fix, or the dishes with no headings?" He is right,
+  // and the old split had a hole in it that this closes. With Veg on and the sections half of the
+  // read coming back empty, a diner was told to turn a filter off while the veg dishes they asked
+  // for were sitting in the payload, undrawn. The message was true about the filter and false about
+  // the menu.
+  //
+  // One rule now: dishes but no sections → show the dishes. If the chips genuinely match nothing,
+  // `filteredItems` is empty and the honest message below is reached exactly as before — which is
+  // also why nothing is lost by removing this flag. A sort was never part of it (a sort hides no
+  // dish), and with the whole test gone that distinction has nothing left to protect.
 
   // "SLIDE →" IS ONLY TRUE WHEN THE ROW ACTUALLY HAS MORE (T14 tablet sweep, 2026-08-13).
   // The hint was rendered whenever there were categories at all, with no check on the thing it
@@ -1578,7 +1619,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           // shows the name + dish count + a chevron; tapping it folds that category.
           // Every dropdown starts OPEN so guests see the whole menu at a glance;
           // closedCats records the ones they folded shut (remembered for 10 min).
-          allGroups.length === 0 && filteredItems.length > 0 && !anyFilterOn ? (
+          allGroups.length === 0 && filteredItems.length > 0 ? (
             // ── THERE ARE DISHES, BUT NO SECTIONS TO PUT THEM IN ────────────────────────────────
             // Measured on a production build, 360x780, French House with 59 dishes: with the
             // SECTIONS half of the menu read coming back empty — an ordinary blip on one of the two
@@ -1600,8 +1641,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             // silently vanishing.
             //
             // Nothing changes when the sections DO arrive: `allGroups` is non-empty and the grouped
-            // view below is untouched. And when a filter really is on, `anyFilterOn` sends us to the
-            // honest message instead. Guarded by `verify:guest`.
+            // view below is untouched. And when the chips genuinely match nothing, `filteredItems`
+            // is empty and the honest message below is reached instead. Guarded by `verify:guest`.
+            //
+            // Until 2026-09-14 this arm also required that NO narrowing chip was on, which meant a
+            // diner with Veg on was told to turn a filter off while their veg dishes sat undrawn in
+            // the payload. The owner chose the dishes (item 7). See the obituary above.
             <div
               id="items-container"
               className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}
