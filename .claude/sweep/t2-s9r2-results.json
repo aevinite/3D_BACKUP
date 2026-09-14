@@ -1,0 +1,3506 @@
+{
+ "static": [
+  {
+   "id": "P101751",
+   "what": "the 404 page is a real Next not-found boundary, not a component someone must remember to render",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101752",
+   "what": "…and it draws the GUEST 404, never the platform one",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101753",
+   "what": "…and it is scoped PER GUEST ROUTE, so a staff 404 still falls through to the platform page",
+   "how": "read the path it lives at",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101754",
+   "what": "it exports a metadata object rather than a generateMetadata function",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101755",
+   "what": "…because a not-found boundary receives no params, so it could not name a restaurant without a read",
+   "how": "reason + read: nothing here takes an argument",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101756",
+   "what": "the title says nothing untrue about anybody",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101757",
+   "what": "…and the description names no company",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101758",
+   "what": "…and it tells a diner what to actually DO",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101759",
+   "what": "the apostrophe is the curly one, matching the other two dead ends",
+   "how": "read: U+2019, not U+0027",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101760",
+   "what": "the two guest 404 files are byte-identical",
+   "how": "diff the two",
+   "ok": true,
+   "note": "identical"
+  },
+  {
+   "id": "P101761",
+   "what": "…and a guard fails if they ever drift",
+   "how": "read scripts/verify-3d-viewer.mjs",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101762",
+   "what": "the file imports nothing that would drag a client bundle into a 404",
+   "how": "read its imports",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101763",
+   "what": "it holds no state, no effect and no event handler",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101764",
+   "what": "…and is therefore a server component by default",
+   "how": "read: no \"use client\"",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101765",
+   "what": "it makes no database read",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101766",
+   "what": "…which is the deliberate trade: a read on a 404 page is not worth making",
+   "how": "the comment states it, and the code obeys",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101767",
+   "what": "it logs nothing to a diner's console",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101768",
+   "what": "the note about the live tab title is written down, so the difference is not filed as a regression",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101769",
+   "what": "GuestNotFound itself names no platform brand in its visible words",
+   "how": "read the component",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101770",
+   "what": "…and only offers a menu button once it knows the menu answers",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101771",
+   "what": "the 404 screen carries the restaurant's own look, not a bare browser page",
+   "how": "read: it renders real markup, not a string",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101772",
+   "what": "no dish name, price or photo can appear on it",
+   "how": "read: it receives no dish",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101773",
+   "what": "the tenant twin lives under the tenant route, so its scope is the same narrow one",
+   "how": "read the path",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101774",
+   "what": "neither 404 file grew a `revalidate` or `dynamic` export that would change how it is cached",
+   "how": "read both",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101775",
+   "what": "the metadata object has exactly the two keys it needs",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101776",
+   "what": "…and neither is built from anything dynamic",
+   "how": "read: no template literal, no interpolation",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101777",
+   "what": "nothing in the file can throw at render time",
+   "how": "read: no array index, no JSON.parse, no non-null assertion",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101778",
+   "what": "the file is short enough to read in one go",
+   "how": "wc -l",
+   "ok": true,
+   "note": "52 lines"
+  },
+  {
+   "id": "P101779",
+   "what": "its comment names the measurement that caused it, not just the change",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101780",
+   "what": "…and names BOTH doors it was measured on",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101781",
+   "what": "the platform's own 404 is still a different file, untouched by this one",
+   "how": "read app/not-found.tsx exists and differs",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101782",
+   "what": "…and it is the one a STAFF 404 still reaches",
+   "how": "read: the guest boundary is per-route, the platform one is at the root",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101783",
+   "what": "the dish route calls notFound() rather than rendering a friendly card inside a 200",
+   "how": "read app/item/[slug]/page.tsx",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101784",
+   "what": "…so search engines and our own monitoring are told the truth",
+   "how": "reason from the status the route returns",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101785",
+   "what": "…and the tenant door does the same",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101786",
+   "what": "a dish that exists is never sent to the 404 by mistake",
+   "how": "read: notFound is guarded on the dish being absent",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101787",
+   "what": "the menu master switch also reaches the 404, not a blank page",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101788",
+   "what": "…while Service mode gets the branded closed screen instead, which is a different thing",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101789",
+   "what": "…and restaurant #1 keeps its own mark on that closed screen",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101790",
+   "what": "the 404 answer is decided BEFORE any client component is handed anything",
+   "how": "read the order of the gates",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101791",
+   "what": "nothing about the guest is written to their device by the 404 page",
+   "how": "read: no localStorage, no cookie",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101792",
+   "what": "the 404 page cannot be made to render a stranger's text",
+   "how": "read: it interpolates nothing at all",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101793",
+   "what": "…and GuestNotFound's one raw-HTML block is a CONSTANT stylesheet, not anything a stranger sent",
+   "how": "read: the only dangerouslySetInnerHTML is <style>{CSS}, and CSS is a module const",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101794",
+   "what": "the guest 404 is reachable from the legacy door",
+   "how": "read: the route has a not-found sibling",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101795",
+   "what": "…and from the tenant door",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101796",
+   "what": "the 3D route deliberately has NO not-found of its own",
+   "how": "read: no such file beside app/view/[folder]/page.tsx",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101797",
+   "what": "…because that route answers for an unknown folder itself",
+   "how": "read ViewerClient's own failure path",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101798",
+   "what": "the 404's words and the closed-menu title agree with each other",
+   "how": "compare both strings",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101799",
+   "what": "…and the closed-menu description does not promise a dish",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P101800",
+   "what": "a closed restaurant's share preview names no dish, photo or price",
+   "how": "read the early return in generateMetadata",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110501",
+   "what": "…and that early return happens BEFORE the dish is read",
+   "how": "read the order",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110502",
+   "what": "the 3D door awaits BOTH halves of the address, as Next 16 requires",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110503",
+   "what": "…and types them as promises, so a future sync read is a compile error",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110504",
+   "what": "it gives the 3D page its OWN tab title",
+   "how": "read generateMetadata",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110505",
+   "what": "…naming the restaurant when ?r= resolves to a real one",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110506",
+   "what": "…and a NEUTRAL '3D View' when it does not",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110507",
+   "what": "…so the platform brand can never appear on a restaurant's 3D page",
+   "how": "read: no platform string anywhere",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110508",
+   "what": "the title is built from the DATABASE's name, never from the address bar's text",
+   "how": "read: it uses rest.name, not r",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110509",
+   "what": "an unresolvable ?r= cannot take the page down",
+   "how": "read the catch",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110510",
+   "what": "the tab-tenant pin exists at all, so a cold 3D link knows whose screen it is",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110511",
+   "what": "…and the key matches the one lib/tenantStorage.ts owns",
+   "how": "grep both files for the literal",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110512",
+   "what": "…and a guard fails if those two literals ever drift apart",
+   "how": "read scripts/verify-3d-viewer.mjs",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110513",
+   "what": "what gets pinned is the DATABASE's slug, never the address bar's text",
+   "how": "read: it pins pinned.slug, not r",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110514",
+   "what": "…and it is checked against the shape a slug can actually have",
+   "how": "read the test",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110515",
+   "what": "…and JSON-encoded on the way into the script",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110516",
+   "what": "…and NOTHING is pinned when the slug is unknown",
+   "how": "read: safeSlug null → pinTenant null → no tag",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110517",
+   "what": "the pin is wrapped so a storage-refusing browser cannot break the page",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110518",
+   "what": "it runs as the parser reaches it — before a single line of React",
+   "how": "read: a plain <script> in the server output",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110519",
+   "what": "…which is the whole point: the provider reads that key ONCE, on first mount",
+   "how": "the comment states the reason and the code matches",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110520",
+   "what": "the restaurant lookup is the same cached call generateMetadata already made",
+   "how": "read: both call getRestaurantBySlug(r)",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110521",
+   "what": "the no-framework offline warning is on this route",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110522",
+   "what": "…and it is imported from the component that owns it",
+   "how": "read the import",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110523",
+   "what": "the viewer is given key={folder}",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110524",
+   "what": "…so 3D → 3D navigation gets a fresh instance, not the previous dish's state",
+   "how": "the comment states it; the key is what does it",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110525",
+   "what": "…and that costs no re-download, because the blob cache is a global singleton",
+   "how": "read lib/modelLoader's globalThis stash",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110526",
+   "what": "this file is a server component",
+   "how": "read: no \"use client\"",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110527",
+   "what": "…and pulls no client-only module into the server bundle",
+   "how": "read its imports",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110528",
+   "what": "it makes no database WRITE",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110529",
+   "what": "it logs nothing",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110530",
+   "what": "it holds no state and no effect",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110531",
+   "what": "every await in the file is on a cached read",
+   "how": "read: params, searchParams and getRestaurantBySlug only",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110532",
+   "what": "the folder name is passed through untouched — the route does not try to clean it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110533",
+   "what": "…so a nonsense folder is the viewer's problem to answer, not a crash here",
+   "how": "read: no throw, no notFound",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110534",
+   "what": "nothing on this route reads a cookie or a header",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110535",
+   "what": "…and nothing reads an environment value",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110536",
+   "what": "the file is a thin wrapper, as its own comment claims",
+   "how": "wc -l",
+   "ok": true,
+   "note": "91 lines"
+  },
+  {
+   "id": "P110537",
+   "what": "the script tag is the ONLY dangerouslySetInnerHTML on this route",
+   "how": "count",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110538",
+   "what": "…and its content is built from exactly one value — the resolved slug",
+   "how": "read the pin template alone, not the whole file",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110539",
+   "what": "generateMetadata cannot throw on a missing searchParams",
+   "how": "read: r is optional and guarded",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110540",
+   "what": "…and returns a title in every path through it",
+   "how": "count the returns",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110541",
+   "what": "the two halves of the address are destructured, never used as whole objects",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110542",
+   "what": "the pin and the metadata agree on which restaurant this is",
+   "how": "read: both resolve from the same ?r=",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110543",
+   "what": "an inactive or binned restaurant cannot be pinned",
+   "how": "read: getRestaurantBySlug is the gate, and null short-circuits",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110544",
+   "what": "…and cannot be named in the tab title either",
+   "how": "read: the same null check guards it",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110545",
+   "what": "the route renders exactly two things beside the viewer",
+   "how": "count the children",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110546",
+   "what": "no part of this file depends on a class name that matches no rule",
+   "how": "read: no Tailwind utility",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110547",
+   "what": "the route exports no `dynamic`, `revalidate` or `fetchCache` that would change its caching",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110548",
+   "what": "…so it inherits the app's own defaults rather than a per-route surprise",
+   "how": "reason from the above",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110549",
+   "what": "the comment explains why a script AND the client stamp both exist",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110550",
+   "what": "…and the client half really is still there",
+   "how": "read ViewerClient",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110551",
+   "what": "the pinned value is used by the cart's own scoping, not just stored",
+   "how": "read lib/tenantStorage for the reader",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110552",
+   "what": "the file names the fault it prevents, so nobody 'simplifies' the script away",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110553",
+   "what": "…and names what goes wrong without it, in the door's own words",
+   "how": "read: the comment states the fallback-to-#1 fault this pin prevents",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110554",
+   "what": "escaping is not left to JSON.stringify alone",
+   "how": "read: the slug shape test is the second guard",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110555",
+   "what": "…and the comment says exactly why that is not enough on its own",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110556",
+   "what": "the route does not fetch the dish — that belongs to the client",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110557",
+   "what": "…nor the settings",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110558",
+   "what": "…so the 3D door's own cost is one cached restaurant lookup",
+   "how": "count the reads",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110559",
+   "what": "…and that lookup is skipped entirely when there is no ?r=",
+   "how": "read the ternary",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110560",
+   "what": "the default export is the page, and it is async",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110561",
+   "what": "nothing here can render a second <html> or <body>",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110562",
+   "what": "the door awaits both halves of the address",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110563",
+   "what": "…and both are typed as promises",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110564",
+   "what": "the menu master switch closes this door",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110565",
+   "what": "…and Service mode swaps in the branded closed screen rather than an orderable dish",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110566",
+   "what": "…so the two switches have two DIFFERENT endings here, deliberately",
+   "how": "read: one 404s, one renders",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110567",
+   "what": "the share preview refuses to show a dish while the restaurant is closed",
+   "how": "read generateMetadata's early return",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110568",
+   "what": "…treating BOTH switches as one meaning, like the 3D screen already does",
+   "how": "read the || ",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110569",
+   "what": "…and that early return names no dish, photo or price",
+   "how": "read it",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110570",
+   "what": "the tab title is the dish's, under restaurant #1's own name",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110571",
+   "what": "…and falls back to #1's name, never the platform's, when there is no dish",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110572",
+   "what": "the share description is the dish's own sentence, not the SaaS pitch",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110573",
+   "what": "…and has a sensible fallback that still names the restaurant",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110574",
+   "what": "…and the openGraph block carries the dish's own photo when it has one",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110575",
+   "what": "…and omits images entirely when it does not, rather than sending an empty array",
+   "how": "read the spread",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110576",
+   "what": "a dish that does not exist ANSWERS 404 rather than a friendly card inside a 200",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110577",
+   "what": "…and the dish the 404 decision read is KEPT, not thrown away",
+   "how": "read: it is passed down",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110578",
+   "what": "…which is what removes a duplicate read from the hottest guest page",
+   "how": "read ItemClient: it starts from initialItem rather than fetching",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110579",
+   "what": "the switches the server resolved are handed down too",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110580",
+   "what": "…so a ratings-off restaurant has no star row in its own HTML",
+   "how": "read useFeatures' seed",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110581",
+   "what": "the browsing category is carried through to the client",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110582",
+   "what": "…so prev/next keeps walking the list the guest came from",
+   "how": "read ItemClient's use of fromCat",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110583",
+   "what": "the no-framework offline warning is on this route",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110584",
+   "what": "…placed BEFORE the client component, so it paints first",
+   "how": "read the order",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110585",
+   "what": "the metadata read and the existence read are the same cached call",
+   "how": "read: both call getMenuItem(slug)",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110586",
+   "what": "…and both are guarded, so a dropped signal cannot 500 the page",
+   "how": "read the catches",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110587",
+   "what": "getSettings is read once in each half and is cached between them",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110588",
+   "what": "this route passes NO restaurantId, which is correct for the legacy door",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110589",
+   "what": "…so its links stay global, unchanged for restaurant #1",
+   "how": "read: no restaurantSlug prop either",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110590",
+   "what": "…and it can therefore never show another restaurant's dish",
+   "how": "read: it resolves no tenant at all",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110591",
+   "what": "the file is a server component",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110592",
+   "what": "…and pulls no client-only module into the server bundle",
+   "how": "read the imports",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110593",
+   "what": "it makes no database write",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110594",
+   "what": "it logs nothing",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110595",
+   "what": "it holds no state and no effect",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110596",
+   "what": "every gate runs BEFORE the client component is handed anything",
+   "how": "read the order of all four",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110597",
+   "what": "the tenant twin gates on the same two switches",
+   "how": "read both files",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110598",
+   "what": "…and hands the dish down the same way",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110599",
+   "what": "…and hands the switches down the same way",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110600",
+   "what": "…and answers 404 the same way",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110601",
+   "what": "…and renders the no-framework offline bar too",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110602",
+   "what": "so a fix cannot land on one door and miss the other",
+   "how": "count the shared gates across both",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110603",
+   "what": "the route exports no dynamic/revalidate/fetchCache surprise",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110604",
+   "what": "nothing on this route reads a cookie or a header",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110605",
+   "what": "…or an environment value",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110606",
+   "what": "no raw HTML is injected anywhere on this door",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110607",
+   "what": "…and no class name that matches no rule",
+   "how": "read: no Tailwind utility",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110608",
+   "what": "the file is a thin wrapper, as its comment claims",
+   "how": "wc -l",
+   "ok": true,
+   "note": "92 lines"
+  },
+  {
+   "id": "P110609",
+   "what": "initialItem is REQUIRED on the client side, so a future caller forgetting it is a compile error",
+   "how": "read ItemClient's props",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110610",
+   "what": "…and `item` starts from it, so the page can never begin with nothing",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110611",
+   "what": "…which is what makes a forever-spinner impossible on this page",
+   "how": "read: the old spinner machinery is gone, not left beside it",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110612",
+   "what": "the closed-menu title and the 404's title are the same words",
+   "how": "compare",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110613",
+   "what": "Maintenance is imported from the component that owns it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110614",
+   "what": "…and is given the flag that keeps restaurant #1's own mark on it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110615",
+   "what": "the dish is read ONCE per request even though two functions ask",
+   "how": "read: getMenuItem is request-cached",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110616",
+   "what": "…and the comment says so, so nobody 'optimises' the second call away",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110617",
+   "what": "the door never renders ItemClient without a dish",
+   "how": "read: notFound() precedes it unconditionally",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110618",
+   "what": "…and never renders it while the restaurant is closed",
+   "how": "read: both switch gates precede it",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110619",
+   "what": "the slug is used exactly as the address gave it",
+   "how": "read: no lowercasing, no trimming",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110620",
+   "what": "…so the database decides what exists, not a guess in the route",
+   "how": "reason: getMenuItem is the only judge",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110621",
+   "what": "the default export is the page and it is async",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110622",
+   "what": "nothing here can render a second <html> or <body>",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110623",
+   "what": "the component refuses to render a model it has no URL for",
+   "how": "read the early return",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110624",
+   "what": "…and the placeholder string is treated as 'no URL', not as a URL",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110625",
+   "what": "…and what it says instead is guest language, with no internal instruction",
+   "how": "read the message",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110626",
+   "what": "…and that card wears the house card, not a class name that matches no rule",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110627",
+   "what": "…with the padding the viewer's own reset strips off it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110628",
+   "what": "…and it is NOT the fixed full-screen overlay, so BACK and AR stay usable",
+   "how": "read: no #try-again-overlay here",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110629",
+   "what": "the heading is a real <h2>, so a screen reader has something to jump to",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110630",
+   "what": "the engine script is loaded through Next's <Script>, not a hand-rolled tag",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110631",
+   "what": "…after the page is usable, not blocking the first paint",
+   "how": "read the strategy",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110632",
+   "what": "…as a module, which is what the element needs",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110633",
+   "what": "…with crossOrigin set, so the preload and the script agree and the file arrives ONCE",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110634",
+   "what": "…and a failure to load it is reported upward rather than swallowed",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110635",
+   "what": "…and the parent turns that into a real 'unavailable' message",
+   "how": "read ViewerClient's handler",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110636",
+   "what": "the engine is pinned to an exact version, not a floating latest",
+   "how": "read the src",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110637",
+   "what": "the model element is given a stable id the rest of the screen can find",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110638",
+   "what": "…and the parent's handle is attached to it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110639",
+   "what": "the dish is NAMED to a screen reader, not announced as a generic object",
+   "how": "read the alt",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110640",
+   "what": "…and the name is optional, so any other caller keeps the generic text",
+   "how": "read the prop type",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110641",
+   "what": "AR is offered, with the three methods tried in order",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110642",
+   "what": "…and placed on the floor, which is where a plate goes",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110643",
+   "what": "the visitor can drag to rotate and pinch to zoom",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110644",
+   "what": "…and the viewer owns BOTH drag axes from the first touch",
+   "how": "read touch-action",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110645",
+   "what": "the opening framing honours a saved pose when there is one",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110646",
+   "what": "…and falls back to a sane default when there is not",
+   "how": "read the same line",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110647",
+   "what": "how far a diner can tilt is bounded at both ends",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110648",
+   "what": "the lighting is neutral, so a dish is not tinted by the viewer",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110649",
+   "what": "the model fills its wrapper exactly, with no overflow",
+   "how": "read the style",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110650",
+   "what": "a hotspot's position is three real numbers or a defined fallback — never a word",
+   "how": "read the chain",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110651",
+   "what": "…the precise triple is all-or-nothing, because half of one point means nothing",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110652",
+   "what": "…the saved string falls back PER PART, because '0.4' really does mean x=0.4",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110653",
+   "what": "…and a saved ZERO survives as the coordinate it is",
+   "how": "read: Number.isFinite, not || 0",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110654",
+   "what": "a bullet is only drawn where there are words",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110655",
+   "what": "…because the stylesheet paints a dot on every <li>, empty or not",
+   "how": "read the CSS rule it would otherwise show",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110656",
+   "what": "every hotspot is keyed by its own id",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110657",
+   "what": "…and the anchor, the line, the card and the title all derive their ids from it",
+   "how": "read the four templates",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110658",
+   "what": "…which is what lets the connector-line loop find all three every frame",
+   "how": "read ViewerClient's _updateLine",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110659",
+   "what": "the hotspot buttons take no pointer events, so they cannot eat a drag",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110660",
+   "what": "…and carry no visible box of their own",
+   "how": "read the zero-size styles",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110661",
+   "what": "the class names the hotspot markup uses all exist in the stylesheet",
+   "how": "grep each in app/globals.css",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110662",
+   "what": "the component is a client component",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110663",
+   "what": "it holds no state of its own",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110664",
+   "what": "…and no effect",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110665",
+   "what": "…and no timer",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110666",
+   "what": "it reads nothing from storage",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110667",
+   "what": "it makes no network call of its own beyond the engine script",
+   "how": "read: no fetch",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110668",
+   "what": "it logs nothing",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110669",
+   "what": "the element is created with React.createElement because it is not a normal tag",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110670",
+   "what": "…and the cast is confined to that one call",
+   "how": "count the anys",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110671",
+   "what": "no Tailwind utility class survives anywhere in the file",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110672",
+   "what": "…and the layout that replaced them is inline, where nothing can out-specify it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110673",
+   "what": "the comment names the measurement that caused the change",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110674",
+   "what": "…and names the cause correctly — no utilities at all, not a layer-order fight",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110675",
+   "what": "the tags array is optional, so a dish with no hotspots renders fine",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110676",
+   "what": "…and an empty config renders the model and nothing else",
+   "how": "read: the map is the only thing tags drives",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110677",
+   "what": "the interface declares every field the markup reads",
+   "how": "cross-check the reads against the type",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110678",
+   "what": "…including the three precise-position fields, so a half-filled one is a typed shape not a surprise",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110679",
+   "what": "nothing in the file can throw on a missing tag field",
+   "how": "read: every access is guarded or template-safe",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110680",
+   "what": "the file is small enough to hold in your head",
+   "how": "wc -l",
+   "ok": true,
+   "note": "296 lines"
+  },
+  {
+   "id": "P110681",
+   "what": "the only raw-HTML in the file is none at all",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110682",
+   "what": "the loader is one object for the whole app, stashed on globalThis",
+   "how": "read getLoader",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110683",
+   "what": "…so a page navigation keeps the downloads, which is what 'download once' means",
+   "how": "read: the stash is checked before creating",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110684",
+   "what": "…and on the server it is a throwaway that never touches globalThis",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110685",
+   "what": "the exported value is resolved once, at import time",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110686",
+   "what": "the three wake listeners are wired ONCE, on the singleton",
+   "how": "read: inside the !globalThis branch",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110687",
+   "what": "…and wrapped, so an old browser missing one cannot break the loader at import",
+   "how": "read the try",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110688",
+   "what": "…and visibilitychange only wakes on becoming VISIBLE",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110689",
+   "what": "…all three share one handler, so they cannot drift apart",
+   "how": "read: const wake",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110690",
+   "what": "the cache is budgeted in BYTES, not in files",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110691",
+   "what": "…with a second, looser guard on the count",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110692",
+   "what": "…and eviction keeps going while EITHER is exceeded",
+   "how": "read the || inside the while",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110693",
+   "what": "…but always keeps at least one, so the model on screen is never taken away",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110694",
+   "what": "every eviction frees the blob it drops",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110695",
+   "what": "…and subtracts that entry's EXACT size, never an estimate",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110696",
+   "what": "…and drops its attempt count too, so that map cannot grow forever",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110697",
+   "what": "a negative byte total is clamped, so eviction cannot be silently disabled",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110698",
+   "what": "the size stored is the blob's own",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110699",
+   "what": "asking for a cached model promotes it to most-recently-used",
+   "how": "read the delete+set",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110700",
+   "what": "…so the model on screen is never the eviction victim",
+   "how": "reason from the promotion above",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110701",
+   "what": "every public answer is null-safe",
+   "how": "read the three guards",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110702",
+   "what": "…and an unknown URL answers null, not undefined and not a throw",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110703",
+   "what": "a model gets exactly two goes before it is written off",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110704",
+   "what": "…six seconds apart",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110705",
+   "what": "…and the retry only re-queues if it has not since loaded, failed or been re-queued",
+   "how": "read the four conditions",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110706",
+   "what": "a non-OK response counts as a failed attempt rather than a silent success",
+   "how": "read the else",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110707",
+   "what": "CALLING a download off is NOT the same as it failing",
+   "how": "read the AbortError branch",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110708",
+   "what": "…so an abort records no attempt and no failure",
+   "how": "read: the calledOff branch does nothing",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110709",
+   "what": "…and no retry timer either, because re-queueing behind an OFF switch is the waste stopAll exists to prevent",
+   "how": "read the comment beside the empty branch, and that the branch is empty",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110710",
+   "what": "stopAll empties the queue AND aborts the download in flight",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110711",
+   "what": "…and forgets what was asked for, so a reconnect cannot revive a switched-off feature",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110712",
+   "what": "the abort handle is set before the fetch and cleared after it",
+   "how": "read the order",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110713",
+   "what": "…and a browser with no AbortController still gets a plain fetch, not `signal: null`",
+   "how": "read the spread",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110714",
+   "what": "…guarded so that reading AbortController cannot itself throw on an old phone",
+   "how": "read the try",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110715",
+   "what": "the record of asks is BOUNDED",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110716",
+   "what": "…most-recent-wins, so a re-ask moves rather than duplicates",
+   "how": "read remember()",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110717",
+   "what": "…and the bound keeps the NEWEST asks",
+   "how": "read the slice",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110718",
+   "what": "…and blanks are skipped before they are recorded",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110719",
+   "what": "a reconnect leaves immediately when there is nothing written off or nothing asked for",
+   "how": "read the early return",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110720",
+   "what": "…is throttled, so one phone unlock cannot become a storm",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110721",
+   "what": "…and the cooldown stamp is written AFTER the test, so one wake is not counted twice",
+   "how": "read the order",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110722",
+   "what": "…and a revived model gets a genuinely fresh start, not one last attempt",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110723",
+   "what": "…and never queues one that is loaded, in flight or already waiting",
+   "how": "read the three conditions",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110724",
+   "what": "…and still notifies when it cleared a write-off but has nothing to fetch",
+   "how": "read the else",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110725",
+   "what": "setQueue REPLACES the queue, so a new page's priorities win",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110726",
+   "what": "…de-duplicating across all four input lists",
+   "how": "read the seen Set",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110727",
+   "what": "…and skipping what is loaded, written off, or in flight",
+   "how": "read the three continues",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110728",
+   "what": "prioritize puts the named URLs at the FRONT and removes their duplicates from the tail",
+   "how": "read the rebuild",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110729",
+   "what": "…and records the ask even for URLs it skips, so a reconnect can revive the dish on screen",
+   "how": "read: remember() is called before the loop",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110730",
+   "what": "…and with nothing new to add it still refreshes the UI and leaves",
+   "how": "read the early return",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110731",
+   "what": "only one download loop can run at a time",
+   "how": "read the running flag",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110732",
+   "what": "…and the flag is cleared when the queue empties, so a later ask can start it again",
+   "how": "read the end of pump",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110733",
+   "what": "downloads carry no cookie to wherever the model is hosted",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110734",
+   "what": "…and are read cross-origin, which is what a Storage URL needs",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110735",
+   "what": "a listener that throws cannot stop the others",
+   "how": "read the try inside notify",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110736",
+   "what": "…and unsubscribing really removes it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110737",
+   "what": "the two bus events are spelled exactly once each",
+   "how": "read dispatch's callers",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110738",
+   "what": "…and dispatching is a no-op on the server",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110739",
+   "what": "…and wrapped, so a CustomEvent failure cannot break the download loop",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110740",
+   "what": "the loader owns exactly one timer, and it is the retry delay",
+   "how": "count",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110741",
+   "what": "…and no interval at all, so nothing polls",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110742",
+   "what": "nothing about a diner is written to their device by this file",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110743",
+   "what": "it only ever warns — no noise, no errors thrown at a diner's console",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110744",
+   "what": "`wanted` is private, so nothing outside can grow it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110745",
+   "what": "the connector-line loop knows which chain it is",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110746",
+   "what": "…and retires itself when a newer reveal takes over",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110747",
+   "what": "…and hands its own generation to its next frame",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110748",
+   "what": "…and the reveal cancels the pending frame in the same breath as bumping the generation",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110749",
+   "what": "…while leaving the screen still ends EVERY chain",
+   "how": "read aliveRef",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110750",
+   "what": "the three dead ends and the slow-model card are ONE look, not four",
+   "how": "count the cards",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110751",
+   "what": "…each with the padding the wrapper's reset strips off it",
+   "how": "count",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110752",
+   "what": "…each with the gap under its emoji",
+   "how": "count",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110753",
+   "what": "…and under its heading",
+   "how": "count",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110754",
+   "what": "every way out is a real pill, not a bare text link",
+   "how": "count",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110755",
+   "what": "…each padded to a thumb-sized target",
+   "how": "count",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110756",
+   "what": "no Tailwind utility class survives anywhere in the file",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110757",
+   "what": "…and no bracketed colour class either",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110758",
+   "what": "the two reasons this screen appears are told apart",
+   "how": "read the state type",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110759",
+   "what": "…an unresolvable slug is 'unknown'",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110760",
+   "what": "…a reachable but switched-off restaurant is 'closed'",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110761",
+   "what": "…and only 'closed' offers a way out",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110762",
+   "what": "the 3D switch skips ALL model work, not just the buttons",
+   "how": "read the early return in the config effect",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110763",
+   "what": "…and the model effect refuses to download too",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110764",
+   "what": "the static demo config is read ONLY for restaurant #1",
+   "how": "read the guard",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110765",
+   "what": "…and the config effect waits until it knows whose screen it is",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110766",
+   "what": "…which starts true when there is no ?r= at all",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110767",
+   "what": "a 404 on the config falls back to an empty one rather than a failure screen",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110768",
+   "what": "…while a real server error is still treated as a failure",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110769",
+   "what": "…and the raw error text is never printed at a diner",
+   "how": "read the error branch",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110770",
+   "what": "the Add button on this screen goes through the same table gate as every other Add",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110771",
+   "what": "…and refuses a sold-out dish even though the button is already disabled",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110772",
+   "what": "…and the disabled state and the handler read the SAME flag",
+   "how": "read soldOut's single definition",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110773",
+   "what": "the details sheet registers with the back-button manager",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110774",
+   "what": "the allergy list on that sheet follows the restaurant's allergy switch",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110775",
+   "what": "…and the rating follows BOTH the ratings switch and having real reviews",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110776",
+   "what": "the bar's title prefers the LIVE menu name over the demo config's",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110777",
+   "what": "…and so does the ready-ticket, so both say the same thing about the same dish",
+   "how": "read the watchlist entry",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110778",
+   "what": "…and so does the screen-reader name on the model",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110779",
+   "what": "the hint pill is placed from the bar's MEASURED height, not a hardcoded guess",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110780",
+   "what": "…measured with a ResizeObserver, because a long name wraps",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110781",
+   "what": "…and 0 means 'not measured yet', so nothing flashes",
+   "how": "read the initial state and the guard",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110782",
+   "what": "the first thing the pill says teaches the gesture",
+   "how": "read hintSpin's initial value",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110783",
+   "what": "…and it stops saying it once it has been read",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110784",
+   "what": "the loading panel sits UNDER the top bar, so BACK stays tappable",
+   "how": "read the inline z-index",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110785",
+   "what": "the currency is pinned to base INR when the restaurant has the picker off",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110786",
+   "what": "…and the language is forced to English when that picker is off",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110787",
+   "what": "the accent is emitted for non-#1 tenants, canvas first then the palette",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110788",
+   "what": "…and only for a restaurant that is not #1, so the flagship keeps its gold",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110789",
+   "what": "every timer the model effect starts is collected and cleared with it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110790",
+   "what": "the file names the measurement behind each of its inline workarounds",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110791",
+   "what": "the dish starts from the server's copy, so the page can never open empty",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110792",
+   "what": "…and a client re-read that comes back empty cannot blank it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110793",
+   "what": "…and the browser does not ask for that same row a second time",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110794",
+   "what": "the price starts from the real default, not from nothing",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110795",
+   "what": "…so an offline reload shows rupees rather than dollars",
+   "how": "reason: DEFAULT_CURRENCY is INR and getCurrency is SSR-safe",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110796",
+   "what": "the switches are seeded from what the server already read",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110797",
+   "what": "the reviews read asks the RESOLVED switches, not the hook's first-render defaults",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110798",
+   "what": "…and behaves as OFF when it cannot get an answer",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110799",
+   "what": "…and the condition that DRAWS them asks for the same two switches",
+   "how": "read normalOn",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110800",
+   "what": "the heart reads the saved list in its OWN effect, not as a passenger on the fetch",
+   "how": "read the dependency",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110801",
+   "what": "…and listens for the event this page itself fires",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110802",
+   "what": "…and saving the same dish twice is impossible",
+   "how": "read the includes test",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110803",
+   "what": "a sold-out dish cannot reach the cart from here",
+   "how": "read the guard in addToCart",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110804",
+   "what": "…and is never suggested in 'You might like' either",
+   "how": "read the filter",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110805",
+   "what": "…and the pinned Add bar never appears for one",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110806",
+   "what": "the Add button rows sit above the prev/next strips, so the button owns its own edge",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110807",
+   "what": "…and BOTH rows get it, including the bottom Back-to-menu row",
+   "how": "count",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110808",
+   "what": "the pinned bar is a phone-and-tablet thing, decided by a live media query",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110809",
+   "what": "…and supports the older listener form too, because this menu runs on old phones",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110810",
+   "what": "…and starts true, so a phone never flashes without it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110811",
+   "what": "…and is driven by an observer, so there is no scroll handler at all",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110812",
+   "what": "…and it hands over BEFORE the real button arrives under it",
+   "how": "read the rootMargin",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110813",
+   "what": "…and is hidden from a screen reader while it is away",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110814",
+   "what": "…and is taken out of the tab order too",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110815",
+   "what": "the photo lightbox registers with the back-button manager",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110816",
+   "what": "…and its ✕ stays on top while the photo is zoomed",
+   "how": "read the inline z-index",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110817",
+   "what": "…and the backdrop only closes at 1×, because at 2.5× you are panning",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110818",
+   "what": "…and zoom is bounded at both ends",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110819",
+   "what": "Read more is a real button, so a keyboard can reach the allergy list behind it",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110820",
+   "what": "…and only the FAMILY is inherited, so it does not swallow the stylesheet's size",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110821",
+   "what": "…and it names what it controls",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110822",
+   "what": "the heart has a name and says whether the dish is already saved",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110823",
+   "what": "the veg mark follows the switch AND whether it means anything on this menu",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110824",
+   "what": "…and while the list is still loading it keeps today's behaviour rather than flickering",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110825",
+   "what": "the nutrition row is hidden when every value is empty",
+   "how": "read the some()",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110826",
+   "what": "…and the About card is hidden when there is no description",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110827",
+   "what": "…and the INGREDIENTS heading goes with its list",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110828",
+   "what": "the star row and the tab count read the SAME authoritative number",
+   "how": "read: both use reviewCount",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110829",
+   "what": "a double-tap on Submit fires ONE save, not two",
+   "how": "read the in-flight ref",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110830",
+   "what": "…and the guard is released in a finally, so a failure cannot lock the button",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110831",
+   "what": "re-rating replaces this device's previous review rather than showing two",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110832",
+   "what": "the name box fills itself from the one name this diner already gave",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110833",
+   "what": "…and a changed name is SAID, quietly, rather than silently rewriting their other reviews",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110834",
+   "what": "the related row is shuffled once per dish, not on every keystroke",
+   "how": "read the memo",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110835",
+   "what": "the main fetch re-runs when the RESTAURANT changes, not only the dish",
+   "how": "read the dependency list",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110836",
+   "what": "all THREE guest doors reach this territory, and each gates the same way",
+   "how": "read /item, /r/<slug>/item, and the 3D screen",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110837",
+   "what": "…and the 3D screen is the one outside AppShell, so it repeats them itself",
+   "how": "read: it calls getSettings directly",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110838",
+   "what": "the accent is repeated on the 3D screen too, for the same reason",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110839",
+   "what": "every popup in this territory is registered with the back-button manager",
+   "how": "count useBackClose against the overlays",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110840",
+   "what": "no screen in this territory polls",
+   "how": "read: no setInterval outside the hint pill's own pop",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110841",
+   "what": "…and the 3D screen's only interval is the hint pill, which is presentation",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110842",
+   "what": "every scoped read in this territory carries a restaurant",
+   "how": "read the getMenuItems/getMenuItem calls",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110843",
+   "what": "…and the list read asks for the CARD columns, not the whole row",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110844",
+   "what": "nothing in this territory writes to the database except the review save",
+   "how": "count the writes",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110845",
+   "what": "no file in this territory names a privileged key or a server secret",
+   "how": "read all seven",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110846",
+   "what": "no file in this territory reads process.env",
+   "how": "read all seven",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110847",
+   "what": "the territory is still exactly seven files",
+   "how": "re-derive from the file system",
+   "ok": true,
+   "note": "app/item/[slug]/{ItemClient,page,not-found} · app/view/[folder]/{ViewerClient,page} · components/PublicModelViewer.tsx · lib/modelLoader.ts"
+  },
+  {
+   "id": "P110848",
+   "what": "nothing in this territory re-offers something the owner has rejected",
+   "how": "cross-check docs/REJECTED-IDEAS.md's rows that touch 3D",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110849",
+   "what": "…and R28's ceiling on the background preload has NOT been added in disguise",
+   "how": "read: no cap, no first-N window, no data-saver",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110850",
+   "what": "JUDGMENT: on a mid-range phone, is the first 3D open still delightful rather than a wait",
+   "how": "the bar is fed by the dish, independent of the model — confirm the two are not coupled",
+   "ok": true,
+   "note": ""
+  }
+ ],
+ "live": [
+  {
+   "id": "P110851",
+   "what": "french-house: the 3D tab is titled for THIS restaurant, never the platform",
+   "how": "drive the door and read the rendered <title>",
+   "ok": true,
+   "note": "\"3D View — My Little French House\""
+  },
+  {
+   "id": "P110852",
+   "what": "french-house: …and the tab is pinned to this restaurant BEFORE React runs",
+   "how": "read sessionStorage on a cold 3D link",
+   "ok": true,
+   "note": "lfh_tab_tenant=french-house"
+  },
+  {
+   "id": "P110853",
+   "what": "aangan-garden-restaurant: the 3D tab is titled for THIS restaurant, never the platform",
+   "how": "drive the door and read the rendered <title>",
+   "ok": true,
+   "note": "\"3D View — AANGAN GARDEN RESTAURANT\""
+  },
+  {
+   "id": "P110854",
+   "what": "aangan-garden-restaurant: …and the tab is pinned to this restaurant BEFORE React runs",
+   "how": "read sessionStorage on a cold 3D link",
+   "ok": true,
+   "note": "lfh_tab_tenant=aangan-garden-restaurant"
+  },
+  {
+   "id": "P110855",
+   "what": "sakura-sushi: the 3D tab is titled for THIS restaurant, never the platform",
+   "how": "drive the door and read the rendered <title>",
+   "ok": true,
+   "note": "\"3D View — Sakura Sushi\""
+  },
+  {
+   "id": "P110856",
+   "what": "sakura-sushi: …and the tab is pinned to this restaurant BEFORE React runs",
+   "how": "read sessionStorage on a cold 3D link",
+   "ok": true,
+   "note": "lfh_tab_tenant=sakura-sushi"
+  },
+  {
+   "id": "P110857",
+   "what": "pizza-palace: the 3D tab is titled for THIS restaurant, never the platform",
+   "how": "drive the door and read the rendered <title>",
+   "ok": true,
+   "note": "\"3D View — Pizza Palace\""
+  },
+  {
+   "id": "P110858",
+   "what": "pizza-palace: …and the tab is pinned to this restaurant BEFORE React runs",
+   "how": "read sessionStorage on a cold 3D link",
+   "ok": true,
+   "note": "lfh_tab_tenant=pizza-palace"
+  },
+  {
+   "id": "P110859",
+   "what": "an unknown ?r= gets the NEUTRAL 3D title, never a restaurant's and never the platform's",
+   "how": "drive it",
+   "ok": true,
+   "note": "\"3D View\""
+  },
+  {
+   "id": "P110860",
+   "what": "…and pins NOTHING, so a tab's genuine history is not overwritten",
+   "how": "read sessionStorage",
+   "ok": true,
+   "note": "lfh_tab_tenant=null"
+  },
+  {
+   "id": "P110861",
+   "what": "…and the screen says so plainly rather than falling through to somebody else's dish",
+   "how": "read the rendered text",
+   "ok": true,
+   "note": "🍽️ This menu isn't available right now Please ask a member "
+  },
+  {
+   "id": "P110862",
+   "what": "…and never names a dish",
+   "how": "read the rendered text",
+   "ok": true,
+   "note": "🍽️ This menu isn't available right now Please ask a member "
+  },
+  {
+   "id": "P110863",
+   "what": "no ?r= at all still gets a neutral title rather than the platform brand",
+   "how": "drive it",
+   "ok": true,
+   "note": "\"3D View\""
+  },
+  {
+   "id": "P110864",
+   "what": "…and threw nothing",
+   "how": "count pageerror + console errors",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110865",
+   "what": "/item: a dish that does not exist answers a real 404",
+   "how": "drive it and read the status",
+   "ok": true,
+   "note": "status 404"
+  },
+  {
+   "id": "P110866",
+   "what": "/item: …and the SERVED head carries exactly one neutral title",
+   "how": "read the HTML before React runs",
+   "ok": true,
+   "note": "[\"Menu\"]"
+  },
+  {
+   "id": "P110867",
+   "what": "/item: …and the live tab settles on THIS restaurant's own name, never the platform's",
+   "how": "read the DOM after hydration",
+   "ok": true,
+   "note": "[\"My Little French House — Menu\"]"
+  },
+  {
+   "id": "P110868",
+   "what": "/item: …and the screen tells a diner what to do",
+   "how": "read the rendered text",
+   "ok": true,
+   "note": "TABLE 404 Covers — Order none Status no such table VOID That table doe"
+  },
+  {
+   "id": "P110869",
+   "what": "/item: …with no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110870",
+   "what": "/r/french-house/item: a dish that does not exist answers a real 404",
+   "how": "drive it and read the status",
+   "ok": true,
+   "note": "status 404"
+  },
+  {
+   "id": "P110871",
+   "what": "/r/french-house/item: …and the SERVED head carries exactly one neutral title",
+   "how": "read the HTML before React runs",
+   "ok": true,
+   "note": "[\"Menu\"]"
+  },
+  {
+   "id": "P110872",
+   "what": "/r/french-house/item: …and the live tab settles on THIS restaurant's own name, never the platform's",
+   "how": "read the DOM after hydration",
+   "ok": true,
+   "note": "[\"My Little French House — Menu\"]"
+  },
+  {
+   "id": "P110873",
+   "what": "/r/french-house/item: …and the screen tells a diner what to do",
+   "how": "read the rendered text",
+   "ok": true,
+   "note": "TABLE 404 Covers — Order none Status no such table VOID That table doe"
+  },
+  {
+   "id": "P110874",
+   "what": "/r/french-house/item: …with no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110875",
+   "what": "/r/aangan.../item: a dish that does not exist answers a real 404",
+   "how": "drive it and read the status",
+   "ok": true,
+   "note": "status 404"
+  },
+  {
+   "id": "P110876",
+   "what": "/r/aangan.../item: …and the SERVED head carries exactly one neutral title",
+   "how": "read the HTML before React runs",
+   "ok": true,
+   "note": "[\"Menu\"]"
+  },
+  {
+   "id": "P110877",
+   "what": "/r/aangan.../item: …and the live tab settles on THIS restaurant's own name, never the platform's",
+   "how": "read the DOM after hydration",
+   "ok": true,
+   "note": "[\"AANGAN GARDEN RESTAURANT — Menu\"]"
+  },
+  {
+   "id": "P110878",
+   "what": "/r/aangan.../item: …and the screen tells a diner what to do",
+   "how": "read the rendered text",
+   "ok": true,
+   "note": "TABLE 404 Covers — Order none Status no such table VOID That table doe"
+  },
+  {
+   "id": "P110879",
+   "what": "/r/aangan.../item: …with no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110880",
+   "what": "/r/sakura-sushi/item: a dish that does not exist answers a real 404",
+   "how": "drive it and read the status",
+   "ok": true,
+   "note": "status 404"
+  },
+  {
+   "id": "P110881",
+   "what": "/r/sakura-sushi/item: …and the SERVED head carries exactly one neutral title",
+   "how": "read the HTML before React runs",
+   "ok": true,
+   "note": "[\"Menu\"]"
+  },
+  {
+   "id": "P110882",
+   "what": "/r/sakura-sushi/item: …and the live tab settles on THIS restaurant's own name, never the platform's",
+   "how": "read the DOM after hydration",
+   "ok": true,
+   "note": "[\"Sakura Sushi — Menu\"]"
+  },
+  {
+   "id": "P110883",
+   "what": "/r/sakura-sushi/item: …and the screen tells a diner what to do",
+   "how": "read the rendered text",
+   "ok": true,
+   "note": "TABLE 404 Covers — Order none Status no such table VOID That table doe"
+  },
+  {
+   "id": "P110884",
+   "what": "/r/sakura-sushi/item: …with no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110885",
+   "what": "dish phone/dark: the dish and its price are on screen",
+   "how": "drive it and read the rendered values",
+   "ok": true,
+   "note": "Avocado & Cream Cheese · ₹550"
+  },
+  {
+   "id": "P110886",
+   "what": "dish phone/dark: no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110887",
+   "what": "dish phone/dark: no sideways scroll",
+   "how": "compare scrollWidth to clientWidth",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110888",
+   "what": "dish phone/dark: nothing spills past the right edge outside a scroller",
+   "how": "walk every visible box",
+   "ok": true,
+   "note": "[]"
+  },
+  {
+   "id": "P110889",
+   "what": "dish phone/dark: every visible control has a name",
+   "how": "walk the buttons and links",
+   "ok": true,
+   "note": "0 unnamed"
+  },
+  {
+   "id": "P110890",
+   "what": "dish phone/dark: nothing threw",
+   "how": "count pageerror + console errors",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110891",
+   "what": "dish phone/light: the dish and its price are on screen",
+   "how": "drive it and read the rendered values",
+   "ok": true,
+   "note": "Avocado & Cream Cheese · ₹550"
+  },
+  {
+   "id": "P110892",
+   "what": "dish phone/light: no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110893",
+   "what": "dish phone/light: no sideways scroll",
+   "how": "compare scrollWidth to clientWidth",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110894",
+   "what": "dish phone/light: nothing spills past the right edge outside a scroller",
+   "how": "walk every visible box",
+   "ok": true,
+   "note": "[]"
+  },
+  {
+   "id": "P110895",
+   "what": "dish phone/light: every visible control has a name",
+   "how": "walk the buttons and links",
+   "ok": true,
+   "note": "0 unnamed"
+  },
+  {
+   "id": "P110896",
+   "what": "dish phone/light: nothing threw",
+   "how": "count pageerror + console errors",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110897",
+   "what": "dish tablet/dark: the dish and its price are on screen",
+   "how": "drive it and read the rendered values",
+   "ok": true,
+   "note": "Avocado & Cream Cheese · ₹550"
+  },
+  {
+   "id": "P110898",
+   "what": "dish tablet/dark: no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110899",
+   "what": "dish tablet/dark: no sideways scroll",
+   "how": "compare scrollWidth to clientWidth",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110900",
+   "what": "dish tablet/dark: nothing spills past the right edge outside a scroller",
+   "how": "walk every visible box",
+   "ok": true,
+   "note": "[]"
+  },
+  {
+   "id": "P110901",
+   "what": "dish tablet/dark: every visible control has a name",
+   "how": "walk the buttons and links",
+   "ok": true,
+   "note": "0 unnamed"
+  },
+  {
+   "id": "P110902",
+   "what": "dish tablet/dark: nothing threw",
+   "how": "count pageerror + console errors",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110903",
+   "what": "dish tablet/light: the dish and its price are on screen",
+   "how": "drive it and read the rendered values",
+   "ok": true,
+   "note": "Avocado & Cream Cheese · ₹550"
+  },
+  {
+   "id": "P110904",
+   "what": "dish tablet/light: no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110905",
+   "what": "dish tablet/light: no sideways scroll",
+   "how": "compare scrollWidth to clientWidth",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110906",
+   "what": "dish tablet/light: nothing spills past the right edge outside a scroller",
+   "how": "walk every visible box",
+   "ok": true,
+   "note": "[]"
+  },
+  {
+   "id": "P110907",
+   "what": "dish tablet/light: every visible control has a name",
+   "how": "walk the buttons and links",
+   "ok": true,
+   "note": "0 unnamed"
+  },
+  {
+   "id": "P110908",
+   "what": "dish tablet/light: nothing threw",
+   "how": "count pageerror + console errors",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110909",
+   "what": "dish desktop/dark: the dish and its price are on screen",
+   "how": "drive it and read the rendered values",
+   "ok": true,
+   "note": "Avocado & Cream Cheese · ₹550"
+  },
+  {
+   "id": "P110910",
+   "what": "dish desktop/dark: no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110911",
+   "what": "dish desktop/dark: no sideways scroll",
+   "how": "compare scrollWidth to clientWidth",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110912",
+   "what": "dish desktop/dark: nothing spills past the right edge outside a scroller",
+   "how": "walk every visible box",
+   "ok": true,
+   "note": "[]"
+  },
+  {
+   "id": "P110913",
+   "what": "dish desktop/dark: every visible control has a name",
+   "how": "walk the buttons and links",
+   "ok": true,
+   "note": "0 unnamed"
+  },
+  {
+   "id": "P110914",
+   "what": "dish desktop/dark: nothing threw",
+   "how": "count pageerror + console errors",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110915",
+   "what": "dish desktop/light: the dish and its price are on screen",
+   "how": "drive it and read the rendered values",
+   "ok": true,
+   "note": "Avocado & Cream Cheese · ₹550"
+  },
+  {
+   "id": "P110916",
+   "what": "dish desktop/light: no leaked code text",
+   "how": "scan the rendered text",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110917",
+   "what": "dish desktop/light: no sideways scroll",
+   "how": "compare scrollWidth to clientWidth",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110918",
+   "what": "dish desktop/light: nothing spills past the right edge outside a scroller",
+   "how": "walk every visible box",
+   "ok": true,
+   "note": "[]"
+  },
+  {
+   "id": "P110919",
+   "what": "dish desktop/light: every visible control has a name",
+   "how": "walk the buttons and links",
+   "ok": true,
+   "note": "0 unnamed"
+  },
+  {
+   "id": "P110920",
+   "what": "dish desktop/light: nothing threw",
+   "how": "count pageerror + console errors",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110921",
+   "what": "the 3D screen ends with a model on screen, not a spinner",
+   "how": "drive it and read the element",
+   "ok": true,
+   "note": "src blob:http://localh"
+  },
+  {
+   "id": "P110922",
+   "what": "…serving the downloaded copy rather than re-fetching the file",
+   "how": "read the src",
+   "ok": true,
+   "note": "blob:http://localhost:44"
+  },
+  {
+   "id": "P110923",
+   "what": "…and no patience overlay on a healthy load",
+   "how": "read",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110924",
+   "what": "the dish's own name and price are in the bar",
+   "how": "read the rendered values",
+   "ok": true,
+   "note": "Avocado & Cream Cheese · ₹550"
+  },
+  {
+   "id": "P110925",
+   "what": "the model announces WHICH dish it is to a screen reader",
+   "how": "read the alt",
+   "ok": true,
+   "note": "3D model of Avocado & Cream Cheese"
+  },
+  {
+   "id": "P110926",
+   "what": "the working 3D screen has a heading to jump to",
+   "how": "count visible headings",
+   "ok": true,
+   "note": "1 visible"
+  },
+  {
+   "id": "P110927",
+   "what": "BACK returns to the dish AND the category it came from",
+   "how": "read the href",
+   "ok": true,
+   "note": "/item/avocado-and-cream-cheese?cat=sandwiches"
+  },
+  {
+   "id": "P110928",
+   "what": "…and it hit-tests to itself while the model is on screen",
+   "how": "elementFromPoint at its own centre",
+   "ok": true,
+   "note": "self"
+  },
+  {
+   "id": "P110929",
+   "what": "…and is a thumb-sized target",
+   "how": "measure it",
+   "ok": true,
+   "note": "44px tall"
+  },
+  {
+   "id": "P110930",
+   "what": "Add to Order is live once the dish is known",
+   "how": "read the button",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110931",
+   "what": "the hint pill sits clear of the dish bar",
+   "how": "measure the overlap",
+   "ok": true,
+   "note": "0px overlap"
+  },
+  {
+   "id": "P110932",
+   "what": "the engine script is in the page exactly once",
+   "how": "count the tags",
+   "ok": true,
+   "note": "1 tag(s)"
+  },
+  {
+   "id": "P110933",
+   "what": "…and was requested exactly once, not twice",
+   "how": "count the requests",
+   "ok": true,
+   "note": "1 request(s)"
+  },
+  {
+   "id": "P110934",
+   "what": "this restaurant's own hotspots are pinned to the model",
+   "how": "count them",
+   "ok": true,
+   "note": "3 hotspots"
+  },
+  {
+   "id": "P110935",
+   "what": "…none positioned with a word where a number belongs",
+   "how": "read every data-position",
+   "ok": true,
+   "note": "0 bad"
+  },
+  {
+   "id": "P110936",
+   "what": "…and no bullet drawn without words",
+   "how": "count empty <li>",
+   "ok": true,
+   "note": "0 empty"
+  },
+  {
+   "id": "P110937",
+   "what": "the whole 3D open costs at most the two model tiers",
+   "how": "count .glb requests",
+   "ok": true,
+   "note": "2 GLB requests"
+  },
+  {
+   "id": "P110938",
+   "what": "…and nothing threw",
+   "how": "count pageerror + console errors",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110939",
+   "what": "every public answer on the loader is null-safe",
+   "how": "call all five with null/undefined/empty in the page",
+   "ok": true,
+   "note": "[false,false,false,null,false]"
+  },
+  {
+   "id": "P110940",
+   "what": "a model bigger than the whole budget is still kept",
+   "how": "push 41MB through it",
+   "ok": true,
+   "note": "true"
+  },
+  {
+   "id": "P110941",
+   "what": "…and a second one evicts the older while keeping the newest",
+   "how": "push another 41MB",
+   "ok": true,
+   "note": "{\"first\":false,\"second\":true}"
+  },
+  {
+   "id": "P110942",
+   "what": "…and the evicted one reports no link, so nothing points at freed memory",
+   "how": "ask for its cached url",
+   "ok": true,
+   "note": "null"
+  },
+  {
+   "id": "P110943",
+   "what": "the same url in all four queue lists is downloaded once",
+   "how": "setQueue with four copies, count fetches",
+   "ok": true,
+   "note": "3 total fetches at that point"
+  },
+  {
+   "id": "P110944",
+   "what": "…and asking again for something already held costs nothing",
+   "how": "prioritize a loaded url, count new fetches",
+   "ok": true,
+   "note": "0 new fetches"
+  },
+  {
+   "id": "P110945",
+   "what": "a model that 404s is given exactly two goes before it is written off",
+   "how": "stub a 404 and wait past the retry delay",
+   "ok": true,
+   "note": "[{\"failed\":false},{\"failed\":true}]"
+  },
+  {
+   "id": "P110946",
+   "what": "…and a reconnect gives it a genuinely fresh go",
+   "how": "fire the wake handler",
+   "ok": true,
+   "note": "{\"failed\":false,\"newCalls\":1}"
+  },
+  {
+   "id": "P110947",
+   "what": "…and a second wake inside the cooldown fetches nothing",
+   "how": "fire it again immediately",
+   "ok": true,
+   "note": "0 new fetches"
+  },
+  {
+   "id": "P110948",
+   "what": "calling stopAll twice in a row does not throw",
+   "how": "call it twice",
+   "ok": true,
+   "note": "false"
+  },
+  {
+   "id": "P110949",
+   "what": "…and the dish page itself threw nothing while all that ran",
+   "how": "count pageerror + console errors",
+   "ok": true,
+   "note": ""
+  },
+  {
+   "id": "P110950",
+   "what": "menu → dish → 3D → Back returns to the SAME dish in the SAME category, with no error on the way",
+   "how": "drive the whole journey in one tab on a production build",
+   "ok": true,
+   "note": "menu 59 dishes → dish \"Espresso\" → 3D \"Avocado & Cream Cheese\" → back \"Avocado & Cream Cheese\" at /r/french-house/item/avocado-and-cream-cheese?cat=sandwiches · GLB requests on the 3D hop: 2 · errors: 0"
+  }
+ ]
+}
