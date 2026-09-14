@@ -10,6 +10,13 @@
 //      for ever. Reachable on a real phone through the pre-session-scoping name value that
 //      getNickname() deliberately treats as "no name".
 //
+//   D. A TAP NEVER SITS IN SILENCE WHILE THE FIRST READ RUNS.
+//      Every screen this sheet can show is behind `setOpen(true)`. For "order" and "call" — which
+//      always open the sheet anyway — that must happen BEFORE the settings read, or the tap shows
+//      nothing at all until it answers (measured: nothing at 3s or 8s). And that read must have a
+//      deadline of its own, because getSettings() has none: a database that is up but silent
+//      otherwise parks the flow with no way out. "connect" stays silent on purpose.
+//
 //   C. THE LINE THAT SAYS WHY A TAP WAS REFUSED IS READABLE IN BOTH SKINS.
 //      Five screens render `note` and all five carried an inline `color:#fca5a5`. MEASURED on the
 //      rendered page: 8.7:1 on the dark card, 1.9:1 on the light one — pale pink on white. A
@@ -149,6 +156,17 @@ function run(src) {
     const b = css.indexOf(`.${cls} {`), l = css.indexOf(`[data-theme="light"] .${cls}`);
     check(b > -1 && l > b, `.${cls} has a light-skin override, placed below its base (base ${b}, override ${l})`);
   }
+
+  console.log("D. a tap answers at once, and the first read cannot run for ever");
+  const onDo = code.slice(code.indexOf("const onDo = async (e: Event)"), code.indexOf("window.addEventListener(\"lfh:session-do\", onDo)"));
+  const opensFirst = onDo.indexOf('if (detail.action !== "connect") { setOpen(true); setStep("working"); }');
+  const reads = onDo.indexOf("await Promise.race([");
+  check(opensFirst > -1, "order and call open the waiting screen before anything is read");
+  check(opensFirst > -1 && reads > opensFirst, `…and that happens BEFORE the read, which is the whole point (open at ${opensFirst}, read at ${reads})`);
+  check(/SETTINGS_DEADLINE_MS = \d+/.test(onDo), "the settings read has a deadline of its own");
+  check(/getSettings\(rid\),\s*\n\s*new Promise<never>/.test(onDo), "…applied by racing it, not by hoping");
+  check(!/setOpen\(true\); setStep\("working"\); \}\s*\n?\s*if \(detail\.action === "connect"\)/.test(onDo) && /detail\.action !== "connect"/.test(onDo),
+    "…and `connect` still says nothing, so a diner already at their table gets no pop-up");
   return failed;
 }
 
@@ -163,6 +181,8 @@ if (process.argv.includes("--self-test")) {
     ["the sheet growing its own copy of the rules again", (s) => s.replace("const check = validateTable(tableInput,", "const t = tableInput.trim(); if (!/^\\d+$/.test(t)) { setNote(\"no\"); return; }\n    const check = validateTable(tableInput,")],
     ["the checker's value computed and then ignored", (s) => s.replace("rememberTable(check.value);", "rememberTable(tableInput);")],
     ["a refusal painted back in the dark-skin-only red", (s) => s.replace('className="sg-sub sg-note-bad"', 'className="sg-sub" style={{ color: "#fca5a5" }}')],
+    ["the waiting screen moved back behind the read", (s) => s.replace('if (detail.action !== "connect") { setOpen(true); setStep("working"); }\n', "")],
+    ["the deadline taken off the first read", (s) => s.replace("const s = await Promise.race([", "const s = await Promise.resolve().then(() => [")],
   ];
   for (const [what, bend] of sabotage) {
     const bent = bend(src);

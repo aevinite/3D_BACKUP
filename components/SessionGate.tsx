@@ -716,10 +716,41 @@ export default function SessionGate() {
       // simultaneous callers into ONE request, holds a short TTL, and — the part a private Map can
       // never have — it is DROPPED by invalidateSettings() when a realtime breadcrumb says the row
       // changed. A cache in front of a breadcrumb is the known way these updates die.
+      //
+      // ── AND A TAP NEVER SITS IN SILENCE WHILE THAT READ RUNS (T4 sweep #9, item 7) ──────────────
+      // Two separate holes, both measured on the rendered page with the settings read stalled:
+      //
+      //   1. NOTHING WAS ON SCREEN. Every screen this sheet can show is behind `setOpen(true)`,
+      //      and that came AFTER the read. So "Place order" and "Call a waiter" — which always end
+      //      up opening the sheet anyway — showed nothing at all for the whole read. Measured:
+      //      nothing at 3s, nothing at 8s, the honest "Connection trouble" screen at 16s. The
+      //      screen it lands on is right; the silence before it is not, and this file already has
+      //      a waiting screen for exactly this ("One moment…"). It is now opened FIRST for those
+      //      two, so the tap always answers instantly. `connect` deliberately stays silent — a
+      //      diner already at their table should get their dish added with no pop-up at all
+      //      (see the fast-path below), and flashing a sheet at them would be the noise that
+      //      design exists to avoid.
+      //
+      //   2. THE READ HAD NO DEADLINE OF ITS OWN. getSettings() → fetchSettings() in lib/menu.ts
+      //      is the one guest read with no AbortSignal (its siblings for orders and waiter calls
+      //      both have one), so a database that is UP but answering nothing — measured at 30-90
+      //      seconds in this app on 2026-07-31 — leaves the flow parked here with no way out. The
+      //      16 seconds above was Chrome's own request timeout deciding for us, not us. Racing it
+      //      is done HERE rather than inside getSettings() because that function is shared by
+      //      every guest screen and a deadline there is a bigger decision than this item.
+      //
+      //      8s, not the 15s that lib/session.ts uses: 15 is the deadline on a WRITE, where the
+      //      cost of giving up too early is a lost order. This one only gates a screen, and the
+      //      fallback below is generous — the last-known settings for this very restaurant.
+      const SETTINGS_DEADLINE_MS = 8000;
+      if (detail.action !== "connect") { setOpen(true); setStep("working"); }
       try {
         // THIS restaurant's settings, not "the first restaurant this tab ever asked about".
         const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
-        const s = await getSettings(rid);
+        const s = await Promise.race([
+          getSettings(rid),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("settings_timed_out")), SETTINGS_DEADLINE_MS)),
+        ]);
         settingsByRid.current.set(rid, s);
         settingsRef.current = s;
       } catch {
