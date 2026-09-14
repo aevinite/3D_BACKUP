@@ -1099,7 +1099,7 @@ export default function SessionGate() {
                 onClick={() => { setTableInput(""); setScannedTable(""); window.dispatchEvent(new Event("lfh:table-scanned")); }}>✕</button>
             )}
           </div>
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={startScan}><i className="fas fa-qrcode"></i>&nbsp;Scan QR</button>
             <button className="sg-btn gold" onClick={submitTable}>Continue</button>
@@ -1173,7 +1173,7 @@ export default function SessionGate() {
           <p className="sg-sub">A waiter opens your table once you&apos;re seated. Add your name and we&apos;ll let them know you&apos;re ready at table {pending.current?.table} — it usually takes a few minutes.</p>
           <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doRequestOpen(); }} autoFocus />
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={rescan}>Scan another table</button>
             <button className="sg-btn gold" onClick={doRequestOpen}>Request a waiter</button>
@@ -1193,7 +1193,7 @@ export default function SessionGate() {
           <p className="sg-sub">You&apos;ll be the head of this table. Add your name so the staff know who opened it — we&apos;ll only ask once for this visit.</p>
           <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitOpenName(); }} autoFocus />
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={submitOpenName}>Open table {pending.current?.table}</button>
           </div>
@@ -1211,7 +1211,7 @@ export default function SessionGate() {
           <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doJoinAsGuest(); }} autoFocus />
           {/* e.g. "couldn't reach the restaurant's system" after a failed join attempt */}
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={() => doJoinAsGuest()}>Ask to join this table</button>
           </div>
@@ -1231,7 +1231,7 @@ export default function SessionGate() {
           <p className="sg-sub">Just a name so the kitchen and your table know who&apos;s who — no real name or details needed. We&apos;ll only ask this once.</p>
           <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitNickname(); }} autoFocus />
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={submitNickname}>Continue</button>
           </div>

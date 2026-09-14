@@ -1616,6 +1616,18 @@ body.menu-frost .nav {
 .sg-emoji { font-size: 46px; line-height: 1; margin-bottom: 10px; }
 .sg-title { font-family: 'Playfair Display', serif; font-size: 23px; font-weight: 700; color: var(--text); margin: 0 0 10px; line-height: 1.2; }
 .sg-sub { font-size: 14px; color: var(--muted); line-height: 1.5; margin: 0 0 18px; }
+/* ── THE LINE THAT SAYS WHY A TAP WAS REFUSED, IN BOTH SKINS (T4 sweep #9, item 3) ────────────────
+   Five screens in the sheet render `note` — "Please enter your table number", "This place has
+   tables 1-30", "Add your name so staff know who's asking", "Couldn't reach the restaurant's
+   system" — and every one of them carried an inline `color:#fca5a5`. MEASURED on the rendered
+   page: 8.7:1 on the dark card and **1.9:1 on the light one**, i.e. pale pink on white. A diner
+   on the light skin could not read the only sentence telling them why nothing happened.
+   #fca5a5 is a DARK-SKIN ink and a hard-coded hex cannot follow the skin — the admin console
+   already records exactly this, and this is the same cure it used (components/admin/UsersView.tsx,
+   `.usp-banner.err`). The override sits BELOW its base rule on purpose: a later rule of equal
+   weight is what wins, and one placed above would silently do nothing. */
+.sg-note-bad { color: #fca5a5; }
+[data-theme="light"] .sg-note-bad { color: color-mix(in srgb, #fca5a5 55%, #000); }
 .sg-input { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; border: var(--border); background: rgba(128,90,60,0.08); color: var(--text); font-size: 15px; font-family: inherit; }
 .sg-input:focus { outline: none; border-color: var(--accent); }
 /* ── NO SPINNER ARROWS ON THE TABLE BOX (T4 sweep #8, item 15, owner 2026-09-02) ──────────────────
