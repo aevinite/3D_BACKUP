@@ -132,11 +132,16 @@ try {
   P("P101842", "a 201-line order is REFUSED, never quietly trimmed to 200", r42.status === 400 && r42.j?.reason === "order_too_big", r42.j?.reason);
   const r43 = await post("/api/guest/leave", { restaurantId: FH }, { "X-LFH-Action-Id": aid(43) });
   P("P101843", "leaving with no token is refused 400, not a 500", r43.status === 400 && r43.j?.reason === "invalid_token", r43.j?.reason);
-  const bad = [];
-  for (const p of ["/api/guest/place-order", "/api/guest/call-waiter", "/api/guest/leave"]) {
-    const r = await post(p, "{not json", { "X-LFH-Action-Id": aid(44) + p.length });
-    bad.push(`${p.split("/").pop()}=${r.status}:${r.j?.reason}`);
-  }
+  // WRITTEN OUT, NOT LOOPED, and that is deliberate: `npm run verify:test-safety` refuses a script
+  // that repeats a rate-limited action in a loop, because tripping one of the app's own walls pings
+  // a real owner's phone about a real restaurant. These three bodies are malformed on purpose and
+  // are refused before any limiter is consulted — but the guard reads the SHAPE, and it is right to:
+  // a loop over guest write doors is exactly the thing that must never be written here, and a guard
+  // that has to judge intent is a guard that can be argued with. Three calls, each once.
+  const r44a = await post("/api/guest/place-order", "{not json", { "X-LFH-Action-Id": aid(441) });
+  const r44b = await post("/api/guest/call-waiter", "{not json", { "X-LFH-Action-Id": aid(442) });
+  const r44c = await post("/api/guest/leave", "{not json", { "X-LFH-Action-Id": aid(443) });
+  const bad = [`place-order=${r44a.status}:${r44a.j?.reason}`, `call-waiter=${r44b.status}:${r44b.j?.reason}`, `leave=${r44c.status}:${r44c.j?.reason}`];
   P("P101844", "malformed JSON bytes answer 400 bad_body on all three writing doors, never a 500", bad.every((b) => /=400:bad_body$/.test(b)), bad.join(" "));
   const r45 = await post("/api/guest/limit-hit", "", {});
   P("P101845", "the limit beacon answers 200 even to an empty body — it must never surface an error", r45.status === 200 && r45.j?.ok === true, r45.status);
