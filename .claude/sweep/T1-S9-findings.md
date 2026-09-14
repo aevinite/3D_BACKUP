@@ -60,3 +60,56 @@ new condition reads false against `origin/main`'s copy of each file.
 
 Four detectors of mine came back red and were withdrawn, not filed — they are listed in the ledger
 so a withdrawn finding is as useful as a confirmed one.
+
+---
+
+# T1 · THE 500-PHASE RE-TEST — 2026-09-15
+
+**Asked for by the owner after the sweep-#9 fixes landed:** run the whole thing again inside the
+same boundaries, and solve anything left. Block `P110001`–`P110517`, taken above sweep #9's whole
+reservation. **517 checks · 517 ✅ · 0 ❌ · 0 ⏭.**
+
+## The product: clean
+
+No problem was found in the eight owned files, in `components/GuestNotFound.tsx`, or in the editor
+panel's guest-QR card. The phases are in `LEDGER/T1.md` → "THE 500-PHASE RE-TEST", aimed by
+measuring existing coverage per file first: `app/layout.tsx` had 14 rows per 100 lines and got 70
+phases; the two door pages had 18 and got 80.
+
+**Ten of my own detectors came back red and every one was the detector, not the product.** All ten
+are written down in the ledger. Two are worth repeating because they are traps, not slips:
+
+- The VOID/CLOSED stamp "covered two words" when measured against the *block boxes* of `h2` and
+  `.big`, which span the docket's width while their glyphs sit at the left. Measured against the
+  text's own rectangles: **0 overlaps**, both dockets, both widths.
+- "Two controls overlap at every phone width" was the filter row scrolling sideways — a chip parked
+  past the row's edge reports its true position and looks like it sits under the layout switch.
+  Hit-tested at 320, 360 and 390: **every chip takes its own tap** once slid into view.
+
+## The guard around it: red on clean `origin/main`, and now green
+
+`verify:guest-doors` was **red on clean `origin/main`**, and a red `verify:*` refuses Write and Edit
+for every session in this folder through the repo's PostToolUse hook.
+
+**Two of the four failures I found were fixed by another terminal first** — T3 round 2 (#1354)
+landed the trailing `flush()` and re-pinned the settings and name-box rows while this run was going.
+Their work stands; what follows is only what theirs did not cover, applied on top after a rebase.
+
+1. **The tally did not NAME the failures.** With the flush fixed, all 133 lines print — but a reader
+   still had to scan them to find the red ones. The summary now lists each failure, and says so if
+   the number counted and the number printed ever disagree again, which is what the original fault
+   looked like from the outside.
+2. **The guard read RAW source, so a commented-out line satisfied it.** Sabotage-proved while
+   checking the fix: commenting out `settingsByRid.current.set(rid, s);` left it green. The rows
+   about what the code DOES now read a comment-stripped copy; the rows that deliberately assert a
+   written-down reason still read the file as written.
+3. **A fourth spelling-pinned row, still red after their fix.** "The table-session gate keeps
+   settings PER RESTAURANT" named `ridRef.current` as the thing the map is read by. PR #1356 settled
+   the id once into `settledRid` — same rule, better code — and the row went red for it. Re-pinned to
+   the rule: every touch of the map carries a key, and nothing fills a single un-keyed ref.
+   Sabotage-proved — reading the map with no key at all turns it red.
+
+**One residue, said plainly rather than over-engineered:** the gate has two keyed `.set()` calls, so
+commenting one out still satisfies "every touch is keyed" — correctly, because the rule it states
+does still hold. Tightening that row to one specific call would put it straight back on a spelling,
+which is the fault being fixed here four times over.
