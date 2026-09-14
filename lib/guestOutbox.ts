@@ -127,7 +127,7 @@ export type GuestKind = "order" | "call" | "leave";
  */
 const WORDED_FOR_EVERY_KIND = new Set([
   "session_closed", "not_approved", "blocked", "otp_required", "invalid_token",
-  "server_busy", "call_too_old", "off_plan_table",
+  "server_busy", "call_too_old", "off_plan_table", "unknown_table",
 ]);
 
 /**
@@ -196,8 +196,31 @@ export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: bool
   }
   switch (reason) {
     case "session_closed": return q ? "Your table was closed while you were offline." : "This table has been closed — please ask your server.";
-    case "not_approved": return q ? "You weren't approved to order on this table." : "You're not approved to order on this table yet.";
-    case "blocked": return "This order was blocked — please ask a member of staff.";
+    // ── AND THESE TWO HAD TO STOP SAYING "ORDER" (sweep #9 T3, item 2) ─────────────────────────
+    //
+    // WORDED_FOR_EVERY_KIND above is a carve-out list: the codes whose sentence is true of ANY
+    // saved thing, so they skip the per-kind branch and come down here. Two of the eight were
+    // not actually true of any saved thing — they named an ORDER — and both are reachable by a
+    // saved WAITER CALL, which is the one thing a diner taps when something is wrong:
+    //
+    //   · `blocked`      — lfh_call_waiter (mig 084, the seated door) and lfh_call_waiter_table
+    //                      (mig 334, the QR door) BOTH answer it for a blocked table or phone.
+    //                      The diner tapped a bell in a dead spot and read
+    //                      "This ORDER was blocked — please ask a member of staff."
+    //   · `not_approved` — lfh_call_waiter answers it for a guest the head has not approved yet.
+    //                      They read "You weren't approved to ORDER on this table."
+    //
+    // This is the same fault sweep #8's item 3 was written to end ("a saved call is not an order,
+    // and nor is leaving a table") — it simply survived inside the carve-out list, because the
+    // list was chosen by reading the sentences and these two read as general.
+    //
+    // The fix keeps them in the carve-out, because the REASON is worth telling the diner and the
+    // per-kind fallback would throw it away ("Couldn't send your call for a server" says nothing
+    // about a block). Instead the sentences say the true thing, which is about the TABLE and not
+    // about what the person was trying to do — so they are now correct for an order, a raised hand
+    // and an "I've left" alike.
+    case "not_approved": return q ? "You weren't approved on this table." : "You're not approved on this table yet — please ask your server.";
+    case "blocked": return "This table is blocked — please ask a member of staff.";
     case "otp_required": return q ? "Phone verification was needed." : "Please confirm your phone number first.";
     case "invalid_token": return q ? "Your table session expired." : "Your table session has expired — please scan the code again.";
     case "sold_out": return q
@@ -224,6 +247,32 @@ export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: bool
     // arriving twenty minutes late for something nobody remembers is worse than not arriving.
     case "call_too_old": return "Your call for a server was too old to send — please call again if you still need someone.";
     case "unknown_restaurant": return "We couldn't tell which restaurant this order was for.";
+    // ── THE TWO CODES FOR "THAT TABLE ISN'T ONE OF OURS" SHARE ONE SENTENCE (sweep #9 T3, item 1) ─
+    //
+    // There are two of them because two different things check the number, at two different
+    // distances from the floor plan, and only ONE of them was ever worded:
+    //
+    //   · `off_plan_table` — this app's own check (lib/planTable.ts). Deliberately generous: it
+    //     refuses only a number more than 500 above the plan, because a restaurant's parcel and
+    //     takeaway counters number ABOVE the floor on purpose.
+    //   · `unknown_table`  — the database's check (migration 281, inside lfh_place_order_public).
+    //     Strict: anything above `table_count` at all.
+    //
+    // So a 30-table restaurant refuses table 9,999 with the worded code and table **31** — the
+    // realistic typo, the one a diner actually makes — with the unworded one, which fell through
+    // to reasonMsg's default: "Couldn't send this order — please order again." That is advice that
+    // cannot work: ordering again types the same number and is refused identically, for ever.
+    // DRIVEN, not reasoned: POST table 31 to /api/guest/place-order on French House answers
+    // `{"reason":"unknown_table","error":"Table 31 doesn't exist — tables are 1–30."}` — the
+    // server even composed the right sentence, and it was thrown away (the server's own words
+    // never travel to a diner; a CODE does, and this file owns the wording).
+    //
+    // One sentence, shared by fallthrough, so the two codes can never drift into disagreeing about
+    // the same situation. `unknown_table` joins WORDED_FOR_EVERY_KIND beside its twin for the same
+    // reason: the sentence is about a TABLE NUMBER, which is true of an order, a raised hand or
+    // "I've left" alike. `npm run verify:order-retry` now derives its code list from the
+    // migrations instead of a hand-typed one, which is why this was missed for four months.
+    case "unknown_table":
     case "off_plan_table": return "That table number isn't one this restaurant has — please check it.";
     case "bad_body": return "Something was wrong with this order.";
     // The two size ceilings (T9 improvement 7, 2026-08-06). A real basket never reaches them, so the
@@ -671,7 +720,36 @@ export async function flushGuestOutbox() {
         await moveToFailed(item, j.clash.plain); notify(); continue;
       }
       // A CALL succeeds with no order_id — there is nothing to track, the floor just knows.
-      if (res.ok && j?.ok && (isCall(item) || isLeave(item))) { progressed = true; await removeItem(item.id); notify(); continue; }
+      //
+      // ── EXCEPT WHEN NOTHING WAS PUT ON THE FLOOR (sweep #9 T3, item 4) ──────────────────────────
+      //
+      // `lfh_call_waiter_table` (migration 334) answers `ok: TRUE` to three things that create no
+      // waiter_calls row at all — and this branch removed the saved tap for every one of them,
+      // saying nothing. Two of the three are right to remove:
+      //
+      //   · `already_sent` — the same request is already pending on the floor (the 6-second dedupe);
+      //   · `capped`       — six unresolved calls are already stacked on that table.
+      //
+      // In both, a waiter IS coming: there is a live call, so the diner's tap has been honoured and
+      // the row is finished with. The third is not like them at all:
+      //
+      //   · `rate_limited` — the restaurant's own limiter refused it. NOTHING was created, nobody is
+      //     coming, and the row vanished out of the saved-work list with no message and no control.
+      //
+      // That is the "a tap must never vanish in silence" rule, on the one action a diner takes when
+      // something is wrong. The same distinction already exists on the server — callLanded() in
+      // app/api/guest/call-waiter/route.ts excludes exactly these three from dropping the floor
+      // snapshot — so this is the phone's half of a rule the route already keeps.
+      //
+      // Worded through the kind branch on purpose: `rate_limited` is deliberately NOT in
+      // WORDED_FOR_EVERY_KIND (its sentence is "that's a lot of ORDERS in a row", which is the wrong
+      // thing to say to someone whose bell taps hit the waiter-call wall), so a call gets
+      // "Couldn't send your call for a server — please ask a member of staff" — which is also the
+      // one piece of advice that works, since tapping again would hit the same wall.
+      if (res.ok && j?.ok && (isCall(item) || isLeave(item))) {
+        if (String(j.reason ?? "") === "rate_limited") { await moveToFailed(item, reasonMsg(j.reason, { queued: true, kind: kindOf(item) })); notify(); continue; }
+        progressed = true; await removeItem(item.id); notify(); continue;
+      }
       if (res.ok && j?.ok && j.order_id) { progressed = true; recordActive(item, j.order_id as string); await removeItem(item.id); notify(); continue; }
       // Already placed on a prior sync whose reply we lost. The server echoes the original
       // order_id back with the duplicate, so we can still show it to the guest.
@@ -866,6 +944,27 @@ export async function retryGuestFailed(id: string) {
   // not just the 5xx one. Resetting only `tries` left the other two at their ceiling, so one tap
   // of Try again bought a single attempt and the order fell straight back into "Couldn't send".
   it.status = "queued"; it.error = undefined; it.tries = 0; it.netTries = 0; it.busyTries = 0;
+  // ── AND THE DISH THE LAST REFUSAL NAMED (sweep #9 T3, item 3) ────────────────────────────────
+  //
+  // `blocked` / `blockedId` are set by the flush when the server refuses the basket for ONE dish
+  // (sold_out · hidden_item · unknown_item), and they are what puts the "Order the rest" button on
+  // the row. They were NOT cleared here, and moveToFailed does not clear them either — it only
+  // ever sets them, and only for those three codes. So:
+  //
+  //   1. a saved basket is refused because "Paneer Tikka" sold out → blocked = "Paneer Tikka";
+  //   2. the diner taps Try again;
+  //   3. this attempt fails for something else entirely — the table was closed, the system was
+  //      busy, the session expired — and the row's error is now that new sentence;
+  //   4. …while `blocked` still says "Paneer Tikka", so "Order the rest" is offered beside a
+  //      refusal that had nothing to do with any dish. Tapping it DROPS Paneer Tikka from the
+  //      basket — a dish the diner ordered and nobody ever refused — and re-queues the rest,
+  //      which is then refused again for the unchanged real reason.
+  //
+  // A person asking for a fresh go is asking for a fresh go: the counters were already cleared
+  // here for exactly that reason, and this is the same sentence. If the new attempt is refused for
+  // a dish again, the flush sets both fields again from THAT refusal, which is the only honest
+  // source for them.
+  it.blocked = undefined; it.blockedId = undefined;
   retryStep = 0;                       // …and reset the backoff, so it goes now rather than in two minutes
   queued.push(it);
   await persist(it);

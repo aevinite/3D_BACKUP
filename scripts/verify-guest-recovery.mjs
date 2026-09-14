@@ -59,6 +59,30 @@ check("…and on the server, which cannot rely on the phone", /STALE_CALL_MS/.te
 check("the diner is told in words why a stale call didn't go", /case "call_too_old":/.test(outbox));
 check("the toast only promises automatic sending when it really reached storage",
   /q\.persisted \?/.test(chef));
+// ── A SAVED TAP THE RESTAURANT DID NOT TAKE MUST NOT VANISH (sweep #9 T3, item 4) ──────────────
+//
+// lfh_call_waiter_table (mig 334) answers `ok: TRUE` to three things that create no waiter_calls
+// row: `already_sent`, `capped` and `rate_limited`. The queue removed the saved tap for all three,
+// silently. Two of them are right — a call really is pending on the floor, so the diner's tap has
+// been honoured. `rate_limited` is not: nothing was created, nobody is coming, and the row left the
+// saved-work list with no message and no control, on the one action a diner takes when something is
+// wrong.
+//
+// The server already draws this exact line (callLanded() in the call-waiter route excludes all
+// three from dropping the floor snapshot). This asserts the PHONE keeps the same one — and that the
+// two that mean "a waiter is coming" are still treated as delivered, so the fix cannot drift into
+// nagging a diner about a call that was honoured.
+{
+  const landed = read("app/api/guest/call-waiter/route.ts");
+  check("the server still knows which answers created no call",
+    /already_sent/.test(landed) && /capped/.test(landed) && /rate_limited/.test(landed));
+  check("…and the phone refuses to drop a saved tap the limiter turned down",
+    /rate_limited[\s\S]{0,160}moveToFailed/.test(outbox));
+  check("…while a call that IS pending on the floor is still finished with, not nagged about",
+    !/already_sent[\s\S]{0,120}moveToFailed/.test(outbox) && !/"capped"[\s\S]{0,120}moveToFailed/.test(outbox));
+  check("…and it is worded as a CALL, never as an order the diner never placed",
+    /rate_limited[\s\S]{0,200}kind: kindOf\(item\)/.test(outbox));
+}
 
 console.log("\n#5) One sold-out dish doesn't cost the whole basket");
 check("the phone remembers which id is which dish", /lines\?: \{ id: string; title: string \}\[\]/.test(outbox));
@@ -87,6 +111,26 @@ check("it refuses to guess when it can't tell the lines apart",
   /if \(!keptLines\.length \|\| !keptItems\.length\) return \{ ok: false, left: 0 \};/.test(outbox));
 check("the button is offered ONLY when it can genuinely do something",
   /o\.blocked && \(o\.lines \|\| \[\]\)\.length > 1/.test(badge));
+// ── …AND THE DISH IT NAMES IS THE ONE THE LAST REFUSAL NAMED (sweep #9 T3, item 3) ─────────────
+//
+// `blocked` / `blockedId` are what put that button on the row, and the flush only ever SETS them —
+// for sold_out, hidden_item and unknown_item. Nothing cleared them. So a basket refused for a
+// sold-out dish, retried by the diner, and refused the second time for something else entirely
+// (the table closed, the system was busy) kept the button — and tapping it DROPPED a dish nobody
+// had refused, then re-queued the rest into the same unchanged refusal.
+//
+// Checked as the RULE, not the spelling: a fresh go clears everything the previous attempt learned
+// about this row. The three counters were already cleared there for the same reason; these two
+// belong in the same sentence.
+{
+  const retry = (outbox.match(/export async function retryGuestFailed[\s\S]*?\n\}/) || [])[0] || "";
+  check("a fresh go really is a fresh go — all three attempt counters are cleared",
+    /tries = 0/.test(retry) && /netTries = 0/.test(retry) && /busyTries = 0/.test(retry));
+  check("…and so is the dish the previous refusal named, so 'Order the rest' can't drop an innocent line",
+    /blocked = undefined/.test(retry) && /blockedId = undefined/.test(retry));
+  check("…and that clearing really is inside retryGuestFailed, not merely somewhere in the file",
+    retry.length > 200);
+}
 
 console.log("\nBoth) the shared promises still hold");
 check("everything saved still carries a timer to send it", /ensureRetry\(\);/.test(outbox));
