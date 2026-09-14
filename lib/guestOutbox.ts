@@ -720,7 +720,36 @@ export async function flushGuestOutbox() {
         await moveToFailed(item, j.clash.plain); notify(); continue;
       }
       // A CALL succeeds with no order_id — there is nothing to track, the floor just knows.
-      if (res.ok && j?.ok && (isCall(item) || isLeave(item))) { progressed = true; await removeItem(item.id); notify(); continue; }
+      //
+      // ── EXCEPT WHEN NOTHING WAS PUT ON THE FLOOR (sweep #9 T3, item 4) ──────────────────────────
+      //
+      // `lfh_call_waiter_table` (migration 334) answers `ok: TRUE` to three things that create no
+      // waiter_calls row at all — and this branch removed the saved tap for every one of them,
+      // saying nothing. Two of the three are right to remove:
+      //
+      //   · `already_sent` — the same request is already pending on the floor (the 6-second dedupe);
+      //   · `capped`       — six unresolved calls are already stacked on that table.
+      //
+      // In both, a waiter IS coming: there is a live call, so the diner's tap has been honoured and
+      // the row is finished with. The third is not like them at all:
+      //
+      //   · `rate_limited` — the restaurant's own limiter refused it. NOTHING was created, nobody is
+      //     coming, and the row vanished out of the saved-work list with no message and no control.
+      //
+      // That is the "a tap must never vanish in silence" rule, on the one action a diner takes when
+      // something is wrong. The same distinction already exists on the server — callLanded() in
+      // app/api/guest/call-waiter/route.ts excludes exactly these three from dropping the floor
+      // snapshot — so this is the phone's half of a rule the route already keeps.
+      //
+      // Worded through the kind branch on purpose: `rate_limited` is deliberately NOT in
+      // WORDED_FOR_EVERY_KIND (its sentence is "that's a lot of ORDERS in a row", which is the wrong
+      // thing to say to someone whose bell taps hit the waiter-call wall), so a call gets
+      // "Couldn't send your call for a server — please ask a member of staff" — which is also the
+      // one piece of advice that works, since tapping again would hit the same wall.
+      if (res.ok && j?.ok && (isCall(item) || isLeave(item))) {
+        if (String(j.reason ?? "") === "rate_limited") { await moveToFailed(item, reasonMsg(j.reason, { queued: true, kind: kindOf(item) })); notify(); continue; }
+        progressed = true; await removeItem(item.id); notify(); continue;
+      }
       if (res.ok && j?.ok && j.order_id) { progressed = true; recordActive(item, j.order_id as string); await removeItem(item.id); notify(); continue; }
       // Already placed on a prior sync whose reply we lost. The server echoes the original
       // order_id back with the duplicate, so we can still show it to the guest.
