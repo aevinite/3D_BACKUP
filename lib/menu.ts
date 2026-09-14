@@ -238,6 +238,23 @@ function busyError(why: string): BusyError {
   return e;
 }
 
+/**
+ * "The request never got an answer" — abandoned by a deadline, or the network dropped it — as
+ * opposed to "the database answered, and the answer was no".
+ *
+ * supabase-js surfaces an aborted request as an ordinary error, so the only thing separating the
+ * two is the shape of the message. That is prose-matching, which this project has a rule against
+ * — so it is confined to ONE function, it decides a RETRY and never a refusal or a number, and the
+ * safe direction is the default: anything unrecognised is treated as a real answer, exactly as it
+ * was before. lib/session.ts draws the same line the same way (`/abort/i.test(msg)`).
+ */
+function isUnreachable(err: unknown): boolean {
+  const e = err as { message?: unknown; name?: unknown } | null;
+  const msg = String(e?.message ?? "");
+  const name = String(e?.name ?? "");
+  return /abort|timeout|timed out|network|fetch failed|load failed/i.test(msg) || /AbortError|TimeoutError/i.test(name);
+}
+
 // A deadline on every order, WITHOUT assuming the browser can make one. `AbortSignal.timeout`
 // is recent; on an older phone reading it throws, which was caught and mis-reported as "the
 // restaurant is busy" — so a diner on a perfectly good connection was told their order had been
@@ -348,12 +365,49 @@ export async function updateOrderTableNumber(
 
 // A guest reads only their own order's status via a SECURITY DEFINER function
 // (migration 006), so no one can list everyone else's orders.
+// ── THE ONE GUEST CALL THAT HAD NO CEILING, AND WHY ADDING ONE IS NOT ONE LINE (item 7) ─────────
+//
+// Every guest WRITE has a deadline — placing an order (orderDeadline), ringing the bell
+// (callWaiter), correcting a table (updateOrderTableNumber), the saved-work queue
+// (lib/guestOutbox.ts sendDeadline). This READ, the one the floating order strip makes every few
+// seconds, had none. A browser request has no timeout of its own, so on a connection that HANGS
+// rather than drops — the café Wi-Fi with a dead uplink — the await never settles.
+//
+// THE TRAP, and it is the whole reason this is not a one-line change. `null` from here does not
+// mean "I couldn't ask". It means **the order no longer exists on the server**, and the strip
+// counts three of those in a row and marks the order CANCELLED on the diner's screen (a deliberate
+// fix from 2026-07-08, so a deleted order stops lingering as a "preparing" ghost for three hours).
+// A timeout that answered `null` would therefore be indistinguishable from a deleted order — and
+// `navigator.onLine` stays TRUE on a hung Wi-Fi, which is precisely the case this deadline exists
+// for, so the tracker's offline guard would not save it either. Three slow polls would have
+// cancelled a live order that was cooking perfectly well. Adding the deadline WITHOUT this
+// distinction would have been strictly worse than having no deadline at all.
+//
+// So "I couldn't ask" is raised as a BUSY error — the same word this file already uses for "the
+// restaurant could not take this right now", rather than a fourth convention — and the strip skips
+// that round without counting it. `null` keeps meaning exactly what it meant.
+const STATUS_TIMEOUT_MS = 10000;   // shorter than an order's 15s: this is a read, and it repeats
+
 export async function getOrderStatus(
   id: string
 ): Promise<{ status: OrderStatus; tableNumber: string | null; createdAt: string } | null> {
   // Ask the database function for just this one order's status.
-  const { data, error } = await supabase.rpc("get_order_status", { order_id: id });
-  // Anything wrong or no matching order -> return null (caller treats as "unknown").
+  // Guarded the same way orderDeadline() is: reading `AbortSignal.timeout` throws on an older
+  // phone, and this file has already been bitten by that exact thing.
+  let signal: AbortSignal | undefined;
+  try {
+    signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(STATUS_TIMEOUT_MS)
+      : undefined;
+  } catch { signal = undefined; }
+  const { data, error } = signal
+    ? await supabase.rpc("get_order_status", { order_id: id }).abortSignal(signal)
+    : await supabase.rpc("get_order_status", { order_id: id });
+  // A request that was ABANDONED (the deadline above) or never completed is not an answer about
+  // this order at all. Raised, never returned as `null` — see the note above; answering `null` here
+  // is what would cancel a live order on the diner's screen.
+  if (error && isUnreachable(error)) throw busyError("could not reach the restaurant");
+  // Anything else wrong, or no matching order -> return null (caller treats as "gone").
   if (error || !Array.isArray(data) || data.length === 0) return null;
   // Take the first (only) row. "as { ... }" just tells TypeScript its shape.
   const row = data[0] as { status: OrderStatus; table_number: string | null; created_at: string };
