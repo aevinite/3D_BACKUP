@@ -10,6 +10,12 @@
 //      for ever. Reachable on a real phone through the pre-session-scoping name value that
 //      getNickname() deliberately treats as "no name".
 //
+//   E. EVERY SCREEN THIS SHEET DECLARES IS BOTH DRAWN AND REACHABLE, AND NOBODY REACHES THE FLOOR
+//      AS "Someone". Two dead screens were once deleted from this file for reading as live, so a
+//      declared step with no render branch, or a render branch nothing can set, is a fault. And
+//      the waiter-request path must not send a nameless request: the owner's NAME-FIRST rule
+//      (2026-06-17) is why the pending list shows a person.
+//
 //   D. A TAP NEVER SITS IN SILENCE WHILE THE FIRST READ RUNS.
 //      Every screen this sheet can show is behind `setOpen(true)`. For "order" and "call" — which
 //      always open the sheet anyway — that must happen BEFORE the settings read, or the tap shows
@@ -140,8 +146,13 @@ function run(src) {
   console.log("C. the refusal line is readable on the light card too");
   const inlineRed = (src.match(/style=\{\{ color: "#fca5a5" \}\}/g) || []).length;
   check(inlineRed === 0, `no screen in the sheet paints its refusal with a dark-skin-only hex (${inlineRed} found)`);
-  const notes = (code.match(/className="sg-sub sg-note-bad"/g) || []).length;
-  check(notes >= 5, `every screen that renders a refusal uses the skin-aware class (${notes} of 5)`);
+  // Derived, not a typed number: count the screens that render `note` and require every one of
+  // them to carry the class. A hard-coded "at least 5" quietly stops meaning anything the moment a
+  // sixth screen is added — which happened in this same branch (item 8).
+  const noteLines = code.split("\n").filter((l) => /\{note && <p/.test(l));
+  const bare = noteLines.filter((l) => !/sg-note-bad/.test(l));
+  check(noteLines.length > 0 && bare.length === 0,
+    `all ${noteLines.length} screen(s) that render a refusal use the skin-aware class${bare.length ? ` (${bare.length} do not)` : ""}`);
   // …and the two the basket carried, found by the same measurement (item 6).
   const cart = readFileSync(join(ROOT, "components/CartPanel.tsx"), "utf8");
   const cartRed = (cart.match(/#fca5a5/g) || []).length;
@@ -167,6 +178,22 @@ function run(src) {
   check(/getSettings\(rid\),\s*\n\s*new Promise<never>/.test(onDo), "…applied by racing it, not by hoping");
   check(!/setOpen\(true\); setStep\("working"\); \}\s*\n?\s*if \(detail\.action === "connect"\)/.test(onDo) && /detail\.action !== "connect"/.test(onDo),
     "…and `connect` still says nothing, so a diner already at their table gets no pop-up");
+
+  console.log("E. every screen is drawn and reachable, and no request reaches the floor nameless");
+  const decl = /type Step =([\s\S]*?);\n/.exec(code);
+  const steps = decl ? [...decl[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]).filter((x) => x !== "idle") : [];
+  check(steps.length > 0, `${steps.length} screen(s) declared besides "idle"`);
+  const noRender = steps.filter((x) => !new RegExp(`step === "${x}" &&`).test(code));
+  const noSetter = steps.filter((x) => !new RegExp(`setStep\\("${x}"\\)|\\? "${x}" :|: "${x}"\\)`).test(code));
+  check(noRender.length === 0, `every declared screen is drawn${noRender.length ? `: ${noRender} is not` : ""}`);
+  check(noSetter.length === 0, `every declared screen can be reached${noSetter.length ? `: nothing sets ${noSetter}` : ""}`);
+  const req = bodyOf(code, "const doRequest = async (type:");
+  check(!!req && /if \(!who && type === "access"\) \{[^}]*setStep\("access_name"\); return; \}/.test(req),
+    "a waiter request with no name anywhere asks for one instead of reaching the floor as \"Someone\"");
+  check(!!req && req.indexOf('setStep("access_name")') < req.indexOf("await requestAccess("),
+    "…and it asks BEFORE the request is sent, not after");
+  const open = bodyOf(code, "const doRequestOpen = async ()");
+  check(!!open && /if \(!name\.trim\(\)\) \{ setNote\(/.test(open), "the open-my-table request still refuses without a name too");
   return failed;
 }
 
@@ -183,6 +210,8 @@ if (process.argv.includes("--self-test")) {
     ["a refusal painted back in the dark-skin-only red", (s) => s.replace('className="sg-sub sg-note-bad"', 'className="sg-sub" style={{ color: "#fca5a5" }}')],
     ["the waiting screen moved back behind the read", (s) => s.replace('if (detail.action !== "connect") { setOpen(true); setStep("working"); }\n', "")],
     ["the deadline taken off the first read", (s) => s.replace("const s = await Promise.race([", "const s = await Promise.resolve().then(() => [")],
+    ["a nameless waiter request let through to the floor", (s) => s.replace('if (!who && type === "access") { setNote(""); setOpen(true); setStep("access_name"); return; }\n', "")],
+    ["a screen declared but never drawn", (s) => s.replace('| "nickname" | "access_name" |', '| "nickname" | "access_name" | "ghost_screen" |')],
   ];
   for (const [what, bend] of sabotage) {
     const bent = bend(src);

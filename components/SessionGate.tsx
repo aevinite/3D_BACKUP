@@ -59,7 +59,7 @@ const rememberTable = (table: string) => {
 //  waiter together, replaced them. Dead screens read as live the next time this is edited.)
 type Step =
   | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "open_name" | "joining"
-  | "nickname" | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
+  | "nickname" | "access_name" | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
 // location" consent screen, so we only show it the FIRST time and go straight to
@@ -934,6 +934,20 @@ export default function SessionGate() {
     // "Someone". If they have ever given this restaurant a name — on a review, or at a table on an
     // earlier visit — it is here, and the pending-requests view names a person again.
     const who = name.trim() || getNickname(sess.current?.token) || getGuestName() || null;
+    // ── AND NOBODY IS CALLED "SOMEONE" ON THE FLOOR (T4 sweep #9, item 8) ────────────────────────
+    // The fallbacks above cover every diner who has ever given this restaurant a name — at a table,
+    // or on a review. The one case they cannot cover is the one sweep #8 wrote down and could not
+    // close: a brand-new phone tapping "Not at the restaurant? Call a waiter" on the very first
+    // screen, which has no name box on it. That request reached the manager's and the tablet's
+    // pending list as "Someone", and the owner's NAME-FIRST rule (2026-06-17) exists precisely so a
+    // waiter is sent to a PERSON.
+    //
+    // So we ask — once, on its own small screen, and only when there is genuinely nothing to use.
+    // A diner who has a name saved never sees it, which is why this is not more friction on the
+    // escape hatch: it is the same single question the "your table isn't open yet" screen already
+    // asks before it will tell staff anything, now applied to the other way of telling them.
+    // `type === "open"` is untouched — doRequestOpen() already refuses without a name.
+    if (!who && type === "access") { setNote(""); setOpen(true); setStep("access_name"); return; }
     const r = await requestAccess(p.table, type, who, null, ridRef.current);
     // NOBODY WAS TOLD IS NOT "WE'VE LET THE STAFF KNOW" (sweep 6 T3, 2026-08-17).
     //
@@ -959,6 +973,14 @@ export default function SessionGate() {
     setReqAt(Date.now());          // stamped only after requestLanded() said it really landed
     setStep("request_sent");
     } finally { reqBusy.current = false; }
+  };
+  // The access_name screen's button: keep the name for good, then send the request that was
+  // waiting on it. doRequest() re-reads `name`, so it now finds one and goes straight through.
+  const submitAccessName = () => {
+    if (!name.trim()) { setNote("Add your name so staff know who's asking."); return; }
+    setGuestName(name.trim(), ridRef.current); // their ONE name from now on (item 14)
+    setNote("");
+    doRequest("access");
   };
   // From the "not open" screen: tell staff, then keep waiting — proceedWhenOpen
   // (already running) auto-continues the moment they open the table. NAME-FIRST
@@ -1262,6 +1284,22 @@ export default function SessionGate() {
           {note && <p className="sg-sub sg-note-bad">{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={submitNickname}>Continue</button>
+          </div>
+        </>)}
+
+        {/* THE ONE NAME BOX ON THE WAITER-REQUEST PATH (item 8). Shown only when this device has no
+            name anywhere — a returning diner never sees it. Worded as the reason, not as a form:
+            the waiter has to find a person. */}
+        {step === "access_name" && (<>
+          <div className="sg-badge"><i className="fas fa-bell-concierge"></i></div>
+          <div className="sg-kicker">Calling a waiter</div>
+          <h3 className="sg-title">What should we call you?</h3>
+          <p className="sg-sub">Add your name so the waiter knows who they&apos;re looking for. We&apos;ll only ask once.</p>
+          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
+            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitAccessName(); }} autoFocus />
+          {note && <p className="sg-sub sg-note-bad">{note}</p>}
+          <div className="sg-actions">
+            <button className="sg-btn gold" onClick={submitAccessName}>Request a waiter</button>
           </div>
         </>)}
 
