@@ -111,14 +111,22 @@ check("P55226", "…and every OTHER guest render site still divides the same tex
   const missing = Object.entries(want).filter(([f, k]) => !has(code(f), k)).map(([f]) => f.split("/").pop());
   return { ok: missing.length === 0, note: missing.length ? "missing: " + missing.join(", ") : "header, hero and splash all go through lib/brandText" };
 });
+// WHATEVER THE CHIPS SAY (owner, 2026-09-14, item 7). This row used to require the opposite half
+// too — the flat grid only when NO narrowing chip was on — and that half had a hole in it: with Veg
+// on and the sections coming back empty, the diner was told "No dishes match these filters" while
+// their veg dishes sat in the payload, undrawn. Asked which was more honest, the owner chose the
+// dishes. One rule now, and `anyFilterOn` is gone with the split it served.
 check("P55217", "with dishes but no sections, the menu shows the dishes rather than blaming a filter", () => {
   const mv = F.menuView;
-  return { ok: has(mv, "allGroups.length === 0 && filteredItems.length > 0 && !anyFilterOn")
-             && has(mv, "const anyFilterOn = !!(chefActive || favActive || dietActive)"),
-           note: "the flat grid is reached before the no-match message, and only a NARROWING chip counts as a filter" };
+  return { ok: has(mv, "allGroups.length === 0 && filteredItems.length > 0 ?")
+             && !has(mv, "&& !anyFilterOn"),
+           note: "the flat grid is reached before the no-match message, whatever the chips say" };
 });
-check("P55218", "a sort alone never counts as a filter, because a sort hides nothing", () =>
-  ({ ok: !rx(F.menuView, /const anyFilterOn = [^;]*currentSort/), note: "anyFilterOn names chef, favourites and diet only" }));
+// …and the message is still reached when the chips really do match nothing, which is the other half
+// of the same promise: `filteredItems` empty is what sends the diner to the honest screen.
+check("P55218", "…and a menu the chips genuinely empty still gets the honest message", () =>
+  ({ ok: has(F.menuView, "allGroups.length === 0 ? (") && has(F.menuView, "t.noMatch") && has(F.menuView, "t.noMatchSub"),
+     note: "no dishes left after filtering still reaches the headline AND the next step" }));
 check("P55219", "the placeholder category chips stop once the menu has loaded", () => {
   const mv = F.menuView;
   const n = (mv.match(/\(dbCategories\.length === 0 && !loaded\) \|\| visibleCategories\.length > 0/g) || []).length;

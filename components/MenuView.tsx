@@ -1207,11 +1207,23 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   const nonEmptyCatSlugs = new Set(filteredItems.map((it) => it.category));
   const visibleCategories = categories.filter((c) => nonEmptyCatSlugs.has(c.slug));
 
-  // ── IS A FILTER ACTUALLY ON? ─────────────────────────────────────────────────────────────────
-  // Only the three NARROWING chips count. A sort re-orders the menu, it never hides a dish, so a
-  // sorted menu that shows nothing is not "no dishes match these filters". This is what lets the
-  // empty screen below tell the truth about WHY it is empty (guest sweep T1, sweep #8).
-  const anyFilterOn = !!(chefActive || favActive || dietActive);
+  // ── OBITUARY: `anyFilterOn`, removed 2026-09-14 (owner, item 7) ──────────────────────────────
+  //
+  // It existed for one job: when the menu came back with dishes but no SECTIONS, it decided whether
+  // the diner saw the dishes flat or the message "No dishes match these filters. Try turning a
+  // filter off." — the dishes only when no narrowing chip was on.
+  //
+  // The owner chose the dishes, whatever the chips say: *"do 7"*, against the question "which is
+  // more honest — the message that points at a fix, or the dishes with no headings?" He is right,
+  // and the old split had a hole in it that this closes. With Veg on and the sections half of the
+  // read coming back empty, a diner was told to turn a filter off while the veg dishes they asked
+  // for were sitting in the payload, undrawn. The message was true about the filter and false about
+  // the menu.
+  //
+  // One rule now: dishes but no sections → show the dishes. If the chips genuinely match nothing,
+  // `filteredItems` is empty and the honest message below is reached exactly as before — which is
+  // also why nothing is lost by removing this flag. A sort was never part of it (a sort hides no
+  // dish), and with the whole test gone that distinction has nothing left to protect.
 
   // "SLIDE →" IS ONLY TRUE WHEN THE ROW ACTUALLY HAS MORE (T14 tablet sweep, 2026-08-13).
   // The hint was rendered whenever there were categories at all, with no check on the thing it
@@ -1607,7 +1619,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           // shows the name + dish count + a chevron; tapping it folds that category.
           // Every dropdown starts OPEN so guests see the whole menu at a glance;
           // closedCats records the ones they folded shut (remembered for 10 min).
-          allGroups.length === 0 && filteredItems.length > 0 && !anyFilterOn ? (
+          allGroups.length === 0 && filteredItems.length > 0 ? (
             // ── THERE ARE DISHES, BUT NO SECTIONS TO PUT THEM IN ────────────────────────────────
             // Measured on a production build, 360x780, French House with 59 dishes: with the
             // SECTIONS half of the menu read coming back empty — an ordinary blip on one of the two
@@ -1629,8 +1641,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             // silently vanishing.
             //
             // Nothing changes when the sections DO arrive: `allGroups` is non-empty and the grouped
-            // view below is untouched. And when a filter really is on, `anyFilterOn` sends us to the
-            // honest message instead. Guarded by `verify:guest`.
+            // view below is untouched. And when the chips genuinely match nothing, `filteredItems`
+            // is empty and the honest message below is reached instead. Guarded by `verify:guest`.
+            //
+            // Until 2026-09-14 this arm also required that NO narrowing chip was on, which meant a
+            // diner with Veg on was told to turn a filter off while their veg dishes sat undrawn in
+            // the payload. The owner chose the dishes (item 7). See the obituary above.
             <div
               id="items-container"
               className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}
