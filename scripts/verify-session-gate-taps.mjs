@@ -10,6 +10,13 @@
 //      for ever. Reachable on a real phone through the pre-session-scoping name value that
 //      getNickname() deliberately treats as "no name".
 //
+//   G. "WE DON'T KNOW WHICH RESTAURANT" IS NEVER TURNED BACK INTO RESTAURANT #1.
+//      lib/restaurant-context answers a failed lookup with an empty id and `ready:false`, on
+//      purpose, after a fault the owner called "very imp" — guessing #1 puts a diner's order on
+//      another restaurant's floor. This sheet undid that in FIVE places spelled
+//      `ridRef.current || DEFAULT_RESTAURANT_ID`, and neither it nor the card waited for `ready`,
+//      so the id's opening value (#1) was also used while a /r/<slug> lookup was in flight.
+//
 //   F. THE MID-MEAL BLOCK STILL BLOCKS, AND STILL LETS GO.
 //      A table with food in flight refuses to be left — right, and it must stay. But it decided
 //      that purely from "is any dish unserved", so a restaurant that never marks dishes served
@@ -225,6 +232,25 @@ function run(src) {
     "…and an unreadable time keeps the block, so 'I could not tell' falls on the safe side");
   check(/Your order stays with the table for the bill/.test(card),
     "…and leaving still says plainly that the food stays with the bill, which is why letting go is safe");
+
+  console.log("G. an unknown restaurant is never quietly turned into restaurant #1");
+  const subs = code.split("\n").filter((l) => /\|\| DEFAULT_RESTAURANT_ID/.test(l));
+  check(subs.length === 0, `no line in the sheet substitutes restaurant #1 for an unknown one (${subs.length} found)`);
+  check(/const \{ name: restaurantName, ready: restaurantReady \} = useRestaurantMeta\(\)/.test(code),
+    "the sheet takes the settled flag from the provider, not just the id");
+  check(/const settledRestaurant = async \(\): Promise<string \| null> =>/.test(code),
+    "…and has one place that waits for it to settle");
+  check(/if \(!settledRid\) \{/.test(code), "…and refuses honestly when it never settles, rather than guessing");
+  check(/const rid = settledRid;/.test(code), "…so the rules it reads are THIS restaurant's");
+  check(/const rid = ridRef\.current;\n/.test(code) || /const rid = ridRef\.current;/.test(code),
+    "…and an order is placed against the real restaurant, never a substituted one");
+  const cardSrc2 = codeOnly(readFileSync(join(ROOT, CARD), "utf8"));
+  check(/const \{ id: restaurantId, ready: restaurantReady \} = useRestaurantMeta\(\)/.test(cardSrc2),
+    "the card takes the settled flag too");
+  check(/if \(!restaurantReady \|\| !restaurantId\) return;/.test(cardSrc2),
+    "…and asks nothing, and publishes nothing, until the restaurant is known");
+  check(/\}, \[restaurantId, restaurantReady\]\);/.test(cardSrc2),
+    "…and wakes up the moment it becomes known, so this is a wait and not a refusal");
   return failed;
 }
 
@@ -253,6 +279,7 @@ if (process.argv.includes("--self-test")) {
   }
   for (const [what, bend] of [
     ["the mid-meal block made permanent again", (t) => t.replace(" && !foodIsStale", "")],
+    ["the card acting before it knows which restaurant it is on", (t) => t.replace("if (!restaurantReady || !restaurantId) return;\n", "")],
     ["the expiry stretched past any honest meal", (t) => t.replace("const STALE_MEAL_MS = 90 * 60_000;", "const STALE_MEAL_MS = 30 * 60_000;").replace("> STALE_MEAL_MS", "> STALE_MEAL_MS").replace("const STALE_MEAL_MS = 30 * 60_000;", "const STALE_MEAL_MS = 5 * 60_000;")],
     ["the refusal itself removed from both buttons", (t) => t.replace("orderActive ? setBlocked(true) : doChange()", "doChange()")],
   ]) {
@@ -273,6 +300,7 @@ if (process.argv.includes("--self-test")) {
     ["the deadline taken off the first read", (s) => s.replace("const s = await Promise.race([", "const s = await Promise.resolve().then(() => [")],
     ["a nameless waiter request let through to the floor", (s) => s.replace('if (!who && type === "access") { setNote(""); setOpen(true); setStep("access_name"); return; }\n', "")],
     ["a screen declared but never drawn", (s) => s.replace('| "nickname" | "access_name" |', '| "nickname" | "access_name" | "ghost_screen" |')],
+    ["restaurant #1 substituted for an unknown one again", (s) => s.replace("const rid = settledRid;", "const rid = settledRid || DEFAULT_RESTAURANT_ID;")],
   ];
   for (const [what, bend] of sabotage) {
     const bent = bend(src);
