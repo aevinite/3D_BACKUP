@@ -178,7 +178,9 @@ async function postImpl(req: NextRequest): Promise<Response> {
   // "We couldn't tell which restaurant this order was for." No client change was needed.
   const rid = isUuid(b.restaurantId) ? (b.restaurantId as string) : "";
   if (!rid) return NextResponse.json({ ok: false, reason: "unknown_restaurant" }, { status: 400 });
-  if (await offPlanTable(rid, b.table)) return NextResponse.json({ ok: false, reason: "off_plan_table" }, { status: 400 });
+  // `strict` — a guest is locked to a table on the floor plan (item 10); the +500 counter margin is
+  // for the STAFF doors, which are the ones that open a parcel or takeaway counter.
+  if (await offPlanTable(rid, b.table, { strict: true })) return NextResponse.json({ ok: false, reason: "off_plan_table" }, { status: 400 });
 
   const { data, error } = await sb.rpc("lfh_call_waiter_table", {
     p_table: b.table || null,

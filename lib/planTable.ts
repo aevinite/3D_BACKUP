@@ -53,15 +53,40 @@ async function tableCountOf(rid: string): Promise<number | null> {
 }
 
 /**
- * Returns a refusal message when `table` is a NUMBER far beyond this restaurant's floor plan, or
- * null when the write may proceed.
+ * Returns a refusal message when `table` is a NUMBER beyond what this restaurant can have, or null
+ * when the write may proceed.
  *
  * - A non-numeric label ("parcel", "banquet", "A1") is never judged here — those are off-plan by
  *   design and handled by their own features.
  * - FAILS OPEN: if the settings row can't be read we allow the write. A lookup hiccup must never
  *   stop a real order.
+ *
+ * ── TWO CALLERS, TWO DIFFERENT LINES, AND THAT IS THE POINT (sweep #9 T3, item 10) ───────────────
+ *
+ * This check and the DATABASE's own check disagreed, and the gap between them was where a real
+ * diner landed. `lfh_place_order_public` (migration 281) refuses any numeric table above
+ * `table_count`. This helper refused only what was more than PLAN_MARGIN (500) above it. So at a
+ * 30-table restaurant, table **31** walked past this check and was refused by the database a moment
+ * later — the near-miss a person actually types, refused by the half of the pair that did not own
+ * the wording (fixed separately as item 1).
+ *
+ * The margin is not wrong; it is aimed at the wrong callers. It exists because **a restaurant's own
+ * parcel and takeaway counters are numbered ABOVE the floor plan on purpose** — and that is a STAFF
+ * thing. Checked before changing it, rather than assumed:
+ *
+ *   · the two staff doors (`/api/editor`, `/api/tablet`) open those counters — they keep the margin;
+ *   · the two guest doors (`/api/guest/place-order`, `/api/guest/call-waiter`) cannot reach one.
+ *     There is no parcel or takeaway flow on any guest surface (grepped across the basket, the menu,
+ *     the bell popup and the table gate), the guest's own table box is digits-only and validated
+ *     against `tableCount`, and the owner's own words, 2026-09-14: *"user/guest will scan qr and
+ *     they will be locked to that particular table"*.
+ *
+ * So on the guest doors the margin buys nothing at all — every number it waved through was refused
+ * by the database one step later — while costing the diner a worse refusal. `strict` makes the
+ * floor plan the line there, which is the same line the database draws, so the two now agree and
+ * the refusal comes from the half that has the words for it.
  */
-export async function offPlanTable(rid: string, table: unknown): Promise<string | null> {
+export async function offPlanTable(rid: string, table: unknown, opts?: { strict?: boolean }): Promise<string | null> {
   const raw = String(table ?? "").trim();
   if (!raw || !/^\d+$/.test(raw)) return null;      // a label, not a plan number
   const n = Number(raw);
@@ -70,7 +95,9 @@ export async function offPlanTable(rid: string, table: unknown): Promise<string 
     const count = await tableCountOf(rid);           // shared across a burst — see PLAN_WINDOW_MS
     if (count == null) return null;                  // can't tell → let it through
     if (!count) return null;                         // no floor plan configured → nothing to compare
-    if (n > count + PLAN_MARGIN) {
+    // A guest is locked to a table on the floor plan; staff also open counters numbered above it.
+    const ceiling = opts?.strict ? count : count + PLAN_MARGIN;
+    if (n > ceiling) {
       return `Table ${raw} isn't on the floor plan (this restaurant has ${count} tables) — check the number.`;
     }
     return null;
