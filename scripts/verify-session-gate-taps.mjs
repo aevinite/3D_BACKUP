@@ -10,6 +10,12 @@
 //      for ever. Reachable on a real phone through the pre-session-scoping name value that
 //      getNickname() deliberately treats as "no name".
 //
+//   F. THE MID-MEAL BLOCK STILL BLOCKS, AND STILL LETS GO.
+//      A table with food in flight refuses to be left — right, and it must stay. But it decided
+//      that purely from "is any dish unserved", so a restaurant that never marks dishes served
+//      blocked every table for ever. It now expires against the NEWEST order's age, and both
+//      halves must hold: the block, and the expiry.
+//
 //   E. EVERY SCREEN THIS SHEET DECLARES IS BOTH DRAWN AND REACHABLE, AND NOBODY REACHES THE FLOOR
 //      AS "Someone". Two dead screens were once deleted from this file for reading as live, so a
 //      declared step with no render branch, or a render branch nothing can set, is a fault. And
@@ -45,12 +51,13 @@
 // Static — no key, no database, no running app, so it is safe in the PostToolUse hook.
 //   node scripts/verify-session-gate-taps.mjs
 //   node scripts/verify-session-gate-taps.mjs --self-test   # proves each check can go red
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FILE = "components/SessionGate.tsx";
+const CARD = "components/SessionStatusWidget.tsx";
 
 // Strip LINE comments BEFORE block comments. A `/*` sitting inside a `//` line otherwise swallows
 // everything to the next `*/` — this repo has lost 190 lines to that exact order twice.
@@ -194,6 +201,26 @@ function run(src) {
     "…and it asks BEFORE the request is sent, not after");
   const open = bodyOf(code, "const doRequestOpen = async ()");
   check(!!open && /if \(!name\.trim\(\)\) \{ setNote\(/.test(open), "the open-my-table request still refuses without a name too");
+
+  console.log("F. the mid-meal block still blocks, and now lets go when the meal is long over");
+  const card = codeOnly(readFileSync(join(ROOT, CARD), "utf8"));
+  check(/orderActive \? setBlocked\(true\) : doChange\(\)/.test(card) && /orderActive \? setBlocked\(true\) : setConfirming\(true\)/.test(card),
+    "both Change table and Leave still go to the refusal while food is in flight");
+  check(/sItems\.some\(\(i\) => i\.status !== "served"\)/.test(card), "…and it is still unserved food that decides that");
+  // The check that matters most, and the one this guard did NOT have until its own self-test
+  // caught it: the expiry has to REACH the answer. A stale-food test computed and then never
+  // used reads exactly like a working one.
+  check(/setOrderActive\(sItems\.some\(\(i\) => i\.status !== "served"\) && !foodIsStale\)/.test(card),
+    "…and the expiry actually reaches the answer, rather than being computed and ignored");
+  const ms = /const STALE_MEAL_MS = (\d+) \* 60_000;/.exec(card);
+  check(!!ms, "the block has a named expiry rather than lasting for ever");
+  check(!!ms && Number(ms[1]) >= 60, `…and it is ${ms ? ms[1] : "?"} minutes, well past any real service window for a dish still coming`);
+  check(/newestOrderAt > 0 && Date\.now\(\) - newestOrderAt > STALE_MEAL_MS/.test(card),
+    "…measured from the NEWEST order, so a party that just ordered again is still mid-meal");
+  check(/const foodIsStale = newestOrderAt > 0/.test(card),
+    "…and an unreadable time keeps the block, so 'I could not tell' falls on the safe side");
+  check(/Your order stays with the table for the bill/.test(card),
+    "…and leaving still says plainly that the food stays with the bill, which is why letting go is safe");
   return failed;
 }
 
@@ -203,6 +230,23 @@ let bad = run(src);
 
 if (process.argv.includes("--self-test")) {
   console.log("\nSELF-TEST — each sabotage must turn this guard red");
+  // Section F reads a SECOND file, so it is sabotaged on disk and put straight back. A guard that
+  // only ever self-tests the file it was born in stops proving anything the day it grows.
+  const cardPath = join(ROOT, CARD);
+  const cardSrc = readFileSync(cardPath, "utf8");
+  for (const [what, bend] of [
+    ["the mid-meal block made permanent again", (t) => t.replace(" && !foodIsStale", "")],
+    ["the expiry stretched past any honest meal", (t) => t.replace("const STALE_MEAL_MS = 90 * 60_000;", "const STALE_MEAL_MS = 30 * 60_000;").replace("> STALE_MEAL_MS", "> STALE_MEAL_MS").replace("const STALE_MEAL_MS = 30 * 60_000;", "const STALE_MEAL_MS = 5 * 60_000;")],
+    ["the refusal itself removed from both buttons", (t) => t.replace("orderActive ? setBlocked(true) : doChange()", "doChange()")],
+  ]) {
+    const bent = bend(cardSrc);
+    if (bent === cardSrc) { console.log(`  ✗ ${what}: the sabotage matched nothing — this guard is testing itself against code that has moved`); bad++; continue; }
+    writeFileSync(cardPath, bent);
+    const before = console.log; console.log = () => {};
+    let n;
+    try { n = run(src); } finally { console.log = before; writeFileSync(cardPath, cardSrc); }
+    n > 0 ? console.log(`  ✓ ${what} → ${n} check(s) red`) : (console.log(`  ✗ ${what} → still green, so this guard would not catch it`), bad++);
+  }
   const sabotage = [
     ["the name screen set on a closed sheet", (s) => s.replace('setNote(""); setOpen(true); setStep("nickname");', 'setNote(""); setStep("nickname");')],
     ["the sheet growing its own copy of the rules again", (s) => s.replace("const check = validateTable(tableInput,", "const t = tableInput.trim(); if (!/^\\d+$/.test(t)) { setNote(\"no\"); return; }\n    const check = validateTable(tableInput,")],
