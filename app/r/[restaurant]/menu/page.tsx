@@ -29,8 +29,18 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   //
   // getSettings and getRestaurantBySlug are both cached and de-duplicated, and the page below asks
   // for exactly the same two things — so this costs no extra read.
+  //
+  // CLOSED FOR THE EVENING COUNTS AS NOT SERVING TOO (sweep #9 T1, item 2). This checked the two
+  // permanent switches and not the one an owner actually uses on a Tuesday. Both DISH doors were
+  // corrected for exactly this on 2026-08-22 (T2 item 4) — "two switches, one meaning" — and the
+  // MENU doors were left behind. MEASURED with demo-bistro put into service mode for ten seconds
+  // on a production build: the dish door beside it answered title "Menu" / "This menu isn’t
+  // available right now." and no image, while THIS door answered "Demo Bistro — Menu", "View the
+  // menu and order at Demo Bistro." and the restaurant's logo as the preview picture — over a
+  // screen that then tells the diner the restaurant is closed. A link forwarded in a chat, and the
+  // browser tab itself, both invited an order that could not be placed.
   const meta = await getSettings(r.id);
-  if (!r.active || !meta.menuEnabled) {
+  if (!r.active || !meta.menuEnabled || meta.serviceMode) {
     return { title: "Menu", description: "This menu isn’t available right now." };
   }
   const title = r.name ? `${r.name} — Menu` : "Menu";

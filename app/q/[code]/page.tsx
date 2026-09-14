@@ -63,6 +63,13 @@ export async function generateMetadata({ params }: { params: Promise<{ code: str
   const hit = await resolveCode(code);
   // A dead code must not advertise itself either — a neutral title, and no platform description.
   if (!hit) return { title: "Menu", description: "This QR code isn’t active." };
+  // …AND NEITHER DOES A RESTAURANT THAT IS CLOSED FOR THE EVENING (sweep #9 T1, item 2). Same
+  // correction, same wording, as the menu door beside this one and as both dish doors got on
+  // 2026-08-22: service mode and the Menu master switch are two switches with one meaning. This
+  // door only ever saw the master switch (inside resolveCode), so the printed sticker on a table
+  // in a closed restaurant still previewed as "view the menu and order at …", with the logo.
+  // resolveCode already read the settings, so this costs nothing.
+  if (hit.settings.serviceMode) return { title: "Menu", description: "This menu isn’t available right now." };
   const title = hit.r.name ? `${hit.r.name} — Menu` : "Menu";
   const description = hit.r.tagline
     ? `${hit.r.tagline} — view the menu and order at ${hit.r.name}.`
