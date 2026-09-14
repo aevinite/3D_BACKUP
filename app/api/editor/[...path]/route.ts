@@ -54,17 +54,19 @@ import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint 
 // SETTING THE PRINTERS UP FROM THE MACHINE THAT HAS THEM (mig 367, owner 2026-08-27). The same board
 // the admin console draws, narrowed to this computer — same file, same four steps, same words.
 import {
-  agentForDevice, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
-  panelForRole, waitingCount, type RoutableKind,
+  // writeRoutes · readRoutes · syncKotSwitch · ROUTABLE_KINDS · panelForRole · papersForRestaurant
+  // were imported for the setup verbs this route no longer has (owner, 2026-09-14: "that setup will
+  // be done by me only"). An import left behind after its callers go is the next person's clue that
+  // the door is still here.
+  agentForDevice, isRoutableKind, waitingCount, type RoutableKind,
 } from "@/lib/printHelpers";
 // KIND_LABEL — "Kitchen slips" / "Bills" / "Banquet sheets". One wording for the three papers, so a
 // diary line reads the same as the board the person pressed the button on.
 import { KIND_LABEL } from "@/lib/printBoardWords";
 // The ten-minute setup code a computer types in (mig 380) — the ONE way a machine joins this
-// restaurant's printing now that the Allow page is gone.
-import { issueSetupCode } from "@/lib/printSetupCode";
-import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
-import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
+import { printBoardState, stationFiles } from "@/lib/printBoard";
+// Only the TYPE now — the station launcher card still opens on the right operating system.
+import type { HelperOs } from "@/lib/printHelperScript";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
 // BACKUP_PRINTER_MS is gone with the backup screen (owner, 2026-08-30): there is no second room
@@ -2295,7 +2297,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // hiding a button has never been a gate.
     if (path[0] === "printing" && (path.length === 1 || path[1] === "state")) {
       const dv = deviceIdFrom(req);
-      const maySetup = g.user ? await managerCan(g, rid, "print_setup") : true;
+      // ── NOBODY SETS PRINTERS UP FROM THIS PANEL ANY MORE (owner, 2026-09-14) ────────────────
+      // Asked directly whether "May set the printers up" (2026-08-27) or his newer *"in the manager
+      // panel and the owner panel there shouldn't be able to change it"* wins, he ruled:
+      // **"That setup will be done by me only."**
+      //
+      // So this panel's Printing section is a STATUS screen: which papers print, on which printer,
+      // on which computer, and whether that computer is answering — plus a Test print, and emptying
+      // a pile-up for the one person given `print_clear`, which is its own permission and stays.
+      // Deciding WHERE a restaurant's paper comes out is Aevidine's, from the admin console.
+      //
+      // It is `false` for the admin looking in too, deliberately: the controls exist on
+      // /aevinite/printing, and two places to change one thing is how these two boards drifted apart
+      // twice already.
+      const maySetup = false;
       // ── AND WHETHER THIS PERSON MAY EMPTY A PILE-UP (owner, 2026-09-13) ─────────────────────
       // Its own permission, not `maySetup`: setting the printers up and deciding that a hundred
       // waiting tickets never print are different amounts of trust, and the owner asked for this
@@ -2305,9 +2320,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const board = await printBoardState(rid, { deviceId: dv });
       return ok({
         ...board,
-        // The same one generic file the admin console shows — same text, same source, so the two
-        // screens cannot hand out different helpers (mig 368).
-        files: helperFiles(originOfReq(req)),
+        // THE HELPER FILE IS NO LONGER SENT HERE (owner, 2026-09-14: "that setup will be done by
+        // me only"). This panel has no card to show it in, and shipping the text of a file whose
+        // only purpose is linking a computer — to a screen that cannot link one — is a door left
+        // ajar in the payload rather than on the page. /aevinite/printing still has it.
         // MODE B's launcher, sent beside MODE A's. Both are plain text with nothing secret in them,
         // so the panel can show whichever the mode calls for with no second round trip.
         stationFiles: stationFiles(originOfReq(req)),
@@ -5126,7 +5142,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // ── SETTING THE PRINTERS UP, FROM THE COMPUTER THAT HAS THEM (mig 367) ──────────────────────
     //
-    // Every verb below asks managerCan("print_setup") FIRST, before it reads or writes a single row.
+    // Every SETUP verb that used to live below is deleted (owner, 2026-09-14); only the test print
+    // remains, and the refusal above catches anything else that arrives at this path.
     // The screen hides the buttons too, but that is decoration: this is the gate.
     //
     // AND EVERY VERB IS SCOPED TO THIS BROWSER'S OWN COMPUTER. A person with the permission can set
@@ -5166,124 +5183,30 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     if (a === "printing") {
-      if (g.user && !(await managerCan(g, rid, "print_setup"))) return permDenied("set the printers up");
+      // ── EVERY SETUP VERB IS CLOSED HERE (owner, 2026-09-14: "that setup will be done by me only") ──
+      // The panel's Printing section no longer draws any of these controls — and a screen hiding a
+      // button has never been the gate in this product, so the door is shut on the server. The one
+      // verb that is NOT setup keeps working: `queue/clear` is `print_clear`, a different amount of
+      // trust that he asked for by name on 2026-09-13, and it is handled ABOVE this line.
+      //
+      // The `test` verb is allowed through: a test print changes nothing — no route, no switch, no
+      // row — and seeing whether the printer is alive is the whole point of the status screen.
+      // ── ONLY THE TEST PRINT LIVES HERE NOW (owner, 2026-09-14) ─────────────────────────────
+      // `setup-code`, `this-computer`, `unlink` and `route` were DELETED from this block, not left
+      // behind a refusal: a verb that still mints a printing credential, or still rewrites which
+      // printer gets which paper, is a door — and a door nobody can currently open is still a door.
+      // All four live on /aevinite/printing. His ruling: **"That setup will be done by me only."**
+      //
+      // The refusal stays anyway, for anything that arrives at this path that is not the test — a
+      // stale tab, a replayed outbox write, a future verb somebody adds here by habit.
+      const b0 = String(path[1] || "");
+      if (b0 !== "test") return permDenied("set the printers up — Aevidine does that");
       const dv = deviceIdFrom(req);
 
-      // ── HAND OUT A SETUP CODE, FROM THE RESTAURANT'S OWN SCREEN (mig 380) ────────────────────
-      // The same verb the admin console has, behind the same print_setup gate checked one line
-      // above — so the person the owner named on 2026-08-27 ("that device is connected to the
-      // printer, so it will be easy for that device to set up the printer") can still do the whole
-      // job without Aevidine, and a waiter still reaches nothing here.
-      //
-      // ⚠️ IT SITS ABOVE THE DEVICE-ID LINE ON PURPOSE (caught by the printing sweep, phase 469).
-      // Every other verb in this block acts on "the computer THIS browser set up", so it genuinely
-      // needs to know which browser is asking. A setup code does not: it belongs to the restaurant,
-      // and the device id is only a nicety for the log. Below that line, a panel whose device cookie
-      // had not been written yet was refused a code it had every right to — and the reply told the
-      // person to reload the page, for a problem that was never theirs.
-      //
-      // The code is scoped to THEIR restaurant and nobody else's: `rid` here is the signed-in
-      // person's own restaurant, never a value from the body.
-      if (b === "setup-code") {
-        const made = await issueSetupCode(rid, {
-          kind: g.user ? "staff" : "admin",
-          userId: g.user?.id || null,
-          deviceId: dv || null,
-        });
-        if ("error" in made) return err(made.error, 500);
-        // The digits are never logged — only that a code was handed out, and by whom.
-        await logAction("editor", "print_setup_code_issued", {
-          restaurant_id: rid, ...(dv ? { device_id: dv } : {}),
-          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-          detail: "a ten-minute setup code was handed out for a computer to join the printing",
-        });
-        return ok({ code: made.code, pretty: made.pretty, expiresAt: made.expiresAt, expiresInMs: made.expiresInMs });
-      }
 
       if (!dv) return err("This browser has no device id yet — reload the page and try again.", 400);
 
-      // ── "This is the computer with the printer" ───────────────────────────────────────────────
-      // Registers THIS browser's machine and hands back the one-time code. A second call from the
-      // same browser does not make a second computer: it renames the one it already has, because a
-      // person pressing the button twice means "I am setting this machine up", not "I have two".
-      if (b === "this-computer") {
-        const name = String((body as Record<string, unknown>)?.name || "").trim().slice(0, 60)
-          || (g.user?.name || g.user?.username || "This computer");
-        // ── "I AM THAT COMPUTER" ─────────────────────────────────────────────────────────────
-        // The link between a browser and its helper is the panel's own device id, and a device id
-        // does not survive a cleared browser, a new profile, or a machine that was set up from the
-        // admin console in the first place. Without a way back, the person sitting at the printer
-        // would see "this computer is not set up yet" beside a helper that is plainly running, and
-        // the only way out would be a SECOND registration of the same machine — two rows, one
-        // printer, and half the tickets in the wrong room.
-        //
-        // So a computer can be adopted: pick the one you are sitting at, and this browser becomes
-        // its screen. It never steals a machine from another live browser silently — the row's old
-        // device is replaced, and the change is audited like every other printing change.
-        const adopt = String((body as Record<string, unknown>)?.adopt || "");
-        if (adopt) {
-          const row = (await sb.from("print_agents").select("id, name").eq("id", adopt)
-            .eq("restaurant_id", rid).is("revoked_at", null).maybeSingle()).data as { id: string; name: string } | null;
-          if (!row) return err("That computer is not one of this restaurant's.", 404);
-          await sb.from("print_agents").update({ owner_device: dv, owner_user: g.user?.id || null })
-            .eq("id", row.id).eq("restaurant_id", rid);
-          await logAction("editor", "print_routes_changed", {
-            restaurant_id: rid, device_id: dv,
-            ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-            detail: `this screen now manages the computer “${row.name}”`,
-          });
-          return ok({ adopted: true, id: row.id, name: row.name });
-        }
-        const mine = await agentForDevice(rid, dv);
-        if (mine) {
-          if (name !== mine.name) {
-            const up = await sb.from("print_agents").update({ name }).eq("id", mine.id).eq("restaurant_id", rid).select("id").maybeSingle();
-            if (up.error) return err(up.error.code === "23505" ? "There is already a computer with that name." : "Could not rename it.", 400);
-          }
-          return ok({ already: true, id: mine.id, name });
-        }
-        // ── THIS BROWSER CANNOT CONJURE A COMPUTER ANY MORE (mig 380) ──────────────────────────
-        // It used to fall through here and mint a print_agents row with a permanent token, handing
-        // back a helper file with that token typed into it. No screen has called that branch since
-        // mig 368 retired the token-carrying file — it was a live credential minter behind a door
-        // nobody opened, which is exactly what "a new way replaces the old one" is about.
-        //
-        // A computer joins by REDEEMING A SETUP CODE now, which is the same one path the admin
-        // console uses, so there is one story to tell and one thing to guard. This branch is
-        // reachable only when the button is pressed on a browser that has no computer of its own,
-        // and the honest answer to that is the instruction, not a row.
-        return err("Press “Show a setup code” below, then type that code into the helper on the computer with the printer.", 400);
-      }
 
-      // ── UNLINK THIS COMPUTER ──────────────────────────────────────────────────────────────────
-      // It replaces "newcode" (mig 368). Minting a fresh token to be carried to a machine by hand was
-      // the whole ritual the pairing handshake removed, and once the file stopped carrying a token
-      // there was nowhere left to show one — a button that mints a credential nothing displays is
-      // worse than no button.
-      //
-      // Re-linking is now ONE path, the same one as a first-time setup: unlink here, press "Show a
-      // setup code", and type it into the helper on that computer (mig 380 — there is no Allow page
-      // any more). Routes pointing at it are emptied in the same breath, because a route naming a
-      // machine that can no longer print would leave paper silently unprinted, and an EMPTY line at
-      // least says "no printer chosen" on screen.
-      if (b === "unlink") {
-        const mine = await agentForDevice(rid, dv);
-        if (!mine) return err("This computer is not set up here.", 404);
-        await sb.from("print_agents").update({ revoked_at: new Date().toISOString() })
-          .eq("id", mine.id).eq("restaurant_id", rid);
-        const routes = await readRoutes(rid);
-        const patch: Record<string, unknown> = {};
-        for (const k of ROUTABLE_KINDS) {
-          if (routes[k].agent === mine.id) patch[k] = null;   // no backup line to fall back to
-        }
-        if (Object.keys(patch).length) await writeRoutes(rid, patch);
-        await logAction("editor", "print_helper_removed", {
-          restaurant_id: rid, device_id: dv,
-          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-          detail: `“${mine.name}” was unlinked and can no longer print`,
-        });
-        return ok({ ok: true, cleared: Object.keys(patch) });
-      }
 
 // ── THE "mode" VERB IS GONE HERE TOO (owner, 2026-08-31) ─────────────────────────────────
       // Same reason as the admin console: there is no mechanism left to choose. A manager who wants
@@ -5295,74 +5218,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // route from here always means THIS panel and THIS person — narrowing it to somebody else's
       // screen is an admin act, and letting a manager do it from their own settings would be a way
       // to move another person's paper without telling them.
-      if (b === "route") {
-        const kind = String((body as Record<string, unknown>)?.kind || "");
-        if (!isRoutableKind(kind)) return err("There is no such kind of paper.", 400);
-        const who = String((body as Record<string, unknown>)?.who || "");
-        const mine = await agentForDevice(rid, dv);
-        let patch: Record<string, unknown>;
-        if (who === "computer") {
-          // WHICH machine, not necessarily THIS one. The board's dropdown is grouped by computer, so
-          // a restaurant with two machines can send the bills to the counter and the slips to the
-          // kitchen from either screen. It still falls back to this computer when none is named, so
-          // the older one-machine flow is unchanged.
-          const named = String((body as Record<string, unknown>)?.agent || "");
-          const agentId = named || mine?.id || "";
-          if (!agentId) return err("Set this computer up first — it has to tell us its printers before it can be given any.", 400);
-          const printer = String((body as Record<string, unknown>)?.printer || "");
-          if (!printer) return err("Which printer?", 400);
-          // NO BACKUP FIELDS (owner, 2026-08-30 — there is no backup printer). This still ACCEPTED
-          // `backupAgent` / `backupPrinter` off the request body and wrote them onto the route, weeks
-          // after everything that READ them was deleted. Nothing acted on them, so nothing looked
-          // wrong: it quietly stamped `backupAgent: null` onto every route it saved, and a caller
-          // passing a real one would have had it stored and silently ignored. A field that can still
-          // be WRITTEN is not a deleted field — it is a deleted field waiting to be read again.
-          // (T25 round 3 found the same two lines independently, an hour later, by re-running four old
-          // ledger rows that were still defending the backup printer — P12488, P27231, P27232, P27586.
-          // Two lanes, one leftover: the guard that now watches every file is verify:print-queue's
-          // twelve-file walk, and verify:print-helper block 8h checks the whole tree including the
-          // panels, with the one named shim.)
-          patch = {
-            agent: agentId, printer,
-            paper: (body as Record<string, unknown>)?.paper ?? undefined,
-          };
-        } else if (who === "screen") {
-          // NO `device` HERE, deliberately. A per-paper "On" must produce the SAME shape as naming a
-          // person on the admin board — otherwise one line would be narrowed to this one PC and the
-          // others not, which is a difference nobody asked for and nothing shows.
-          //
-          // THE PANEL FOLLOWS THE PERSON, and it is no longer hard-coded (2026-08-31). This said
-          // `panel: "manager"` outright, which is the same fault he reported on the admin picker
-          // ("choosing a person, there is not kitchen panel available"): writeRoutes then refuses a
-          // cook for not being a manager, so a cook pressing "print them on this screen" from the
-          // kitchen panel was told their own screen was not the kitchen panel. panelForRole is the
-          // one place that answers this, and it answers it for every role that has a screen.
-          patch = { via: "screen", panel: panelForRole(g.user?.role), person: g.user?.id || null };
-        } else if (who === "off") {
-          patch = { via: "off" };
-        } else if (who === "none") {
-          // "— no printer chosen yet —". A real answer, and a different one from "nobody": the line
-          // is simply unanswered again, and every screen says so instead of going quiet.
-          patch = null as unknown as Record<string, unknown>;
-        } else {
-          return err("Say who prints it — this computer, a screen, or nobody.", 400);
-        }
-        const saved = await writeRoutes(rid, { [kind]: patch });
-        if ("error" in saved) return err(saved.error, 400);
-        // KITCHEN SLIPS AND auto_print_kot ARE ONE DECISION (see lib/printHelpers → syncKotSwitch).
-        // Without this the trigger would keep filling the basket with slips nobody could claim,
-        // behind a switch that said off — and the two boards would disagree again, which is the
-        // exact fault the owner reported.
-        if (kind === "kot") await syncKotSwitch(rid, who !== "off");
-        await logAction("editor", "print_routes_changed", {
-          restaurant_id: rid, device_id: dv,
-          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-          detail: `${kind === "kot" ? "kitchen slips" : kind === "bill" ? "bills" : "banquet sheets"} → ${
-            who === "computer" ? `${String((body as Record<string, unknown>)?.printer || "")} on ${mine?.name || "this computer"}`
-              : who === "screen" ? "this screen" : "nobody"}`,
-        });
-        return ok({ routes: saved.routes });
-      }
 
       // ── A REAL SAMPLE OF A REAL DOCUMENT, ON THE ROUTE THAT PRINTS IT (owner, 2026-09-14) ─────
       //

@@ -434,22 +434,33 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "a helper remembers WHICH browser set it up, and that question is indexed",
     "mig 367 has lost owner_device / its index — Settings → Printing then cannot answer 'is this computer already set up?' without a scan");
 
-  check(/id: "print_setup"/.test(tree) && /flag: "print_setup"/.test(tree) && /mgrDef: false/.test(code(tree).match(/id: "print_setup"[\s\S]{0,400}/)?.[0] || ""),
-    "…and setting printers up is its OWN permission, default OFF",
-    "print_setup is gone from the access tree, or defaults ON — it is granted to the ONE person at the machine, not to every manager");
+  // `print_setup` is RETIRED (owner, 2026-09-14: "that setup will be done by me only"). The row is
+  // GONE rather than switched off — a switch on the Access screen that changes nothing when you turn
+  // it on is the dead switch the whole access rebuild existed to delete. Its two NEIGHBOURS must
+  // survive, because each is a different amount of trust he named separately: being the printer, and
+  // emptying a pile-up.
+  check(!/id: "print_setup"/.test(tree) && /id: "print_here"/.test(tree) && /id: "print_clear"/.test(tree),
+    "'May set the printers up' is retired from the Access screen, and the two printing permissions beside it are not",
+    "print_setup is back on the Access screen (it grants nothing now), or retiring it took print_here or print_clear with it");
 
   const eCode = code(eroute);
-  check(/managerCan\(g, rid, "print_setup"\)/.test(eCode),
-    "…asked on the SERVER before any printing setup verb runs, not just hidden on screen",
-    "the panel's printing endpoints no longer check print_setup — hiding a button has never been a gate");
+  // `print_setup` is RETIRED (owner, 2026-09-14: "that setup will be done by me only"). What has to
+  // hold is the same principle it was protecting — the rule lives on the SERVER, not on the screen —
+  // so the guard follows the principle rather than the permission that carried it.
+  check(/if \(b0 !== "test"\) return permDenied/.test(eCode) && !/b === "setup-code"/.test(eCode)
+        && !/b === "route"/.test(eCode) && !/b === "unlink"/.test(eCode),
+    "…and the panel route REFUSES every printing setup verb, and no longer contains one to refuse",
+    "a printing setup verb is back on the panel route — deciding where a restaurant's paper comes out is Aevidine's, and a door nobody can currently open is still a door");
   check(/agentForDevice\(rid, dv\)/.test(eCode) && !/createAgent\(rid, [^,)]+\)\s*;/.test(eCode),
     "…and every verb is scoped to THIS browser's own computer, never another machine",
     "a panel printing verb stopped resolving the machine from this device — a manager could then re-code or re-route somebody else's computer");
 
   // ONE DECISION, ONE COLUMN. The kitchen-slip line and settings.auto_print_kot are the same
   // answer; two controls for one value is exactly what made the two boards disagree on 2026-08-26.
-  check(/export async function syncKotSwitch/.test(lib) && /syncKotSwitch\(rid/.test(eCode) && /syncKotSwitch\(rid/.test(code(adminR)),
-    "the kitchen-slip line IS auto_print_kot — both boards write the one column through one function",
+  // Only the ADMIN board writes routes now, so only it calls this. The rule is unchanged and
+  // matters more, not less: there is one writer of that column and it goes through one function.
+  check(/export async function syncKotSwitch/.test(lib) && /syncKotSwitch\(rid/.test(code(adminR)),
+    "the kitchen-slip line IS auto_print_kot — the one board that writes it does so through one function",
     "a board stopped calling syncKotSwitch: the address book would say 'nobody prints kitchen slips' while the trigger went on queueing them for ever");
   check(!/key: "on", on: st\.printing\.on/.test(code(page)),
     "…and the admin board no longer carries a SECOND switch for it",
@@ -476,9 +487,13 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "…and the words file imports NOTHING, so a client page can read it without dragging the service key in",
     "lib/printBoardWords.ts grew an import: the admin console is a client component, and verify:static will refuse the whole page");
 
-  check(/data-pw="adopt"/.test(epanel) && /adopt/.test(eCode),
-    "a browser that has lost its device id can say 'I am that computer' instead of registering it twice",
-    "adopt is gone — a cleared browser would set the same machine up a second time, and half the tickets would come out in the wrong room");
+  // "I am that computer" was a MANAGER-panel idea: it existed because that panel could register a
+  // machine, and a cleared browser would otherwise register it twice. With setup back in Aevidine's
+  // hands there is one register, on one screen, and nothing to adopt. What must stay true is the
+  // thing it protected — a machine can never end up listed twice.
+  check(!/data-pw="adopt"/.test(epanel) && !/"adopt"/.test(eCode) && /23505/.test(lib),
+    "…and there is nothing to 'adopt': one screen registers a computer, and a duplicate NAME is refused by the database",
+    "the adopt flow is back on the manager panel, or the unique-name refusal that makes it unnecessary has gone");
 
   check(/auto_print_kot_allowed === true;/.test(epanel) && !/const printingOn = st\.auto_print_kot === true && st\.auto_print_kot_allowed === true;/.test(epanel),
     "…and switching kitchen slips off does not hide the screen that switches them back on",
@@ -696,12 +711,18 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   check(/seg\[0\] === "setup-code"/.test(code(adminR)) && /issueSetupCode/.test(adminR),
     "the admin console can hand out a code, behind the same tokenIsValid as every other verb here",
     "the admin console lost the setup-code verb");
-  check(/b === "setup-code"/.test(code(eroute)) && /issueSetupCode\(rid, \{/.test(eroute),
-    "…and so can a restaurant's own screen, behind print_setup — the person the owner named",
-    "the manager panel lost the setup-code verb, so a restaurant cannot set its own printer up without Aevidine");
-  check(/managerCan\(g, rid, "print_setup"\)/.test(code(eroute)),
-    "…and that permission is asked on the SERVER before a code exists, so hiding the button is never the only guard",
-    "the panel's printing verbs stopped asking print_setup — a waiter's own login would reach the code");
+  // ── AND *ONLY* THE ADMIN CONSOLE (owner, 2026-09-14) ──────────────────────────────────────
+  // This pair used to assert the opposite: that a restaurant's own screen could show a setup code
+  // too, behind `print_setup`. That was his own 2026-08-27 ask, and asked directly which of his two
+  // rulings won he replaced it: **"That setup will be done by me only."** So the verb is refused on
+  // the panel route — not hidden, refused, because a stale tab can still post — and the guard now
+  // asserts the refusal rather than the permission that no longer exists.
+  check(!/b === "setup-code"/.test(code(eroute)),
+    "…and ONLY there: the manager panel has no setup-code verb at all any more",
+    "the manager panel can mint a printing setup code again — deciding where a restaurant's paper comes out is Aevidine's");
+  check(/if \(b0 !== "test"\) return permDenied/.test(code(eroute)),
+    "…and every other printing verb on the panel route is refused outright, leaving only the test print",
+    "the panel route's printing verbs are open again — a hidden button has never been the gate");
   check(!/issueSetupCode\([^)]*body\./.test(eroute),
     "…and the panel's code is for THEIR restaurant, never an id out of the request",
     "the panel's setup-code verb takes a restaurant id from the body — one manager could attach a machine to somebody else's shop");
@@ -759,18 +780,25 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "the single-instance lock is gone: auto-start plus a double-click would put two helpers on one token");
 
   // ONE FILE, SHOWN BY BOTH BOARDS, and the code-carrying ceremony retired.
-  check(/export const helperFiles/.test(board) && /files: helperFiles\(/.test(code(adminR)) && /files: helperFiles\(/.test(code(eroute)),
-    "both boards show the SAME one file, from one place",
-    "a printing board builds its own helper file again — two screens can then hand out different helpers");
+  // The manager panel stopped being SENT the helper file on 2026-09-14 — it has no card to show it
+  // in, and shipping the text of a linking file to a screen that cannot link is a door left ajar in
+  // the payload. One board shows it, from one place, which is the same rule with one fewer reader.
+  check(/export const helperFiles/.test(board) && /files: helperFiles\(/.test(code(adminR)) && !/files: helperFiles\(/.test(code(eroute)),
+    "the helper file comes from ONE place and is shown on ONE board",
+    "a printing board builds its own helper file again, or the manager panel is being sent one it cannot use");
   // Comments stripped on both sides: the code that REMOVED this ceremony explains what it removed,
   // and quotes the old wording to do it. A guard that trips on its own obituary is a guard the next
   // person deletes (this file's header, and it happened again right here).
   check(!/shown only once/i.test(code(page)) && !/data-pw="newcode"/.test(epanel) && !/"newcode"/.test(code(eroute)),
     "the 'new code, shown once' ceremony is gone — there is no token in the file to guard",
     "the newcode flow is back: it mints a credential that no screen displays any more, which is worse than no button");
-  check(/data-pw="unlink"/.test(epanel) && /b === "unlink"/.test(code(eroute)),
-    "…replaced by Unlink, which also empties the routes that named that machine",
-    "unlink is gone, so there is no way to retire a computer from its own screen");
+  // Unlink lived on the manager panel until 2026-09-14 and is now the admin console's alone, with
+  // the rest of the setup half. Retiring a computer decides where a restaurant's paper stops coming
+  // out, which is the same act as deciding where it starts.
+  // The admin console calls it `agents/:id/revoke`; the word Unlink is what a person reads on it.
+  check(/>Unlink</.test(page) && /revoke/.test(code(adminR)),
+    "…replaced by Unlink, which also empties the routes that named that machine — on the ADMIN board",
+    "unlink is gone from the admin console too, so there is no way to retire a computer at all");
 
   // EVERY RESTAURANT ON ONE PAGE.
   check(/seg\[0\] === "overview"/.test(code(adminR)) && /adm-over-row/.test(page) && /adm-over-row/.test(read("app/globals.css")),
@@ -817,12 +845,12 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   check(/Linked, but not printing anything yet/.test(page) && /Choose a printer on the lines just below/.test(page),
     "…and says, beside that computer, what is left to do",
     "the half-done state has no words on it — the card says connected, the card below offers dropdowns, and nothing joins the two");
-  check(/Show a setup code/.test(page) && /Show a setup code/.test(epanel),
-    "both boards have the same 'Show a setup code' button, in the same words",
-    "one of the two printing boards lost the setup-code button — that board can no longer set a computer up at all");
+  check(/Show a setup code/.test(page) && !/Show a setup code/.test(epanel),
+    "the setup code is the admin console's alone — the manager panel does not offer one",
+    "the manager panel is offering a setup code again (owner, 2026-09-14: \"that setup will be done by me only\")");
   check(/setupCode\?: \{[^}]*expiresAt: string \| null/.test(page)
-    && /left<\/div>|left<\/span>|\} left/.test(page) && /data-pw-left/.test(epanel),
-    "…and each shows a live countdown, so nobody has to guess how long they have",
+    && /left<\/div>|left<\/span>|\} left/.test(page),
+    "…and it shows a live countdown, so nobody has to guess how long they have",
     "a setup code is shown with no clock: 'ten minutes' said once, beside a code somebody is carrying to another room, is a number they then have to guess");
   // ── COPYING THE CODE MUST SAY SO, ON BOTH BOARDS ──────────────────────────────────────────
   // Owner, 2026-09-13: *"im also not able to copy the code or code is being copy but it not show
@@ -845,10 +873,13 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     const h = code(epanel);
     const i = h.indexOf('what === "copycode"');
     const block = i < 0 ? "" : h.slice(i, i + 900);
-    check(/data-pw="copycode"/.test(epanel) && !!block
-      && /Copied \\u2713/.test(block) && /toast\("Copied\."\)/.test(block) && /Could not copy/.test(block),
-      "…and the manager panel has the same button, which changes to Copied, toasts, and says when it cannot",
-      "the manager panel's setup code has no Copy button, or its own handler copies without saying so");
+    // The manager panel's twin of this button went with the card it copied (2026-09-14). What it
+    // taught survives on the admin console above, and on the Test buttons, which say "Sent ✓" on the
+    // control as well as in a toast for the same reason: a toast at the bottom of a tall page can be
+    // off screen while the thumb is still up here.
+    check(!/data-pw="copycode"/.test(epanel) && /Sent \\u2713/.test(code(epanel)),
+      "…and the lesson it taught outlived it: the manager panel's Test button answers on the button, not only in a toast",
+      "the manager panel has a copy-the-code button again, or its Test button stopped answering where the thumb is");
   }
   // COMMENTS STRIPPED: commenting the line out left it matching, so the guard passed over a button
   // that no longer changes at all. Same sabotage run.
@@ -1380,12 +1411,30 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     // backslash that keeps it inside the template literal — hence the optional \\ below. Written
     // once here rather than un-escaping the whole file, which would hide other escaping mistakes.
     const shape = /^for \/f "usebackq tokens=\*" %%i in \(\\?`powershell -NoProfile -Command "[^"]*"\\?`\) do (set "[A-Za-z]+=%%i"|echo\s+%%i)\s*$/;
+    // ── A SECOND PROVEN SHAPE: READING A FILE, NOT RUNNING A COMMAND (2026-09-14) ──────────────
+    // Added with the printing lanes, which read one "id,printer" line per job out of batch.txt.
+    // It is a different shape and it is deliberate, so it is written down rather than waved through:
+    //   · `usebackq` is what makes a DOUBLE-QUOTED argument mean "read this file". Without it the
+    //     same line would treat "…batch.txt" as a literal string to be split — the classic way this
+    //     reads one nonsense line and nobody notices.
+    //   · `tokens=1,*` puts the id in %%a and THE WHOLE REST OF THE LINE in %%b, so a printer called
+    //     "HP LaserJet 1020" survives. `tokens=1,2` would keep only "HP".
+    //   · `delims=,` is safe because the app strips commas (and quotes, backslashes and control
+    //     characters) out of every printer name it will accept — lib/printHelpers → asPrinters — so
+    //     a comma can never appear inside a name and split the line in the wrong place.
+    // Anything that is NOT one of these two shapes still fails, which is the point of the check.
+    const fileShape = /^for \/f "usebackq tokens=1,\* delims=," %%a in \("%WORK%\\\\[A-Za-z.]+"\) do \($/;
+    // …and one more the lanes need: counting the finished flags. `dir /b | find /c /v ""` is the
+    // standard way to count files in cmd, and the pipe MUST be carried as ^| because it sits inside
+    // a for /f 'single-quoted' command, where cmd parses it as a real pipe.
+    const countShape = /^for \/f %%c in \('dir \/b "%WORK%\\\\lane-\*\.done" 2\^>nul \^\| find \/c \/v ""'\) do set "FINISHED=%%c"$/;
     const off = [];
     for (const [label, txt] of targets) {
       txt.split("\n").forEach((raw, n) => {
         const line = raw.trim();
-        if (!/^for \/f.*usebackq/i.test(line)) return;
-        if (!shape.test(line)) off.push(`${label} line ${n + 1}: ${line.slice(0, 90)}`);
+        if (!/^for \/f.*usebackq/i.test(line) && !/^for \/f %%c in \('dir/.test(line)) return;
+        if (shape.test(line) || fileShape.test(line) || countShape.test(line)) return;
+        off.push(`${label} line ${n + 1}: ${line.slice(0, 90)}`);
       });
     }
     check(off.length === 0,
@@ -1618,6 +1667,96 @@ check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(e
     check(/No computer is set to print that yet/.test(src),
       `${name}: Test refuses unless a computer actually owns that paper`,
       `${name}: Test can be pressed with no printer behind it, and would print into nowhere`);
+}
+
+// ── 14 · ONE LANE PER PRINTER (owner, 2026-09-14) ─────────────────────────────────────────────
+//
+// *"Whenever there are more prints in the queue it is working slowly… if there are three different
+// printers connected to the PC and set up for different prints, so all that we have different
+// queue. For example, you can send kitchen and print bill simultaneously in parallel."*
+//
+// The helper printed strictly one job at a time, whatever printer it was for, and each one costs a
+// Chrome render plus up to fifteen seconds waiting for the queue to confirm. A bill for a customer
+// standing at the counter queued behind every kitchen slip in front of it, on a DIFFERENT printer
+// that was idle throughout.
+{
+  const helpers = read("lib/printHelpers.ts");
+  check(/export async function claimSome/.test(helpers) && /const lanes = new Set<string>\(\)/.test(helpers)
+        && /if \(lanes\.has\(printer\)\) continue/.test(helpers),
+    "the app hands out at most ONE job per printer in a round, so two lanes can never share a queue",
+    "claimSome no longer keeps one lane per printer — two workers on one printer is the serial case again, with the ORDER of the tickets thrown away");
+  // The single-job shape has to survive, because a helper is a text file somebody pasted into
+  // Notepad and there is no way to push a new one. An old file cannot send `max`, so an old file
+  // must go on getting exactly what it always got.
+  check(/export async function claimNext/.test(helpers) && /claimSome\(rid, agent, \{ max: 1, routes \}\)/.test(helpers),
+    "…and the OLD single-job door still answers, for every helper file already out there",
+    "claimNext is gone — every helper installed before today would stop printing the moment this shipped");
+  check(/const want = Number\(new URL\(req\.url\)\.searchParams\.get\("max"\) \|\| 0\)/.test(code(agentR))
+        && /if \(want > 1\)/.test(code(agentR)),
+    "…and the batch is only ever sent to a helper that ASKED for it",
+    "the print-agent route answers the batch shape by default — an older helper would be handed JSON it cannot read");
+
+  // ── THE THREE FILES ───────────────────────────────────────────────────────────────────────
+  // Everything a lane touches must carry the job id. Two lanes sharing one job.pdf print each
+  // other's paper, and two Chromes sharing one profile directory fight over its lock — one of them
+  // then silently writes no PDF at all, which reads exactly like a printer that did not respond.
+  const gen = read("lib/printHelperScript.ts");
+  // ── EACH OS IS CHECKED AGAINST ITS OWN BLOCK, NOT THE WHOLE FILE ──────────────────────────
+  // The first version tested the file as a whole, so breaking the MAC copy still passed on the
+  // LINUX copy's identical line — the "matched the other OS's copy" fault this suite has now made
+  // eight times. Caught by sabotage, not by reading.
+  const blockOf = (name) => {
+    const at = gen.indexOf(`const ${name} = (a: HelperScriptArgs) =>`);
+    if (at < 0) return "";
+    const ends = ["mac", "windows", "linux"].map((n) => gen.indexOf(`const ${n} = (a: HelperScriptArgs) =>`))
+      .filter((i) => i > at);
+    return gen.slice(at, ends.length ? Math.min(...ends) : gen.length);
+  };
+  for (const [label, name, htmlPat, pdfPat, profPat] of [
+    ["the Mac helper", "mac", /HTML="\$WORK\/job-\$ID\.html"/, /PDF="\$WORK\/job-\$ID\.pdf"/, /--user-data-dir="\$WORK\/chrome-\$ID"/],
+    ["the Linux helper", "linux", /HTML="\$WORK\/job-\$ID\.html"/, /PDF="\$WORK\/job-\$ID\.pdf"/, /--user-data-dir="\$WORK\/chrome-\$ID"/],
+    ["the Windows helper", "windows", /JHTML=%WORK%\\\\job-%ID%\.html/, /JPDF=%WORK%\\\\job-%ID%\.pdf/, /JPROF=%WORK%\\\\chrome-%ID%/],
+  ]) {
+    const blk = blockOf(name);
+    check(!!blk && htmlPat.test(blk) && pdfPat.test(blk) && profPat.test(blk),
+      `${label}: every file a lane touches is named after its job`,
+      `${label}: two lanes would share one document, one PDF or one Chrome profile — they would print each other's paper`);
+  }
+  // Mac and Linux fan out with `&` and then WAIT. Without the wait, a second round could hand the
+  // same printer another ticket while the first is still going out, and the ORDER of the kitchen's
+  // tickets is a promise the queue makes.
+  for (const os of ["mac", "linux"]) {
+    const blk = gen.split(`const ${os} = `)[1]?.split("\n};")[0] || gen.split(`const ${os} = `)[1] || "";
+    check(/print_one "\$JID" "\$JPR" &/.test(blk) && /\n    wait\b/.test(blk),
+      `the ${os === "mac" ? "Mac" : "Linux"} helper starts a worker per lane and waits for the round to finish`,
+      `the ${os} helper no longer waits for its lanes — a printer could be handed a second ticket while the first is still going out, and they would come out in the wrong order`);
+  }
+  // Windows is the one that cannot be run from here, so its two failure modes are checked by name.
+  {
+    const w = gen.split("const windows = ")[1] || "";
+    // THE RULE IS THE LOCK, NOT "somewhere near the top". The first version compared the dispatch
+    // against `set "CHROME=` — so moving it to sit just above that line still passed, while every
+    // lane would by then be fighting its parent for the single-instance lock. The thing a lane must
+    // never reach is the LOCK, so the lock is what it is measured against. Caught by sabotage.
+    const dispatchAt = w.indexOf('if /i "%~1"=="/lane" goto lane');
+    const lockAt = w.indexOf('>>"%LOCKFILE%"');
+    const promptAt = w.indexOf("Setup code:");
+    check(dispatchAt > 0 && lockAt > 0 && dispatchAt < lockAt && (promptAt < 0 || dispatchAt < promptAt),
+      "the Windows lane dispatch runs BEFORE the single-instance lock and before the setup-code prompt",
+      "the Windows lane dispatch has moved below the lock (or the code prompt): every lane would fight its own parent for the lock, and nothing would print");
+    check(/\/lane "%%a" "%%b" "%CHROME%" "%SUMATRA%"/.test(w) && /set "CHROME=%~4"/.test(w) && /set "SUMATRA=%~5"/.test(w),
+      "…and Chrome and SumatraPDF are PASSED to it, because a lane jumps past the lines that find them",
+      "the Windows lane is left to find Chrome and SumatraPDF itself — it jumps past both, so every lane would have them empty and print nothing, silently");
+    const lane = w.split("\n:lane\n")[1]?.split("\n:idle\n")[0] || "";
+    const exits = (lane.match(/exit \/b/g) || []).length;
+    const flagged = /echo done>"%WORK%\\\\lane-%ID%\.done"/.test(lane);
+    check(flagged && exits <= 2 && !/goto work/.test(lane),
+      "…and every way out of a Windows lane writes its finished-flag (except the one that has no id to name it)",
+      "a Windows lane can end without leaving its flag — the parent then waits the full ninety seconds, losing a round of everybody's printing to one missing file");
+    check(/if %WAITED% LSS 90 goto waitlanes/.test(w),
+      "…and the parent's wait for its lanes is BOUNDED, so a lost flag costs one slow round and never the helper",
+      "the Windows wait-for-lanes loop is unbounded again — one lane that dies without its flag stops that computer printing for ever");
+  }
 }
 
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────

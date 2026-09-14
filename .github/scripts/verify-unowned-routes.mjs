@@ -80,11 +80,19 @@ const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
   want(/\btokenIsValid\s*\(/.test(adminApi) && /seg\[0\] === "setup-code"/.test(adminApi),
     "the admin console's code verb is behind the console's own gate",
     "app/api/admin/printing lost its gate or its setup-code verb");
-  want(/\bmanagerCan\s*\(/.test(eroute) && /"print_setup"/.test(eroute),
-    "…and the restaurant's own verb is behind print_setup, so a waiter's login reaches nothing here",
-    "app/api/editor no longer asks print_setup before the printing verbs",
-    "This is the whole of the owner's objection: the staff login is also the waiter's login, so it\n      " +
-    "could never be the door to deciding where a restaurant's paper comes out.");
+  // ── AND THE RESTAURANT'S OWN VERB IS GONE ENTIRELY (owner, 2026-09-14) ──────────────────────
+  // This asked that the panel's setup verbs sit behind `print_setup`. Asked directly which of his
+  // two rulings won, he answered: **"That setup will be done by me only."** So `setup-code`,
+  // `this-computer`, `unlink` and `route` are DELETED from the panel route rather than gated — a
+  // verb that still mints a printing credential is a door, and a door nobody can currently open is
+  // still a door. The objection this check was written for is answered more completely than before:
+  // the staff login is also the waiter's login, and now it opens nothing here at all.
+  want(!/seg\[0\] === "setup-code"/.test(eroute) && !/b === "setup-code"/.test(eroute)
+       && /if \(b0 !== "test"\) return permDenied/.test(eroute),
+    "…and the restaurant's own panel has no printing setup verb at all — only a test print",
+    "a printing setup verb is back on app/api/editor",
+    "The staff login is also the waiter's login, so it could never be the door to deciding where a\n      " +
+    "restaurant's paper comes out. It now opens nothing here.");
 
   // THE CODE IS A SECRET FOR TEN MINUTES, which is the cost of not asking for a login. It must
   // therefore never be readable twice, and never be stored in the clear.

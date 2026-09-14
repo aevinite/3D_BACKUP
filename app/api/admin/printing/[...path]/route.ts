@@ -17,7 +17,7 @@ import { logAction } from "@/lib/oplog";
 import {
   agentsView, readRoutes, writeRoutes,
   PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch, waitingCount,
-  helperFor, isRoutableKind, type RoutableKind,
+  helperFor, isRoutableKind, papersForRestaurant, type RoutableKind,
 } from "@/lib/printHelpers";
 // KIND_LABEL — one wording for the three papers, so the diary line reads the same as the board.
 import { KIND_LABEL } from "@/lib/printBoardWords";
@@ -334,6 +334,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   if (seg[0] === "routes") {
     const patch = (body.routes && typeof body.routes === "object" ? body.routes : {}) as Record<string, unknown>;
     if (!Object.keys(patch).length) return err("Nothing to save.");
+    // ── A PAPER THIS RESTAURANT DOES NOT HAVE CANNOT BE ROUTED (owner, 2026-09-14) ───────────────
+    // *"If we have not provided the feature of banquet, it should not even show the banquet also in
+    // the printing section."* The LINE is gone from both boards (lib/printHelpers →
+    // papersForRestaurant), and hiding a control has never been a gate in this product: a stale tab
+    // open from before the module was switched off would still post the old line. The server is
+    // where the rule actually lives.
+    {
+      const have = await papersForRestaurant(rid);
+      const strays = Object.keys(patch).filter((k) => isRoutableKind(k) && !have.includes(k));
+      if (strays.length) {
+        return err(`This restaurant does not have ${strays.map((k) => KIND_LABEL[k] || k).join(", ")} — switch the feature on first.`);
+      }
+    }
     const saved = await writeRoutes(rid, patch);
     if ("error" in saved) return err(saved.error);
     // The kitchen-slip line IS settings.auto_print_kot — one decision, one column, one control

@@ -12,9 +12,10 @@
 // copy is the same board narrowed to the machine in front of them. Neither is a different product.
 //
 // It holds no gate of its own. Every caller is already behind its own door — tokenIsValid for the
-// admin route, requireRole + managerCan("print_setup") for the panel route.
+// admin route, and requireRole for the panel route — which since 2026-09-14 shows this board
+// READ-ONLY (owner: "that setup will be done by me only"), so it needs no permission of its own.
 import {
-  agentsView, readRoutes, waitingCount, agentForDevice, ROUTABLE_KINDS, paperStatus,
+  agentsView, readRoutes, waitingCount, agentForDevice, ROUTABLE_KINDS, paperStatus, papersForRestaurant,
   type AgentView, type PrintRoutes, type PaperSize, type RoutableKind, type PaperStatus,
 } from "@/lib/printHelpers";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
@@ -112,7 +113,7 @@ export const helperFiles = (origin: string) =>
 /** Everything both boards draw, in ONE set of reads. Scoped by restaurant, column lists, hard
  *  limits — the egress rule, same as every other read in this app. */
 export async function printBoardState(rid: string, opts?: { deviceId?: string | null; recent?: number }): Promise<BoardState> {
-  const [agents, routes, waiting, setRow, jobs, stuck, setupCode, live] = await Promise.all([
+  const [agents, routes, waiting, setRow, jobs, stuck, setupCode, kinds, live] = await Promise.all([
     agentsView(rid),
     readRoutes(rid),
     waitingCount(rid),
@@ -125,6 +126,10 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     // One indexed row, two columns, scoped to this restaurant — it rides along with the six reads
     // this board already makes rather than costing a round trip of its own.
     liveCodeState(rid),
+    // WHICH PAPERS THIS RESTAURANT ACTUALLY HAS (owner, 2026-09-14) — see lib/printHelpers →
+    // papersForRestaurant. Both boards already iterate `kinds`, so filtering it here removes the line from the
+    // admin console AND the manager panel with no change on either screen.
+    papersForRestaurant(rid),
     // The three status rows. It makes its own pair of reads rather than being handed `routes` and
     // `agents` — deliberately: the owner route calls it on its own, and a version that only works
     // when somebody remembers to pass it two arguments is a version that goes stale in one of the
@@ -135,10 +140,10 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
   const dv = String(opts?.deviceId || "").trim();
   return {
     steps: STEPS,
-    kinds: ROUTABLE_KINDS,
+    kinds,
     labels: { kind: KIND_LABEL, what: KIND_WHAT, off: KIND_OFF_LABEL },
     papers: PAPER_PRESETS,
-    papersByKind: Object.fromEntries(ROUTABLE_KINDS.map((k) => [k, papersFor(k)])) as Record<string, typeof PAPER_PRESETS>,
+    papersByKind: Object.fromEntries(kinds.map((k) => [k, papersFor(k)])) as Record<string, typeof PAPER_PRESETS>,
     paperElsewhere: PAPER_ELSEWHERE,
     agents,
     routes,

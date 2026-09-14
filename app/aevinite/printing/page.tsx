@@ -680,7 +680,17 @@ const PANEL_GROUPS: [ string, string ][] = [
     const [agent, ...rest] = value.split("\u0000");
     const printer = rest.join("\u0000");
     const d = await post("routes", { routes: { [kind]: { via: "computer", agent, printer } } });
-    if (d) { toast(`${KIND_LABEL[kind] || kind} → ${printer}.`, "ok"); void load(); }
+    if (d) {
+      // SAY WHAT IT MEANS WHEN THAT COMPUTER IS ASLEEP. A sleeping printer can be chosen now (see
+      // the note on the dropdown), so the confirmation has to carry the honest consequence rather
+      // than a bare tick — otherwise picking a printer on a shop's closed-for-the-night PC looks
+      // exactly like picking one that is about to print.
+      const a = agents.find((x) => x.id === agent);
+      toast(a && !a.connected
+        ? `${KIND_LABEL[kind] || kind} → ${printer}. ${a.name} is asleep — it prints as soon as that computer is back.`
+        : `${KIND_LABEL[kind] || kind} → ${printer}.`, "ok");
+      void load();
+    }
   };
   /** The value that dropdown is currently showing, in the same encoding. */
   const printerValue = (r: Route | undefined) =>
@@ -1201,14 +1211,33 @@ const PANEL_GROUPS: [ string, string ][] = [
                           {/* THE COMPUTER IS THE GROUP, AND IT SAYS HOW IT IS (owner, 2026-08-29:
                               "there should be a dropdown that how many printers it has and how many
                               are connected… if the PC is disconnected, both printers will be
-                              disconnected only"). A printer is only reachable through its machine,
-                              so a sleeping machine's printers are not offerable — they are shown,
-                              greyed, under a group that says the computer is asleep. */}
+                              disconnected only").
+                              ── A SLEEPING PRINTER CAN STILL BE CHOSEN (owner, 2026-09-14) ────────
+                              His words, on a screenshot of this very dropdown: *"even though this
+                              time printers are connected, why couldn't I able to select the
+                              printer?"* Every option carried `disabled={!a.connected}`, and
+                              `connected` means "polled in the last 30 seconds" (HELPER_STALE_MS).
+                              Three things were wrong with that:
+                                · ONE MISSED POLL locks the screen. Measured on his own Mac the same
+                                  night: the helper went quiet for two minutes while its process was
+                                  perfectly healthy, and the whole picker was unusable.
+                                · AFTER THE SHOP CLOSES nobody can set printing up at all. The PC is
+                                  off overnight, so every printer is greyed, and choosing which
+                                  printer gets the bills would mean going to the restaurant and
+                                  switching a computer on.
+                                · IT CONTRADICTS THE PRODUCT'S OWN RULE. lib/printHelpers → helperFor
+                                  says in as many words that routing to a sleeping machine is
+                                  correct and the ticket WAITS. The system supports it; only this
+                                  dropdown refused.
+                              His 2026-08-29 ask was to SHOW the state, and it was built as BLOCKING
+                              the choice. So the state is still shown — the group says asleep, the
+                              option says asleep — and the choice is allowed. The manager panel never
+                              blocked it, so this also ends a drift between the two boards. */}
                           {agents.map((a) => (
                             <optgroup key={a.id}
-                              label={`${a.name} · ${a.printers.length} printer${a.printers.length === 1 ? "" : "s"} · ${a.connected ? "connected" : "asleep — its printers cannot be used"}`}>
+                              label={`${a.name} · ${a.printers.length} printer${a.printers.length === 1 ? "" : "s"} · ${a.connected ? "connected" : "asleep — anything sent waits until it is back"}`}>
                               {a.printers.map((pr) => (
-                                <option key={pr.name} value={`${a.id}\u0000${pr.name}`} disabled={!a.connected}>
+                                <option key={pr.name} value={`${a.id}\u0000${pr.name}`}>
                                   {pr.name}{pr.paper ? ` · ${paperLabel(pr.paper)}` : ""}{a.connected ? "" : " (asleep)"}
                                 </option>
                               ))}

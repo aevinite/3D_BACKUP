@@ -999,3 +999,83 @@ door now, and the rule that survives is that an unknown kind and a foreign order
 End to end on a virtual thermal printer built from the real ZJ-80 driver — 38 checks, including the
 three samples fetched by a real helper and pushed through a real CUPS queue: the kitchen slip arrived
 as **32,951 bytes** of raster, the bill as **41,606**, and both were read on the paper.
+
+## 2026-09-14 (later) — one lane per printer, a paper a restaurant does not have, and who may change any of it
+
+> Owner, on a screenshot of the printer dropdown: *"Even though this time printers are connected, why
+> couldn't I able to select the printer?"* · *"Whenever there are more prints in the queue it is working
+> slowly — if there are three different printers connected to the PC and set up for different prints, so
+> all that we have different queue. For example, you can send kitchen and print bill simultaneously in
+> parallel."* · *"If we have not provided the feature of banquet, it should not even show the banquet also
+> in the printing section."* · *"In the manager panel and the owner panel there shouldn't be able to change
+> it — just for them to see that a computer is online, printer is online, whichever printer we have set up
+> all online, you are good to go."*
+
+### 1 · A sleeping printer could not be chosen — and that was worse than it looked
+
+Every option in the admin console's picker carried `disabled={!a.connected}`, and **connected means
+"polled in the last 30 seconds"**. Three consequences, all real:
+
+- **One missed poll locked the screen.** Measured on his own Mac the same night: the helper went quiet
+  for two minutes while its process was perfectly healthy.
+- **After the shop closes, nobody could set printing up at all.** The PC is off overnight, so every
+  printer is greyed — choosing which printer gets the bills would mean going to the restaurant and
+  switching a computer on.
+- **It contradicted the product's own rule.** `helperFor` says in as many words that routing to a
+  sleeping machine is correct and the ticket WAITS.
+
+It came from his 2026-08-29 words — *"if the PC is disconnected, both printers will be disconnected
+only"* — which asked to SHOW the state and was built as BLOCKING the choice. The state is still shown
+(the group says asleep, the option says asleep, and the confirmation says "it prints as soon as that
+computer is back"); the choice is allowed. The manager panel never blocked it, so this also ends a
+drift between the two boards.
+
+### 2 · One lane per printer
+
+The helper printed **strictly one job at a time**, whatever printer it was for: fetch → Chrome render
+(~2-3s) → `lp` → poll the queue for up to **15 seconds** → report. A bill for a customer standing at
+the counter queued behind every kitchen slip in front of it, on a different printer that was idle.
+
+`claimSome()` hands back **at most one job per distinct printer**, so one worker per job can never
+collide with another, and a round takes as long as its SLOWEST printer instead of the sum of them.
+Measured: three 3-second jobs in 3.0s, starting 0.7ms apart.
+
+- **The claim is untouched** — still one filtered UPDATE, so a ticket still comes out exactly once.
+- **Per-job files are load-bearing**: two workers sharing one `job.pdf` print each other's paper, and
+  two Chromes sharing one profile directory fight over its lock and one writes nothing.
+- **The old single-job door still answers.** A helper is a text file somebody pasted into Notepad;
+  there is no way to push a new one, so `/next` without `?max=` returns exactly what it always did.
+- **Windows** re-runs the same .bat with `/lane`, dispatched before the single-instance lock. Every
+  lane exit writes a finished-flag, and the parent's wait is **bounded at 90s** — a lost flag costs one
+  slow round, never a helper that stops printing. ⚠️ This is the platform nothing here can execute.
+
+### 3 · A paper the restaurant has not bought is not shown, and cannot be routed
+
+`papersForRestaurant()` drops banquet when the module is off. Both boards already iterate `kinds`, so
+the line disappears everywhere at once — and the **server refuses** a route or a sample for it, because
+hiding a control has never been the gate. Only banquet is gated, and that is not an oversight: kitchen
+slips and bills are core, and a restaurant that prints nothing at all is already handled by
+`auto_print_kot_allowed`, which hides the whole section.
+
+### 4 · Setting printers up is Aevidine's
+
+Asked directly which of his two rulings won, he answered: **"That setup will be done by me only, and
+maybe I was talking about the screen."** So `print_setup` is retired from the Access screen, the four
+setup verbs are **deleted** from the panel route rather than gated, and `maySetup` is a constant
+`false`. The manager panel's Printing section is a status screen: the three papers live, a Test print,
+the computers read-only, what has printed, and the **kitchen-screen launcher** — the "screen" half he
+named in the same breath, which holds no secret and moves nobody's paper. Full record:
+`docs/REJECTED-IDEAS.md`.
+
+### How it was checked
+
+A new sweep, `npm run verify:print-scenarios` — **183 phases over 12 restaurant shapes**: menu-only ·
+printing on with no computer · linked but nothing routed · one printer for everything · three printers
+one per paper · asleep · removed · "Nobody" · queue stopped · banquet off *and* on · manager and owner
+read-only · two restaurants at once. Ten **invariants** are asked of every shape, which is the half that
+catches real faults — a rule that is right for a full restaurant and wrong for a menu-only one is
+exactly the kind that ships.
+
+`verify:print-helper` **232 → 244**. `verify:printing-sweep` 507, with its banquet grid now switching
+the module ON for the grid and back afterwards — it had been routing a paper its restaurant did not
+have, and the new gate caught it.

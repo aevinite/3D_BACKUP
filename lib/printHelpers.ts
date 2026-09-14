@@ -24,6 +24,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { STALE_CLAIM_MS, wrote } from "@/lib/printQueue";
 import type { PaperSize } from "@/lib/printBoardWords";
 import { KIND_LABEL, KIND_OFF_LABEL } from "@/lib/printBoardWords";
+// Which modules this restaurant actually has — ONE settings select for all of them (mig 320).
+import { allModuleLadders } from "@/lib/tableTags";
 
 /** A helper that has not said hello inside this window is shown as not connected. It polls every
  *  ~2s, so 30s means "three quarters of a minute of silence" — long enough to survive a hiccup,
@@ -471,8 +473,39 @@ const liveFilter = () =>
  * what makes "two helpers", "a copied helper file", "two tabs" and "two printers with the same
  * name" all end in ONE piece of paper: everyone after the winner matches zero rows.
  */
-export async function claimNext(rid: string, agent: AgentRow, routes?: PrintRoutes): Promise<ClaimedJob | null> {
-  const R = routes || await readRoutes(rid);
+/**
+ * ── ONE LANE PER PRINTER (owner, 2026-09-14) ─────────────────────────────────────────────────
+ *
+ * *"Whenever there are more prints in the queue, it is working slowly. If possible make a queue of
+ * — if there are three different printers connected to the PC and set up for different prints — so
+ * all that we have different queue. For example, you can send kitchen and print bill simultaneously
+ * in parallel."*
+ *
+ * He is describing the real shape of the fault. The helper printed STRICTLY one job at a time,
+ * whatever printer it was for, and each one costs a Chrome render (~2-3s) plus up to 15 seconds
+ * waiting for CUPS to say the paper actually came out. So a bill for a customer standing at the
+ * counter queued behind every kitchen slip in front of it — on a DIFFERENT printer that was sitting
+ * idle the whole time.
+ *
+ * `claimSome` hands back **at most one job per distinct printer**, which is exactly what makes the
+ * lanes independent: the helper starts one worker per job, and by construction no two workers ever
+ * touch the same printer. A round is then as slow as its slowest printer instead of the sum of all
+ * of them.
+ *
+ * NOTHING ABOUT THE SAFETY CHANGES. Each job is still won by the same single filtered UPDATE, so
+ * two claimers racing still means the second one matches nothing — the guarantee that a ticket comes
+ * out exactly once is the claim, and the claim is untouched.
+ */
+export async function claimSome(
+  rid: string,
+  agent: AgentRow,
+  opts?: { max?: number; routes?: PrintRoutes },
+): Promise<ClaimedJob[]> {
+  const R = opts?.routes || await readRoutes(rid);
+  // Four is a ceiling, not a target: a restaurant has three papers, and a helper that forked one
+  // headless Chrome per waiting ticket would fall over on a backlog. It is also the cap on how many
+  // rows a single poll can claim, so a burst can never strand a dozen tickets in "printing".
+  const max = Math.max(1, Math.min(4, opts?.max ?? 1));
   const mine = PRINT_KINDS.filter((k) => R[k].agent === agent.id);
   // NO EARLY RETURN when nothing is routed here. There was one, and it was the other half of the same
   // fault: a machine with no routes at all could never be handed a job addressed to it by name — which
@@ -511,8 +544,12 @@ export async function claimNext(rid: string, agent: AgentRow, routes?: PrintRout
     .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 
-  const now = Date.now();
+  const out: ClaimedJob[] = [];
+  // ONE PER PRINTER. Two jobs for the same printer in one batch would be two workers fighting over
+  // one queue — which is the serial case again, with the ordering guarantee thrown away.
+  const lanes = new Set<string>();
   for (const row of rows || []) {
+    if (out.length >= max) break;
     if (!isPrintKind(row.kind)) continue;
     const route = R[row.kind];
     let printer: string | null = null;
@@ -525,6 +562,7 @@ export async function claimNext(rid: string, agent: AgentRow, routes?: PrintRout
     // changed underneath it — the paper it was meant for is already half out of the door.
     if (!printer && row.agent_id === agent.id && row.printer) printer = row.printer;
     if (!printer) continue;
+    if (lanes.has(printer)) continue;                     // that lane already has a job this round
 
     const won = (await sb.from("print_jobs")
       .update({ status: "printing", claimed_at: new Date().toISOString(), agent_id: agent.id, printer, printed_by: agent.name })
@@ -532,13 +570,26 @@ export async function claimNext(rid: string, agent: AgentRow, routes?: PrintRout
       .select("id").maybeSingle()).data as { id: string } | null;
     if (!won) continue;                                   // someone else got there first — next row
 
-    return {
+    lanes.add(printer);
+    out.push({
       id: row.id, kind: row.kind, printer, orderId: row.order_id ?? null,
       reprint: row.reprint !== false, attempts: row.attempts || 0,
       payload: (row.payload && typeof row.payload === "object" ? row.payload : {}) as Record<string, unknown>,
-    };
+    });
   }
-  return null;
+  return out;
+}
+
+/**
+ * The single-job door, unchanged for every helper that has ever existed.
+ *
+ * IT STAYS BECAUSE HIS WINDOWS PC IS STILL RUNNING AN OLDER COPY. A helper is a text file somebody
+ * pasted into Notepad; there is no way to push a new one, so the server must go on answering the old
+ * shape for as long as an old file is out there. `claimSome` is the same code path with max:1.
+ */
+export async function claimNext(rid: string, agent: AgentRow, routes?: PrintRoutes): Promise<ClaimedJob | null> {
+  const [one] = await claimSome(rid, agent, { max: 1, routes });
+  return one || null;
 }
 
 /**
@@ -794,11 +845,34 @@ export type PaperStatus = {
   canTest: boolean;
 };
 
+/**
+ * WHICH PAPERS THIS RESTAURANT ACTUALLY HAS (owner, 2026-09-14).
+ *
+ * *"If we have not provided the feature of banquet, it should not even show the banquet also in the
+ * printing section."*
+ *
+ * The three papers were a constant, so a restaurant with the banquet module switched OFF was still
+ * offered a "Banquet sheets" line with a printer dropdown — a control for a feature it does not
+ * have. Measured on Pizza Palace, which has `banquet_allowed: false` and was showing the row.
+ *
+ * It is his standing rule (R36) applied to paper: what is withheld is not mentioned at all — not
+ * greyed, not explained, absent. He confirmed it again when offered the greyed alternative.
+ *
+ * ONLY BANQUET IS GATED, and that is not an oversight: kitchen slips and bills are core — there is
+ * no entitlement anywhere that switches them off (the module list is banquet · inventory · khata ·
+ * payroll · table_ops · table_tags · take_orders). A restaurant that prints nothing at all is
+ * already handled one level up, by `auto_print_kot_allowed`, which hides the whole section.
+ */
+export async function papersForRestaurant(rid: string): Promise<RoutableKind[]> {
+  const ladders = await allModuleLadders(rid);
+  return ROUTABLE_KINDS.filter((k) => k !== "banquet" || ladders.banquet?.effective === true);
+}
+
 export async function paperStatus(rid: string): Promise<PaperStatus[]> {
-  // ONE pair of reads for all three papers — the same reason targetsFor() exists. Asking per kind
-  // would be six reads on a screen that repaints every fifteen seconds.
-  const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
-  return ROUTABLE_KINDS.map((kind) => {
+  // ONE pair of reads for the papers — the same reason targetsFor() exists. Asking per kind would be
+  // six reads on a screen that repaints every fifteen seconds.
+  const [routes, agents, kinds] = await Promise.all([readRoutes(rid), agentsView(rid), papersForRestaurant(rid)]);
+  return kinds.map((kind) => {
     const t = resolveTarget(routes[kind], agents, kind);
     const base = { kind, label: KIND_LABEL[kind] || kind };
     if (t.kind === "computer") {
