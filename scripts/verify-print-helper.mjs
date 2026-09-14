@@ -1915,6 +1915,131 @@ check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",
   "the print-helper design doc has shrunk to a stub");
 
+// ── 10 · WHICH PRINTERS, AND WHETHER THEY ARE ON (owner, 2026-09-14) ─────────────────────────
+// *"Right now, which printer are connected and which are online and all offline, all that stuff is
+// not there only. Make sure it should be there."* It was never reported, so no screen could show it.
+const words = read("lib/printBoardWords.ts");
+check(/PrinterState/.test(words) && /PRINTER_STATE_WORDS/.test(words) && /"ready"/.test(words) && /"paused"/.test(words) && /"offline"/.test(words),
+  "a printer's state has three real answers and a fourth for 'not reported'",
+  "the printer-state words are gone — the boards have nothing to say about whether a printer is switched on");
+check(/unknown:.*Not reported/.test(words),
+  "an OLD helper file reports no state, and that reads as 'not reported' rather than as broken",
+  "a printer whose state we never asked about would be shown as offline, sending somebody to a working printer");
+// Its own copy of the per-OS reader, because the two above are block-scoped. A guard that greps the
+// WHOLE generated file passes on the other operating system's copy of the rule — three of those were
+// found in a single day (2026-09-13), which is why nothing here ever greps `script` directly.
+const genAll = read("lib/printHelperScript.ts");
+const blockOf = (name) => {
+  const at = genAll.indexOf(`const ${name} = (a: HelperScriptArgs) =>`);
+  if (at < 0) return "";
+  const ends = ["mac", "windows", "linux"].map((x) => genAll.indexOf(`const ${x} = (a: HelperScriptArgs) =>`)).filter((i) => i > at);
+  return genAll.slice(at, ends.length ? Math.min(...ends) : genAll.length);
+};
+for (const [flavour, want] of [["mac", /lpstat -l -p/], ["linux", /lpstat -l -p/], ["windows", /WorkOffline/]]) {
+  const b = blockOf(flavour);
+  check(want.test(b) && /state/.test(b),
+    `the ${flavour} helper reports each printer's state, not just its name`,
+    `the ${flavour} helper stopped reporting whether its printers are switched on — the boards go back to saying nothing`);
+}
+check(/\$st='offline'/.test(blockOf("windows")) && !/\?\s*'offline'\s*:/.test(blockOf("windows")),
+  "the windows state is decided with if/elseif, never a ternary — Windows ships PowerShell 5.1",
+  "a ternary is back in the windows printer read; 5.1 cannot parse it and the whole printer list would go with it");
+check(/isPrinterState\(p\.state\)/.test(lib),
+  "the state a machine reports about itself is narrowed to the four known words before it is stored",
+  "a printer state is stored as whatever the machine sent — that lands unchecked in three screens' HTML");
+check(/printerStates/.test(read("lib/printBoard.ts")) && /printerStates/.test(read("public/panels/editor/app.js")),
+  "the panels read the state words from the server, not from a second copy in app.js",
+  "the manager panel writes its own copy of these four words — that is exactly how the two printing boards came to be 'not identical'");
+check(/PRINTER_STATE_WORDS/.test(read("app/api/owner/printing/route.ts")),
+  "the owner's screen says it in the same four words as the other two boards",
+  "the owner board words a printer's state differently from the admin console");
+
+// ── 10b · NOTHING IS "LIVE" WHILE NOTHING CAN PRINT (2026-09-14) ─────────────────────────────
+// The poll answers 204 for EVERY kind while printing is switched off or the queue is stopped — the
+// column is called auto_print_kot but the gate is the whole door. Until this was found, all three
+// boards showed three green LIVE rows and three working-looking Test buttons in that state, and a
+// Test answered "paper should appear in a moment" about a page nothing would ever fetch.
+check(/printingRunning/.test(lib) && /"STOPPED"/.test(lib),
+  "the status rows have their own word for 'printing is not running at all'",
+  "the boards are back to calling a switched-off restaurant LIVE — three green rows where no paper can come out");
+check(/paused/.test(lib) && /switched off/.test(lib),
+  "…and it tells the two reasons apart, because the fix differs",
+  "'the queue is stopped' and 'printing is switched off' are said the same way — one means the tickets are waiting, the other means they were never made");
+check(!/async function printingOn\(rid: string\): Promise<boolean> \{\n  const s = \(await sb/.test(agentR),
+  "the helper's door reads that ONE answer instead of keeping its own private copy",
+  "app/api/print-agent has its own copy of 'is printing on' again — that private copy is exactly why the boards could not know");
+for (const [who, src2] of [["Aevidine's", adminR], ["the manager's", eroute], ["the owner's", read("app/api/owner/printing/route.ts")]]) {
+  check(/printingRunning/.test(src2),
+    `${who} Test verb refuses while nothing is running, instead of queueing a page nobody fetches`,
+    `${who} Test verb still queues a sample when printing is off — it reports success and no paper ever comes out`);
+}
+
+// ── 11 · THE FILE TEXT IS SHUT UNTIL SOMEBODY ASKS (owner, 2026-09-14) ───────────────────────
+// *"The code is visible all the time. Make sure there is a button which is written show the code,
+// then only code should be shown — in both worlds, because it is annoying."*
+check(/Show the code/.test(page) && /setShowCode/.test(page),
+  "the helper file's text is behind a Show the code button",
+  "the file text pours down the printing screen again, pushing the computers and printers below a wall of script");
+check(/showCode \? \(/.test(page) || /\{showCode/.test(page),
+  "…and the code block really is conditional, not merely collapsed with CSS",
+  "the <pre> is still rendered and only hidden — the wall of text is still in the page");
+check(/Copy the file/.test(page),
+  "…and it can still be COPIED without being shown, which is what the file is for",
+  "copying now needs the code revealed first — that is the same annoyance wearing a button");
+// ONE component, both callers — the helper file and the print-station file.
+check((page.match(/<FileCard/g) || []).length >= 2 && (page.match(/function FileCard/g) || []).length === 1,
+  "both file cards are the same component, so the button exists on both",
+  "the two file cards have drifted apart again — one of them will keep its wall of code");
+// ── AND THE OTHER WORLD: THE MANAGER PANEL (owner, 2026-09-14) ───────────────────────────────
+// He said "in both worlds", and the second one is the one that mattered: the manager panel poured
+// 6,760 characters of the print-station script — 330 pixels of it — onto a screen a MANAGER opens.
+// Measured in Chrome, which is the only reason it was found: the admin console's two cards were the
+// obvious reading of "both", and they were the less important half.
+check(/data-pw="showcode"/.test(epanel) && /printShowCode/.test(epanel),
+  "the manager panel's print-station file is behind a Show the code button too",
+  "the manager panel pours the whole print-station script down the page again, above the instructions for using it");
+check(/pwShowCode \? `<div class="pw-code"/.test(epanel),
+  "…and it is not rendered at all until asked for, rather than hidden with CSS",
+  "the manager panel still ships the script in the page and only hides it");
+check(/state\.printShowCode = !state\.printShowCode/.test(epanel),
+  "…and the open/shut state survives the board's own re-render",
+  "the manager panel's Printing section re-renders on every poll, so a CSS-only toggle would snap shut seconds after it was opened");
+check(/Copy the file/.test(epanel),
+  "…and the manager can still copy the file without revealing it",
+  "copying in the manager panel now needs the code shown first");
+
+// ── 12 · A TEST MAY NEVER LEAVE ITS ORDERS ON SOMEBODY'S KITCHEN BOARD (2026-09-14) ──────────
+// 1,284 of them reached the owner's screen and made the panel grind, because a hard DELETE is
+// refused by mig 331 (a sale may never disappear) and a bare `catch {}` hid the refusal for weeks.
+for (const f of ["scripts/verify-printing-sweep.mjs", "scripts/verify-print-speed.mjs"]) {
+  const s = read(f);
+  if (!s) continue;
+  check(!/orders\?id=eq\.\$\{id\}`,\s*\{ method: "DELETE"/.test(s),
+    `${f.split("/").pop()} does not try to hard-delete an order`,
+    `${f.split("/").pop()} hard-deletes its orders again — mig 331 refuses that, and a bare catch turns the refusal into 1,284 fake orders on a real kitchen board`);
+  check(/deleted_at/.test(s) && /archived/.test(s),
+    `${f.split("/").pop()} clears its orders the way the app does — soft-delete and archive`,
+    `${f.split("/").pop()} has no soft-delete, so its orders stay on the kitchen board for ever`);
+}
+// ── AND A TEST MAY NOT PUT A DIALOG IN FRONT OF THE PERSON USING THE MAC (2026-09-14) ────────
+// The speed run's paper chapters start the real helper with a throwaway HOME, and headless Chrome
+// then looked for the login keychain inside it and asked the owner about it — twice, while he was
+// working, once per rendered page. Two rules came out of that, and both are asserted:
+//   · the paper chapters are OPT-IN, so an ordinary run cannot start a helper at all
+//   · when they DO run, the throwaway HOME gets the real keychain linked in
+{
+  const s = read("scripts/verify-print-speed.mjs");
+  check(/!has\("--live-helper"\)/.test(s),
+    "the speed run does not start a real helper unless --live-helper is asked for",
+    "running the real helper is back on by default — that is what put a macOS keychain dialog in front of the owner twice");
+  check(/Library\/Keychains/.test(s),
+    "…and when it does, the throwaway home has a real keychain, so Chrome has nothing to ask about",
+    "the throwaway home has no keychain again, so every rendered page can raise a modal on somebody's screen");
+  check(/use-mock-keychain/.test(genAll) && (genAll.match(/use-mock-keychain/g) || []).length >= 3,
+    "and the shipped helper keeps Chrome out of the password store on all three systems",
+    "the keychain flags are gone from the helper's Chrome — a locked keychain could stall printing behind a modal nobody sees");
+}
+
 if (fails.length) {
   console.log(`\n✗ verify:print-helper — ${fails.length} check(s) failed:`);
   for (const f of fails) console.log("   · " + f);

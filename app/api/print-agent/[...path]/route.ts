@@ -19,7 +19,7 @@
 // blast radius is paper — and one press of Remove in the admin console ends it.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { agentByToken, helloAgent, claimNext, claimSome, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
+import { agentByToken, helloAgent, claimNext, claimSome, readRoutes, paperFor, touchAgent, printingRunning, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
 import { claimSetupCode } from "@/lib/printSetupCode";
 import { rateAllowed, rateResetOnSuccess } from "@/lib/rateLimit";
 import { finishKotJob, tellSomebodyItGaveUp } from "@/lib/printQueue";
@@ -52,16 +52,15 @@ async function whoIsAsking(req: NextRequest): Promise<AgentRow | null> {
 /** Ticks 1 and 2 of the four (docs/PRINT-HELPER.md): printing must exist for this restaurant, and
  *  auto-print must be on. When either is off the helper is told "nothing to print" and idles — it
  *  is not an error, and a restaurant that pauses printing must not fill a log with refusals. */
-async function printingOn(rid: string): Promise<boolean> {
-  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle())
-    .data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
-  // …AND THE QUEUE MUST NOT BE STOPPED (owner, 2026-08-29: "you can stop the queue, restart the
-  // queue"). Stopping is deliberately NOT the same as switching printing off: the tickets go on
-  // being made and go on waiting, so the moment it restarts they all come out. Switching printing
-  // off instead stops them being made at all, and that paper would never exist.
-  if (s?.modules?.printing?.paused === true) return false;
-  return s?.auto_print_kot === true && s?.auto_print_kot_allowed === true;
-}
+// ── THIS MOVED TO lib/printHelpers → printingRunning() ON 2026-09-14 ─────────────────────────
+// It was private to this file, so only the helper's own door could read it — and that is exactly how
+// all three boards came to say LIVE, with working-looking Test buttons, about a restaurant whose
+// printing was switched off. The poll answers 204 for EVERY kind in that state, so the one place
+// that knew could not tell the screens. One copy now, read by the door and by the status rows.
+// (A new way replaces the old one: this function is deleted, not left beside its replacement.)
+// The two reasons it can be off — switched off vs queue stopped — are kept apart there, for the
+// reason recorded there: the tickets are never made in one case and are waiting in the other.
+const printingOn = async (rid: string): Promise<boolean> => (await printingRunning(rid)).on;
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
@@ -111,6 +110,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
 
   const agent = await whoIsAsking(req);
   if (!agent) return err("This computer's printing code is not valid any more.", 401);
+  // ── ASKING FOR WORK IS A SIGN OF LIFE (2026-09-14) ─────────────────────────────────────────
+  // Written here rather than only in `hello`, and the whole reason is spelled out over
+  // SEEN_REFRESH_MS in lib/printHelpers: a round does not return until the backlog is empty, hello
+  // is only asked every fifth round, and the two together made a helper printing a rush report
+  // itself ASLEEP on all three boards. It writes at most once every ten seconds.
+  await touchAgent(agent.id, agent.last_seen_at);
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
 
   // POST /hello — "here I am, and here is what I can print on."
@@ -233,6 +238,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const seg = (path || []).map(String);
   const agent = await whoIsAsking(req);
   if (!agent) return err("This computer's printing code is not valid any more.", 401);
+  // ── AND HERE MOST OF ALL: THE POLL IS A GET ────────────────────────────────────────────────
+  // This is the ask a working helper makes constantly and `hello` is the one it now skips four
+  // times out of five, so a sign of life written only in the POST handler would have fixed nothing
+  // for a computer that is busy printing. The reasoning in full: SEEN_REFRESH_MS, lib/printHelpers.
+  await touchAgent(agent.id, agent.last_seen_at);
 
   // GET /next — "anything for me?" The answer is normally 204: no body, no work, no cost.
   if (seg[0] === "next") {

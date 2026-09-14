@@ -1228,3 +1228,132 @@ question, not a code one, so it stays where it was decided.
 `verify:print-helper` **253 → 263**, four sabotage cases on the new rules, all caught.
 `verify:print-scenarios` 183/183. A backlog of 8 slips + a bill finishes in **39.4s** against a floor
 of ~30s of pure printer time, with the bill out in **7.5s**.
+
+## 2026-09-14 (fifth round) — which printers are ON, and the wall of code behind a button
+
+> *"The code is visible all the time. Make sure there is a button to, uh, which is written show the
+> code. Then only code should be shown. In both worlds, because it is annoying. First of all, there
+> should be the list of computer connected or not, and when the computer is connected, in that
+> computer which printers are connected. There should be that, and then there should be a code. Right
+> now, which printer are connected and which are online and all offline, all that stuff is not there
+> only. Make sure it should be there."*
+
+### 1 · A printer's state was never REPORTED, so no screen could show it
+
+Not hidden — **missing**. The helper told us a printer's NAME, its MODEL and its PAPER SIZE, and
+nothing about whether the thing was switched on. The admin console said `· 6 printers` and stopped;
+the manager panel listed the names joined by dots. So all three boards could say a computer was
+connected while saying nothing at all about the printer the paper actually comes out of — which is
+the one a cook is standing next to.
+
+Every helper now reports one of four words per printer, and **one call answers it** on each system:
+
+| | how it is read | ready | paused | not answering |
+|---|---|---|---|---|
+| mac · linux | `lpstat -l -p <queue>` — the "is idle / disabled" line **and** the Alerts line under it, in one call | neither below | `disabled` | `Alerts: …offline…` |
+| windows | `Get-Printer`, which we already call — no extra call at all | neither below | `PrinterStatus = Paused` | `WorkOffline` **or** `PrinterStatus = Offline` |
+
+`WorkOffline` is checked FIRST on Windows and that is deliberate: *Use Printer Offline* is a setting
+a person can tick by accident, the printer then reports `Normal`, and every job silently queues for
+ever. It is the most common "it is connected but nothing prints" on Windows.
+
+**`unknown` is its own state and is never folded into "offline".** A helper file from before today
+reports nothing, there is no way to push a new file to a restaurant's computer, and saying "offline"
+about a printer we simply have not asked about would send somebody to a working printer. It reads
+**Not reported**, in grey, with the reason said **once under the list** rather than on every row —
+his own Windows PC has six printers, and the same twenty-word sentence six times over is the
+annoyance he asked to be rid of arriving by another door.
+
+The four words live in **one** place (`lib/printBoardWords.ts → PRINTER_STATE_WORDS`) and are *sent
+to the panels* in the board payload. `public/panels/` is plain JavaScript and cannot import the
+library, and a second copy of four words in `app.js` is exactly how these two screens came to be
+"not identical" the first time.
+
+### 2 · Both walls of code are behind a button
+
+Two screens were pouring script down the page on every visit:
+
+- the **admin console's** two file cards (helper file · print-station file) — one component,
+  `FileCard`, so both got the button at once;
+- the **manager panel's** print-station file — **6,760 characters, 330 pixels tall**, above the
+  instructions for using it, on a screen a *manager* opens. This was the one that mattered, and it
+  was only found by looking at the rendered page.
+
+**Copy still works while the code is shut**, and that is the point rather than a nicety: nobody reads
+the file, they paste it. Making somebody reveal 250 lines in order to copy them is the same
+annoyance wearing a button.
+
+### 3 · Nothing is "LIVE" while nothing can print — found by the new sweep
+
+`printingOn()` lived privately inside `app/api/print-agent`, where only the helper's own door could
+read it. And it gates the **whole** poll: while printing is switched off or the queue is stopped,
+`/next` answers 204 for **every** kind — bills and banquet sheets included, whatever the
+`auto_print_kot` column is called.
+
+So all three boards showed **three green LIVE rows and three working-looking Test buttons** on a
+restaurant where no paper could come out, and pressing Test answered *"Sample sent — paper should
+appear in a moment"* about a page nothing would ever fetch.
+
+- it is now `lib/printHelpers → printingRunning()`, one copy, read by the door **and** the rows
+  (the route's private copy was deleted, not left beside it);
+- the rows have their own word, **STOPPED**, and it outranks every other state;
+- the two reasons are kept apart, because the fix differs — *switched off* means the tickets are
+  never made; *stopped* means they are made, waiting, and all come out when it restarts;
+- and all three Test verbs (admin · manager · owner) **refuse** with that reason. Hiding the button
+  has never been the gate in this product.
+
+### 4 · A poll is a sign of life
+
+`last_seen_at` was written by `hello` and nothing else — safe only while hello was asked on every
+poll, which stopped being true when it moved to every fifth round. A round does not return until the
+backlog is empty, so a helper printing a rush stayed inside one round for the best part of a minute,
+past the 30-second window everything uses to decide "connected". **The machine printing hardest was
+the one reported as asleep**, with its Test buttons greyed out to match.
+
+Any authenticated ask from a helper now counts, written at most once every ten seconds
+(`SEEN_REFRESH_MS`) — so a helper polling every two seconds pays one small indexed update per five
+polls, not one per poll, and a helper that has stopped still turns cold after 30s.
+
+### 5 · `verify:print-speed` — 519 phases, and what they measured
+
+A new sweep, about the speed rework only and nothing else, because `verify:printing-sweep` predates
+it and every one of its 507 phases passes whether the helper takes 1.6 seconds or 7. Numbers from a
+full run on this Mac, through three virtual thermal printers with the real ZJ-80 driver:
+
+| | |
+|---|---|
+| job created → the helper is handed it | **~400 ms** (median; 373–665 ms over 20 runs) |
+| an idle poll (the answer is 204) | **~175 ms** median |
+| the bare CUPS floor, no helper at all | **5,493 ms** per page |
+| one ticket, to PAPER | **7,473–9,114 ms** — i.e. the floor plus a poll and a render |
+| one ticket, to the app AGREEING | ~9,900 ms — slower **on purpose** (nothing is called printed until the printer says so) |
+| 8 slips + a bill, start to finish | **36.3 s** |
+| a bill dropped into a running 10-slip backlog | **~10.7 s** |
+| 26 tickets, amortised | **3,585 ms** each |
+
+Two faults it drilled rather than asserted: a finished CUPS job that `PreserveJobHistory No` has
+already forgotten being read as "failed" (which printed **every ticket twice**), and the asleep-while-
+printing fault above.
+
+⚠️ **Its paper chapters are OPT-IN** (`--live-helper`), and that is not tidiness. They run the real
+shipped helper with a throwaway `HOME` so it cannot touch a real token or a real launchd job — and
+headless Chrome then looked for the login keychain inside that throwaway folder, found none, and put
+**"Keychain Not Found — A keychain cannot be found to store Chrome"** in front of the owner, once per
+page it rendered, twice. Proven afterwards with `security default-keychain`: under a bare throwaway
+HOME macOS itself answers *"A default keychain could not be found"*. The run now links the real
+keychain into that HOME, and the shipped helper passes `--use-mock-keychain --password-store=basic`
+as a precaution — a PDF render has no business in the system password store, and this file is started
+by a login item, so it can be running while the keychain is locked.
+
+### 6 · A test may never leave its orders on somebody's kitchen board
+
+The same session found that every printing sweep has been leaving its test orders behind **for
+weeks**. The teardown called `DELETE` on its own `orders` rows, wrapped in a bare `catch {}`; mig
+331's CHECK refuses a hard delete (*"an issued bill cannot be hard-deleted"* — a sale may never
+disappear) and the empty catch swallowed the 400 every single run.
+
+It surfaced as the owner's kitchen panel grinding on **3,893 test orders** — 1,284 from that day's
+run and 1,456 from earlier ones. Both sweeps now **soft-delete and archive** (`deleted_at` +
+`archived`, which is what `lib/liveBoard.ts` filters on, so the row survives and every board is
+clear), and they **count what is left afterwards and say so**. `verify:print-helper` fails if either
+one grows a hard `DELETE` back.

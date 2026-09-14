@@ -1709,6 +1709,12 @@ function bindPrintingBoard(ed) {
         return;
       }
       if (what === "os") { state.printOs = el.dataset.os; renderEditor(); return; }
+      // ── SHOW / HIDE THE FILE'S TEXT (owner, 2026-09-14) ──────────────────────────────────────
+      // Kept on `state` rather than a DOM class because this section is re-rendered wholesale on
+      // every board poll — a CSS toggle would snap shut a few seconds after it was opened, which is
+      // worse than never opening. NOT persisted: a person landing here is nearly always looking at
+      // the computers, not at the file.
+      if (what === "showcode") { state.printShowCode = !state.printShowCode; renderEditor(); return; }
       if (what === "copy") {
         // TWO launcher files exist now (helper · print-station), so the button says which it is.
         const setName = el.dataset.set === "station" ? "stationFiles" : "files";
@@ -13897,6 +13903,37 @@ function formPrinting(s) {
   //     its own machine. It holds no secret and moves nobody's paper.
   //   · What has printed, and emptying a pile-up for whoever has `print_clear` — a different
   //     permission he asked for by name on 2026-09-13, and not setup.
+  // ── ONE PRINTER, AND WHETHER IT WILL PRINT (owner, 2026-09-14) ─────────────────────────────
+  // *"Which printer are connected and which are online and all offline, all that stuff is not there
+  // only."* This panel listed the NAMES joined by dots and said nothing about any of them, which is
+  // one step better than the admin console's bare count and still not the answer.
+  //
+  // THE FOUR WORDS COME FROM THE SERVER (B.printerStates), never from here. This file is plain
+  // JavaScript and cannot import lib/printBoardWords, and a second copy of four words is precisely
+  // how the manager panel and the admin console came to be "not identical" — the owner's own phrase
+  // for it. A server that has not sent them yet falls back to the printer's name alone rather than
+  // inventing a word.
+  const prState = (p) => {
+    const words = (B.printerStates || {})[p && p.state ? p.state : "unknown"];
+    const name = esc(String((p && p.name) || ""));
+    const size = p && p.paper ? ` <span class="muted" style="font-size:11.5px">${Number(p.paper.wMm)} × ${Number(p.paper.hMm)} mm</span>` : "";
+    if (!words) return `<div style="font-size:12.5px"><b>${name}</b>${size}</div>`;
+    const colour = words.ok ? "var(--green)" : (!p.state || p.state === "unknown") ? "var(--muted,#8b93a7)" : "var(--red)";
+    // TWO LINES, the same shape as the admin console's: the name and the one word on top, the
+    // sentence that explains it underneath. One line held a name, a status word and a whole
+    // sentence and wrapped into four.
+    // THE "WHY" IS DROPPED FOR 'not reported', AND SAID ONCE UNDER THE LIST INSTEAD. An old helper
+    // file reports nothing for ANY of its printers, so his real Windows PC showed the same
+    // twenty-word sentence six times over — which is the annoyance he asked to be rid of on the
+    // file text, arriving by another door.
+    const why = (!p.state || p.state === "unknown") ? ""
+      : `<div class="muted" style="font-size:11.5px;padding-left:14px">${esc(words.why)}</div>`;
+    return `<div style="font-size:12.5px;line-height:1.45">`
+      + `<div><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${colour};margin-right:7px"></span>`
+      + `<b>${name}</b> <span style="color:${colour};font-weight:600">${esc(words.label)}</span>${size}</div>`
+      + why
+      + `</div>`;
+  };
   const seenWord = (a) => a.connected ? `connected · seen ${a.secondsAgo || 0}s ago`
     : a.last_seen_at ? `last heard from ${a.secondsAgo > 3600 ? Math.round(a.secondsAgo / 3600) + "h" : Math.round((a.secondsAgo || 0) / 60) + " min"} ago`
     : "has never started yet";
@@ -13910,12 +13947,23 @@ function formPrinting(s) {
     ${agentsList.length ? `<div class="pw-state">
       ${agentsList.map((a) => `<div class="pw-state-row ${a.connected ? "yes" : "no"}">
         <span class="pw-dot" aria-hidden="true"></span>
-        <span class="who"><b>${esc(a.name)}</b><br>${(a.printers || []).length
-          ? esc((a.printers || []).map((p) => p.name).join(" · "))
-          : "It has not listed any printers yet — it does that the first moment the helper runs."}</span>
+        <span class="who"><b>${esc(a.name)}</b></span>
         <span class="pw-val">${a.connected ? "AWAKE" : "ASLEEP"}</span>
         <span class="muted" style="font-size:12px">${esc(seenWord(a))}</span>
-      </div>`).join("")}
+      </div>
+      ${/* THE PRINTERS GET THEIR OWN ROWS, UNDER their computer — NOT inside the one above.
+            They were inside it, and .pw-state-row is a one-line grid: four printers made the row
+            four times too tall, wrapped every sentence into a 200px column, and left the
+            AWAKE/ASLEEP word floating in the vertical middle of it. Seen in Chrome at the size he
+            uses, not reasoned about. */""}
+      ${(a.printers || []).length
+        ? `<div style="padding:2px 0 10px 26px;display:grid;gap:5px">
+            ${(a.printers || []).map((p) => prState(p)).join("")}
+            ${(a.printers || []).some((p) => !p.state || p.state === "unknown")
+              ? `<div class="muted" style="font-size:11.5px">This computer&rsquo;s helper file is from before printers reported whether they were switched on. Everything still prints — ask us to refresh it and these lights come on.</div>`
+              : ""}
+          </div>`
+        : `<div class="muted" style="padding:2px 0 10px 26px;font-size:12.5px">It has not listed any printers yet — it does that the first moment the helper runs.</div>`}`).join("")}
     </div>` : `<p class="what" style="margin:0">No computer prints for this restaurant yet. Kitchen slips come out on the kitchen screen, and bills and banquet sheets open a window for whoever presses Print.</p>`}
   </div>`;
 
@@ -13997,6 +14045,7 @@ function formPrinting(s) {
   const pos = state.printOs || B.os || "mac";
   const OSN = { mac: "Mac", windows: "Windows", linux: "Linux / Raspberry Pi" };
   const sf = sfiles[pos];
+  const pwShowCode = !!state.printShowCode;
   const stepStation = !sf ? "" : `<div class="card"><h3>3 · The kitchen screen</h3>
     <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">
       Kitchen slips print on the <b>kitchen screen</b> whenever no computer is set to take them —
@@ -14013,10 +14062,23 @@ function formPrinting(s) {
       <li>Double-click it. Sign in once in the window it opens — that Chrome remembers.</li>
     </ol>
     <p class="muted" style="font-size:12.5px;margin:0 0 10px">${esc(sf.firstRun || "")}</p>
-    <div class="pw-code">
+    ${/* ── THE CODE IS SHUT UNTIL SOMEBODY ASKS FOR IT (owner, 2026-09-14) ──────────────────────
+          *"The code is visible all the time. Make sure there is a button which is written show the
+          code, then only code should be shown — in both worlds, because it is annoying."*
+          THIS is the second world, and it is the one that matters most: 6,760 characters of script,
+          330 pixels tall, on the screen a MANAGER opens — above the kitchen-screen instructions and
+          below nothing. The other is the admin console's two file cards.
+          Copy still works while it is shut, because copying is what the file is for — nobody reads
+          it, they paste it. */""}
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button type="button" class="btn" data-pw="showcode" aria-expanded="${pwShowCode ? "true" : "false"}">${pwShowCode ? "Hide the code" : "Show the code"}</button>
+      <button type="button" class="btn primary" data-pw="copy" data-set="station">Copy the file</button>
+      <span class="muted" style="font-size:12px">${esc(sf.filename)} · ${Math.round(String(sf.text || "").length / 1024)} KB — nothing in it is secret.</span>
+    </div>
+    ${pwShowCode ? `<div class="pw-code" style="margin-top:10px">
       <button type="button" class="btn" data-pw="copy" data-set="station">Copy</button>
       <pre>${esc(sf.text)}</pre>
-    </div>
+    </div>` : ""}
   </div>`;
 
   return stepLive + step1 + step2 + stepStation + step4 + guide;

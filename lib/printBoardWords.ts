@@ -15,6 +15,41 @@
  *  untouched. */
 export type PaperSize = { name?: string; wMm: number; hMm: number };
 
+/**
+ * ── IS THAT PRINTER GOING TO PRINT? (owner, 2026-09-14) ──────────────────────────────────────
+ *
+ * *"Right now, which printer are connected and which are online and all offline, all that stuff is
+ * not there only. Make sure it should be there."*
+ *
+ * He is right, and it was not "not shown" — it was never REPORTED. The helper told us a printer's
+ * name, its model and its paper size, and nothing about whether the thing was switched on. So the
+ * boards could say a computer was connected and still had nothing to say about the printer the paper
+ * actually comes out of, which is the one a cook is standing next to.
+ *
+ * THREE STATES, because the three have different answers to "what do I do about it":
+ *   · ready         — it will print.
+ *   · paused        — the queue is stopped. Somebody (or an error) paused it; it needs starting.
+ *   · offline       — nothing is answering at the other end. It is switched off or unplugged.
+ *
+ * `unknown` is its own state and deliberately not folded into any of the three: an older helper file
+ * cannot report this at all, and saying "offline" about a printer we simply have not asked about
+ * would send somebody to a working printer. There is no way to push a new helper file, so an old one
+ * has to be able to say nothing without that being read as bad news.
+ */
+export type PrinterState = "ready" | "paused" | "offline" | "unknown";
+export const PRINTER_STATES: PrinterState[] = ["ready", "paused", "offline", "unknown"];
+export const isPrinterState = (v: unknown): v is PrinterState =>
+  typeof v === "string" && (PRINTER_STATES as string[]).includes(v);
+
+/** What each state is CALLED on screen, and the one-line explanation under it. Said in one place so
+ *  the admin console, the manager panel and the owner's screen cannot word it three ways. */
+export const PRINTER_STATE_WORDS: Record<PrinterState, { label: string; why: string; ok: boolean }> = {
+  ready:   { label: "Ready",         why: "switched on and accepting paper", ok: true },
+  paused:  { label: "Paused",        why: "its queue is stopped — it needs starting again on that computer", ok: false },
+  offline: { label: "Not answering", why: "nothing is replying at the printer — check it is switched on and plugged in", ok: false },
+  unknown: { label: "Not reported",  why: "that computer's helper file is too old to say — paste the current one to see this", ok: false },
+};
+
 /** The four questions, in the order a person asks them. Both screens print these verbatim as their
  *  card headings — that is the whole point of them living in one file. */
 /**

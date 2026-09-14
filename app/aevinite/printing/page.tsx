@@ -18,12 +18,16 @@ import { SkelList } from "@/components/admin/Skeleton";
 // THE WORDS ARE SHARED WITH THE RESTAURANT'S OWN SCREEN (owner, 2026-08-27: "the UI/UX is also not
 // identical"). Four steps, three kinds of paper, one sentence each — declared once in
 // lib/printBoardWords.ts and printed verbatim by both boards, so they cannot drift apart again.
-import { STEPS, WAYS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, paperLabel, waitedWords, waitedShort, whenWords } from "@/lib/printBoardWords";
+import { STEPS, WAYS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, paperLabel, waitedWords, waitedShort, whenWords,
+  PRINTER_STATE_WORDS, isPrinterState, type PrinterState } from "@/lib/printBoardWords";
 import type { WayId } from "@/lib/printBoardWords";
 
 type Rest = { id: string; slug: string; name: string };
 type Paper = { name?: string; wMm: number; hMm: number };
-type Printer = { name: string; desc?: string; paper?: Paper };
+// `state` is OPTIONAL and stays optional: a helper file from before 2026-09-14 reports no state at
+// all, and a file cannot be pushed to a restaurant's computer. Every screen reads a missing state as
+// "not reported" rather than as bad news — see PRINTER_STATE_WORDS.
+type Printer = { name: string; desc?: string; paper?: Paper; state?: PrinterState };
 type Agent = {
   id: string; name: string; printers: Printer[]; last_seen_at: string | null;
   connected: boolean; secondsAgo: number | null; fingerprintClash: boolean;
@@ -163,6 +167,9 @@ function FileCard({ title, lead, files, os, setOs, copy, steps, footer }: {
   steps: (os: string) => React.ReactNode[];
   footer: (os: string) => React.ReactNode;
 }) {
+  // Shut on every visit, deliberately — not remembered. A person who wanted it open five minutes
+  // ago is, the next time they land here, almost always looking at the computers instead.
+  const [showCode, setShowCode] = useState(false);
   const f = files?.[os];
   if (!files || !f) return null;
   // A SECTION, NOT A CARD OF ITS OWN (owner, 2026-09-13: "it looks dark and unmerged"). Both callers
@@ -183,15 +190,57 @@ function FileCard({ title, lead, files, os, setOs, copy, steps, footer }: {
         {steps(os).map((n, i) => <li key={i}>{n}</li>)}
       </ol>
       <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>{footer(os)}</p>
-      <div style={{ position: "relative" }}>
-        <button className="adm-btn" style={{ position: "absolute", top: 8, right: 8, fontSize: 12, zIndex: 2 }}
-          onClick={() => void copy(f.text)}>Copy</button>
-        <pre style={{ background: "#0f1420", color: "#e7ecf5", padding: "14px 16px", borderRadius: 11, overflowX: "auto", fontSize: 12, lineHeight: 1.5, maxHeight: 300 }}>
-          {f.text}
-        </pre>
+      {/* ── THE CODE IS SHUT UNTIL SOMEBODY ASKS FOR IT (owner, 2026-09-14) ────────────────────
+          *"The code is visible all the time. Make sure there is a button which is written show the
+          code, then only code should be shown — in both worlds, because it is annoying."*
+          "Both worlds" is this component's two callers: the helper file and the print-station file.
+          They were each pouring ~250 lines of shell down the page, every visit, for a thing anybody
+          needs about once per computer per year — so the interesting part of the screen (which
+          computers are up, which printers are alive) was always below a wall of script.
+          COPY STILL WORKS WHILE IT IS SHUT, and that is the point rather than a nicety: copying is
+          what the file is FOR. Nobody reads it — they paste it. Making them reveal 250 lines first
+          in order to copy them would be the same annoyance wearing a button. */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="adm-btn" style={{ fontSize: 12.5 }} aria-expanded={showCode}
+          onClick={() => setShowCode((v) => !v)}>
+          <i className={`fas fa-chevron-${showCode ? "up" : "down"}`} aria-hidden="true" style={{ marginRight: 7, fontSize: 11 }} />
+          {showCode ? "Hide the code" : "Show the code"}
+        </button>
+        <button className="adm-btn primary" style={{ fontSize: 12.5 }} onClick={() => void copy(f.text)}>
+          <i className="fas fa-copy" aria-hidden="true" style={{ marginRight: 7, fontSize: 11 }} />
+          Copy the file
+        </button>
+        <span className="adm-muted" style={{ fontSize: 12 }}>
+          {f.filename} · {Math.round(f.text.length / 1024)} KB — nothing in it is secret, and it is the same file for every restaurant.
+        </span>
       </div>
+      {showCode ? (
+        <div style={{ position: "relative", marginTop: 10 }}>
+          <button className="adm-btn" style={{ position: "absolute", top: 8, right: 8, fontSize: 12, zIndex: 2 }}
+            onClick={() => void copy(f.text)}>Copy</button>
+          <pre style={{ background: "#0f1420", color: "#e7ecf5", padding: "14px 16px", borderRadius: 11, overflowX: "auto", fontSize: 12, lineHeight: 1.5, maxHeight: 300 }}>
+            {f.text}
+          </pre>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+/** "6 printers · 4 ready" — the one-line answer above the list (owner, 2026-09-14).
+ *
+ *  It used to say "· 6 printers" and that is not information: six printers with four switched off is
+ *  the state somebody has to DO something about, and it read identically to six working ones. The
+ *  ready count is left off entirely when no printer on the machine has reported a state, because an
+ *  old helper file would otherwise make every machine read "6 printers · 0 ready". */
+function printerTally(printers: Printer[]): string {
+  const n = printers.length;
+  const head = `${n} printer${n === 1 ? "" : "s"}`;
+  const known = printers.filter((p) => p.state && isPrinterState(p.state));
+  if (!known.length) return head;
+  const ready = known.filter((p) => p.state === "ready").length;
+  if (ready === known.length && known.length === n) return `${head} · all ready`;
+  return `${head} · ${ready} of ${known.length} ready`;
 }
 
 /** HOW LONG IS LEFT, in the words a person says. Ticked by the card, not stored on the server:
@@ -1101,7 +1150,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                           : a.last_seen_at ? `last seen ${a.secondsAgo != null && a.secondsAgo > 3600 ? Math.round(a.secondsAgo / 3600) + "h" : Math.round((a.secondsAgo ?? 0) / 60) + " min"} ago`
                           : "never said hello yet"}
                       </span>
-                      <span className="adm-muted" style={{ fontSize: 12 }}>· {a.printers.length} printer{a.printers.length === 1 ? "" : "s"}</span>
+                      <span className="adm-muted" style={{ fontSize: 12 }}>· {printerTally(a.printers)}</span>
                       <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
                         <button className="adm-btn" style={{ fontSize: 12 }} disabled={!!busy}
                           onClick={async () => {
@@ -1124,11 +1173,65 @@ const PANEL_GROUPS: [ string, string ][] = [
                         tickets will come out in the wrong room — unlink it and set the other machine up as its own.
                       </div>
                     ) : null}
+                    {/* ── AND WHICH PRINTERS, AND WHICH OF THEM ARE ALIVE (owner, 2026-09-14) ──
+                        *"When the computer is connected, in that computer which printers are
+                        connected, there should be that… right now which printer are connected and
+                        which are online and all offline, all that stuff is not there only."*
+                        It said "· 6 printers" and stopped. A count cannot answer the only question
+                        anybody has in front of this screen — is the printer the paper comes out of
+                        switched on — and that is the question, because the computer being connected
+                        says nothing at all about the printer plugged into it. */}
                     {!a.printers.length ? (
                       <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 7 }}>
                         It has not reported any printers yet — it reports them the first time the helper runs.
                       </div>
-                    ) : null}
+                    ) : (
+                      <div style={{ marginTop: 8, display: "grid", gap: 5 }}>
+                        {a.printers.map((pr) => {
+                          const w = PRINTER_STATE_WORDS[pr.state && isPrinterState(pr.state) ? pr.state : "unknown"];
+                          return (
+                            // TWO LINES PER PRINTER, laid out rather than left to wrap. Inline, the
+                            // name, the state word, a whole sentence and two facts about the paper
+                            // wrapped into three ragged lines and the paper size ended up looking
+                            // like it belonged to the printer below. Seen in Chrome, not guessed.
+                            <div key={pr.name} title={w.why} style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+                              <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+                                <span aria-hidden="true" style={{
+                                  width: 8, height: 8, borderRadius: "50%", display: "inline-block", flex: "0 0 auto",
+                                  background: w.ok ? "var(--adm-ok, #30a46c)"
+                                    : pr.state === "unknown" || !pr.state ? "var(--adm-muted, #8b93a7)"
+                                    : "var(--adm-danger, #e5484d)",
+                                }} />
+                                <b>{pr.name}</b>
+                                <span style={{
+                                  fontWeight: 600,
+                                  color: w.ok ? "var(--adm-ok, #30a46c)"
+                                    : pr.state === "unknown" || !pr.state ? "var(--adm-muted, #8b93a7)"
+                                    : "var(--adm-danger, #e5484d)",
+                                }}>{w.label}</span>
+                                {pr.paper ? <span className="adm-muted" style={{ fontSize: 12 }}>{paperLabel(pr.paper)}</span> : null}
+                                {pr.desc ? <span className="adm-muted" style={{ fontSize: 12 }}>· {pr.desc}</span> : null}
+                              </div>
+                              {/* Not repeated for "not reported": an old helper file says nothing
+                                  about ANY of its printers, so a six-printer machine printed the
+                                  same sentence six times. It is said once under the list instead. */}
+                              {pr.state && pr.state !== "unknown"
+                                ? <div className="adm-muted" style={{ fontSize: 12, paddingLeft: 17 }}>{w.why}</div>
+                                : null}
+                            </div>
+                          );
+                        })}
+                        {/* SAID ONCE, UNDER THE LIST, not on every row: an old helper file reports no
+                            state at all, and "Not reported" on six rows with no explanation reads as
+                            six broken printers. */}
+                        {a.printers.some((pr) => !pr.state) ? (
+                          <div className="adm-muted" style={{ fontSize: 12, marginTop: 2 }}>
+                            This computer&rsquo;s helper file is from before printers reported whether they were switched
+                            on. Everything still prints — paste the current file on that machine to see these lights.
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {/* ── LINKED, BUT NOT YET DOING ANYTHING ────────────────────────────────────────

@@ -15,7 +15,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScopeOr503 } from "@/lib/ownerScope";
 import { agentsView, readRoutes, waitingCount, PRINT_KINDS, paperStatus, helperFor, queueJob, isRoutableKind } from "@/lib/printHelpers";
-import { KIND_LABEL } from "@/lib/printBoardWords";
+import { KIND_LABEL, PRINTER_STATE_WORDS } from "@/lib/printBoardWords";
+import { printingRunning } from "@/lib/printHelpers";
 import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -102,9 +103,16 @@ export async function GET(req: NextRequest) {
     allowed: true, on: s?.auto_print_kot === true, waiting,
     // Only what an owner needs to READ: the computer's name, whether it is awake, and what it prints.
     // No codes, no fingerprints — there is nothing on this screen worth stealing.
+    // ── AND WHETHER EACH PRINTER IS GOING TO PRINT (owner, 2026-09-14) ──────────────────────
+    // This sent a list of NAMES, which told the owner nothing he could act on: a computer can be
+    // wide awake with every printer plugged into it switched off. The state rides along per printer,
+    // and the four words it is said in come from PRINTER_STATE_WORDS like everywhere else — this
+    // screen is read-only, so it may only ever SAY what is true, and it must say it in the same
+    // words as the other two boards.
+    printerStates: PRINTER_STATE_WORDS,
     computers: agents.map((a) => ({
       name: a.name, connected: a.connected, secondsAgo: a.secondsAgo,
-      printers: a.printers.map((p) => p.name),
+      printers: a.printers.map((p) => ({ name: p.name, state: p.state || "unknown", paper: p.paper || null })),
     })),
     routes: PRINT_KINDS.map((k) => {
       const r = routes[k];
@@ -190,6 +198,13 @@ export async function POST(req: NextRequest) {
   if (!own.owned) {
     return NextResponse.json({ error: "No computer is set to print that yet — choose a printer for it first." }, { status: 409 });
   }
+  // The owner's screen is read-only but this one verb writes, so it carries the same refusal as the
+  // other two: while printing is off nothing fetches the sample and the note would promise paper
+  // that never comes.
+  const runO = await printingRunning(target);
+  if (!runO.on) return NextResponse.json({ error: runO.why === "paused"
+    ? "The printing queue is stopped, so nothing would come out. Restart it and try again."
+    : "Printing is switched off for this restaurant, so nothing would come out." }, { status: 400 });
   const q = await queueJob(target, kind, { sample: true }, { requestedBy: "sample · owner" });
   if ("error" in q) return NextResponse.json({ error: "Could not send that sample to the printer." }, { status: 500 });
   await logAction("owner", "print_test", {
