@@ -129,6 +129,10 @@ function run(src) {
   // the shared checker still enforces the two rules, and now canonicalises
   check(/\/\^\\d\+\$\/\.test\(value\)/.test(shared), "the shared checker still refuses anything that is not all digits");
   check(/tableCount > 0 && num > tableCount/.test(shared), "…and still refuses a number above the restaurant's own table count");
+  // isSafeInteger, not isInteger: above 2^53-1 the canonicalising below would hand back digits
+  // nobody typed, and `tableCount` is 0 — so the range test is skipped — until settings load.
+  check(/Number\.isSafeInteger\(num\)/.test(shared), "…and refuses a number too big for a phone to hold exactly, before it canonicalises one");
+  check(!/Number\.isInteger\(num\)/.test(shared), "…so the weaker whole-number test cannot come back in its place");
   check(/return \{ ok: true, value: String\(num\) \};/.test(shared), "…and hands back the CANONICAL number, so \"007\" leaves as \"7\"");
   check(!/return \{ ok: true, value \};/.test(shared), "…and never hands back the raw text it was given");
   // the sheet delegates instead of keeping a copy
@@ -234,6 +238,19 @@ if (process.argv.includes("--self-test")) {
   // only ever self-tests the file it was born in stops proving anything the day it grows.
   const cardPath = join(ROOT, CARD);
   const cardSrc = readFileSync(cardPath, "utf8");
+  // lib/table.ts is a THIRD file this guard now defends, so it gets sabotaged on disk too.
+  const tablePath = join(ROOT, "lib/table.ts");
+  const tableSrc = readFileSync(tablePath, "utf8");
+  for (const [what, bend] of [
+    ["the safe-number test weakened back to isInteger", (t) => t.replace("Number.isSafeInteger(num)", "Number.isInteger(num)")],
+  ]) {
+    const bent = bend(tableSrc);
+    if (bent === tableSrc) { console.log(`  ✗ ${what}: the sabotage matched nothing`); bad++; continue; }
+    writeFileSync(tablePath, bent);
+    const before = console.log; console.log = () => {};
+    let n; try { n = run(src); } finally { console.log = before; writeFileSync(tablePath, tableSrc); }
+    n > 0 ? console.log(`  ✓ ${what} → ${n} check(s) red`) : (console.log(`  ✗ ${what} → still green`), bad++);
+  }
   for (const [what, bend] of [
     ["the mid-meal block made permanent again", (t) => t.replace(" && !foodIsStale", "")],
     ["the expiry stretched past any honest meal", (t) => t.replace("const STALE_MEAL_MS = 90 * 60_000;", "const STALE_MEAL_MS = 30 * 60_000;").replace("> STALE_MEAL_MS", "> STALE_MEAL_MS").replace("const STALE_MEAL_MS = 30 * 60_000;", "const STALE_MEAL_MS = 5 * 60_000;")],
