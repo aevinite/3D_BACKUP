@@ -51,8 +51,21 @@ export function validateTable(raw: string, tableCount: number): TableCheck {
       message: `Table ${num} doesn't exist — we have tables 1–${tableCount}. Please check your number.`,
     };
   }
-  // Passed every check — hand back the clean value.
-  return { ok: true, value };
+  // ── "007" IS TABLE 7, AND THE FLOOR HAS NEVER HEARD OF "007" (T4 sweep #9, item 4) ────────────
+  // A table's identity everywhere — sessions, orders, bills, KOTs and the printed QR — is its
+  // NUMBER, stored as text and compared with `=` (migration 131 states exactly that in its own
+  // header; lfh_table_status does `WHERE table_number = lfh_merge_parent_table(...)`). So a padded
+  // "007" passes every check above — it is all digits, and 7 is inside the range — and then matches
+  // nothing: the diner is carried to "your table isn't open yet" for a table that does not exist,
+  // while the one they are sitting at is open, and Request-a-waiter puts "007" in front of the
+  // floor. MEASURED on the wire before this line existed: p_table went out as "007".
+  //
+  // Canonicalising is safe precisely BECAUSE of the two checks above — by this point the value has
+  // been proved a plain positive whole number inside 1..tableCount, and a table's number is never
+  // padded at the place it is created. It is done HERE, in the one shared checker, so all three
+  // doors that ask for a table number get it: the basket's Place Order, the waiter-call popup, and
+  // the table sheet (which stopped keeping its own private copy of these rules in the same change).
+  return { ok: true, value: String(num) };
 }
 
 // Toast the message, focus the offending input, and flash its error state.
