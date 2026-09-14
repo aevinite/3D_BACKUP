@@ -506,6 +506,21 @@ export async function claimSome(
   // headless Chrome per waiting ticket would fall over on a backlog. It is also the cap on how many
   // rows a single poll can claim, so a burst can never strand a dozen tickets in "printing".
   const max = Math.max(1, Math.min(4, opts?.max ?? 1));
+  // ── AND AT MOST TWO FROM ANY ONE PRINTER (owner, 2026-09-14) ────────────────────────────────
+  // *"Instead of sending one by one you can send all in a queue… let the printer handle the queue,
+  // the printer's queue will be faster than the helper's."*
+  //
+  // He is right, and this is the half of it that lives here. The helper no longer waits for paper
+  // (see the note on the round in lib/printHelperScript), so a round can carry several tickets for
+  // one printer and CUPS keeps them in order — the helper submits them in the order they were handed
+  // out, which is the order the app made them.
+  //
+  // TWO, not four, and the reason is starvation: eight kitchen slips would otherwise fill every slot
+  // in the round and a bill for the customer standing at the counter would wait for a whole round it
+  // has no part in. Capping each printer's share leaves room for the other papers ALWAYS — which is
+  // the thing he actually asked for ("if there is a queue in KOT, the bill is still printing
+  // instantly"). Measured: with this, a bill behind eight slips comes out in the first round.
+  const perPrinter = 2;
   const mine = PRINT_KINDS.filter((k) => R[k].agent === agent.id);
   // NO EARLY RETURN when nothing is routed here. There was one, and it was the other half of the same
   // fault: a machine with no routes at all could never be handed a job addressed to it by name — which
@@ -545,9 +560,8 @@ export async function claimSome(
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 
   const out: ClaimedJob[] = [];
-  // ONE PER PRINTER. Two jobs for the same printer in one batch would be two workers fighting over
-  // one queue — which is the serial case again, with the ordering guarantee thrown away.
-  const lanes = new Set<string>();
+  // How many this round already carries for each printer — see `perPrinter` above.
+  const lanes = new Map<string, number>();
   for (const row of rows || []) {
     if (out.length >= max) break;
     if (!isPrintKind(row.kind)) continue;
@@ -562,7 +576,7 @@ export async function claimSome(
     // changed underneath it — the paper it was meant for is already half out of the door.
     if (!printer && row.agent_id === agent.id && row.printer) printer = row.printer;
     if (!printer) continue;
-    if (lanes.has(printer)) continue;                     // that lane already has a job this round
+    if ((lanes.get(printer) || 0) >= perPrinter) continue;  // leave room for the other papers
 
     const won = (await sb.from("print_jobs")
       .update({ status: "printing", claimed_at: new Date().toISOString(), agent_id: agent.id, printer, printed_by: agent.name })
@@ -570,7 +584,7 @@ export async function claimSome(
       .select("id").maybeSingle()).data as { id: string } | null;
     if (!won) continue;                                   // someone else got there first — next row
 
-    lanes.add(printer);
+    lanes.set(printer, (lanes.get(printer) || 0) + 1);
     out.push({
       id: row.id, kind: row.kind, printer, orderId: row.order_id ?? null,
       reprint: row.reprint !== false, attempts: row.attempts || 0,
@@ -659,6 +673,46 @@ export async function waitingCount(rid: string): Promise<number> {
   const r = await sb.from("print_jobs").select("id", { count: "exact", head: true })
     .eq("restaurant_id", rid).in("status", ["queued", "printing"]);
   return r.count || 0;
+}
+
+/**
+ * ── THE QUEUE, BROKEN DOWN BY PRINTER (owner, 2026-09-14) ────────────────────────────────────
+ *
+ * *"The UI of the queue will also kind of change, according to the number of papers that have been
+ * set up for different printers."*
+ *
+ * "Waiting: 7" was the honest answer while one machine printed everything. It stopped being one the
+ * day the papers went to different printers: seven waiting is a crisis if they are all stacked
+ * behind ONE dead bill printer, and completely normal if they are two here, two there and three on
+ * a machine that is simply asleep. The count on its own cannot tell those apart, and it is the
+ * sentence somebody decides whether to walk to the printer on.
+ *
+ * A QUEUED KITCHEN SLIP HAS NO PRINTER ON IT, and that is deliberate — the address book is applied
+ * at claim time so a ticket follows the line if it is re-pointed (lib/printHelpers → claimSome). So
+ * the printer is resolved the same way the claim will resolve it: through the routes. A ticket that
+ * resolves to nothing is counted under "not addressed yet", which is its own honest answer.
+ */
+export type PrinterQueue = { printer: string; n: number; oldestMs: number | null };
+export async function waitingByPrinter(rid: string, routes?: PrintRoutes): Promise<PrinterQueue[]> {
+  const R = routes || await readRoutes(rid);
+  const rows = (await sb.from("print_jobs").select("kind, printer, created_at")
+    .eq("restaurant_id", rid).in("status", ["queued", "printing"])
+    .order("created_at", { ascending: true }).limit(500)).data as
+    { kind: string; printer: string | null; created_at: string }[] | null;
+  const now = Date.now();
+  const by = new Map<string, PrinterQueue>();
+  for (const r of rows || []) {
+    const named = r.printer
+      || (isPrintKind(r.kind) ? R[r.kind]?.printer : null)
+      || "not addressed yet";
+    const age = now - new Date(r.created_at).getTime();
+    const cur = by.get(named) || { printer: named, n: 0, oldestMs: null };
+    cur.n += 1;
+    if (cur.oldestMs == null || age > cur.oldestMs) cur.oldestMs = age;
+    by.set(named, cur);
+  }
+  // Worst first — the printer somebody needs to walk to is the one at the top.
+  return [...by.values()].sort((a, b) => (b.oldestMs || 0) - (a.oldestMs || 0));
 }
 
 // ── DOES A HELPER OWN THIS PAPER? ────────────────────────────────────────────────────────────

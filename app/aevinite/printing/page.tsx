@@ -38,6 +38,8 @@ type Job = { id: string; kind: string; status: string; printer: string | null; p
 type Stuck = { n: number; oldestMs: number | null; afterMs: number };
 type State = {
   agents: Agent[]; routes: Record<string, Route>; waiting: number; stuck?: Stuck; recent: Job[];
+  /** The queue split by printer, worst first (owner, 2026-09-14) — see the note where it renders. */
+  waitingBy?: { printer: string; n: number; oldestMs: number | null }[];
   kinds: string[]; printing: { allowed: boolean; on: boolean };
   panels?: string[]; people?: Person[]; devices?: Device[]; managerMayPrint?: boolean;
   // no `mode` — see lib/printBoard.ts. Kept out of the type on purpose so a stale server
@@ -1402,6 +1404,26 @@ const PANEL_GROUPS: [ string, string ][] = [
               The last few pieces of paper, and what became of them. Nothing here is a guess: a job says
               “done” only after the printer confirmed it.
             </p>
+            {/* ── WHICH PRINTER THEY ARE WAITING FOR (owner, 2026-09-14) ───────────────────────
+                *"The UI of the queue will also kind of change, according to the number of papers
+                that have been set up for different printers."*
+                "Waiting: 7" was an honest answer while one machine printed everything. It stopped
+                being one the day the papers went to different printers: seven behind ONE dead bill
+                printer is a crisis, and two here, two there and three on a machine that is simply
+                asleep is an ordinary Saturday. The number alone cannot tell those apart — and it is
+                the sentence somebody decides whether to walk to the printer on.
+                Worst first, so the printer to go and look at is the top line. */}
+            {(st.waitingBy || []).length > 1 ? (
+              <div style={{ display: "grid", gap: 4, margin: "0 0 12px" }}>
+                {(st.waitingBy || []).map((q) => (
+                  <div key={q.printer} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", fontSize: 12.5 }}>
+                    <b style={{ minWidth: 160 }}>{q.printer}</b>
+                    <span>{q.n} waiting</span>
+                    <span className="adm-muted">· oldest {waitedWords(q.oldestMs)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             {/* ── STOP / RESTART THE QUEUE (owner, 2026-08-29) ────────────────────────────────
                 Deliberately NOT the same as switching printing off in step 1. Stopped, the tickets
                 go on being MADE and go on waiting — restart it and they all come out, in order.

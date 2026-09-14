@@ -13934,10 +13934,21 @@ function formPrinting(s) {
   // Numbered by what came BEFORE it: choosing a computer adds a step that choosing a screen does not,
   // so this is 5 one way and 4 the other. The admin console numbers it the same way, from the same
   // rule, because two boards that number one setup differently are two setups to learn.
+  // ── WHICH PRINTER THEY ARE WAITING FOR (owner, 2026-09-14) ─────────────────────────────────
+  // The same block as the admin board, for the same reason: "waiting: 7" cannot tell a crisis behind
+  // one dead printer from a normal spread across three, and it is the line somebody decides whether
+  // to walk to the printer on. Only drawn when there IS more than one printer in the queue —
+  // otherwise it is the same number said twice.
+  const wBy = Array.isArray(B.waitingBy) ? B.waitingBy : [];
   const step4 = `<div class="card"><h3>5 · ${esc(STEP.four || "What has printed")} — waiting: ${Number(B.waiting || 0)}</h3>
     <p class="muted" style="font-size:13px;margin:0 0 10px">
       Nothing here is a guess: a job says <b>printed</b> only after the printer confirmed it.
     </p>
+    ${wBy.length > 1 ? `<div style="display:grid;gap:4px;margin:0 0 12px">
+      ${wBy.map((q) => `<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:12.5px">
+        <b style="min-width:150px">${esc(q.printer)}</b><span>${Number(q.n)} waiting</span>
+        <span class="muted">· oldest ${esc(fmtWaited(q.oldestMs))}</span></div>`).join("")}
+    </div>` : ""}
     ${Number(sk.n) > 0 ? `<div class="pw-state" style="margin-bottom:12px"><div class="pw-state-row ${skStuck ? "warn" : "yes"}">
       <span class="pw-dot" aria-hidden="true"></span>
       <span class="who"><b>${Number(sk.n)} kitchen slip${Number(sk.n) === 1 ? "" : "s"} waiting to print</b><br>${

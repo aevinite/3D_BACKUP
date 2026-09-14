@@ -15,8 +15,9 @@
 // admin route, and requireRole for the panel route — which since 2026-09-14 shows this board
 // READ-ONLY (owner: "that setup will be done by me only"), so it needs no permission of its own.
 import {
-  agentsView, readRoutes, waitingCount, agentForDevice, ROUTABLE_KINDS, paperStatus, papersForRestaurant,
-  type AgentView, type PrintRoutes, type PaperSize, type RoutableKind, type PaperStatus,
+  agentsView, readRoutes, agentForDevice, ROUTABLE_KINDS, paperStatus, papersForRestaurant,
+  waitingByPrinter,
+  type AgentView, type PrintRoutes, type PaperSize, type RoutableKind, type PaperStatus, type PrinterQueue,
 } from "@/lib/printHelpers";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { waitingToPrint, STUCK_AFTER_MS } from "@/lib/printQueue";
@@ -64,6 +65,9 @@ export type BoardState = {
    *  a computer is doing it is READ off `routes`, never off a stored choice. */
   /** The queue is stopped: tickets keep being made and keep waiting until it is restarted. */
   paused: boolean;
+  /** …AND WHICH PRINTER EACH WAITING TICKET IS FOR (owner, 2026-09-14). "Waiting: 7" cannot tell a
+   *  crisis behind one dead printer from a normal spread across three. Worst first. */
+  waitingBy: PrinterQueue[];
   /** The helper this browser set up, when a restaurant set itself up (mig 367). Null on the admin's
    *  screen and on any device that has not registered itself. */
   thisComputer: AgentView | null;
@@ -113,10 +117,17 @@ export const helperFiles = (origin: string) =>
 /** Everything both boards draw, in ONE set of reads. Scoped by restaurant, column lists, hard
  *  limits — the egress rule, same as every other read in this app. */
 export async function printBoardState(rid: string, opts?: { deviceId?: string | null; recent?: number }): Promise<BoardState> {
-  const [agents, routes, waiting, setRow, jobs, stuck, setupCode, kinds, live] = await Promise.all([
+  const [agents, routes, setRow, jobs, stuck, setupCode, kinds, waitingBy, live] = await Promise.all([
     agentsView(rid),
     readRoutes(rid),
-    waitingCount(rid),
+    // ── THE TOTAL IS THE SUM OF THE BREAKDOWN, NEVER A SECOND COUNT (owner, 2026-09-14) ────────
+    // This was `waitingCount(rid)` — its own query, a moment apart from the per-printer one. Caught
+    // by reading both screens ninety-four times while a backlog printed: the rows added to 14 and
+    // the heading said 15, because a ticket finished in between. Two numbers describing one queue
+    // that can disagree is the fault this whole file's comments keep warning about, and on a screen
+    // somebody is deciding whether to walk to a printer on, a heading that contradicts the rows
+    // below it is worse than either number alone. One read, one answer — `waitingCount` is gone from
+    // this board entirely, so there is no second count left to drift.
     sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
     sb.from("print_jobs").select(JOB_COLS).eq("restaurant_id", rid)
       .order("created_at", { ascending: false }).limit(Math.min(30, Math.max(5, opts?.recent ?? 12))),
@@ -130,6 +141,7 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     // papersForRestaurant. Both boards already iterate `kinds`, so filtering it here removes the line from the
     // admin console AND the manager panel with no change on either screen.
     papersForRestaurant(rid),
+    waitingByPrinter(rid),
     // The three status rows. It makes its own pair of reads rather than being handed `routes` and
     // `agents` — deliberately: the owner route calls it on its own, and a version that only works
     // when somebody remembers to pass it two arguments is a version that goes stale in one of the
@@ -141,13 +153,14 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
   return {
     steps: STEPS,
     kinds,
+    waitingBy,
     labels: { kind: KIND_LABEL, what: KIND_WHAT, off: KIND_OFF_LABEL },
     papers: PAPER_PRESETS,
     papersByKind: Object.fromEntries(kinds.map((k) => [k, papersFor(k)])) as Record<string, typeof PAPER_PRESETS>,
     paperElsewhere: PAPER_ELSEWHERE,
     agents,
     routes,
-    waiting,
+    waiting: waitingBy.reduce((n, q) => n + q.n, 0),
     stuck: { ...stuck, afterMs: STUCK_AFTER_MS },
     recent: (jobs.data || []) as BoardJob[],
     // STOPPED, not switched off — the two are different answers and the board says which. Tickets go
