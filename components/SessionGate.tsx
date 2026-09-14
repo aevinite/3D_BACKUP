@@ -406,7 +406,25 @@ export default function SessionGate() {
     // silently — nobody is ever re-asked. submitNickname() resumes the SAME queued
     // action by calling act() again (the name now passes this gate). Tied to the
     // session: when a session is required, a name is too (owner, 2026-06-17).
-    if (!getNickname(s.token)) { setNote(""); setStep("nickname"); return; }
+    // ── A SCREEN SET ON A CLOSED SHEET IS A TAP THAT VANISHED (T4 sweep #9, item 1) ──────────────
+    // act() is normally reached with the sheet already open, but NOT always: the "connect"
+    // fast-path in onDo below calls act() directly, on purpose, so a diner who is already in an
+    // open, approved session can add a dish without a pop-up appearing at all. When that diner has
+    // no saved name for this session's token, this line used to set the name screen on a sheet
+    // that was never opened — `if (!open) return null` draws nothing, no result is ever reported,
+    // and the Add-to-cart gate keeps holding the dish. MEASURED on the rendered page: no sheet, no
+    // toast, and `lfh:session-done` never fires. The tap simply disappears.
+    //
+    // It is reachable on a real phone: getNickname() deliberately treats the PRE-session-scoping
+    // plain-string value as "no name" (see its own catch), so a device whose name was saved by an
+    // older build, sitting at a table it is already approved for, hits exactly this state on its
+    // first add-to-cart. Placing an ORDER from the same device was always fine — that path opens
+    // the sheet first — which is what makes the failure look random.
+    //
+    // Opening the sheet beside the step is the same thing the two refusal branches below already
+    // do ("the sheet may have been dismissed while the send was in flight"), for the same reason:
+    // a screen the diner has to act on must never be set on a sheet nobody can see.
+    if (!getNickname(s.token)) { setNote(""); setOpen(true); setStep("nickname"); return; }
     // "connect" has no server work: we only needed to get the guest in. Report
     // success so the Add-to-cart gate can carry out the held add, then close.
     if (p.action === "connect") { fireDone({ ok: true, action: "connect" }); close(); return; }
