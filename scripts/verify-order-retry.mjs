@@ -23,7 +23,7 @@
 // In hook mode it stays silent unless a file in this pipeline was just edited, then exits 2 with
 // the failures so the editing session is told immediately. It derives the checkout root from the
 // edited file's path, so it is correct inside a git worktree.
-import { readFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -107,16 +107,85 @@ const route = readFileSync(join(ROOT, "app/api/guest/place-order/route.ts"), "ut
 // ── 4. every code the server can send has diner-facing wording ──────────────────────────────
 const outbox = readFileSync(join(ROOT, "lib/guestOutbox.ts"), "utf8");
 const worded = new Set([...outbox.matchAll(/case "([a-z_]+)":/g)].map((m) => m[1]));
-// The refusal codes the order RPCs return (supabase/migrations 029 + 240) plus this route's own.
-const SERVER_CODES = [
-  "empty_order", "unknown_item", "sold_out", "invalid_token", "session_closed",
-  "not_approved", "blocked", "otp_required", "rate_limited", "staff_priced_item",
+// ── THE CODE LIST IS DERIVED, NOT TYPED (sweep #9 T3, item 1) ────────────────────────────────
+//
+// This list used to be fourteen hand-typed strings, sourced from "migrations 029 + 240". Migration
+// **281** then taught lfh_place_order_public a fifteenth — `unknown_table`, for a table number
+// above the restaurant's floor plan — and nobody came back to edit an array in a guard. So the one
+// check whose whole job is "every code the server can send has words a diner can read" went on
+// answering all-clear for four months while a 30-table restaurant refused table 31 with a code the
+// phone had no sentence for: the diner read "Couldn't send this order — please order again", and
+// ordering again typed the same number and was refused identically.
+//
+// A hand-typed list of what another file does is a copy that rots. So the codes are READ OUT of
+// the migrations that define the guest order + waiter-call functions, every time this runs — a new
+// `'reason', 'x'` in a new migration is in the list the moment it lands, and this guard goes red
+// until lib/guestOutbox.ts has a sentence for it. The hand-typed set stays as a FLOOR (the route's
+// own codes, which live in TypeScript and not in SQL), so the check can only ever get stricter.
+const MIG = join(ROOT, "supabase/migrations");
+// Scoped to the FIVE functions a guest device can actually reach, and to their own bodies —
+// a migration file routinely defines a dozen functions, and a reason code belonging to the
+// table-merge or the review RPC is not a sentence this queue owes anybody.
+const GUEST_FN_HEAD = /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+(?:public\.)?(lfh_place_order|lfh_place_order_public|lfh_call_waiter|lfh_call_waiter_table)\s*\(/gi;
+// ORDER codes and CALL codes are held to DIFFERENT standards, and the difference is real.
+// An order's refusal has only the `switch` to fall back on, so an unworded code lands on the
+// default ("Couldn't send this order — please order again"), which is the fault this check
+// exists for. A saved CALL has a second net: reasonMsg's `kind` branch answers anything the
+// switch does not know with "Couldn't send your call for a server — please ask a member of
+// staff" — true of every refusal there is. So a call-only code needs no `case`, and demanding
+// one would make this guard red for a sentence that is already right.
+const derived = new Set();
+const callOnly = new Set();
+try {
+  for (const f of readdirSync(MIG).filter((f) => f.endsWith(".sql")).sort()) {
+    const sql = readFileSync(join(MIG, f), "utf8");
+    for (const head of sql.matchAll(GUEST_FN_HEAD)) {
+      // Where this function's body ENDS. Migrations close a body several ways (`END; $$;`,
+      // `$$ LANGUAGE plpgsql`, `$$;` on its own line) and a file routinely carries a dozen
+      // functions, so the end is whichever top-level statement comes FIRST after the head.
+      // Getting this wrong is not a small error: a slice that runs on into the next function
+      // hands this check the table-merge RPC's refusals and it goes red for sentences this
+      // queue does not owe anybody.
+      const from = head.index;
+      const after = sql.slice(from + 1);
+      const ends = [/\n\s*\$\$\s*;/, /\n\s*\$\$\s+LANGUAGE/i, /\nCREATE\s+OR\s+REPLACE\s+FUNCTION/i, /\nREVOKE\s/i, /\nGRANT\s/i, /\nCOMMENT\s+ON\s+FUNCTION/i]
+        .map((re) => { const m = after.match(re); return m ? m.index : -1; })
+        .filter((i) => i >= 0);
+      const body = sql.slice(from, ends.length ? from + 1 + Math.min(...ends) : sql.length);
+      const isCall = /lfh_call_waiter/i.test(head[1]);
+      for (const m of body.matchAll(/'reason',\s*'([a-z_]+)'/g)) { derived.add(m[1]); if (isCall) callOnly.add(m[1]); }
+    }
+  }
+} catch { /* no migrations reachable → the floor list below still runs */ }
+// Codes that are an ANSWER rather than a refusal: the call really is pending on the floor, so the
+// phone removes the saved row instead of wording anything. Named here so they cannot be mistaken
+// for a wording gap. (`rate_limited` is NOT one of them — see lib/guestOutbox.ts callLanded.)
+const NOT_A_REFUSAL = new Set(["already_sent", "capped", "already_active"]);
+// The route's own codes — TypeScript, not SQL, so no migration scan can find them.
+const ROUTE_CODES = [
   "server_busy", "unknown_restaurant", "off_plan_table", "bad_body",
+  "order_too_big", "allergies_too_long", "call_too_old", "empty_order",
+  // lfh_price_order names these two on a line it refuses; they are worded off the basket.
+  "unknown_item", "sold_out",
 ];
+// A code an ORDER function can also answer is never "call-only", however many call functions
+// happen to share the word — the order path is the strict one and it wins.
+const orderCodes = new Set([...derived].filter((c) => !callOnly.has(c)));
+const SERVER_CODES = [...new Set([...ROUTE_CODES, ...orderCodes])].filter((c) => !NOT_A_REFUSAL.has(c)).sort();
 const missing = SERVER_CODES.filter((c) => !worded.has(c));
 missing.length === 0
-  ? ok(`all ${SERVER_CODES.length} refusal codes have words a diner can read`)
+  ? ok(`all ${SERVER_CODES.length} refusal codes have words a diner can read (${derived.size} read out of the migrations)`)
   : bad("a refusal would show as a machine word", missing.join(", "));
+// …and the derivation really found something, so a broken scan cannot look like a pass.
+derived.size >= 10
+  ? ok(`the migration scan is alive — ${derived.size} refusal codes read out of the SQL`)
+  : bad("the migration scan found almost nothing — it is asserting against an empty set", String(derived.size));
+// …and the second net a CALL relies on really is there, so "call-only codes need no case" stays
+// a true statement rather than an excuse.
+/ask a member of staff\.["`]\s*\n?\s*:\s*\n?\s*"Couldn't tell the restaurant you'd left/.test(outbox)
+  || (/Couldn't send your call for a server/.test(outbox) && /opts\.kind && opts\.kind !== "order"/.test(outbox))
+  ? ok("a saved CALL or LEAVE has a sentence of its own for any code the switch does not know")
+  : bad("the per-kind fallback is gone — an unworded code would talk to a diner about an order they never placed");
 // And an UNKNOWN code must never be echoed verbatim. Checked as a PROPERTY of the default arm
 // rather than by matching one exact sentence: the old test looked for the literal
 // `default: return "Couldn't send this order`, so it went red the moment that arm legitimately

@@ -127,7 +127,7 @@ export type GuestKind = "order" | "call" | "leave";
  */
 const WORDED_FOR_EVERY_KIND = new Set([
   "session_closed", "not_approved", "blocked", "otp_required", "invalid_token",
-  "server_busy", "call_too_old", "off_plan_table",
+  "server_busy", "call_too_old", "off_plan_table", "unknown_table",
 ]);
 
 /**
@@ -224,6 +224,32 @@ export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: bool
     // arriving twenty minutes late for something nobody remembers is worse than not arriving.
     case "call_too_old": return "Your call for a server was too old to send — please call again if you still need someone.";
     case "unknown_restaurant": return "We couldn't tell which restaurant this order was for.";
+    // ── THE TWO CODES FOR "THAT TABLE ISN'T ONE OF OURS" SHARE ONE SENTENCE (sweep #9 T3, item 1) ─
+    //
+    // There are two of them because two different things check the number, at two different
+    // distances from the floor plan, and only ONE of them was ever worded:
+    //
+    //   · `off_plan_table` — this app's own check (lib/planTable.ts). Deliberately generous: it
+    //     refuses only a number more than 500 above the plan, because a restaurant's parcel and
+    //     takeaway counters number ABOVE the floor on purpose.
+    //   · `unknown_table`  — the database's check (migration 281, inside lfh_place_order_public).
+    //     Strict: anything above `table_count` at all.
+    //
+    // So a 30-table restaurant refuses table 9,999 with the worded code and table **31** — the
+    // realistic typo, the one a diner actually makes — with the unworded one, which fell through
+    // to reasonMsg's default: "Couldn't send this order — please order again." That is advice that
+    // cannot work: ordering again types the same number and is refused identically, for ever.
+    // DRIVEN, not reasoned: POST table 31 to /api/guest/place-order on French House answers
+    // `{"reason":"unknown_table","error":"Table 31 doesn't exist — tables are 1–30."}` — the
+    // server even composed the right sentence, and it was thrown away (the server's own words
+    // never travel to a diner; a CODE does, and this file owns the wording).
+    //
+    // One sentence, shared by fallthrough, so the two codes can never drift into disagreeing about
+    // the same situation. `unknown_table` joins WORDED_FOR_EVERY_KIND beside its twin for the same
+    // reason: the sentence is about a TABLE NUMBER, which is true of an order, a raised hand or
+    // "I've left" alike. `npm run verify:order-retry` now derives its code list from the
+    // migrations instead of a hand-typed one, which is why this was missed for four months.
+    case "unknown_table":
     case "off_plan_table": return "That table number isn't one this restaurant has — please check it.";
     case "bad_body": return "Something was wrong with this order.";
     // The two size ceilings (T9 improvement 7, 2026-08-06). A real basket never reaches them, so the
