@@ -276,7 +276,7 @@ check("44-48", "restaurant #1's branding never leaks onto another tenant", () =>
   has(code("components/IntroSplash.tsx"), 'isDefault && <img className="intro-logo"'));
 
 // ── sweep #6 / T1 (2026-08-17): four more that must never come back ───────────────────────
-const T1 = { menuPage: code("app/r/[restaurant]/menu/page.tsx") };
+const T1 = { menuPage: code("app/r/[restaurant]/menu/page.tsx"), qPage: code("app/q/[code]/page.tsx") };
 
 // ONE RESTAURANT, ONE ADDRESS. getRestaurantBySlug folds case, so /r/French-House/menu resolves —
 // but lib/tenantStorage derives its scope from the RAW path, so the cart, the scanned table, the
@@ -302,8 +302,21 @@ check("P00155", "an oddly-cased menu link is sent to the canonical one, query an
 // A menu that isn't serving must not preview as an open one. app/q/[code] always did this; the
 // tenant door advertised the name, tagline and logo whatever the state was, then landed the guest
 // on "This menu isn't available right now".
-check("P00165", "a not-serving menu previews neutrally on the tenant door too", () =>
-  rx(T1.menuPage, /if \(!r\.active \|\| !\w+\.menuEnabled\)[\s\S]{0,120}?title: "Menu"/));
+//
+// ALL THREE SWITCHES, ON BOTH MENU DOORS (sweep #9 T1, item 2). This row asked for the two
+// PERMANENT switches and not for the one an owner uses on a Tuesday. Measured with demo-bistro in
+// service mode for ten seconds on a production build: both dish doors answered title "Menu" and the
+// neutral sentence, while /r/demo-bistro/menu AND its printed /q/<code> both answered "Demo Bistro
+// — Menu", "View the menu and order at Demo Bistro." and the logo as the preview picture — over a
+// screen that then says the restaurant is closed. Service mode and the master switch are two
+// switches with one meaning; the dish doors have said so since 2026-08-22.
+check("P00165", "a not-serving menu previews neutrally on BOTH menu doors — closed for the evening included", () => {
+  const tenant = rx(T1.menuPage, /if \(!r\.active \|\| !\w+\.menuEnabled \|\| \w+\.serviceMode\)[\s\S]{0,160}?title: "Menu"/);
+  // The QR door reads the master switch inside resolveCode (a dead code and a switched-off menu are
+  // one answer there), so its service-mode arm sits in generateMetadata beside the dead-code one.
+  const qr = rx(T1.qPage, /if \(hit\.settings\.serviceMode\) return \{ title: "Menu", description: "[^"]+" \};/);
+  return { ok: tenant && qr, note: `tenant door=${tenant} printed QR door=${qr}` };
+});
 
 // THE BELL STAYS PUT — R29 (owner, 2026-08-17): "i want like previous bell of call waiter should be
 // stuck at his place we can scrool and click the thing make sure don't change that again."
