@@ -420,7 +420,223 @@ else
 fi
 
 # ── the loop: ask, print, report. Nothing clever, on purpose. ────────────────────────────────
+# ── HOW OFTEN THIS SAYS HELLO (owner, 2026-09-14: "sending should be as fast as possible") ────
+# Hello was on EVERY cycle, and it is a round trip: measured at 379 ms against the live site and
+# 452 ms locally. That is 0.4s added to the front of every single poll — about a fifth of the delay
+# between a waiter sending an order and this computer even hearing about it — and it is paid 43,000
+# times a day per restaurant for an answer that almost never changes.
+#
+# What hello actually carries: the printer list, the "seen just now" stamp, the poll interval, and
+# the site's one way of saying this computer has been unlinked. None of those need two seconds.
+# The stamp is the tightest of them and the board treats anything under thirty seconds as connected
+# (HELPER_STALE_MS), so every ten seconds is comfortably inside it.
+#
+# It makes the loop FASTER AND CHEAPER at the same time, which is rare enough to be worth saying:
+# tickets are noticed sooner because the poll is no longer queued behind a hello, and the traffic
+# drops by about a third.
+# ── ONE ROUND OF WORK, as its own function ──────────────────────────────────────────────────
+# It used to sit inline in the loop below, which meant the loop could not skip the hello above
+# it without skipping the work too. Same code, one indent out.
+run_rounds() {
+# ── THE PRINTER HOLDS THE QUEUE, NOT THIS FILE (owner, 2026-09-14) ─────────────────────────
+#
+# *"You don't have to give everything to the helper — the printer itself has a queue, and the
+# printer's queue will be faster than the helper's. Put it in the printer queue so it works fast."*
+#
+# He is right, and the measurement says how right. One ticket used to cost about SEVEN SECONDS:
+#
+#     chrome render        1535 ms
+#     a fixed 1s settle    1028 ms
+#     lp submit             103 ms
+#     WAIT for CUPS to say
+#        "it came out"     4326 ms   <- 62% of it, standing still
+#
+# Four of those seven seconds were this file watching a queue CUPS was already managing perfectly
+# well. Eight kitchen slips took sixty-six seconds.
+#
+# So: RENDER the round in parallel, SUBMIT it in order, and then LET GO. The confirmation happens
+# on a LATER round (confirm_sent, below), which is what keeps the 2026-08-20 rule intact — nothing
+# is ever reported "printed" until the printer itself has said so. The only thing that changed is
+# that this file stopped standing still while it waited.
+#
+# SUBMIT IN ORDER, and that is not a detail: the app hands the round out oldest-first, and a
+# kitchen expects its tickets in the order they were rung. The renders race; the submits do not.
+
+# Anything handed to a printer and not yet accounted for: "<app job id> <cups id> <printer> <when>"
+SENT="$WORK/sent.txt"
+[ -f "$SENT" ] || : > "$SENT"
+
+# ── HAS THE PRINTER FINISHED ANY OF THEM? ───────────────────────────────────────────────────
+# Asked once per round, before any new work. Three answers per line:
+#   · CUPS lists it as completed -> the paper came out; tell the app.
+#   · CUPS has never heard of it any more (not completed, not pending) -> it was cancelled or
+#     purged behind our back; tell the app it failed, so it is retried rather than lost.
+#   · still pending -> leave it and ask again next round, UNLESS it has been sitting two minutes,
+#     in which case the queued copy is CANCELLED before the ticket is handed back. Handing it back
+#     while the printer still holds it is the one way this design could make two identical tickets.
+confirm_sent() {
+  [ -s "$SENT" ] || return 0
+  KEEP="$WORK/sent.keep"; : > "$KEEP"
+  NOW=$(date +%s)
+  while read -r AID CID CPR WHEN; do
+    [ -z "$AID" ] && continue
+    if lpstat -W completed -o "$CPR" 2>/dev/null | grep -q "^$CID "; then
+      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/done" -H "x-lfh-agent: $CODE" \\
+        -H "content-type: application/json" -d '{}' >/dev/null
+      say "printed job $AID on $CPR"
+      continue
+    fi
+    if lpstat -o "$CPR" 2>/dev/null | grep -q "^$CID "; then
+      # Still in the printer's queue. Leave it — unless it has been sitting for two minutes, in
+      # which case the queued copy is CANCELLED before the ticket is handed back. Handing it back
+      # while the printer still holds it is the one way this design could make two identical
+      # tickets.
+      AGE=$(( NOW - WHEN ))
+      if [ "$AGE" -lt 120 ]; then printf '%s %s %s %s\\n' "$AID" "$CID" "$CPR" "$WHEN" >> "$KEEP"; continue; fi
+      cancel "$CID" >/dev/null 2>&1
+      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/failed" -H "x-lfh-agent: $CODE" \\
+        -H "content-type: application/json" -d "{\\"error\\":\\"$CPR did not print it — switched off, out of paper, or unplugged\\"}" >/dev/null
+      say "FAILED job $AID on $CPR — is it switched on, with paper?"
+      continue
+    fi
+    # ── GONE FROM BOTH LISTS: TREAT IT AS PRINTED ────────────────────────────────────────────
+    # Not completed, not pending. There are exactly two ways a job leaves a CUPS queue: it
+    # printed, or it was cancelled — and WE are the only thing here that cancels, on the branch
+    # just above, which reports the failure itself and never reaches this line.
+    #
+    # It matters because of a CUPS setting this file cannot control: with PreserveJobHistory set
+    # to No, a finished job vanishes IMMEDIATELY and never appears in the completed list at all. Call
+    # that a failure and the app retries a ticket that is already on paper — EVERY ticket, on every
+    # machine set up that way, printed twice. Calling it printed costs one wrong word in the rare
+    # case where a person cancelled the job by hand from the Printers window. A duplicate ticket in
+    # a kitchen is food cooked twice; a wrong word is not.
+    curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/done" -H "x-lfh-agent: $CODE" \\
+      -H "content-type: application/json" -d '{}' >/dev/null
+    say "printed job $AID on $CPR (the queue had already let it go)"
+  done < "$SENT"
+  mv -f "$KEEP" "$SENT"
+}
+
+# ── RENDER ONE (in the background; the round waits for all of them) ─────────────────────────
+# Everything it touches carries the job id: two renders sharing one job.pdf print each other's
+# paper, and two Chromes sharing one profile directory fight over its lock — one of them then
+# silently writes nothing, which reads exactly like a printer that did not respond.
+render_one() {
+  ID="$1"
+  HTML="$WORK/job-$ID.html"; PDF="$WORK/job-$ID.pdf"
+  rm -f "$HTML" "$PDF"
+  if ! curl -s -m 30 -o "$HTML" "$SITE/api/print-agent/job/$ID/document" -H "x-lfh-agent: $CODE" || [ ! -s "$HTML" ]; then
+    say "job $ID: the app had no document for it (already handled)"; : > "$WORK/rdy-$ID"; return
+  fi
+  # AND ON A WATCHDOG, because Chrome's new headless mode DOES NOT EXIT after --print-to-pdf: it
+  # writes the file and keeps running. Waiting for it plainly hung the helper for ever after the
+  # very first ticket — measured 2026-08-20, thirteen Chromes deep.
+  "$CHROME" --headless=new --disable-gpu --no-first-run --no-default-browser-check \\
+    --user-data-dir="$WORK/chrome-$ID" --no-pdf-header-footer --virtual-time-budget=4000 \\
+    --print-to-pdf="$PDF" "file://$HTML" >/dev/null 2>&1 &
+  CPID=$!
+  # WAIT FOR THE FILE TO STOP GROWING, rather than a flat one-second guess. The guess cost a whole
+  # second on every single ticket and was still only a guess; two identical sizes 200ms apart is
+  # the thing it was standing in for, and that is usually true in about 400ms.
+  LAST=-1; STABLE=0; n=0
+  while [ $n -lt 60 ]; do
+    SIZE=$(wc -c < "$PDF" 2>/dev/null || echo 0)
+    if [ "$SIZE" -gt 0 ] && [ "$SIZE" = "$LAST" ]; then
+      STABLE=$((STABLE+1)); [ $STABLE -ge 2 ] && break
+    else STABLE=0; fi
+    LAST="$SIZE"; sleep 0.2; n=$((n+1))
+  done
+  kill "$CPID" >/dev/null 2>&1
+  pkill -f "print-to-pdf=$PDF" >/dev/null 2>&1
+  wait "$CPID" 2>/dev/null
+  rm -rf "$WORK/chrome-$ID" "$HTML"
+  # ── SAY THAT THIS ONE IS FINISHED ────────────────────────────────────────────────────────
+  # The submit loop below waits for THIS marker before handing THIS page over, instead of waiting
+  # for the whole round. Written on every path, including the ones that produced no page at all —
+  # a render that leaves no marker is a round that stalls on it.
+  : > "$WORK/rdy-$ID"
+}
+
+# ── HAND ONE TO ITS PRINTER, AND LET GO ────────────────────────────────────────────────────
+submit_one() {
+  ID="$1"; PRINTER="$2"; PDF="$WORK/job-$ID.pdf"
+  if [ ! -s "$PDF" ]; then
+    curl -s -m 20 -X POST "$SITE/api/print-agent/job/$ID/failed" -H "x-lfh-agent: $CODE" \\
+      -H "content-type: application/json" -d "{\\"error\\":\\"the ticket could not be made into a page on this computer\\"}" >/dev/null
+    say "FAILED job $ID — the page could not be made"; return
+  fi
+  OUT="$(lp -d "$PRINTER" "$PDF" 2>/dev/null)"
+  CUPSID="$(echo "$OUT" | sed -n 's/.*request id is \\([^ ]*\\).*/\\1/p')"
+  if [ -z "$CUPSID" ]; then
+    curl -s -m 20 -X POST "$SITE/api/print-agent/job/$ID/failed" -H "x-lfh-agent: $CODE" \\
+      -H "content-type: application/json" -d "{\\"error\\":\\"$PRINTER would not take it — is that printer still set up on this computer?\\"}" >/dev/null
+    say "FAILED job $ID — $PRINTER would not take it"; return
+  fi
+  printf '%s %s %s %s\\n' "$ID" "$CUPSID" "$PRINTER" "$(date +%s)" >> "$SENT"
+  say "job $ID handed to $PRINTER ($CUPSID)"
+}
+
+confirm_sent
+
 while :; do
+  # An old app answers the single-job shape and ignores the max — the reader below copes with both,
+  # because a helper file cannot be pushed and this one may well outlive a rollback.
+  BATCH="$(curl -s -m 20 "$SITE/api/print-agent/next?max=4" -H "x-lfh-agent: $CODE")"
+  [ -z "$BATCH" ] && break                    # 204 — nothing to print
+  : > "$WORK/batch.txt"
+  echo "$BATCH" | tr '{' '\\n' | while IFS= read -r CHUNK; do
+    JID="$(printf '%s' "$CHUNK" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')"
+    JPR="$(printf '%s' "$CHUNK" | sed -n 's/.*"printer":"\\([^"]*\\)".*/\\1/p')"
+    [ -n "$JID" ] && printf '%s %s\\n' "$JID" "$JPR" >> "$WORK/batch.txt"
+  done
+  [ ! -s "$WORK/batch.txt" ] && break
+  # Redirected from a FILE, never a pipe: a pipe runs this in a subshell and the wait below would
+  # have nothing to wait for. A printer name may contain spaces, and read puts the whole remainder
+  # in the LAST variable, which is why the id is written first.
+  rm -f "$WORK"/rdy-* 2>/dev/null
+  while read -r JID JPR; do
+    [ -z "$JID" ] && continue
+    render_one "$JID" &
+  done < "$WORK/batch.txt"
+  # ── HAND EACH ONE OVER THE MOMENT *IT* IS READY, IN ORDER (owner, 2026-09-14) ─────────────
+  # *"Sending should be as fast as possible, and one by one in the queue only."*
+  #
+  # This used to wait for the WHOLE round and only then start submitting, so the first page sat
+  # finished and idle until the slowest of its siblings caught up — a page ready in 1.5s waiting
+  # on one that took 3. Nothing was gained by it: the ORDER is what matters, and the order is kept
+  # by this loop being sequential, not by the renders finishing together.
+  #
+  # So it walks the batch IN ORDER and waits for each page's own marker before handing that page
+  # over. Ticket 1 goes to the printer as soon as ticket 1 exists. Ticket 2 goes next, whenever it
+  # is ready — never before ticket 1, which is the promise a kitchen queue makes.
+  while read -r JID JPR; do
+    [ -z "$JID" ] && continue
+    n=0
+    while [ $n -lt 200 ]; do                  # 20s, far past a render; a stall must not be for ever
+      [ -f "$WORK/rdy-$JID" ] && break
+      sleep 0.1; n=$((n+1))
+    done
+    submit_one "$JID" "$JPR"
+  done < "$WORK/batch.txt"
+  wait                                        # reap the render workers; they are all done by now
+  rm -f "$WORK"/rdy-* 2>/dev/null
+  confirm_sent                                # anything the printer has already finished
+done
+}
+
+HELLO_EVERY=5
+HELLO_IN=0
+
+while :; do
+  # Say hello on the first turn and then every fifth — see the note above. Everything the round
+  # itself needs is answered by the poll, not by hello.
+  if [ "$HELLO_IN" -gt 0 ]; then
+    HELLO_IN=$(( HELLO_IN - 1 ))
+    run_rounds
+    sleep "$IDLE"
+    continue
+  fi
+  HELLO_IN=$(( HELLO_EVERY - 1 ))
   # ── ONLY THE SITE SAYING "NO" COUNTS AS BEING UNLINKED (2026-09-13) ─────────────────────────
   # This used to treat ANY answer that was not ok:true as "this computer was unlinked" and
   # DELETE ITS OWN TOKEN. An empty answer does that. A timeout does that. A 502 while the site is
@@ -485,168 +701,7 @@ while :; do
   [ "$PMS" -gt 60000 ] && PMS=60000
   IDLE=$(( PMS / 1000 ))
 
-  # ── THE PRINTER HOLDS THE QUEUE, NOT THIS FILE (owner, 2026-09-14) ─────────────────────────
-  #
-  # *"You don't have to give everything to the helper — the printer itself has a queue, and the
-  # printer's queue will be faster than the helper's. Put it in the printer queue so it works fast."*
-  #
-  # He is right, and the measurement says how right. One ticket used to cost about SEVEN SECONDS:
-  #
-  #     chrome render        1535 ms
-  #     a fixed 1s settle    1028 ms
-  #     lp submit             103 ms
-  #     WAIT for CUPS to say
-  #        "it came out"     4326 ms   <- 62% of it, standing still
-  #
-  # Four of those seven seconds were this file watching a queue CUPS was already managing perfectly
-  # well. Eight kitchen slips took sixty-six seconds.
-  #
-  # So: RENDER the round in parallel, SUBMIT it in order, and then LET GO. The confirmation happens
-  # on a LATER round (confirm_sent, below), which is what keeps the 2026-08-20 rule intact — nothing
-  # is ever reported "printed" until the printer itself has said so. The only thing that changed is
-  # that this file stopped standing still while it waited.
-  #
-  # SUBMIT IN ORDER, and that is not a detail: the app hands the round out oldest-first, and a
-  # kitchen expects its tickets in the order they were rung. The renders race; the submits do not.
-
-  # Anything handed to a printer and not yet accounted for: "<app job id> <cups id> <printer> <when>"
-  SENT="$WORK/sent.txt"
-  [ -f "$SENT" ] || : > "$SENT"
-
-  # ── HAS THE PRINTER FINISHED ANY OF THEM? ───────────────────────────────────────────────────
-  # Asked once per round, before any new work. Three answers per line:
-  #   · CUPS lists it as completed -> the paper came out; tell the app.
-  #   · CUPS has never heard of it any more (not completed, not pending) -> it was cancelled or
-  #     purged behind our back; tell the app it failed, so it is retried rather than lost.
-  #   · still pending -> leave it and ask again next round, UNLESS it has been sitting two minutes,
-  #     in which case the queued copy is CANCELLED before the ticket is handed back. Handing it back
-  #     while the printer still holds it is the one way this design could make two identical tickets.
-  confirm_sent() {
-    [ -s "$SENT" ] || return 0
-    KEEP="$WORK/sent.keep"; : > "$KEEP"
-    NOW=$(date +%s)
-    while read -r AID CID CPR WHEN; do
-      [ -z "$AID" ] && continue
-      if lpstat -W completed -o "$CPR" 2>/dev/null | grep -q "^$CID "; then
-        curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/done" -H "x-lfh-agent: $CODE" \\
-          -H "content-type: application/json" -d '{}' >/dev/null
-        say "printed job $AID on $CPR"
-        continue
-      fi
-      if lpstat -o "$CPR" 2>/dev/null | grep -q "^$CID "; then
-        # Still in the printer's queue. Leave it — unless it has been sitting for two minutes, in
-        # which case the queued copy is CANCELLED before the ticket is handed back. Handing it back
-        # while the printer still holds it is the one way this design could make two identical
-        # tickets.
-        AGE=$(( NOW - WHEN ))
-        if [ "$AGE" -lt 120 ]; then printf '%s %s %s %s\\n' "$AID" "$CID" "$CPR" "$WHEN" >> "$KEEP"; continue; fi
-        cancel "$CID" >/dev/null 2>&1
-        curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/failed" -H "x-lfh-agent: $CODE" \\
-          -H "content-type: application/json" -d "{\\"error\\":\\"$CPR did not print it — switched off, out of paper, or unplugged\\"}" >/dev/null
-        say "FAILED job $AID on $CPR — is it switched on, with paper?"
-        continue
-      fi
-      # ── GONE FROM BOTH LISTS: TREAT IT AS PRINTED ────────────────────────────────────────────
-      # Not completed, not pending. There are exactly two ways a job leaves a CUPS queue: it
-      # printed, or it was cancelled — and WE are the only thing here that cancels, on the branch
-      # just above, which reports the failure itself and never reaches this line.
-      #
-      # It matters because of a CUPS setting this file cannot control: with PreserveJobHistory set
-      # to No, a finished job vanishes IMMEDIATELY and never appears in the completed list at all. Call
-      # that a failure and the app retries a ticket that is already on paper — EVERY ticket, on every
-      # machine set up that way, printed twice. Calling it printed costs one wrong word in the rare
-      # case where a person cancelled the job by hand from the Printers window. A duplicate ticket in
-      # a kitchen is food cooked twice; a wrong word is not.
-      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/done" -H "x-lfh-agent: $CODE" \\
-        -H "content-type: application/json" -d '{}' >/dev/null
-      say "printed job $AID on $CPR (the queue had already let it go)"
-    done < "$SENT"
-    mv -f "$KEEP" "$SENT"
-  }
-
-  # ── RENDER ONE (in the background; the round waits for all of them) ─────────────────────────
-  # Everything it touches carries the job id: two renders sharing one job.pdf print each other's
-  # paper, and two Chromes sharing one profile directory fight over its lock — one of them then
-  # silently writes nothing, which reads exactly like a printer that did not respond.
-  render_one() {
-    ID="$1"
-    HTML="$WORK/job-$ID.html"; PDF="$WORK/job-$ID.pdf"
-    rm -f "$HTML" "$PDF"
-    if ! curl -s -m 30 -o "$HTML" "$SITE/api/print-agent/job/$ID/document" -H "x-lfh-agent: $CODE" || [ ! -s "$HTML" ]; then
-      say "job $ID: the app had no document for it (already handled)"; return
-    fi
-    # AND ON A WATCHDOG, because Chrome's new headless mode DOES NOT EXIT after --print-to-pdf: it
-    # writes the file and keeps running. Waiting for it plainly hung the helper for ever after the
-    # very first ticket — measured 2026-08-20, thirteen Chromes deep.
-    "$CHROME" --headless=new --disable-gpu --no-first-run --no-default-browser-check \\
-      --user-data-dir="$WORK/chrome-$ID" --no-pdf-header-footer --virtual-time-budget=4000 \\
-      --print-to-pdf="$PDF" "file://$HTML" >/dev/null 2>&1 &
-    CPID=$!
-    # WAIT FOR THE FILE TO STOP GROWING, rather than a flat one-second guess. The guess cost a whole
-    # second on every single ticket and was still only a guess; two identical sizes 200ms apart is
-    # the thing it was standing in for, and that is usually true in about 400ms.
-    LAST=-1; STABLE=0; n=0
-    while [ $n -lt 60 ]; do
-      SIZE=$(wc -c < "$PDF" 2>/dev/null || echo 0)
-      if [ "$SIZE" -gt 0 ] && [ "$SIZE" = "$LAST" ]; then
-        STABLE=$((STABLE+1)); [ $STABLE -ge 2 ] && break
-      else STABLE=0; fi
-      LAST="$SIZE"; sleep 0.2; n=$((n+1))
-    done
-    kill "$CPID" >/dev/null 2>&1
-    pkill -f "print-to-pdf=$PDF" >/dev/null 2>&1
-    wait "$CPID" 2>/dev/null
-    rm -rf "$WORK/chrome-$ID" "$HTML"
-  }
-
-  # ── HAND ONE TO ITS PRINTER, AND LET GO ────────────────────────────────────────────────────
-  submit_one() {
-    ID="$1"; PRINTER="$2"; PDF="$WORK/job-$ID.pdf"
-    if [ ! -s "$PDF" ]; then
-      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$ID/failed" -H "x-lfh-agent: $CODE" \\
-        -H "content-type: application/json" -d "{\\"error\\":\\"the ticket could not be made into a page on this computer\\"}" >/dev/null
-      say "FAILED job $ID — the page could not be made"; return
-    fi
-    OUT="$(lp -d "$PRINTER" "$PDF" 2>/dev/null)"
-    CUPSID="$(echo "$OUT" | sed -n 's/.*request id is \\([^ ]*\\).*/\\1/p')"
-    if [ -z "$CUPSID" ]; then
-      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$ID/failed" -H "x-lfh-agent: $CODE" \\
-        -H "content-type: application/json" -d "{\\"error\\":\\"$PRINTER would not take it — is that printer still set up on this computer?\\"}" >/dev/null
-      say "FAILED job $ID — $PRINTER would not take it"; return
-    fi
-    printf '%s %s %s %s\\n' "$ID" "$CUPSID" "$PRINTER" "$(date +%s)" >> "$SENT"
-    say "job $ID handed to $PRINTER ($CUPSID)"
-  }
-
-  confirm_sent
-
-  while :; do
-    # An old app answers the single-job shape and ignores the max — the reader below copes with both,
-    # because a helper file cannot be pushed and this one may well outlive a rollback.
-    BATCH="$(curl -s -m 20 "$SITE/api/print-agent/next?max=4" -H "x-lfh-agent: $CODE")"
-    [ -z "$BATCH" ] && break                    # 204 — nothing to print
-    : > "$WORK/batch.txt"
-    echo "$BATCH" | tr '{' '\\n' | while IFS= read -r CHUNK; do
-      JID="$(printf '%s' "$CHUNK" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')"
-      JPR="$(printf '%s' "$CHUNK" | sed -n 's/.*"printer":"\\([^"]*\\)".*/\\1/p')"
-      [ -n "$JID" ] && printf '%s %s\\n' "$JID" "$JPR" >> "$WORK/batch.txt"
-    done
-    [ ! -s "$WORK/batch.txt" ] && break
-    # Redirected from a FILE, never a pipe: a pipe runs this in a subshell and the wait below would
-    # have nothing to wait for. A printer name may contain spaces, and read puts the whole remainder
-    # in the LAST variable, which is why the id is written first.
-    while read -r JID JPR; do
-      [ -z "$JID" ] && continue
-      render_one "$JID" &
-    done < "$WORK/batch.txt"
-    wait
-    # …and NOW in order, one after another, so a printer's tickets keep the order the app made them.
-    while read -r JID JPR; do
-      [ -z "$JID" ] && continue
-      submit_one "$JID" "$JPR"
-    done < "$WORK/batch.txt"
-    confirm_sent                                # anything the printer has already finished
-  done
+  run_rounds
   sleep "$IDLE"
 done
 `;
@@ -986,12 +1041,19 @@ set "LANES=0"
 REM !LANES! and not %LANES% - a %VAR% read inside the same parenthesised block that SETS it is
 REM expanded when cmd.exe PARSES the block, i.e. before the loop has run even once. That exact
 REM mistake is why the PDF-printer check failed on every Windows machine once already.
+REM PREV is the job BEFORE this one in the round. A lane renders whenever it likes but may not hand
+REM its page to the printer until PREV's lane has handed over its own - which is what keeps a
+REM kitchen's tickets in the order they were rung now that a round can carry two for one printer.
+REM (The Mac and Linux scripts get this from a single ordered submit loop; Windows lanes are separate
+REM processes, so the order has to be carried between them.)
+set "PREV=-"
 for /f "usebackq tokens=1,* delims=," %%a in ("%WORK%\\batch.txt") do (
   set /a LANES=!LANES!+1
   REM CHROME and SUMATRA are PASSED IN, and that is not a nicety: the lane jumps to :lane before
   REM either of them is worked out, so a lane left to find them itself would have both empty and
   REM print nothing at all, silently. They are read here, outside this block, so %VAR% is right.
-  start "" /b cmd /c call "%~f0" /lane "%%a" "%%b" "%CHROME%" "%SUMATRA%"
+  start "" /b cmd /c call "%~f0" /lane "%%a" "%%b" "%CHROME%" "%SUMATRA%" "!PREV!"
+  set "PREV=%%a"
 )
 if %LANES%==0 goto idle
 set "WAITED=0"
@@ -1019,6 +1081,7 @@ set "ID=%~2"
 set "PRINTER=%~3"
 set "CHROME=%~4"
 set "SUMATRA=%~5"
+set "PREV=%~6"
 REM No id means no flag can be named, so this one really does just end. Every OTHER way out goes to
 REM :laneend, which writes the flag — a lane that leaves without one is a lane the parent waits the
 REM full ninety seconds for, and that is a round of everybody's printing lost to one missing file.
@@ -1053,6 +1116,27 @@ REM PowerShell 5.1 is what Windows 10 and 11 ship, so this is written for it: no
 REM null-coalescing, plain if/else - and no caret escapes inside the quoted -Command, because cmd
 REM does not read them there and the program receives them as stray arguments.
 powershell -NoProfile -Command "$a=@('--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--user-data-dir=%JPROF%','--no-pdf-header-footer','--virtual-time-budget=4000','--print-to-pdf=%JPDF%','file:///%JHTML:\\=/%'); $p=Start-Process -FilePath '%CHROME%' -ArgumentList $a -PassThru -WindowStyle Hidden; $last=-1; $stable=0; for($i=0; $i -lt 75; $i++){ Start-Sleep -Milliseconds 200; $s=0; if(Test-Path '%JPDF%'){ $s=(Get-Item '%JPDF%').Length }; if($s -gt 0 -and $s -eq $last){ $stable=$stable+1; if($stable -ge 2){ break } } else { $stable=0 }; $last=$s }; try{ $p.Kill() }catch{}" >nul 2>&1
+REM ── WAIT ITS TURN, AND ONLY FOR THE HANDOVER ────────────────────────────────────────────────
+REM The page above was made while the other lanes made theirs - that part is meant to race. THIS is
+REM the part that may not: a printer's tickets must reach it in the order the app made them, and a
+REM round can now carry two for one printer. So this lane holds its page until the lane before it
+REM has handed its own over, which is exactly what that lane's finished-flag means.
+REM
+REM BOUNDED, like every other wait in this file: if the lane before it never finishes, this one goes
+REM anyway after thirty seconds. A ticket slightly out of order is a far smaller fault than a ticket
+REM that never comes out at all.
+REM EVERY LINE AT TOP LEVEL, and that is not a style choice: a LABEL inside a parenthesised block
+REM is not reliable in cmd.exe, and a goto out of one leaves the block anyway. The same rule that
+REM already cost this file the %VAR%-inside-a-block fault once.
+if "%PREV%"=="-" goto myturn
+if "%PREV%"=="" goto myturn
+set "TURN=0"
+:waitturn
+if exist "%WORK%\\lane-%PREV%.done" goto myturn
+timeout /t 1 /nobreak >nul
+set /a TURN=%TURN%+1
+if %TURN% LSS 30 goto waitturn
+:myturn
 "%SUMATRA%" -print-to "%PRINTER%" -silent "%JPDF%" >nul 2>&1
 if errorlevel 1 (
   curl -s -m 20 -X POST "%SITE%/api/print-agent/job/%ID%/failed" -H "x-lfh-agent: %CODE%" -H "content-type: application/json" -d "{\\"error\\":\\"could not print on %PRINTER%\\"}" >nul 2>&1
@@ -1237,7 +1321,170 @@ else
   echo "Linked. Waiting for something to print."
 fi
 
+# ── HOW OFTEN THIS SAYS HELLO (owner, 2026-09-14: "sending should be as fast as possible") ────
+# Hello was on EVERY cycle, and it is a round trip: measured at 379 ms against the live site and
+# 452 ms locally. That is 0.4s added to the front of every single poll — about a fifth of the delay
+# between a waiter sending an order and this computer even hearing about it — and it is paid 43,000
+# times a day per restaurant for an answer that almost never changes.
+#
+# What hello actually carries: the printer list, the "seen just now" stamp, the poll interval, and
+# the site's one way of saying this computer has been unlinked. None of those need two seconds.
+# The stamp is the tightest of them and the board treats anything under thirty seconds as connected
+# (HELPER_STALE_MS), so every ten seconds is comfortably inside it.
+#
+# It makes the loop FASTER AND CHEAPER at the same time, which is rare enough to be worth saying:
+# tickets are noticed sooner because the poll is no longer queued behind a hello, and the traffic
+# drops by about a third.
+# ── ONE ROUND OF WORK, as its own function ──────────────────────────────────────────────────
+# It used to sit inline in the loop below, which meant the loop could not skip the hello above
+# it without skipping the work too. Same code, one indent out.
+run_rounds() {
+# ── THE PRINTER HOLDS THE QUEUE — the same change as the Mac script (owner, 2026-09-14) ─────
+# Render the round in parallel, submit it IN ORDER, then let go: the confirmation happens on a
+# later round, so nothing is ever reported "printed" until the printer itself has said so, and
+# this file never stands still waiting for a queue CUPS is already managing. The long "why", and
+# the measurement that prompted it (4.3 of every 7 seconds spent waiting), is on the Mac copy.
+SENT="$WORK/sent.txt"
+[ -f "$SENT" ] || : > "$SENT"
+
+confirm_sent() {
+  [ -s "$SENT" ] || return 0
+  KEEP="$WORK/sent.keep"; : > "$KEEP"
+  NOW=$(date +%s)
+  while read -r AID CID CPR WHEN; do
+    [ -z "$AID" ] && continue
+    if lpstat -W completed -o "$CPR" 2>/dev/null | grep -q "^$CID "; then
+      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/done" -H "x-lfh-agent: $CODE" \\
+        -H "content-type: application/json" -d '{}' >/dev/null
+      say "printed job $AID on $CPR"
+      continue
+    fi
+    if lpstat -o "$CPR" 2>/dev/null | grep -q "^$CID "; then
+      # Still in the printer's queue. Leave it — unless it has been sitting for two minutes, in
+      # which case the queued copy is CANCELLED before the ticket is handed back. Handing it back
+      # while the printer still holds it is the one way this design could make two identical
+      # tickets.
+      AGE=$(( NOW - WHEN ))
+      if [ "$AGE" -lt 120 ]; then printf '%s %s %s %s\\n' "$AID" "$CID" "$CPR" "$WHEN" >> "$KEEP"; continue; fi
+      cancel "$CID" >/dev/null 2>&1
+      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/failed" -H "x-lfh-agent: $CODE" \\
+        -H "content-type: application/json" -d "{\\"error\\":\\"$CPR did not print it — switched off, out of paper, or unplugged\\"}" >/dev/null
+      say "FAILED job $AID on $CPR — is it switched on, with paper?"
+      continue
+    fi
+    # ── GONE FROM BOTH LISTS: TREAT IT AS PRINTED ────────────────────────────────────────────
+    # Not completed, not pending. There are exactly two ways a job leaves a CUPS queue: it
+    # printed, or it was cancelled — and WE are the only thing here that cancels, on the branch
+    # just above, which reports the failure itself and never reaches this line.
+    #
+    # It matters because of a CUPS setting this file cannot control: with PreserveJobHistory set
+    # to No, a finished job vanishes IMMEDIATELY and never appears in the completed list at all. Call
+    # that a failure and the app retries a ticket that is already on paper — EVERY ticket, on every
+    # machine set up that way, printed twice. Calling it printed costs one wrong word in the rare
+    # case where a person cancelled the job by hand from the Printers window. A duplicate ticket in
+    # a kitchen is food cooked twice; a wrong word is not.
+    curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/done" -H "x-lfh-agent: $CODE" \\
+      -H "content-type: application/json" -d '{}' >/dev/null
+    say "printed job $AID on $CPR (the queue had already let it go)"
+  done < "$SENT"
+  mv -f "$KEEP" "$SENT"
+}
+
+render_one() {
+  ID="$1"
+  HTML="$WORK/job-$ID.html"; PDF="$WORK/job-$ID.pdf"; rm -f "$HTML" "$PDF"
+  curl -s -m 30 -o "$HTML" "$SITE/api/print-agent/job/$ID/document" -H "x-lfh-agent: $CODE"
+  [ -s "$HTML" ] || { say "job $ID: no document (already handled)"; : > "$WORK/rdy-$ID"; return; }
+  # Same watchdog as the Mac: new-headless Chrome writes the PDF and then keeps running, so
+  # waiting for it would hang the helper for ever after one ticket.
+  "$CHROME" --headless=new --disable-gpu --no-first-run --user-data-dir="$WORK/chrome-$ID" \\
+    --no-pdf-header-footer --virtual-time-budget=4000 --print-to-pdf="$PDF" "file://$HTML" >/dev/null 2>&1 &
+  CPID=$!
+  LAST=-1; STABLE=0; n=0
+  while [ $n -lt 60 ]; do
+    SIZE=$(wc -c < "$PDF" 2>/dev/null || echo 0)
+    if [ "$SIZE" -gt 0 ] && [ "$SIZE" = "$LAST" ]; then
+      STABLE=$((STABLE+1)); [ $STABLE -ge 2 ] && break
+    else STABLE=0; fi
+    LAST="$SIZE"; sleep 0.2; n=$((n+1))
+  done
+  kill "$CPID" >/dev/null 2>&1
+  pkill -f "print-to-pdf=$PDF" >/dev/null 2>&1
+  wait "$CPID" 2>/dev/null
+  rm -rf "$WORK/chrome-$ID" "$HTML"
+  # ── SAY THAT THIS ONE IS FINISHED ────────────────────────────────────────────────────────
+  # The submit loop below waits for THIS marker before handing THIS page over, instead of waiting
+  # for the whole round. Written on every path, including the ones that produced no page at all —
+  # a render that leaves no marker is a round that stalls on it.
+  : > "$WORK/rdy-$ID"
+}
+
+submit_one() {
+  ID="$1"; PRINTER="$2"; PDF="$WORK/job-$ID.pdf"
+  if [ ! -s "$PDF" ]; then
+    curl -s -m 20 -X POST "$SITE/api/print-agent/job/$ID/failed" -H "x-lfh-agent: $CODE" \\
+      -H "content-type: application/json" -d "{\\"error\\":\\"the ticket could not be made into a page on this computer\\"}" >/dev/null
+    say "FAILED job $ID — the page could not be made"; return
+  fi
+  OUT="$(lp -d "$PRINTER" "$PDF" 2>/dev/null)"
+  CUPSID="$(echo "$OUT" | sed -n 's/.*request id is \\([^ ]*\\).*/\\1/p')"
+  if [ -z "$CUPSID" ]; then
+    curl -s -m 20 -X POST "$SITE/api/print-agent/job/$ID/failed" -H "x-lfh-agent: $CODE" \\
+      -H "content-type: application/json" -d "{\\"error\\":\\"$PRINTER would not take it — is that printer still set up on this computer?\\"}" >/dev/null
+    say "FAILED job $ID — $PRINTER would not take it"; return
+  fi
+  printf '%s %s %s %s\\n' "$ID" "$CUPSID" "$PRINTER" "$(date +%s)" >> "$SENT"
+  say "job $ID handed to $PRINTER ($CUPSID)"
+}
+
+confirm_sent
+
 while :; do
+  BATCH="$(curl -s -m 20 "$SITE/api/print-agent/next?max=4" -H "x-lfh-agent: $CODE")"
+  [ -z "$BATCH" ] && break
+  : > "$WORK/batch.txt"
+  echo "$BATCH" | tr '{' '\\n' | while IFS= read -r CHUNK; do
+    JID="$(printf '%s' "$CHUNK" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')"
+    JPR="$(printf '%s' "$CHUNK" | sed -n 's/.*"printer":"\\([^"]*\\)".*/\\1/p')"
+    [ -n "$JID" ] && printf '%s %s\\n' "$JID" "$JPR" >> "$WORK/batch.txt"
+  done
+  [ ! -s "$WORK/batch.txt" ] && break
+  rm -f "$WORK"/rdy-* 2>/dev/null
+  while read -r JID JPR; do
+    [ -z "$JID" ] && continue
+    render_one "$JID" &
+  done < "$WORK/batch.txt"
+  # HAND EACH ONE OVER THE MOMENT *IT* IS READY, IN ORDER — the same change as the Mac script.
+  # Waiting for the whole round left the first page finished and idle until its slowest sibling
+  # caught up; the ORDER is kept by this loop being sequential, not by the renders ending together.
+  while read -r JID JPR; do
+    [ -z "$JID" ] && continue
+    n=0
+    while [ $n -lt 200 ]; do
+      [ -f "$WORK/rdy-$JID" ] && break
+      sleep 0.1; n=$((n+1))
+    done
+    submit_one "$JID" "$JPR"
+  done < "$WORK/batch.txt"
+  wait
+  rm -f "$WORK"/rdy-* 2>/dev/null
+  confirm_sent
+done
+}
+
+HELLO_EVERY=5
+HELLO_IN=0
+
+while :; do
+  # Say hello on the first turn and then every fifth — see the note above. Everything the round
+  # itself needs is answered by the poll, not by hello.
+  if [ "$HELLO_IN" -gt 0 ]; then
+    HELLO_IN=$(( HELLO_IN - 1 ))
+    run_rounds
+    sleep "$IDLE"
+    continue
+  fi
+  HELLO_IN=$(( HELLO_EVERY - 1 ))
   # ── ONLY THE SITE SAYING "NO" COUNTS AS BEING UNLINKED (2026-09-13) ─────────────────────────
   # This used to treat ANY answer that was not ok:true as "this computer was unlinked" and
   # DELETE ITS OWN TOKEN. An empty answer does that. A timeout does that. A 502 while the site is
@@ -1293,122 +1540,7 @@ while :; do
   [ "$PMS" -gt 60000 ] && PMS=60000
   IDLE=$(( PMS / 1000 ))
 
-  # ── THE PRINTER HOLDS THE QUEUE — the same change as the Mac script (owner, 2026-09-14) ─────
-  # Render the round in parallel, submit it IN ORDER, then let go: the confirmation happens on a
-  # later round, so nothing is ever reported "printed" until the printer itself has said so, and
-  # this file never stands still waiting for a queue CUPS is already managing. The long "why", and
-  # the measurement that prompted it (4.3 of every 7 seconds spent waiting), is on the Mac copy.
-  SENT="$WORK/sent.txt"
-  [ -f "$SENT" ] || : > "$SENT"
-
-  confirm_sent() {
-    [ -s "$SENT" ] || return 0
-    KEEP="$WORK/sent.keep"; : > "$KEEP"
-    NOW=$(date +%s)
-    while read -r AID CID CPR WHEN; do
-      [ -z "$AID" ] && continue
-      if lpstat -W completed -o "$CPR" 2>/dev/null | grep -q "^$CID "; then
-        curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/done" -H "x-lfh-agent: $CODE" \\
-          -H "content-type: application/json" -d '{}' >/dev/null
-        say "printed job $AID on $CPR"
-        continue
-      fi
-      if lpstat -o "$CPR" 2>/dev/null | grep -q "^$CID "; then
-        # Still in the printer's queue. Leave it — unless it has been sitting for two minutes, in
-        # which case the queued copy is CANCELLED before the ticket is handed back. Handing it back
-        # while the printer still holds it is the one way this design could make two identical
-        # tickets.
-        AGE=$(( NOW - WHEN ))
-        if [ "$AGE" -lt 120 ]; then printf '%s %s %s %s\\n' "$AID" "$CID" "$CPR" "$WHEN" >> "$KEEP"; continue; fi
-        cancel "$CID" >/dev/null 2>&1
-        curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/failed" -H "x-lfh-agent: $CODE" \\
-          -H "content-type: application/json" -d "{\\"error\\":\\"$CPR did not print it — switched off, out of paper, or unplugged\\"}" >/dev/null
-        say "FAILED job $AID on $CPR — is it switched on, with paper?"
-        continue
-      fi
-      # ── GONE FROM BOTH LISTS: TREAT IT AS PRINTED ────────────────────────────────────────────
-      # Not completed, not pending. There are exactly two ways a job leaves a CUPS queue: it
-      # printed, or it was cancelled — and WE are the only thing here that cancels, on the branch
-      # just above, which reports the failure itself and never reaches this line.
-      #
-      # It matters because of a CUPS setting this file cannot control: with PreserveJobHistory set
-      # to No, a finished job vanishes IMMEDIATELY and never appears in the completed list at all. Call
-      # that a failure and the app retries a ticket that is already on paper — EVERY ticket, on every
-      # machine set up that way, printed twice. Calling it printed costs one wrong word in the rare
-      # case where a person cancelled the job by hand from the Printers window. A duplicate ticket in
-      # a kitchen is food cooked twice; a wrong word is not.
-      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$AID/done" -H "x-lfh-agent: $CODE" \\
-        -H "content-type: application/json" -d '{}' >/dev/null
-      say "printed job $AID on $CPR (the queue had already let it go)"
-    done < "$SENT"
-    mv -f "$KEEP" "$SENT"
-  }
-
-  render_one() {
-    ID="$1"
-    HTML="$WORK/job-$ID.html"; PDF="$WORK/job-$ID.pdf"; rm -f "$HTML" "$PDF"
-    curl -s -m 30 -o "$HTML" "$SITE/api/print-agent/job/$ID/document" -H "x-lfh-agent: $CODE"
-    [ -s "$HTML" ] || { say "job $ID: no document (already handled)"; return; }
-    # Same watchdog as the Mac: new-headless Chrome writes the PDF and then keeps running, so
-    # waiting for it would hang the helper for ever after one ticket.
-    "$CHROME" --headless=new --disable-gpu --no-first-run --user-data-dir="$WORK/chrome-$ID" \\
-      --no-pdf-header-footer --virtual-time-budget=4000 --print-to-pdf="$PDF" "file://$HTML" >/dev/null 2>&1 &
-    CPID=$!
-    LAST=-1; STABLE=0; n=0
-    while [ $n -lt 60 ]; do
-      SIZE=$(wc -c < "$PDF" 2>/dev/null || echo 0)
-      if [ "$SIZE" -gt 0 ] && [ "$SIZE" = "$LAST" ]; then
-        STABLE=$((STABLE+1)); [ $STABLE -ge 2 ] && break
-      else STABLE=0; fi
-      LAST="$SIZE"; sleep 0.2; n=$((n+1))
-    done
-    kill "$CPID" >/dev/null 2>&1
-    pkill -f "print-to-pdf=$PDF" >/dev/null 2>&1
-    wait "$CPID" 2>/dev/null
-    rm -rf "$WORK/chrome-$ID" "$HTML"
-  }
-
-  submit_one() {
-    ID="$1"; PRINTER="$2"; PDF="$WORK/job-$ID.pdf"
-    if [ ! -s "$PDF" ]; then
-      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$ID/failed" -H "x-lfh-agent: $CODE" \\
-        -H "content-type: application/json" -d "{\\"error\\":\\"the ticket could not be made into a page on this computer\\"}" >/dev/null
-      say "FAILED job $ID — the page could not be made"; return
-    fi
-    OUT="$(lp -d "$PRINTER" "$PDF" 2>/dev/null)"
-    CUPSID="$(echo "$OUT" | sed -n 's/.*request id is \\([^ ]*\\).*/\\1/p')"
-    if [ -z "$CUPSID" ]; then
-      curl -s -m 20 -X POST "$SITE/api/print-agent/job/$ID/failed" -H "x-lfh-agent: $CODE" \\
-        -H "content-type: application/json" -d "{\\"error\\":\\"$PRINTER would not take it — is that printer still set up on this computer?\\"}" >/dev/null
-      say "FAILED job $ID — $PRINTER would not take it"; return
-    fi
-    printf '%s %s %s %s\\n' "$ID" "$CUPSID" "$PRINTER" "$(date +%s)" >> "$SENT"
-    say "job $ID handed to $PRINTER ($CUPSID)"
-  }
-
-  confirm_sent
-
-  while :; do
-    BATCH="$(curl -s -m 20 "$SITE/api/print-agent/next?max=4" -H "x-lfh-agent: $CODE")"
-    [ -z "$BATCH" ] && break
-    : > "$WORK/batch.txt"
-    echo "$BATCH" | tr '{' '\\n' | while IFS= read -r CHUNK; do
-      JID="$(printf '%s' "$CHUNK" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')"
-      JPR="$(printf '%s' "$CHUNK" | sed -n 's/.*"printer":"\\([^"]*\\)".*/\\1/p')"
-      [ -n "$JID" ] && printf '%s %s\\n' "$JID" "$JPR" >> "$WORK/batch.txt"
-    done
-    [ ! -s "$WORK/batch.txt" ] && break
-    while read -r JID JPR; do
-      [ -z "$JID" ] && continue
-      render_one "$JID" &
-    done < "$WORK/batch.txt"
-    wait
-    while read -r JID JPR; do
-      [ -z "$JID" ] && continue
-      submit_one "$JID" "$JPR"
-    done < "$WORK/batch.txt"
-    confirm_sent
-  done
+  run_rounds
   sleep "$IDLE"
 done
 `;

@@ -1758,7 +1758,10 @@ check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(e
     // `wait "$CPID"` inside render_one, so removing the round's wait left the guard green. Caught by
     // sabotage; the lesson is the same one as blockOf above — match the exact thing, not a word that
     // appears elsewhere in the same file.
-    check(/render_one "\$JID" &/.test(blk) && /\n {4}wait\n/.test(blk) && /submit_one "\$JID" "\$JPR"/.test(blk),
+    // `\n  wait` with TWO spaces since the round moved into run_rounds() and lost an indent. Pinned
+    // to the reap that follows the ordered submit loop — not `\bwait\b`, which also matches the
+    // `wait "$CPID"` inside render_one.
+    check(/render_one "\$JID" &/.test(blk) && /\n {2}wait\s/.test(blk) && /submit_one "\$JID" "\$JPR"/.test(blk),
       `the ${os === "mac" ? "Mac" : "Linux"} helper RENDERS the round in parallel and then SUBMITS it in order`,
       `the ${os} helper no longer renders in parallel, or no longer submits in order — the renders may race, the submits may not, because a kitchen expects its tickets in the order they were rung`);
   }
@@ -1841,6 +1844,70 @@ check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(e
     check(/waitingBy/.test(src),
       `${label} shows which printer each waiting ticket is for`,
       `${label} is back to one number for a queue spread across several printers`);
+}
+
+// ── 16 · AS FAST AS POSSIBLE, AND STILL ONE BY ONE (owner, 2026-09-14) ────────────────────────
+//
+// *"Make sure that whatever the printing job, the helper gets it instantly. One by one, send it to
+// the printer and the printer will hold the queue to print… sending should be as fast as possible,
+// and one by one in the queue only."*
+{
+  const gen = read("lib/printHelperScript.ts");
+  const blockOf2 = (name) => {
+    const at = gen.indexOf(`const ${name} = (a: HelperScriptArgs) =>`);
+    if (at < 0) return "";
+    const ends = ["mac", "windows", "linux"].map((x) => gen.indexOf(`const ${x} = (a: HelperScriptArgs) =>`)).filter((i) => i > at);
+    return gen.slice(at, ends.length ? Math.min(...ends) : gen.length);
+  };
+
+  // ── EACH PAGE GOES THE MOMENT *IT* IS READY ────────────────────────────────────────────────
+  // The round used to wait for every render before submitting any, so a page finished in 1.5s sat
+  // idle until its slowest sibling caught up. Nothing was gained: the ORDER is kept by the submit
+  // loop being sequential, not by the renders ending together.
+  for (const os of ["mac", "linux"]) {
+    const blk = blockOf2(os);
+    check(/: > "\$WORK\/rdy-\$ID"/.test(blk) && /\[ -f "\$WORK\/rdy-\$JID" \] && break/.test(blk),
+      `the ${os === "mac" ? "Mac" : "Linux"} helper hands each page over the moment THAT page is ready`,
+      `the ${os} helper waits for the whole round again — the first page sits finished and idle until the slowest one catches up`);
+    // …and still ONE BY ONE, in order. The submit loop is sequential; that is the whole guarantee.
+    check(/while read -r JID JPR; do[\s\S]{0,400}?submit_one "\$JID" "\$JPR"/.test(blk),
+      `…and still one at a time, in the order the app made them`,
+      `the ${os} helper submits from inside the parallel renders again — a kitchen's tickets would reach the printer in whatever order they happened to finish`);
+  }
+
+  // ── WINDOWS KEEPS THE ORDER WITH A BATON ───────────────────────────────────────────────────
+  // Its lanes are separate processes that render AND submit, so raising the per-printer cap to two
+  // meant two lanes could race to the same printer. Each lane now waits for the previous one's
+  // finished-flag before it hands its own page over — parallel renders, ordered handover.
+  {
+    const w = blockOf2("windows");
+    check(/set "PREV=%%a"/.test(w) && /"%CHROME%" "%SUMATRA%" "!PREV!"/.test(w) && /set "PREV=%~6"/.test(w),
+      "the Windows lanes carry the order between them — each is told which job goes before it",
+      "a Windows lane no longer knows what precedes it: with two tickets for one printer in a round, they would reach it in whatever order the two processes happened to get there");
+    check(/if exist "%WORK%\\\\lane-%PREV%\.done" goto myturn/.test(w) && /if %TURN% LSS 30 goto waitturn/.test(w),
+      "…and it waits its turn before handing over, with a bound so a stuck lane never stops the rest",
+      "the Windows hand-over baton is gone, or its wait is unbounded — the first is tickets out of order, the second is a printer that stops for ever behind one bad lane");
+    // A LABEL INSIDE A PARENTHESISED BLOCK IS NOT RELIABLE IN cmd.exe — the same family as the
+    // %VAR%-inside-a-block fault this file already paid for once.
+    const labelInBlock = /\(\r?\n(?:[^()]*\r?\n)*?\s*:[A-Za-z]/.test(w.split(":lane")[1] || "");
+    check(!labelInBlock,
+      "…and no label is defined inside a parenthesised block, where cmd.exe does not reliably find it",
+      "a :label was written inside a ( ) block in the Windows helper — cmd does not reliably jump to it, and a goto out of the block leaves the block anyway");
+  }
+
+  // ── HELLO IS NOT PAID ON EVERY POLL ────────────────────────────────────────────────────────
+  // Measured at 379 ms against the live site: a fifth of the delay between a waiter sending an order
+  // and the computer hearing about it, paid 43,000 times a day for an answer that rarely changes.
+  // Every ten seconds is well inside the thirty the board treats as connected (HELPER_STALE_MS).
+  for (const os of ["mac", "linux"]) {
+    const blk = blockOf2(os);
+    check(/HELLO_EVERY=5/.test(blk) && /HELLO_IN=\$\(\( HELLO_IN - 1 \)\)/.test(blk),
+      `the ${os === "mac" ? "Mac" : "Linux"} helper does not pay for a hello on every single poll`,
+      `the ${os} helper says hello on every poll again — 0.4s in front of every ticket, and a third more traffic, for an answer that rarely changes`);
+  }
+  check(/HELPER_STALE_MS = 30_000/.test(read("lib/printHelpers.ts")),
+    "…and the board still treats thirty seconds of quiet as connected, which is what makes that safe",
+    "HELPER_STALE_MS moved: if it drops below the hello interval, every healthy computer starts reading as asleep");
 }
 
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
