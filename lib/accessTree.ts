@@ -261,18 +261,30 @@ const ACTIONS: ActionDef[] = [
   // and a rebuild must not quietly take that away.
   { id: "print_here", name: "May be the printer (print on their own screen)", flag: "print_here", mgrDef: true,
     what: "Their screen may print this restaurant's paper — kitchen slips, bills, banquet sheets — on whatever printer that machine is set to. Turn it OFF for a phone: a phone that takes a ticket puts it in a dialog nobody looks at, and the kitchen never gets the paper. Where printing actually happens is chosen on Printing (Aevidine holds that): a computer running the print helper, or a named screen — and only a person with this on can be that named screen." },
-  // MAY THIS PERSON SET THE PRINTERS UP (owner, 2026-08-27: "that device is connected to the printer,
-  // so it will be easy for THAT device to set up the printer and all that, instead of the admin —
-  // admin can still see it… but that device will set up, and that device will only get the option in
-  // settings, like everyone has their settings where they log out from").
+  // ── "MAY SET THE PRINTERS UP" WAS RETIRED HERE ON 2026-09-14 ────────────────────────────────
+  // It was his own ask (2026-08-27): *"that device is connected to the printer, so it will be easy
+  // for THAT device to set up the printer, instead of the admin."* It gave ONE named manager a
+  // Printing page in their own Settings that could register that computer, show its setup code and
+  // choose which printer got which paper.
   //
-  // It is deliberately a SEPARATE row from "May be the printer". They are different amounts of trust:
-  // being the printer is "paper comes out of my machine", setting printers up is "I decide where the
-  // whole restaurant's paper comes out". Default OFF, because it is granted to ONE person — whoever
-  // sits at the machine the printer is plugged into — and a restaurant where every manager can
-  // re-route the kitchen slips is a restaurant where tickets go missing and nobody knows why.
-  { id: "print_setup", name: "May set the printers up (from their own computer)", flag: "print_setup", mgrDef: false,
-    what: "Adds a Printing page to their own Settings, on the computer the printer is plugged into: it can register that computer, get the little helper program's code, and choose which printer prints the kitchen slips, the bills and the banquet sheets. Give it to ONE person — the one sitting at that machine. Aevidine sees and can change everything they do, and nothing here lets them change any other restaurant." },
+  // REVERSED by him on 2026-09-14. Asked directly which of his two rulings won — this permission, or
+  // his newer *"in the manager panel and the owner panel there shouldn't be able to change it, just
+  // for them to see that a computer is online, printer is online, whichever printer we have set up
+  // all online, you are good to go"* — he answered: **"That setup will be done by me only, and maybe
+  // I was talking about the screen."**
+  //
+  // So it grants nothing and is GONE rather than left switched off: a row on this screen that
+  // changes nothing when you turn it on is the dead switch the whole access rebuild existed to
+  // delete. The manager panel's Printing section is a status screen now — the three papers, live,
+  // with a Test print — and every setup verb on that route is refused.
+  //
+  // WHAT A RESTAURANT KEEPS on its own side, and why none of them is this:
+  //   · the KITCHEN SCREEN launcher — the "screen" half he named in the same breath. It opens their
+  //     own Chrome on their own machine, holds no secret and moves nobody's paper.
+  //   · `print_clear` below — emptying a pile-up is a different amount of trust, and he asked for it
+  //     by name one day earlier.
+  //   · `print_here` above — being the printer, which is not deciding who is.
+  // Full record: docs/REJECTED-IDEAS.md. Do not put a printer control on a restaurant's panel.
   // MAY THIS PERSON EMPTY A QUEUE THAT HAS PILED UP (owner, 2026-09-13, after clearing a three-day
   // backlog himself: *"you could able to see who is able to clear it out in access and permission"*).
   //

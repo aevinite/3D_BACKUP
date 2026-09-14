@@ -485,17 +485,30 @@ while :; do
   [ "$PMS" -gt 60000 ] && PMS=60000
   IDLE=$(( PMS / 1000 ))
 
-  # Keep asking while there is work; the sleep below is only for when the basket is empty.
-  while :; do
-    JOB="$(curl -s -m 20 "$SITE/api/print-agent/next" -H "x-lfh-agent: $CODE")"
-    [ -z "$JOB" ] && break                      # 204 — nothing to print
-    ID="$(echo "$JOB" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')"
-    PRINTER="$(echo "$JOB" | sed -n 's/.*"printer":"\\([^"]*\\)".*/\\1/p')"
-    [ -z "$ID" ] && break
-    HTML="$WORK/job.html"; PDF="$WORK/job.pdf"
+  # ── ONE LANE PER PRINTER (owner, 2026-09-14) ────────────────────────────────────────────────
+  #
+  # *"Whenever there are more prints in the queue it is working slowly… if there are three different
+  # printers connected to the PC and set up for different prints, so all that we have different
+  # queue. For example, you can send kitchen and print bill simultaneously in parallel."*
+  #
+  # This loop printed STRICTLY one job at a time, whatever printer it was for. Each one costs a
+  # Chrome render plus up to fifteen seconds waiting for the queue to confirm the paper came out —
+  # so a bill for a customer standing at the counter waited behind every kitchen slip in front of
+  # it, on a DIFFERENT printer that was idle the whole time.
+  #
+  # A "max" on the request asks the app for a BATCH: at most one job per distinct printer. So every job in a round
+  # is on its own printer, and one background worker per job can never collide with another. A round
+  # now takes as long as its SLOWEST printer instead of the sum of all of them.
+  #
+  # TWO THINGS ARE PER-JOB AND HAVE TO BE: the html/pdf pair (two workers sharing one job.pdf would
+  # print each other's paper) and Chrome's profile directory (two Chromes on one profile fight over
+  # its lock and one of them silently writes nothing).
+  print_one() {
+    ID="$1"; PRINTER="$2"
+    HTML="$WORK/job-$ID.html"; PDF="$WORK/job-$ID.pdf"
     rm -f "$HTML" "$PDF"
     if ! curl -s -m 30 -o "$HTML" "$SITE/api/print-agent/job/$ID/document" -H "x-lfh-agent: $CODE" || [ ! -s "$HTML" ]; then
-      say "job $ID: the app had no document for it (already handled)"; continue
+      say "job $ID: the app had no document for it (already handled)"; return
     fi
     # Turn it into a paper-shaped PDF with the Chrome that is already on this machine. Its own
     # profile folder, so it can never disturb anybody's browsing.
@@ -506,7 +519,7 @@ while :; do
     # thirteen Chrome processes piled up. Measured on 2026-08-20. So: start it, wait for the PDF to
     # appear and settle, then end it ourselves.
     "$CHROME" --headless=new --disable-gpu --no-first-run --no-default-browser-check \\
-      --user-data-dir="$WORK/chrome" --no-pdf-header-footer --virtual-time-budget=4000 \\
+      --user-data-dir="$WORK/chrome-$ID" --no-pdf-header-footer --virtual-time-budget=4000 \\
       --print-to-pdf="$PDF" "file://$HTML" >/dev/null 2>&1 &
     CPID=$!
     n=0
@@ -549,6 +562,29 @@ while :; do
         -H "content-type: application/json" -d "{\\"error\\":\\"$PRINTER did not print it — switched off, out of paper, or unplugged\\"}" >/dev/null
       say "FAILED job $ID on $PRINTER — is it switched on, with paper?"
     fi
+    rm -rf "$WORK/chrome-$ID" "$HTML" "$PDF"
+  }
+
+  while :; do
+    # An old app answers the single-job shape and ignores the max — the reader below copes with both,
+    # because a helper file cannot be pushed and this one may well outlive a rollback.
+    BATCH="$(curl -s -m 20 "$SITE/api/print-agent/next?max=4" -H "x-lfh-agent: $CODE")"
+    [ -z "$BATCH" ] && break                    # 204 — nothing to print
+    : > "$WORK/batch.txt"
+    echo "$BATCH" | tr '{' '\\n' | while IFS= read -r CHUNK; do
+      JID="$(printf '%s' "$CHUNK" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')"
+      JPR="$(printf '%s' "$CHUNK" | sed -n 's/.*"printer":"\\([^"]*\\)".*/\\1/p')"
+      [ -n "$JID" ] && printf '%s %s\\n' "$JID" "$JPR" >> "$WORK/batch.txt"
+    done
+    [ ! -s "$WORK/batch.txt" ] && break
+    # Redirected from a FILE, never a pipe: a pipe runs this in a subshell and the wait below
+    # would have nothing to wait for. A printer name may contain spaces, and read puts the whole
+    # remainder in the LAST variable, which is why the id is written first.
+    while read -r JID JPR; do
+      [ -z "$JID" ] && continue
+      print_one "$JID" "$JPR" &
+    done < "$WORK/batch.txt"
+    wait                                        # every lane finishes before the next round
   done
   sleep "$IDLE"
 done
@@ -603,6 +639,26 @@ set "LOG=%WORK%\\helper.log"
 set "TOKENFILE=%WORK%\\token.txt"
 set "LOCKFILE=%WORK%\\running.lock"
 if not exist "%WORK%" mkdir "%WORK%"
+
+REM ── ONE LANE PER PRINTER (owner, 2026-09-14) ──────────────────────────────────────────────────
+REM
+REM *"You can send kitchen and print bill simultaneously in parallel."*
+REM
+REM This file used to print strictly one job at a time, whatever printer it was for, so a bill for a
+REM customer standing at the counter waited behind every kitchen slip in front of it - on a DIFFERENT
+REM printer that was idle the whole time.
+REM
+REM A round now asks the app for at most ONE JOB PER PRINTER and starts a lane for each. A lane is
+REM THIS SAME FILE, re-run with /lane - which is why this dispatch is the first thing after the
+REM folder exists and before every other line: a lane must not take the single-instance lock, must
+REM not read the setup code prompt, and must not write a Startup shortcut. It prints one job and
+REM ends.
+REM
+REM The parent waits for the lanes before starting the next round, so two tickets for one printer
+REM can never be in flight at once and their ORDER is kept - which is a promise the kitchen queue
+REM makes. That wait is BOUNDED (see :waitlanes): a mis-count must cost a slow round, never a helper
+REM that stops printing.
+if /i "%~1"=="/lane" goto lane
 
 REM ── NOBODY IS WATCHING AN AUTO-STARTED COPY (mig 380) ─────────────────────────────────────
 REM The Startup shortcut this file writes for itself passes /auto and opens the window MINIMISED.
@@ -854,24 +910,78 @@ if "%PMS%"=="" set "PMS=0"
 if %PMS% GEQ 2000 if %PMS% LEQ 60000 set /a IDLE=%PMS%/1000
 
 :work
-curl -s -m 20 "%SITE%/api/print-agent/next" -H "x-lfh-agent: %CODE%" > "%WORK%\\job.json" 2>nul
+REM The app answers a BATCH - at most one job per printer - when asked with a max. An older app
+REM ignores it and answers a single job; the reader below produces one line either way, so this file
+REM works against both.
+curl -s -m 20 "%SITE%/api/print-agent/next?max=4" -H "x-lfh-agent: %CODE%" > "%WORK%\\job.json" 2>nul
 for %%A in ("%WORK%\\job.json") do if %%~zA LSS 5 goto idle
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\job.json' -Raw | ConvertFrom-Json).id"\`) do set "ID=%%i"
-for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\job.json' -Raw | ConvertFrom-Json).printer"\`) do set "PRINTER=%%i"
-if "%ID%"=="" goto idle
+REM One "id,printer" line per job. A COMMA is a safe separator: the app strips commas, quotes,
+REM backslashes and control characters out of every printer name it accepts, so one can never appear
+REM inside the name and split the line in the wrong place.
+powershell -NoProfile -Command "$j=Get-Content '%WORK%\\job.json' -Raw | ConvertFrom-Json; $list=if($j.jobs){$j.jobs}else{@($j)}; foreach($x in $list){ if($x.id){ '{0},{1}' -f $x.id,$x.printer } }" > "%WORK%\\batch.txt" 2>nul
+for %%A in ("%WORK%\\batch.txt") do if %%~zA LSS 5 goto idle
+del /q "%WORK%\\lane-*.done" 2>nul
+set "LANES=0"
+REM !LANES! and not %LANES% - a %VAR% read inside the same parenthesised block that SETS it is
+REM expanded when cmd.exe PARSES the block, i.e. before the loop has run even once. That exact
+REM mistake is why the PDF-printer check failed on every Windows machine once already.
+for /f "usebackq tokens=1,* delims=," %%a in ("%WORK%\\batch.txt") do (
+  set /a LANES=!LANES!+1
+  REM CHROME and SUMATRA are PASSED IN, and that is not a nicety: the lane jumps to :lane before
+  REM either of them is worked out, so a lane left to find them itself would have both empty and
+  REM print nothing at all, silently. They are read here, outside this block, so %VAR% is right.
+  start "" /b cmd /c call "%~f0" /lane "%%a" "%%b" "%CHROME%" "%SUMATRA%"
+)
+if %LANES%==0 goto idle
+set "WAITED=0"
+:waitlanes
+timeout /t 1 /nobreak >nul
+set "FINISHED=0"
+for /f %%c in ('dir /b "%WORK%\\lane-*.done" 2^>nul ^| find /c /v ""') do set "FINISHED=%%c"
+if %FINISHED% GEQ %LANES% goto work
+set /a WAITED=%WAITED%+1
+REM BOUNDED ON PURPOSE. If a lane dies without leaving its flag - killed, out of disk, a Chrome that
+REM never returned - counting for ever would stop this computer printing anything again. Ninety
+REM seconds is far past the ~20s a slow ticket takes, and going round again is harmless: the app
+REM will not hand out a job it has already given to somebody.
+if %WAITED% LSS 90 goto waitlanes
+echo %DATE% %TIME%  a printing lane did not finish in 90s - carrying on>>"%LOG%"
+goto work
 
-del /q "%WORK%\\job.html" "%WORK%\\job.pdf" 2>nul
-curl -s -m 30 -o "%WORK%\\job.html" "%SITE%/api/print-agent/job/%ID%/document" -H "x-lfh-agent: %CODE%" 2>nul
-for %%A in ("%WORK%\\job.html") do if %%~zA LSS 20 (
+:lane
+REM ── ONE LANE: print exactly one job, then leave a flag and end ───────────────────────────────
+REM Re-run of this same file with /lane <id> <printer>. It shares nothing with its siblings except
+REM the folder, and every file it touches carries the job id - two lanes on one job.pdf would print
+REM each other's paper, and two Chromes on one profile folder fight over its lock and one of them
+REM silently writes nothing.
+set "ID=%~2"
+set "PRINTER=%~3"
+set "CHROME=%~4"
+set "SUMATRA=%~5"
+REM No id means no flag can be named, so this one really does just end. Every OTHER way out goes to
+REM :laneend, which writes the flag — a lane that leaves without one is a lane the parent waits the
+REM full ninety seconds for, and that is a round of everybody's printing lost to one missing file.
+if "%ID%"=="" exit /b
+if not exist "%CHROME%" goto laneend
+if not exist "%SUMATRA%" goto laneend
+set /p CODE=<"%TOKENFILE%"
+if "%CODE%"=="" goto laneend
+
+set "JHTML=%WORK%\\job-%ID%.html"
+set "JPDF=%WORK%\\job-%ID%.pdf"
+set "JPROF=%WORK%\\chrome-%ID%"
+del /q "%JHTML%" "%JPDF%" 2>nul
+curl -s -m 30 -o "%JHTML%" "%SITE%/api/print-agent/job/%ID%/document" -H "x-lfh-agent: %CODE%" 2>nul
+for %%A in ("%JHTML%") do if %%~zA LSS 20 (
   echo %DATE% %TIME%  job %ID%: the app had no document for it ^(already handled^)>>"%LOG%"
-  goto work
+  goto laneend
 )
 
 REM Chrome's new headless mode does NOT exit after --print-to-pdf (measured on macOS 2026-08-20;
 REM same engine here), so it is started with a 25-second leash and ended if it overstays. Waiting on
 REM it plainly would hang the helper for ever after the first ticket.
-powershell -NoProfile -Command "$a=@('--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--user-data-dir=%WORK%\\chrome','--no-pdf-header-footer','--virtual-time-budget=4000','--print-to-pdf=%WORK%\\job.pdf','file:///%WORK:\\=/%/job.html'); $p=Start-Process -FilePath '%CHROME%' -ArgumentList $a -PassThru -WindowStyle Hidden; if(-not $p.WaitForExit(25000)){ try{ $p.Kill() }catch{} }" >nul 2>&1
-"%SUMATRA%" -print-to "%PRINTER%" -silent "%WORK%\\job.pdf" >nul 2>&1
+powershell -NoProfile -Command "$a=@('--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--user-data-dir=%JPROF%','--no-pdf-header-footer','--virtual-time-budget=4000','--print-to-pdf=%JPDF%','file:///%JHTML:\\=/%'); $p=Start-Process -FilePath '%CHROME%' -ArgumentList $a -PassThru -WindowStyle Hidden; if(-not $p.WaitForExit(25000)){ try{ $p.Kill() }catch{} }" >nul 2>&1
+"%SUMATRA%" -print-to "%PRINTER%" -silent "%JPDF%" >nul 2>&1
 if errorlevel 1 (
   curl -s -m 20 -X POST "%SITE%/api/print-agent/job/%ID%/failed" -H "x-lfh-agent: %CODE%" -H "content-type: application/json" -d "{\\"error\\":\\"could not print on %PRINTER%\\"}" >nul 2>&1
   echo %DATE% %TIME%  FAILED job %ID% on %PRINTER% - is it switched on, with paper?>>"%LOG%"
@@ -879,7 +989,15 @@ if errorlevel 1 (
   curl -s -m 20 -X POST "%SITE%/api/print-agent/job/%ID%/done" -H "x-lfh-agent: %CODE%" -H "content-type: application/json" -d "{}" >nul 2>&1
   echo %DATE% %TIME%  printed job %ID% on %PRINTER%>>"%LOG%"
 )
-goto work
+
+:laneend
+REM THE FLAG IS THE LAST THING, AND IT IS WRITTEN WHATEVER HAPPENED. The parent counts these to know
+REM the round is over; a lane that ended without leaving one would be waited on until the bound in
+REM :waitlanes gives up. Named by the job id, so two lanes never write the same flag.
+rmdir /s /q "%JPROF%" 2>nul
+del /q "%JHTML%" "%JPDF%" 2>nul
+echo done>"%WORK%\\lane-%ID%.done"
+exit /b
 
 :idle
 timeout /t %IDLE% /nobreak >nul
@@ -1103,18 +1221,18 @@ while :; do
   [ "$PMS" -gt 60000 ] && PMS=60000
   IDLE=$(( PMS / 1000 ))
 
-  while :; do
-    JOB="$(curl -s -m 20 "$SITE/api/print-agent/next" -H "x-lfh-agent: $CODE")"
-    [ -z "$JOB" ] && break
-    ID="$(echo "$JOB" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')"
-    PRINTER="$(echo "$JOB" | sed -n 's/.*"printer":"\\([^"]*\\)".*/\\1/p')"
-    [ -z "$ID" ] && break
-    HTML="$WORK/job.html"; PDF="$WORK/job.pdf"; rm -f "$HTML" "$PDF"
+  # ── ONE LANE PER PRINTER — the same change as the Mac script (owner, 2026-09-14) ────────────
+  # A batch is at most one job per distinct printer, so one background worker per job can never
+  # collide with another, and the html/pdf pair and Chrome's profile directory are per-job because
+  # two workers sharing either would print each other's paper. The long "why" is on the Mac copy.
+  print_one() {
+    ID="$1"; PRINTER="$2"
+    HTML="$WORK/job-$ID.html"; PDF="$WORK/job-$ID.pdf"; rm -f "$HTML" "$PDF"
     curl -s -m 30 -o "$HTML" "$SITE/api/print-agent/job/$ID/document" -H "x-lfh-agent: $CODE"
-    [ -s "$HTML" ] || { say "job $ID: no document (already handled)"; continue; }
+    [ -s "$HTML" ] || { say "job $ID: no document (already handled)"; return; }
     # Same watchdog as the Mac: new-headless Chrome writes the PDF and then keeps running, so
     # waiting for it would hang the helper for ever after one ticket.
-    "$CHROME" --headless=new --disable-gpu --no-first-run --user-data-dir="$WORK/chrome" \\
+    "$CHROME" --headless=new --disable-gpu --no-first-run --user-data-dir="$WORK/chrome-$ID" \\
       --no-pdf-header-footer --virtual-time-budget=4000 --print-to-pdf="$PDF" "file://$HTML" >/dev/null 2>&1 &
     CPID=$!
     n=0
@@ -1147,6 +1265,24 @@ while :; do
       curl -s -m 20 -X POST "$SITE/api/print-agent/job/$ID/failed" -H "x-lfh-agent: $CODE" -H "content-type: application/json" -d "{\\"error\\":\\"$PRINTER did not print it — switched off, out of paper, or unplugged\\"}" >/dev/null
       say "FAILED job $ID on $PRINTER"
     fi
+    rm -rf "$WORK/chrome-$ID" "$HTML" "$PDF"
+  }
+
+  while :; do
+    BATCH="$(curl -s -m 20 "$SITE/api/print-agent/next?max=4" -H "x-lfh-agent: $CODE")"
+    [ -z "$BATCH" ] && break
+    : > "$WORK/batch.txt"
+    echo "$BATCH" | tr '{' '\\n' | while IFS= read -r CHUNK; do
+      JID="$(printf '%s' "$CHUNK" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p')"
+      JPR="$(printf '%s' "$CHUNK" | sed -n 's/.*"printer":"\\([^"]*\\)".*/\\1/p')"
+      [ -n "$JID" ] && printf '%s %s\\n' "$JID" "$JPR" >> "$WORK/batch.txt"
+    done
+    [ ! -s "$WORK/batch.txt" ] && break
+    while read -r JID JPR; do
+      [ -z "$JID" ] && continue
+      print_one "$JID" "$JPR" &
+    done < "$WORK/batch.txt"
+    wait
   done
   sleep "$IDLE"
 done

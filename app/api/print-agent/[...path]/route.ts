@@ -19,7 +19,7 @@
 // blast radius is paper — and one press of Remove in the admin console ends it.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { agentByToken, helloAgent, claimNext, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
+import { agentByToken, helloAgent, claimNext, claimSome, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
 import { claimSetupCode } from "@/lib/printSetupCode";
 import { rateAllowed, rateResetOnSuccess } from "@/lib/rateLimit";
 import { finishKotJob, tellSomebodyItGaveUp } from "@/lib/printQueue";
@@ -237,6 +237,28 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   // GET /next — "anything for me?" The answer is normally 204: no body, no work, no cost.
   if (seg[0] === "next") {
     if (!(await printingOn(agent.restaurant_id))) return new NextResponse(null, { status: 204 });
+    // ── ONE LANE PER PRINTER (owner, 2026-09-14) ──────────────────────────────────────────────
+    // *"You can send kitchen and print bill simultaneously in parallel."* `?max=` asks for a BATCH:
+    // at most one job per distinct printer, so the helper can run one worker per lane and a bill
+    // never queues behind a kitchen slip on a different printer.
+    //
+    // ⚠️ THE OLD SHAPE IS STILL THE DEFAULT, AND THAT IS NOT TIDINESS — a helper is a text file
+    // somebody pasted into Notepad, there is no way to push a new one, and his Windows PC is running
+    // an older copy right now. Without `?max=` this answers exactly what it always answered: one
+    // job, one object. With it, `{ jobs: [...] }`. An old file cannot send the parameter, so an old
+    // file cannot be handed a shape it does not understand.
+    const want = Number(new URL(req.url).searchParams.get("max") || 0);
+    if (want > 1) {
+      const jobs = await claimSome(agent.restaurant_id, agent, { max: want });
+      if (!jobs.length) return new NextResponse(null, { status: 204 });
+      return NextResponse.json({
+        jobs: jobs.map((job) => ({
+          id: job.id, kind: job.kind, printer: job.printer,
+          document: `/api/print-agent/job/${job.id}/document`,
+          reprint: job.reprint, attempts: job.attempts,
+        })),
+      });
+    }
     const job = await claimNext(agent.restaurant_id, agent);
     if (!job) return new NextResponse(null, { status: 204 });
     return NextResponse.json({

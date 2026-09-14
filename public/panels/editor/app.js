@@ -1659,32 +1659,13 @@ function bindPrintingBoard(ed) {
   ed.querySelectorAll('[data-pw]').forEach((el) => {
     const what = el.dataset.pw;
     // ONE DROPDOWN, WHOSE OPTIONS ARE THE ANSWERS. "off", "" (not chosen), or "<agent>|<printer>".
-    if (what === "printerpick") {
-      el.onchange = async () => {
-        const kind = el.dataset.kind, v = el.value;
-        if (v === "off") { const d = await post("route", { kind, who: "off" }); if (d) { toast("Saved."); await loadPrintBoard(); } return; }
-        if (!v) { const d = await post("route", { kind, who: "none" }); if (d) { toast("Saved."); await loadPrintBoard(); } return; }
-        const cut = v.indexOf("|");
-        const agent = v.slice(0, cut), printer = v.slice(cut + 1);
-        const d = await post("route", { kind, who: "computer", agent, printer });
-        if (d) { toast("Saved."); await loadPrintBoard(); }
-      };
-      return;
-    }
-    if (what === "printer" || what === "paper") {
-      // A dropdown SAVES on change — there is no second Save button to forget to press.
-      el.onchange = async () => {
-        const kind = el.dataset.kind;
-        const r = (B().routes || {})[kind] || {};
-        const printer = what === "printer" ? el.value : r.printer;
-        const paper = what === "paper"
-          ? (((B().papersByKind || {})[el.dataset.kind] || B().papers || []).find((x) => x.id === el.value) || {}).paper || null
-          : (r.paper || null);
-        const d = await post("route", { kind, who: "computer", printer, paper });
-        if (d) { toast("Saved."); await loadPrintBoard(); }
-      };
-      return;
-    }
+    // ── THE PRINTER AND PAPER DROPDOWNS WERE DELETED HERE ON 2026-09-14 ─────────────────────
+    // "printerpick", "printer" and "paper" saved which printer got which paper from this panel.
+    // Owner, asked directly which of his two rulings won: **"That setup will be done by me only."**
+    // The controls are gone from the section above and the panel route refuses the verbs, so these
+    // three handlers had no button to fire them and no server that would listen. Do not add a
+    // printer control back to this panel — /aevinite/printing is where a restaurant's paper is
+    // addressed, and two places to change one thing is how these two boards drifted apart twice.
     el.onclick = async () => {
       if (what === "reload") { state.printBoard = state.printBoard || null; await loadPrintBoard(); return; }
       // ── EMPTY A PILE-UP (owner, 2026-09-13) ──────────────────────────────────────────────────
@@ -1737,11 +1718,6 @@ function bindPrintingBoard(ed) {
         catch { toast("Could not copy — select the text and copy it by hand.", "err"); }
         return;
       }
-      if (what === "adopt") {
-        const d = await post("this-computer", { adopt: el.dataset.id });
-        if (d) { toast(`This screen now manages “${d.name}”.`); await loadPrintBoard(); }
-        return;
-      }
       // ── SHOW A SETUP CODE (mig 380) ────────────────────────────────────────────────────────
       // The answer is held in `state` and drawn once. It is never stored anywhere that survives
       // this page: not localStorage, not the offline cache — a ten-minute secret that outlives its
@@ -1753,30 +1729,6 @@ function bindPrintingBoard(ed) {
       // the thumb is still up here on the code, so the control that was pressed says it too.
       // A refusal is said out loud as well — a clipboard write can be blocked by the browser, and
       // "nothing happened" is the one answer a tap may never give.
-      if (what === "copycode") {
-        const code = (state.printCode || {}).code || "";
-        if (!code) return;
-        try {
-          await navigator.clipboard.writeText(code);
-          el.textContent = "Copied \u2713";
-          el.classList.add("primary");
-          toast("Copied.");
-          setTimeout(() => { el.textContent = "Copy"; el.classList.remove("primary"); }, 1600);
-        } catch {
-          toast("Could not copy — read it off the screen instead.", "err");
-        }
-        return;
-      }
-      if (what === "setupcode") {
-        const d = await post("setup-code", {});
-        if (d && d.code) {
-          state.printCode = { code: d.code, pretty: d.pretty, expiresAt: d.expiresAt };
-          // Re-read so the board's own "a code is live" line agrees with the card immediately.
-          await loadPrintBoard();
-          startPrintCodeTick();
-        }
-        return;
-      }
       // THESE TWO ASK IN THE PANEL, NOT WITH THE BROWSER'S OWN DIALOG (sweep #8 T6, 2026-09-03).
       // They were the last bare prompt() and confirm() left in this file, and this panel already owns
       // a themed replacement for each (promptDialog / confirmDialog, right at the top).
@@ -1788,88 +1740,11 @@ function bindPrintingBoard(ed) {
       // not break. Same reasoning, same fix and the same wording as editor/inventory.js's four
       // (2026-08-31) and maint.js's two (2026-08-30).
       // verify:panel-dialogs now covers this file too, so they cannot come back.
-      if (what === "rename") {
-        const cur = (B().thisComputer || {}).name || "";
-        const name = await promptDialog("What should this computer be called?",
-          { confirmLabel: "Rename", placeholder: "e.g. Front till", defaultValue: cur, required: true, danger: false });
-        if (!name || !name.trim() || name === cur) return;
-        const d = await post("this-computer", { name: name.trim() });
-        if (d) { toast("Renamed."); await loadPrintBoard(); }
-        return;
-      }
-      if (what === "unlink") {
-        const nm = (B().thisComputer || {}).name || "this computer";
-        if (!(await confirmDialog(
-          `Unlink \u201c${nm}\u201d? It stops printing at once, and anything routed to it needs a printer choosing again. `
-          + "To bring it back: show a setup code, run the helper file on that computer, and type it in.",
-          "Unlink"))) return;
-        const d = await post("unlink", {});
-        if (d) { toast("Unlinked."); await loadPrintBoard(); }
-        return;
-      }
-      if (what === "test") {
-        const d = await post("test", { printer: el.dataset.printer });
-        if (d) { toast(d.note || "Test page sent."); await loadPrintBoard(); }
-        return;
-      }
       // THE MODE ACTIONS ARE GONE (owner, 2026-08-31 — "we don't need toggle"): `mode`,
       // `mode-cancel` and `mode-yes`, plus the inline confirmation they existed to show. There is no
       // mechanism to switch, so there is nothing whose cost has to be explained first. What is left
       // is the one act that was always the real one: naming whose screen prints the slips.
       // "Print them on this screen" — screen mode's one action, and it names THIS person.
-      if (what === "mine") {
-        // A ROUTE, NOT A MODE. Same act as before — "the slips print on MY screen" — but said in the
-        // one place the paper actually reads. The panel follows the person on the server
-        // (lib/printHelpers → panelForRole), so nothing here has to know what a "panel" is.
-        const d = await post("route", { kind: "kot", who: "screen" });
-        if (d) { toast("Kitchen tickets print here now."); await loadPrintBoard(); }
-        return;
-      }
-      if (what === "off") {
-        const d = await post("route", { kind: el.dataset.kind, who: "off" });
-        if (d) { toast("Saved."); await loadPrintBoard(); }
-        return;
-      }
-      if (what === "on") {
-        // "ON" IS DERIVED NOW, NOT READ OFF A MODE (owner, 2026-08-31). It used to ask the stored
-        // mode which of two things one tap meant. With no mode, the honest question is what this
-        // machine can actually DO: if the helper is running here and has listed printers, "on" means
-        // that printer; if it is not, "on" means this screen. Same one tap either way, and it can no
-        // longer mean "the helper" on a computer that has none — which is what the old branch did
-        // whenever the stored mode said "computer" and nothing was set up.
-        const kind = el.dataset.kind;
-        const mine2 = B().thisComputer;
-        if (!mine2 || !(mine2.printers || []).length) {
-          const d = await post("route", { kind, who: "screen" });
-          if (d) { toast("Saved."); await loadPrintBoard(); }
-          return;
-        }
-        const r2 = (B().routes || {})[kind] || {};
-        const printer = mine2.printers.some((p) => p.name === r2.printer) ? r2.printer : mine2.printers[0].name;
-        const d = await post("route", { kind, who: "computer", printer });
-        if (d) { toast("Saved."); await loadPrintBoard(); }
-        return;
-      }
-      if (what === "who") {
-        const kind = el.dataset.kind, who = el.dataset.who;
-        const mine = B().thisComputer;
-        const body = { kind, who };
-        if (who === "computer") {
-          if (!mine) { toast("Set this computer up first — the section above.", "err"); return; }
-          if (!(mine.printers || []).length) { toast("This computer has not listed any printers yet. Start the helper first.", "err"); return; }
-          const r = (B().routes || {})[kind] || {};
-          // Keep the printer already chosen if it is still one of this machine's; otherwise the
-          // first one it reported, so one tap is genuinely one tap.
-          body.printer = (mine.printers.some((p) => p.name === r.printer) ? r.printer : mine.printers[0].name);
-        }
-        // Naming THIS screen is the same act as answering the per-device question "should this
-        // screen print?" — without it the route would point at a browser that has never agreed to
-        // print anything, and the paper would simply never come. Answering "nobody" or "a computer"
-        // does not switch the device off: another kind of paper may still be its job.
-        const d = await post("route", body);
-        if (d) { toast("Saved."); await loadPrintBoard(); }
-        return;
-      }
     };
   });
   // Remember what is half-typed, so a re-render (a poll landing) does not eat the name.
@@ -2389,7 +2264,7 @@ function secEscOff(ov) {
 // from the live Table view) was DELETED 2026-09-03, unreferenced from the day it was written.
 // It existed for one reason: Settings was gated by `edit_settings`, so a manager granted only
 // `table_assign` had no way to reach the rota. That was fixed properly instead — the Settings tab
-// now opens for "edit_settings|table_assign|print_setup" and every card inside keeps its own gate
+// now opens for "edit_settings|table_assign" and every card inside keeps its own gate
 // (see XRAY_TABS), so a table_assign manager gets in and sees that one card. The popup solved a
 // problem that no longer exists.
 // AND he refused the floor door on its own merits — REJECTED (owner, 2026-07-31): "I do not want
@@ -7465,10 +7340,10 @@ function bindEditor() {
   if (state.tab === "general" && state.settingsSection === "printing") {
     if (!state.printBoardLoaded && !state.printBoardLoading) loadPrintBoard();
     bindPrintingBoard(ed);
-    // The setup code's clock. Started HERE and not inside the card's own builder, because a builder
-    // that starts a timer runs once per render and would leave one behind every redraw. It stops
-    // itself the moment no countdown is on screen (see startPrintCodeTick).
-    if (ed.querySelector("[data-pw-left]")) startPrintCodeTick();
+    // The setup code's clock was started here and is GONE with the card it counted down (2026-09-14,
+    // owner: "that setup will be done by me only"). It was left behind for one edit — a call to a
+    // deleted function, which is a ReferenceError on every render of this section, i.e. the whole
+    // Printing screen blank. Caught by grepping for what the deletion left pointing at nothing.
   }
 
   // ---- "Who serves which table" card (Settings → Access): waiter sections, mig 222 ----
@@ -13913,85 +13788,18 @@ let lastPrintedHere = null;   // { kot, table, at } — the bell row proves prin
 //
 // Everyone else sees exactly the same four cards with the answers stated as plain sentences and no
 // buttons — never as dead controls (owner, 2026-07-31: "there shouldn't be grayed out option also").
-// ── THE SETUP CODE (mig 380) ──────────────────────────────────────────────────────────────────
+// ── THE SETUP-CODE CARD WAS DELETED HERE ON 2026-09-14 ────────────────────────────────────────
+// It showed a ten-minute code (mig 380) so the person at the printer could link that computer from
+// this panel. Owner, asked directly which of his two rulings won — the 2026-08-27 "May set the
+// printers up" permission, or his newer "in the manager panel there shouldn't be able to change
+// it" — answered: **"That setup will be done by me only."**
 //
-// Owner, 2026-09-13: *"instead of login make something else otherwise the waiter will also do that
-// printing thing"*, then: *"you can generate code for each restaurant from printing menu and like
-// the helper ask for that code and that generated code only works for 10 min."*
+// So the card, its countdown, its Copy button and `state.printCode` are gone, and the panel route
+// refuses `printing/setup-code` outright rather than hiding the button: hiding has never been the
+// gate in this product. Showing a code is how a computer joins a restaurant's printing, which makes
+// it the most setup-ish thing on the screen — it belongs on /aevinite/printing, where it still is.
 //
-// This is the restaurant's own copy of the admin console's card, same words, same shape — the rule
-// this whole section lives under ("the UI/UX is also not identical", 2026-08-27).
-//
-// A waiter cannot reach it: this whole Printing section is behind print_setup, and the SERVER asks
-// for that permission again before it makes a code. Hiding is never the only guard.
-//
-// The code lives in `state.printCode` and nowhere else. It is stored hashed on the server, so a
-// panel reload loses the DIGITS but not the setup — the board still says a code is live and for how
-// long, and the honest answer to "I lost it" is a fresh code, never a second copy of a live one.
-let _printCodeTick = null;
-function setupCodeLeft(iso) {
-  const ms = new Date(iso).getTime() - Date.now();
-  if (ms <= 0) return null;
-  const total = Math.ceil(ms / 1000);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
-function setupCodeCard() {
-  const mine = state.printCode || null;
-  const live = ((state.printBoard || {}).setupCode) || {};
-  const mineLeft = mine ? setupCodeLeft(mine.expiresAt) : null;
-  const liveLeft = live.expiresAt ? setupCodeLeft(live.expiresAt) : null;
-  // THE ONE THING AN OLD HELPER CANNOT SAY FOR ITSELF (mig 381). Reading our reply is exactly what
-  // is broken in a file from before 2026-09-13, so its own window can only show an error. The code
-  // is not spent by such an attempt, so this sits above one that still works.
-  const oldFile = live.oldFileAt
-    ? `<p class="hint" style="margin:0 0 11px"><b>That computer is running an out-of-date helper file.</b>
-         Nothing was used up — the code below still works. Press <b>Copy</b> on the helper file lower down,
-         paste it over the file on that computer, save it, and run it again.</p>`
-    : "";
-  const body = mineLeft
-    // Big, monospaced and widely spaced: it is read ALOUD down a phone as often as it is typed.
-    ? `<div class="pw-code">
-         <div class="pw-code-digits">${esc(mine.pretty)}</div>
-         <div class="pw-code-left"><span data-pw-left>${esc(mineLeft)}</span> left</div>
-         <button type="button" class="btn" data-pw="copycode" style="min-width:78px">Copy</button>
-       </div>`
-    : mine
-      ? `<p class="hint" style="margin:0 0 10px">That code has run out. Show a new one — they last ten minutes on purpose.</p>`
-      : liveLeft
-        ? `<p class="muted" style="font-size:12.5px;margin:0 0 10px">A code is already live for another
-             <b data-pw-left>${esc(liveLeft)}</b>. If you have lost it, show a new one — the old one stops
-             working the moment you do.</p>`
-        : "";
-  return `${oldFile}${body}
-    <button type="button" class="btn primary" data-pw="setupcode">
-      ${mineLeft || liveLeft ? "Show a new setup code" : "Show a setup code"}
-    </button>
-    <p class="muted" style="font-size:12px;margin:8px 0 0;line-height:1.6">
-      It is shown here once and nowhere else — we keep only a scrambled copy, so it can never be read
-      back off a screen or out of a log. The code works once, for one computer, for this restaurant.
-    </p>`;
-}
-// THE COUNTDOWN IS REPAINTED IN PLACE, not by re-rendering the section. Re-rendering every second
-// would throw away whatever the person was doing in the paper dropdowns beside it — the same reason
-// the floor strip patches its own numbers rather than redrawing the floor.
-function startPrintCodeTick() {
-  if (_printCodeTick) return;
-  _printCodeTick = setInterval(() => {
-    const spots = document.querySelectorAll("[data-pw-left]");
-    if (!spots.length) { clearInterval(_printCodeTick); _printCodeTick = null; return; }
-    const iso = (state.printCode && state.printCode.expiresAt)
-      || ((state.printBoard || {}).setupCode || {}).expiresAt;
-    const left = iso ? setupCodeLeft(iso) : null;
-    // It ran out while somebody was looking at it. Redraw ONCE so the card becomes "show a new one"
-    // instead of freezing on 0:00, then stop.
-    if (!left) {
-      clearInterval(_printCodeTick); _printCodeTick = null;
-      if (state.tab === "general" && state.settingsSection === "printing") renderEditor();
-      return;
-    }
-    spots.forEach((el) => { el.textContent = left; });
-  }, 1000);
-}
+// Do not bring it back here. If a restaurant needs a computer linked, Aevidine shows the code.
 
 function formPrinting(s) {
   const B = state.printBoard;
@@ -14005,8 +13813,9 @@ function formPrinting(s) {
   }
   const L = B.labels || { kind: {}, what: {}, off: {} };
   const STEP = B.steps || {};
-  const mine = B.thisComputer || null;
-  const may = B.maySetup === true;
+  // `mine` (this browser's own computer) and `may` (B.maySetup) were read here and are GONE with the
+  // setup half — see the status-screen note below. maySetup is now always false from this route, so
+  // a `may ?` left anywhere would be a branch that can never be taken.
 
   // ── 1 · IS PRINTING SWITCHED ON ────────────────────────────────────────────────────────────
   // Two facts, in the same shape the admin console shows them, so a person who has seen one board
@@ -14040,14 +13849,18 @@ function formPrinting(s) {
   const stepLive = !liveRows.length ? "" : `<div class="card"><h3>Is it working right now</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
       Where each piece of paper comes out, and whether that printer is answering this second.
-      ${may ? "Press <b>Test</b> to print a real sample of that document — the real layout, on the real paper, with a TEST band across it. Nothing is charged and nothing is recorded as a sale." : ""}
+      Press <b>Test</b> to print a real sample of that document — the real layout, on the real paper,
+      with a TEST band across it. Nothing is charged and nothing is recorded as a sale.
     </p>
     <div class="pw-state">
       ${liveRows.map((r) => `<div class="pw-state-row ${r.ok ? "yes" : "no"}">
         <span class="pw-dot" aria-hidden="true"></span>
         <span class="who"><b>${esc(r.label)}</b><br>${esc(r.words)}</span>
         <span class="pw-val">${esc(r.state || "")}</span>
-        ${may && r.canTest ? `<button type="button" class="btn" style="padding:4px 11px;min-height:34px" data-pw="sample" data-kind="${esc(r.kind)}">Test</button>` : `<span class="muted" style="font-size:12px">${r.via === "computer" ? "" : "no printer to test"}</span>`}
+        ${/* A TEST PRINT IS NOT SETUP, so it is not behind the setup permission that no longer exists.
+             It changes nothing — no route, no switch, no row — and "is the printer working?" is the
+             single question this whole section was asked for. */""}
+        ${r.canTest ? `<button type="button" class="btn" style="padding:4px 11px;min-height:34px" data-pw="sample" data-kind="${esc(r.kind)}">Test</button>` : `<span class="muted" style="font-size:12px">${r.via === "computer" ? "" : "no printer to test"}</span>`}
       </div>`).join("")}
     </div>
   </div>`;
@@ -14059,243 +13872,51 @@ function formPrinting(s) {
     </p>
     <div class="pw-state">
       ${stateRow(B.printing.allowed, "Aevidine allows this restaurant to print", "With this off, nothing about printing appears anywhere — no greyed-out buttons, nothing at all.", "set by Aevidine")}
-      ${stateRow(B.printing.on, "Kitchen slips print by themselves", "Your own pause button — off while a printer is being serviced. Slips wait; nothing is lost.", may ? "yours, on the Kitchen slips line below" : "set by Aevidine")}
+      ${stateRow(B.printing.on, "Kitchen slips print by themselves", "Off while a printer is being serviced. Slips wait behind it; nothing is lost.", "set by Aevidine")}
     </div>
     ${!B.printing.allowed ? `<div class="hint">Printing is not switched on for this restaurant yet. Ask Aevidine to allow it — nothing on this page prints anything until then.</div>` : ""}
   </div>`;
 
-  // ── 2 · THE COMPUTERS THAT CAN PRINT ───────────────────────────────────────────────────────
-  // The half the owner asked for (2026-08-27): the machine WITH the printer sets itself up, in its
-  // own Settings, beside where that person logs out. Everyone else sees the same list read-only.
+  // ══ THIS SECTION IS A STATUS SCREEN, NOT A SETUP FORM (owner, 2026-09-14) ═══════════════════
+  //
+  // Asked outright whether "May set the printers up" (his own ask, 2026-08-27) or his newer *"in the
+  // manager panel and the owner panel there shouldn't be able to change it — just for them to see
+  // that a computer is online, printer is online, whichever printer we have set up all online, you
+  // are good to go"* should win, he ruled: **"That setup will be done by me only."**
+  //
+  // WHAT WENT, and it is deleted rather than hidden: the setup-code card, the helper file, "I am
+  // this computer", Rename, Unlink, the printer picker on every paper line, and the kitchen-slip
+  // person picker. Every one of them decided where a restaurant's paper comes out; all of it lives
+  // on /aevinite/printing now, and the panel route refuses the verbs so a stale tab cannot post one.
+  //
+  // WHAT STAYS, and each for its own reason:
+  //   · "Is it working right now" — the three papers, live, with a Test print. That IS the ask.
+  //   · The computers, read only — their name, whether they are awake, what printers they have.
+  //   · The KITCHEN SCREEN launcher. He added *"maybe I was talking about the screen"* to the same
+  //     ruling, and this is the screen half: a launcher that opens this restaurant's own Chrome on
+  //     its own machine. It holds no secret and moves nobody's paper.
+  //   · What has printed, and emptying a pile-up for whoever has `print_clear` — a different
+  //     permission he asked for by name on 2026-09-13, and not setup.
   const seenWord = (a) => a.connected ? `connected · seen ${a.secondsAgo || 0}s ago`
     : a.last_seen_at ? `last heard from ${a.secondsAgo > 3600 ? Math.round(a.secondsAgo / 3600) + "h" : Math.round((a.secondsAgo || 0) / 60) + " min"} ago`
     : "has never started yet";
-  const printerChips = (a, own) => (a.printers || []).length
-    ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-        ${a.printers.map((p) => `<span class="pw-printer"><i class="fa-solid fa-print" aria-hidden="true"></i>
-          <b>${esc(p.name)}</b>${p.paper ? ` · ${esc(p.paper.wMm + " × " + p.paper.hMm + " mm")}` : ""}
-          ${own && may ? `<button type="button" class="btn" style="padding:4px 9px;min-height:34px" data-pw="test" data-printer="${esc(p.name)}">Test page</button>` : ""}
-        </span>`).join("")}
-      </div>`
-    : `<p class="muted" style="font-size:12.5px;margin:7px 0 0">It has not listed any printers yet — it does that the first moment the helper runs.</p>`;
-
-  const others = (B.agents || []).filter((a) => !mine || a.id !== mine.id);
-  // NO NUMBER ON THIS ONE. It is not a step any more — it is what card 2's toggle reveals when the
-  // answer is "a computer", and two cards both numbered "2 ·" is worse than neither being numbered.
-  const step2 = `<div class="card"><h3>2 · The computer that prints <span class="muted" style="font-weight:400;font-size:12.5px">(optional)</span></h3>
+  const agentsList = (B.agents || []);
+  const step2 = `<div class="card"><h3>2 · The computers that print</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
       A computer prints by running one small program — the <b>helper</b>. It asks us every two seconds
-      whether there is anything to print, and prints it. No window has to be open, nobody has to stay
-      logged in, and nothing can hide behind another window.
+      whether there is anything to print, and prints it. No window has to be open and nobody has to
+      stay logged in. <b>Aevidine sets these up</b> — ask us and it is one line.
     </p>
-
-    ${mine ? `
-      <div class="pw-state">
-        ${stateRow(!!mine.connected, `This computer — “${mine.name}”`,
-          mine.connected ? "Its helper is running and talking to us right now." : "Its helper is not running. Anything routed here is waiting, and prints the moment it starts.",
-          seenWord(mine))}
-      </div>
-      ${printerChips(mine, true)}
-      ${may ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-        <button type="button" class="btn" data-pw="rename">Rename this computer</button>
-        <button type="button" class="btn" data-pw="unlink">Unlink this computer</button>
-      </div>
-      <p class="muted" style="font-size:12px;margin:8px 0 0">
-        “Unlink” stops this computer printing at once, and anything routed to it needs a printer
-        choosing again. To bring it back: show a setup code, run the helper file here, and type it in.
-      </p>` : ""}
-    ` : may ? `
-      <div class="hint" style="margin-bottom:10px">
-        <b>This computer is not set up yet.</b> Do this on the computer the printer is actually plugged
-        into — not on a phone, and not on a tablet. A phone cannot print silently; it can only open a
-        print box nobody is watching.
-      </div>
-      <p class="what" style="margin:0 0 8px">
-        Press <b>Show a setup code</b> below, make the helper file on that computer, and type the code
-        into it. <b>Nobody signs in on that computer</b> — not now, and not ever.
-      </p>
-      ${setupCodeCard()}
-      ${(B.agents || []).length ? `
-        <details class="pw-more"><summary>Already set up? Say which of these computers this is</summary>
-          <p class="what" style="margin-top:6px">Pick it and this screen takes over managing it — nothing is
-          reinstalled and no code changes. Use this after clearing your browser, on a new browser, or when
-          Aevidine set the computer up for you.</p>
-          <div class="pw-row">
-            ${(B.agents || []).map((a) => `<button type="button" class="btn" data-pw="adopt" data-id="${esc(a.id)}">I am “${esc(a.name)}”</button>`).join("")}
-          </div>
-        </details>` : ""}
-    ` : `<p class="muted" style="font-size:13px;margin:0">No computer has been set up from this screen.</p>`}
-
-    ${others.length ? `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">
-      <p class="muted" style="font-size:12.5px;margin:0 0 8px">Other computers in this restaurant — read only from here. Aevidine sets those up.</p>
-      ${others.map((a) => `<div style="padding:6px 0">
-        <b style="font-size:13.5px">${esc(a.name)}</b>
-        <span class="muted" style="font-size:12px"> · ${esc(seenWord(a))} · ${(a.printers || []).length} printer${(a.printers || []).length === 1 ? "" : "s"}</span>
+    ${agentsList.length ? `<div class="pw-state">
+      ${agentsList.map((a) => `<div class="pw-state-row ${a.connected ? "yes" : "no"}">
+        <span class="pw-dot" aria-hidden="true"></span>
+        <span class="who"><b>${esc(a.name)}</b><br>${(a.printers || []).length
+          ? esc((a.printers || []).map((p) => p.name).join(" · "))
+          : "It has not listed any printers yet — it does that the first moment the helper runs."}</span>
+        <span class="pw-val">${a.connected ? "AWAKE" : "ASLEEP"}</span>
+        <span class="muted" style="font-size:12px">${esc(seenWord(a))}</span>
       </div>`).join("")}
-    </div>` : ""}
-  </div>`;
-
-  // ── 2 · HOW THIS RESTAURANT PRINTS — the one toggle, mirroring the console exactly ──────────
-  // Owner, 2026-08-28: "I want a simple toggle… you only see the option you have selected, only the
-  // setting for that option will be shown." — which was true until 2026-08-31, when he removed the
-  // choice itself. The admin console's card and this one are still the SAME card, deliberately: same
-  // sections, same words, same order, both setups present. The person with "May set the printers up"
-  // is the one standing at the machine, so they are the one who may change any of it.
-  // NO MODE (owner, 2026-08-31). `step2mode` held the same two big buttons as the admin board and
-  // the same inline confirmation. Both setups are simply shown now — a computer if the restaurant
-  // has one, and the kitchen screen which needs nothing — so there is nothing to pick between and
-  // no stored choice that can disagree with the paper. Do not re-add it here either: this panel and
-  // the admin board have drifted apart twice already, and a toggle in one of them is how it starts.
-  // ── the chosen mode's SETUP — one of these two, never both ──────────────────────────────────
-  const files = B.files || {};
-  const sfiles = B.stationFiles || {};
-  const pos = state.printOs || B.os || "mac";
-  const OSN = { mac: "Mac", windows: "Windows", linux: "Linux / Raspberry Pi" };
-
-  // ONE card shape for both launcher files. Two copies of this markup is two places for the wording
-  // to drift, which is exactly how the printing screens became "not identical" the first time.
-  const fileCard = (title, lead, set, steps, footer) => {
-    const f = set[pos];
-    if (!may || !f) return "";
-    return `<div class="card"><h3>${esc(title)}</h3>
-      <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">${lead}</p>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-        ${Object.keys(set).map((k) => `<button type="button" class="btn${pos === k ? " primary" : ""}" data-pw="os" data-os="${esc(k)}">${esc(OSN[k] || k)}</button>`).join("")}
-      </div>
-      <ol class="pw-steps">${steps(pos, f).map((n) => `<li>${n}</li>`).join("")}</ol>
-      <p class="muted" style="font-size:12.5px;margin:0 0 10px">${footer(pos, f)}</p>
-      <div class="pw-code">
-        <button type="button" class="btn" data-pw="copy" data-set="${esc(set === sfiles ? "station" : "helper")}">Copy</button>
-        <pre>${esc(f.text)}</pre>
-      </div>
-    </div>`;
-  };
-
-  const editorWord = (k) => k === "windows" ? "Notepad" : k === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano";
-
-  const step2setup = step2 + fileCard(
-        "The helper file",
-        `The same file for every restaurant, with <b>nothing secret in it</b>. <b>Nothing is downloaded:</b>
-         a downloaded script is blocked outright by a Mac and warned about by Windows, while a file you
-         typed yourself simply opens.`,
-        files,
-        (k, f) => [
-          `On that computer, open <b>${editorWord(k)}</b>.`,
-          `Press <b>Copy</b> below, and paste it in.`,
-          `Save it on the Desktop as <b>${esc(f.filename)}</b>${k === "windows" ? " with <b>Save as type: All Files</b>" : ""}.`,
-          k === "mac" ? `In Terminal, once: <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click the file.` : "Double-click it.",
-          `A page opens. Press <b>Allow</b>. That is the whole setup.`,
-        ],
-        (k, f) => `<b>After a shutdown:</b> ${esc(f.autostart)}`);
-
-  // ── 4 · THE KITCHEN SCREEN — its own block, AFTER the paper lines ────────────────────────────
-  // Order matters more than it looks. Rendered inside step2setup it came out as "the computer", "the
-  // helper file", "the kitchen screen", "the print-station file", and only THEN "which printer gets
-  // which paper" — so the paper lines, which belong to the computer above them, were separated from
-  // it by a whole other subject. Read top to bottom it now goes: is it on · the computer · what that
-  // computer prints · the screen that prints when it does not · what has printed.
-  const stepScreen = `<div class="card"><h3>4 · The kitchen screen</h3>
-        <p style="font-size:13px;margin:0 0 4px;line-height:1.5">
-          Kitchen slips print on the <b>kitchen screen</b> already — there is nothing to switch on.
-          ${((B.routes || {}).kot || {}).agent ? "Right now a computer above is set to print them, so it does that instead." : "No computer is set to print them, so the kitchen screen is doing it."}
-        </p>
-        <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">
-          Only change this to send the slips to <b>one particular person's</b> screen instead. Bills and
-          banquet sheets are never affected — whoever presses Print gets the window.
-        </p>
-        ${(() => {
-          const kot = (B.routes || {}).kot || {};
-          const nm = kot.personName || "";
-          const meIsIt = kot.person && B.person && kot.person === B.person.id;
-          if (kot.via === "off") return `<p class="what"><b>Nobody</b> — kitchen slips do not print by themselves.</p>`;
-          if (!kot.person) return `<p class="what">Anyone signed in on the <b>kitchen screen</b> prints them — no person to choose.${may ? " Press below to move them to this screen instead." : ""}</p>`;
-          return `<p class="what"${meIsIt ? ' style="color:var(--green)"' : ""}>${meIsIt
-            ? "Kitchen tickets print on <b>this</b> screen."
-            : `Kitchen tickets print on <b>${esc(nm || "another person")}</b>'s screen.`}</p>`;
-        })()}
-        ${may ? `<div style="margin-top:10px"><button type="button" class="btn primary" data-pw="mine">Print them on this screen instead</button></div>` : ""}
-      </div>` + fileCard(
-        "The print-station file",
-        `It opens a <b>separate</b> Chrome with its own profile, <b>out of the way</b>, with silent printing
-         on — so it never comes to the front and never touches your own tabs or logins. Nothing secret is
-         in it: you sign in <b>once</b> in the window it opens.`,
-        sfiles,
-        (k, f) => [
-          `On the computer by the printer, open <b>${editorWord(k)}</b>.`,
-          `Press <b>Copy</b> below, and paste it in.`,
-          `Save it on the Desktop as <b>${esc(f.filename)}</b>${k === "windows" ? " with <b>Save as type: All Files</b>" : ""}.`,
-          k === "mac" ? `In Terminal, once: <b>chmod +x ~/Desktop/print-station.command</b> — then double-click the file.` : "Double-click it.",
-          esc(f.firstRun || ""),
-        ],
-        () => `Leave it running. It keeps the computer awake, because a sleeping machine prints nothing.`);
-
-  // ── 3 · THE THREE PAPERS — the only question left ───────────────────────────────────────────
-  // Each paper used to ask "who prints it" with three answers of its own, on top of the printer, the
-  // person and the device. The ROUTE answers "who" — a paper names a computer's printer, or a screen,
-  // or nobody — and with no computer set up yet the dropdown simply has nothing to offer and says so.
-  const agentName = (id) => ((B.agents || []).find((a) => a.id === id) || {}).name || "another computer";
-
-  // ── ONE CONTROL PER PAPER ──────────────────────────────────────────────────────────────────
-  // The same shape as the admin console's board, on purpose: two screens describing one setup in
-  // two visual languages is what made a person learn each separately. A line used to be an On
-  // button, a Nobody button, a printer picker and a paper picker; the options ARE the answers now,
-  // grouped by machine, saved on change.
-  //
-  // The value is "<agent uuid>|<printer name>" — a uuid can never contain a pipe, so splitting on
-  // the FIRST one is safe even for a printer called "Front|Desk".
-  const anyPrinters = (B.agents || []).some((a) => (a.printers || []).length);
-  const line = (kind) => {
-    const r = (B.routes || {})[kind] || {};
-    const off = r.via === "off";
-    const answered = !!r.via;
-    const val = off ? "off" : (r.agent && r.printer ? r.agent + "|" + r.printer : "");
-    if (!may) {
-      return `<div class="pw-line">
-        <h4>${esc(L.kind[kind] || kind)}</h4>
-        <p class="what">${esc(L.what[kind] || "")}</p>
-        <p class="what" style="margin-top:8px"><b>${esc(
-          off ? (L.off[kind] || "Nobody")
-          : r.printer ? `${r.printer} on ${agentName(r.agent)}`
-          : "No printer chosen yet")}</b> — set by Aevidine.</p>
-      </div>`;
-    }
-    return `<div class="pw-line">
-      <h4>${esc(L.kind[kind] || kind)}</h4>
-      <p class="what">${esc(L.what[kind] || "")}</p>
-      <div class="pw-row" style="margin-top:9px">
-        <select data-pw="printerpick" data-kind="${esc(kind)}" style="min-width:250px"${anyPrinters ? "" : ` disabled title="Set this computer up above first — the printers come from it."`}>
-          <option value="off"${off ? " selected" : ""}>${esc(L.off[kind] || "Nobody")}</option>
-          <option value=""${!off && !answered ? " selected" : ""}>— not decided yet —</option>
-          ${(B.agents || []).map((a) => `<optgroup label="${esc(a.name)}">${(a.printers || []).map((pr) => {
-            const v = a.id + "|" + pr.name;
-            return `<option value="${esc(v)}"${v === val ? " selected" : ""}>${esc(pr.name)}</option>`;
-          }).join("")}</optgroup>`).join("")}
-        </select>
-        ${(!off && r.agent && r.printer) ? `<button type="button" class="btn" style="padding:4px 9px;min-height:34px" data-pw="test" data-printer="${esc(r.printer)}">Test page</button>` : ""}
-      </div>
-      ${!anyPrinters ? `<p class="what" style="margin-top:8px">Set this computer up above first — the printers in this list come from it.</p>` : ""}
-      ${off ? `<p class="what" style="margin-top:8px">${esc(kind === "kot"
-          ? "No slip comes out by itself. Orders still appear on the kitchen screen, and this is the same switch as “Kitchen slips print by themselves” at the top."
-          : "No printer does it silently — the ordinary print window opens for whoever presses Print.")}</p>` : ""}
-    </div>`;
-  };
-
-  // THE THREE PAPERS EXIST ONLY IN COMPUTER MODE.
-  // With no computer set up there is little to answer here: the kitchen slips fall to the kitchen
-  // screen on their own, and the other two papers are printed by whoever presses Print, which is what
-  // a restaurant with no helper has always done (owner, 2026-08-29). The lines are still shown — a
-  // restaurant that adds a computer later answers them here — but they offer nothing until it has.
-  // THE PAPER LINES ARE ALWAYS SHOWN NOW. This read `const step3 = mode !== "computer" ? "" : …`,
-  // so with the mode gone the whole card threw `mode is not defined` and the board stopped at
-  // "Reading the printing setup…" — the section rendered nothing at all. Which printer gets which
-  // paper is a real question whether or not a computer is set up yet: the dropdowns simply have
-  // nothing to offer until one is, and say so.
-  const step3 = `<div class="card"><h3>3 · Which printer gets which paper</h3>
-    <p class="muted" style="font-size:13px;margin:0 0 4px;line-height:1.5">
-      The papers the helper takes come out on their own, with no window. Anything left on <b>normal</b>
-      prints the way it always has: a window opens when somebody taps Print.
-    </p>
-    ${(B.kinds || ["kot", "bill", "banquet"]).map(line).join("")}
+    </div>` : `<p class="what" style="margin:0">No computer prints for this restaurant yet. Kitchen slips come out on the kitchen screen, and bills and banquet sheets open a window for whoever presses Print.</p>`}
   </div>`;
 
   // ── 4 · WHAT HAS PRINTED ───────────────────────────────────────────────────────────────────
@@ -14355,7 +13976,39 @@ function formPrinting(s) {
   // it explained a setup this panel can no longer perform, in different words from the board above.
   const guide = "";
 
-  return stepLive + step1 + step2setup + step3 + stepScreen + step4 + guide;
+  // ── THE KITCHEN SCREEN'S OWN LAUNCHER — the "screen" half he kept ────────────────────────────
+  // *"Maybe I was talking about the screen"* (owner, 2026-09-14), said in the same breath as handing
+  // printer setup back to Aevidine. This is that half: a launcher that opens THIS restaurant's own
+  // Chrome, minimised, with silent printing on, so the kitchen screen prints its slips when no
+  // computer is set to. It holds no secret, names no printer and moves nobody's paper — which is
+  // exactly why it is the one file that stays on this side.
+  const sfiles = B.stationFiles || {};
+  const pos = state.printOs || B.os || "mac";
+  const OSN = { mac: "Mac", windows: "Windows", linux: "Linux / Raspberry Pi" };
+  const sf = sfiles[pos];
+  const stepStation = !sf ? "" : `<div class="card"><h3>3 · The kitchen screen</h3>
+    <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">
+      Kitchen slips print on the <b>kitchen screen</b> whenever no computer is set to take them —
+      there is nothing to switch on. This file opens that screen in its own Chrome, out of the way,
+      so printing never steals the window somebody is working in.
+    </p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      ${Object.keys(sfiles).map((k) => `<button type="button" class="btn${pos === k ? " primary" : ""}" data-pw="os" data-os="${esc(k)}">${esc(OSN[k] || k)}</button>`).join("")}
+    </div>
+    <ol class="pw-steps">
+      <li>On the kitchen's computer, open <b>${pos === "windows" ? "Notepad" : pos === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</li>
+      <li>Press <b>Copy</b> below, and paste it in.</li>
+      <li>Save it on the Desktop as <b>${esc(sf.filename)}</b>${pos === "windows" ? " with <b>Save as type: All Files</b>" : ""}.</li>
+      <li>Double-click it. Sign in once in the window it opens — that Chrome remembers.</li>
+    </ol>
+    <p class="muted" style="font-size:12.5px;margin:0 0 10px">${esc(sf.firstRun || "")}</p>
+    <div class="pw-code">
+      <button type="button" class="btn" data-pw="copy" data-set="station">Copy</button>
+      <pre>${esc(sf.text)}</pre>
+    </div>
+  </div>`;
+
+  return stepLive + step1 + step2 + stepStation + step4 + guide;
 }
 
 // One pass of the queue: what is waiting → claim it → print it → say what happened.
@@ -17992,8 +17645,10 @@ const XRAY_TABS = [
   // Three unrelated powers now have their home behind Settings, and ANY of them opens the tab —
   // each card inside keeps its own gate, so getting in never means seeing everything.
   //   edit_settings → the settings cards · table_assign → who serves which table
-  //   print_setup   → Printing, for the ONE person sitting at the machine with the printer (2026-08-27)
-  { tab: "general", flag: "edit_settings|table_assign|print_setup", label: "Settings" },
+  //   (print_setup was the third key here and is RETIRED — owner, 2026-09-14: "that setup will be
+  //    done by me only". The Printing section is a status screen now, so it needs no permission of
+  //    its own: anyone who can open Settings may look at it, and there is nothing in it to change.)
+  { tab: "general", flag: "edit_settings|table_assign", label: "Settings" },
   // Activity log (owner 2026-07-26): the "Activity log" manager power now hides the Log tab
   // for a real manager when it's revoked, instead of the tab lingering and its contents
   // 403-ing. view_logs is ABSENT-means-ON (whoami resolves effectivePowers.view_logs=true by

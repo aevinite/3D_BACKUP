@@ -103,7 +103,9 @@ const PR = B("printing");
 check(nid(), "anyone who can open Settings gets the READ — is printing on, where does the paper go", "read GET /printing",
   () => /const board = await printBoardState\(rid, \{ deviceId: dv \}\)/.test(PR));
 check(nid(), "…but only 'May set the printers up' gets the buttons, asked on the SERVER", "read GET /printing",
-  () => /const maySetup = g\.user \? await managerCan\(g, rid, "print_setup"\) : true/.test(PR));
+  // RETIRED 2026-09-14 (owner: "that setup will be done by me only") — maySetup is now a constant
+  // false on the panel route, so the board renders read-only and there is no permission to read.
+  () => /const maySetup = false;/.test(PR));
 check(nid(), "the install text points at THIS site, taken from the request, never from a constant", "read originOfReq",
   () => /const proto = h\.get\("x-forwarded-proto"\) \|\| "https"/.test(HC) && /files: helperFiles\(originOfReq\(req\)\)/.test(PR));
 check(nid(), "…and the browser's own operating system is guessed so nobody has to pick it off a list", "read osOfRequest",

@@ -817,17 +817,45 @@ await phase("…and a print on ITS printer closes it", async () => {
       body: JSON.stringify({ manager_permissions: { ...(r.manager_permissions || {}), print_setup: on } }) });
   };
 
-  await setPerm(false);
-  await phase("without the permission, the panel says setting up is not theirs", async () => {
-    const r = await asMgrGet("/printing/state");
-    return r.body.maySetup === false || `maySetup was ${JSON.stringify(r.body.maySetup)}`;
-  });
-  await phase("…and the SERVER refuses the verb, not just the screen", async () => {
-    const r = await asMgrPost("/printing/setup-code", {});
-    return r.status >= 400 || `it answered ${r.status} — the screen hiding a button has never been a gate`;
-  });
-
+  // ══ THE RESTAURANT'S OWN PANEL CANNOT SET PRINTERS UP — AEVIDINE DOES (owner, 2026-09-14) ═════
+  //
+  // These fourteen phases asserted the OPPOSITE until today: that the device at the printer could do
+  // the whole job from its own Settings, behind `print_setup`. That was his own 2026-08-27 design,
+  // and asked directly which of his two rulings won he replaced it: **"That setup will be done by me
+  // only, and maybe I was talking about the screen."**
+  //
+  // The coverage is not dropped — it MOVES to the door that now owns it. Every capability below is
+  // still proven end to end; it is simply proven from /aevinite/printing, and the panel is proven to
+  // refuse it.
+  //
+  // `setPerm` still runs, and that is the point of the first two: the permission row is gone, so
+  // writing `print_setup: true` into a restaurant's manager_permissions must change NOTHING. A
+  // stale value left in the database by an older deployment is exactly what would quietly re-open
+  // this door if anything still read it.
   await setPerm(true);
+  await phase("the panel is read-only even with a stale print_setup:true left in the database", async () => {
+    const r = await asMgrGet("/printing/state");
+    return r.body.maySetup === false || `maySetup was ${JSON.stringify(r.body.maySetup)} — a retired permission is still being read`;
+  });
+  for (const [verb, body] of [["setup-code", {}], ["this-computer", {}], ["unlink", {}], ["route", { kind: "kot", who: "off" }]]) {
+    await phase(`…and the SERVER refuses /printing/${verb}, whatever that stale value says`, async () => {
+      const r = await asMgrPost(`/printing/${verb}`, body, DEV2);
+      return r.status >= 400 || `it answered ${r.status} — a printing setup verb is open on the panel route`;
+    });
+  }
+  await phase("…and the panel's printing section carries no setup verb left to refuse", () => {
+    const t = read("app/api/editor/[...path]/route.ts");
+    return (!/b === "setup-code"/.test(t) && !/b === "unlink"/.test(t) && !/b === "route"/.test(t))
+      || "a setup verb is still written into the panel route — a door nobody can currently open is still a door";
+  });
+  await phase("…but a TEST PRINT is still allowed from the panel, because it changes nothing", async () => {
+    await asShape("computer");
+    const r = await asMgrPost("/printing/test", { sample: "kot" }, DEV2);
+    return (r.status === 200 && r.body.queued === true) || `it answered ${r.status} ${JSON.stringify(r.body).slice(0, 90)}`;
+  });
+  await setPerm(false);
+
+  // ── AND AEVIDINE CAN STILL DO THE WHOLE JOB ────────────────────────────────────────────────
   let sweptAgent = null, sweptCode = null;
   // EVERY FAKE HELPER CARRIES A STAMP, like a real one. A claim with none is refused as an
   // out-of-date file (mig 381) — which is the product working, and would make each of these phases
@@ -835,87 +863,53 @@ await phase("…and a print on ITS printer closes it", async () => {
   const claimCode = (body) => fetch(BASE + "/api/print-agent/pair/claim", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ helper: "sweep", ...body }),
   }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
-  /* ⚠️ RE-POINTED BY mig 380 (2026-09-13). This browser no longer REGISTERS a computer — that verb
-     minted a print_agents row and a permanent token in a browser, and the owner replaced the whole
-     join with a code the helper asks for. His 2026-08-27 design is unchanged and is what these
-     phases now assert: the device at the printer still does the whole job from its own Settings,
-     and the screen that handed out the code is the screen that manages the machine. */
-  await phase("with the permission, this browser can hand out a setup code", async () => {
-    const r = await asMgrPost("/printing/setup-code", {}, DEV2);
+  await phase("the ADMIN console hands out a setup code", async () => {
+    const r = await api("/api/admin/printing/setup-code", { method: "POST", body: JSON.stringify({ rid: RID }) })
+      .then(async (x) => ({ status: x.status, body: await x.json().catch(() => ({})) }));
     sweptCode = r.body.code || null;
     return (r.status === 200 && /^[A-HJ-NP-Z2-9]{6}$/.test(String(sweptCode)))
-      || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 140)}`;
+      || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 120)}`;
   });
   await phase("…and the helper on that machine redeems it with nobody signing in there", async () => {
     const r = await claimCode({ code: sweptCode, hostname: "Sweep PC", os: "mac",
-      printers: [{ name: "Sweep-Printer", paper: { wMm: 79.7, hMm: 64.2 } }] });
+      printers: [{ name: VIRT.kitchen }, { name: VIRT.counter }] });
     sweptAgent = r.body.agentId || null;
     if (sweptAgent) made.agents.push(sweptAgent);
-    return (r.body.ok === true && String(r.body.token || "").startsWith("lfhp_"))
-      || `${JSON.stringify(r.body).slice(0, 140)}`;
+    return (r.body.ok === true && !!sweptAgent) || `${JSON.stringify(r.body).slice(0, 140)}`;
   });
-  await phase("…and the row remembers WHICH browser handed the code out (mig 367, via mig 380)", async () => {
-    // The HELPER has no browser and no device id, so without this the panel on the very machine
-    // that had just been set up would still say "this computer is not set up yet".
-    const [row] = await db(`print_agents?id=eq.${sweptAgent}&select=owner_device,owner_user`);
-    return row?.owner_device === DEV2 || `owner_device was ${row?.owner_device}`;
+  await phase("…and that computer appears on the admin board, awake, with the printers it reported", async () => {
+    const r = await api(`/api/admin/printing/state?rid=${RID}`).then((x) => x.json());
+    const a = (r.agents || []).find((x) => x.id === sweptAgent);
+    return (a && (a.printers || []).some((p) => p.name === VIRT.kitchen))
+      || `the board does not list it with its printers: ${JSON.stringify((r.agents || []).map((x) => x.name))}`;
   });
-  await phase("…so that screen's own board finds its computer without anybody adopting anything", async () => {
-    const r = await asMgrGet("/printing/state", DEV2);
-    return (r.body?.thisComputer?.id === sweptAgent)
-      || `the panel says its computer is ${JSON.stringify(r.body?.thisComputer?.id)}`;
+  await phase("…and the same computer read from the PANEL, read-only, with no way to change it", async () => {
+    const r = await asMgrGet("/printing/state");
+    const a = (r.body.agents || []).find((x) => x.id === sweptAgent);
+    return (!!a && r.body.maySetup === false) || `agent ${!!a} · maySetup ${JSON.stringify(r.body.maySetup)}`;
   });
-  // "newcode" was RETIRED by mig 368 — the helper file carries no token, so there was nowhere left to
-  // show one. `unlink` is the verb that replaced it, and the rule under test is unchanged: a browser
-  // that does not own a machine cannot act on it.
-  await phase("…a DIFFERENT browser cannot unlink that computer", async () => {
-    const r = await asMgrPost("/printing/unlink", {}, "sweep-device-C");
-    return r.status >= 400 || `it answered ${r.status} — another screen could unlink somebody else's machine`;
-  });
-  await phase("…and pressing the button twice hands out a code, never a second computer", async () => {
-    const before = (await db(`print_agents?restaurant_id=eq.${RID}&owner_device=eq.${DEV2}&select=id`)).length;
-    await asMgrPost("/printing/setup-code", {}, DEV2);
-    const after = (await db(`print_agents?restaurant_id=eq.${RID}&owner_device=eq.${DEV2}&select=id`)).length;
-    return (before === 1 && after === 1) || `${before} → ${after}`;
-  });
-
-  // The kitchen-slip line IS settings.auto_print_kot. Two boards, one column — the exact fault the
-  // owner reported on 2026-08-26 ("board should be sync, right now it's not").
   await phase("answering “nobody” on kitchen slips switches auto-print OFF at the source", async () => {
-    const r = await asMgrPost("/printing/route", { kind: "kot", who: "off" }, DEV2);
-    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=auto_print_kot,modules`);
-    return (r.status === 200 && st.auto_print_kot === false && st.modules?.printing?.routes?.kot?.via === "off")
-      || `status ${r.status} · auto_print_kot ${st.auto_print_kot} · via ${st.modules?.printing?.routes?.kot?.via}`;
+    await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID, routes: { kot: { via: "off" } } }) });
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=auto_print_kot`);
+    return st.auto_print_kot === false || `auto_print_kot is still ${st.auto_print_kot} — the line and the column have come apart`;
   });
   await phase("…and with it off, a new order queues NO ticket (the trigger reads that same column)", async () => {
-    const { jobId } = await newOrder(41, "sweep off-line");
+    const { jobId } = await newOrder(9, "Sweep no-print");
     return jobId === null || "a ticket was queued for a restaurant that had said it does not print them";
   });
-  await phase("answering “print here” switches it back on and points at THIS computer's printer", async () => {
-    // A route can only ever name a printer the machine itself reported — so report one first.
-    await db(`print_agents?id=eq.${sweptAgent}`, { method: "PATCH",
-      body: JSON.stringify({ printers: [{ name: "Sweep-Printer", paper: { wMm: 79.7, hMm: 64.2 } }] }) });
-    const r = await asMgrPost("/printing/route", { kind: "kot", who: "computer", printer: "Sweep-Printer" }, DEV2);
-    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=auto_print_kot,modules`);
-    const kot = st.modules?.printing?.routes?.kot || {};
-    return (r.status === 200 && st.auto_print_kot === true && kot.agent === sweptAgent && kot.printer === "Sweep-Printer")
-      || `status ${r.status} · auto_print_kot ${st.auto_print_kot} · ${JSON.stringify(kot).slice(0, 140)}`;
+  await phase("…and pointing the line back at a printer switches it on again", async () => {
+    await api("/api/admin/printing/routes", { method: "POST",
+      body: JSON.stringify({ rid: RID, routes: { kot: { via: "computer", agent: sweptAgent, printer: VIRT.kitchen } } }) });
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=auto_print_kot`);
+    return st.auto_print_kot === true || `auto_print_kot is still ${st.auto_print_kot}`;
   });
   await phase("…a printer the machine never reported is refused", async () => {
-    const r = await asMgrPost("/printing/route", { kind: "bill", who: "computer", printer: "A-Printer-Nobody-Has" }, DEV2);
-    return r.status >= 400 || "a route was saved to a printer that does not exist — it would print nowhere while looking set";
+    const r = await api("/api/admin/printing/routes", { method: "POST",
+      body: JSON.stringify({ rid: RID, routes: { kot: { via: "computer", agent: sweptAgent, printer: "Printer That Does Not Exist" } } }) })
+      .then(async (x) => ({ status: x.status, body: await x.json().catch(() => ({})) }));
+    return r.status >= 400 || `it accepted a printer nothing reported: ${JSON.stringify(r.body).slice(0, 100)}`;
   });
-  await phase("a browser with no computer of its own cannot route paper to one", async () => {
-    const r = await asMgrPost("/printing/route", { kind: "bill", who: "computer", printer: "Sweep-Printer" }, "sweep-device-D");
-    return r.status >= 400 || "any screen could point the bills at somebody else's printer";
-  });
-  await phase("…but it can ADOPT the machine it is sitting at, instead of setting it up twice", async () => {
-    // ADOPT still matters after mig 380: a device id does not survive a cleared browser, a new
-    // profile, or a machine Aevidine set up from the console.
-    const r = await asMgrPost("/printing/this-computer", { adopt: sweptAgent }, "sweep-device-D");
-    const [row] = await db(`print_agents?id=eq.${sweptAgent}&select=owner_device`);
-    return (r.status === 200 && row?.owner_device === "sweep-device-D") || `status ${r.status} · owner_device ${row?.owner_device}`;
-  });
+
 }
 
 // ══ 6c · THE TEN-MINUTE SETUP CODE (mig 380) ═════════════════════════════════════════════════
@@ -1206,7 +1200,11 @@ await phase("…and a print on ITS printer closes it", async () => {
     const r = await fetch(BASE + "/api/editor/printing/mode", { method: "POST",
       headers: { "content-type": "application/json", cookie: MANAGER_COOKIE + "; lfh_panel_device=mode-dev" },
       body: JSON.stringify({ mode: "computer" }) });
-    return r.status === 404 || `it answered ${r.status}`;
+    // 404 until 2026-09-14 and 403 since: the panel route now refuses EVERY printing verb that is
+    // not the test print (owner: "that setup will be done by me only"), so an unknown verb is turned
+    // away before anything looks for it. Either answer proves the same thing — nothing on this route
+    // will store a mechanism — and the check accepts both rather than pinning to one number.
+    return (r.status === 404 || r.status === 403) || `it answered ${r.status} — a door that still takes a mode will be used by something`;
   });
   await phase("…and a person who is not this restaurant's staff is refused", async () => {
     const r = await setMode("screen", "00000000-0000-0000-0000-0000000000ff");
@@ -1517,29 +1515,52 @@ await phase("…and a print on ITS printer closes it", async () => {
     ["this-computer", { name: "Perm PC" }],
     ["route", { kind: "kot", who: "off" }],
     ["unlink", {}],
-    ["test", { printer: "whatever" }],
+    // `test` LEFT this list on 2026-09-14. It is the one printing verb the panel keeps, because a
+    // test print changes nothing — no route, no switch, no row — and "is the printer working?" is
+    // the whole question the panel's Printing section now exists to answer.
   ]) {
     await setSetup(false);
-    await phase(`print_setup OFF → the panel refuses /printing/${verb} on the SERVER`, async () => {
+    await phase(`the panel refuses /printing/${verb} on the SERVER, whatever is stored`, async () => {
       const r = await mgrPost("/printing/" + verb, payload);
       return r.status >= 400 || `it answered ${r.status} — hiding the button has never been a gate`;
     });
   }
   await setSetup(true);
-  await phase("print_setup ON → the panel's own state says maySetup", async () => {
+  // ── RETIRED, AND THE ROW IS GONE (owner, 2026-09-14: "that setup will be done by me only") ────
+  // These two asserted that `print_setup` switched the panel's board into setup mode, and that it
+  // was a different permission from `print_here`. The first is now the opposite — the panel is
+  // read-only whatever is stored — and the second must hold for the two permissions that SURVIVED,
+  // which are still different amounts of trust: being the printer, and emptying a pile-up.
+  await phase("print_setup ON → the panel's board is STILL read-only, because the permission is retired", async () => {
     const d = await asManager("/printing/state");
-    return d.maySetup === true || `maySetup was ${JSON.stringify(d.maySetup)}`;
+    return d.maySetup === false || `maySetup was ${JSON.stringify(d.maySetup)} — a retired permission is still being read`;
   });
-  await phase("…and print_setup is NOT the same switch as print_here", () => {
+  await phase("…and the row is gone from the Access screen, without taking its neighbours with it", () => {
     const t = read("lib/accessTree.ts");
-    return /id: "print_setup"/.test(t) && /id: "print_here"/.test(t)
-      || "the two printing permissions have been merged: being the printer and deciding where the whole restaurant's paper goes are different amounts of trust";
+    return (!/id: "print_setup"/.test(t) && /id: "print_here"/.test(t) && /id: "print_clear"/.test(t))
+      || "print_setup is back on the Access screen (it grants nothing now), or retiring it removed print_here or print_clear too";
   });
   await db(`restaurants?id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ manager_permissions: mpWas }) });
 }
 
 // ══ 11 · MODE × PAPER × STATE — the whole grid, stored AND as each screen sees it ═════════════
 {
+  // ── THE BANQUET LINE ONLY EXISTS IF THE RESTAURANT HAS BANQUET (owner, 2026-09-14) ──────────
+  // Four phases of this grid route the BANQUET paper, and this restaurant has `banquet_allowed`
+  // false — so since today the server refuses them, correctly: *"if we have not provided the feature
+  // of banquet, it should not even show the banquet also in the printing section."* The grid was
+  // testing a line that does not exist for this restaurant, and passed only because the old code
+  // offered all three papers to everybody.
+  //
+  // So the module is switched ON for the length of the grid and put back afterwards — which is a
+  // better test than before: it now proves the banquet line works WHEN the restaurant has banquet,
+  // and §12 below proves it is absent when it does not.
+  const [bqWas] = await db(`settings?restaurant_id=eq.${RID}&select=banquet_allowed`);
+  stash({ settings: { banquet_allowed: bqWas.banquet_allowed } });
+  restoreOnExit("the banquet entitlement", () =>
+    db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ banquet_allowed: bqWas.banquet_allowed }) }));
+  await db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ banquet_allowed: true }) });
+
   const setMode = (mode, person) => asShape(mode, person);   // see asShape — there is no mode verb
   const setPaper = (kind, route) => api("/api/admin/printing/routes", { method: "POST",
     body: JSON.stringify({ rid: RID, routes: { [kind]: route } }) });
@@ -1626,6 +1647,9 @@ await phase("…and a print on ITS printer closes it", async () => {
     await setPaper(kind, null);   // leave the line unanswered for the next kind
   }
   await setMode("computer");
+  // The entitlement goes back the moment the grid is done, so the shape this restaurant is left
+  // in is the shape it was found in. restoreOnExit above is the belt for a crash mid-grid.
+  await db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ banquet_allowed: bqWas.banquet_allowed }) });
 }
 
 // ══ 12 · THE EDGES OF THE HANDOVER — what the helper is told when things go wrong ═════════════
@@ -2693,8 +2717,11 @@ if (!browser) {
     /kind === "kot" \? \{ kind: "screen", panel: "kitchen"/.test(helpers)
     && /: \{ kind: "none" \}/.test(helpers)
     || "an unanswered line no longer falls to the kitchen screen for slips ONLY — a bill or a banquet sheet printing itself on an unwatched screen is nobody's ask");
+  // `panelForRole` left app/api/editor with the `route` verb on 2026-09-14 (owner: "that setup will
+  // be done by me only"). It still exists and is still the one place a person's role becomes a
+  // screen — the admin console is its reader now. The rule is unchanged; its address moved.
   await phase("…and the panel a screen route names FOLLOWS the person's role", () =>
-    /export function panelForRole/.test(helpers) && /panelForRole\(g\.user\?\.role\)/.test(read("app/api/editor/[...path]/route.ts"))
+    /export function panelForRole/.test(helpers) && !/panelForRole\(/.test(read("app/api/editor/[...path]/route.ts"))
     || "the panel is being decided separately from the person again — hard-coding it to \"manager\" is what left the picker with no kitchen option");
   await phase("…so a cook, a waiter and a manager all map to a real screen", () => {
     const f = helpers.slice(helpers.indexOf("export function panelForRole"), helpers.indexOf("export function panelForRole") + 400);
@@ -2720,9 +2747,12 @@ if (!browser) {
   });
   await phase("…and it saves on change, with no Save button beside it", () =>
     !/>Save<\/button>/.test(admPage) || "a Save button is back next to a dropdown — that is two controls pretending to be one");
-  await phase("…and screen mode has no three-paper card at all, because there is nothing to answer", () =>
-    /step3 = mode !== "computer" \? ""/.test(panel)
-    || "the manager panel still draws three paper lines in screen mode — three controls that change nothing");
+  // The manager panel has NO paper card in either mode since 2026-09-14 — it is a status screen and
+  // the three lines it used to draw were the controls that moved a restaurant's paper. This is the
+  // same rule the phase always asserted (no control that changes nothing), gone one step further.
+  await phase("…and the manager panel has no three-paper CARD at all any more, in either mode", () =>
+    !/data-pw="printerpick"/.test(panel)
+    || "the manager panel is drawing printer controls again — deciding where a restaurant's paper comes out is Aevidine's");
 
   // ── "the printer option is there but greyed out, and when you hover it, it tells you" ───────
   await phase("with no computer set up, the printer dropdown is DISABLED", () =>
@@ -2785,8 +2815,11 @@ if (!browser) {
     }
     return bad.length === 0 || bad.join(" · ") + " — a beginner following numbered steps is sent to the wrong card";
   });
-  await phase("…and the manager panel does the same", () =>
-    /Set this computer up above first/.test(panel) || "the panel's dropdown greys out silently");
+  // The panel has no dropdown to grey out. What has to stay true is that it still SAYS what is
+  // happening when there is no computer, rather than showing an empty box.
+  await phase("…and the manager panel says so in words when no computer prints for this restaurant", () =>
+    /No computer prints for this restaurant yet/.test(panel)
+    || "the manager panel shows nothing at all when there is no computer — an empty box is not an answer");
 
   // ── "no two cards called 4" ─────────────────────────────────────────────────────────────────
   // ON THE SCREEN, not in the source: the two mode branches both contain a card 3, and only one of
@@ -3380,10 +3413,17 @@ for (const g of ["verify:print-helper", "verify:print-queue", "verify:print-form
   });
 
   let C1 = null;
-  await phase("a manager who MAY set printers up can — and that is the only way in", async () => {
-    const r = await mintAs(MANAGER_COOKIE);
+  // ── ONLY AEVIDINE MINTS A CODE NOW (owner, 2026-09-14: "that setup will be done by me only") ──
+  // This asked a MANAGER for the code, behind `print_setup`. That permission is retired and the
+  // panel verb is deleted, so the code comes from the admin console — which is also the strongest
+  // form of the thing this section is really about: a staff login opens nothing here at all.
+  await phase("a manager CANNOT mint a setup code, and Aevidine can — that is the only way in", async () => {
+    const refused = await mintAs(MANAGER_COOKIE);
+    if (refused.status < 400) return `a manager minted a code: ${JSON.stringify(refused.body).slice(0, 120)}`;
+    const r = await api("/api/admin/printing/setup-code", { method: "POST", body: JSON.stringify({ rid: RID }) })
+      .then(async (x) => ({ status: x.status, body: await x.json().catch(() => ({})) }));
     C1 = r.body.code || null;
-    return (r.status === 200 && /^[A-HJ-NP-Z2-9]{6}$/.test(String(C1))) || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 140)}`;
+    return (r.status === 200 && /^[A-HJ-NP-Z2-9]{6}$/.test(String(C1))) || `admin: status ${r.status} · ${JSON.stringify(r.body).slice(0, 140)}`;
   });
   await phase("…and NO computer exists yet — a code on a screen prints nothing", async () => {
     const rows = await agentsNamed("Sweep join PC");

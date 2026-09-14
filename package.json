@@ -131,6 +131,7 @@
     "verify:print-queue": "node scripts/verify-print-queue.mjs",
     "verify:print-helper": "node scripts/verify-print-helper.mjs",
     "verify:printing-sweep": "node scripts/verify-printing-sweep.mjs",
+    "verify:print-scenarios": "node scripts/verify-print-scenarios.mjs",
     "compare:schemas": "node scripts/compare-schemas.mjs",
     "verify:merged-floor": "node scripts/verify-merged-floor.mjs",
     "verify:xray": "node scripts/verify-xray-marks.mjs",
