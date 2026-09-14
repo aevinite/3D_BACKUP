@@ -458,7 +458,11 @@ console.log("\n── the 3D screen's animation loop ends when the screen does �
 check(
   "the connector-line loop refuses to re-arm once the 3D screen has gone",
   /const aliveRef = useRef\(true\)/.test(src[VIEWER]) &&
-    /const _loop = \(\) => \{[\s\S]{0,400}?if \(!aliveRef\.current\) return;/.test(src[VIEWER]),
+    // The signature is matched loosely on purpose. Item 1 (2026-09-14) gave _loop a generation
+    // parameter, and this check was pinned to `const _loop = () => {` — so it went red for a
+    // change that kept the very behaviour it defends. What matters is that the FIRST thing the
+    // loop does is ask whether the screen is still here.
+    /const _loop = \([^)]*\) => \{[\s\S]{0,400}?if \(!aliveRef\.current\) return;/.test(src[VIEWER]),
   `${VIEWER} → _loop() re-arms itself with requestAnimationFrame every frame. It must return ` +
     "early on !aliveRef.current, or a chain started near unmount runs for the life of the tab."
 );
@@ -743,6 +747,36 @@ check(
     "getMenuItems(restaurantId, CARD_COLUMNS) must depend on BOTH. The reviews effect and the " +
     "Google-settings effect beside it already do."
 );
+
+console.log("\n── the 3D screen's reveal loop, and its four failure screens ────────────────────");
+
+// ── ONE LIVE CONNECTOR-LINE CHAIN, NOT ONE PER REPLAY (sweep #9 T2, 2026-09-14 — item 1) ─────
+// `aliveRef` stops every chain when the screen goes; it does not stop a SECOND chain starting while
+// the screen is still here. runFullSequence() runs on the first reveal, on entering AR, and on every
+// triple-tap — the gesture this screen's own hint pill advertises — and `requestRef` only ever held
+// the newest handle, so every replay left one more loop reading three elements per hotspot per frame.
+// MEASURED at 360×780: 936 layout reads per second after one reveal, 4,356 after three more
+// triple-taps. A generation counter retires the old chain; the cancel is the immediate half.
+{
+  const code = src[VIEWER].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the connector-line loop knows which chain it is, so a replay REPLACES the old one",
+    /const loopGenRef = useRef\(0\);/.test(code) &&
+      /const _loop = \(gen: number\) => \{/.test(code) &&
+      /gen !== loopGenRef\.current/.test(code) &&
+      /requestAnimationFrame\(\(\) => _loop\(gen\)\)/.test(code),
+    `${VIEWER} → _loop must take a generation, refuse to re-arm when a newer reveal has taken over, ` +
+      "and pass that generation to its own next frame. Without it every triple-tap adds a permanent " +
+      "animation-frame chain to a live screen."
+  );
+  check(
+    "…and the reveal retires the running chain before it starts its own",
+    /cancelAnimationFrame\(requestRef\.current\);\s*\n\s*_loop\(\+\+loopGenRef\.current\);/.test(code),
+    `${VIEWER} → runFullSequence's onComplete must cancel the pending frame and bump the generation ` +
+      "in the same breath as starting _loop. Bumping without cancelling leaves one wasted frame; " +
+      "cancelling without bumping leaves the old chain free to re-arm."
+  );
+}
 
 // Every overlay on these screens registers with the back-button manager.
 check(

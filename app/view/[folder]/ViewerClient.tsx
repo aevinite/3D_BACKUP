@@ -172,6 +172,24 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // connector lines instead of merely stopping them at the right time.
   const aliveRef = useRef(true);
   useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
+  // WHICH CONNECTOR-LINE CHAIN IS THE LIVE ONE (sweep #9 T2, 2026-09-14 — item 1).
+  //
+  // `aliveRef` above stops every chain when the screen goes. It does NOT stop a second chain
+  // starting while the screen is still here — and `runFullSequence` starts one every time it runs.
+  // It runs on the first reveal, on entering AR, and on EVERY triple-tap, which is the gesture the
+  // hint pill on this screen advertises ("Triple-tap to replay"). `requestRef` remembers only the
+  // newest handle, so nothing ever cancelled the older chains: each replay left one more loop
+  // reading three elements per hotspot, every frame, for as long as the diner stayed on the screen.
+  //
+  // MEASURED on a 360×780 phone, counting real layout reads per second on the working 3D screen:
+  // 936 after one reveal, 4,356 after three more triple-taps — 4.65× the work, forever. Ten
+  // replays is eleven loops. That is the phone getting warm and the model stuttering while it
+  // spins, on the one screen this product is sold on. After the fix: 1,080 and 1,080.
+  //
+  // A generation counter, not a second `cancelAnimationFrame` alone: a chain that has already been
+  // scheduled must recognise that it is no longer the current one and stop re-arming itself. The
+  // cancel at the call site is the immediate half; this is the half that cannot be raced.
+  const loopGenRef = useRef(0);
   const searchParams = useSearchParams();        // the address's "?..." part
   const fromSlug = searchParams.get("from") || ""; // which dish we came from
   // Which RESTAURANT this viewer belongs to (carried as ?r=<slug> from the dish
@@ -671,12 +689,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
   };
 
   // A continuous loop that keeps every connector line updated, frame by frame.
-  const _loop = () => {
+  const _loop = (gen: number) => {
     // The screen has gone — stop, and do not schedule another frame. Without this the chain is
     // immortal: nothing else holds its handle once the component that started it has unmounted.
     if (!aliveRef.current) return;
+    // A newer reveal has taken over — this chain is retired. See loopGenRef.
+    if (gen !== loopGenRef.current) return;
     config?.tags?.forEach(ing => _updateLine(ing));
-    requestRef.current = requestAnimationFrame(_loop);  // schedule the next frame
+    requestRef.current = requestAnimationFrame(() => _loop(gen));  // schedule the next frame
   };
 
   // The opening "cinematic": spins the model a full turn while scaling it up
@@ -840,7 +860,10 @@ export default function ViewerClient({ folder }: { folder: string }) {
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
           startTagAnimation();
-          _loop();
+          // ONE LIVE CHAIN, ALWAYS — see loopGenRef. Retire whatever was running before starting
+          // this reveal's own loop, so a replay replaces the tracking loop instead of adding one.
+          if (requestRef.current) cancelAnimationFrame(requestRef.current);
+          _loop(++loopGenRef.current);
         })
       )
     );
