@@ -308,9 +308,28 @@ check(!/api\/print-agent\/(mac|windows|linux)|download>/.test(code(script + page
 check(/does not exit after --print-to-pdf|DOES NOT EXIT after --print-to-pdf/i.test(script) && /kill "\$CPID"/.test(script),
   "the render runs on a watchdog — headless Chrome does not exit after --print-to-pdf",
   "the Chrome watchdog is gone: measured 2026-08-20, the helper hangs for ever after the FIRST ticket and piles up Chrome processes");
-check(/lpstat -W completed/.test(script) && /cancel "\$CUPSID"/.test(script),
-  "…and a job is followed to completion, with the queued copy cancelled if it never prints",
-  "the helper reports success on `lp` accepting the file again — that says 'printed' with the printer switched off, and a stuck copy plus a retry is the only way this design could hand out two identical tickets");
+// ── STILL FOLLOWED TO COMPLETION — JUST NOT BY STANDING STILL (owner, 2026-09-14) ─────────────
+// The rule from 2026-08-20 is unchanged and is the whole point: `lp` returns 0 with the printer
+// switched off, so "accepted" is not "printed". What changed is WHERE the answer is collected. The
+// helper used to block for up to fifteen seconds per ticket waiting for CUPS — measured as 4.3 of
+// every 7 seconds — which is his objection exactly: *"the printer itself has a queue, you don't
+// have to give everything to the helper."* It now hands the job over and confirms on a LATER round.
+// So: confirm_sent must exist, it must read the completed list, and it must still cancel a copy the
+// printer is sitting on before handing the ticket back — that cancel is the only thing standing
+// between a stuck job and two identical tickets.
+check(/confirm_sent\(\) \{/.test(script) && /lpstat -W completed/.test(script) && /cancel "\$CID"/.test(script),
+  "…and a job is still followed to completion — on a later round, with the queued copy cancelled if it never prints",
+  "the helper reports success on `lp` accepting the file again, or stopped cancelling a stuck copy — that says 'printed' with the printer switched off, and a stuck copy plus a retry is the only way this design could hand out two identical tickets");
+// …AND IT MUST NOT BLOCK. The whole speed change is that nothing waits for paper inside the round.
+check(!/while \[ \$n -lt 30 \]; do\s*\n\s*if lpstat -W completed/.test(script),
+  "…and nothing in the round stands still waiting for the printer — that is what the printer's own queue is for",
+  "the blocking completion wait is back: 4.3 of every 7 seconds went on it, and the printer's queue was managing perfectly well without it");
+// A finished job that CUPS has already forgotten counts as PRINTED, not failed. With
+// PreserveJobHistory off, a completed job vanishes at once — call that a failure and the app
+// retries a ticket that is already on paper, on every ticket, on every machine set up that way.
+check(/the queue had already let it go/.test(script),
+  "…and a job the queue has already let go of counts as printed, not as a failure to be retried",
+  "a vanished CUPS job is reported failed again — with job history switched off that is every ticket printed twice");
 
 // ── 7 · the admin screen ──────────────────────────────────────────────────────────────────────
 // AWAITED, not merely present. tokenIsValid is async: `if (!admin(req))` tests a Promise, which is
@@ -1681,10 +1700,14 @@ check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(e
 // that was idle throughout.
 {
   const helpers = read("lib/printHelpers.ts");
-  check(/export async function claimSome/.test(helpers) && /const lanes = new Set<string>\(\)/.test(helpers)
-        && /if \(lanes\.has\(printer\)\) continue/.test(helpers),
-    "the app hands out at most ONE job per printer in a round, so two lanes can never share a queue",
-    "claimSome no longer keeps one lane per printer — two workers on one printer is the serial case again, with the ORDER of the tickets thrown away");
+  // TWO PER PRINTER, not one (owner, 2026-09-14). The helper submits a round IN ORDER now, so
+  // several tickets for one printer are safe — CUPS keeps the order they were handed over in. The
+  // cap is about STARVATION, not ordering: eight kitchen slips must not fill every slot and leave a
+  // bill for the customer at the counter waiting for a round it has no part in.
+  check(/export async function claimSome/.test(helpers) && /const perPrinter = 2;/.test(helpers)
+        && /if \(\(lanes\.get\(printer\) \|\| 0\) >= perPrinter\) continue/.test(helpers),
+    "a round leaves room for every paper — one printer's backlog can never fill it",
+    "claimSome lost its per-printer cap — a kitchen backlog would fill every slot and the bill for the customer at the counter would wait behind it");
   // The single-job shape has to survive, because a helper is a text file somebody pasted into
   // Notepad and there is no way to push a new one. An old file cannot send `max`, so an old file
   // must go on getting exactly what it always got.
@@ -1726,10 +1749,18 @@ check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(e
   // same printer another ticket while the first is still going out, and the ORDER of the kitchen's
   // tickets is a promise the queue makes.
   for (const os of ["mac", "linux"]) {
-    const blk = gen.split(`const ${os} = `)[1]?.split("\n};")[0] || gen.split(`const ${os} = `)[1] || "";
-    check(/print_one "\$JID" "\$JPR" &/.test(blk) && /\n    wait\b/.test(blk),
-      `the ${os === "mac" ? "Mac" : "Linux"} helper starts a worker per lane and waits for the round to finish`,
-      `the ${os} helper no longer waits for its lanes — a printer could be handed a second ticket while the first is still going out, and they would come out in the wrong order`);
+    // blockOf(), NOT a split on "\n};" — these are template literals and do not end with that, so the
+    // old splitter handed back the whole rest of the FILE and breaking the Mac copy still matched the
+    // Linux one. Third time this suite has made that exact mistake; caught by sabotage, again, and
+    // the fix is to reuse the one helper that gets it right.
+    const blk = blockOf(os);
+    // `\n    wait\n` — the ROUND's bare wait, on its own line. `\bwait\b` also matched the
+    // `wait "$CPID"` inside render_one, so removing the round's wait left the guard green. Caught by
+    // sabotage; the lesson is the same one as blockOf above — match the exact thing, not a word that
+    // appears elsewhere in the same file.
+    check(/render_one "\$JID" &/.test(blk) && /\n {4}wait\n/.test(blk) && /submit_one "\$JID" "\$JPR"/.test(blk),
+      `the ${os === "mac" ? "Mac" : "Linux"} helper RENDERS the round in parallel and then SUBMITS it in order`,
+      `the ${os} helper no longer renders in parallel, or no longer submits in order — the renders may race, the submits may not, because a kitchen expects its tickets in the order they were rung`);
   }
   // Windows is the one that cannot be run from here, so its two failure modes are checked by name.
   {
@@ -1753,10 +1784,63 @@ check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(e
     check(flagged && exits <= 2 && !/goto work/.test(lane),
       "…and every way out of a Windows lane writes its finished-flag (except the one that has no id to name it)",
       "a Windows lane can end without leaving its flag — the parent then waits the full ninety seconds, losing a round of everybody's printing to one missing file");
+    // ── AND IT MUST NOT WAIT FOR A CHROME THAT NEVER EXITS ────────────────────────────────
+    // This file's OWN comment has said since 2026-08-20 that headless Chrome does not exit after
+    // --print-to-pdf. The Windows lane then called WaitForExit(25000) and waited for that exit
+    // anyway: a backstop being paid IN FULL, twenty-five seconds on every single ticket. On a busy
+    // Windows till that is the whole of "the printing is slow" — and Windows is the one machine
+    // nothing on this side can run, so it went unmeasured. It waits for the PDF to stop growing now.
+    // Measured against the POWERSHELL LINES ONLY. The first version tested the whole block, and a
+    // REM comment explaining the old fault matched its own description — `code()` strips // comments,
+    // not REM ones. A guard that reads its own comment is the fault this suite has now made twice.
+    const psLines = (w.match(/powershell -NoProfile -Command "[^"]*"/g) || []).join("\n");
+    check(!/WaitForExit\(/.test(psLines) && /Test-Path '%JPDF%'/.test(psLines) && /\$stable -ge 2/.test(psLines),
+      "the Windows render waits for the PAGE, not for a Chrome that never exits",
+      "the Windows lane is back to WaitForExit on a process its own comment says never exits — twenty-five seconds on every ticket, on the one platform nothing here can measure");
+    // PowerShell 5.1 is what Windows 10 and 11 ship. A ternary or a null-coalescing operator parses
+    // on the machine writing this and throws on the machine running it.
+    check(!/\?\?/.test(psLines) && !/\)\s*\?\s*\(/.test(psLines),
+      "…and every PowerShell line in it is PowerShell 5.1, which is what Windows actually ships",
+      "a PowerShell 7 operator (?: or ??) reached the Windows helper — it parses here and throws there");
     check(/if %WAITED% LSS 90 goto waitlanes/.test(w),
       "…and the parent's wait for its lanes is BOUNDED, so a lost flag costs one slow round and never the helper",
       "the Windows wait-for-lanes loop is unbounded again — one lane that dies without its flag stops that computer printing for ever");
   }
+}
+
+// ── 15 · THE QUEUE, BROKEN DOWN BY PRINTER (owner, 2026-09-14) ────────────────────────────────
+//
+// *"The UI of the queue will also kind of change, according to the number of papers that have been
+// set up for different printers."*
+//
+// "Waiting: 7" was an honest answer while one machine printed everything. It stopped being one the
+// day the papers went to different printers: seven behind ONE dead bill printer is a crisis, and
+// two here, two there and three on a machine that is simply asleep is an ordinary Saturday.
+{
+  const helpers = read("lib/printHelpers.ts");
+  const bd = read("lib/printBoard.ts");
+  check(/export async function waitingByPrinter/.test(helpers),
+    "the queue is countable per printer, so a pile-up can be told from a normal spread",
+    "waitingByPrinter is gone — 'waiting: 7' cannot tell a dead printer from three busy ones");
+  // A QUEUED KITCHEN SLIP CARRIES NO PRINTER, on purpose (the address book is applied at claim
+  // time). Counting only the rows that already have one would under-report exactly the tickets that
+  // have been waiting longest.
+  check(/R\[r\.kind\]\?\.printer/.test(helpers) && /not addressed yet/.test(helpers),
+    "…and a ticket with no printer on it yet is resolved through the routes, not dropped",
+    "the per-printer queue counts only tickets a helper has already claimed — the ones waiting longest would be missing");
+  // ── ONE READ, ONE ANSWER ─────────────────────────────────────────────────────────────────
+  // The heading and the rows underneath it must come from the SAME read. They did not: a second
+  // count a moment apart had the rows adding to 14 under a heading saying 15, because a ticket
+  // finished in between. Caught by reading both screens ninety-four times while a backlog printed.
+  // code(bd), not bd: the obituary right above the change says the words "waitingCount(rid)", and a
+  // guard that reads its own comment is the fault this suite has now made three times in one day.
+  check(/waiting: waitingBy\.reduce\(/.test(bd) && !/waitingCount\(rid\)/.test(code(bd)),
+    "…and the total is the SUM of that breakdown, so the heading can never contradict the rows below it",
+    "the board counts the queue twice again — the rows and the heading will disagree the moment a ticket finishes between the two reads");
+  for (const [label, src] of [["the admin board", page], ["the manager panel", epanel]])
+    check(/waitingBy/.test(src),
+      `${label} shows which printer each waiting ticket is for`,
+      `${label} is back to one number for a queue spread across several printers`);
 }
 
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────

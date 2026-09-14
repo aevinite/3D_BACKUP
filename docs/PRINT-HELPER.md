@@ -1079,3 +1079,91 @@ exactly the kind that ships.
 `verify:print-helper` **232 → 244**. `verify:printing-sweep` 507, with its banquet grid now switching
 the module ON for the grid and back afterwards — it had been routing a paper its restaurant did not
 have, and the new gate caught it.
+
+## 2026-09-14 (third round) — the PRINTER holds the queue, not the helper
+
+> Owner, with a screenshot of the macOS Printers window showing four jobs stacked on one printer:
+> *"The screenshot is not showing that it's slow — it is just for your reference that a printer can
+> also have its queue. You don't have to give everything to the helper. The printer's queue will be
+> faster than the helper's, so put that thing in the printer queue such that it works fast."* And:
+> *"If there is a queue in KOT, is the bill still printing instantly? Make sure it is fast and it is
+> not causing any kind of error in the UI. The UI of the queue will also kind of change according to
+> the number of papers that have been set up for different printers."*
+
+### Where the seven seconds went
+
+Measured on a real helper with real CUPS queues before changing anything:
+
+```
+chrome render        1535 ms
+a fixed 1s "settle"  1028 ms
+lp submit             103 ms
+WAIT for CUPS to say
+   "it came out"     4326 ms   ← 62% of it, standing still
+total per ticket     7029 ms
+```
+
+**Four of every seven seconds were the helper watching a queue CUPS was already managing.** Eight
+kitchen slips took sixty-six seconds. That is his point exactly, and it is now measured rather than
+argued.
+
+### What changed
+
+The round **renders in parallel, submits IN ORDER, and lets go.** Confirmation happens on a LATER
+round (`confirm_sent`), so the 2026-08-20 rule is untouched — nothing is ever reported "printed"
+until the printer itself has said so. The helper simply stopped standing still while it waited.
+
+- **Submits are ordered and renders are not.** A kitchen expects its tickets in the order they were
+  rung; the app hands the round out oldest-first and the submit loop preserves it. CUPS then keeps
+  that order in its own queue, which is the whole point.
+- **Two per printer per round, not one.** One was needed while parallel *workers* submitted; with a
+  single ordered submit loop it is safe. The cap is now about STARVATION — eight kitchen slips must
+  not fill the round and leave a bill for the customer at the counter waiting for it.
+- **The one-second settle is gone**, replaced by "the PDF has stopped growing" (two identical sizes
+  200 ms apart). It was a whole second of guess on every single ticket.
+
+| | before | after |
+|---|---|---|
+| 8 kitchen slips + a bill | **67.0s** | **41.6s** |
+| a bill sent INTO a running 10-slip backlog | — | **7.5s** |
+| the printer's own share of that | | **~3.8s** |
+
+**CUPS alone, with no helper at all, prints six of these tickets in 23 seconds — 3.8s each.** The
+helper is now delivering faster than the printer can consume, which is the correct end state: the
+bottleneck is the hardware, not us.
+
+### THE WINDOWS ONE, which nothing here can run
+
+Its own comment has said since 2026-08-20 that headless Chrome **does not exit** after
+`--print-to-pdf`. And then the lane called `WaitForExit(25000)` and waited for that exit anyway — a
+backstop being paid **in full, twenty-five seconds on every ticket.** On a busy Windows till that is
+the whole of "the printing is slow", and it went unmeasured because Windows is the one platform
+nothing on this side executes. It waits for the PDF to stop growing now, with fifteen seconds as a
+ceiling rather than a price. Written for **PowerShell 5.1**, which is what Windows actually ships —
+guarded, because a PS7 operator parses here and throws there.
+
+### Two faults found while doing it
+
+- **A vanished CUPS job was reported as a failure.** With `PreserveJobHistory` set to No a finished
+  job disappears immediately and never reaches the completed list. Calling that a failure means the
+  app retries a ticket that is already on paper — **every ticket, on every machine set up that way.**
+  A job that has left the queue without us cancelling it now counts as printed.
+- **The queue heading contradicted its own rows.** Caught by reading both boards ninety-six times
+  while a backlog printed: the per-printer rows added to 14 under a heading saying 15, because a
+  ticket finished between two separate counts. The total is the sum of the breakdown now — one read,
+  one answer.
+
+### The queue, per printer
+
+Both boards break the queue down by printer, worst first, whenever more than one is involved. A
+queued kitchen slip carries no printer yet (the address book is applied at claim time), so it is
+resolved through the routes rather than dropped — otherwise the tickets that have waited longest
+would be the ones missing from the count.
+
+### Checked
+
+`verify:print-helper` **244 → 253**, with **ten sabotage cases**; three were blind on first write —
+two matched the *other* operating system's copy and one matched its own obituary comment, which is
+the same fault three times in one day. `verify:print-scenarios` 183. A UI-load pass reads every
+printing screen ~96 times while fourteen slips and a bill are in flight, and asserts no bad status,
+no row without words, no red for the wrong reason, and no heading that disagrees with its own rows.

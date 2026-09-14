@@ -369,12 +369,28 @@ if (!ONLY || ONLY === "4") {
     return (jobs.length >= 1 && jobs.every((j) => j.printer === "OnlyPrinter-80"))
       || `the helper was handed ${JSON.stringify(jobs.map((j) => j.printer))}`;
   });
-  await phase("ONE printer means ONE lane: two waiting tickets are not handed out together", async () => {
+  // ── ONE PRINTER TAKES TWO AT A TIME, AND IN ORDER (owner, 2026-09-14) ──────────────────────
+  // This asserted ONE per printer, which was right while the helper submitted from parallel workers
+  // — two workers racing to one queue is two tickets in an unpredictable order. The helper now
+  // RENDERS in parallel and SUBMITS in a single ordered loop, so a printer can safely be given
+  // several: CUPS keeps the order they were handed over in. What must still hold is the cap (so a
+  // kitchen backlog cannot fill the round and starve the bill) and the ORDER of the batch itself.
+  await phase("one printer takes two at a time — and the app hands them over oldest first", async () => {
     await db(`print_jobs?restaurant_id=eq.${RID}`, { method: "DELETE" });
-    await newOrder(4, "Lane A"); await newOrder(4, "Lane B");
+    const first = await newOrder(4, "Lane A");
+    await new Promise((r) => setTimeout(r, 1100));      // so "oldest first" is a real question
+    await newOrder(4, "Lane B");
+    await newOrder(4, "Lane C");
     const r = await agentGet("/next?max=4", a.token);
     const jobs = r.body?.jobs || (r.body?.id ? [r.body] : []);
-    return jobs.length === 1 || `it handed out ${jobs.length} for one printer — they would come out in the wrong order`;
+    made.jobs.push(...jobs.map((j) => j.id));
+    if (jobs.length !== 2) return `it handed out ${jobs.length} for one printer — the cap that leaves room for the other papers is gone`;
+    const rows = await db(`print_jobs?id=in.(${jobs.map((j) => j.id).join(",")})&select=id,created_at&order=created_at.asc`);
+    const handedOrder = jobs.map((j) => j.id).join(",");
+    const madeOrder = rows.map((x) => x.id).join(",");
+    if (handedOrder !== madeOrder) return `handed over in a different order from the one they were made in`;
+    return (first.jobs[0] && jobs[0].id === first.jobs[0].id)
+      || "the OLDEST waiting ticket was not the first one handed over";
   });
 
   await invariants("one printer, all papers");
