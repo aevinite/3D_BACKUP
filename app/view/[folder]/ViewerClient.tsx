@@ -34,6 +34,36 @@ import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to
 // nothing. It only ever fires on the slow path, which is exactly the path that needed it.
 const SLOW_BAR_GRACE_MS = 2500;
 
+// ── WHAT THIS SCREEN'S OWN RESET TAKES AWAY FROM ITS FAILURE CARD ──────────────────────────────
+// (sweep #9 T2, 2026-09-14 — item 3.)
+//
+// `app/globals.css` carries `.viewer-wrapper *{margin:0;padding:0;box-sizing:border-box;…}` — a
+// universal reset scoped to this screen's wrapper. It is (0,1,0) specificity, exactly like
+// `.try-again-card`, and it is DECLARED LATER in the file, so it wins every tie. Everything inside
+// `.viewer-wrapper` therefore loses its margin and its padding, including the whole slow-model
+// card, which lives earlier in the same stylesheet and asks for 28px/24px of its own.
+//
+// MEASURED on the running screen, with every GLB held open so the real overlay arrives at 15s:
+//     card      padding 0px   (the stylesheet asks for 28px 24px)
+//     emoji     margin  0px   (asks for 12px)
+//     title     margin  0px   (asks for 8px)
+//     sub       margin  0px   (asks for 20px)
+//     Go back   padding 0px   (asks for 12px 24px)  →  the pill renders 76 × 17 px
+// Screenshot Read at 360×780: the two-line message runs into the card's rounded corners, and the
+// "Go back" pill — the only way off that screen — is a squashed sliver clipped by the card's own
+// bottom edge. 17px tall against a 44px tap-target guideline, on the screen a diner meets whenever
+// a model is slow, which on restaurant wi-fi is often. After: 124 × 41 px, inside a padded card.
+//
+// So the five values the reset strips are put back inline, where nothing can out-specify them.
+// Inline and not a stylesheet fix, for the same reason the two other workarounds in this file are
+// inline: `app/globals.css` belongs to another part of this sweep. If that reset is ever narrowed
+// at source these become redundant rather than wrong.
+const CARD_PAD = { padding: "28px 24px" } as const;
+const CARD_EMOJI = { marginBottom: 12 } as const;
+const CARD_TITLE = { margin: "0 0 8px" } as const;
+const CARD_SUB = { margin: "0 0 20px" } as const;
+const CARD_BTN = { padding: "12px 24px" } as const;
+
 // Describes the "config.json" file each dish folder has — the 3D model URLs,
 // the title/subtitle/stats, and the hotspot "tags" pinned onto the model.
 interface PublicConfig {
@@ -913,12 +943,39 @@ export default function ViewerClient({ folder }: { folder: string }) {
 
   // This restaurant isn't serving guests right now (Menu switch off / maintenance), or the
   // ?r= slug doesn't resolve. Say so plainly — never fall through to another tenant's dish.
+  // ── THE THREE DEAD ENDS WEAR THE SAME CARD THE SLOW-MODEL SCREEN ALREADY WEARS ────────────────
+  // (sweep #9 T2, 2026-09-14 — item 2.)
+  //
+  // All three of these screens were laid out with Tailwind utility classes — `flex`,
+  // `items-center`, `justify-center`, `min-h-screen`, `p-4`, `text-white`, `text-[#6ddc8a]`. THOSE
+  // CLASSES MATCH NO RULE IN THIS PRODUCT: `app/globals.css` is the app's only stylesheet and it
+  // never imports Tailwind, so no utility is ever generated. MEASURED on the running app, on this
+  // route: a fresh `<div class="flex p-4 text-white">` computes `display:block`, `padding:0px`,
+  // `color:rgb(60,42,30)`. So every one of those class names was inert, and these screens rendered
+  // as unstyled text glued to the top-left corner in the page's inherited brown — 1.39:1 against
+  // the viewer's own near-black canvas, where 4.5:1 is the floor. The "← Back" link, the only way
+  // off two of these screens, was the same invisible brown with no weight and no underline.
+  //
+  // The remedy is the pattern this screen already owns. `#try-again-overlay` + `.try-again-*` in
+  // app/globals.css are the slow-model card — centred, padded, themed for BOTH skins, with a real
+  // accent pill for its way out — and the patience overlay further down already uses them. So
+  // these three say the same thing in the same card, and the inert class names are gone rather
+  // than left beside the working way. After: 13.75:1 dark and 13.62:1 light on the heading.
+  //
+  // The headings stay `<h2>`: sweep #8's item 10 made them headings on purpose, so a screen-reader
+  // user has something to jump to. `.try-again-title`/`.try-again-sub` are written for a `div`, so
+  // the margins an h2 and a p bring with them are set explicitly — and CARD_* puts back what the
+  // wrapper's own reset strips off the card. See CARD_PAD at the top of this file.
   if (unavailable) {
     return (
-      <div className="viewer-wrapper flex flex-col items-center justify-center min-h-screen p-4">
-        <div className="text-4xl mb-4">🍽️</div>
-        <h2 className="text-xl font-bold text-white mb-2">This menu isn&apos;t available right now</h2>
-        <p className="text-white/50 mb-4">Please ask a member of staff — they can bring you the menu for your table.</p>
+      <div className="viewer-wrapper">
+        <div id="try-again-overlay">
+          <div className="try-again-card" style={CARD_PAD}>
+            <div className="try-again-emoji" style={CARD_EMOJI}>🍽️</div>
+            <h2 className="try-again-title" style={CARD_TITLE}>This menu isn&apos;t available right now</h2>
+            <p className="try-again-sub" style={{ margin: 0 }}>Please ask a member of staff — they can bring you the menu for your table.</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -928,13 +985,17 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // only shows once the switch resolves to off — #1 and unresolved links are on).
   if (features.model3d === false) {
     return (
-      <div className="viewer-wrapper flex flex-col items-center justify-center min-h-screen p-4">
-        <div className="text-4xl mb-4">🍽️</div>
-        <h2 className="text-xl font-bold text-white mb-2">3D preview isn&apos;t available</h2>
-        <p className="text-white/50 mb-4">You can still see this dish&apos;s photo and details on the menu.</p>
-        <Link href={backHref} className="text-[#6ddc8a] font-semibold hover:underline">
-          ← Back
-        </Link>
+      <div className="viewer-wrapper">
+        <div id="try-again-overlay">
+          <div className="try-again-card" style={CARD_PAD}>
+            <div className="try-again-emoji" style={CARD_EMOJI}>🍽️</div>
+            <h2 className="try-again-title" style={CARD_TITLE}>3D preview isn&apos;t available</h2>
+            <p className="try-again-sub" style={CARD_SUB}>You can still see this dish&apos;s photo and details on the menu.</p>
+            <Link href={backHref} className="try-again-btn" style={CARD_BTN}>
+              <i className="fas fa-arrow-left" aria-hidden="true"></i> {t.back}
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -956,13 +1017,17 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // sweep 2026-08-04). `error` is still what gates this branch, just no longer displayed.
   if (error) {
     return (
-      <div className="viewer-wrapper flex flex-col items-center justify-center min-h-screen p-4">
-        <div className="text-4xl mb-4">😔</div>
-        <h2 className="text-xl font-bold text-white mb-2">3D view unavailable</h2>
-        <p className="text-white/50 mb-4">We couldn&apos;t load this dish in 3D right now. You can still see its photo and details on the menu.</p>
-        <Link href={backHref} className="text-[#6ddc8a] font-semibold hover:underline">
-          ← Back
-        </Link>
+      <div className="viewer-wrapper">
+        <div id="try-again-overlay">
+          <div className="try-again-card" style={CARD_PAD}>
+            <div className="try-again-emoji" style={CARD_EMOJI}>😔</div>
+            <h2 className="try-again-title" style={CARD_TITLE}>3D view unavailable</h2>
+            <p className="try-again-sub" style={CARD_SUB}>We couldn&apos;t load this dish in 3D right now. You can still see its photo and details on the menu.</p>
+            <Link href={backHref} className="try-again-btn" style={CARD_BTN}>
+              <i className="fas fa-arrow-left" aria-hidden="true"></i> {t.back}
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -998,17 +1063,19 @@ export default function ViewerClient({ folder }: { folder: string }) {
           promising a load that will never come. */}
       {(showTryAgain || loadFailed) && !modelSeenRef.current && (
         <div id="try-again-overlay">
-          <div className="try-again-card">
-            <div className="try-again-emoji">{loadFailed ? "😔" : "⏳"}</div>
-            <div className="try-again-title">
+          {/* The five inline values are the ones `.viewer-wrapper *` strips off this card — see
+              CARD_PAD at the top of this file for the measurement and the screenshot. */}
+          <div className="try-again-card" style={CARD_PAD}>
+            <div className="try-again-emoji" style={CARD_EMOJI}>{loadFailed ? "😔" : "⏳"}</div>
+            <div className="try-again-title" style={CARD_TITLE}>
               {loadFailed ? "3D view unavailable" : "Still preparing your 3D view"}
             </div>
-            <div className="try-again-sub">
+            <div className="try-again-sub" style={CARD_SUB}>
               {loadFailed
                 ? "We couldn't load this dish in 3D right now. You can still see its photo and details on the menu."
                 : "The model is taking longer than usual. We'll let you know as soon as it's ready."}
             </div>
-            <Link href={backHref} className="try-again-btn">
+            <Link href={backHref} className="try-again-btn" style={CARD_BTN}>
               <i className="fas fa-arrow-left"></i> Go back
             </Link>
           </div>

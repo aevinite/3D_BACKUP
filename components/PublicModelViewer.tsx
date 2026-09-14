@@ -56,14 +56,36 @@ export default function PublicModelViewer({
   // Supabase Storage URL." straight at a diner — an instruction for us, meaningless to them
   // (guest sweep 2026-08-04). Same rule the AR message already follows: no internal detail.
   if (!config.modelUrl || config.modelUrl === "SUPABASE_GLB_URL_HERE") {
+    // ── THIS MESSAGE HAD NO STYLING AT ALL, AND THAT IS NOT WHAT IT LOOKED LIKE ────────────────
+    // (sweep #9 T2, 2026-09-14 — item 2.)
+    //
+    // It was laid out with Tailwind utility classes — `flex`, `items-center`, `justify-center`,
+    // `h-full`, `text-center`, `p-8`, `text-white`. NONE OF THOSE MATCH A RULE IN THIS PRODUCT:
+    // `app/globals.css` is the app's only stylesheet and it never imports Tailwind, so no utility
+    // is generated. MEASURED on the running 3D route: a fresh `<div class="flex p-4 text-white">`
+    // computes `display:block`, `padding:0px`, `color:rgb(60,42,30)` — so this card was unstyled
+    // brown text in the top-left corner, 1.39:1 against the viewer's near-black canvas.
+    //
+    // Same remedy as the three dead ends in app/view/[folder]/ViewerClient.tsx: the `.try-again-*`
+    // card in app/globals.css, which the slow-model overlay on this very screen already wears, so
+    // there is one look for "this dish has no 3D" rather than two. Not the fixed full-screen
+    // `#try-again-overlay` wrapper though — this message renders in the model's own slot, and a
+    // fixed overlay at z-index 5800 would cover BACK and AR, which stay usable here.
+    // The `<h2>` is kept (sweep #8's item 10 made these headings on purpose) with the margin an h2
+    // brings zeroed inline, the same idiom the dish bar's own title uses.
     return (
-      <div className="flex items-center justify-center h-full text-center p-8">
-        <div>
-          <div className="text-4xl mb-4">🍽️</div>
-          <h2 className="text-xl font-bold text-white mb-2">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: 24 }}>
+        {/* The padding and the two margins below are what `.viewer-wrapper *{margin:0;padding:0}`
+            in app/globals.css strips off this card — it is declared later than `.try-again-card`
+            at the same specificity, so it wins every tie. Measured: card padding 0px where the
+            stylesheet asks for 28px 24px. See the long note at CARD_PAD in
+            app/view/[folder]/ViewerClient.tsx. */}
+        <div className="try-again-card" style={{ padding: "28px 24px" }}>
+          <div className="try-again-emoji" style={{ marginBottom: 12 }}>🍽️</div>
+          <h2 className="try-again-title" style={{ margin: "0 0 8px" }}>
             3D view isn&apos;t ready for this dish
           </h2>
-          <p className="text-white/50">
+          <p className="try-again-sub" style={{ margin: 0 }}>
             You can still see its photo and details on the menu.
           </p>
         </div>
