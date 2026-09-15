@@ -61,6 +61,12 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url);
   const rid = url.searchParams.get("restaurant_id");
+  // ── A FILTER THAT CANNOT BE HONOURED IS REFUSED, NEVER WIDENED (T26 sweep #9, 2026-09-15) ────
+  // `if (rid && isUuid(rid))` below silently DROPPED a malformed id, so a stale bookmark answered
+  // with every restaurant's bill changes under a confident 200 while the page believed it was
+  // scoped to one tenant. Same fix, same day, as the bill ledger twin next door; every other
+  // per-restaurant admin read already refuses.
+  if (rid && !isUuid(rid)) return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
   const type = url.searchParams.get("type");
   const actions = type === "risk" ? [...RISK] : BILL_ACTIONS;
 
@@ -82,7 +88,7 @@ export async function GET(req: NextRequest) {
     // the tiebreak, in the same direction, so the order is stable across page reads.
     .order("id", { ascending: false })
     .range(offset, offset + per - 1);
-  if (rid && isUuid(rid)) q = q.eq("restaurant_id", rid);
+  if (rid) q = q.eq("restaurant_id", rid);   // shape-checked at the top — never dropped
 
   // THE TOTAL, AND THE RISK TOTAL, ONLY WHEN ASKED. Head counts — no rows cross the wire. The risk
   // count has to be its own count now: it used to be `rows.filter(...).length` over the 500 loaded
@@ -91,7 +97,7 @@ export async function GET(req: NextRequest) {
   // than no banner.
   const countOf = (acts: string[]) => {
     let c = sb.from("staff_actions").select("id", { count: "exact", head: true }).in("action", acts);
-    if (rid && isUuid(rid)) c = c.eq("restaurant_id", rid);
+    if (rid) c = c.eq("restaurant_id", rid);
     return c;
   };
   const reads = new ReadSet("admin/bill-audit", await Promise.all([

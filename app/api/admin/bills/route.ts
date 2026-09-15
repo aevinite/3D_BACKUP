@@ -81,8 +81,23 @@ export async function GET(req: NextRequest) {
   const trail = url.searchParams.get("trail");
   const limit = Math.min(500, Math.max(20, Number(url.searchParams.get("limit")) || 200));
 
+  // ── A FILTER THAT CANNOT BE HONOURED IS REFUSED, NEVER WIDENED (T26 sweep #9, 2026-09-15) ────
+  // `restaurant_id` was applied as `if (rid && isUuid(rid))` in four places on this route, so a
+  // malformed id — a stale bookmark, a hand-typed address, a link built from a since-purged
+  // restaurant — silently DROPPED the filter and answered with every restaurant's bills under a
+  // confident 200. On the one screen whose stated job is proving no sale quietly vanished, showing
+  // the whole platform while the page believes it is scoped to one tenant is the wrong way for this
+  // to fail. Every sibling admin read already refuses (`/api/admin/audit`, `/api/admin/oplog`,
+  // `/api/admin/customers`, `/api/admin/printing`); this one and its bill-audit twin did not.
+  // The POST below already refuses a malformed sessionId, so the two halves now agree.
+  if (rid && !isUuid(rid)) return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
+  // …and the same for the trail. `trail && isUuid(trail)` fell THROUGH to the ledger list, so
+  // expanding a bill whose id had gone stale answered with the whole list in a shape the caller
+  // never asked for, instead of saying the bill could not be found.
+  if (trail && !isUuid(trail)) return NextResponse.json({ error: "invalid trail id" }, { status: 400 });
+
   // ── Per-bill action trail (lazy, on expand) — keeps the list query lean ──────
-  if (trail && isUuid(trail)) {
+  if (trail) {
     // Capped like every other read on this route (200 / 50 / 5000 below) — it was the one that
     // stated no ceiling, against the module checklist's egress rule. A bill of 400 KOTs is already
     // refused elsewhere as implausible, so 500 is far above anything real.
@@ -121,7 +136,7 @@ export async function GET(req: NextRequest) {
   const isIso = (s: string) => !!s && !Number.isNaN(Date.parse(s));
 
   let sq = sb.from("sessions").select(SESSION_COLS).order("created_at", { ascending: false }).limit(limit);
-  if (rid && isUuid(rid)) sq = sq.eq("restaurant_id", rid);
+  if (rid) sq = sq.eq("restaurant_id", rid);   // shape-checked at the top — never dropped
   // DELETED is the one state that lives on the session row itself, so it can be asked for
   // directly instead of being sieved out of a window. A whole-bill delete ALWAYS tombstones the
   // session (lib/softDelete.ts stamps it once the last live order goes, and the delete branch
@@ -144,7 +159,7 @@ export async function GET(req: NextRequest) {
   // chip said "0" while deleted bills existed, which is the worst possible thing for the one
   // screen whose job is proving no sale quietly vanished. Rows-free head count, so it is cheap.
   let delCountQ = sb.from("sessions").select("id", { count: "exact", head: true }).not("deleted_at", "is", null);
-  if (rid && isUuid(rid)) delCountQ = delCountQ.eq("restaurant_id", rid);
+  if (rid) delCountQ = delCountQ.eq("restaurant_id", rid);
   // THREE DIFFERENT EVENTS SIT UNDER ONE WORD, AND THE TILE SAID ONE NUMBER (owner, 2026-08-31 —
   // he asked why this screen has a "Deleted" bucket at all when a bill can never be deleted).
   // Measured on backup: 2,956 tombstoned bills, of which **16** had a person's name against them.
@@ -161,7 +176,7 @@ export async function GET(req: NextRequest) {
     .not("deleted_at", "is", null).eq("delete_reason", EMPTIED_REASON);
   let delByPersonQ = sb.from("sessions").select("id", { count: "exact", head: true })
     .not("deleted_at", "is", null).not("deleted_by", "is", null);
-  if (rid && isUuid(rid)) { delEmptiedQ = delEmptiedQ.eq("restaurant_id", rid); delByPersonQ = delByPersonQ.eq("restaurant_id", rid); }
+  if (rid) { delEmptiedQ = delEmptiedQ.eq("restaurant_id", rid); delByPersonQ = delByPersonQ.eq("restaurant_id", rid); }
 
   const reads = new ReadSet("admin/bills", await Promise.all([
     // TWO POPULATIONS OUT OF ONE READ, and they are deliberately different (T19 sweep #7, 2026-09-01).

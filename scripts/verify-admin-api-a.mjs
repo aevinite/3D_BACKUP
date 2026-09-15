@@ -551,12 +551,53 @@ for (const rel of PART_A) {
   fail(`${rel} decides something from \`(await sb…).data\` at ${hits.join(", ")} — the \`.error\` is unreachable there, so a failed read is indistinguishable from an absent row. Assign the query first and answer for its error (rule 6)`);
 }
 
+// ── RULES 7+ ARE T26's, AND RULE 6 ABOVE IS T27's — both landed on 2026-09-15 ──────────────────
+// The two halves of this tree were swept in parallel and both extended this guard in the same hour,
+// so the numbers were allocated at the rebase rather than in the branches. Nothing was dropped and
+// nothing was merged: rule 6 asks whether a read can fail OUT LOUD, and T26's rules ask four
+// different questions about writes and filters. They overlap nowhere.
+
+// ── RULE 7 — A SCOPED FILTER IS NEVER CONDITIONAL ON ITS OWN SHAPE (T26 sweep #9, 2026-09-15) ───
+//
+// `if (rid && isUuid(rid)) q = q.eq("restaurant_id", rid)` reads like a safety check and is the
+// opposite of one: a malformed id makes the test FALSE, so the filter is silently dropped and the
+// answer widens from one restaurant to every restaurant — under a confident 200, on a page that
+// believes it is scoped. Found live on the two BILL screens, which is the worst possible place for
+// it: their stated job is proving that no sale quietly vanished, and a stale bookmark showed the
+// whole platform's bills instead. /api/admin/audit, /api/admin/oplog, /api/admin/customers and
+// /api/admin/printing all already do it the right way round — validate once, refuse, then filter
+// unconditionally — so this rule is the majority shape made compulsory.
+//
+// The rule looks for the SHAPE, not for a route: a conditional whose test is "is this id well
+// formed" and whose body applies a scoping `.eq(`. Validating and returning is untouched, because
+// that is a `return`, not an `.eq(`.
+// Judged LINE BY LINE, not by trying to balance the `if (…)` parentheses: the condition itself
+// contains a call — `if (rid && isUuid(rid))` — so a `[^)]*` capture stops inside it and the shape
+// test never matches. (It did exactly that on the first run, and passed the very line it exists for;
+// the rule is only worth having if it can be shown to go red, so it is written the way that does.)
+const SHAPE_TEST = /\b(?:isUuid|isUUID|UUID\.test|UUID_RE\.test|RID_UUID\.test)\s*\(\s*([A-Za-z_$][\w$]*)\s*\)/;
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  const dropped = [];
+  for (const line of src.split("\n")) {
+    if (!/^\s*if\s*\(/.test(line)) continue;
+    if (!/&&/.test(line)) continue;
+    const shaped = SHAPE_TEST.exec(line);
+    if (!shaped) continue;
+    if (!/\.eq\s*\(/.test(line)) continue;              // it validates and returns — the right shape
+    if (/\breturn\b/.test(line)) continue;              // a refusal, which is what this rule wants
+    dropped.push(shaped[1]);
+  }
+  if (!dropped.length) ok(`${rel} refuses a malformed id instead of dropping the filter`);
+  else fail(`${rel} applies a scope filter only when the id LOOKS right (${[...new Set(dropped)].join(", ")}) — a malformed id then widens the answer to every restaurant. Validate once and refuse, then filter unconditionally (rule 7)`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {
   console.error("\nverify-admin-api-a FAILED:");
   for (const m of fails) console.error(`  FAIL ${m}`);
-  console.error("\nEach of these six rules is a bug that already reached the owner's console once.");
+  console.error("\nEvery rule here is a bug that already reached the owner's console once.");
   console.error("If a change genuinely needs to break one, change THIS FILE in the same commit and say why.");
   process.exit(1);
 }
