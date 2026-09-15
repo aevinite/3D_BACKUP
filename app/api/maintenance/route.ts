@@ -20,7 +20,7 @@ import { logAction, deviceIdFrom } from "@/lib/oplog";
 export const dynamic = "force-dynamic";
 
 // Resolve the acting restaurant for a manager/admin request, or return the HTTP error to send.
-async function scope(req: NextRequest, forWrite = false): Promise<{ rid: string; who: string } | { error: NextResponse }> {
+async function scope(req: NextRequest, forWrite = false): Promise<{ rid: string; who: string; admin: boolean } | { error: NextResponse }> {
   const g = await requireRole(req, "manager");
   if (!g.ok) {
     // transient = auth lookup failed (DB blip) → 503 so the client retries instead of logging out.
@@ -49,7 +49,8 @@ async function scope(req: NextRequest, forWrite = false): Promise<{ rid: string;
     }
   }
   // WHO is taking the menu down — the owner/manager's own name, or "admin" for the super-user.
-  return { rid, who: g.user ? (g.user.name || g.user.username) : "admin" };
+  // `admin` also says WHICH LOG the action belongs in — see the note on logAction below.
+  return { rid, who: g.user ? (g.user.name || g.user.username) : "admin", admin: !g.user };
 }
 
 export async function GET(req: NextRequest) {
@@ -92,7 +93,27 @@ export async function POST(req: NextRequest) {
   // Guests see "we'll be right back", the owner asks who did it, and there was no answer anywhere.
   // The write is properly GATED already (Access -> Menu -> "Put menu on maintenance" + the `who`
   // rung above) — it was only the record that was missing.
-  await logAction("manager", on ? "maintenance_on" : "maintenance_off", {
+  // ── …AND WHOSE LOG IT BELONGS IN (T28 of sweep #9, 2026-09-15) ────────────────────────────────
+  // `requireRole(req, "manager")` passes for the ADMIN super-user as well as for a real manager (a
+  // `?rid=` request with a valid admin cookie answers `{ ok: true, user: null }`), which is how
+  // Aevidine reaches any restaurant's panels. So this line wrote `panel: "manager", actor: "admin"`
+  // for an admin flip — and `/api/owner/oplog` excludes `panel in (admin,db)` and nothing else, so
+  // that row sailed into the OWNER's Activity feed.
+  //
+  // Measured on French House, 2026-09-15, flipping it as the admin act-as:
+  //     panel "manager" · actor "admin" · "admin put the guest menu back online"
+  // and it was in the owner's own feed on the next load. That is the standing "admin = top power,
+  // INVISIBLY" rule leaking through the exact hole `ownerLogPanel()` (lib/ownerScope) was written to
+  // close on 2026-08-12 — the owner's words then were *"admin should not be able to see"* — except
+  // that fix only ever covered `/api/owner/*`, and taking the menu down is reached from the MANAGER
+  // panel, so this route was outside it.
+  //
+  // Nothing is hidden from the record: an admin flip still lands in Aevidine's Everything Log in
+  // full, exactly as ownerLogPanel's header describes, because that log is where a `panel:"admin"`
+  // row belongs. It simply stops appearing in the owner's and the manager's feeds. A real
+  // manager's or owner's flip is completely unchanged — which is the row that matters here, because
+  // taking the menu down stops every guest ordering and the owner has to be able to see who did it.
+  await logAction(s.admin ? "admin" : "manager", on ? "maintenance_on" : "maintenance_off", {
     restaurant_id: s.rid, actor: s.who, device_id: deviceIdFrom(req),
     detail: on ? `${s.who} took the guest menu OFFLINE` : `${s.who} put the guest menu back online`,
   });
