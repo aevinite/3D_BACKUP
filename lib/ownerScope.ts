@@ -261,12 +261,28 @@ export class RestaurantListIncomplete extends Error {
   }
 }
 
+// A RESTAURANT IN THE RECYCLE BIN IS NOT ONE OF "EVERY RESTAURANT" (sweep #9 T30, 2026-09-15).
+// `{ all: true }` is the ADMIN's whole-platform owner view, and this paged the restaurants table
+// with no `deleted_at` filter — so every caller of it was handed the removed ones too. Measured
+// through the real gate: GET /api/owner/overview?scope=all answered with 177 rows where 50
+// restaurants exist, `totals.restaurantCount` read 177, and ₹7,30,621.50 of all-time takings from
+// binned restaurants was folded into the estate headline (₹7,30,411.50 of it from one removed
+// restaurant). Migration 128 created the bin exactly so a removed restaurant lives on ONE screen —
+// the admin's Recycle bin, which reads `restaurants` directly and is unaffected by this.
+//
+// NOT the deleted-BILL rule. docs/COMPLIANCE-GUARDRAILS.md §4 requires a binned BILL to stay in the
+// owner's revenue, and migration 309 states that asymmetry. That is `orders.deleted_at`. This is
+// `restaurants.deleted_at`. A live restaurant's figures do not move by a paisa.
+//
+// Migration 383 adds the same filter inside `lfh_owner_overview` itself, because CLAUDE.md's SaaS
+// rule is that the business rule lives in the RPC and never in app-code filtering alone. Both
+// halves are deliberate; `verify:binned-restaurant-leaves` checks both.
 export async function scopedRestaurantIds(scope: OwnerScope): Promise<string[]> {
   if (!scope.all) return scope.ids;
   const ids: string[] = [];
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
-    const r = await sb.from("restaurants").select("id").order("id").range(offset, offset + PAGE - 1);
+    const r = await sb.from("restaurants").select("id").is("deleted_at", null).order("id").range(offset, offset + PAGE - 1);
     if (r.error) throw new RestaurantListIncomplete(r.error.message);
     const batch = (r.data ?? []).map((x) => x.id as string);
     ids.push(...batch);
