@@ -13,7 +13,7 @@
 // greyed-out card, no hint that a feature exists.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503 } from "@/lib/ownerScope";
+import { ownerScopeOr503, ownerLogPanel, ownerActorName } from "@/lib/ownerScope";
 import { agentsView, readRoutes, waitingCount, PRINT_KINDS, paperStatus, helperFor, queueJob, isRoutableKind } from "@/lib/printHelpers";
 import { KIND_LABEL, PRINTER_STATE_WORDS } from "@/lib/printBoardWords";
 import { printingRunning } from "@/lib/printHelpers";
@@ -207,8 +207,21 @@ export async function POST(req: NextRequest) {
     : "Printing is switched off for this restaurant, so nothing would come out." }, { status: 400 });
   const q = await queueJob(target, kind, { sample: true }, { requestedBy: "sample · owner" });
   if ("error" in q) return NextResponse.json({ error: "Could not send that sample to the printer." }, { status: 500 });
-  await logAction("owner", "print_test", {
+  // ── WHO SENT IT, AND WHOSE LOG IT BELONGS IN (T28 of sweep #9, 2026-09-15) ────────────────────
+  // This was the newest write in the owner panel (2026-09-14) and the only one that named NOBODY:
+  // no `actor` at all, so the row stored `actor: null` and the Activity log's Who column rendered
+  // "—" for it. On a restaurant with two co-owners that makes "who put that through the printer?"
+  // unanswerable, which is the whole job of that screen.
+  //
+  // And `panel` was the literal "owner", so an ADMIN's sample print — this route answers an admin
+  // act-as session exactly as it answers a real owner — landed in the OWNER's feed: `/api/owner/oplog`
+  // excludes `panel in (admin,db)` and nothing else. `ownerLogPanel()` and `ownerActorName()`
+  // (lib/ownerScope) are the two helpers that decide both questions for every other write in these
+  // routes; this one was written without them. Same pair, same answers, no new rule.
+  await logAction(ownerLogPanel(scope), "print_test", {
     restaurant_id: target,
+    actor: ownerActorName(scope),
+    ...(!scope.all && !scope.admin && "ownerId" in scope ? { actor_id: scope.ownerId } : {}),
     detail: `sample ${KIND_LABEL[kind] || kind} to ${own.printer} on ${own.agent}`,
   });
   return NextResponse.json({
