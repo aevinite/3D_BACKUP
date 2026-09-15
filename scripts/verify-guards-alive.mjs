@@ -170,9 +170,34 @@ function quotedStrings(src) {
 // So a path inside a NEGATED existence test is skipped. It is deliberately narrow: only `!exists(`
 // / `!existsSync(` immediately before the path on the same line. A path named anywhere else on that
 // line is still checked, and a genuinely rotted path in an ordinary read still fails.
+//
+// ── AND WHEN THE OBITUARY IS WRITTEN AS A try/catch (2026-09-15) ────────────────────────────────
+// There is a SECOND way to spell "this file must not exist", and this guard could not read it:
+//
+//     () => { try { raw("app/view/[folder]/not-found.tsx"); return false; } catch { return true; } }
+//
+// — a read that is EXPECTED to throw, so throwing is the pass. `scripts/sweep/t2/s9r2-checks.mjs:58`
+// says it that way ("the 3D route deliberately has NO not-found of its own"), and this check called
+// it rot. That mattered far more than one wrong line: verify:guards-alive runs from the PostToolUse
+// hook after every Edit and Write in this folder, so a false red here REFUSES EVERY FILE SAVE IN
+// EVERY SESSION — and the only two ways to clear it were to point the obituary at a live file or
+// delete the check, which are the two things this guard exists to prevent. Measured on clean `main`
+// on 2026-09-15: red, on a repo with nothing wrong with it.
+//
+// The try/catch form is recognised on the same narrow terms as the `!exists(` one: the path must sit
+// inside a `try {` that opened earlier ON THIS LINE and has not closed before the path, and that try
+// must be answered by a `catch` which returns true. Anything else is still checked.
 {
   const RX = /["'`]((?:app|lib|components|public|supabase|tests|scripts|\.github)\/[A-Za-z0-9_.\/\[\]@-]+\.(?:tsx?|jsx?|mjs|css|sql|md|json|html|js|yml|sh))["'`]/g;
   const OBITUARY = /!\s*exists(?:Sync)?\s*\(\s*(?:join\([^)]*?,\s*)?$/;
+  // "reading it MUST throw" — the try/catch spelling of the same obituary.
+  const mustThrow = (line, at) => {
+    const before = line.slice(0, at);
+    const t = before.lastIndexOf("try");
+    if (t === -1 || !/^try\s*\{/.test(before.slice(t))) return false;
+    if (before.slice(t).includes("}")) return false;              // that try already closed
+    return /\}\s*catch\s*(?:\([^)]*\)\s*)?\{\s*return\s+true/.test(line.slice(at));
+  };
   const bad = [];
   for (const f of scriptFiles) {
     const seen = new Set();
@@ -182,6 +207,7 @@ function quotedStrings(src) {
         // "this file must NOT exist" — an obituary, not a stale pointer. Judged from the text
         // immediately before the path, so it cannot swallow an unrelated read later on the line.
         if (OBITUARY.test(line.slice(0, m.index))) continue;
+        if (mustThrow(line, m.index)) continue;
         if (seen.has(rel)) continue;
         seen.add(rel);
         if (!existsSync(join(ROOT, rel))) bad.push(`${f}:${ln} — names ${rel}, which does not exist`);

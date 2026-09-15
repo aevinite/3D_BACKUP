@@ -233,7 +233,17 @@ for (const [re, what] of [
 ]) if (!re.test(index)) fail(`INDEX.md no longer states ${what}`);
 
 // ── 4 · the next free ID really is free ────────────────────────────────────────────────────────
-const declared = index.match(new RegExp(`next free ID[^P]*P(${ID_DIGITS})`, "i"));
+// Read the DECLARATION, not a mention of it. The phrase "Next free ID" now appears twice in
+// INDEX.md's prose ABOVE the real line — the sweep-#9 round-2 note explains why four terminals
+// collided on it — and a plain `index.match` returns the FIRST hit, so this was resolving to a
+// number out of a historical "Previously:" paragraph (`P94701`) instead of the live mark. It then
+// reported 8,000-odd rows as sitting above a registry that had in fact moved past them, which is a
+// guard telling a confident lie: the one failure mode this file exists to prevent.
+// The declaration is the line that STARTS with the bolded phrase; anything else is prose. And the
+// id is found by scanning to the first BACKTICKED one, not by `[^P]*` — that stopped dead on the
+// capital P in "SWEEP" the moment the line grew a parenthetical, which is how the old matcher came
+// to read a historical paragraph instead. Every mark this file has ever carried is written `P…`.
+const declared = index.match(new RegExp("^\\*\\*next free ID[^`]*`P(" + ID_DIGITS + ")`", "im"));
 if (declared) {
   const next = Number(declared[1]);
   const taken = [...owner.keys()].map((i) => Number(i.slice(1))).filter((n) => n >= next);

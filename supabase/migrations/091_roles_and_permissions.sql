@@ -40,3 +40,17 @@ ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS manager_permissions jsonb NOT N
 }'::jsonb;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (sweep #9, T29, 2026-09-15).
+-- `idx_staff_users_username_per_restaurant` above is RETIRED. Migration 245 ("a binned login frees
+-- its name") replaced it with `idx_staff_users_username_live`, the same key but WHERE deleted_at IS
+-- NULL — so a recycled staff login stops holding its username hostage — plus a plain
+-- `idx_staff_users_username_any` for the "is this name free?" lookup over binned rows too.
+--
+-- Left as it was, running THIS FILE ALONE puts the strict rule back and quietly removes 245's whole
+-- decision: a binned "manager" would once again block a new one from taking that name, with nothing
+-- on any screen to explain why. It does not FAIL today — checked, not assumed: no restaurant
+-- currently has a live and a binned row sharing a name.
+--
+-- A FULL re-seed already ends correctly (245 sorts after this file). Idempotent.
+DROP INDEX IF EXISTS idx_staff_users_username_per_restaurant;

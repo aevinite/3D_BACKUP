@@ -158,7 +158,9 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     { rule: "manager_pin",  re: /managerPin|manager-pin|\/pin\b/ },
     { rule: "waiter_call",  re: /\/calls?\b.*(POST|post)|lfh_call_waiter|chef-call/ },
     { rule: "join_session", re: /join-table|join_session|lfh_join/ },
-    { rule: "otp_request",  re: /otp|verification_codes|lfh_request_code/ },
+    // `verification_codes` was dropped by migration 384 with the last of the mig-037 stub; the
+    // live phone path is lfh_send_otp / lfh_verify_otp, which `otp` already matches.
+    { rule: "otp_request",  re: /otp|lfh_request_code/ },
   ];
   const bad = [];
   for (const f of files) {
