@@ -43,8 +43,12 @@ export async function POST(req: NextRequest) {
   // Confirm the restaurant exists BEFORE touching Storage — otherwise a valid-looking but
   // unknown id would upload/keep an orphan file and return a URL no restaurant references
   // (audit 2026-07-06).
-  const exists = (await sb.from("restaurants").select("id").eq("id", rid).maybeSingle()).data;
-  if (!exists) return bad("Restaurant not found.", 404);
+  // The DELETE below has answered for this read since 2026-08-27; the upload was left on the shape
+  // where the error is unreachable, so a blip refused a picked file with "Restaurant not found."
+  // (T27 sweep #9, 2026-09-15.)
+  const existsQ = await sb.from("restaurants").select("id").eq("id", rid).maybeSingle();
+  if (existsQ.error) return adminFail("this restaurant's logo", existsQ.error, { action: "save" });
+  if (!existsQ.data) return bad("Restaurant not found.", 404);
   await purgeLogos(rid); // drop any previous logo so Storage keeps just the current one
   const path = `${rid}/logo-${Date.now()}.${ext}`;
   const buf = new Uint8Array(await file.arrayBuffer());

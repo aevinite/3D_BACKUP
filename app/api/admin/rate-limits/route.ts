@@ -140,7 +140,13 @@ export async function POST(req: NextRequest) {
   if (action === "approve_request") {
     const id = String(b.request_id || "");
     if (!UUID.test(id)) return err("invalid request_id");
-    const r = (await sb.from("unblock_requests").select("key").eq("id", id).maybeSingle()).data as { key: string } | null;
+    // A BLIP MUST NOT READ AS "that request no longer exists" (T27 sweep #9, 2026-09-15) — the same
+    // correction the `block` and `clear` paths below were given as item 21 in sweep #7, on the one
+    // action that LETS SOMEBODY BACK IN. The person on the other end is locked out of the panel and
+    // asking is their only move; telling the admin their ask has vanished leaves them there.
+    const rQ = await sb.from("unblock_requests").select("key").eq("id", id).maybeSingle();
+    if (rQ.error) return adminFail("that unblock request", rQ.error, { action: "load" });
+    const r = rQ.data as { key: string } | null;
     if (!r) return err("that request no longer exists", 404);
     await throttleUnblock(r.key);
     const tidy2 = await sb.from("unblock_requests").update({ status: "approved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("key", r.key).eq("status", "open");

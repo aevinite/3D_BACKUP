@@ -491,13 +491,73 @@ for (const rel of PART_A) {
   else fail(`${rel} counts a write's returning rows (${counted.join(", ")}) — those stop at PostgREST's own cap, so the number can be smaller than what was changed. Count first with a head count on the same filter (rule 5)`);
 }
 
+// ── RULE 6 — A READ THAT DECIDES SOMETHING MUST BE ABLE TO FAIL OUT LOUD (T27 sweep #9, 2026-09-15)
+//
+// The shape is `(await sb.from(…)…).data` — the result is thrown away in the same expression, so the
+// `.error` is not merely unchecked, it is UNREACHABLE. supabase-js sets `data` to null on a failure,
+// so the value this shape hands to the next line is indistinguishable from "there is no such row".
+// Four separate faults in this pass were that one shape, and each said something untrue:
+//
+//   · app/api/admin/restaurants/access-tree — THREE of them, and the worst consequence in the tree.
+//     Two seeded a MERGE (`{ ...curFeat }`, `{ ...curPc }`), so a failed read made the base `{}` and
+//     one saved switch wiped every other guest feature, or every other delivery channel AND its
+//     stored API key. The third answered "does this restaurant have a settings row?", and a failed
+//     read looked like "no" — sending the save down the clone branch, whose upsert names
+//     `onConflict: restaurant_id` and carries a full copy of restaurant #1's row. Driven on a
+//     throwaway restaurant: 11 of 11 probed columns reset, including price_tax_mode
+//     composition→excl, the module ladders, the per-table names, and a saved channel key.
+//   · app/api/admin/repair — five ownership reads, each deciding a 404 that ACCUSES the admin of
+//     picking the wrong restaurant, on the screen used when service is already going wrong.
+//   · app/api/admin/users (PATCH "edit") — a failed read skipped the username clash check entirely.
+//   · branding · logo (POST) · restaurants (PATCH) · rate-limits (approve_request) · resolve-error
+//     — "Restaurant not found." / "That user isn't an owner." / "that request no longer exists" /
+//     "that entry no longer exists", each for a row that is right there.
+//
+// This is the same rule half this tree already carries in prose ("A FAILED READ IS NOT 'NOT FOUND'",
+// "A BLIP MUST NOT READ AS …", "Refuse on doubt"). Rule 6 is what makes it a rule rather than a habit.
+//
+// THE CARVE-OUT IS BY NAME, NOT BY POSITION. Five routes in the first half of the tree still carry
+// this shape and belong to another terminal's territory in this same sweep (T26, admin routes 1-25);
+// fixing them from here would collide with live work. They are listed explicitly rather than as a
+// `slice(0, 25)`, because LEDGER/INDEX.md records positional ranges leaving a file watched by nobody
+// — a NEW route anywhere is covered from the day it lands, and each name below becomes a no-op the
+// moment its owner fixes it. Remove a name when it reads `ok` on its own.
+const RULE6_PENDING = new Set([
+  "app/api/admin/audit/route.ts",
+  "app/api/admin/billing/route.ts",
+  "app/api/admin/bills/route.ts",
+  "app/api/admin/fix-request/route.ts",
+  "app/api/admin/owners/route.ts",
+  "app/api/admin/printing/[...path]/route.ts",
+]);
+// `(await sb…)` / `(await supabaseAdmin…)` closed off and immediately dereferenced — across lines
+// too, because four of the nine hits in this pass were written over two or three.
+const INLINE_DATA = /\(\s*await\s+(?:sb|supabaseAdmin|supabase)\s*\.\s*(?:from|rpc)\s*\([\s\S]{0,700}?\)\s*\.\s*(?:data|error)\b/g;
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  const hits = [...src.matchAll(INLINE_DATA)].map((m) => {
+    const line = src.slice(0, m.index).split("\n").length;
+    return `L${line}`;
+  });
+  if (!hits.length) {
+    ok(`${rel} — every read that decides something can fail out loud (rule 6)`);
+    if (RULE6_PENDING.has(rel)) fail(`${rel} is listed in RULE6_PENDING but is now clean — delete its line from that list so the carve-out cannot go stale`);
+    continue;
+  }
+  if (RULE6_PENDING.has(rel)) {
+    console.log(`  note  ${rel} has ${hits.length} read(s) whose error is unreachable (${hits.join(", ")}) — carved out, owned by admin routes part A`);
+    continue;
+  }
+  fail(`${rel} decides something from \`(await sb…).data\` at ${hits.join(", ")} — the \`.error\` is unreachable there, so a failed read is indistinguishable from an absent row. Assign the query first and answer for its error (rule 6)`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {
   console.error("\nverify-admin-api-a FAILED:");
   for (const m of fails) console.error(`  FAIL ${m}`);
-  console.error("\nEach of these four rules is a bug that already reached the owner's console once.");
+  console.error("\nEach of these six rules is a bug that already reached the owner's console once.");
   console.error("If a change genuinely needs to break one, change THIS FILE in the same commit and say why.");
   process.exit(1);
 }
-console.log(`\nAll ${oks.length} checks passed — the admin routes are gated, named, bounded and honest.`);
+console.log(`\nAll ${oks.length} checks passed — the admin routes are gated, named, bounded, honest, and able to fail out loud.`);

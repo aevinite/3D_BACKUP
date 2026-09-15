@@ -312,8 +312,13 @@ export async function PATCH(req: NextRequest) {
   const ownerId = raw == null || raw === "" ? null : String(raw);
   if (ownerId) {
     if (!UUID.test(ownerId)) return bad("That user isn't an owner.", 400);
-    const owner = (await sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1)).data?.[0];
-    if (!owner) return bad("That user isn't an owner.", 400);
+    // A FAILED READ IS NOT "that user isn't an owner" (T27 sweep #9, 2026-09-15). This file gave
+    // four of its reads that correction in sweep #7 and left this one: it is the only refusal on the
+    // page that makes a CLAIM ABOUT A PERSON, so a blip told the admin that the owner he just picked
+    // from the dropdown is not an owner.
+    const ownerQ = await sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1);
+    if (ownerQ.error) return adminFail("this restaurant's owner", ownerQ.error, { action: "load" });
+    if (!ownerQ.data?.[0]) return bad("That user isn't an owner.", 400);
   }
   // The PRIMARY owner is stored on the restaurant (display / back-compat); the
   // SCOPING source of truth is the restaurant_owners join table (migration 097).
@@ -573,7 +578,17 @@ export async function POST(req: NextRequest) {
     // mig 245 gave staff logins). A restaurant sitting in the 90-day recycle bin no longer blocks
     // the name, so "Aangan" deleted this morning can be created again this afternoon without
     // silently becoming "aangan-2".
-    while (((await sb.from("restaurants").select("id").eq("slug", slug).is("deleted_at", null).limit(1)).data || []).length) slug = `${base}-${++n}`;
+    // The check answers for itself (T27 sweep #9, 2026-09-15). A failed read made `.data` null,
+    // `[] || []`, length 0 — i.e. "the name is free" — so the loop stopped early and the insert below
+    // collided on the partial unique index. The 23505 branch then told the admin "That name was just
+    // taken — please try a slightly different name", which is a sentence about a RACE and this was
+    // not one: the check simply never ran. Refuse before writing, so the message matches the cause.
+    for (;;) {
+      const takenQ = await sb.from("restaurants").select("id").eq("slug", slug).is("deleted_at", null).limit(1);
+      if (takenQ.error) return adminFail("whether that name is free", takenQ.error, { action: "load" });
+      if (!(takenQ.data || []).length) break;
+      slug = `${base}-${++n}`;
+    }
     // ── A REUSED WEB ADDRESS INHERITS SOMEBODY ELSE'S PRINTED QR CODES (owner, 2026-08-21) ──────
     // Freeing a binned restaurant's name is deliberate (mig 319, and he asked for it) and that is
     // NOT changed here — this only makes the consequence visible, because it is silent and it is
@@ -587,11 +602,26 @@ export async function POST(req: NextRequest) {
     // occupant is simply the binned row still holding this slug. `restaurants` is a tiny table — the
     // health route calls it exactly that — so this is one small read on a create, not a hot path,
     // and it is skipped entirely when the address is brand new.
-    const previousHolder = ((await sb.from("restaurants")
+    // ── …AND THE WARNING MUST NOT GO MISSING IN SILENCE (T27 sweep #9, 2026-09-15) ────────────────
+    // The whole point of the paragraph above is that this consequence USED to be silent and now is
+    // not. But the read was written with its error unreachable, so a database hiccup made
+    // `previousHolder` null — indistinguishable from "this address is brand new" — and the create
+    // succeeded with the QR warning quietly absent from the answer, the console and the record. The
+    // admin then never learns that the laminated codes at the old place now open this menu, and
+    // there is no way back except reprinting them.
+    //
+    // It must NOT fail the create: the restaurant, its logins and its menu are all real and useful,
+    // and throwing that away over a warning is the fault lib/partialRead.ts was written to stop. So
+    // it degrades and NAMES itself — `addressHistoryUnread` — the same convention this console's own
+    // Full report and restaurant list already use, and the record says so too.
+    const prevQ = await sb.from("restaurants")
       .select("name, deleted_at")
       .eq("slug", slug).not("deleted_at", "is", null)
       .order("deleted_at", { ascending: false })
-      .limit(1)).data || [])[0] as { name: string; deleted_at: string } | null;
+      .limit(1);
+    if (prevQ.error) console.error("[admin/restaurants] could not check who last held this web address:", prevQ.error.message);
+    const addressHistoryUnread = !!prevQ.error;
+    const previousHolder = ((prevQ.data || [])[0] || null) as { name: string; deleted_at: string } | null;
     // Chosen panels (default M+K+T on, Owner off). Coerce to honest booleans.
     const wp = (body?.panels && typeof body.panels === "object") ? body.panels as Record<string, unknown> : {};
     const panels = {
@@ -725,7 +755,7 @@ export async function POST(req: NextRequest) {
     const onPanels = (Object.keys(panels) as (keyof typeof panels)[]).filter((k) => panels[k]);
     // The reused address goes in the RECORD as well as on the screen: months later, "why is this
     // restaurant getting the other one's diners" is answered by this line and nothing else.
-    await logAction("admin", "restaurant_create", { actor: "admin", restaurant_id: rid, detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}${seedMenu ? (menuSeeded ? " · menu seeded" : " · menu seed FAILED") : " · no menu"}${previousHolder ? ` · REUSED the web address /r/${slug}/menu, last held by "${previousHolder.name}" (binned ${new Date(previousHolder.deleted_at).toISOString().slice(0, 10)}) — that restaurant's printed QR codes now open THIS menu` : ""}` });
+    await logAction("admin", "restaurant_create", { actor: "admin", restaurant_id: rid, detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}${seedMenu ? (menuSeeded ? " · menu seeded" : " · menu seed FAILED") : " · no menu"}${previousHolder ? ` · REUSED the web address /r/${slug}/menu, last held by "${previousHolder.name}" (binned ${new Date(previousHolder.deleted_at).toISOString().slice(0, 10)}) — that restaurant's printed QR codes now open THIS menu` : addressHistoryUnread ? ` · COULD NOT CHECK whether /r/${slug}/menu was held before — if it was, that restaurant's printed QR codes now open THIS menu` : ""}` });
     // Remember this setup (panels + sample-menu) so the next "New restaurant" form auto-fills
     // from it. Best-effort — a save failure must never fail the create. NO `access` any more
     // (sweep T6, 2026-08-06): remembering a permission set is what let one stale shape pre-fill
@@ -744,6 +774,9 @@ export async function POST(req: NextRequest) {
       // then never mention it again. Not an error and not a refusal — freeing a binned name is his
       // rule; this is the consequence stated out loud so reprinting the codes is a decision.
       ...(previousHolder ? { reusedAddress: { name: previousHolder.name, binnedOn: previousHolder.deleted_at } } : {}),
+      // Only when the check itself could not be made, so a healthy create is byte-for-byte what it
+      // was before. "I don't know" is the one answer this must be able to give — see the note above.
+      ...(addressHistoryUnread ? { addressHistoryUnread: true } : {}),
     });
   }
 
