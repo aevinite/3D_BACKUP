@@ -592,6 +592,21 @@ for (const rel of PART_A) {
   else fail(`${rel} applies a scope filter only when the id LOOKS right (${[...new Set(dropped)].join(", ")}) — a malformed id then widens the answer to every restaurant. Validate once and refuse, then filter unconditionally (rule 7)`);
 }
 
+// ── RULE 9 — A NUMBER AIMED AT AN INT COLUMN IS RANGE-CHECKED (T26 sweep #9, 2026-09-15) ────────
+//
+// `sessions.bill_no` and `sessions.invoice_no` are INT (migs 036/037). The bill ledger's search box
+// took the last run of digits from whatever was typed and put it straight into `bill_no.eq.${n}`,
+// so a phone number — an entirely ordinary thing to paste into "find one bill" — came back as a red
+// "That value isn't allowed for the bill ledger" instead of an empty list. Postgres is right to
+// refuse it; the screen is wrong to call it an error. Anywhere one of these two columns is compared
+// to an interpolated number, the file has to state the int ceiling.
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  if (!/(bill_no|invoice_no)\.eq\.\$\{/.test(src)) continue;
+  if (/2147483647/.test(src)) ok(`${rel} keeps a searched bill number inside what an INT column can hold`);
+  else fail(`${rel} compares bill_no/invoice_no to a typed number with no range check — anything past 2147483647 answers with a refusal instead of "no bills" (rule 9)`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {

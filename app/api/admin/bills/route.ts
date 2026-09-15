@@ -152,7 +152,17 @@ export async function GET(req: NextRequest) {
   if (q) {
     const m = q.match(/(\d+)(?!.*\d)/);              // last run of digits, so "INV/2026-27/000042" → 42
     const n = m ? parseInt(m[1], 10) : NaN;
-    sq = Number.isFinite(n) ? sq.or(`bill_no.eq.${n},invoice_no.eq.${n}`) : sq.eq("table_number", q);
+    // ── A NUMBER TOO BIG TO BE A BILL NUMBER IS NOT AN ERROR (T26 sweep #9, 2026-09-15) ────────
+    // `sessions.bill_no` and `sessions.invoice_no` are INT (migs 036/037), so anything past
+    // 2,147,483,647 is refused by Postgres with `value "9876543210" is out of range for type
+    // integer` — and adminFail turned that into a red "That value isn't allowed for the bill
+    // ledger" on the search box. Typing a phone number into "find one bill" is an ordinary thing
+    // to do (the guest's number is the other thing a person has in front of them), and the honest
+    // answer to "is there a bill numbered 9876543210?" is NO BILLS, not a refusal. Out-of-range
+    // now falls through to the table search like any other non-numeric text, which finds nothing
+    // and says so in the empty-list words the screen already has.
+    const fitsBillNo = Number.isFinite(n) && n >= 0 && n <= 2147483647;
+    sq = fitsBillNo ? sq.or(`bill_no.eq.${n},invoice_no.eq.${n}`) : sq.eq("table_number", q);
   }
 
   // The REAL number of deleted bills, counted in the database rather than inside the page — the
