@@ -522,14 +522,20 @@ for (const rel of PART_A) {
 // `slice(0, 25)`, because LEDGER/INDEX.md records positional ranges leaving a file watched by nobody
 // — a NEW route anywhere is covered from the day it lands, and each name below becomes a no-op the
 // moment its owner fixes it. Remove a name when it reads `ok` on its own.
-const RULE6_PENDING = new Set([
-  "app/api/admin/audit/route.ts",
-  "app/api/admin/billing/route.ts",
-  "app/api/admin/bills/route.ts",
-  "app/api/admin/fix-request/route.ts",
-  "app/api/admin/owners/route.ts",
-  "app/api/admin/printing/[...path]/route.ts",
-]);
+// ── THE CARVE-OUT IS EMPTY — PART A CLEARED IT (T26 sweep #9, 2026-09-15) ───────────────────────
+// T27 wrote this rule and listed six files it could not touch, each marked "owned by admin routes
+// part A". Part A is this terminal, and those eleven reads are done: the bill trail's four (an
+// empty trail read as "nothing happened" instead of "I could not look" — on the screen whose job
+// is proving a sale did not vanish), the next-due CYCLE on the billing page (a blip rolled a
+// MONTHLY plan a whole year forward and the restaurant then read as paid up), the owner activity
+// read (a blip answered "Owner not found." about the card just clicked), the previous main owner's
+// name (the permanent record could say "nobody" when there was somebody), and four genuinely
+// tolerated ones now written out so the tolerance is a decision with a log line rather than an
+// unreachable `.error`.
+//
+// The set stays, empty, on purpose: the self-check below is what stops a carve-out going stale, and
+// an empty list is the honest state of it rather than a deleted rule.
+const RULE6_PENDING = new Set([]);
 // `(await sb…)` / `(await supabaseAdmin…)` closed off and immediately dereferenced — across lines
 // too, because four of the nine hits in this pass were written over two or three.
 const INLINE_DATA = /\(\s*await\s+(?:sb|supabaseAdmin|supabase)\s*\.\s*(?:from|rpc)\s*\([\s\S]{0,700}?\)\s*\.\s*(?:data|error)\b/g;
@@ -551,12 +557,126 @@ for (const rel of PART_A) {
   fail(`${rel} decides something from \`(await sb…).data\` at ${hits.join(", ")} — the \`.error\` is unreachable there, so a failed read is indistinguishable from an absent row. Assign the query first and answer for its error (rule 6)`);
 }
 
+// ── RULES 7+ ARE T26's, AND RULE 6 ABOVE IS T27's — both landed on 2026-09-15 ──────────────────
+// The two halves of this tree were swept in parallel and both extended this guard in the same hour,
+// so the numbers were allocated at the rebase rather than in the branches. Nothing was dropped and
+// nothing was merged: rule 6 asks whether a read can fail OUT LOUD, and T26's rules ask four
+// different questions about writes and filters. They overlap nowhere.
+
+// ── RULE 7 — A SCOPED FILTER IS NEVER CONDITIONAL ON ITS OWN SHAPE (T26 sweep #9, 2026-09-15) ───
+//
+// `if (rid && isUuid(rid)) q = q.eq("restaurant_id", rid)` reads like a safety check and is the
+// opposite of one: a malformed id makes the test FALSE, so the filter is silently dropped and the
+// answer widens from one restaurant to every restaurant — under a confident 200, on a page that
+// believes it is scoped. Found live on the two BILL screens, which is the worst possible place for
+// it: their stated job is proving that no sale quietly vanished, and a stale bookmark showed the
+// whole platform's bills instead. /api/admin/audit, /api/admin/oplog, /api/admin/customers and
+// /api/admin/printing all already do it the right way round — validate once, refuse, then filter
+// unconditionally — so this rule is the majority shape made compulsory.
+//
+// The rule looks for the SHAPE, not for a route: a conditional whose test is "is this id well
+// formed" and whose body applies a scoping `.eq(`. Validating and returning is untouched, because
+// that is a `return`, not an `.eq(`.
+// Judged LINE BY LINE, not by trying to balance the `if (…)` parentheses: the condition itself
+// contains a call — `if (rid && isUuid(rid))` — so a `[^)]*` capture stops inside it and the shape
+// test never matches. (It did exactly that on the first run, and passed the very line it exists for;
+// the rule is only worth having if it can be shown to go red, so it is written the way that does.)
+const SHAPE_TEST = /\b(?:isUuid|isUUID|UUID\.test|UUID_RE\.test|RID_UUID\.test)\s*\(\s*([A-Za-z_$][\w$]*)\s*\)/;
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  const dropped = [];
+  for (const line of src.split("\n")) {
+    if (!/^\s*if\s*\(/.test(line)) continue;
+    if (!/&&/.test(line)) continue;
+    const shaped = SHAPE_TEST.exec(line);
+    if (!shaped) continue;
+    if (!/\.eq\s*\(/.test(line)) continue;              // it validates and returns — the right shape
+    if (/\breturn\b/.test(line)) continue;              // a refusal, which is what this rule wants
+    dropped.push(shaped[1]);
+  }
+  if (!dropped.length) ok(`${rel} refuses a malformed id instead of dropping the filter`);
+  else fail(`${rel} applies a scope filter only when the id LOOKS right (${[...new Set(dropped)].join(", ")}) — a malformed id then widens the answer to every restaurant. Validate once and refuse, then filter unconditionally (rule 7)`);
+}
+
+// ── RULE 7 — A SAVE THAT MATCHED NO ROW IS NOT A SAVE (T26 sweep #9, 2026-09-15) ────────────────
+//
+// A write that ends `.select(…).maybeSingle()` is ASKING which row it touched. Throwing that answer
+// away and returning ok means the screen shows the change, the next refresh shows the old value,
+// and nothing says why. Measured live on the printing board: renaming a computer that had been
+// removed in another tab answered 200 {"ok":true}, and switching printing on for a restaurant with
+// no settings row did the same — while three verbs in the very same file (revoke, job cancel, job
+// retry) got it right. The rule the repo already states for it is in app/api/admin/fix-request:
+// "A SAVE THAT MATCHED NO ROW IS NOT A SAVE … the tile changed on screen and came back on the next
+// refresh, with nothing saying why."
+//
+// `.single()` is not flagged: it makes PostgREST itself raise on no-row, which the `.error` branch
+// then answers. Only `.maybeSingle()` — the one that hands back a quiet null — has to be tested.
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  const untested = [];
+  // `[^;]` and not `[\s\S]`: the chain is ONE statement. A greedy cross-statement match walked from
+  // `const up = await sb.from("restaurants").update(...);` to a `maybeSingle()` forty lines later and
+  // reported a properly-written handler (admin/restaurants/access-tree) as ignoring an answer it had
+  // never asked for. A guard that invents a failure is worse than no guard — this file's own header.
+  for (const m of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+([^;]{0,600}?maybeSingle\s*\(\s*\))\s*;/g)) {
+    const v = m[1], chain = m[2];
+    if (!/\.(insert|update|upsert|delete)\s*\(/.test(chain)) continue;  // a read — a null there is a real "not found"
+    if (!/\.select\s*\(/.test(chain)) continue;                          // it asked for nothing back
+    // Is the answer tested — IN THE LINES THAT FOLLOW THIS STATEMENT, not anywhere in the file.
+    // `up` is the obvious name and one route reuses it in five separate branches, so a file-wide
+    // search found some OTHER branch's `if (!up.data)` and passed a branch that had none. (Caught
+    // by deleting a real check and watching the guard stay green — a rule that cannot go red is
+    // decoration.) The window is generous but bounded: a no-row test that is 40 lines below the
+    // write is not the test, it is a coincidence.
+    const after = src.slice(m.index + m[0].length, m.index + m[0].length + 700);
+    const tested = new RegExp(`[!(?\\s]${v}\\.data\\b|${v}\\.data\\s*(?:===?|!==?)\\s*null|${v}\\.data\\?\\.`).test(after);
+    if (!tested) untested.push(v);
+  }
+  if (!untested.length) ok(`${rel} never reports a write that matched no row as done`);
+  else fail(`${rel} asks a write which row it touched and then ignores the answer (${untested.join(", ")}) — a save that matched nothing is reported as saved. Test <var>.data and answer 404 (rule 7)`);
+}
+
+// ── RULE 8 — A JSONB BAG IS NEVER REBUILT FROM AN UNCHECKED READ (T26 sweep #9, 2026-09-15) ─────
+//
+// `settings.modules` (mig 326) holds EVERY new module's permission ladder AND a restaurant's whole
+// printing address book. Changing one key means read-modify-write of the whole column, so the read
+// is load-bearing in a way an ordinary read is not: swallow its error and the bag becomes `{}`, and
+// the update then REPLACES everything that was in it. The printing board's "stop the queue" button
+// had exactly this shape — one press during a blip would have wiped the address book and every
+// module's flags. lib/printHelpers → writeRoutes carries a comment naming this damage in its own
+// words, which is what makes the unchecked read beside it worth a permanent guard.
+//
+// Flagged: the inline `(await sb.from(...).select(...)...).data` shape in a file that also writes
+// `update({ modules`. Binding the query to a variable and testing `.error` is what passes.
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  if (!/update\s*\(\s*\{\s*modules\b/.test(src)) { ok(`${rel} does not rebuild a jsonb bag`); continue; }
+  const inline = /\(\s*await\s+[\s\S]{0,300}?\.select\s*\(\s*["'`][^"'`]*modules[^"'`]*["'`][\s\S]{0,200}?\)\s*\)\s*\.data/.test(src);
+  if (!inline) ok(`${rel} checks the read behind the jsonb bag it rewrites`);
+  else fail(`${rel} rebuilds settings.modules from a read whose failure it never tests — a blip empties the bag and the update wipes every other module (rule 8)`);
+}
+
+// ── RULE 9 — A NUMBER AIMED AT AN INT COLUMN IS RANGE-CHECKED (T26 sweep #9, 2026-09-15) ────────
+//
+// `sessions.bill_no` and `sessions.invoice_no` are INT (migs 036/037). The bill ledger's search box
+// took the last run of digits from whatever was typed and put it straight into `bill_no.eq.${n}`,
+// so a phone number — an entirely ordinary thing to paste into "find one bill" — came back as a red
+// "That value isn't allowed for the bill ledger" instead of an empty list. Postgres is right to
+// refuse it; the screen is wrong to call it an error. Anywhere one of these two columns is compared
+// to an interpolated number, the file has to state the int ceiling.
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  if (!/(bill_no|invoice_no)\.eq\.\$\{/.test(src)) continue;
+  if (/2147483647/.test(src)) ok(`${rel} keeps a searched bill number inside what an INT column can hold`);
+  else fail(`${rel} compares bill_no/invoice_no to a typed number with no range check — anything past 2147483647 answers with a refusal instead of "no bills" (rule 9)`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {
   console.error("\nverify-admin-api-a FAILED:");
   for (const m of fails) console.error(`  FAIL ${m}`);
-  console.error("\nEach of these six rules is a bug that already reached the owner's console once.");
+  console.error("\nEvery rule here is a bug that already reached the owner's console once.");
   console.error("If a change genuinely needs to break one, change THIS FILE in the same commit and say why.");
   process.exit(1);
 }

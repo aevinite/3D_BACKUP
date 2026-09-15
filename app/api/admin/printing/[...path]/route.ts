@@ -303,6 +303,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     if (!name) return err("Give the computer a name.");
     const up = await sb.from("print_agents").update({ name }).eq("id", seg[1]).eq("restaurant_id", rid).select("id").maybeSingle();
     if (up.error) return err(up.error.code === "23505" ? "There is already a computer with that name." : "Could not rename it.");
+    // A SAVE THAT MATCHED NO ROW IS NOT A SAVE (T26 sweep #9, 2026-09-15). This answered ok:true
+    // whatever came back, so renaming a computer that had been removed in another tab — or one that
+    // belongs to a different restaurant — showed the new name on the board and the old one again on
+    // the next refresh, with nothing saying why. Its three siblings on this route (revoke, job
+    // cancel, job retry) all check this already; rename was the one that did not.
+    if (!up.data) return err("That computer is no longer here — refresh the page.", 404);
     return NextResponse.json({ ok: true });
   }
 
@@ -380,6 +386,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     if (!Object.keys(patch).length) return err("Nothing to change.");
     const up = await sb.from("settings").update(patch).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
     if (up.error) return err("Could not save that.");
+    // A SAVE THAT MATCHED NO ROW IS NOT A SAVE. A restaurant with no `settings` row got ok:true and
+    // a diary line saying printing had been switched on, while nothing was written anywhere — the
+    // board then read the switch back from a row that does not exist and showed it off again.
+    if (!up.data) return err("This restaurant has no settings yet — open it once in the console first.", 404);
     await logAction("admin", "print_switch", { restaurant_id: rid, detail: Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(" ") });
     return NextResponse.json({ ok: true });
   }
@@ -457,11 +467,26 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // off instead would stop them being made at all, and the paper for those orders would never exist.
   if (seg[0] === "queue") {
     const paused = body.paused === true;
-    const cur = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as { modules?: Record<string, Record<string, unknown>> } | null;
+    // ── READ IT PROPERLY, OR WRITE NOTHING (T26 sweep #9, 2026-09-15) ─────────────────────────
+    // This is a read-modify-write of ONE jsonb column, and `modules` is the bag that holds EVERY
+    // new module's permission ladder (mig 326) plus this restaurant's whole printing address book
+    // (`modules.printing.routes`). The read took `.data` and ignored `.error`, so a transient
+    // failure made `cur` null, `bag` an EMPTY object, and the update below replaced the bag with
+    // `{ printing: { paused } }` — wiping the address book and every module's allowed/enabled
+    // flags, from a button whose entire job is to hold the paper back for a minute. The sibling
+    // read-modify-write in lib/printHelpers → writeRoutes has the same shape and its own comment
+    // names exactly this damage ("overwriting `modules` wholesale would silently switch other
+    // features off"); it is reported rather than changed here because that file is not this
+    // terminal's to edit. Refusing costs one press; the alternative costs a restaurant's setup.
+    const curQ = await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle();
+    if (curQ.error) return adminFail("the printing queue", curQ.error, { action: "save" });
+    const cur = curQ.data as { modules?: Record<string, Record<string, unknown>> } | null;
     const bag = { ...(cur?.modules || {}) };
     bag["printing"] = { ...(bag["printing"] || {}), paused };
     const up = await sb.from("settings").update({ modules: bag }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
     if (up.error) return err("Could not change the queue.");
+    // …and the same rule as the switch above: no row matched means nothing was saved.
+    if (!up.data) return err("This restaurant has no settings yet — open it once in the console first.", 404);
     await logAction("admin", "print_switch", { restaurant_id: rid, detail: paused ? "printing queue STOPPED — tickets wait" : "printing queue restarted" });
     return NextResponse.json({ ok: true, paused });
   }

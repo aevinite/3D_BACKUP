@@ -59,9 +59,14 @@ export async function GET(req: NextRequest) {
     if (detail.failed("removal")) return adminFail("this removal", detail.error("removal"), { action: "load" });
     const one = detail.rows<Record<string, unknown>>("removal")[0];
     if (!one) return NextResponse.json({ error: "not found" }, { status: 404 });
-    const rn = one.restaurant_id
-      ? (await sb.from("restaurants").select("name").eq("id", String(one.restaurant_id)).maybeSingle()).data?.name ?? null
+    // TOLERATED, and said so rather than left inline (T26 sweep #9, 2026-09-15): a failure leaves
+    // the removal card without a restaurant NAME, which is a smaller wrong than refusing to show
+    // the removal at all — but it was written as `(await …).data?.name ?? null`, where the `.error`
+    // is not merely unchecked, it is unreachable. Now it is a decision with a log line behind it.
+    const rnR = one.restaurant_id
+      ? new ReadSet("admin/audit:restaurant-name", [await rd("name", () => sb.from("restaurants").select("name").eq("id", String(one.restaurant_id)).maybeSingle())])
       : null;
+    const rn = rnR && !rnR.failed("name") ? (rnR.value<{ name?: string }>("name")?.name ?? null) : null;
     // Is the thing it describes still restorable? A soft-deleted order can be put back; a
     // cancellation or a menu-item removal is a different kind of correction. Answered from the
     // live row so the button is never offered for something that cannot be undone.

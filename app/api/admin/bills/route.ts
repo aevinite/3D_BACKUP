@@ -81,13 +81,38 @@ export async function GET(req: NextRequest) {
   const trail = url.searchParams.get("trail");
   const limit = Math.min(500, Math.max(20, Number(url.searchParams.get("limit")) || 200));
 
+  // ── A FILTER THAT CANNOT BE HONOURED IS REFUSED, NEVER WIDENED (T26 sweep #9, 2026-09-15) ────
+  // `restaurant_id` was applied as `if (rid && isUuid(rid))` in four places on this route, so a
+  // malformed id — a stale bookmark, a hand-typed address, a link built from a since-purged
+  // restaurant — silently DROPPED the filter and answered with every restaurant's bills under a
+  // confident 200. On the one screen whose stated job is proving no sale quietly vanished, showing
+  // the whole platform while the page believes it is scoped to one tenant is the wrong way for this
+  // to fail. Every sibling admin read already refuses (`/api/admin/audit`, `/api/admin/oplog`,
+  // `/api/admin/customers`, `/api/admin/printing`); this one and its bill-audit twin did not.
+  // The POST below already refuses a malformed sessionId, so the two halves now agree.
+  if (rid && !isUuid(rid)) return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
+  // …and the same for the trail. `trail && isUuid(trail)` fell THROUGH to the ledger list, so
+  // expanding a bill whose id had gone stale answered with the whole list in a shape the caller
+  // never asked for, instead of saying the bill could not be found.
+  if (trail && !isUuid(trail)) return NextResponse.json({ error: "invalid trail id" }, { status: 400 });
+
   // ── Per-bill action trail (lazy, on expand) — keeps the list query lean ──────
-  if (trail && isUuid(trail)) {
+  if (trail) {
     // Capped like every other read on this route (200 / 50 / 5000 below) — it was the one that
     // stated no ceiling, against the module checklist's egress rule. A bill of 400 KOTs is already
     // refused elsewhere as implausible, so 500 is far above anything real.
-    const orderRows = (await sb.from("orders").select("id").eq("session_id", trail).limit(500)).data as { id: string }[] | null;
-    const orderIds = (orderRows || []).map((o) => o.id);
+    // ── AN EMPTY TRAIL MUST MEAN "NOTHING HAPPENED", NEVER "I COULD NOT LOOK" (T26 sweep #9,
+    //    2026-09-15) ────────────────────────────────────────────────────────────────────────────
+    // All four reads below took `.data` and ignored `.error`, so a blip on any one of them handed
+    // the expanded bill an EMPTY list with a confident 200. On this screen that is the one answer
+    // that must never be given: the trail is what proves a bill's history, and "no credit notes
+    // against this bill" is a statement about money. The first read is worse again — with
+    // `orderIds` empty the events read is skipped entirely, so ONE failure silences the whole
+    // trail. Carved out of T27's rule 6 on 2026-09-15 as "owned by admin routes part A"; this is
+    // part A doing it. Same ceilings, same columns, same shape — only the failure is answered now.
+    const t = new ReadSet("admin/bills:trail", [await rd("orders", () => sb.from("orders").select("id").eq("session_id", trail).limit(500))]);
+    if (t.failed("orders")) return adminFail("this bill's history", t.error("orders"), { action: "load" });
+    const orderIds = t.rows<{ id: string }>("orders").map((o) => o.id);
     // Actions linked to this bill's orders (delete/discount/revert/invoice). The order_id link is
     // exact, which is the whole trail: a read of the SESSION used to sit here "to scope table-level
     // events to the session's table + restaurant for context", and that second query was never
@@ -96,20 +121,24 @@ export async function GET(req: NextRequest) {
     // context is wanted later it comes back with the query that uses it.
     let events: { action: string; actor: string | null; detail: string | null; at: string }[] = [];
     if (orderIds.length) {
-      const byOrder = (await sb.from("staff_actions").select("action, actor, detail, created_at").in("order_id", orderIds).order("created_at", { ascending: true }).limit(200)).data as
-        { action: string; actor: string | null; detail: string | null; created_at: string }[] | null;
-      events = (byOrder || []).map((e) => ({ action: e.action, actor: e.actor, detail: e.detail, at: e.created_at }));
+      const e = new ReadSet("admin/bills:trail-events", [await rd("events", () => sb.from("staff_actions").select("action, actor, detail, created_at").in("order_id", orderIds).order("created_at", { ascending: true }).limit(200))]);
+      if (e.failed("events")) return adminFail("this bill's history", e.error("events"), { action: "load" });
+      events = e.rows<{ action: string; actor: string | null; detail: string | null; created_at: string }>("events")
+        .map((x) => ({ action: x.action, actor: x.actor, detail: x.detail, at: x.created_at }));
     }
-    // Invoice history — the append-only generate/void timeline for this bill (mig 189).
-    const invRows = (await sb.from("invoice_events").select("event, invoice_no, reason, actor, created_at")
-      .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)).data as
-      { event: string; invoice_no: number | null; reason: string | null; actor: string | null; created_at: string }[] | null;
-    const invoiceHistory = (invRows || []).map((e) => ({ event: e.event, no: e.invoice_no, reason: e.reason, actor: e.actor, at: e.created_at }));
-    // Credit notes issued against this bill (mig 194) — post-settlement corrections.
-    const cnRows = (await sb.from("credit_notes").select("credit_no, amount, reason, actor, created_at")
-      .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)).data as
-      { credit_no: number; amount: number; reason: string | null; actor: string | null; created_at: string }[] | null;
-    const creditNotes = (cnRows || []).map((c) => ({ no: c.credit_no, amount: Number(c.amount) || 0, reason: c.reason, actor: c.actor, at: c.created_at }));
+    // Invoice history (mig 189) and credit notes (mig 194) — the append-only record of what was
+    // issued against this bill and what was credited back. Both checked for the same reason.
+    const docs = new ReadSet("admin/bills:trail-docs", await Promise.all([
+      rd("invoices", () => sb.from("invoice_events").select("event, invoice_no, reason, actor, created_at")
+        .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)),
+      rd("credits", () => sb.from("credit_notes").select("credit_no, amount, reason, actor, created_at")
+        .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)),
+    ]));
+    if (docs.anyFailed) return adminFail("this bill's history", docs.firstError, { action: "load" });
+    const invoiceHistory = docs.rows<{ event: string; invoice_no: number | null; reason: string | null; actor: string | null; created_at: string }>("invoices")
+      .map((e) => ({ event: e.event, no: e.invoice_no, reason: e.reason, actor: e.actor, at: e.created_at }));
+    const creditNotes = docs.rows<{ credit_no: number; amount: number; reason: string | null; actor: string | null; created_at: string }>("credits")
+      .map((c) => ({ no: c.credit_no, amount: Number(c.amount) || 0, reason: c.reason, actor: c.actor, at: c.created_at }));
     return NextResponse.json({ trail: events, invoiceHistory, creditNotes });
   }
 
@@ -121,7 +150,7 @@ export async function GET(req: NextRequest) {
   const isIso = (s: string) => !!s && !Number.isNaN(Date.parse(s));
 
   let sq = sb.from("sessions").select(SESSION_COLS).order("created_at", { ascending: false }).limit(limit);
-  if (rid && isUuid(rid)) sq = sq.eq("restaurant_id", rid);
+  if (rid) sq = sq.eq("restaurant_id", rid);   // shape-checked at the top — never dropped
   // DELETED is the one state that lives on the session row itself, so it can be asked for
   // directly instead of being sieved out of a window. A whole-bill delete ALWAYS tombstones the
   // session (lib/softDelete.ts stamps it once the last live order goes, and the delete branch
@@ -137,14 +166,24 @@ export async function GET(req: NextRequest) {
   if (q) {
     const m = q.match(/(\d+)(?!.*\d)/);              // last run of digits, so "INV/2026-27/000042" → 42
     const n = m ? parseInt(m[1], 10) : NaN;
-    sq = Number.isFinite(n) ? sq.or(`bill_no.eq.${n},invoice_no.eq.${n}`) : sq.eq("table_number", q);
+    // ── A NUMBER TOO BIG TO BE A BILL NUMBER IS NOT AN ERROR (T26 sweep #9, 2026-09-15) ────────
+    // `sessions.bill_no` and `sessions.invoice_no` are INT (migs 036/037), so anything past
+    // 2,147,483,647 is refused by Postgres with `value "9876543210" is out of range for type
+    // integer` — and adminFail turned that into a red "That value isn't allowed for the bill
+    // ledger" on the search box. Typing a phone number into "find one bill" is an ordinary thing
+    // to do (the guest's number is the other thing a person has in front of them), and the honest
+    // answer to "is there a bill numbered 9876543210?" is NO BILLS, not a refusal. Out-of-range
+    // now falls through to the table search like any other non-numeric text, which finds nothing
+    // and says so in the empty-list words the screen already has.
+    const fitsBillNo = Number.isFinite(n) && n >= 0 && n <= 2147483647;
+    sq = fitsBillNo ? sq.or(`bill_no.eq.${n},invoice_no.eq.${n}`) : sq.eq("table_number", q);
   }
 
   // The REAL number of deleted bills, counted in the database rather than inside the page — the
   // chip said "0" while deleted bills existed, which is the worst possible thing for the one
   // screen whose job is proving no sale quietly vanished. Rows-free head count, so it is cheap.
   let delCountQ = sb.from("sessions").select("id", { count: "exact", head: true }).not("deleted_at", "is", null);
-  if (rid && isUuid(rid)) delCountQ = delCountQ.eq("restaurant_id", rid);
+  if (rid) delCountQ = delCountQ.eq("restaurant_id", rid);
   // THREE DIFFERENT EVENTS SIT UNDER ONE WORD, AND THE TILE SAID ONE NUMBER (owner, 2026-08-31 —
   // he asked why this screen has a "Deleted" bucket at all when a bill can never be deleted).
   // Measured on backup: 2,956 tombstoned bills, of which **16** had a person's name against them.
@@ -161,7 +200,7 @@ export async function GET(req: NextRequest) {
     .not("deleted_at", "is", null).eq("delete_reason", EMPTIED_REASON);
   let delByPersonQ = sb.from("sessions").select("id", { count: "exact", head: true })
     .not("deleted_at", "is", null).not("deleted_by", "is", null);
-  if (rid && isUuid(rid)) { delEmptiedQ = delEmptiedQ.eq("restaurant_id", rid); delByPersonQ = delByPersonQ.eq("restaurant_id", rid); }
+  if (rid) { delEmptiedQ = delEmptiedQ.eq("restaurant_id", rid); delByPersonQ = delByPersonQ.eq("restaurant_id", rid); }
 
   const reads = new ReadSet("admin/bills", await Promise.all([
     // TWO POPULATIONS OUT OF ONE READ, and they are deliberately different (T19 sweep #7, 2026-09-01).
@@ -218,9 +257,12 @@ export async function GET(req: NextRequest) {
   // How many times each bill's invoice was generated (>1 = re-issued after a void). One
   // scoped read of the append-only invoice_events (mig 189), counted in JS.
   if (sessionIds.length) {
-    const ev = (await sb.from("invoice_events").select("session_id").eq("event", "generate").in("session_id", sessionIds).limit(5000)).data as { session_id: string }[] | null;
+    // TOLERATED, and now it says so rather than looking like an omission (T26 sweep #9): a failure
+    // leaves every bill reading "issued once", which understates a re-issue but takes nothing off
+    // the ledger. Stated at the call site with rowsOr, the way this repo spells a tolerated read.
+    const evR = new ReadSet("admin/bills:invoice-gens", [await rd("gens", () => sb.from("invoice_events").select("session_id").eq("event", "generate").in("session_id", sessionIds).limit(5000))]);
     const genBy = new Map<string, number>();
-    for (const e of ev || []) genBy.set(e.session_id, (genBy.get(e.session_id) || 0) + 1);
+    for (const e of evR.rowsOr<{ session_id: string }>("gens", [])) genBy.set(e.session_id, (genBy.get(e.session_id) || 0) + 1);
     for (const b of bills) b.invoiceGens = genBy.get(b.sessionId) || 0;
   }
 
