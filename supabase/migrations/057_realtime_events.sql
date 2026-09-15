@@ -50,3 +50,11 @@ REVOKE ALL ON FUNCTION lfh_rt_prune() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION lfh_rt_prune() TO service_role;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (sweep #9, T29, 2026-09-15).
+-- `realtime_events_topic_idx` above is RETIRED — migration 267 dropped it once the breadcrumb
+-- moved onto its per-restaurant topic key, so the plain (topic, id) index serves no read. This is
+-- the busiest INSERT table in the product (one row per operational change, on two topics), and an
+-- unused index is paid for on every one of those inserts. A FULL re-seed already ends correctly
+-- (267 sorts after this file). Idempotent, and safe where the index is already gone.
+DROP INDEX IF EXISTS realtime_events_topic_idx;

@@ -128,3 +128,18 @@ CREATE INDEX IF NOT EXISTS idx_order_items_order     ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_session   ON order_items(session_id);
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (sweep #9, T29, 2026-09-15).
+-- Three of the indexes above are RETIRED, and re-creating them costs write time and storage on
+-- every insert into two busy tables for reads nobody makes:
+--   · idx_blocklist_phone  — dropped by migration 267: "0 scans; idx_blocklist_rid_phone is the
+--     scoped one" (every lookup is per restaurant now).
+--   · idx_blocklist_table  — dropped by migration 267: "0 scans; idx_blocklist_restaurant covers
+--     the scoped read".
+--   · idx_otp_phone        — dropped by migration 296: it indexes otp_codes(phone) alone, while
+--     every lookup since has carried the restaurant too.
+-- A FULL re-seed already ends correctly (267 and 296 both sort after this file). This closes the
+-- single-file route CLAUDE.md recommends. Idempotent, and safe where none of them exists.
+DROP INDEX IF EXISTS idx_blocklist_phone;
+DROP INDEX IF EXISTS idx_blocklist_table;
+DROP INDEX IF EXISTS idx_otp_phone;

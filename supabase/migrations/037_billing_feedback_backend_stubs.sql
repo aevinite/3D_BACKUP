@@ -164,3 +164,13 @@ NOTIFY pgrst, 'reload schema';
 -- code-issuing door beside the real one and is invisible while `verification` is a backend-only
 -- flag. A FULL re-seed ends correctly (040 sorts after this file). Idempotent.
 DROP FUNCTION IF EXISTS lfh_request_otp(text, text);
+
+-- And `settings.tax_inclusive`, added a few lines up, is RETIRED too (sweep #9, T29, 2026-09-15).
+-- Migration 270 superseded it with `price_tax_mode` — which is what every tax decision actually
+-- reads — and migration 304 dropped the column, for the reason it wrote down: "tax is the one
+-- subject where a stale-looking column is dangerous. Anyone reading the schema to answer 'does
+-- this restaurant quote tax-inclusive prices?' currently finds a column whose name promises
+-- exactly that answer and whose value means nothing." Running this file alone put it back.
+-- No migration between this one and 304 READS the column (270 only names it in a comment, 282
+-- only lists its NAME in the guest denylist), so a full re-seed is unaffected. Idempotent.
+ALTER TABLE settings DROP COLUMN IF EXISTS tax_inclusive;

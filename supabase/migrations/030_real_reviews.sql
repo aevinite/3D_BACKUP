@@ -59,4 +59,32 @@ CREATE OR REPLACE VIEW item_ratings WITH (security_invoker = true) AS
 GRANT SELECT ON item_ratings TO anon, authenticated;
 
 -- Wipe the fake seeded reviews and the invented per-dish rating numbers.
-UPDATE menu_items SET reviews = '[]'::jsonb, rating = NULL;
+--
+-- ⚠️ RUN-ALONE GUARD (sweep #9, T29, 2026-09-15). Both columns are GONE: migration 359
+-- ("a rating is given, not typed") dropped `menu_items.rating` and `menu_items.reviews`, because
+-- a real rating has lived in the `reviews` table and the `item_ratings` view since this very file.
+-- A bare UPDATE naming them therefore raises `column "reviews" does not exist` on any database
+-- that has reached 359 — which is every live one — so `node scripts/run-migration.mjs
+-- 030_real_reviews.sql`, the single-file workflow CLAUDE.md recommends, ABORTS here rather than
+-- no-ops. (A full re-seed was always fine: migration 001 creates both columns, this file empties
+-- them, 359 drops them.)
+--
+-- The write is now conditional on the columns still being there, so the file lands in the same
+-- state on both kinds of database: on a fresh seed it still wipes the seeded fakes, and on a
+-- database past 359 it does nothing at all. Same shape as migration 043's `to_regprocedure` gate
+-- — EXECUTE so PostgreSQL only PLANS the statement once the answer is yes.
+DO $wipe_seeded_reviews$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'menu_items' AND column_name = 'reviews'
+  ) THEN
+    EXECUTE $wipe$ UPDATE menu_items SET reviews = '[]'::jsonb $wipe$;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'menu_items' AND column_name = 'rating'
+  ) THEN
+    EXECUTE $wipe$ UPDATE menu_items SET rating = NULL $wipe$;
+  END IF;
+END $wipe_seeded_reviews$;

@@ -38,4 +38,28 @@ CREATE TRIGGER trg_assign_dish_no
   FOR EACH ROW EXECUTE FUNCTION assign_dish_no();
 
 -- 4) no two dishes share a code
-CREATE UNIQUE INDEX IF NOT EXISTS menu_items_dish_no_key ON menu_items(dish_no);
+--
+-- ⚠️ RUN-ALONE GUARD (sweep #9, T29, 2026-09-15). This index is GLOBAL on dish_no, and migration
+-- 082 replaced it with the per-restaurant `menu_items_restaurant_dish_no_key` precisely because a
+-- global one "would block a real 2nd restaurant from having … a dish #1". On today's database ten
+-- restaurants each have a dish #3, so re-creating the global index raises `could not create unique
+-- index … key is duplicated` and `node scripts/run-migration.mjs 032_dish_no.sql` — the single-file
+-- workflow CLAUDE.md recommends — ABORTS here. (A full re-seed was always fine: this runs while
+-- only restaurant #1 exists, and 082 then swaps it for the scoped one.)
+--
+-- So: create it only while 082's scoped replacement is NOT yet present. Where 082 has run, the
+-- rule it enforces is already being enforced, better, and this line has nothing left to do.
+DO $dish_no_unique$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname = 'public' AND indexname = 'menu_items_restaurant_dish_no_key'
+  ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS menu_items_dish_no_key ON menu_items(dish_no);
+  END IF;
+END $dish_no_unique$;
+
+-- …and retire it at the end, so the file's own end state is the one 082 decided rather than an
+-- index the sequence has replaced. The same one-line ending migrations 036/040/099 carry.
+ALTER TABLE menu_items DROP CONSTRAINT IF EXISTS menu_items_dish_no_key;
+DROP INDEX IF EXISTS menu_items_dish_no_key;
