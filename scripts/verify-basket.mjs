@@ -334,5 +334,53 @@ console.log("\n8 · a button that waits on someone else, a queue that never drop
   P("…before it launches a browser", t24.indexOf("await requireUp(BASE,") < t24.indexOf("await chromium.launch()"));
 }
 
+// ── THE BILL'S FOOT: the total and Place Order stay in view on a laptop (owner picked item 2) ────
+//
+// On a 1280×800 laptop the panel's content is taller than its 92vh cap, so the money rows AND the
+// button sat below the fold on open, with one dish in the basket. Found by OPENING a capture and
+// looking at it — the measurement had said "nothing overflows the panel", which was true and not
+// the point. Four things have to stay true, and each of them broke at least once while building it:
+{
+  const css = read("app/globals.css");
+  const cart = read("components/CartPanel.tsx");
+  // The block this all lives in. Everything is asserted INSIDE it, because the one thing that must
+  // never happen is a rule escaping to the phone — 360px is the screen almost every diner uses and
+  // its layout is already right.
+  const blockRaw = (css.match(/@media \(min-width: 760px\) \{[\s\S]*?\n\}/g) || []).find((b) => /\.cart-foot/.test(b)) || "";
+  // COMMENTS STRIPPED. My first version of these checks tested the raw block, and the block is
+  // heavily commented — so "the offline strip's height is still reserved" passed against the WORDS
+  // "--lfh-offbar-h" inside a comment explaining why it must be reserved, while the declaration
+  // itself had been removed. Found by sabotage, which is the only way that ever gets found: three
+  // of four breakages went red and that one did not. A guard that can be satisfied by its own
+  // explanation is asserting nothing.
+  const block = blockRaw.replace(/\/\*[\s\S]*?\*\//g, " ");
+  P("the bill's money rows and its button are wrapped in one foot", /<div className="cart-foot">/.test(cart));
+  P("…which closes again, so the panel's markup still balances", (cart.match(/className="cart-foot"/g) || []).length === 1 && /<\/button>\s*<\/div>/.test(cart));
+  P("the foot is pinned ONLY from 760px up — the phone keeps today's layout", block !== "" && /\.cart-foot\s*\{[^}]*position: sticky/.test(block));
+  P("…and nothing about it is declared outside that block", !/\.cart-foot\s*\{[^}]*position: sticky/.test(css.replace(blockRaw, "")));
+  // STICKY, NOT FIXED. A fixed foot leaves the flow and covers whatever is beneath it — which is
+  // exactly how the offline strip once covered this button and cut it in half. Sticky keeps its
+  // space, so nothing needs a compensating padding and nothing can be hidden under it.
+  P("it is STICKY, never fixed — a fixed foot would cover the content it sits over", /position: sticky/.test(block) && !/\.cart-foot[^}]*position: fixed/.test(css));
+  // THE OFFLINE-STRIP SCAR. --lfh-offbar-h is that strip's height; it is position:fixed at z-index
+  // 99990 and once painted straight over PLACE ORDER. Its height must stay reserved in whatever
+  // owns the panel's bottom spacing — and the foot now owns it.
+  P("the offline strip's height is still reserved below the button", /padding[^;]*var\(--lfh-offbar-h/.test(block));
+  P("…together with the device's own safe area", /padding[^;]*env\(safe-area-inset-bottom/.test(block));
+  // THE GAP. `bottom: 0` sticks the foot to the CONTENT box, and the panel's 32px padding-bottom
+  // sits below that — so the basket scrolled through a 32px band under the pinned foot and the
+  // table field showed as a stray sliver of a rounded box. MEASURED before and after. A negative
+  // margin does NOT fix it (once stuck, the margin no longer moves the element — also measured), so
+  // the panel gives the padding up instead, and only when a foot is actually there.
+  P("the panel gives up its bottom padding to the foot, so nothing shows through beneath it", /\.cart-panel:has\(\.cart-foot\) \{ padding-bottom: 0; \}/.test(block));
+  P("…scoped with :has(), so the Live-status tab — which has no foot — keeps its own padding", /:has\(\.cart-foot\)/.test(block));
+  // A hard edge guillotines whatever is passing under it: on open, the allergy card's heading sat
+  // sliced across the middle directly above Subtotal and read as a half-drawn row.
+  P("the row above the foot fades out instead of being cut in half", /\.cart-foot::before/.test(block) && /linear-gradient/.test(block));
+  P("…and that fade can never swallow a tap", /\.cart-foot::before[\s\S]{0,260}pointer-events: none/.test(block));
+  P("the foot sits UNDER the sticky top bar, so the two can never fight over an overlap",
+    /\.cart-foot[\s\S]{0,400}z-index: 5;/.test(block) && /\.cart-topbar[\s\S]{0,200}z-index: 6;/.test(css));
+}
+
 console.log(`\n${fails.length ? "✗" : "✓"} verify:basket — ${pass} passed, ${fails.length} failed`);
 if (fails.length) { console.log("\nFAILED:"); for (const f of fails) console.log("  · " + f); process.exit(1); }

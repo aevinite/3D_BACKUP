@@ -170,6 +170,21 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
         || (/\b(for|while)\s*\(.*\)\s*\{\s*$/.test(above))
         || /Array\.from\([^)]*\)\.map\(|Promise\.all\(\s*\[?[^)]*map\(/.test(here);
       if (!inLoop) continue;
+      // ── A MENTION IS NOT AN ACTION (sweep #9 T3, 2026-09-15) ──────────────────────────────────
+      //
+      // This flagged any line in a loop that merely NAMED a limited route, and went red on `main`
+      // for scripts/verify-guest-waits-for-its-restaurant.mjs:121 — a loop over two FILE PATHS that
+      // calls readFileSync on each and asserts something about the source. It sends nothing. It
+      // cannot trip a rate limit, cannot reach a database, and cannot ping anybody's phone.
+      //
+      // The rule this guard exists for is "no script repeats a limited ACTION in a loop", and an
+      // action is a REQUEST. So the loop must also look like it makes one — here, or in the few
+      // lines beneath it that are still plausibly its body. A static read of a route file is now
+      // invisible to it, and a looped fetch/rpc/goto at the same route is caught exactly as before.
+      // (Checked by sabotage both ways before this shipped.)
+      const window = lines.slice(i, i + 7).join("\n");
+      const SENDS = /\bfetch\s*\(|\.rpc\s*\(|\bpost\s*\(|\brequest\s*\(|\baxios\b|page\.goto\s*\(|\bcurl\b|loginAs\s*\(|adminHeaders\s*\(/;
+      if (!SENDS.test(window)) continue;
       for (const { rule, re } of LIMITED) {
         if (re.test(here)) bad.push(`${f}:${i + 1} — repeats a "${rule}" action in a loop\n      ${here.trim().slice(0, 90)}`);
       }

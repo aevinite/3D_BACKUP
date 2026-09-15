@@ -1755,6 +1755,73 @@ body.menu-frost .nav {
    Place Order. Two scrollbars that sync. overscroll-behavior stays `auto`
    (NOT `contain`) — that's what lets the inner→panel chaining happen. */
 .cart-list { max-height: 50vh; overflow-y: auto; overscroll-behavior: auto; margin-bottom: 24px; padding-right: 8px; }
+
+/* ── THE BILL'S FOOT: the money rows + Place Order (owner picked item 2, 2026-09-14) ──────────
+   On a laptop the panel's content is taller than its 92vh cap, so the total and the button sat
+   below the fold on open, with one dish in the basket. Pinned to the bottom of the panel from
+   760px up, so a diner always sees what they are about to pay and the control that pays it.
+
+   POSITION: STICKY, NOT FIXED. A sticky element keeps its space in the normal flow, so it cannot
+   cover the content above it — which is precisely how the offline strip once covered this button
+   and cut it in half (see the --lfh-offbar-h note above .panel). Nothing needs a compensating
+   padding, because nothing is taken out of the flow.
+
+   760px is NOT a new breakpoint: it is the one .panel already uses to stop being full-width and
+   become a 480px centred card. Below it the sheet IS the screen, thumb-scrolling to the bottom is
+   natural, and pinning would spend ~150px of the smallest screen we support on a problem the
+   phone does not have. So the phone keeps today's layout exactly.
+
+   The background is the panel's own token, not a colour: this surface has a light skin and a dark
+   one, and the rows scroll UNDER it, so a transparent or hard-coded foot would show the basket
+   sliding through the total. The top border is the same divider the grand-total row already uses,
+   so the foot reads as part of the bill rather than as a bar bolted onto it. */
+@media (min-width: 760px) {
+  .cart-foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;                 /* under .cart-topbar's 6 — the top bar still wins an overlap */
+    background: var(--bg);
+    border-top: 1px solid rgba(212,165,116,0.2);
+    /* ── IT HAS TO REACH THE PANEL'S REAL BOTTOM EDGE, NOT THE SCROLLPORT'S ─────────────────
+       `bottom: 0` sticks this to the CONTENT box, and the panel carries 32px of padding-bottom
+       below that — so there was a 32-pixel band under the pinned foot that the basket scrolled
+       straight through. MEASURED on a 1280×800 laptop: the foot painted to y=768, the panel ends
+       at y=800, and the table field (at its natural y=797) showed as a stray 3px sliver of a
+       rounded box under PLACE ORDER, in both skins. It reads as a rendering fault, because it is.
+       So the foot is pulled DOWN by exactly the padding it has to cover and given that padding
+       back as its own — same clearance inside, no gap outside. The calc is the panel's own, to the
+       term: `--lfh-offbar-h` is the offline strip's height and it MUST stay in here. That strip is
+       position:fixed at z-index 99990 and once painted over this very button and cut it in half
+       (see the note above .panel); reserving its height is what stops that happening again. */
+    margin: 0 -32px;
+    padding: 10px 32px calc(32px + env(safe-area-inset-bottom, 0px) + var(--lfh-offbar-h, 0px));
+  }
+  /* …AND THE PANEL GIVES UP THE PADDING THE FOOT NOW OWNS.
+     A negative bottom margin does NOT work here, and it is worth writing down why: once the foot is
+     STUCK, `bottom: 0` holds it against the scrollport and the margin no longer moves it — measured,
+     the 32px band was still there with the margin applied. So the padding moves instead: the panel
+     drops its own bottom padding and the foot carries the identical calc, which puts the painted
+     surface flush with the panel's real bottom edge and keeps every millimetre of the offline-strip
+     reservation that the --lfh-offbar-h scar exists for.
+     `:has(.cart-foot)` so ONLY the bill tab is affected — the Live-status tab has no foot and keeps
+     its own bottom padding. Where :has() is unsupported the panel simply keeps its padding, which is
+     today's behaviour: a 32px band, cosmetic, never a break. */
+  .cart-panel:has(.cart-foot) { padding-bottom: 0; }
+  /* ── AND THE ROW ABOVE IT DISSOLVES RATHER THAN BEING GUILLOTINED ────────────────────────────
+     A hard edge cuts whatever is passing under it clean in half: on open, the allergy card's
+     heading — "Any allergies? Tap what you avoid" — sat sliced across the middle, directly above
+     Subtotal, and read as a half-drawn row rather than as content continuing underneath. A short
+     fade in the panel's own colour says "there is more above this" instead. `--bg` in a gradient
+     needs both stops, because `transparent` computes to transparent BLACK and would dirty the
+     light skin on its way down. Pointer-events:none so it can never eat a tap on the chip below. */
+  .cart-foot::before {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0), var(--bg));
+    pointer-events: none;
+  }
+  /* The grand-total already draws a rule above itself; two lines 6px apart reads as a mistake. */
+  .cart-foot .bill-line.grand { border-top: none; }
+}
 .cart-item { 
   display: flex; justify-content: space-between; align-items: center; padding: 14px 0; 
   border-bottom: 1px solid rgba(212,165,116,0.2);

@@ -1267,6 +1267,25 @@ export default function CartPanel() {
                 restaurant (which may not charge the diner GST at all) both have nothing to add,
                 so the row is REMOVED — printing "GST ₹0" reads as a bug, and printing the GST
                 hidden inside the price would charge it twice. */}
+            {/* ── THE TOTAL AND THE BUTTON STAY IN VIEW ON A LAPTOP (owner picked item 2, 2026-09-14) ──
+                On a 1280×800 desktop this panel's content is taller than its 92vh cap, so the money
+                rows AND Place Order sat BELOW THE FOLD on open — with one dish in the basket. It
+                scrolled, so nothing was unreachable, but a diner could not see what they were about
+                to pay without scrolling for it. Found by opening a capture and looking at it; the
+                measurement alone had said "nothing overflows", which was true and not the point.
+
+                STICKY, NOT FIXED, and that distinction is the whole safety of this: a sticky element
+                keeps its space in the flow, so it can never cover the content above it the way the
+                offline strip once covered this very button (see the --lfh-offbar-h note in
+                globals.css — that scar is why the panel's bottom padding reserves that height).
+
+                FROM 760px UP ONLY. Below that the sheet IS the screen and thumb-scrolling to the
+                bottom is the natural thing; pinning there would spend ~150px of the smallest screen
+                we support to solve a problem a phone does not have. 760px is not a new number — it
+                is the breakpoint at which .panel already stops being full-width and becomes a
+                480px centred card, which is exactly when "below the fold" stops reading as a
+                scroll and starts reading as a mistake. The phone is unchanged, byte for byte. */}
+            <div className="cart-foot">
             <div className="bill-rows">
               <div className="bill-line"><span>Subtotal</span><span>{fmtDisp(subtotal)}</span></div>
               {nontaxDisp > 0 && (
@@ -1291,6 +1310,7 @@ export default function CartPanel() {
             <button className="btn btn-gold" onClick={placeOrder} disabled={placing}>
               <i className="fas fa-circle-check"></i> {placing ? "Placing…" : "Place Order"}
             </button>
+            </div>
           </>
         )}
         </>
