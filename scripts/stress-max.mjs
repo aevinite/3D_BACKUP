@@ -111,7 +111,8 @@ async function actPay(r) {
   const { data: ords } = await sb.from("orders").select("id,session_id").eq("restaurant_id", r.id).eq("status", "served").eq("payment_status", "pending").not("session_id", "is", null).limit(4);
   if (!ords?.length) return;
   const o = rnd(ords);
-  const e1 = (await sb.from("orders").update({ payment_status: "paid" }).eq("session_id", o.session_id)).error;
+  // paid_at rides with payment_status — see the note in verify-customer-erase.mjs (T30 item 2).
+  const e1 = (await sb.from("orders").update({ payment_status: "paid", paid_at: new Date().toISOString() }).eq("session_id", o.session_id)).error;
   await sb.from("sessions").update({ status: "closed", closed_at: new Date().toISOString() }).eq("id", o.session_id);
   bump("pay", !e1); if (e1) logline(`ERR pay ${r.slug}: ${e1.message}`);
 }
