@@ -259,9 +259,20 @@ export async function GET(req: NextRequest) {
 // links so Restore works, so without this check the primary pointer stays on a ghost
 // and the newly-assigned real owner reads as "Co-owner" everywhere (seen on Aangan
 // 2026-07-31: the starter "owner" login was binned 29 Jul but still held primary).
+//
+// ── A BLIP MUST NOT READ AS "THE SLOT IS FREE" (T26 sweep #9, 2026-09-15) ─────────────────────
+// This took `.data` and ignored `.error`, so a failed read answered FALSE — "not a live holder" —
+// and `attach()` below then handed the primary slot to whoever was being attached, taking it off a
+// real, live, present owner. Silently, with a 200. The safe answer to "can I tell?" is "assume the
+// slot is held", so a failure now returns `true` with the reason logged: at worst the newly
+// attached owner does not become primary and the admin presses ★ Make primary, which is a visible
+// no-op instead of an invisible re-assignment. Same class as the eight `.error` checks this route
+// was given on 2026-09-01 (item 21); these were the ones inside helper functions.
 async function isLivePrimaryHolder(userId: string | null | undefined): Promise<boolean> {
   if (!userId) return false;
-  const u = (await sb.from("staff_users").select("id, deleted_at").eq("id", userId).limit(1)).data?.[0];
+  const q = await sb.from("staff_users").select("id, deleted_at").eq("id", userId).limit(1);
+  if (q.error) { dbNote("check who holds the primary slot", q.error); return true; }
+  const u = q.data?.[0];
   return !!u && !u.deleted_at;
 }
 
@@ -281,7 +292,16 @@ async function attach(ownerId: string, rid: string): Promise<string | null> {
     console.error("[admin/owners] attach failed:", up.error.code || "", up.error.message);
     return "Couldn't attach that restaurant — nothing was changed. Please try again.";
   }
-  const r = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
+  // Checked for the same reason as isLivePrimaryHolder above: with the error swallowed, `r` came
+  // back undefined and the primary-owner step was skipped ENTIRELY while this function still
+  // returned null, i.e. "attached, all good". A restaurant whose only owner is the one just
+  // attached would then show no main owner anywhere, and nothing said so.
+  const rQ = await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1);
+  if (rQ.error) {
+    dbNote("read this restaurant's main owner", rQ.error);
+    return "The restaurant was attached, but its main owner could not be checked — set it with ★ Make primary.";
+  }
+  const r = rQ.data?.[0];
   if (r && !(await isLivePrimaryHolder(r.owner_user_id as string | null))) {
     const set = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
     if (set.error) {
@@ -515,9 +535,24 @@ export async function PATCH(req: NextRequest) {
     if (del.error) return adminFail("the owner's link to this restaurant", del.error, { action: "save" });
     // If they were the PRIMARY, hand primary to a remaining co-owner (or clear it)
     // so restaurants.owner_user_id never points at someone with no membership.
-    const r = (await sb.from("restaurants").select("owner_user_id, name").eq("id", rid).limit(1)).data?.[0];
+    //
+    // ── BOTH OF THESE READS ARE CHECKED (T26 sweep #9, 2026-09-15) ────────────────────────────
+    // They decide who ends up owning the restaurant, and each failed silently in its own direction:
+    //   · the FIRST swallowed, `r` came back undefined, so `r?.owner_user_id === ownerId` was false
+    //     and the handover was skipped — leaving owner_user_id pointing at the person whose
+    //     membership had just been deleted, which is the exact state the comment above forbids.
+    //   · the SECOND swallowed, `next` came back undefined, and `next?.user_id ?? null` WROTE NULL —
+    //     clearing the restaurant's main owner even though co-owners were sitting right there. A
+    //     blip on a read is not "there is nobody else".
+    // Both refuse now. The link is already gone at this point, so the sentence says what is true:
+    // the revoke happened, the primary pointer did not move, and ★ Make primary is the way to fix it.
+    const rQ = await sb.from("restaurants").select("owner_user_id, name").eq("id", rid).limit(1);
+    if (rQ.error) return adminFail("the restaurant's primary owner", rQ.error, { action: "load", status: 500 });
+    const r = rQ.data?.[0];
     if (r?.owner_user_id === ownerId) {
-      const next = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).limit(1)).data?.[0];
+      const nextQ = await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).limit(1);
+      if (nextQ.error) return adminFail("the restaurant's primary owner", nextQ.error, { action: "load", status: 500 });
+      const next = nextQ.data?.[0];
       const set = await sb.from("restaurants").update({ owner_user_id: next?.user_id ?? null }).eq("id", rid);
       if (set.error) return adminFail("the restaurant's primary owner", set.error, { action: "save" });
     }
@@ -602,9 +637,19 @@ async function hardDeleteOwner(ownerId: string): Promise<{ error?: string; relea
   const links = linksQ.data || [];
   for (const l of links) {
     const rid = l.restaurant_id as string;
-    const r = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
+    // CHECKED, both of them, for the same reason the `linksQ` read above is (T26 sweep #9,
+    // 2026-09-15). This is the PERMANENT step, so a guess here is a guess nobody can undo: with the
+    // first read swallowed the handover was skipped and the FK's ON DELETE SET NULL cleared the
+    // restaurant's main owner instead of giving it to a co-owner; with the second swallowed, `next`
+    // was undefined and this line WROTE NULL over a restaurant that had one. Refuse before
+    // anything is deleted — at this point in the function nothing has been.
+    const rQ = await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1);
+    if (rQ.error) return { error: dbNote("read a restaurant's main owner", rQ.error), released: 0 };
+    const r = rQ.data?.[0];
     if (r?.owner_user_id === ownerId) {
-      const next = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).neq("user_id", ownerId).limit(1)).data?.[0];
+      const nextQ = await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).neq("user_id", ownerId).limit(1);
+      if (nextQ.error) return { error: dbNote("find a co-owner to hand the restaurant to", nextQ.error), released: 0 };
+      const next = nextQ.data?.[0];
       const set = await sb.from("restaurants").update({ owner_user_id: next?.user_id ?? null }).eq("id", rid);
       if (set.error) return { error: dbNote("release a restaurant", set.error), released: 0 };
     }
