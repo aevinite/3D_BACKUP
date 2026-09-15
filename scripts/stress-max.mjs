@@ -90,7 +90,7 @@ async function actJoin(r) {
   // only worked through the "assume restaurant #1" default — so on a multi-restaurant run every
   // join landed on French House whichever restaurant it was meant for, and the first attempt
   // always errored. Live signature: (p_table, p_name, p_lat, p_lng, p_device, p_restaurant_id).
-  const e = (await sb.rpc("lfh_join_session", { p_table: t, p_name: rnd(NAMES), p_lat: 23.0, p_lng: 72.0, p_restaurant_id: r.id })).error;
+  const e = (await sb.rpc("lfh_join_session", { p_table: t, p_name: rnd(NAMES), p_lat: 23.0, p_lng: 72.0, p_device: `stress-${r.slug}-${t}`, p_restaurant_id: r.id })).error;
   bump("join", !e); if (e) logline(`ERR join ${r.slug}: ${e.message}`);
 }
 async function advance(r, from, to, orderStatus) {
