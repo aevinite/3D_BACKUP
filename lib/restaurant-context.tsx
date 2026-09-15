@@ -65,9 +65,37 @@ export interface RestaurantMeta {
 const DEFAULT_META: RestaurantMeta = { id: DEFAULT_RESTAURANT_ID, slug: DEFAULT_RESTAURANT_SLUG, name: null, ready: true };
 const RestaurantContext = createContext<RestaurantMeta>(DEFAULT_META);
 
-/** The active restaurant id for the current URL (defaults to restaurant #1). */
+/**
+ * The active restaurant id — **or `""` until we actually know it.**
+ *
+ * ── ONE HOOK, NOT A RULE EVERY CALLER HAS TO REMEMBER (owner, 2026-09-15, item 14) ──────────────
+ * This used to hand back `id` raw, and `id` starts at restaurant #1 while a `/r/<slug>` or
+ * `/q/<code>` lookup is in flight, and stays `""` for good if that lookup fails. So the honest
+ * value and the raw value differ for a few hundred milliseconds on every tenant page — and EIGHT
+ * guest components spent that window asking restaurant #1 about a diner standing somewhere else:
+ * the basket, the waiter-call popup and its button, the order-confirm sheet, the live-order strip,
+ * the shared-basket sync, the head's approve prompt and the table bill. Measured on Spice Route:
+ * one settings read naming #1 per page load.
+ *
+ * That is the Aangan sticker fault in miniature — the one where the widgets read #1's
+ * `sessionsEnabled`, which is ON, on a restaurant where it is OFF, so tapping "+" opened the
+ * join-a-table gate instead of adding the dish and the basket stayed empty. `BanGate` and
+ * `CustomerGreeter` have always guarded against it by hand with `if (!ready) return;`, and
+ * `SessionGate` and `SessionStatusWidget` learned to in sweep #9. Eight did not.
+ *
+ * Rather than write that guard an eighth and ninth time, the rule now lives in the hook itself:
+ * **you cannot get an id out of here that we are not sure of.** A caller that wants the raw,
+ * possibly-provisional value can still have it from `useRestaurantMeta()`, which is what
+ * `RealtimeProvider` uses — it deliberately subscribes to the unscoped topic during the window
+ * rather than to the wrong one, and says so in its own comment.
+ *
+ * Callers should treat `""` as "don't ask yet": `if (!restaurantId) return;` at the top of the
+ * effect. Every one of them already re-runs on `[restaurantId]`, so the real id arriving wakes
+ * them; this is a wait of a few hundred milliseconds, not a refusal.
+ */
 export function useRestaurantId(): string {
-  return useContext(RestaurantContext).id;
+  const { id, ready } = useContext(RestaurantContext);
+  return ready ? id : "";
 }
 
 /** The active restaurant's id + slug + name — for global widgets that need to

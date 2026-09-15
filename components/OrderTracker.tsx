@@ -235,6 +235,12 @@ export default function OrderTracker() {
   // then keeps their status fresh. The device that placed an order already has it,
   // so this only fills in the ones others placed.
   useEffect(() => {
+    // ── NOT UNTIL WE KNOW WHICH RESTAURANT (owner, 2026-09-15, item 14) ─────────────────────────
+    // `useRestaurantId()` answers "" until the restaurant is settled — see its own note. Asking
+    // before then meant reading restaurant #1's rules for a diner standing somewhere else, which
+    // is the Aangan sticker fault. This effect already re-runs on `restaurantId`, so the real id
+    // landing wakes it: a wait of a few hundred milliseconds, not a refusal.
+    if (!restaurantId) return;
     let alive = true;
     let iv: ReturnType<typeof setInterval> | null = null;
     let onTick: (() => void) | null = null;

@@ -166,11 +166,17 @@ async function postImpl(req: NextRequest): Promise<Response> {
   // else's books: an order saved on a phone by a build old enough to predate the field replays here
   // months later and is filed under #1.
   //
-  // Nothing that runs today can hit this. `useRestaurantId()` (lib/restaurant-context.tsx) always
-  // returns a real id — it defaults to #1 itself and is never undefined — and every call site that
-  // queues a guest action passes it (components/CartPanel.tsx, ChefPopup.tsx, SessionGate.tsx). So the
-  // only body that reaches this branch is one saved before the field existed, which is exactly the
-  // body we must not guess about. Checked before changing it: guessing was the whole risk, and
+  // ⚠️ THE SENTENCE THAT USED TO BE HERE IS NO LONGER TRUE, AND THAT IS THE POINT (2026-09-15,
+  // item 14). It read: *"Nothing that runs today can hit this. `useRestaurantId()` always returns a
+  // real id — it defaults to #1 itself and is never undefined."* That WAS true, and it was the
+  // problem: defaulting to #1 is exactly the guess this branch exists to refuse, made one layer up
+  // where nobody could see it. `useRestaurantId()` now answers `""` until the restaurant is
+  // genuinely settled, so a client CAN reach this branch — a diner on a restaurant whose lookup
+  // failed — and reaching it is the correct outcome. The client-side guards make it very hard to
+  // get this far (every queueing call site now waits for a settled id), but this refusal is no
+  // longer theoretical, and it is the last thing standing between a failed lookup and somebody
+  // else's books. The other body that reaches it is one saved before the field existed, which is
+  // equally a body we must not guess about. Checked before changing it: guessing was the whole risk, and
   // refusing costs a genuinely ancient saved order that would otherwise have been billed to the wrong
   // restaurant.
   //

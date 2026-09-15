@@ -62,6 +62,12 @@ export default function SessionCartSync() {
   // This runs once when the component first appears. It sets up the pull timer
   // (every 2s) and the listeners that push local changes up to the server.
   useEffect(() => {
+    // ── NOT UNTIL WE KNOW WHICH RESTAURANT (owner, 2026-09-15, item 14) ─────────────────────────
+    // `useRestaurantId()` answers "" until the restaurant is settled — see its own note. Asking
+    // before then meant reading restaurant #1's rules for a diner standing somewhere else, which
+    // is the Aangan sticker fault. This effect already re-runs on `restaurantId`, so the real id
+    // landing wakes it: a wait of a few hundred milliseconds, not a refusal.
+    if (!restaurantId) return;
     let alive = true; // guards against acting after the component is gone
     // The restaurant resolves async (RestaurantProvider starts at #1, then fixes itself).
     // enabled.current is cached once per mount; reset it here so a change of restaurantId
