@@ -152,7 +152,15 @@ export async function GET(req: NextRequest) {
     // window, which for a 30-day window could be hours and for an old drilled day is never. Bumping
     // the version retires every stale snapshot the moment this deploys. Any future change to what
     // these numbers MEAN has to bump it again.
-    key: `admin:v4:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
+    // v4 → v5 (T26 sweep #9, 2026-09-15): `busiest` CHANGED MEANING. It was the top ten; it is now
+    // every restaurant that took an order in the window (capped and counted), because the card
+    // printed "8 of 10" while forty-five had. The change-detector is an ORDERS fingerprint — it
+    // notices a new order and it cannot notice that a field now means something different — so
+    // without this bump every stored v4 snapshot would go on serving the ten-row list, and the
+    // sentence would stay wrong until an order happened to land in that window. Which for a 30-day
+    // window is hours and for an old drilled day is never. This is the fourth time that paragraph
+    // has had to be written on this line; read it before changing what any of these numbers mean.
+    key: `admin:v5:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
     force,
     fingerprint: () => ordersFingerprint(null, fromIso, toIso),
     compute: () => computeAnalytics(drillDay ? "today" : range, from, to, fromIso, toIso, !!drillDay, windowDays),
@@ -276,7 +284,29 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
   }
 
   const allNow = reads.rows<{ restaurant_id: string; slug: string; name: string; orders: number }>("busiest");
-  const busiest = allNow.slice(0, 10).map((r) => ({
+  // ── THE CARD HAS TO KNOW HOW MANY IT IS HIDING (T26 sweep #9, 2026-09-15) ────────────────────
+  //
+  // This sent `allNow.slice(0, 10)`, and app/aevinite/analytics/page.tsx renders the top EIGHT of
+  // whatever it is handed, then prints "Showing the busiest 8 of {busiest.length} restaurants that
+  // took an order." Counting the array it was given, it could only ever say "8 of 10" — so the
+  // sentence was a fact about this route's slice, not about the platform. Measured on the dev
+  // database the day this was written: 45 restaurants took an order in 30 days, the card said 10,
+  // and the 244 orders belonging to the ones ranked 11th and below were simply not admitted to
+  // exist. The tile above it says 8,065 and the table under it added up to 7,821 — two true numbers
+  // for one fact, which is the exact fault mig 348 was written to end ("THE TILE MUST EQUAL THE
+  // LIST UNDER IT") reappearing one layer up. The sibling card on the admin Customers page was
+  // given the honest count on 2026-08-31 and its comment says analytics already had it; it did not.
+  //
+  // So the population crosses the wire, and the PAGE keeps deciding how many of them to draw. That
+  // is the split that cannot drift: a count computed here from the same rows the page counts.
+  //
+  // EGRESS: five small fields per restaurant that actually took an order — not per restaurant —
+  // inside a payload that is already snapshot-cached and only recomputed when the orders
+  // fingerprint moves. 45 rows measured; the ceiling below is stated rather than hidden, and
+  // `busiestTotal` stays true past it so the card can never silently under-report again.
+  const BUSIEST_CAP = 200;
+  const tookAnOrder = allNow.filter((r) => (Number(r.orders) || 0) > 0);
+  const busiest = tookAnOrder.slice(0, BUSIEST_CAP).map((r) => ({
     id: r.restaurant_id, slug: r.slug, name: r.name,
     orders: Number(r.orders) || 0,
     activeTablesNow: openByRid.get(r.restaurant_id) || 0,
@@ -326,6 +356,10 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     bucket: range === "today" ? "hour" : "day",
     trend: zeroFill(range, from, to, reads.rows<{ bucket: string; orders: number }>("trend")),
     busiest,
+    // How many there REALLY are, so the card stays honest even past the ceiling above — the same
+    // field, for the same reason, as `spreadTotal` on the admin Customers page.
+    busiestTotal: tookAnOrder.length,
+    busiestCapped: tookAnOrder.length > BUSIEST_CAP,
     // null (not []) when the window is too short to compare — the card must be able to tell
     // "nothing is going quiet" apart from "I cannot answer that for one day".
     quiet,
