@@ -1274,7 +1274,26 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
               exists to prevent), and do not re-report the English fallback as a translation gap.
               Extends R15 and R23, which already ruled that the guest menu's remaining English is
               not to be brought back as work. */}
-          <HeroTitle greeting={isDefault ? t.greeting : (tagline || "Welcome")} title={isDefault ? t.heroTitle : (heroTitle || "Our Menu")} />
+          {/* RESTAURANT #1 READS ITS OWN TAGLINE TOO (owner, 2026-09-15, picked as item 10 of
+              sweep #9 T30's report). This used to be `isDefault ? t.greeting : (tagline || …)`,
+              so French House was the ONE tenant whose hero ignored its own `restaurants.tagline`
+              and `hero_title` columns: the database said BONSOIR, the screen said BONJOUR, and
+              editing that field changed nothing anybody could see. Every other restaurant already
+              read its own — Pizza Palace's BUONASERA was on screen throughout.
+              Now the stored value wins for EVERY restaurant, and the i18n copy is what #1 falls
+              back to when it has set none — which is exactly what R30 below says those keys are.
+
+              R30 IS UNCHANGED AND STILL BINDING. It rejected giving OTHER restaurants a neutral
+              TRANSLATED fallback, and reaching for t.greeting/t.heroTitle on their behalf. Neither
+              happens here: a non-#1 restaurant with no custom hero still gets the English
+              "Welcome" / "Our Menu" literal, never a translated key, and #1's keys are still only
+              ever used for #1. Do not widen this to the other tenants.
+
+              ONE KNOCK-ON, SAID OUT LOUD: French House's greeting no longer changes with the
+              guest's language, because a stored tagline is one string. That matches R30's own
+              words — "i want english only for all" — and R15/R23, which park the guest menu's
+              half-finished translation rather than finish it. */}
+          <HeroTitle greeting={tagline || (isDefault ? t.greeting : "Welcome")} title={heroTitle || (isDefault ? t.heroTitle : "Our Menu")} />
         </div>
 
         {/* Categories heading + pinned bar hide entirely once we know the menu is
