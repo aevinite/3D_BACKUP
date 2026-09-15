@@ -301,8 +301,27 @@ export async function POST(req: NextRequest) {
   // The count is ALLOW-LIST MEMBERSHIP, not "did the value change", exactly like grants/sections: a
   // cred sent as "" is a deliberate no-op the channel form sends on every save ("saved without
   // retyping the key"), and it must still count as a real save.
+  // ── THE MERGE MUST NOT START FROM AN UNREADABLE ROW (T27 sweep #9, 2026-09-15) ────────────────
+  // This is the same correction the `curQ` read at the top of this handler already carries, 140
+  // lines above, in these words: "treating an unreadable row as an EMPTY one would rewrite
+  // `manager_permissions`, `owner_entitlements` or `access_config` from `{}` and quietly drop every
+  // stored permission that was not in this one patch."
+  //
+  // The two `settings` reads down here were left on the old shape — `(await sb…).data`, where the
+  // error is not merely unchecked but UNREACHABLE — and they seed exactly the same kind of merge:
+  //   · features         → `{ ...curFeat }` becomes `{}`, so saving ONE guest switch writes a
+  //                        features object holding only that key and every other guest feature this
+  //                        restaurant had turned on is gone;
+  //   · platform_channels → `{ ...curPc }` becomes `{}`, so saving one channel's on/off drops the
+  //                        OTHER channels AND their stored API keys — write-only fields nobody can
+  //                        retype from the screen, because the screen has never been allowed to see
+  //                        them (lib/channelKey.ts's whole reason for reading "" as "leave it").
+  // Refuse on doubt, exactly as the rest of this handler does: the admin presses Save again and the
+  // second press is fine, whereas a dropped entitlement is invisible until a restaurant rings up.
   if (patch.features) {
-    const curFeat = obj((await sb.from("settings").select("features").eq("restaurant_id", rid).maybeSingle()).data?.features);
+    const curFeatQ = await sb.from("settings").select("features").eq("restaurant_id", rid).maybeSingle();
+    if (curFeatQ.error) return adminFail("these permissions", curFeatQ.error, { action: "load" });
+    const curFeat = obj((curFeatQ.data as { features?: unknown } | null)?.features);
     const next = { ...curFeat };
     let took = 0;
     for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) { next[k] = v === true; took++; }
@@ -313,7 +332,11 @@ export async function POST(req: NextRequest) {
   // twice, the second overwriting the first — a saved key silently lost, or a channel switched
   // back on by the write that stored its key.
   if (patch.channels || patch.creds) {
-    const curPc = obj((await sb.from("settings").select("platform_channels").eq("restaurant_id", rid).maybeSingle()).data?.platform_channels);
+    // Answers for itself for the reason written above the features branch — and this is the half
+    // that loses a third party's credential, which nobody can retype from this screen.
+    const curPcQ = await sb.from("settings").select("platform_channels").eq("restaurant_id", rid).maybeSingle();
+    if (curPcQ.error) return adminFail("these permissions", curPcQ.error, { action: "load" });
+    const curPc = obj((curPcQ.data as { platform_channels?: unknown } | null)?.platform_channels);
     const next = { ...curPc };
     let took = 0;   // see the note on the features branch above
     for (const [k, v] of Object.entries(obj(patch.channels))) {
@@ -360,13 +383,41 @@ export async function POST(req: NextRequest) {
   }
 
   if (Object.keys(setPatch).length) {
-    const existing = (await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle()).data;
+    // ── "IS THERE A ROW?" MUST NOT BE ANSWERED BY A FAILED READ (T27 sweep #9, 2026-09-15) ────────
+    // The worst of the three, because the wrong answer here does not drop one column — it resets
+    // the whole row. `existing` was read with the error UNREACHABLE, so a failed read looked exactly
+    // like "this restaurant has no settings row" and sent the save down the CLONE branch below,
+    // whose upsert names `onConflict: "restaurant_id"` and carries a full copy of restaurant #1's
+    // cleaned row. On a restaurant that DOES have a settings row that resolves to
+    // `ON CONFLICT DO UPDATE SET <~110 columns>` — i.e. the restaurant is reset to factory
+    // defaults by a save that was meant to flip one switch.
+    //
+    // MEASURED, not reasoned: driven on a throwaway restaurant of the sweep's own making (binned and
+    // purged afterwards), the clone-branch upsert against an existing row reset 11 of 11 probed
+    // columns — table_count 77→10, price_tax_mode composition→excl, khata_allowed and
+    // payroll_allowed true→false, tablet_mark_paid pin→off, the per-table names Patio/Window→{},
+    // google_review_mode google→off, service_mode true→false, floor_per_row 4→12, and
+    // platform_channels including its saved key→the template's. On a restaurant on the composition
+    // scheme, price_tax_mode→'excl' alone means its bills start printing a tax line it may not show.
+    //
+    // Every restaurant on both stacks has a settings row (a trigger creates one with the restaurant
+    // — verified 2026-09-15), so the clone branch is only ever reached by MISTAKE today. It is kept
+    // rather than deleted because it is the NOT NULL safety net for a row that really is absent;
+    // what changes is that a read failure can no longer be mistaken for that case.
+    const existingQ = await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle();
+    if (existingQ.error) return adminFail("these permissions", existingQ.error, { action: "save" });
+    const existing = existingQ.data;
     if (existing) {
       const up = await sb.from("settings").update(setPatch).eq("restaurant_id", rid);
       if (up.error) return adminFail("these permissions", up.error, { action: "save" });
     } else {
+      // The template answers for itself too: `cleanClonedSettings(null)` returns only the ~50
+      // columns it names explicitly, so a failed read would build a settings row out of column
+      // defaults and whatever this one patch said — a restaurant born half-configured, with no
+      // error anywhere. (T27 sweep #9, 2026-09-15.)
       const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
-      const row = { ...cleanClonedSettings(template.data), id: rid.slice(0, 40), restaurant_id: rid, ...setPatch };
+      if (template.error) return adminFail("these permissions", template.error, { action: "save" });
+      const row = { ...cleanClonedSettings(template.data), id: rid, restaurant_id: rid, ...setPatch };
       const up = await sb.from("settings").upsert(row, { onConflict: "restaurant_id" });
       if (up.error) return adminFail("these permissions", up.error, { action: "save" });
     }
