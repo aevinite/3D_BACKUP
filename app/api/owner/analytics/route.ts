@@ -151,6 +151,23 @@ async function fpWithStaffPay(ids: string[] | null, from: string, to: string): P
   const q0 = sb.from("staff_payments").select("created_at, voided_at", { count: "exact" });
   const q = await (ids ? q0.in("restaurant_id", ids) : q0)
     .order("created_at", { ascending: false }).limit(1);
+  // ── A FINGERPRINT THAT CANNOT SEE IS NOT A FINGERPRINT (T28 of sweep #9, 2026-09-15) ────────────
+  // `q.error` was never inspected, so a failed read fell through to `q.count ?? 0` and the staff-pay
+  // half of the fingerprint became the constant `sp:0::`. That is not a small inaccuracy — it is the
+  // exact thing this function was ADDED to prevent, in the words of the note above it: "recording a
+  // salary left the cached dashboard showing the OLD 'after staff pay' number until an order
+  // happened to change". While the read keeps failing the detector is numb to salaries again, and
+  // the "Staff pay out" and "After staff pay" tiles sit on a stale figure with nothing saying so.
+  //
+  // A fingerprint's only job is to CHANGE when the data changes, so the honest answer to "I could
+  // not look" is a value that is different every time: the snapshot is then recomputed rather than
+  // served stale. Recomputing needlessly costs one dashboard rebuild; serving a stale salary figure
+  // is a wrong number on the owner's screen, and this route's own rules put those in that order
+  // everywhere else ("a stale money figure is worse than a small live query").
+  if (q.error) {
+    console.error("[owner/analytics] the staff-pay change-detector could not be read:", q.error.message);
+    return `${base}|sp:unread:${Date.now()}`;
+  }
   const last = (q.data || [])[0] as { created_at?: string; voided_at?: string | null } | undefined;
   return `${base}|sp:${q.count ?? 0}:${last?.created_at ?? ""}:${last?.voided_at ?? ""}`;
 }
