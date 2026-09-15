@@ -141,9 +141,26 @@ for (const [what, ts] of INSTANTS) {
 // the month is one of twelve fixed three-letter names, the same on every device — and it walks all
 // twelve, so a platform that abbreviates ANY month differently is caught the day it lands, not in
 // the month it happens to break.
+// ── …AND THE SAMPLE MUST NEVER LAND ON TODAY (T27 sweep #9, 2026-09-15) ───────────────────────
+// This walked the 15th of every month of a HARD-CODED 2026, and today is 2026-09-15 — so the
+// September iteration asked `kotWhen` about *this* business day, which correctly answers with the
+// TIME ALONE and no date. Check 2, forty lines above, is the reason it does that: a ticket from the
+// current business day must not be branded with a date or with YESTERDAY. The guard then reported
+// `SEP → "11:30 AM"` as a month printed wrongly, and went RED on clean `main`.
+//
+// So it failed for ONE DAY A MONTH — the 15th — and only for the current month. That is the very
+// same shape as the note above it ("it went RED for the whole of September and only September … The
+// ticket was right; the guard was narrower than its own rule"): the fix for the ICU month name left
+// the calendar coupling behind. A guard that is red on a date nobody chose blocks every session in
+// this folder through the PostToolUse hook, and teaches everyone to skip the output — which is how
+// the 517 real id collisions in LEDGER/INDEX.md sat unread in the neighbouring guard's report.
+//
+// The rule being asserted is about the MONTH NAME, not about any particular year, so the sample is
+// pinned to a year that is always in the past. Verified: all twelve then print "15 <MON> 11:30 AM".
+const SAMPLE_YEAR = new Date().getUTCFullYear() - 1;
 let dateBad = [];
 for (let m = 0; m < 12; m++) {
-  const when = Date.UTC(2026, m, 15, 6, 0, 0);            // the 15th, mid-morning IST, every month
+  const when = Date.UTC(SAMPLE_YEAR, m, 15, 6, 0, 0);     // the 15th, mid-morning IST, every month
   const s = BILLDOC.kotWhen(new Date(when).toISOString());
   if (!/^\d{1,2} [A-Z]{3} /.test(s)) dateBad.push(`${MONTHS[m]} → "${s}"`);
   else if (!s.includes(" " + MONTHS[m] + " ")) dateBad.push(`${MONTHS[m]} printed as "${s.split(" ")[1]}"`);
