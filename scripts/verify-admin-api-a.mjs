@@ -592,6 +592,44 @@ for (const rel of PART_A) {
   else fail(`${rel} applies a scope filter only when the id LOOKS right (${[...new Set(dropped)].join(", ")}) — a malformed id then widens the answer to every restaurant. Validate once and refuse, then filter unconditionally (rule 7)`);
 }
 
+// ── RULE 7 — A SAVE THAT MATCHED NO ROW IS NOT A SAVE (T26 sweep #9, 2026-09-15) ────────────────
+//
+// A write that ends `.select(…).maybeSingle()` is ASKING which row it touched. Throwing that answer
+// away and returning ok means the screen shows the change, the next refresh shows the old value,
+// and nothing says why. Measured live on the printing board: renaming a computer that had been
+// removed in another tab answered 200 {"ok":true}, and switching printing on for a restaurant with
+// no settings row did the same — while three verbs in the very same file (revoke, job cancel, job
+// retry) got it right. The rule the repo already states for it is in app/api/admin/fix-request:
+// "A SAVE THAT MATCHED NO ROW IS NOT A SAVE … the tile changed on screen and came back on the next
+// refresh, with nothing saying why."
+//
+// `.single()` is not flagged: it makes PostgREST itself raise on no-row, which the `.error` branch
+// then answers. Only `.maybeSingle()` — the one that hands back a quiet null — has to be tested.
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  const untested = [];
+  // `[^;]` and not `[\s\S]`: the chain is ONE statement. A greedy cross-statement match walked from
+  // `const up = await sb.from("restaurants").update(...);` to a `maybeSingle()` forty lines later and
+  // reported a properly-written handler (admin/restaurants/access-tree) as ignoring an answer it had
+  // never asked for. A guard that invents a failure is worse than no guard — this file's own header.
+  for (const m of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+([^;]{0,600}?maybeSingle\s*\(\s*\))\s*;/g)) {
+    const v = m[1], chain = m[2];
+    if (!/\.(insert|update|upsert|delete)\s*\(/.test(chain)) continue;  // a read — a null there is a real "not found"
+    if (!/\.select\s*\(/.test(chain)) continue;                          // it asked for nothing back
+    // Is the answer tested — IN THE LINES THAT FOLLOW THIS STATEMENT, not anywhere in the file.
+    // `up` is the obvious name and one route reuses it in five separate branches, so a file-wide
+    // search found some OTHER branch's `if (!up.data)` and passed a branch that had none. (Caught
+    // by deleting a real check and watching the guard stay green — a rule that cannot go red is
+    // decoration.) The window is generous but bounded: a no-row test that is 40 lines below the
+    // write is not the test, it is a coincidence.
+    const after = src.slice(m.index + m[0].length, m.index + m[0].length + 700);
+    const tested = new RegExp(`[!(?\\s]${v}\\.data\\b|${v}\\.data\\s*(?:===?|!==?)\\s*null|${v}\\.data\\?\\.`).test(after);
+    if (!tested) untested.push(v);
+  }
+  if (!untested.length) ok(`${rel} never reports a write that matched no row as done`);
+  else fail(`${rel} asks a write which row it touched and then ignores the answer (${untested.join(", ")}) — a save that matched nothing is reported as saved. Test <var>.data and answer 404 (rule 7)`);
+}
+
 // ── RULE 9 — A NUMBER AIMED AT AN INT COLUMN IS RANGE-CHECKED (T26 sweep #9, 2026-09-15) ────────
 //
 // `sessions.bill_no` and `sessions.invoice_no` are INT (migs 036/037). The bill ledger's search box
