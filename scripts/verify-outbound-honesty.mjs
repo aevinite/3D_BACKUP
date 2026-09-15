@@ -61,6 +61,51 @@ console.log("Outbound honesty — plain words out, a retry is not a failure\n");
   else bad("the webhook does not pass `duplicate` through — a repeat still looks undelivered");
 }
 
+// ── 1b · …AND A FAILURE IS NEVER ANSWERED AS FINAL (T28 of sweep #9, 2026-09-15) ───────────────
+//
+// Section 1 pins the half that was found in 2026-08: a RETRY must not read as a failure, because
+// every aggregator treats 5xx as "not delivered" and would retry an order we already have, forever.
+//
+// This is the mirror image, and it costs more. `resolveWebhookRestaurant()` answered a bare `null`
+// for three different things — nobody claims this outlet, two restaurants claim it, and "the
+// channel-mappings read failed" — and the route turned all three into one HTTP 404 with one
+// sentence: "We don't recognise that outlet. Ask Aevidine to link it to a restaurant first."
+//
+// 404 is FINAL to every platform. So a Supabase blip meant a real incoming order — real food, real
+// money — was answered "that outlet does not exist", dropped for good, and the restaurant was sent
+// to fix a mapping that was correct all along. Nothing on either side would have recorded why.
+//
+// The rule: a refusal that tells the caller to STOP must only be sent when we actually know. "We
+// could not ask" is a 5xx. Same distinction lib/ownerScope draws with OwnerScopeUnavailable, and
+// the same one /api/blocked draws in usedToday ("the page renders on doubt, the write refuses on
+// doubt"). Refusing to GUESS which restaurant is unchanged and is still the entire point.
+{
+  const agg = read("lib/aggregators.ts");
+  const route = read("app/api/aggregators/webhook/[source]/route.ts");
+  if (!agg || !route) bad("lib/aggregators.ts or the webhook route is missing — if they moved, update this guard");
+  else {
+    const fn = agg.slice(agg.indexOf("export async function resolveWebhookRestaurant"));
+    const body = fn.slice(0, fn.indexOf("\nexport ") > 0 ? fn.indexOf("\nexport ") : fn.length);
+    // It must be able to SAY which refusal this is, rather than collapsing both into one value.
+    if (/unread/.test(body)) ok("resolveWebhookRestaurant distinguishes \"couldn't ask\" from \"no such outlet\"");
+    else bad("resolveWebhookRestaurant answers one value for both a failed read and an unknown outlet — a blip then reads as final");
+    // A bare `return null` is what that collapse looked like; it must be gone.
+    const bareNull = [...body.matchAll(/\breturn null;/g)].length;
+    if (bareNull === 0) ok("…and no branch of it returns a bare null any more");
+    else bad(`…but ${bareNull} branch(es) still return a bare null, so the caller cannot tell them apart`);
+    // The read failure must be the one flagged unread.
+    if (/could not read channel mappings[\s\S]{0,600}unread: true/.test(body))
+      ok("a failed channel-mappings read is the branch marked retryable");
+    else bad("the failed channel-mappings read is not the branch marked retryable");
+    // And the ROUTE has to act on it: a 5xx for the unread case, the 404 kept for a real answer.
+    if (/unread[\s\S]{0,400}status:\s*503/.test(route)) ok("the webhook answers a 5xx when the mapping could not be read, so the platform retries");
+    else bad("the webhook still answers the unread case as a 404 — the platform would stop retrying a real order");
+    if (/don't recognise that outlet[\s\S]{0,200}status:\s*404/.test(route) || /status:\s*404[\s\S]{0,200}don't recognise that outlet/.test(route))
+      ok("…and a genuinely unmapped outlet still gets the final 404 that makes somebody set it up");
+    else bad("the unmapped-outlet 404 has gone — an unconfigured outlet would be retried forever instead of fixed");
+  }
+}
+
 // ── 2 · no route in this scope hands a database message to its caller ──────────────────────────
 {
   // `error.message` straight into a response body. Each of these was a real screen or a real

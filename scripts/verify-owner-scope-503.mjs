@@ -71,6 +71,51 @@ if (lib) {
     "a failed owner lookup must be OwnerScopeUnavailable, not a silent narrowing to `{ ids: [acting] }`");
 }
 
+// 1b · …AND THE TWIN RESOLVER GETS THE SAME PROPERTY, NOT A WEAKER ONE (T28, sweep #9, 2026-09-15)
+//
+// `app/api/owner/staff/route.ts` has its own `scope()` because it also serves a MANAGER, which
+// ownerScope does not. Section 3 below exempts it from the ownerScopeOr503 rule on the grounds that
+// it "answers transient() 503 on every failed read" — and that allowance was checked by a regex
+// that only proved the `transient()` HELPER EXISTS. It did. Two reads in the act-as branch were
+// still `.data || []`:
+//
+//     sb.from("restaurants").select("owner_user_id").eq("id", pin).maybeSingle()
+//     sb.from("restaurant_owners").select("user_id").eq("restaurant_id", pin)
+//
+// so a blip there left `members` empty and `primary` undefined, `ownerId` fell to null, and the
+// function returned `ids = [pin]`. The admin opens a five-restaurant owner's Team page and it lists
+// ONE restaurant's people, completely and convincingly, with nothing saying the other four were
+// dropped rather than never existed. That is finding F22's exact symptom, on a third road.
+//
+// The lesson is about the ALLOWANCE, not the route: an exemption that checks a helper exists rather
+// than that it is reached is how the thing it excuses goes wrong in silence. So the twin's resolver
+// is now held to the SAME property section 1 holds ownerScope() to — every read that shapes the id
+// list reads its own error.
+const staffSrc = read("app/api/owner/staff/route.ts");
+check("app/api/owner/staff/route.ts exists", !!staffSrc);
+if (staffSrc) {
+  const fn = staffSrc.slice(staffSrc.indexOf("async function scope(req: NextRequest)"),
+                            staffSrc.indexOf("const slim = "));
+  const named = [...new Set(fn.match(/\b(\w+Q|owned|data|error)\b(?=\.(?:error|data))/g) || [])]
+    .filter((v) => v !== "data" && v !== "error");
+  const unchecked = named.filter((v) => !new RegExp(`\\b${v}\\.error\\b`).test(fn));
+  check("its own scope() reads the error of every read that shapes the restaurant list",
+    unchecked.length === 0 && named.length > 0,
+    unchecked.length
+      ? `${unchecked.join(", ")} read .data without ever reading .error — a blip there narrows the admin's Team page to ONE restaurant in silence`
+      : "");
+  check("…and the act-as owner lookup answers transient() rather than falling through to one restaurant",
+    /if \(membersQ\.error \|\| primaryQ\.error\)[\s\S]{0,400}return \{ ok: false, resp: transient\(\) \}/.test(fn),
+    "a failed owner lookup must be a retryable 503, not a silent narrowing to `ids = [pin]`");
+  // Both join-table reads are bounded, like their twins in lib/ownerScope — PostgREST caps an
+  // unbounded select at a thousand rows with NO error, so an unbounded read is capped anyway and
+  // the only honest version says so.
+  const joins = [...fn.matchAll(/sb\.from\("restaurant_owners"\)[\s\S]{0,160}?;/g)].map((m) => m[0]);
+  check("…and both restaurant_owners reads carry an explicit ceiling",
+    joins.length >= 2 && joins.every((j) => /\.limit\(\d+\)/.test(j)),
+    joins.length < 2 ? `only found ${joins.length} — the matcher has broken` : "an unbounded read is silently capped at 1,000");
+}
+
 // 2 · EVERY owner route is covered. Discovered by walking, never a hardcoded list.
 const dir = "app/api/owner";
 const walk = (d, out = []) => {

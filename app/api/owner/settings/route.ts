@@ -6,7 +6,7 @@
 //          token_version. That invalidates the current cookie, so the client re-logs in.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, ownerLogPanel, ownerActorName } from "@/lib/ownerScope";
 import { restaurantNames } from "@/lib/restaurantNames";
 import { getOwnerEntitlementsUnion, OWNER_SECTION_KEYS, entitledSubset } from "@/lib/ownerEntitlements";
 import { USER_COOKIE, userFromCookie, verifySecret } from "@/lib/userAuth";
@@ -257,8 +257,27 @@ export async function PATCH(req: NextRequest) {
   // A module turning itself off changes what a whole panel offers, and nothing recorded it — so with
   // two co-owners nobody could say who flipped it (sweep 2026-08-04). Unlike issues/ratings there is
   // no in-row stamp to fall back on: the settings column holds only the value.
+  // ── AND IT RECORDED A UUID AS THE PERSON (T28 of sweep #9, 2026-09-15) ────────────────────────
+  // `ownerActorName()` (lib/ownerScope) exists for exactly this line and this one never called it.
+  // Its own header says why it was written: five owner routes hand-rolled
+  // `(scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner")`, `scope.ownerId` is a UUID,
+  // and the value lands in columns the panels PRINT. The five it fixed on 2026-08-27 were ratings,
+  // customers and three in issues. This was the sixth, and it was missed.
+  //
+  // Measured on French House, 2026-09-15, driving the owner's own toggle: the row came back
+  //     panel "owner" · actor "c0af7b5b-c0d8-40f6-b831-f475e48bab53" · "Table & ticket operations → on"
+  // — the SAME uuid ownerActorName's header quotes from the rating it was written for. So the one
+  // screen that answers "who turned that off?" answered it with a uuid, and `actor_id` was null too,
+  // so nothing downstream could resolve a name from it either. Every other writer in these routes
+  // records a login name ("diagm1", "diago1"), which is what makes this the odd one out rather than
+  // the convention.
+  //
+  // `actor_id` rides along now for the same reason the staff routes send it: it is what lets a
+  // person's own Activity tab find their own rows (/api/owner/oplog?actor=<id>), and a module the
+  // owner switched off never appeared there.
   await logAction(ownerLogPanel(scope), "module_toggle", {
-    restaurant_id: rid, actor: scope.admin ? "admin" : (("ownerId" in scope && scope.ownerId) || "owner"),
+    restaurant_id: rid, actor: ownerActorName(scope),
+    ...(!scope.all && !scope.admin && "ownerId" in scope ? { actor_id: scope.ownerId } : {}),
     detail: `${def.label} → ${enabled ? "on" : "off"}`,
   });
   return NextResponse.json({ ok: true });

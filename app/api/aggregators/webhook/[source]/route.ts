@@ -58,13 +58,27 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // restaurant already stores. An unmapped outlet is answered with a plain 404 so the aggregator
     // stops retrying and somebody goes and sets the mapping up — which is a far better failure than
     // an order silently appearing on a stranger's floor.
-    const restaurantId = await resolveWebhookRestaurant(source as AggSource, payload);
-    if (!restaurantId) {
+    const target = await resolveWebhookRestaurant(source as AggSource, payload);
+    // ── A 404 TELLS THE PLATFORM TO STOP TRYING, SO IT HAS TO BE TRUE (T28, sweep #9, 2026-09-15) ─
+    // The 404 below is deliberate and stays: an unmapped outlet is a configuration job, and saying
+    // so plainly is what makes somebody go and do it. What it must NOT cover is "we could not read
+    // the mappings" — a blip answered 404 too, and every aggregator treats that as final, so a real
+    // order was dropped for good and the restaurant was sent to fix a mapping that was correct.
+    // Same rule this route already keeps one answer down: a duplicate gets 200 "delivered" and a
+    // genuine failure gets a 5xx, because 5xx is the only thing that earns a retry.
+    if (target.restaurantId === null && target.unread) {
+      return NextResponse.json(
+        { error: "Couldn't check which outlet that is just now — please send it again.", transient: true },
+        { status: 503 },
+      );
+    }
+    if (!target.restaurantId) {
       return NextResponse.json(
         { error: "We don't recognise that outlet. Ask Aevidine to link it to a restaurant first." },
         { status: 404 },
       );
     }
+    const restaurantId = target.restaurantId;
     const row = await ingestIncoming(source as AggSource, payload as Record<string, any>, restaurantId);
     // A RETRY GETS 200, NOT 500 (T9 sweep, 2026-08-05). `duplicate:true` means we already hold
     // this external_id, so the aggregator is told "delivered" and stops retrying. Answering 5xx

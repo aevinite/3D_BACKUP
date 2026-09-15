@@ -209,6 +209,7 @@
     "verify:retention": "node scripts/verify-retention-lock.mjs",
     "verify:floor-offplan": "node scripts/verify-floor-offplan.mjs",
     "verify:tip": "node scripts/verify-tip.mjs",
+    "verify:t28-new50": "node --env-file=.env.local scripts/sweep/t28/new50.mjs",
     "verify:owner-s7": "node scripts/verify-owner-territory-s7.mjs",
     "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs",
     "verify:owner-live500": "node scripts/verify-owner-live-500.mjs",
