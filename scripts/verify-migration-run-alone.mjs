@@ -58,6 +58,18 @@ const KNOWN_BACKLOG = new Set([
   "236_write_down_the_unwritten_function.sql|function|lfh_check_ban_scoped", // retired by 281, which predicted this
   "249_merge_is_recorded_and_reversible.sql|function|lfh_merge_group",    // retired by 267 as having no caller
   "296_database_layer_a_sweep_fixes.sql|function|lfh_check_verification", // retired by 297, "undo a resurrection"
+  // Three more, surfaced the day the INDEX kind was added (sweep #9, T29, 2026-09-15). All three sit
+  // OUTSIDE migrations 001–080, so that sweep did not own them; they are written down here rather
+  // than silenced, and each needs the same one-line ending in its own file. None of them FAILS on
+  // today's data — checked, not assumed — so each is a cost, not an abort:
+  //   · 091's index is UNIQUE over ALL staff rows; 245 narrowed it to the LIVE ones so a binned
+  //     login frees its name. No restaurant currently has a live and a binned row sharing a name,
+  //     so re-creating it succeeds — and quietly puts back the rule 245 removed.
+  //   · both of 095's are plain indexes superseded by a covering one with the same key (155 and 267
+  //     say so on the line that drops them), so a resurrection is paid for on every order insert.
+  "091_roles_and_permissions.sql|index|idx_staff_users_username_per_restaurant", // retired by 245
+  "095_orders_analytics_indexes.sql|index|idx_orders_created_at",                // retired by 155
+  "095_orders_analytics_indexes.sql|index|idx_orders_restaurant_created",        // retired by 267
 ]);
 
 const files = readdirSync(DIR).filter((f) => f.endsWith(".sql")).sort();
@@ -77,7 +89,38 @@ const KINDS = [
     drop: /DROP\s+TRIGGER\s+(?:IF\s+EXISTS\s+)?"?([a-zA-Z0-9_]+)"?/gi },
   { kind: "policy",   create: /CREATE\s+POLICY\s+"?([a-zA-Z0-9_ ]+?)"?\s+ON\s+(?:public\.)?"?([a-zA-Z0-9_]+)"?/gi,
     drop: /DROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?"?([a-zA-Z0-9_ ]+?)"?\s+ON\s+(?:public\.)?"?([a-zA-Z0-9_]+)"?/gi },
+  // An INDEX is the kind that BITES, because a retired one is usually retired for a reason the old
+  // file cannot satisfy any more: migration 082 replaced the global `menu_items_dish_no_key` with a
+  // per-restaurant one precisely so a second restaurant could have a dish #1, and 091/245 did the
+  // same for `idx_staff_users_username`. Re-creating either on today's data does not merely add a
+  // stale object — the CREATE UNIQUE INDEX FAILS on the duplicates, so the whole file aborts.
+  // The cheaper half is just as real: 267/296 dropped four indexes for having 0 scans, and putting
+  // one back is paid for on every insert into the busiest tables in the product.
+  // `ALTER TABLE … DROP CONSTRAINT` counts as a drop: 082 uses both spellings for the same object.
+  { kind: "index",    create: /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?([a-zA-Z0-9_]+)"?\s+ON/gi,
+    drop: /(?:DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?(?:public\.)?|ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\.)?[a-zA-Z0-9_"]+\s+DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?)"?([a-zA-Z0-9_]+)"?/gi },
+  // Publication membership is an object too, and an invisible one. Migration 013 put `settings` on
+  // supabase_realtime; 304 took it off, because nothing subscribes any more and every settings write
+  // was still being decoded into the replication stream for a listener that does not exist. Egress
+  // is this product's cost, so a resurrection here is a bill, not an untidiness.
+  { kind: "publication", create: /ALTER\s+PUBLICATION\s+[a-zA-Z0-9_]+\s+ADD\s+TABLE\s+(?:public\.)?"?([a-zA-Z0-9_]+)"?/gi,
+    drop: /ALTER\s+PUBLICATION\s+[a-zA-Z0-9_]+\s+DROP\s+TABLE\s+(?:public\.)?"?([a-zA-Z0-9_]+)"?/gi },
 ];
+
+// Columns need their own extractor, because one ALTER TABLE can add several and the table name
+// only appears once. `%I` in migration 078's dynamic loop is deliberately not matched — nothing
+// static can name those columns, and they are covered by the files that declare them for real.
+function columnOps(t) {
+  const add = [], drop = [];
+  for (const m of t.matchAll(/ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\.)?"?([a-zA-Z0-9_]+)"?([\s\S]*?);/gi)) {
+    const tbl = m[1].toLowerCase();
+    for (const c of m[2].matchAll(/ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([a-zA-Z0-9_]+)"?/gi))
+      add.push({ key: `${tbl}.${c[1].toLowerCase()}`, at: m.index + c.index });
+    for (const c of m[2].matchAll(/DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?"?([a-zA-Z0-9_]+)"?/gi))
+      drop.push({ key: `${tbl}.${c[1].toLowerCase()}`, at: m.index + c.index });
+  }
+  return { add, drop };
+}
 
 // ── 1. STATIC: a single-file run must land where a full re-seed lands ────────────────────────
 head("supabase/migrations — running ONE file by hand lands in the same state as a full re-seed");
@@ -127,6 +170,83 @@ head("supabase/migrations — running ONE file by hand lands in the same state a
   if (backlog.size) {
     console.log(`  – ${backlog.size} known, written-down: ${[...backlog].join(" · ")}`);
     console.log("    (outside migrations 001–118; each needs the same one-line ending in its own file)");
+  }
+}
+
+// ── 1b. COLUMNS: a file must not re-add a column the sequence dropped, and must never WRITE one ──
+// Two faults, one map. Both were found by sweep #9 T29 on migrations 001–080, and both are invisible
+// to every other guard here, because `verify-migration-truth` asks "is what this file promised still
+// present?" and a column a later file deliberately dropped answers that correctly.
+//
+//   · RE-ADD — migration 037 created `settings.tax_inclusive`; 270 superseded it with
+//     `price_tax_mode` and 304 dropped it, writing down why: "tax is the one subject where a
+//     stale-looking column is dangerous."  Running 037 alone put the column back.
+//
+//   · WRITE — far worse, because the file does not merely drift, it STOPS. Migration 030 ended with
+//     `UPDATE menu_items SET reviews = '[]', rating = NULL`, and migration 359 dropped both columns.
+//     On every database that has reached 359 — which is every live one — that statement raises
+//     `column "reviews" does not exist` and `node scripts/run-migration.mjs 030_real_reviews.sql`
+//     ABORTS. A full re-seed was always fine (001 creates the columns), which is exactly why nobody
+//     noticed: the failure only exists on the databases that matter.
+// A write inside a function body is NOT counted — a plpgsql body is not planned until it is called,
+// and the function that owns it is the thing that would need fixing, not this file.
+head("supabase/migrations — a single file never re-adds, or writes to, a column the sequence dropped");
+{
+  const lastAdd = new Map(), lastDropCol = new Map();
+  for (const f of files) {
+    const { add, drop } = columnOps(code(f));
+    for (const a of add) lastAdd.set(a.key, `${f}#${String(a.at).padStart(8, "0")}`);
+    for (const d of drop) lastDropCol.set(d.key, `${f}#${String(d.at).padStart(8, "0")}`);
+  }
+  const deadCols = new Map();   // key → the file that retires it
+  for (const [k, d] of lastDropCol) {
+    const a = lastAdd.get(k);
+    if (!a || d > a) deadCols.set(k, d.split("#")[0]);
+  }
+
+  const readds = [], writes = [];
+  for (const f of files) {
+    const t = code(f);
+    const { add, drop } = columnOps(t);
+    for (const a of add) {
+      if (!deadCols.has(a.key)) continue;
+      const lastA = Math.max(...add.filter((x) => x.key === a.key).map((x) => x.at));
+      const lastD = Math.max(-1, ...drop.filter((x) => x.key === a.key).map((x) => x.at));
+      if (lastD > lastA) continue;                                  // the file retires it again ✓
+      readds.push(`${f} re-adds column ${a.key}, which ${deadCols.get(a.key)} drops`);
+    }
+    // Top-level DML only: blank out every $tag$ … $tag$ body first.
+    const top = t.replace(/\$([a-zA-Z0-9_]*)\$[\s\S]*?\$\1\$/g, " ");
+    for (const m of top.matchAll(/\bUPDATE\s+(?:ONLY\s+)?(?:public\.)?"?([a-zA-Z0-9_]+)"?\s+(?:[a-zA-Z0-9_]+\s+)?SET\s+([\s\S]*?)(?:\bWHERE\b|\bFROM\b|;)/gi) ) {
+      const tbl = m[1].toLowerCase();
+      for (const c of m[2].matchAll(/([a-zA-Z0-9_]+)\s*=/g)) {
+        const key = `${tbl}.${c[1].toLowerCase()}`;
+        if (deadCols.has(key)) writes.push(`${f} writes ${key} at the top level, and ${deadCols.get(key)} drops that column — the file ERRORS instead of no-opping`);
+      }
+    }
+    for (const m of top.matchAll(/\bINSERT\s+INTO\s+(?:public\.)?"?([a-zA-Z0-9_]+)"?\s*\(([^)]*)\)/gi)) {
+      const tbl = m[1].toLowerCase();
+      for (const c of m[2].split(",")) {
+        const key = `${tbl}.${c.trim().replace(/"/g, "").toLowerCase()}`;
+        if (deadCols.has(key)) writes.push(`${f} inserts ${key} at the top level, and ${deadCols.get(key)} drops that column — the file ERRORS instead of no-opping`);
+      }
+    }
+  }
+  const uniqR = [...new Set(readds)], uniqW = [...new Set(writes)];
+  if (uniqW.length) {
+    fail(`${uniqW.length} migration(s) name a dropped column in a statement that runs at migration time:`);
+    for (const o of uniqW) console.log("      · " + o);
+    console.log("      Fix: gate the statement on the column still existing (migration 030's pattern),");
+    console.log("      so a fresh seed still does the work and a database past the drop does nothing.");
+  } else {
+    pass(`no migration writes a column the sequence drops (${deadCols.size} dropped column(s) checked)`);
+  }
+  if (uniqR.length) {
+    fail(`${uniqR.length} migration(s) would put back a column a later migration deliberately dropped:`);
+    for (const o of uniqR) console.log("      · " + o);
+    console.log("      Fix: end the offending file with the same ALTER TABLE … DROP COLUMN IF EXISTS.");
+  } else {
+    pass("no migration re-adds a column the sequence drops");
   }
 }
 
