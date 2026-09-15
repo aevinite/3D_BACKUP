@@ -1101,7 +1101,33 @@
 + "                  border:1px solid #b9b9c0;background:#fff;color:#000}\n"
 + "      .bar button.x{background:#111;color:#fff;border-color:#111}\n"
 + "      .bar .note{flex:1 1 100%;font:11.5px/1.35 system-ui,sans-serif;color:#3a3a42;text-align:left}\n"
-+ "      @media print{.bar{display:none !important}}\n";
++ "      @media print{.bar{display:none !important}}\n"
+/* ── THE PREVIEW LOOKS LIKE ITS TWO SIBLINGS (owner, item 7, 2026-09-15) ────────────────────────
+   Three previews are reached from the same pair of "Format of …" screens. The bill and the parcel
+   centre their paper on a grey backdrop under a full-width toolbar; this one sat hard left on bare
+   white with the toolbar trapped inside the 280px ticket column — so its one-sentence explanation
+   wrapped over four lines and the buttons squeezed up against it. Nothing was unreadable; it simply
+   looked like a different, half-built screen, and the owner said so after seeing all three.
+
+   SCREEN ONLY, AND PREVIEW ONLY — twice over, so this cannot reach paper or a cook:
+     · everything below is inside `@media screen`, and the print rules above are untouched;
+     · this whole function is emitted ONLY when `o.note` is set, and the docstring above says why —
+       a KOT printed from a panel goes through a hidden iframe and passes no note, so a real ticket
+       never receives one byte of it. `lib/billPreview.ts` is the only caller that passes one.
+
+   The bar breaks out of the centred 280px column with the symmetric negative-margin trick rather
+   than `100vw`, which on desktop counts the scrollbar and would add a sideways scroll. */
++ "      @media screen{\n"
++ "        html{background:#e8e8ea}\n"
+/* No `min-height`: the paper ends where the ticket ends, exactly as the bill's does. With 100vh it
+   ran the full window and left a tall empty white column under a three-line ticket — which looks
+   like a page that failed to load rather than a short ticket. `html` carries the backdrop, so the
+   grey fills the window either way. */
++ "        body{margin:0 auto;background:#fff;box-shadow:0 2px 18px rgba(0,0,0,.2)}\n"
++ "        .bar{margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);margin-top:-8px;\n"
++ "             flex-wrap:nowrap;align-items:center;padding:10px 12px}\n"
++ "        .bar .note{flex:1 1 auto;max-width:52%;margin-right:auto;align-self:center}\n"
++ "      }\n";
   }
   function kotBarHtml(note) {
     if (!note) return "";
