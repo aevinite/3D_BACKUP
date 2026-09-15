@@ -13,7 +13,7 @@
 // hard limit — never a whole-table read. deletion_audit is indexed (restaurant_id, at DESC).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, inScope, dbFail } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, dbFail, ownerActorName } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 // The admin stays invisible to an owner, in the AUDIT as it already is in the Activity log.
 import { auditForReader, forReader } from "@/lib/auditActor";
@@ -230,9 +230,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── WHICH OWNER ANSWERED IT (T28 of sweep #9, 2026-09-15) ────────────────────────────────────
+  // This wrote the literal word "Owner", and `actor` is a column the Removals record PRINTS. So on
+  // a restaurant with two co-owners the one screen built to answer "who decided that?" answered it
+  // with a job title. Every other row in that column holds a login name, which is what makes this
+  // the odd one out rather than the convention.
+  //
+  // `ownerActorName()` (lib/ownerScope) is the one definition of who to record, and it already keeps
+  // the half that matters here: the ADMIN still records as the admin. The only change is that a real
+  // owner records as themselves. It was written on 2026-08-27 for five call sites; this is the
+  // eighth found since (the sixth and seventh were module_toggle and print_test, both this sweep).
+  //
+  // Deliberately NOT `ownerActorName` verbatim for the admin: this table's own convention is the
+  // fuller "Admin (Aevidine)", which `auditForReader` then withholds from a non-admin reader by
+  // matching /^admin\b/i. Keeping that word is what keeps the withholding working.
   const r = await sb.rpc("lfh_cancel_classify", {
     p_restaurant: rid, p_order: orderId, p_made: made,
-    p_actor: scope.admin ? "Admin (Aevidine)" : "Owner",
+    p_actor: scope.admin ? "Admin (Aevidine)" : ownerActorName(scope),
     p_actor_id: scope.all ? null : (scope as { ownerId?: string }).ownerId ?? null,
     p_actor_role: scope.admin ? "admin" : "owner", p_audit_id: null,
   });
