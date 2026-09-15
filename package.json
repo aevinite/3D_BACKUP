@@ -236,7 +236,9 @@
     "verify:session-gate": "node scripts/verify-session-gate-taps.mjs",
     "verify:guest-restaurant": "node scripts/verify-guest-waits-for-its-restaurant.mjs",
     "verify:admin-counts-cancelled": "node scripts/verify-admin-counts-cancelled.mjs",
-    "verify:binned-restaurant-leaves": "node scripts/verify-binned-restaurant-leaves.mjs"
+    "verify:binned-restaurant-leaves": "node scripts/verify-binned-restaurant-leaves.mjs",
+    "verify:rid-required": "node scripts/verify-rid-required.mjs",
+    "verify:own-hero": "node scripts/verify-own-hero.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"

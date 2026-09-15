@@ -49,7 +49,12 @@ async function runSql(query) {
 }
 
 // 1) Pick two real, orderable dishes.
-// Scoped to restaurant #1: the place RPC defaults to that restaurant, so an unscoped pick
+// Scoped to restaurant #1 — and now NAMED, not assumed. This comment used to say "the place RPC
+// defaults to that restaurant"; since migration 384 it does not default to anything. A call that
+// passes no restaurant is refused with "this needs a restaurant: p_restaurant_id was null" rather
+// than quietly answering as French House, so this script has to say which restaurant it means.
+// It was the ONE caller in the whole repo that didn't. (sweep #9 T30, item 4.)
+// The original note is still true of the dish pick itself: an unscoped pick
 // returned another restaurant's dish and the server answered `unknown_item` — the test was
 // failing on fixture drift, not on an ordering bug. (2026-07-30)
 const items = await runSql(`SELECT id, price, title FROM menu_items WHERE NOT ('sold-out' = ANY(tags)) AND restaurant_id = '00000000-0000-0000-0000-000000000001' ORDER BY sort_order LIMIT 2;`);
@@ -60,7 +65,8 @@ const payload = JSON.stringify([
 console.log("ordering:", items.map((i) => `${i.title} (${i.price})`).join(" + "));
 
 // 2) Place it exactly like the non-session client now does.
-const placed = await runSql(`SELECT lfh_place_order_public('1', '${payload}'::jsonb, ARRAY[]::text[]) AS r;`);
+const RID = "00000000-0000-0000-0000-000000000001";
+const placed = await runSql(`SELECT lfh_place_order_public('1', '${payload}'::jsonb, ARRAY[]::text[], '${RID}'::uuid) AS r;`);
 const r = placed[0].r;
 console.log("place result:", JSON.stringify(r));
 if (!r.ok) { console.error("✗ order did NOT place"); process.exit(1); }
