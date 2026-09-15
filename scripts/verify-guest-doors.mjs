@@ -134,6 +134,54 @@ check("the pin is read inside an effect, never during render (there is no sessio
 // lib/tenant.ts is what makes the catch reachable: since 2026-08-03 a failed READ throws instead of
 // folding into `null`, so this is a cold process plus one refused read.
 const resolveTail = ctx.slice(ctx.indexOf("getRestaurantBySlug("));
+
+// ── AN UNKNOWN RESTAURANT IS REFUSED HERE, NOT BY THE DATABASE (owner, 2026-09-15) ──────────────
+//
+// `lib/restaurant-context.tsx` states the contract: a failed lookup leaves `id` as `""`, and
+// "keys on the restaurant must treat '' the way the server already does: refuse, and say so."
+// The server did refuse — with `invalid input syntax for type uuid: ""` — after a full round trip
+// from a diner's phone. Measured on a production build during an ordinary menu open, and
+// verify:guest was filing it as a request refused by a THIRD-PARTY service, because the host is not
+// our origin. It is our own database.
+//
+// The trap underneath it: `restaurantId: string = DEFAULT_RESTAURANT_ID` fires for `undefined` and
+// NEVER for `""`, so every read and write in lib/menu.ts was sending an empty uuid. And the default
+// it would otherwise have applied is restaurant #1 — the one answer that must never be given when
+// the restaurant is unknown, which is the rule the check below this one defends.
+//
+// DERIVED, NOT A HAND-TYPED LIST: a list is what lets the next function slip through. This finds
+// every exported function in lib/menu.ts that takes a restaurant id, keeps the ones whose body
+// actually reaches the database, and requires each to refuse an unknown one first.
+{
+  say("\n8b) An unknown restaurant is refused before the request, not by the database");
+  const menuLib = codeOnly(read("lib/menu.ts"));
+  const fns = [];
+  const re = /export async function (\w+)\(/g;
+  let m;
+  while ((m = re.exec(menuLib))) {
+    const name = m[1];
+    const start = m.index;
+    const next = menuLib.indexOf("\nexport ", start + 1);
+    const body = menuLib.slice(start, next === -1 ? menuLib.length : next);
+    if (!/restaurantId: string = DEFAULT_RESTAURANT_ID/.test(body)) continue;
+    const touchesDb = /supabase|postGuestOrder|\.rpc\(/.test(body);
+    if (!touchesDb) continue;
+    fns.push({ name, guarded: /requireRestaurant\(restaurantId|knownRestaurant\(restaurantId\)/.test(body) });
+  }
+  const unguarded = fns.filter((f) => !f.guarded).map((f) => f.name);
+  check(`every guest read and write that takes a restaurant id refuses an unknown one (${fns.length} found${unguarded.length ? ": " + unguarded.join(", ") + " do not" : ", all guarded"})`,
+    fns.length >= 5 && unguarded.length === 0);
+  check("…and the refusal is a real uuid test, not a truthiness check that '0' would pass",
+    /const RESTAURANT_ID_RE = \/\^\[0-9a-f\]\{8\}-/.test(menuLib));
+  check("…and it REFUSES rather than falling back to restaurant #1, which is the rule below",
+    !/requireRestaurant[\s\S]{0,400}\|\| DEFAULT_RESTAURANT_ID/.test(menuLib)
+    && /throw new Error\(`Can't \$\{what\}/.test(menuLib));
+  check("…and the settings read refuses BEFORE its cache, so nothing is stored under an unknown key",
+    menuLib.indexOf('requireRestaurant(restaurantId, "read this restaurant\'s settings")') < menuLib.indexOf("settingsCache.get(restaurantId)"));
+  check("…and the read that answers with an empty list still answers with an empty list",
+    /if \(!knownRestaurant\(restaurantId\)\) return \[\];/.test(menuLib));
+}
+
 check("a FAILED tenant resolve does not fall back to restaurant #1",
   !/\.catch\([^)]*\)\s*=>\s*\{[^}]*setReady\(true\)/.test(resolveTail) &&
   /\.catch\(/.test(resolveTail) && /setId\(""\)/.test(resolveTail));
