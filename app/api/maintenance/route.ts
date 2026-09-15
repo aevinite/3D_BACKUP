@@ -113,7 +113,14 @@ export async function POST(req: NextRequest) {
   // row belongs. It simply stops appearing in the owner's and the manager's feeds. A real
   // manager's or owner's flip is completely unchanged — which is the row that matters here, because
   // taking the menu down stops every guest ordering and the owner has to be able to see who did it.
-  await logAction(s.admin ? "admin" : "manager", on ? "maintenance_on" : "maintenance_off", {
+  //
+  // Hoisted rather than written inline, and that is not only taste: `verify:audit` EXTRACTS every
+  // action code this repo can write by reading `logAction(...)` calls, and one of its two ternary
+  // patterns matches a ternary FIRST argument too — so `logAction(s.admin ? "admin" : "manager", …)`
+  // had it recording "admin" and "manager" as action codes with no label, and the guard went red on
+  // a correct change. The guard's blind spot is fixed in the same commit; this reads better anyway.
+  const logIn = s.admin ? "admin" : "manager";
+  await logAction(logIn, on ? "maintenance_on" : "maintenance_off", {
     restaurant_id: s.rid, actor: s.who, device_id: deviceIdFrom(req),
     detail: on ? `${s.who} took the guest menu OFFLINE` : `${s.who} put the guest menu back online`,
   });

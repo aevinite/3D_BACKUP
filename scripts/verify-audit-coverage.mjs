@@ -168,6 +168,30 @@ else fail("the admin bill ledger deletes bills without an Audit row — the admi
         if (m[2]) written.add(m[2]);
         else if (!PANEL_NAMES.has(m[1])) written.add(m[1]);
       }
+      // ── A COMPUTED PANEL HID A THIRD OF THE CODES FROM THIS GUARD (T28, sweep #9, 2026-09-15) ──
+      // The pattern above requires the FIRST argument to be a quoted panel name. It has not been one
+      // for most of this repo since 2026-08-12: `ownerLogPanel(scope)` decides the panel so an
+      // admin's action lands in the admin's log and not the owner's feed, and `logPanel(s)` does the
+      // same in the staff routes. So every code written that way was INVISIBLE here — measured at
+      // **33 of them**, including rating_handled, issue_resolved, issue_raised, module_toggle,
+      // customer_erase, print_test and the whole staff_* family.
+      //
+      // All 33 happen to have labels today, so nothing is rendering a raw key on a screen — which is
+      // precisely why nobody noticed. But this guard exists because twelve codes once hid behind a
+      // ternary and printed as prettified database keys beside real sentences (T15, 2026-08-05), and
+      // it was blind to a third of its own subject. A guard that cannot see what it is guarding is
+      // the failure `verify:cache` recorded: green for a month while asserting nothing.
+      //
+      // Matched as "a first argument that is a call or an identifier, then a quoted action" — which
+      // is every remaining shape — with the same PANEL_NAMES subtraction, so a code can never be a
+      // panel name by accident.
+      for (const m of body.matchAll(/\blog(?:Action|Error)?\(\s*(?:[A-Za-z_$][\w.$]*\([^)]*\)|[A-Za-z_$][\w.$]*)\s*,\s*"([a-z0-9_]+)"/g)) {
+        if (!PANEL_NAMES.has(m[1])) written.add(m[1]);
+      }
+      // …and the ternary ACTION behind a computed panel, which neither pattern below reaches either.
+      for (const m of body.matchAll(/\blog(?:Action|Error)?\(\s*(?:[A-Za-z_$][\w.$]*\([^)]*\)|[A-Za-z_$][\w.$]*)\s*,\s*[^,;){:]*?\?\s*"([a-z0-9_]+)"\s*:\s*"([a-z0-9_]+)"/g)) {
+        for (const k of [m[1], m[2]]) if (!PANEL_NAMES.has(k)) written.add(k);
+      }
       // A TERNARY second argument writes TWO codes and the literal pattern above sees NEITHER.
       // Twelve codes hid behind this for months — `active ? "staff_enable" : "staff_disable"`
       // had a label for the false branch only, so "Staff enable" printed as a prettified
@@ -177,7 +201,17 @@ else fail("the admin bill ledger deletes bills without an Audit row — the admi
       // it walked into a later `{ detail: value ? "on" : "off" }` and recorded "on"/"off" as codes.
       for (const re of [/\blog(?:Action)?\(\s*[^,]+,\s*[^,;){:]*?\?\s*"([a-z0-9_]+)"\s*:\s*"([a-z0-9_]+)"/g,
                         /\blog(?:Action)?\(\s*[^,;){:"]*?\?\s*"([a-z0-9_]+)"\s*:\s*"([a-z0-9_]+)"/g]) {
-        for (const m of body.matchAll(re)) { written.add(m[1]); written.add(m[2]); }
+        // …AND A TERNARY *PANEL* IS NOT TWO ACTION CODES (T28 of sweep #9, 2026-09-15). The second
+        // pattern also matches a ternary FIRST argument — `logAction(s.admin ? "admin" : "manager", …)`,
+        // which /api/maintenance now needs so an admin's own flip stays out of the owner's feed — and
+        // it recorded "admin" and "manager" as unlabelled action codes, so this guard went red on a
+        // correct change. The literal path above has subtracted PANEL_NAMES since it was written, for
+        // exactly this reason; the ternary path never did. An action code is never a panel name, so
+        // subtracting here cannot hide a real one.
+        for (const m of body.matchAll(re)) {
+          if (!PANEL_NAMES.has(m[1])) written.add(m[1]);
+          if (!PANEL_NAMES.has(m[2])) written.add(m[2]);
+        }
       }
     }
   };
