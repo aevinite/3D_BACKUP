@@ -601,7 +601,20 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   const rep = read("app/api/admin/repair/route.ts");
   if (rep) {
     const un = rep.slice(rep.indexOf('op === "unstick_table"'), rep.indexOf('op === "edit_time"'));
-    if (/select\("id, table_number, status"\)/.test(un)) ok("the Repair Kit's unstick reads whether the table is already closed");
+    // ── ASSERT THE COLUMNS, NOT THE SPELLING (T28 of sweep #9, 2026-09-15) ───────────────────────
+    // This matched a literal `.select("id, table_number, status")`. Commit 68bb9116 (T27's item 3,
+    // 2026-09-15) consolidated the five per-op reads onto one `readOne(table, cols, id, rid, absent)`
+    // helper, so the same columns are now a STRING ARGUMENT rather than a `.select(` call — and this
+    // guard went RED on `main` over a route that is strictly more correct than before. The rule it
+    // exists for is unchanged and still kept: `status` is read for THIS op, in this op's own slice.
+    // The read may be spelled either way; the columns are what matters.
+    // GROUP ONE ONLY. Written with `.match(/…/g)` first, which returns whole matches — so the
+    // `readOne<{ table_number?: string; status?: string }>` TYPE parameter was in the joined string
+    // and `/\bstatus\b/` matched it whatever the columns said. Sabotage caught that: deleting
+    // `status` from the actual column list left this green. Only the quoted column list counts.
+    const reads = (slice) => [...slice.matchAll(/(?:select\(|readOne<[^>]*>\(\s*"[a-z_]+",)\s*"([^"]+)"/g)]
+      .map((m) => m[1]).join(" ");
+    if (/\bstatus\b/.test(reads(un))) ok("the Repair Kit's unstick reads whether the table is already closed");
     else fail("the Repair Kit's unstick no longer reads `status` — closeSession succeeds on an already-closed session, so it would record a repair that repaired nothing");
     if (/alreadyClosed/.test(un)) ok("…and says so instead of writing a repair line");
     else fail("the Repair Kit's unstick no longer distinguishes 'already closed' from 'I unstuck it'");
@@ -646,7 +659,12 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   if (!rep) fail("app/api/admin/repair/route.ts is missing");
   else {
     const vb = rep.slice(rep.indexOf('op === "void_bill"'), rep.indexOf('op === "delete_order"'));
-    if (/select\("id, table_number, invoice_no, invoice_voided, bill_no"\)/.test(vb))
+    // Same move as the unstick check above (T28, 2026-09-15): the columns, not the spelling. Both
+    // `invoice_no` and `invoice_voided` must be read for THIS op — a void keeps the number, so an
+    // invoice_no test on its own passes a second time and the Removals record counts the money twice.
+    const vbCols = [...vb.matchAll(/(?:select\(|readOne<[^>]*>\(\s*"[a-z_]+",)\s*"([^"]+)"/g)]
+      .map((m) => m[1]).join(" ");      // group one only — see the note on `reads` above
+    if (/\binvoice_voided\b/.test(vbCols) && /\binvoice_no\b/.test(vbCols))
       ok("the Repair Kit's void reads whether the invoice is ALREADY voided");
     else fail("the Repair Kit's void no longer reads `invoice_voided` — a void KEEPS the number, so an invoice_no test alone passes a second time and the Removals record gets two rows for one void");
     if (/owns\.invoice_voided\)\s*return err/.test(vb))
