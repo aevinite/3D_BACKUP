@@ -55,6 +55,24 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ sessions: sessRes.data ?? [], orders: ordRes.data ?? [] });
 }
 
+/**
+ * One scoped read of a row this restaurant must own, with the three answers kept apart:
+ * the row · "that isn't for this restaurant" (it really is not there) · "couldn't load it"
+ * (we could not tell, so nothing is refused on a guess). See the note inside handler().
+ */
+async function readOne<T>(
+  table: "sessions" | "orders",
+  cols: string,
+  id: string,
+  rid: string,
+  absent: string,
+): Promise<{ row: T } | { res: NextResponse }> {
+  const q = await sb.from(table).select(cols).eq("id", id).eq("restaurant_id", rid).maybeSingle();
+  if (q.error) return { res: adminFail(table === "sessions" ? "that table" : "that order", q.error, { action: "load" }) };
+  if (!q.data) return { res: err(absent, 404) };
+  return { row: q.data as T };
+}
+
 // Which restaurant this request is repairing, so the after-write floor drop below knows what to
 // clear. Keyed by the request object exactly like the panel routes do it.
 const writeRid = new WeakMap<NextRequest, string>();
@@ -93,8 +111,24 @@ async function handler(req: NextRequest) {
     if (op === "void_bill") {
       const sessionId = String(body.session_id || "");
       if (!UUID.test(sessionId)) return err("invalid session_id");
-      const owns = (await sb.from("sessions").select("id, table_number, invoice_no, invoice_voided, bill_no").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; invoice_no?: number | null; invoice_voided?: boolean | null; bill_no?: number | null } | null;
-      if (!owns) return err("That table isn't for this restaurant.", 404);
+    // ── A BLIP MUST NOT READ AS "THAT ISN'T FOR THIS RESTAURANT" (T27 sweep #9, 2026-09-15) ──────
+    // All five ownership reads in this handler were `(await sb…).data` — the shape where the error
+    // is not merely unchecked but UNREACHABLE — and each one decides a 404 that ACCUSES the admin of
+    // having picked the wrong restaurant. Nothing retries a 404, so the surgery is simply refused,
+    // with a sentence that sends him looking at the restaurant picker instead of pressing again.
+    //
+    // This handler is used when service is ALREADY going wrong — that is the whole premise in the
+    // file's own header ("calm a problem in seconds ... while Claude works the permanent fix"). It is
+    // the worst possible place for a passing database hiccup to answer with a confident refusal about
+    // ownership. Its sibling read three lines down (`beforeQ`) was given exactly this treatment in
+    // sweep #7 and says why on the line; these five were left behind.
+    //
+    // `readOne` keeps the refusal wording byte-for-byte identical when the row really is absent, and
+    // says "couldn't load" (lib/adminFail) when we could not tell.
+      const ownsR = await readOne<{ table_number?: string; invoice_no?: number | null; invoice_voided?: boolean | null; bill_no?: number | null }>(
+        "sessions", "id, table_number, invoice_no, invoice_voided, bill_no", sessionId, rid, "That table isn't for this restaurant.");
+      if ("res" in ownsR) return ownsR.res;
+      const owns = ownsR.row;
       if (!owns.invoice_no) return err("This bill has no invoice to void.", 409);
       // ── AND IT MUST NOT BE VOIDED TWICE (T20, 2026-09-01) ────────────────────────────────────────
       // A void KEEPS the invoice number — retired and marked cancelled, never erased, because a number
@@ -152,9 +186,12 @@ async function handler(req: NextRequest) {
     if (op === "delete_order") {
       const orderId = String(body.order_id || "");
       if (!UUID.test(orderId)) return err("invalid order_id");
-      const cur = (await sb.from("orders").select("id, table_number, payment_status, status, total, session_id").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as
-        { table_number?: string; payment_status?: string; status?: string; total?: number | null; session_id?: string | null } | null;
-      if (!cur) return err("That order isn't for this restaurant.", 404);
+      // Answers for itself — see the note in void_bill above. This one also feeds the Removals
+      // record's amount, so a guess here would be a wrong figure on the owner's audit screen.
+      const curR = await readOne<{ table_number?: string; payment_status?: string; status?: string; total?: number | null; session_id?: string | null }>(
+        "orders", "id, table_number, payment_status, status, total, session_id", orderId, rid, "That order isn't for this restaurant.");
+      if ("res" in curR) return curR.res;
+      const cur = curR.row;
       await softDeleteOrders(rid, [orderId], { actor: "Admin (repair)", actorId: null, reason: reason || "admin repair delete" });
       await logRepair("repair_delete_order", { order_id: orderId, table_number: cur.table_number ?? null, detail: (cur.payment_status === "paid" ? "was PAID — " : "") + "soft-deleted (tombstoned)" });
       // Same reason as the void above: a removal has to reach the Audit, not just the log.
@@ -172,8 +209,11 @@ async function handler(req: NextRequest) {
     if (op === "refire_order") {
       const orderId = String(body.order_id || "");
       if (!UUID.test(orderId)) return err("invalid order_id");
-      const src = (await sb.from("orders").select("id, table_number, items, allergies").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; items?: unknown[]; allergies?: unknown } | null;
-      if (!src) return err("That order isn't for this restaurant.", 404);
+      // Answers for itself — see the note in void_bill above.
+      const srcR = await readOne<{ table_number?: string; items?: unknown[]; allergies?: unknown }>(
+        "orders", "id, table_number, items, allergies", orderId, rid, "That order isn't for this restaurant.");
+      if ("res" in srcR) return srcR.res;
+      const src = srcR.row;
       const table = String(src.table_number || "").trim();
       if (!/^\d+$/.test(table)) return err("The original order has no valid table to re-fire onto.");
       const items = Array.isArray(src.items) ? src.items : [];
@@ -248,8 +288,12 @@ async function handler(req: NextRequest) {
       // an operation that changed nothing must not be recorded as one.
       // It is not an ERROR — pressing it on a table someone else just closed is a reasonable thing to
       // do — so it answers ok with `alreadyClosed`, and writes no diary line.
-      const owns = (await sb.from("sessions").select("id, table_number, status").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; status?: string } | null;
-      if (!owns) return err("That table isn't for this restaurant.", 404);
+      // Answers for itself — see the note in void_bill above. `status` decides the alreadyClosed
+      // answer below, so an unread row must not be able to reach it either.
+      const ownsR = await readOne<{ table_number?: string; status?: string }>(
+        "sessions", "id, table_number, status", sessionId, rid, "That table isn't for this restaurant.");
+      if ("res" in ownsR) return ownsR.res;
+      const owns = ownsR.row;
       if (owns.status === "closed") {
         return NextResponse.json({ ok: true, alreadyClosed: true, message: "That table is already closed — nothing to unstick." });
       }
@@ -270,8 +314,12 @@ async function handler(req: NextRequest) {
       // Guard against a fat-fingered far-future/past time.
       const yr = d.getUTCFullYear();
       if (yr < 2020 || yr > 2100) return err("That date looks wrong — check the year.");
-      const cur = (await sb.from("orders").select("id, table_number, created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; created_at?: string } | null;
-      if (!cur) return err("That order isn't for this restaurant.", 404);
+      // Answers for itself — see the note in void_bill above. `created_at` is the BEFORE half of
+      // the diary line, so an unread row would record the move as "undefined -> <new time>".
+      const curR = await readOne<{ table_number?: string; created_at?: string }>(
+        "orders", "id, table_number, created_at", orderId, rid, "That order isn't for this restaurant.");
+      if ("res" in curR) return curR.res;
+      const cur = curR.row;
       const { error } = await sb.from("orders").update({ created_at: d.toISOString() }).eq("id", orderId).eq("restaurant_id", rid);
       if (error) throw new Error(error.message);
       await logRepair("repair_edit_time", { order_id: orderId, table_number: cur.table_number ?? null, detail: `${cur.created_at} → ${d.toISOString()}` });
