@@ -33,7 +33,74 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P110951`.** *(**T2 of sweep #9 took `P110501`–`P110950` — FOUR HUNDRED AND FIFTY ids, not 500 — on 2026-09-15**, for a second freshly planned 500 over the dish page and the 3D viewer, on the owner's word after round 1 and the three picked follow-ups were merged and deployed: *"make it live and plan the whole 500 phases test again within the boundaries that you have given and test it again so that if any errors are left still within the boundaries that you have given, it can be solved"*.
+## 🔴 SWEEP #9 ROUND-2 BLOCKS ARE PRE-ALLOCATED. **DO NOT CLAIM FROM THE LINE BELOW.**
+
+**Added 2026-09-15 by sweep #9's planning session, after `verify:ledger-index` went RED on `main`
+with 517 problems: 520 ids written twice.** T1 and T3 both filed `P110497`–`P110500`; T1 and T2
+both filed a long stretch of `P1105xx`. Nobody was careless. **Four terminals were each told by the
+owner, in their own windows, to run a fresh 500-phase round** — *"plan the whole 500 phases test
+again within the boundaries that you have given"* — and all four went to the same *Next free ID*
+line within minutes of each other. That line cannot serve four simultaneous claimants; it is the
+seventh, eighth and ninth collision it has caused.
+
+**So it stops being the mechanism. Every sweep-#9 terminal now has a SECOND pre-allocated block of
+1,000 ids for round 2, round 3 and anything after.** They start at `P120001`, a deliberate gap above
+the highest id on disk (`P110950`), so nothing can meet anything already written.
+
+| terminal | round-2+ block (1,000 ids) |
+|---|---|
+| T1 | `P120001`–`P121000` |
+| T2 | `P121001`–`P122000` |
+| T3 | `P122001`–`P123000` |
+| T4 | `P123001`–`P124000` |
+| T5 | `P124001`–`P125000` |
+| T6 | `P125001`–`P126000` |
+| T7 | `P126001`–`P127000` |
+| T8 | `P127001`–`P128000` |
+| T9 | `P128001`–`P129000` |
+| T10 | `P129001`–`P130000` |
+| T11 | `P130001`–`P131000` |
+| T12 | `P131001`–`P132000` |
+| T13 | `P132001`–`P133000` |
+| T14 | `P133001`–`P134000` |
+| T15 | `P134001`–`P135000` |
+| T16 | `P135001`–`P136000` |
+| T17 | `P136001`–`P137000` |
+| T18 | `P137001`–`P138000` |
+| T19 | `P138001`–`P139000` |
+| T20 | `P139001`–`P140000` |
+| T21 | `P140001`–`P141000` |
+| T22 | `P141001`–`P142000` |
+| T23 | `P142001`–`P143000` |
+| T24 | `P143001`–`P144000` |
+| T25 | `P144001`–`P145000` |
+| T26 | `P145001`–`P146000` |
+| T27 | `P146001`–`P147000` |
+| T28 | `P147001`–`P148000` |
+| T29 | `P148001`–`P149000` |
+| T30 | `P149001`–`P150000` |
+| T31 | `P150001`–`P151000` |
+| T32 | `P151001`–`P152000` |
+| T33 | `P152001`–`P153000` |
+| T34 | `P153001`–`P154000` |
+| T35 | `P154001`–`P155000` |
+| T36 | `P155001`–`P156000` |
+| T37 | `P156001`–`P157000` |
+| T38 | `P157001`–`P158000` |
+| T39 | `P158001`–`P159000` |
+| T40 | `P159001`–`P160000` |
+
+**The rule, for the rest of sweep #9:** your round-1 block is in your prompt; your round-2+ block is
+the row above. **You never read, never edit and never claim from the *Next free ID* line.** If you
+exhaust 1,000 round-2 ids, STOP and say so in your chat report — do not take a range from anywhere.
+
+**The existing 520 duplicates still need repairing** — per this file's own rule, the terminal whose
+block a duplicated id legitimately is keeps it, and the newer claimant renumbers into its round-2
+block above. That repair is a named job, not something to do in passing.
+
+---
+
+**Next free ID (SWEEP #9: DO NOT CLAIM FROM THIS LINE — see the round-2 table above): `P110951`.** *(**T2 of sweep #9 took `P110501`–`P110950` — FOUR HUNDRED AND FIFTY ids, not 500 — on 2026-09-15**, for a second freshly planned 500 over the dish page and the 3D viewer, on the owner's word after round 1 and the three picked follow-ups were merged and deployed: *"make it live and plan the whole 500 phases test again within the boundaries that you have given and test it again so that if any errors are left still within the boundaries that you have given, it can be solved"*.
 >
 > **450 and not 500 because 50 of this terminal's own pre-allocated block are still free** — `P101751`–`P101800`, contiguous, counted against every ledger on disk rather than against this line. So the round is 50 + 450 = 500 and only the SHORTFALL is claimed here; taking a fresh 500 from the mark would be taking ids this terminal does not need. Same arithmetic T8, T10, T19 and T20 used in sweep #8.
 >
