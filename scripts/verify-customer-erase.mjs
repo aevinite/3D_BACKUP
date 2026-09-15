@@ -180,7 +180,13 @@ if (!LIVE) {
     sessionId = s.data.id;
     const o = await sb.from("orders").insert({
       restaurant_id: rid, session_id: sessionId, table_number: "T9-erase",
-      status: "served", payment_status: "paid", total: 111, subtotal: 111,
+      // paid_at is stamped with payment_status, always. Every PRODUCT path that settles a bill
+      // writes the pair together (app/api/tablet, app/api/editor, lib/paySplit.ts); a fixture that
+      // writes only half of it invents a shape the app cannot produce — "paid, but never paid" —
+      // and `lfh_khata_collected` filters on `paid_at IS NOT NULL`, so such a row silently drops
+      // out of a collection report. (sweep #9 T30 item 2)
+      status: "served", payment_status: "paid", paid_at: new Date().toISOString(),
+      total: 111, subtotal: 111,
       items: [{ title: "T9 erase test dish", qty: 1, price: 111 }],   // orders.items is NOT NULL
     }).select("id").maybeSingle();
     if (o.error) throw new Error(`couldn't seed the order: ${o.error.message}`);

@@ -105,7 +105,8 @@ async function main() {
     }
 
     // (b) settle the bill, and the same check must now let the erase through.
-    const paid = await sb.from("orders").update({ payment_status: "paid" }).eq("id", order.data.id);
+    // paid_at rides with payment_status — see the note in verify-customer-erase.mjs (T30 item 2).
+    const paid = await sb.from("orders").update({ payment_status: "paid", paid_at: new Date().toISOString() }).eq("id", order.data.id);
     if (paid.error) bad(`could not settle the fixture bill: ${paid.error.message}`);
     else {
       const owe2 = await sb.rpc("lfh_khata_outstanding", { p_restaurant_ids: [RID], p_limit: 500 });

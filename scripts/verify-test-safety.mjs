@@ -518,6 +518,65 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   );
 }
 
+// ── 13. A FIXTURE MUST NOT WRITE A SHAPE THE PRODUCT CANNOT PRODUCE ──────────────────────────
+//
+// Specifically: marking an order PAID without stamping WHEN it was paid. All three product paths
+// that settle a bill write the pair in one object — `app/api/tablet/[...path]/route.ts`,
+// `app/api/editor/[...path]/route.ts` and `lib/paySplit.ts` — so "paid, but never paid" is a state
+// the app itself can never reach. Four scripts wrote it anyway (verify-customer-erase,
+// t9-fixture-test, stress, seed-demo-orders), and by 2026-09-15 there were 167 such rows in the
+// dev database: enough to turn the ledger's own data-integrity row (P25413) red.
+//
+// It cost nothing VISIBLE, which is exactly why it survived: every owner money figure resolves the
+// date with `CASE WHEN khata_at IS NOT NULL AND paid_at IS NOT NULL THEN paid_at ELSE created_at
+// END`, so these rows fell back to created_at and landed in the right day anyway. But
+// `lfh_khata_collected` filters on `paid_at IS NOT NULL` outright — a fixture bill simply vanished
+// from a collection report, silently, with no error anywhere. A test that seeds an impossible row
+// is a test that will one day disagree with the product and be believed over it.
+// (sweep #9 / T30, 2026-09-15, item 2.)
+{
+  const bad = [];
+  for (const f of files) {
+    const src = read(f);
+    if (!src) continue;
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // ONLY A REAL DATABASE WRITE COUNTS, and getting that boundary right took two passes.
+    // The first version flagged five more files and every one of them was innocent:
+    // `verify-bill-ledger-sweep.mjs` and `sweep/t22/rerun-existing.mjs` build plain objects and
+    // hand them to `deriveBillState()` — a pure function, no database, and the whole point of
+    // those fixtures is a bill that is paid, so demanding a timestamp there is noise. And
+    // `verify-t25-editor-writes.mjs` both seeds an in-memory `world({…})` and POSTs
+    // `{ payment_status: "paid" }` as a request BODY — where the ROUTE stamps paid_at, which is
+    // the behaviour under test. A guard that cries wolf on three of five hits is a guard people
+    // learn to scroll past, which is the lesson section 12 above is entirely about.
+    // So: the write must go through a supabase client, at `orders`, via insert/update/upsert.
+    for (const m of code.matchAll(/\.from\(\s*["']orders["']\s*\)\s*\.\s*(insert|update|upsert)\(([\s\S]{0,300})/g)) {
+      const win = m[2];
+      if (!/payment_status\s*:\s*["']paid["']/.test(win)) continue;
+      if (/paid_at/.test(win)) continue;
+      // A spread carries the stamp in from a constant (seed-demo-orders' PAID_DONE shape), so
+      // accept a paid_at anywhere the spread object is built in this file.
+      if (/\.\.\./.test(win) && /paid_at/.test(code)) continue;
+      bad.push(`${f.replace(ROOT + "/", "")} — writes payment_status: "paid" to orders with no paid_at`);
+      break;
+    }
+    // The same write built as a shared constant and spread in (PAID_DONE). Caught separately
+    // because the object literal is nowhere near the `.update(`/`.insert(` call.
+    for (const m of code.matchAll(/=\s*\{[^{}]*payment_status\s*:\s*["']paid["'][^{}]*\}/g)) {
+      if (/paid_at/.test(m[0])) continue;
+      if (/paid_at/.test(code)) continue;          // stamped elsewhere, e.g. conditionally spread
+      if (!/\.from\(\s*["']orders["']\s*\)/.test(code)) continue;  // never reaches the database
+      bad.push(`${f.replace(ROOT + "/", "")} — a shared "paid" order shape carries no paid_at`);
+      break;
+    }
+  }
+  check(
+    'no test marks an order paid without stamping paid_at (the product always writes both)',
+    bad.length === 0,
+    bad.join("\n    ") + "\n    Add:  paid_at: new Date().toISOString()  — or the order's own created_at for a back-dated fixture.",
+  );
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

@@ -140,6 +140,18 @@ function makeOrder(rest, createdAt, live) {
     discount_note: DEMO_TAG, // ← the idempotency marker
     created_at: createdAt.toISOString(),
     ...st,
+    // A DEMO BILL THAT IS PAID CARRIES THE TIME IT WAS PAID (sweep #9 T30 item 2).
+    // `PAID_DONE` used to set payment_status without paid_at, so every seeded bill was
+    // "paid, but never paid" — a shape no product path can produce, because all three of
+    // them (app/api/tablet, app/api/editor, lib/paySplit.ts) write the pair together.
+    // It cost nothing visible: every owner figure resolves the date with
+    // `CASE WHEN khata_at IS NOT NULL AND paid_at IS NOT NULL THEN paid_at ELSE created_at END`,
+    // so these rows fell back to created_at and landed in the right day anyway. But
+    // `lfh_khata_collected` filters on `paid_at IS NOT NULL` outright, so a seeded bill
+    // silently vanished from a collection report — and 167 such rows had already made the
+    // ledger's own data-integrity row (P25413) go red. Back-dated to the order's own time,
+    // which is the only honest stamp available for a bill that was never really settled.
+    ...(st === PAID_DONE ? { paid_at: createdAt.toISOString() } : {}),
   };
 }
 
