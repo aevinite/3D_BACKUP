@@ -178,10 +178,41 @@ export function outletIdFrom(payload: Record<string, unknown>): string {
   return "";
 }
 
+/**
+ * "WE COULDN'T CHECK" IS NOT "WE DON'T KNOW THAT OUTLET" (T28 of sweep #9, 2026-09-15).
+ *
+ * This function used to answer `null` for three different things, and the route turned every one of
+ * them into the same HTTP 404 with the same sentence — "We don't recognise that outlet. Ask Aevidine
+ * to link it to a restaurant first." — chosen deliberately, in its own words, "so the aggregator
+ * stops retrying and somebody goes and sets the mapping up".
+ *
+ * That is the right answer for two of the three and the worst possible one for the third. If the
+ * channel-mappings READ fails — a Supabase blip, a statement timeout, the gateway having a moment —
+ * the platform is told the outlet does not exist. Every aggregator treats 404 as final, so it stops
+ * retrying: a real order, with real food and real money on it, is dropped and never reaches the
+ * kitchen, and the restaurant is sent to check a mapping that was correct all along.
+ *
+ * It is the same distinction `lib/ownerScope.ts` draws with `OwnerScopeUnavailable` ("a scope we
+ * failed to READ is a transient problem") and the same one `/api/blocked` draws in `usedToday`
+ * ("the page still renders on doubt, the write still refuses on doubt"). Refusing to GUESS is
+ * unchanged and is still the whole point — what changes is which refusal the caller sends.
+ *
+ * Dormant today (the `aggregators` flag is off), which is the only reason it has never bitten. That
+ * is exactly the reason finding F11 was fixed while dormant too: the day this is switched on for a
+ * real client, the failure is a silently lost order that nothing on either side records.
+ */
+export type WebhookTarget =
+  | { restaurantId: string }
+  /** We asked and got a clear answer: no restaurant claims this outlet, or two do. Final — the
+   *  aggregator should stop and somebody should set the mapping up. */
+  | { restaurantId: null; unread: false }
+  /** We could not ask. Nothing is known either way, so the caller must ask the platform to retry. */
+  | { restaurantId: null; unread: true };
+
 export async function resolveWebhookRestaurant(
   source: AggSource,
   payload: Record<string, unknown>,
-): Promise<string | null> {
+): Promise<WebhookTarget> {
   const outlet = outletIdFrom(payload);
   // Every restaurant with THIS channel switched on — asked of Postgres, not of every row in the
   // table (T25, sweep #7, 2026-08-28).
@@ -210,7 +241,9 @@ export async function resolveWebhookRestaurant(
     .limit(500);
   if (r.error) {
     console.error("[aggregators] could not read channel mappings:", r.error.message);
-    return null;                       // couldn't check → refuse, never guess
+    // Couldn't check → refuse, never guess. But say WHICH refusal this is: the caller owes the
+    // platform a "try again", not a "that outlet does not exist". See WebhookTarget above.
+    return { restaurantId: null, unread: true };
   }
   // The JavaScript test stays as a second line of defence: it is what makes `on: "true"` (a string
   // somebody hand-edited) or a future third state fail CLOSED here rather than resolve a restaurant.
@@ -221,18 +254,18 @@ export async function resolveWebhookRestaurant(
     const matches = live.filter((row) => String(row.platform_channels?.[source]?.outlet ?? "") === outlet);
     // Exactly one, or nothing. Two restaurants claiming the same outlet id is a configuration
     // mistake, and picking one of them at random is the very thing this function exists to stop.
-    if (matches.length === 1) return matches[0].restaurant_id;
+    if (matches.length === 1) return { restaurantId: matches[0].restaurant_id };
     if (matches.length > 1) {
       console.error(`[aggregators] ${matches.length} restaurants claim ${source} outlet "${outlet}" — refusing to guess`);
     }
-    return null;
+    return { restaurantId: null, unread: false };
   }
 
-  if (live.length === 1) return live[0].restaurant_id;
+  if (live.length === 1) return { restaurantId: live[0].restaurant_id };
   if (live.length > 1) {
     console.error(`[aggregators] ${source} order carried no outlet id and ${live.length} restaurants have the channel on — refusing to guess`);
   }
-  return null;
+  return { restaurantId: null, unread: false };
 }
 
 export async function ingestIncoming(source: AggSource, payload: Record<string, any>, restaurantId: string = DEFAULT_RESTAURANT_ID) {
