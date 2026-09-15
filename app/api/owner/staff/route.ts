@@ -212,8 +212,33 @@ async function scope(req: NextRequest): Promise<Scope> {
       // list a stale set for a reassigned restaurant (audit 2026-07-07). Mirrors lib/ownerScope.
       const [primaryQ, membersQ] = await Promise.all([
         sb.from("restaurants").select("owner_user_id").eq("id", pin).maybeSingle(),
-        sb.from("restaurant_owners").select("user_id").eq("restaurant_id", pin),
+        sb.from("restaurant_owners").select("user_id").eq("restaurant_id", pin).limit(1000),
       ]);
+      // ── THESE TWO READS' ERRORS COUNT TOO (T28 of sweep #9, 2026-09-15) ────────────────────────
+      // `lib/ownerScope.ts` was given this exact correction by T25 of sweep #7 on 2026-08-28, and
+      // its note there describes this branch word for word: "a failure here left `members` empty and
+      // `primary` undefined, `ownerId` fell through to null, and the function returned
+      // `{ ids: [acting] }`: the admin who opened a five-restaurant owner's cockpit saw ONE, with
+      // nothing on screen to say the other four had been dropped rather than never existed."
+      //
+      // This is the twin of that function — the Team page resolves the act-as set itself instead of
+      // calling ownerScope — and it was left reading `.data || []`. The consequence is the same and
+      // lands on a screen: the admin opens an owner's Team page, and it lists ONE restaurant's
+      // people, completely and convincingly, for an owner who has five. Every other read in this
+      // function already answers `transient()`; the widen read three lines below was given that on
+      // 2026-08-14 (T19) and these two, one rung earlier in the same ladder, were missed both times.
+      //
+      // "Nobody owns this restaurant" is a real, different answer, and it still falls through to the
+      // single-restaurant scope below — which is why the ERROR is checked rather than the emptiness.
+      //
+      // The members read also gains the `.limit(1000)` its twin carries: PostgREST caps an unbounded
+      // select at a thousand rows with no error, so an unbounded read is capped anyway and this one
+      // now says so.
+      if (membersQ.error || primaryQ.error) {
+        console.error("[owner/staff] could not read who owns the acting restaurant:",
+          membersQ.error?.message || primaryQ.error?.message);
+        return { ok: false, resp: transient() };
+      }
       const members = (membersQ.data || []).map((m) => m.user_id as string);
       const primary = primaryQ.data?.owner_user_id as string | null | undefined;
       // ?as=<ownerId> — WHICH owner's cockpit this tab was opened for (T19 sweep, 2026-08-14).
@@ -236,7 +261,7 @@ async function scope(req: NextRequest): Promise<Scope> {
         // the page rendered a complete-looking Team screen for ONE restaurant, with nothing
         // saying the others had been dropped rather than never existed. Every other read in this
         // function already answers `transient()`; this one allowed a wrong answer through.
-        const owned = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId);
+        const owned = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(1000);
         if (owned.error) {
           console.error("[owner/staff] could not widen the act-as set:", owned.error.message);
           return { ok: false, resp: transient() };
