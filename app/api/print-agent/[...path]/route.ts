@@ -115,7 +115,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // SEEN_REFRESH_MS in lib/printHelpers: a round does not return until the backlog is empty, hello
   // is only asked every fifth round, and the two together made a helper printing a rush report
   // itself ASLEEP on all three boards. It writes at most once every ten seconds.
-  await touchAgent(agent.id, agent.last_seen_at);
+  await touchAgent(agent);
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
 
   // POST /hello — "here I am, and here is what I can print on."
@@ -242,7 +242,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   // This is the ask a working helper makes constantly and `hello` is the one it now skips four
   // times out of five, so a sign of life written only in the POST handler would have fixed nothing
   // for a computer that is busy printing. The reasoning in full: SEEN_REFRESH_MS, lib/printHelpers.
-  await touchAgent(agent.id, agent.last_seen_at);
+  await touchAgent(agent);
 
   // GET /next — "anything for me?" The answer is normally 204: no body, no work, no cost.
   if (seg[0] === "next") {
