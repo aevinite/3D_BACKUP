@@ -84,6 +84,14 @@ export async function GET(req: NextRequest) {
       sb.from("inv_movements").select("id").eq("restaurant_id", rid).order("id", { ascending: false }).limit(1),
       sb.from("expenses").select("created_at, voided_at").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(1),
     ]);
+    // Same rule as the owner dashboard's staff-pay detector (T28, 2026-09-15): a detector that could
+    // not look must not answer with the value it would give for "nothing has ever happened here".
+    // Both of these are what notices a purchase or an expense, and a collapse to "0||" means the
+    // stock figures sit still through a day of buying.
+    if (mv.error || ex.error) {
+      console.error("[owner/inventory] the change-detector could not be read:", mv.error?.message || ex.error?.message);
+      return `unread|${Date.now()}`;
+    }
     const m = (mv.data || [])[0]; const e = (ex.data || [])[0];
     return [m?.id ?? 0, e?.created_at ?? "", e?.voided_at ?? ""].join("|");
   };
@@ -295,6 +303,11 @@ async function estate(
       sb.from("expenses").select("created_at, voided_at").in("restaurant_id", ids)
         .order("created_at", { ascending: false }).limit(1),
     ]);
+    // Same rule again, for the estate roll-up. (See the single-restaurant detector above.)
+    if (mv.error || ex.error) {
+      console.error("[owner/inventory.estate] the change-detector could not be read:", mv.error?.message || ex.error?.message);
+      return `unread|${Date.now()}`;
+    }
     const m = (mv.data || [])[0]; const e = (ex.data || [])[0];
     return [ids.length, m?.id ?? 0, e?.created_at ?? "", e?.voided_at ?? ""].join("|");
   };

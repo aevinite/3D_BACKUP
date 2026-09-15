@@ -244,6 +244,23 @@ for (const [re, what] of [
 // capital P in "SWEEP" the moment the line grew a parenthetical, which is how the old matcher came
 // to read a historical paragraph instead. Every mark this file has ever carried is written `P…`.
 const declared = index.match(new RegExp("^\\*\\*next free ID[^`]*`P(" + ID_DIGITS + ")`", "im"));
+// ── …AND IF THAT LINE GOES MISSING, REFUSE. DO NOT SILENTLY PASS. ──────────────────────────────
+// (T28 of sweep #9, 2026-09-15. T29 and T28 found the mis-read above INDEPENDENTLY, within the hour,
+// and T29's matcher is the one on `main` and the one kept — it scans to the first BACKTICKED id,
+// which is stricter than T28's and explains its own reason. This is the half T28's version had that
+// T29's did not, so it is all that survives of it; the rest of that commit was dropped, including
+// its renumber, because T29's landed first and this file's own rule is that the one on `main` stays.)
+//
+// Everything below is inside `if (declared)`. So the moment the registry line stops matching — a
+// reworded heading, a mark written without backticks, the line deleted in a tidy-up — this check
+// does not fail, it VANISHES, and the one number every sweep reads before claiming a block stops
+// being watched at all. That is the same failure as reading the wrong line, just quieter, and it is
+// the shape `verify:cache` recorded: green for a month while asserting nothing.
+if (!declared) {
+  fail("INDEX.md has no line BEGINNING with `**Next free ID … \`P…\`` — that line is the registry " +
+    "every sweep reads before it claims a block, and without it this guard cannot check the one " +
+    "thing it exists for. If the mark's shape genuinely changed, change it here in the same commit.");
+}
 if (declared) {
   const next = Number(declared[1]);
   const taken = [...owner.keys()].map((i) => Number(i.slice(1))).filter((n) => n >= next);

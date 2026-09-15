@@ -280,6 +280,26 @@ function checkWhoAndWhichLog() {
   }
   if (calls < 10) fail(`only matched ${calls} logAction call sites across the owner routes — the matcher above has broken, so this guard is asserting nothing`);
   else ok(`all ${calls} owner-reachable log writes name a person and choose their panel through ownerLogPanel()`);
+
+  // ── AND THE SAME RULE WHERE THE PERSON GOES INTO AN RPC, NOT A LOG ROW ─────────────────────────
+  // (T28 of sweep #9, 2026-09-15.) The Removals record's `actor` column is printed on screen exactly
+  // like the Activity log's, and it is filled through `lfh_cancel_classify`'s `p_actor` parameter
+  // rather than through logAction — so the walk above could not see it. It was writing the literal
+  // word "Owner", which on a restaurant with two co-owners answers "who decided that?" with a job
+  // title. The admin's own fuller name stays ("Admin (Aevidine)"), because `lib/auditActor.ts`
+  // matches /^admin\b/i to withhold it from a non-admin reader — so that word is load-bearing.
+  const auditRoute = strip(read("app/api/owner/audit/route.ts"));
+  if (auditRoute) {
+    const call = (auditRoute.match(/lfh_cancel_classify[\s\S]{0,420}?\}\);/) || [])[0] || "";
+    if (!call) fail("app/api/owner/audit/route.ts no longer calls lfh_cancel_classify — if the answer moved, update this guard");
+    else if (/p_actor:\s*[^,\n]*"Owner"/.test(call)) {
+      fail('app/api/owner/audit/route.ts records the literal "Owner" as the person who answered a cancellation — the Removals record PRINTS that column. Use ownerActorName(scope) (lib/ownerScope).');
+    } else if (!/p_actor:[^,\n]*ownerActorName\(/.test(call)) {
+      fail("app/api/owner/audit/route.ts does not take the person from ownerActorName(scope) — one definition, or the screens disagree about who did what.");
+    } else if (!/"Admin \(Aevidine\)"/.test(call)) {
+      fail("app/api/owner/audit/route.ts no longer records the admin as \"Admin (Aevidine)\" — lib/auditActor.ts withholds the admin's identity by matching /^admin\\b/i, so that word is what keeps it hidden from an owner.");
+    } else ok("the Removals record names the owner who answered a cancellation, and still hides the admin");
+  }
 }
 
 // ── 2 · NOBODY STRINGIFIES AN OBJECT INTO A LOG DETAIL ──────────────────────────────────────────

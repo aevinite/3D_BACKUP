@@ -101,6 +101,29 @@ async function ridFromAddress(where: string, referer: string | null): Promise<st
   return null;
 }
 
+/**
+ * WHICH RESTAURANT TO FILE THIS UNDER — the address wins a disagreement.
+ *
+ * `claimed` is whatever the caller sent (already shape-checked); `where` and `referer` are the
+ * address the crash happened at. Three outcomes, and the third is the point:
+ *   · the address names a restaurant and it MATCHES the claim → the claim, as before;
+ *   · the address names no restaurant → the claim, as before. This is every panel report: the
+ *     panels tag the tenant themselves and their addresses (`/manager`, `/kitchen`) name nobody;
+ *   · the address names a DIFFERENT restaurant → the ADDRESS, and the claim is dropped. A page
+ *     cannot be honestly mistaken about which door it is standing at.
+ * With no claim at all it is exactly what it always was: whatever the address says, or null.
+ *
+ * It never REFUSES. Losing a crash report is worse than mislabelling one — this endpoint fails soft
+ * by design, and a fault nobody hears about is the thing it exists to prevent.
+ */
+async function agreedRid(claimed: string | null, where: string, referer: string | null): Promise<string | null> {
+  const fromAddress = await ridFromAddress(where, referer);
+  if (!claimed) return fromAddress;
+  if (!fromAddress || fromAddress === claimed) return claimed;
+  console.warn("[client-error] a report claimed one restaurant and its address named another — filing it under the address");
+  return fromAddress;
+}
+
 export async function POST(req: NextRequest) {
   try {
     // Cap the body hard: a runaway stack trace or a hostile payload can't be huge.
@@ -114,6 +137,29 @@ export async function POST(req: NextRequest) {
     const kind = body.kind === "taps" ? "taps" : "error";
 
     // Optional restaurant scope: trust it only if it's a well-formed uuid, else leave null.
+    //
+    // ── A SHAPE IS NOT A CLAIM ANYONE CHECKED (T28 of sweep #9, 2026-09-15) ───────────────────────
+    // This is a PUBLIC, unauthenticated endpoint, and the only test on the restaurant id it is
+    // handed was that it LOOKS like a uuid. Nothing checked the caller has anything to do with that
+    // restaurant — because nothing can: there is no session here, deliberately, since a crashing
+    // page is the last place to require one. So a broken or curious client could file a crash report
+    // against any restaurant on the platform, and the admin's Repair board would show it under that
+    // restaurant, where "Showing French House only" is exactly how somebody narrows down a real
+    // fault. No money and no private data is involved — it is a label on a support screen — but a
+    // support screen whose filter can be pointed at the wrong restaurant is a support screen that
+    // stops being trusted.
+    //
+    // THE ADDRESS IS THE HONEST SOURCE, and it is already read below for the reports that arrive
+    // with no id at all (`ridFromAddress`, added 2026-08-20 when five problems sat on the board with
+    // no restaurant against them). The guest doors NAME their restaurant — `/r/<slug>/menu` — and
+    // `getRestaurantBySlug` is memoised, so it costs one lookup for a burst.
+    //
+    // So: the supplied id is honoured only when the ADDRESS agrees with it, or when the address
+    // names no restaurant at all (which is every panel report — the panels tag the tenant themselves
+    // through LFH_RT.getRid(), and their own address, `/manager`, names nobody). A supplied id that
+    // CONTRADICTS the address is dropped in favour of the address, and the row still gets filed. The
+    // report is never refused over its label: losing a crash report is worse than mislabelling one,
+    // which is the whole reason this endpoint fails soft.
     const ridRaw = typeof body.rid === "string" ? body.rid : "";
     const rid = UUID.test(ridRaw) ? ridRaw : null;
 
@@ -137,12 +183,15 @@ export async function POST(req: NextRequest) {
       if (await recentActionCount(capKey, "ui_taps", WINDOW_MS, MAX_TAPS_PER_DEVICE_10MIN) >= MAX_TAPS_PER_DEVICE_10MIN) {
         return NextResponse.json({ ok: true, skipped: "rate_limited" });
       }
+      // Same rule as the error branch below: a supplied id is honoured only where the address does
+      // not contradict it (see the note on `rid` above).
+      const tapScope = await agreedRid(rid, String(body.where || ""), req.headers.get("referer"));
       await sb.from("staff_actions").insert({
         // Written under capKey, not `device`, for exactly the reason the error row below is:
         // the cap counts rows BY device_id, so a cookie-less caller's rows must carry the same
         // key or its own cap would forever count zero of them.
         panel, action: "ui_taps", detail, device_id: capKey, level: "info",
-        ...(rid !== null ? { restaurant_id: rid } : { restaurant_id: null }),
+        restaurant_id: tapScope,
       });
       return NextResponse.json({ ok: true });
     }
@@ -158,8 +207,8 @@ export async function POST(req: NextRequest) {
     // untouched and the Repair board's one-line view still leads with the message.
     const detail = `${where ? `${message} @ ${where}` : message}${browserTag(req.headers.get("user-agent"))}`.slice(0, 500);
     // No rid from the client → read it off the address the crash happened at (see ridFromAddress).
-    // Only for a real error row: the tap batches above are already tagged by the panels.
-    const scoped = rid ?? await ridFromAddress(where, req.headers.get("referer"));
+    // A supplied one is honoured only where the address agrees (see the note on `rid` above).
+    const scoped = await agreedRid(rid, where, req.headers.get("referer"));
     // Written under capKey, not `device` — the cap counts rows by device_id, so a cookie-less
     // caller's rows must carry the same key or the cap would count zero of them forever.
     await sb.from("staff_actions").insert({

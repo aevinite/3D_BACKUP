@@ -512,6 +512,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           requested_by: (g.user?.name || g.user?.username || "kitchen").slice(0, 80),
         }).select("id").maybeSingle();
         if (insP.error || !insP.data) return err("Could not send that to the printer.", 500);
+        // REJECTED (owner, 2026-08-20): do NOT move this row onto the `admin` panel to hide it from the
+        // restaurant. Asked on 2026-09-15 whether Aevidine should be invisible here too — the owner's
+        // standing rule, and the one three other log rows were corrected for the same day — the answer
+        // is NO, and this row is the exception that proves where that rule stops. It exists BECAUSE a
+        // physical sheet of paper came out of a machine at a paying client's shop, and
+        // `verify:print-helper` §5 demands it for exactly that ("the admin viewing a restaurant's panel
+        // prints NOTHING at their shop unless deliberately forced — AND THAT IS AUDITED"). Withholding
+        // it would leave paper appearing with nothing at their end explaining it, and they would
+        // reasonably conclude their own staff did it — a worse answer than the truth. The rule about the
+        // admin being invisible is about what we CHANGE on their screens; it was never about an object
+        // appearing in their physical world. Full reasoning: docs/REJECTED-IDEAS.md -> R56.
         await logAction("kitchen", g.user ? "kot_reprint_sent" : "print_sent_by_admin", {
           ...adminMark, device_id: dev, restaurant_id: rid,
           detail: `${String(p.source || "platform").toUpperCase()} KOT #${p.kot_no ?? "—"} sent to ${own.printer} on ${own.agent}`,

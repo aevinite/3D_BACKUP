@@ -247,10 +247,16 @@ export async function claimSetupCode(rawCode: string, machine: ClaimMachine): Pr
     .is("last_seen_at", null).is("revoked_at", null)
     .lt("created_at", ghostCut).limit(20)).data || []) as { id: string; name: string }[];
   for (const g of ghosts) {
+    // SCOPED IN THE STATEMENT, not one statement earlier (T28 of sweep #9, 2026-09-15). The `ghosts`
+    // read above is already `.eq("restaurant_id", row.restaurant_id)`, so `g.id` is provably this
+    // restaurant's — and `verify:scoped-reads` was still RED on this write, correctly: inside `lib/`
+    // the WHERE clause is the only fence, and a scope that lives in a DIFFERENT statement is one
+    // refactor away from not being there at all. This renames and RETIRES a computer, which is the
+    // last write that should ever be reachable from the wrong restaurant. One clause, no exemption.
     await sb.from("print_agents").update({
       name: `${g.name} (never started, ${new Date().toISOString().slice(0, 10)})`,
       revoked_at: new Date().toISOString(),
-    }).eq("id", g.id);
+    }).eq("restaurant_id", row.restaurant_id).eq("id", g.id);
   }
 
   const taken = ((await sb.from("print_agents").select("name")

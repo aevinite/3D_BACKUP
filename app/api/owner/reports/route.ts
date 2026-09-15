@@ -310,6 +310,20 @@ export async function GET(req: NextRequest) {
         ? sb.from("staff_actions").select("id", { count: "exact", head: true }).in("restaurant_id", ids)
         : Promise.resolve({ count: 0 } as { count: number | null }),
     ]);
+    // THE SAME RULE AS THE DASHBOARD'S (T28 of sweep #9, 2026-09-15 — see fpWithStaffPay in
+    // app/api/owner/analytics/route.ts). Neither read's `.error` was inspected, so a failure
+    // collapsed this to the constant "0|||0" — and the note above says exactly why that matters:
+    // "a recorded salary would NOT invalidate the snapshot". This IS the report an argument with a
+    // staff member gets settled from, and the whole point of these two indexed counts is to notice a
+    // payment. A detector that cannot look answers with something that differs every time, so the
+    // snapshot recomputes instead of serving a figure nobody could verify.
+    const payErr = (pay as { error?: unknown }).error;
+    const actErr = (act as { error?: unknown }).error;
+    if (payErr || actErr) {
+      console.error("[owner/reports] the staff change-detector could not be read:",
+        (payErr as { message?: string } | undefined)?.message || (actErr as { message?: string } | undefined)?.message);
+      return `unread|${Date.now()}`;
+    }
     const last = (pay.data || [])[0] as { created_at?: string; voided_at?: string | null } | undefined;
     return [pay.count ?? 0, last?.created_at ?? "", last?.voided_at ?? "", (act as { count?: number | null }).count ?? 0].join("|");
   };

@@ -190,9 +190,62 @@ existed — a slow read, not a dead one. A protection must never be the thing th
         if (/^[a-z_$][\w$]*$/i.test(v) && new RegExp(`\\b${v}\\s*(?::[^=;]*)?=[^;]*?(?:[dD]eadline\\s*\\(|AbortSignal\\s*\\.\\s*timeout|new AbortController)`).test(code)) bounded = true;
         if (/\.signal$/.test(raw) && /new AbortController/.test(code)) bounded = true;
       }
+      // ── AND THE INIT MAY BE A VARIABLE (T28 of sweep #9, 2026-09-15) ─────────────────────────────
+      // A WRAPPER has to pass ONE init object to more than one fetch — `lib/netRetry.ts` calls fetch
+      // twice, once for a write and once per retry attempt, and both must carry the same budget. So
+      // its second argument is a variable, and this guard saw no `signal:` in the call text and
+      // reported "no deadline at all" over a request that is properly bounded. It was RED on `main`
+      // for that, and a red guard here blocks every session in this folder.
+      //
+      // This is the SAME rule as the `signal:` test above, applied one level out: the variable's own
+      // assignment must reach a deadline. It cannot be fooled by the word "signal" appearing — that
+      // is the sabotage the note above records — because the assignment has to contain
+      // `deadline(…)` / `AbortSignal.timeout` / `new AbortController`, exactly as for a named signal.
+      if (!bounded) {
+        const initArg = call.match(/fetch\(\s*[^,()]+,\s*([A-Za-z_$][\w$]*)\s*\)/);
+        const v = initArg && initArg[1];
+        if (v && new RegExp(`\\b${v}\\b[^;\n]*=[^;]*?(?:[dD]eadline\\s*\\(|AbortSignal\\s*\\.\\s*timeout|new AbortController)`).test(code)) bounded = true;
+        // …or the variable is built from a signal that is itself bounded, which is the honest shape
+        // when the ceiling and the object are two statements: `const signal = … deadline(…);`
+        // `const bounded = signal ? { ...init, signal } : init;`
+        if (v && !bounded) {
+          const decl = code.match(new RegExp(`\\b${v}\\b[^;\n]*=([^;]*)`));
+          // Which signal it was built FROM. An explicit `signal: x`, else the shorthand `{ signal }`
+          // — matched as the bare word, because an inner `{}` (`{ ...(init || {}), signal }`) defeats
+          // any attempt to match the braces. The strength is not here: it is the assignment test on
+          // the next line, which the named signal must still pass.
+          const named = decl && decl[1].match(/signal:\s*([A-Za-z_$][\w$.]*)/);
+          const sv = named ? named[1].split(".")[0]
+            : (decl && /\bsignal\b/.test(decl[1]) ? "signal" : null);
+          if (sv && new RegExp(`\\b${sv}\\s*(?::[^=;]*)?=[^;]*?(?:[dD]eadline\\s*\\(|AbortSignal\\s*\\.\\s*timeout|new AbortController)`).test(code)) bounded = true;
+        }
+      }
       if (bounded) continue;
       bare.push(`lib/${f}: ${call.replace(/\s+/g, " ").slice(0, 74)}…`);
     }
+  }
+
+  // ── THE WRAPPER THAT NOW BOUNDS EVERYONE ELSE MUST KEEP ITS OWN CEILING ─────────────────────────
+  // (T28 of sweep #9, 2026-09-15, found by sabotaging this guard rather than by reading it.)
+  //
+  // The note above records hardening this check on 2026-08-31 with one specific sabotage:
+  // "replacing `opts?.signal ?? deadline(30_000)` with a bare `opts?.signal`" in lib/adminFetch.ts.
+  // That sabotage no longer fails, and not because the check weakened — because its SUBJECT MOVED.
+  // adminFetch has no bare `fetch(` left at all: it calls `retryFetch`, and this loop matches a
+  // lowercase `fetch(`, so `retryFetch(` is not scanned. The documented test had quietly stopped
+  // testing anything, which is the same shape as a guard that reads the wrong line.
+  //
+  // Leaving the loop narrow is RIGHT, though: since 2026-09-15 `retryFetch` supplies a ceiling when
+  // its caller brings none, so every one of its callers is bounded by construction and demanding a
+  // second one at each call site would be noise. That makes the whole property rest on ONE line in
+  // ONE file — so that line is asserted here, directly. If the wrapper stops reaching a deadline,
+  // every read in the app silently loses its floor and nothing else would notice.
+  const netRetry = readFileSync(join(libDir, "netRetry.ts"), "utf8");
+  if (!/retryFetch/.test(netRetry)) {
+    bare.push("lib/netRetry.ts: retryFetch has gone — if the shared fetch wrapper moved, update this guard");
+  } else if (!/init\?\.signal\s*\?\?\s*[a-zA-Z_$][\w$]*[dD]eadline|init\?\.signal\s*\?\?\s*deadline\s*\(/.test(netRetry)) {
+    bare.push("lib/netRetry.ts: retryFetch no longer falls back to a deadline when the caller passes " +
+      "no signal — every read that goes through it loses its last ceiling, and the retries triple the wait");
   }
   if (bare.length) {
     console.log(`\n✗ verify:abort-guard — ${bare.length} fetch(es) in lib/ have no deadline at all:\n`);

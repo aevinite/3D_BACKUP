@@ -55,14 +55,31 @@ export const HELPER_STALE_MS = 30_000;
  * not one per poll, and a helper that has stopped still goes quiet and still turns cold after 30s.
  */
 export const SEEN_REFRESH_MS = 10_000;
-export async function touchAgent(id: string, lastSeenAt: string | null): Promise<void> {
-  if (lastSeenAt && Date.now() - new Date(lastSeenAt).getTime() < SEEN_REFRESH_MS) return;
+// ── IT TAKES THE ROW, NOT A BARE ID (T28 of sweep #9, 2026-09-15) ────────────────────────────────
+// It used to be `touchAgent(id: string, lastSeenAt: string | null)`, and the write below was
+// `.eq("id", id)` with no restaurant in it — the one statement in this file that `verify:scoped-reads`
+// could not excuse, and it was RED on `main`.
+//
+// It was SAFE, and that is exactly why it is worth fixing rather than exempting. Both callers pass
+// `agent.id` from a row `agentByToken()` resolved out of the helper's own bearer token, so the id was
+// never caller-chosen. But it crossed a function boundary as a bare string, so nothing in this
+// signature said so: a future caller could hand it any id at all, and inside `lib/` the WHERE clause
+// is the only fence there is — the service-role client has no row-level rules applied to it.
+//
+// The sibling `helloAgent()` never had this problem because it takes the whole row, which is why the
+// guard excuses its identical `.eq("id", agent.id)`. So this one takes the row too: the restaurant is
+// then in hand by construction, the write says which restaurant it is stamping, and the shape needs
+// no exemption at all. The guard got stricter, not more permissive.
+export async function touchAgent(agent: Pick<AgentRow, "id" | "restaurant_id" | "last_seen_at">): Promise<void> {
+  if (agent.last_seen_at && Date.now() - new Date(agent.last_seen_at).getTime() < SEEN_REFRESH_MS) return;
   // Through `wrote`, like every other write in this area — and for the exact fault this function
   // exists to fix: if the stamp silently fails, the boards say NOT CONNECTED about a computer whose
   // helper is polling perfectly, somebody is sent to troubleshoot a machine that is fine, and
   // nothing anywhere says the write never landed. Not a throw: a print path that crashes leaves the
   // ticket in a worse state than one that carries on.
-  await wrote("touchAgent seen-stamp", sb.from("print_agents").update({ last_seen_at: new Date().toISOString() }).eq("id", id));
+  await wrote("touchAgent seen-stamp", sb.from("print_agents")
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq("restaurant_id", agent.restaurant_id).eq("id", agent.id));
 }
 
 // ── THERE IS NO BACKUP PRINTER (owner, 2026-08-30) ───────────────────────────────────────────
