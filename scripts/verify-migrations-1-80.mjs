@@ -211,15 +211,20 @@ if (!db) {
     locked.length > 0 && locked.every((r) => !r.anon),
     locked.filter((r) => r.anon).map((r) => r.proname).join(", ") || `${locked.length} checked`);
 
-  const six = ["feedback", "verification_codes", "payments", "aggregator_orders", "daily_counters", "seq_counters"];
+  // Migration 039 locked SIX tables. Five of them are still here; `verification_codes` was dropped
+  // by migration 384 with the last of the mig-037 verification stub, so there is nothing left to
+  // lock — a retired table cannot be left open. Named here rather than silently dropped from the
+  // list, so the count in the row below stays honest.
+  const six = ["feedback", "payments", "aggregator_orders", "daily_counters", "seq_counters"];
   const rls = await db(`select c.relname, c.relrowsecurity,
                                (select count(*) from pg_policies p where p.schemaname='public' and p.tablename=c.relname
                                   and (p.roles::text like '%anon%' or p.roles::text like '%public%')) as anon_policies
                           from pg_class c join pg_namespace n on n.oid=c.relnamespace
                          where n.nspname='public' and c.relname in (${six.map((t) => `'${t}'`).join(",")})`);
-  check("P104427", "039 still holds: all six tables it locked have RLS on and no policy the guest key can use",
-    rls.length === 6 && rls.every((r) => r.relrowsecurity && Number(r.anon_policies) === 0),
-    rls.filter((r) => !r.relrowsecurity || Number(r.anon_policies)).map((r) => r.relname).join(", ") || "6 of 6");
+  check("P104427", "039 still holds: every table it locked that still EXISTS has RLS on and no policy the guest key can use",
+    rls.length === six.length && rls.every((r) => r.relrowsecurity && Number(r.anon_policies) === 0),
+    rls.filter((r) => !r.relrowsecurity || Number(r.anon_policies)).map((r) => r.relname).join(", ")
+      || `${six.length} of 6 — verification_codes retired by migration 384`);
 
   const bd = (await body("lfh_business_day")) + (await body("lfh_next_counter")) + (await body("lfh_next_counter_on"));
   check("P104428", "044 still holds: the daily number series still rolls over at 05:00 IST, not at UTC midnight",
