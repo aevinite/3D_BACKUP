@@ -79,12 +79,36 @@ export async function GET(req: NextRequest) {
   // the page that explains their situation. Only the WRITE below treats "couldn't count" as a refusal.
   const used = (blocked ? await usedToday(ip) : 0) ?? 0;
   // Any still-open request from this IP → so the page can say "already asked, waiting".
-  let pending = false;
+  //
+  // ── AND "WE COULDN'T LOOK" MUST NOT BE SAID AS "YOU HAVEN'T ASKED" (T28 of sweep #9, 2026-09-15) ─
+  // This read's `.error` was never inspected, so a blip answered `pending: false` — and the card then
+  // offers **Request unblock** to somebody who already asked and is waiting. They press it, and it
+  // spends one of the three they get a day for nothing.
+  //
+  // It is the exact distinction this file already draws twice, in `usedToday` ("the page still renders
+  // on doubt, the write still refuses on doubt") and in the throttled GET above ("we didn't count, so
+  // assume nothing is used"). The counter got it; this one read did not.
+  //
+  // `null` = we could not look, which is neither true nor false, and the page is told so rather than
+  // being handed a guess. The refusal stays where it always was — on the POST, which does its own
+  // count and refuses closed on doubt — so nothing here can hand out a fourth request either way.
+  let pending: boolean | null = false;
   if (blocked) {
-    const { data } = await sb.from("unblock_requests").select("id").eq("ip", ip).eq("status", "open").limit(1);
-    pending = !!(data && data.length);
+    const q = await sb.from("unblock_requests").select("id").eq("ip", ip).eq("status", "open").limit(1);
+    if (q.error) {
+      console.error("[blocked] could not check for an open request:", q.error.message);
+      pending = null;
+    } else {
+      pending = !!(q.data && q.data.length);
+    }
   }
-  return NextResponse.json({ blocked, usedToday: used, remaining: Math.max(0, MAX_PER_DAY - used), pending });
+  return NextResponse.json({
+    blocked, usedToday: used, remaining: Math.max(0, MAX_PER_DAY - used),
+    // `pending` keeps its boolean shape for every normal answer, so no screen has to learn anything;
+    // `pendingUnknown` rides along ONLY when we genuinely could not look.
+    pending: pending === true,
+    ...(pending === null ? { pendingUnknown: true } : {}),
+  });
 }
 
 export async function POST(req: NextRequest) {

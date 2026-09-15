@@ -5,7 +5,9 @@
 // Deliberately calm and non-technical. Matches the dark staff-login styling.
 import { useCallback, useEffect, useState } from "react";
 
-type Status = { blocked: boolean; usedToday: number; remaining: number; pending: boolean };
+// `pendingUnknown` rides along ONLY when the server genuinely could not look for an open request —
+// see the note in app/api/blocked/route.ts. It is absent on every normal answer.
+type Status = { blocked: boolean; usedToday: number; remaining: number; pending: boolean; pendingUnknown?: boolean };
 
 export default function BlockedView() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -66,6 +68,17 @@ export default function BlockedView() {
 
   const remaining = status?.remaining ?? 3;
   const outOfTries = remaining <= 0;
+  // ── "YOU HAVE ALREADY ASKED" WAS NEVER SHOWN (T28 of sweep #9, 2026-09-15) ─────────────────────
+  // The server has answered `pending` since this card shipped — "is there an open request from this
+  // device?" — and this screen read it into its own Status type and then rendered it NOWHERE. The
+  // only thing that changed the button was `sent`, a local flag that resets the moment the page
+  // reloads. So somebody who asked an hour ago came back to a card that looked untouched, pressed
+  // **Request unblock** again, and spent a second of the three they get a day on a duplicate.
+  //
+  // `sent` still counts: it is the truth about THIS page-load and it arrives instantly, before any
+  // re-read. `pendingUnknown` deliberately shows nothing — a card that says "you may or may not have
+  // already asked" is worse than one that says nothing, and the person can simply press it.
+  const alreadyAsked = sent || status?.pending === true;
 
   return (
     <div style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 26, width: "min(94vw, 380px)", maxHeight: "92vh", overflowY: "auto" }}>
@@ -101,11 +114,16 @@ export default function BlockedView() {
       />
       <button onClick={requestUnblock} disabled={busy === "request" || outOfTries}
         style={{ marginTop: 10, width: "100%", padding: 12, borderRadius: 10, border: 0, background: outOfTries ? "#334155" : busy === "request" ? "#2f5fb0" : "#2563eb", color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: busy || outOfTries ? "default" : "pointer" }}>
-        {busy === "request" ? "Sending…" : sent ? "Send another request" : "Request unblock"}
+        {busy === "request" ? "Sending…" : alreadyAsked ? "Send another request" : "Request unblock"}
       </button>
 
       {note ? (
         <div style={{ marginTop: 10, fontSize: 12.5, color: outOfTries ? "#fbbf24" : "#8aa0c6", textAlign: "center", lineHeight: 1.5 }}>{note}</div>
+      ) : alreadyAsked ? (
+        <div style={{ marginTop: 10, fontSize: 12.5, color: "#8aa0c6", textAlign: "center", lineHeight: 1.5 }}>
+          You’ve already asked — the admin will review it. You can send up to 3 requests a day
+          {status ? ` · ${remaining} left today` : ""}.
+        </div>
       ) : (
         <div style={{ marginTop: 10, fontSize: 12, color: "#64748b", textAlign: "center" }}>
           You can send up to 3 requests a day{status ? ` · ${remaining} left today` : ""}.
