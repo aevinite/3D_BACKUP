@@ -553,9 +553,15 @@ row("…and a malformed restaurant id gets a sentence a person can read, never t
 row("…and the admin's own flip of that switch is recorded against the ADMIN's log, not the owner's feed",
   "read: the panel is decided from whether there is a staff user, not hard-coded", () => {
     const src = strip(read("app/api/maintenance/route.ts"));
-    const hard = /logAction\("manager",\s*on \?/.test(src);
-    const decided = /logAction\(s\.admin \? "admin" : "manager"/.test(src);
-    return (!hard && decided) ? true : `hardCodedPanel=${hard} decidedFromTheSession=${decided}`;
+    // ASSERT THE RULE, NOT THE SPELLING. This first read `logAction(s.admin ? "admin" : "manager"`
+    // and went red the moment that ternary was hoisted into a named variable — which item 7 did on
+    // purpose, because verify:audit was reading a ternary PANEL as two action codes. A check that
+    // fails on correct formatting is a check nobody will trust the next time it goes red.
+    const hard = /logAction\("(manager|kitchen|tablet|editor|owner)"\s*,\s*on \?/.test(src);
+    const decided = /s\.admin \? "admin" : "manager"/.test(src) && /logAction\(logIn\s*,/.test(src);
+    const carriesTheFlag = /admin:\s*!g\.user/.test(src);
+    return (!hard && decided && carriesTheFlag)
+      ? true : `hardCodedPanel=${hard} decidedFromTheSession=${decided} sessionKnowsItIsTheAdmin=${carriesTheFlag}`;
   });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -609,5 +615,11 @@ await browser.close();
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${results.length} checks · ${results.length - failed.length} pass · ${failed.length} fail`);
 for (const f of failed) console.log(`  FAIL ${f.id} ${f.claim} → ${f.why}`);
-fs.writeFileSync(path.join(ROOT, ".t28-run/new50-results.json"), JSON.stringify(results, null, 1));
+// The machine-readable copy goes somewhere that always exists — a run must never fail because a
+// scratch folder was tidied up. (It did, once: this line wrote into the terminal's own working
+// directory and the suite crashed after that directory was deleted at the end of the run.)
+try {
+  fs.mkdirSync(path.join(ROOT, "node_modules/.cache"), { recursive: true });
+  fs.writeFileSync(path.join(ROOT, "node_modules/.cache/t28-new50-results.json"), JSON.stringify(results, null, 1));
+} catch { /* the console output above is the real result; the file is a convenience */ }
 process.exit(failed.length ? 1 : 0);
