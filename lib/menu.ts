@@ -189,7 +189,44 @@ export interface OrderInput {
 // caller uses this to tell the guest the truth instead of always saying "sent"
 // (audit fix 2026-07-06).
 export interface CallWaiterResult { ok: boolean; reason?: string }
+
+// ── "" MEANS WE DO NOT KNOW WHICH RESTAURANT THIS IS — REFUSE IT HERE (owner, 2026-09-15) ───────
+//
+// `lib/restaurant-context.tsx` states the contract in its own words: *"ON A FAILED LOOKUP `id` IS ""
+// and `ready` STAYS FALSE … keys on the restaurant must treat "" the way the server already does:
+// refuse, and say so."* The server did refuse — with a Postgres 400,
+// `invalid input syntax for type uuid: ""` — after a full round trip, on the guest menu. Measured on
+// a production build: it fired on an ordinary menu open, and `verify:guest` was filing it as a
+// "request refused by a THIRD-PARTY service" because the host is not our origin. It is our own
+// database, and the answer was never going to be anything else.
+//
+// WHY A DEFAULT PARAMETER DOES NOT COVER THIS, which is the whole trap: `restaurantId: string =
+// DEFAULT_RESTAURANT_ID` fires for `undefined` and NEVER for `""`. So every read and write below
+// was sending an empty uuid the moment a tenant lookup lost a race.
+//
+// AND WHY IT MUST NOT FALL BACK TO #1 INSTEAD. The default the parameter WOULD have applied is
+// restaurant #1 — the one answer that must never be given when the restaurant is unknown. A guest
+// at another restaurant would be shown #1's menu, or worse, have an order posted against it.
+// `verify:guest-doors` holds that rule as "a FAILED tenant resolve does not fall back to restaurant
+// #1". So this refuses; it does not guess.
+//
+// EACH CALLER'S CONTROL FLOW IS UNCHANGED. A function that threw on the database's refusal still
+// throws; one that answered with an empty list still answers with an empty list. The only
+// difference is that nothing leaves the device.
+const RESTAURANT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function knownRestaurant(restaurantId: string | undefined | null): boolean {
+  return RESTAURANT_ID_RE.test(String(restaurantId ?? "").trim());
+}
+/** Throws the way the database used to, without the round trip. */
+function requireRestaurant(restaurantId: string | undefined | null, what: string): string {
+  const id = String(restaurantId ?? "").trim();
+  if (!RESTAURANT_ID_RE.test(id))
+    throw new Error(`Can't ${what} yet — this page hasn't worked out which restaurant it is.`);
+  return id;
+}
+
 export async function callWaiter(tableNumber: string, note?: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<CallWaiterResult> {
+  requireRestaurant(restaurantId, "call a member of staff");
   // Go through the GUARDED RPC (not a direct insert): the database function
   // refuses blocked tables, throttles rapid repeats, and caps pile-up. Direct
   // inserts to waiter_calls are no longer allowed (see migration 050).
@@ -324,6 +361,7 @@ export async function placeSessionOrderSafe(
 // device can follow ONLY its own order later (the table is insert-only for the
 // public, so we can't read the id back via .select()).
 export async function createOrder(o: OrderInput, restaurantId: string = DEFAULT_RESTAURANT_ID, actionId?: string): Promise<string> {
+  requireRestaurant(restaurantId, "place this order");
   // ALWAYS through our own endpoint, so the at-most-once guard and the deadline apply to every
   // order there is: if the reply is lost on a flaky connection and the guest taps again, the same
   // action id makes the server place it ONCE and echo the original order_id back.
@@ -577,6 +615,7 @@ export async function getMenuItems(
   // real answer "we could not tell, so do not filter".
   liveCatsIn?: Set<string> | null,
 ): Promise<MenuItem[]> {
+  requireRestaurant(restaurantId, "load this restaurant's menu");
   // Fetch the dishes AND the real-review aggregates at the same time (parallel
   // requests — no extra waiting). Ratings failing must never hide the menu, so
   // its error is swallowed and dishes just show as unrated.
@@ -614,6 +653,7 @@ export async function getMenuItems(
 // A single item by slug, or null if it doesn't exist.
 // A "slug" is the short URL-friendly name, e.g. "classic-burger".
 export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<MenuItem | null> {
+  requireRestaurant(restaurantId, "load this dish");
   // Reads: the dish, its rating aggregate, and its live categories.
   //
   // The REVIEW LIST used to be fetched here too, on every single call — but nothing reads
@@ -651,6 +691,8 @@ export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_R
 // The newest real reviews for one dish (capped at 20), reshaped to the
 // { name, rating, text } shape the dish page renders.
 export async function getItemReviews(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<{ name: string; rating: number; text: string; deviceId?: string }[]> {
+  // Answers [] on a database error today, so a page that has no restaurant yet gets the same answer.
+  if (!knownRestaurant(restaurantId)) return [];
   const { data, error } = await supabase
     .from("reviews")
     .select("name, stars, comment, device_id, created_at")
@@ -668,6 +710,10 @@ export async function getItemReviews(slug: string, restaurantId: string = DEFAUL
 export async function submitReview(
   slug: string, deviceId: string, stars: number, name: string, comment: string, restaurantId: string = DEFAULT_RESTAURANT_ID
 ): Promise<{ ok: boolean; reason?: string }> {
+  // Answers { ok: false, reason } on a database refusal today, so an unknown restaurant gets the
+  // same shape — a reason the caller can show, rather than a thrown error it is not expecting.
+  if (!knownRestaurant(restaurantId))
+    return { ok: false, reason: "This page hasn't worked out which restaurant it is yet — try again in a moment." };
   const { data, error } = await supabase.rpc("lfh_submit_review", {
     p_slug: slug, p_device: deviceId, p_stars: stars, p_name: name, p_comment: comment, p_restaurant_id: restaurantId,
   });
@@ -694,6 +740,7 @@ export async function renameMyReviews(
 
 // Active categories, in display order. The virtual "All" tab is added by the UI.
 export async function getCategories(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Category[]> {
+  requireRestaurant(restaurantId, "load this restaurant's sections");
   const { data, error } = await supabase
     .from("categories")
     .select("*")
@@ -810,6 +857,8 @@ export function invalidateSettings(restaurantId: string = DEFAULT_RESTAURANT_ID)
 }
 
 export async function getSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Settings> {
+  // Before the cache, so nothing is ever stored under a key that means "unknown".
+  requireRestaurant(restaurantId, "read this restaurant's settings");
   const hit = settingsCache.get(restaurantId);
   if (hit && Date.now() - hit.at < SETTINGS_TTL_MS) return hit.val; // fresh enough
   const pending = settingsInflight.get(restaurantId);
