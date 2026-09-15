@@ -78,7 +78,7 @@ const ANON_ALLOWED = {
   lfh_place_order_public:     "guest orders from a table QR with no session (mig 264 re-grants it explicitly)",
   lfh_price_order:            "the guest cart prices itself server-side; SECURITY INVOKER (mig 253 reasons about this)",
   lfh_nice_usd:               "formatter called BY lfh_price_order, which is INVOKER — revoking it breaks guest pricing",
-  // Added 2026-09-15 with migration 386, and it is the SAME trap as lfh_nice_usd right above it.
+  // Added 2026-09-15 with migration 384, and it is the SAME trap as lfh_nice_usd right above it.
   // `lfh_rid` is the refusal that replaced `COALESCE(p_restaurant_id, '…0001')` in nineteen bodies:
   // it returns the restaurant it was given, or raises 22004 instead of silently meaning French
   // House. `lfh_price_order` is SECURITY INVOKER and anon-callable, so it runs AS THE CALLER — a
@@ -86,7 +86,7 @@ const ANON_ALLOWED = {
   // one would not look dangerous and would break every guest cart's pricing, loudly, on the first
   // dish added. It is also about as narrow as a function gets: IMMUTABLE, reads no table, touches
   // no row, and returns only the uuid it was handed.
-  lfh_rid:                    "refuses a null restaurant instead of guessing #1; called BY lfh_price_order (INVOKER) and the other eighteen scoped RPCs (mig 386). Pure — reads nothing",
+  lfh_rid:                    "refuses a null restaurant instead of guessing #1; called BY lfh_price_order (INVOKER) and the other eighteen scoped RPCs (mig 384). Pure — reads nothing",
   // Added 2026-08-04 the day this guard shipped, and it is the trap above proving itself: mig 270
   // created lfh_resolve_tax_mode with Supabase's default anon grant, this check went red, and the
   // right answer was NOT to revoke it — lfh_price_order (SECURITY INVOKER, anon) calls it, so a
@@ -211,7 +211,10 @@ async function checkDb(label, env) {
            has_function_privilege('authenticated', p.oid, 'EXECUTE') AS auth,
            has_function_privilege('service_role', p.oid, 'EXECUTE') AS svc,
            p.prosecdef AS definer,
-           coalesce(array_to_string(p.proconfig, ','), '') AS cfg
+           coalesce(array_to_string(p.proconfig, ','), '') AS cfg,
+           -- the body, so the work_mem set below can be DERIVED from what a function does
+           -- instead of read off a hand-typed list that nobody remembers to bump (T30 item 7)
+           p.prosrc AS src
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public' AND p.prokind = 'f'
      ORDER BY 1, 2`);
@@ -286,16 +289,50 @@ async function checkDb(label, env) {
   //     and the database did not. Migration 356 put it back; this check is what stops it going
   //     again, and it is the only kind of check that can, because nothing about the SQL looks wrong.
   //     Add a name here when a new analytics function needs the same treatment.
-  const WORK_MEM_FNS = [
-    "lfh_owner_overview", "lfh_owner_restaurant_revenue", "lfh_owner_revenue_timeseries",
-    "lfh_owner_payment_breakdown", "lfh_owner_dish_breakdown", "lfh_owner_category_breakdown",
-    "lfh_owner_hourly", "lfh_owner_payment_trend", "lfh_owner_records", "lfh_owner_sales_report",
-    "lfh_owner_samehour_compare",
-  ];
+  // DERIVED, NOT TYPED (sweep #9 T30, item 7, 2026-09-15). This was a hand-written list of ELEVEN
+  // names, and it stopped being the truth the moment a twelfth heavy report shipped: by 2026-09-15
+  // `lfh_owner_customer_bills` (13 grouping/sorting steps over sessions joined to orders),
+  // `lfh_owner_heatmap` (every order into a day-of-week × hour grid) and `lfh_owner_tips` had all
+  // arrived with no work_mem and no complaint from here, because none of their names was on the
+  // list. That is the "stale allowance" shape the ledger's own guard audit warned this suite about
+  // — not a dead check, a check whose subject moved and whose list nobody bumped. Migration 385
+  // gave those three the SET; this now works out the set from what the functions DO, so the
+  // thirteenth is caught on the day it lands rather than the day it gets slow.
+  //
+  // The rule: an `lfh_owner_*` function that GROUPS or SORTS over the raw orders/sessions tables
+  // needs its own work_mem. A function that reads a pre-aggregated row and returns a scalar does not.
+  const WORK_MEM_EXEMPT = {
+    // Change DETECTORS. Each reads a watermark row and returns one short string answering "has
+    // anything moved since you last looked". Nothing to group, nothing to sort — 128MB would be
+    // cargo-cult. (lfh_owner_orders_fingerprint also carries no search_path, correctly: it is
+    // SECURITY INVOKER and every table it names is schema-qualified.)
+    lfh_owner_orders_fingerprint: "a change detector; returns one string, sorts nothing",
+    lfh_owner_report_month_fingerprint: "same — a fingerprint, not a report",
+  };
   const byName = new Map();
   for (const f of fns) { if (!byName.has(f.name)) byName.set(f.name, []); byName.get(f.name).push(f); }
+  const HEAVY = /\b(group\s+by|order\s+by|json_agg|array_agg)\b/i;
+  const RAW = /\bfrom\s+(public\.)?(orders|sessions)\b/i;
+  //
+  // THE SET IS A UNION, AND THE SECOND HALF IS WHAT STOPS COVERAGE SHRINKING. A first version of
+  // this derivation watched only "groups or sorts over raw orders/sessions" and thereby DROPPED two
+  // functions the hand-written list had deliberately included — `lfh_owner_samehour_compare` and
+  // `lfh_owner_tips`, both of which carry work_mem and neither of which matches that pattern
+  // (they aggregate without a GROUP BY). A guard that gets cleverer and covers LESS is worse than
+  // the stale list it replaced. So: watch anything heavy, AND anything that already carries the
+  // setting — because this check's original job is "a CREATE OR REPLACE must not drop it silently",
+  // and that applies to every function that has it, however it earned it.
+  const WORK_MEM_FNS = [...byName.keys()].filter((n) => {
+    if (!/^lfh_owner_/.test(n)) return false;
+    if (n in WORK_MEM_EXEMPT) return false;
+    return byName.get(n).some((f) => {
+      const src = (f.src || f.def || "").replace(/--[^\n]*/g, " ");
+      if (/work_mem/.test(f.cfg)) return true;              // has it → must never lose it
+      return HEAVY.test(src) && RAW.test(src);              // heavy → must gain it
+    });
+  }).sort();
   const lostTuning = WORK_MEM_FNS.filter((n) => byName.has(n) && !byName.get(n).every((f) => /work_mem/.test(f.cfg)));
-  const goneAltogether = WORK_MEM_FNS.filter((n) => !byName.has(n));
+  const goneAltogether = [];
   if (lostTuning.length) {
     fail(`${lostTuning.length} owner-analytics function(s) have LOST their SET work_mem: ${lostTuning.join(", ")}`
        + ` — a CREATE OR REPLACE that did not restate it. Re-apply with ALTER FUNCTION … SET work_mem = '128MB'`
