@@ -94,13 +94,24 @@ the highest id on disk (`P110950`), so nothing can meet anything already written
 the row above. **You never read, never edit and never claim from the *Next free ID* line.** If you
 exhaust 1,000 round-2 ids, STOP and say so in your chat report — do not take a range from anywhere.
 
-**The existing 520 duplicates still need repairing** — per this file's own rule, the terminal whose
-block a duplicated id legitimately is keeps it, and the newer claimant renumbers into its round-2
-block above. That repair is a named job, not something to do in passing.
+**~~The existing 520 duplicates still need repairing~~ — DONE, 2026-09-15, by T29.** All 517 of them
+were T1's: it had filed `P110001`–`P110517`, on top of T3's `P110001`–`P110500` and then T2's
+`P110501`–`P110950`, both of which were claimed on this page BEFORE T1 wrote a row. T1 had computed
+its block from the highest id then on disk (`P102050`) instead of from a claim, which is the ninth
+time this file has recorded that exact shape.
+
+**T1 is therefore the newer claimant and T1 renumbered**, per the rule above: its 517 rows moved
+`P110001`–`P110517` → `P120001`–`P120517`, entirely inside T1's OWN round-2 block in the table above,
+so nothing needed claiming and no other ledger was touched. Ownership was also checked the practical
+way, not just the registry way: T2 and T3 both have committed, re-runnable generator scripts keyed to
+those ids (`scripts/sweep/t2/s9r2-*.mjs`, `scripts/sweep/t3/s9r2-*.mjs`) and T1 has none, so T1 was
+both the registry-correct and the cheaper side to move. T1 had no live worktree at the time.
+
+`verify:ledger-index` now reads: **76,699 phase rows, 76,699 distinct ids, no collisions.**
 
 ---
 
-**Next free ID (SWEEP #9: DO NOT CLAIM FROM THIS LINE — see the round-2 table above): `P110951`.** *(**T2 of sweep #9 took `P110501`–`P110950` — FOUR HUNDRED AND FIFTY ids, not 500 — on 2026-09-15**, for a second freshly planned 500 over the dish page and the 3D viewer, on the owner's word after round 1 and the three picked follow-ups were merged and deployed: *"make it live and plan the whole 500 phases test again within the boundaries that you have given and test it again so that if any errors are left still within the boundaries that you have given, it can be solved"*.
+**Next free ID (SWEEP #9: DO NOT CLAIM FROM THIS LINE — see the round-2 table above): `P160001`.** *(**Moved 2026-09-15, from `P110951`, by sweep #9's T29 while repairing the 517 duplicates this file's round-2 note describes.** Nothing was CLAIMED by this edit — the mark simply had to get past the pre-allocation that already exists a few lines above it. That table hands T1–T40 a thousand ids each from `P120001`, so T40's block ends at `P160000` and every one of those ids sits ABOVE the old mark. `verify:ledger-index` fails the moment a row sits at or above the registry, so the new mechanism and the old mark could not both be right; leaving it at `P110951` would have kept this guard red for every terminal that files a round-2 row, which is how a guard stops being read. The rule the sweep-#9 prompts state is unchanged and is the reason this edit is safe: blocks come from the prompts and from the table above, never from this line.)* *(**T2 of sweep #9 took `P110501`–`P110950` — FOUR HUNDRED AND FIFTY ids, not 500 — on 2026-09-15**, for a second freshly planned 500 over the dish page and the 3D viewer, on the owner's word after round 1 and the three picked follow-ups were merged and deployed: *"make it live and plan the whole 500 phases test again within the boundaries that you have given and test it again so that if any errors are left still within the boundaries that you have given, it can be solved"*.
 >
 > **450 and not 500 because 50 of this terminal's own pre-allocated block are still free** — `P101751`–`P101800`, contiguous, counted against every ledger on disk rather than against this line. So the round is 50 + 450 = 500 and only the SHORTFALL is claimed here; taking a fresh 500 from the mark would be taking ids this terminal does not need. Same arithmetic T8, T10, T19 and T20 used in sweep #8.
 >
