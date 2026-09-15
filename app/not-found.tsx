@@ -201,13 +201,20 @@ const CSS = `
 .nf-g .spike::before { content: ""; position: absolute; top: -6px; left: -3px; width: 9px; height: 9px;
                        border-radius: 50%; background: #e9ebf0; }
 .nf-g .docket { position: absolute; top: 26px; left: 50%; width: 206px; margin-left: -103px;
-  background: #fffdf6; color: #23201c; padding: 16px 14px 14px; text-align: left;
+  background: #fffdf6; color: #23201c; padding: 16px 14px 7px; text-align: left;
   box-shadow: 0 14px 30px rgba(0,0,0,.42); transform-origin: 50% 6px;
-  clip-path: polygon(0 0,100% 0,100% calc(100% - 7px),
-    94% 100%,88% calc(100% - 6px),82% 100%,76% calc(100% - 6px),70% 100%,64% calc(100% - 6px),
-    58% 100%,52% calc(100% - 6px),46% 100%,40% calc(100% - 6px),34% 100%,28% calc(100% - 6px),
-    22% 100%,16% calc(100% - 6px),10% 100%,4% calc(100% - 6px),0 100%);
+  /* THE TORN EDGE IS A STRIP UNDER THE PAPER, NOT A BITE OUT OF IT (owner, 2026-09-15).
+     clip-path clips a box AND its children, so the stamp's deliberate 6px overhang — what makes it
+     read as slammed on rather than printed on — was sliced flat at the paper's right edge: measured
+     288px against a docket ending at 281px, at 360 and 1280, on both dockets. Same height, same
+     teeth, same sway (the strip is a child); the paper is now a plain rectangle that clips nothing. */
   animation: nfDrop 1.15s cubic-bezier(.25,.9,.3,1) .1s both, nfSway 5.5s ease-in-out 1.4s infinite; }
+.nf-g .docket::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 7px;
+  background: #fffdf6;
+  clip-path: polygon(0 0,100% 0,
+    94% 100%,88% 1px,82% 100%,76% 1px,70% 100%,64% 1px,
+    58% 100%,52% 1px,46% 100%,40% 1px,34% 100%,28% 1px,
+    22% 100%,16% 1px,10% 100%,4% 1px,0 100%); }
 .nf-g .hole { position: absolute; top: 6px; left: 50%; translate: -50% 0; width: 9px; height: 9px;
               border-radius: 50%; background: #2b2724; box-shadow: inset 0 1px 2px rgba(0,0,0,.6); }
 .nf-g .docket h2 { margin: 8px 0 2px; font: 800 11px/1.2 ui-monospace, Menlo, monospace;
