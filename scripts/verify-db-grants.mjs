@@ -78,6 +78,15 @@ const ANON_ALLOWED = {
   lfh_place_order_public:     "guest orders from a table QR with no session (mig 264 re-grants it explicitly)",
   lfh_price_order:            "the guest cart prices itself server-side; SECURITY INVOKER (mig 253 reasons about this)",
   lfh_nice_usd:               "formatter called BY lfh_price_order, which is INVOKER — revoking it breaks guest pricing",
+  // Added 2026-09-15 with migration 386, and it is the SAME trap as lfh_nice_usd right above it.
+  // `lfh_rid` is the refusal that replaced `COALESCE(p_restaurant_id, '…0001')` in nineteen bodies:
+  // it returns the restaurant it was given, or raises 22004 instead of silently meaning French
+  // House. `lfh_price_order` is SECURITY INVOKER and anon-callable, so it runs AS THE CALLER — a
+  // guest browser — and every helper it reaches must therefore be anon-callable too. Revoking this
+  // one would not look dangerous and would break every guest cart's pricing, loudly, on the first
+  // dish added. It is also about as narrow as a function gets: IMMUTABLE, reads no table, touches
+  // no row, and returns only the uuid it was handed.
+  lfh_rid:                    "refuses a null restaurant instead of guessing #1; called BY lfh_price_order (INVOKER) and the other eighteen scoped RPCs (mig 386). Pure — reads nothing",
   // Added 2026-08-04 the day this guard shipped, and it is the trap above proving itself: mig 270
   // created lfh_resolve_tax_mode with Supabase's default anon grant, this check went red, and the
   // right answer was NOT to revoke it — lfh_price_order (SECURITY INVOKER, anon) calls it, so a
