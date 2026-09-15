@@ -95,6 +95,9 @@ const put = (map, key, off, keepLast) => {
 
 function declares(sql) {
   const d = Object.fromEntries(KINDS.map((k) => [k, new Map()]));
+  // Which TABLE an index or a trigger hangs off. Needed because dropping a table takes its
+  // indexes, triggers, policies and columns with it — see WHEN THE TABLE ITSELF GOES, below.
+  d.owner = new Map();
   const re = (p) => new RegExp(p, "gi");
   for (const m of sql.matchAll(re(String.raw`\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w".]+)`)))
     put(d.tbl, bare(m[1]), m.index);
@@ -107,8 +110,16 @@ function declares(sql) {
     put(d.fn, bare(m[1]), m.index);
   for (const m of sql.matchAll(re(String.raw`\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w".]+)`)))
     put(d.view, bare(m[1]), m.index);
+  for (const m of sql.matchAll(re(String.raw`\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+([\w"]+)([\s\S]{0,200}?)\bON\s+([\w".]+)`))) {
+    put(d.trg, bare(m[1]), m.index);
+    if (!d.owner.has("trg:" + bare(m[1]))) d.owner.set("trg:" + bare(m[1]), bare(m[3]));
+  }
   for (const m of sql.matchAll(re(String.raw`\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+([\w"]+)`)))
     put(d.trg, bare(m[1]), m.index);
+  for (const m of sql.matchAll(re(String.raw`\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([\w"]+)\s+ON\s+(?:ONLY\s+)?([\w".]+)`))) {
+    put(d.idx, bare(m[1]), m.index);
+    if (!d.owner.has("idx:" + bare(m[1]))) d.owner.set("idx:" + bare(m[1]), bare(m[2]));
+  }
   for (const m of sql.matchAll(re(String.raw`\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([\w"]+)`)))
     put(d.idx, bare(m[1]), m.index);
   for (const m of sql.matchAll(re(String.raw`\bCREATE\s+POLICY\s+("[^"]+"|[\w]+)\s+ON\s+([\w".]+)`)))
@@ -204,6 +215,27 @@ const retiredAfter = (kind, name, pos, off) => parsed.some((p) => {
   return p.pos > pos || (p.pos === pos && p.r[kind].get(name) > off);
 });
 
+// ── WHEN THE TABLE ITSELF GOES, SO DOES EVERYTHING ON IT (2026-09-15) ────────────────────────
+// `DROP TABLE x` removes x's columns, indexes, triggers and policies in the same breath — Postgres
+// does not ask you to name them, and no migration ever has. This check did not know that, so every
+// such object read as "gone with nothing retiring them" and the whole check sat RED.
+//
+// It was red on `main` on 2026-09-15 for exactly one object: migration 368 creates
+// `print_pairings_expires_idx`, and migration 380 — "a setup code replaces the allow page" — drops
+// the whole `print_pairings` table under the owner's "a new way replaces the old one" rule. Nothing
+// was missing. But a permanently-red check is a check nobody reads, and the next REAL absence would
+// have arrived inside that red: this is the verify:cache fault wearing the other face, a guard that
+// says the wrong thing rather than nothing.
+//
+// Deliberately narrow: only a DROP of the object's OWN table counts, and only when that drop comes
+// strictly later in the sequence than the declaration — the same ordering rule every other
+// retirement here obeys.
+const ownerTable = (kind, name, d) => {
+  if (kind === "col" || kind === "pol") return name.split(".")[0];   // already keyed table.thing
+  if (kind === "idx" || kind === "trg") return d.owner.get(`${kind}:${name}`) || null;
+  return null;
+};
+
 // Objects retired by something other than a DROP in the sequence. Every line is a written-down
 // decision, not a silent allowance. Empty today, and that is the point — it should stay empty.
 const RETIRED_ELSEWHERE = {};
@@ -242,6 +274,8 @@ for (const p of selected) {
       objects++;
       if (db[kind].has(name)) continue;
       if (retiredAfter(kind, name, p.pos, off) || RETIRED_ELSEWHERE[kind]?.[name]) { retired++; continue; }
+      const owner = ownerTable(kind, name, p.d);
+      if (owner && kind !== "tbl" && retiredAfter("tbl", owner, p.pos, off)) { retired++; continue; }
       missing.push(`${KIND_NAME[kind]} ${name}`);
     }
   }
