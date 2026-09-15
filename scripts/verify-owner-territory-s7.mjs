@@ -47,6 +47,13 @@ const css = read("app/globals.css") || "";
 const printRoute = code(read("app/api/owner/printing/route.ts") || "");
 const setRoute = code(read("app/api/owner/settings/route.ts") || "");
 const helpers = code(read("lib/printHelpers.ts") || "");
+// ── THE WORDS MOVED TO THE SERVER ON 2026-09-14, so the checks about them read it there ───────
+// The card used to hold its own KIND_WORDS map and draw a `printing.routes` list from it. The
+// printing rework replaced that list with `printing.live` — rows the SERVER writes, labelled from
+// lib/printBoardWords.ts, so the owner's card, the manager panel's board and the admin console
+// cannot word the same paper three ways. The RULE each of those checks makes is unchanged; the
+// place that satisfies it is one file to the left.
+const words = code(read("lib/printBoardWords.ts") || "");
 // The printing card's own slice of the settings page — everything between its heading and the
 // password card that follows it. Scoped so a match cannot come from elsewhere on the page.
 // Start at the GATE that decides whether the card renders, not at its heading text — the heading
@@ -108,21 +115,59 @@ P("P21129", "…and a never-seen computer says exactly that, not \"0s ago\"", /h
 P("P21130", "…and a sleeping one gives a human age, not raw seconds", /Math\.round\(c\.secondsAgo \/ 3600\)/.test(card) && /Math\.round\(c\.secondsAgo \/ 60\)/.test(card));
 P("P21131", "…switching from minutes to hours past an hour", /c\.secondsAgo > 3600/.test(card));
 P("P21132", "…and `secondsAgo` of 0 cannot print \"undefined\"", /c\.secondsAgo \?\? 0/.test(card));
-P("P21133", "the printers attached to a computer are listed when there are any", /c\.printers\.length \?/.test(card));
-P("P21134", "…and nothing is drawn when there are none", /c\.printers\.length \? .*: null/.test(card.replace(/\n/g, " ")));
-P("P21135", "the routes block only renders when there is a route", /printing\.routes\.length \?/.test(card));
-P("P21136", "each kind of paper is named in English, not by its stored key", /KIND_WORDS\[r\.kind\]/.test(card));
-P("P21137", "…with the raw key as a last resort so a new kind is never blank", /KIND_WORDS\[r\.kind\] \|\| r\.kind/.test(card));
-P("P21138", "…and the English list covers every kind the server can send", ["kot", "bill", "banquet", "label", "test"].every((k) => new RegExp(`${k}:`).test(st)));
-P("P21139", "…and the words match the paper, not the code (\"Kitchen slips\", not \"kot\")", /Kitchen slips/.test(stT) && /Parcel labels/.test(stT));
-P("P21140", "a route says which computer holds it", /on \{r\.computer\}/.test(card));
-P("P21141", "…and flags a sleeping one right there", /asleep — waiting/.test(cardT));
+// EXPECTATION MOVED 2026-09-14 (T28 of sweep #9 re-ran it), same id, same claim. The printers are
+// no longer a nested block inside their computer's row — they are drawn as their own indented line
+// per printer, so a machine with six of them lists six. The rule ("a computer's printers are shown
+// when it has any") is what is asserted, not the shape it used to be written in.
+P("P21133", "the printers attached to a computer are listed when there are any", /\(c\.printers \|\| \[\]\)\.map\(/.test(card));
+// Same move. A `.map` over `c.printers || []` draws nothing at all for a computer with no printers,
+// which is the same answer the old ternary gave — and it cannot throw on a helper that reports none.
+P("P21134", "…and nothing is drawn when there are none", /\(c\.printers \|\| \[\]\)/.test(card));
+// EXPECTATION MOVED 2026-09-14, same id, same claim. `printing.routes` is retired: it listed only
+// the papers a PRINTER was named on, so a restaurant whose bills open a window saw no bill row and
+// read that as "bills are not set up". `printing.live` answers for every paper however it is set up.
+P("P21135", "the routes block only renders when there is a route", /\(printing\.live\?\.length \?\? 0\) > 0/.test(card));
+// EXPECTATION MOVED 2026-09-14, same id, same claim — one file to the left. The card prints the
+// label the SERVER sent (`r.label`), which paperStatus() takes from KIND_LABEL; the page's own copy
+// of that map was deleted in the same change, and its obituary is still on line ~47 of the page.
+P("P21136", "each kind of paper is named in English, not by its stored key", /\{r\.label\}/.test(card) && /KIND_LABEL/.test(words));
+// …and the fall-back moved with it: the route writes `KIND_LABEL[kind] || kind`, so a kind nobody
+// has named yet prints its key rather than an empty row.
+P("P21137", "…with the raw key as a last resort so a new kind is never blank", /KIND_LABEL\[kind\] \|\| kind/.test(printRoute) || /KIND_LABEL\[\w+\] \|\| \w+/.test(code(read("lib/printHelpers.ts") || "")));
+// EXPECTATION MOVED 2026-09-14, same id, same claim, and it is STRONGER than it was: instead of a
+// hand-typed list of five words (one of which, `label`, is not even a kind any more), the covering
+// set is now derived from PRINT_KINDS itself — so adding a kind without naming it fails here.
+const KINDS = (helpers.match(/PRINT_KINDS = \[([^\]]*)\]/) || [])[1] || "";
+P("P21138", "…and the English list covers every kind the server can send",
+  !!KINDS && (KINDS.match(/"([a-z]+)"/g) || []).map((q) => q.replace(/"/g, ""))
+    .every((k) => new RegExp(`\\b${k}: "`).test(words)));
+// EXPECTATION MOVED 2026-09-14, same id, same claim — one file to the left, and one word lighter.
+// "Parcel labels" is gone because the `label` kind is gone: PRINT_KINDS is kot/bill/banquet/test,
+// so asserting a fifth paper was asserting a feature the product no longer has. The claim — the
+// paper is named the way a person names it, never by its stored key — is checked on the words file
+// every screen now reads, so all three boards are covered by it instead of only this one.
+P("P21139", "…and the words match the paper, not the code (\"Kitchen slips\", not \"kot\")",
+  /kot: "Kitchen slips"/.test(words) && /bill: "Bills"/.test(words) && /banquet: "Banquet sheets"/.test(words));
+// EXPECTATION MOVED 2026-09-14, same id, same claim. Which computer holds the kitchen slips is said
+// on the restaurant's own row ("printing now: <the computer>"), and the live rows carry the rest of
+// the sentence from the server. The claim is that a person is told WHICH machine, and they are.
+P("P21140", "a route says which computer holds it", /printing now: <b>\{kotHelper\.computer\}/.test(flat(card)));
+// Same move, same claim; the wording tightened to "asleep, tickets waiting" in the rework.
+P("P21141", "…and flags a sleeping one right there", /asleep, tickets waiting/.test(cardT));
 P("P21142", "the waiting count is a sentence, not a bare number", /waiting to print/.test(cardT));
 P("P21143", "…and it is singular for one thing", /thing is/.test(cardT) && /things are/.test(cardT));
 P("P21144", "…and says so plainly when nothing is waiting", /Nothing is waiting to print/.test(cardT));
 P("P21145", "automatic printing being off is stated before the count, not instead of it", card.indexOf("Automatic printing is switched off") < card.indexOf("waiting to print"));
 P("P21146", "…and it reassures that nothing is lost", /tickets wait and nothing is lost/.test(cardT));
-P("P21147", "the card offers NO control at all — printing is hardware, and the admin's", !/<button/.test(card));
+// ── CLAIM RETIRED AND REPLACED 2026-09-14, BY THE OWNER'S OWN ASK ────────────────────────────
+// He asked for it: *"they can also test from there — print a KOT, print a bill, or print a banquet
+// bill."* So the card now carries Test buttons, and "NO control at all" is no longer the rule.
+// What must STILL hold is the reason the old rule existed: the card may not CHANGE the printing
+// setup. A test print writes no route, no switch and no setting — it puts one banded sheet through
+// the setup that already exists — so the only buttons on this card are Test buttons.
+P("P21147", "the card changes no printing setting — its only buttons send a test print",
+  (card.match(/<button/g) || []).length === (card.match(/sendSample\(/g) || []).length
+  && !/method: "PATCH"|method: "DELETE"/.test(card));
 P("P21148", "…and says who changes it", /done for you by Aevidine/.test(cardT));
 P("P21149", "…twice: once for the routing, once for the two switches", (cardT.match(/done for you by Aevidine/g) || []).length >= 2);
 P("P21150", "the guide is a link, opening in its own tab", /href="\/print-setup\.html" target="_blank"/.test(card));
@@ -180,16 +225,38 @@ P("P21190", "the card is above the password form, and below Appearance", card.le
 P("P21191", "the row wraps rather than overflowing a phone", /flexWrap: "wrap"/.test(card));
 P("P21192", "…and so does the button strip", /display: "flex", gap: 8, flexWrap: "wrap"/.test(card));
 P("P21193", "…and the per-computer line", /gap: 8, flexWrap: "wrap"/.test(card));
-P("P21194", "…and each route line", /padding: "3px 0", flexWrap: "wrap"/.test(card));
-P("P21195", "the route label has a fixed column so the printers line up", /minWidth: 130/.test(card));
+// EXPECTATION MOVED 2026-09-14, same id, same claim — the line is the live row now, and it still
+// wraps rather than overflowing a phone.
+P("P21194", "…and each route line", /padding: "5px 0", flexWrap: "wrap"/.test(card));
+// Same move: the fixed column is 112 on the live row (the labels are shorter than the old route
+// lines were). The claim — a fixed column, so the rows line up instead of stepping — is unchanged.
+P("P21195", "the route label has a fixed column so the printers line up", /minWidth: 112/.test(card));
 P("P21196", "every colour on the card is a declared token or has a fallback", (card.match(/var\(--[a-z-]+\)/g) || []).every((v) => /--(border|accent|adm-ok|adm-danger|adm-warn|muted|text|card|bg)\)/.test(v)));
 // EXPECTATION MOVED 2026-09-01, same id, same claim. Two more raw hexes arrived with T20's item 29,
 // which made "gone quiet" a warning instead of a footnote — an amber that is deliberately the same
 // in both skins, beside the two status-dot colours. Still a small, closed set, and still nowhere
 // that a word is not also carrying the meaning.
-P("P21197", "…and the handful of raw hexes are status colours only, where the words carry the meaning", (card.match(/#[0-9a-f]{6}/gi) || []).length <= 5);
+// EXPECTATION MOVED 2026-09-14, same id, same claim — and counted the way the claim is actually
+// worded. The rework added a per-printer dot and a per-paper dot, so the same four status colours
+// now appear twelve times; counting OCCURRENCES made this a check on how many dots are on screen,
+// which was never the point. What matters is that the SET is small, closed, and status-only — and
+// that every one of them sits beside a word carrying the same meaning (P21126/P21127 and the
+// `{w.label}` / `{r.state}` spans below prove that half).
+P("P21197", "…and the handful of raw hexes are status colours only, where the words carry the meaning",
+  new Set((card.match(/#[0-9a-f]{6}/gi) || []).map((h) => h.toLowerCase())).size <= 5);
 P("P21198", "the card adds no popup or drawer, so nothing needs a phone-Back layer", !/useBackClose|LFH_BACK|dialog/.test(card));
-P("P21199", "the card writes nothing — it is read-only, as the printing rule requires", !/method: "POST"|method: "PATCH"|method: "DELETE"/.test(card));
+// ── AND THE ONE WRITE IT DOES HAVE IS NAMED, rather than hidden by a slice (T28, 2026-09-15) ──
+// This passed on 2026-09-14 and should not have: `sendSample()` POSTs to /api/owner/printing, and
+// it passed only because that function is defined ABOVE the slice this file cuts. A check that is
+// green because it is looking at the wrong lines is worse than a red one. The rule that matters is
+// unchanged and is now asserted over the WHOLE page: the owner's Settings screen may send a test
+// print and may change nothing else about printing.
+P("P21199", "the card's only printing write is the test print — it still changes no setting",
+  (() => {
+    const posts = (st.match(/method: "POST"/g) || []).length;
+    const sample = /sendSample/.test(st) && /"\/api\/owner\/printing"/.test(st);
+    return sample && posts >= 1 && !/\/api\/owner\/printing[^"]*", \{[^}]*method: "(PATCH|DELETE)"/.test(st);
+  })());
 P("P21200", "…so it needs no clash expectation and no idempotency key", !/X-LFH-Expect|X-LFH-Action-Id/.test(card));
 
 // ══ BAND G2 · EGRESS AND LIFECYCLE
@@ -221,7 +288,12 @@ P("P21221", "…and its reads are keyed by id, never a whole-table scan", /\.in\
 P("P21222", "…and it does not read the table at all when the owner holds nothing", /if \(owned\.length\)/.test(m));
 P("P21223", "…and the entitlement and the names come back in ONE read", /select\("id, name, owner_entitlements"\)/.test(m));
 P("P21224", "the printing route names its columns too", /select\("auto_print_kot, auto_print_kot_allowed"\)/.test(printRoute));
-P("P21225", "…and its three follow-up reads run together, not one after another", /await Promise\.all\(\[agentsView/.test(printRoute));
+// EXPECTATION MOVED 2026-09-14, same id, same claim. There are FOUR follow-up reads now, not three
+// — `paperStatus` joined them so this card and the manager's board answer "is it working right
+// now" from one function — and the call was wrapped across lines when it grew. The claim is that
+// they run TOGETHER; matching `Promise.all([agentsView` on one line asserted the formatting.
+P("P21225", "…and its follow-up reads run together, not one after another",
+  /await Promise\.all\(\s*\[\s*agentsView\(/.test(printRoute));
 P("P21226", "the settings route's two printing reads also run together", /Promise\.all\(\[\s*sb\.from\("settings"\)/.test(setRoute));
 P("P21227", "…both keyed by the restaurants the owner already has", /\.in\("restaurant_id", ids\)/.test(setRoute));
 P("P21228", "…and skipped entirely when there are none", /if \(ids\.length\)/.test(setRoute));
