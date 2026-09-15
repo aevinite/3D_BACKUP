@@ -381,14 +381,32 @@ export async function DELETE(req: NextRequest) {
     actor: who,
     actor_role: (scope.all || scope.admin) ? "admin" : "owner",
     item_title: `Guest ending ${last4}`,
+    // ── DERIVED FROM THE DECLARED LIST, LIKE THE ERASE ITSELF (T28 of sweep #9, 2026-09-15) ───────
+    // `also_erased` was typed out by hand as ["customer_visits", "customer_devices"], and the erase
+    // above has walked lib/personalData.ts's declared list since improvement I15 — which exists
+    // because a typed list was wrong for months (`khata_customers` held a name and a number from the
+    // day pay-later shipped and nothing here knew).
+    //
+    // The typed list was wrong again, and this time it UNDERSTATED the erasure: ERASABLE holds seven
+    // entries, and three of them were named nowhere on this record — `session_members` ("their name
+    // and number from tables they sat at"), `requests` ("their old requests to join a table") and
+    // `otp_codes`. Those are exactly what somebody auditing an erasure needs to see WERE removed.
+    // The guest's data really was gone; the proof that it was gone said two tables out of six.
+    //
+    // Derived now, and split by the policy the list itself declares, so "deleted" and "emptied of the
+    // person but kept because a sales record points at it" stay different sentences — and so a
+    // table added to that list can never again be erased without being recorded.
     meta: {
       phone_last4: last4,
       customers_rows: (del.data || []).length,
-      also_erased: ["customer_visits", "customer_devices"],
+      also_erased: ERASABLE.filter((x) => x.table !== "customers" && x.policy !== "anonymise").map((x) => x.table),
       // Named separately and honestly: this row was emptied of the person, not removed, because a
       // sales record points at it. Anyone auditing an erasure should see that distinction rather
       // than a blanket "all gone".
-      anonymised: ["khata_customers"],
+      anonymised: ERASABLE.filter((x) => x.policy === "anonymise").map((x) => x.table),
+      // In the words the person was answered in, not table names — the same sentences
+      // `erasureSummary()` hands back to the screen, so the record and the reply cannot disagree.
+      removed_what: ERASABLE.map((x) => x.what),
     },
   }).then(({ error }) => {
     // A failed audit line must not un-erase the guest (the data is already gone and that was the
