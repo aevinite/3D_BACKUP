@@ -82,9 +82,15 @@ export async function GET(req: NextRequest) {
     // from injecting PostgREST filter syntax into the .or() below, and returns a clean 400
     // instead of leaking a raw "invalid input syntax for type uuid" Postgres error.
     if (!isUuid(ownerId)) return bad("Invalid owner id.", 400);
-    const o = (await sb.from("staff_users")
+    // A BLIP MUST NOT READ AS "Owner not found." (T26 sweep #9, 2026-09-15). This took `.data` and
+    // ignored `.error`, so a failed read answered a definite 404 about the owner whose card the
+    // admin had just clicked — and nothing retries a 404. The same shape and the same sentence this
+    // route's write paths were given on 2026-09-01 (item 21); the read paths were not.
+    const oQ = await sb.from("staff_users")
       .select("id, username, name, active, last_seen_at, created_at")
-      .eq("id", ownerId).eq("role", "owner").limit(1)).data?.[0];
+      .eq("id", ownerId).eq("role", "owner").limit(1);
+    if (oQ.error) return adminFail("this owner", oQ.error, { action: "load" });
+    const o = oQ.data?.[0];
     if (!o) return bad("Owner not found.", 404);
     // Match by the owner's STABLE id: actor_id on their own panel actions (mig 156), plus the
     // owner id embedded in the detail of admin-on-owner actions + their login rows. Replaces the
@@ -103,9 +109,12 @@ export async function GET(req: NextRequest) {
     if (actQ.error) return adminFail("this owner's activity", actQ.error, { action: "load" });
     // Restaurant names for the rows' restaurant_id chips (one scoped lookup).
     const rids = Array.from(new Set((actQ.data || []).map((a) => a.restaurant_id).filter(Boolean)));
-    const restNames = rids.length
-      ? new Map(((await sb.from("restaurants").select("id, name").in("id", rids).limit(2000)).data || []).map((r) => [r.id, r.name]))
-      : new Map();
+    // TOLERATED, and said so: a miss leaves a row's restaurant chip blank rather than emptying the
+    // feed. Written out (T26 sweep #9) because inline the `.error` is unreachable, so "tolerated"
+    // and "forgotten" looked identical.
+    const nQ = rids.length ? await sb.from("restaurants").select("id, name").in("id", rids).limit(2000) : null;
+    if (nQ?.error) console.error("[admin/owners] the activity chips have no restaurant names:", nQ.error.message);
+    const restNames = new Map(((nQ?.data) || []).map((r) => [r.id, r.name]));
     return ok({
       owner: { id: o.id, username: o.username, name: o.name || o.username, active: o.active === true, lastSeenAt: o.last_seen_at, createdAt: o.created_at },
       activity: (actQ.data || []).map((a) => ({
@@ -520,8 +529,15 @@ export async function PATCH(req: NextRequest) {
     const { error } = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
     if (error) return adminFail("this restaurant's primary owner", error, { action: "save" });
     const prevId = (r.owner_user_id as string | null) || null;
-    const prev = prevId ? (await sb.from("staff_users").select("name, username, deleted_at").eq("id", prevId).limit(1)).data?.[0] : null;
-    const prevWho = prev ? `${prev.name || prev.username}${prev.deleted_at ? " (in recycle bin)" : ""}` : "nobody";
+    // THE DIARY MUST NOT SAY "nobody" WHEN THERE WAS SOMEBODY (T26 sweep #9, 2026-09-15). `prev`
+    // came back undefined on a failed read as well as on a genuinely empty slot, and the line below
+    // turns both into the word "nobody" — so the permanent record of a handover could claim the
+    // restaurant had had no main owner at all. The two are told apart now.
+    const prevQ = prevId ? await sb.from("staff_users").select("name, username, deleted_at").eq("id", prevId).limit(1) : null;
+    if (prevQ?.error) dbNote("read the previous main owner's name", prevQ.error);
+    const prev = prevQ?.data?.[0] ?? null;
+    const prevWho = prev ? `${prev.name || prev.username}${prev.deleted_at ? " (in recycle bin)" : ""}`
+      : prevQ?.error ? "someone whose name could not be read" : "nobody";
     await logAction("admin", "owner_set_primary", { restaurant_id: rid, actor: "admin", detail: `${r.name}: primary owner ${prevWho} → "${who}" · owner ${ownerId}` });
     return ok({ ok: true });
   }

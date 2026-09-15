@@ -101,8 +101,18 @@ export async function GET(req: NextRequest) {
     // Capped like every other read on this route (200 / 50 / 5000 below) — it was the one that
     // stated no ceiling, against the module checklist's egress rule. A bill of 400 KOTs is already
     // refused elsewhere as implausible, so 500 is far above anything real.
-    const orderRows = (await sb.from("orders").select("id").eq("session_id", trail).limit(500)).data as { id: string }[] | null;
-    const orderIds = (orderRows || []).map((o) => o.id);
+    // ── AN EMPTY TRAIL MUST MEAN "NOTHING HAPPENED", NEVER "I COULD NOT LOOK" (T26 sweep #9,
+    //    2026-09-15) ────────────────────────────────────────────────────────────────────────────
+    // All four reads below took `.data` and ignored `.error`, so a blip on any one of them handed
+    // the expanded bill an EMPTY list with a confident 200. On this screen that is the one answer
+    // that must never be given: the trail is what proves a bill's history, and "no credit notes
+    // against this bill" is a statement about money. The first read is worse again — with
+    // `orderIds` empty the events read is skipped entirely, so ONE failure silences the whole
+    // trail. Carved out of T27's rule 6 on 2026-09-15 as "owned by admin routes part A"; this is
+    // part A doing it. Same ceilings, same columns, same shape — only the failure is answered now.
+    const t = new ReadSet("admin/bills:trail", [await rd("orders", () => sb.from("orders").select("id").eq("session_id", trail).limit(500))]);
+    if (t.failed("orders")) return adminFail("this bill's history", t.error("orders"), { action: "load" });
+    const orderIds = t.rows<{ id: string }>("orders").map((o) => o.id);
     // Actions linked to this bill's orders (delete/discount/revert/invoice). The order_id link is
     // exact, which is the whole trail: a read of the SESSION used to sit here "to scope table-level
     // events to the session's table + restaurant for context", and that second query was never
@@ -111,20 +121,24 @@ export async function GET(req: NextRequest) {
     // context is wanted later it comes back with the query that uses it.
     let events: { action: string; actor: string | null; detail: string | null; at: string }[] = [];
     if (orderIds.length) {
-      const byOrder = (await sb.from("staff_actions").select("action, actor, detail, created_at").in("order_id", orderIds).order("created_at", { ascending: true }).limit(200)).data as
-        { action: string; actor: string | null; detail: string | null; created_at: string }[] | null;
-      events = (byOrder || []).map((e) => ({ action: e.action, actor: e.actor, detail: e.detail, at: e.created_at }));
+      const e = new ReadSet("admin/bills:trail-events", [await rd("events", () => sb.from("staff_actions").select("action, actor, detail, created_at").in("order_id", orderIds).order("created_at", { ascending: true }).limit(200))]);
+      if (e.failed("events")) return adminFail("this bill's history", e.error("events"), { action: "load" });
+      events = e.rows<{ action: string; actor: string | null; detail: string | null; created_at: string }>("events")
+        .map((x) => ({ action: x.action, actor: x.actor, detail: x.detail, at: x.created_at }));
     }
-    // Invoice history — the append-only generate/void timeline for this bill (mig 189).
-    const invRows = (await sb.from("invoice_events").select("event, invoice_no, reason, actor, created_at")
-      .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)).data as
-      { event: string; invoice_no: number | null; reason: string | null; actor: string | null; created_at: string }[] | null;
-    const invoiceHistory = (invRows || []).map((e) => ({ event: e.event, no: e.invoice_no, reason: e.reason, actor: e.actor, at: e.created_at }));
-    // Credit notes issued against this bill (mig 194) — post-settlement corrections.
-    const cnRows = (await sb.from("credit_notes").select("credit_no, amount, reason, actor, created_at")
-      .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)).data as
-      { credit_no: number; amount: number; reason: string | null; actor: string | null; created_at: string }[] | null;
-    const creditNotes = (cnRows || []).map((c) => ({ no: c.credit_no, amount: Number(c.amount) || 0, reason: c.reason, actor: c.actor, at: c.created_at }));
+    // Invoice history (mig 189) and credit notes (mig 194) — the append-only record of what was
+    // issued against this bill and what was credited back. Both checked for the same reason.
+    const docs = new ReadSet("admin/bills:trail-docs", await Promise.all([
+      rd("invoices", () => sb.from("invoice_events").select("event, invoice_no, reason, actor, created_at")
+        .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)),
+      rd("credits", () => sb.from("credit_notes").select("credit_no, amount, reason, actor, created_at")
+        .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)),
+    ]));
+    if (docs.anyFailed) return adminFail("this bill's history", docs.firstError, { action: "load" });
+    const invoiceHistory = docs.rows<{ event: string; invoice_no: number | null; reason: string | null; actor: string | null; created_at: string }>("invoices")
+      .map((e) => ({ event: e.event, no: e.invoice_no, reason: e.reason, actor: e.actor, at: e.created_at }));
+    const creditNotes = docs.rows<{ credit_no: number; amount: number; reason: string | null; actor: string | null; created_at: string }>("credits")
+      .map((c) => ({ no: c.credit_no, amount: Number(c.amount) || 0, reason: c.reason, actor: c.actor, at: c.created_at }));
     return NextResponse.json({ trail: events, invoiceHistory, creditNotes });
   }
 
@@ -243,9 +257,12 @@ export async function GET(req: NextRequest) {
   // How many times each bill's invoice was generated (>1 = re-issued after a void). One
   // scoped read of the append-only invoice_events (mig 189), counted in JS.
   if (sessionIds.length) {
-    const ev = (await sb.from("invoice_events").select("session_id").eq("event", "generate").in("session_id", sessionIds).limit(5000)).data as { session_id: string }[] | null;
+    // TOLERATED, and now it says so rather than looking like an omission (T26 sweep #9): a failure
+    // leaves every bill reading "issued once", which understates a re-issue but takes nothing off
+    // the ledger. Stated at the call site with rowsOr, the way this repo spells a tolerated read.
+    const evR = new ReadSet("admin/bills:invoice-gens", [await rd("gens", () => sb.from("invoice_events").select("session_id").eq("event", "generate").in("session_id", sessionIds).limit(5000))]);
     const genBy = new Map<string, number>();
-    for (const e of ev || []) genBy.set(e.session_id, (genBy.get(e.session_id) || 0) + 1);
+    for (const e of evR.rowsOr<{ session_id: string }>("gens", [])) genBy.set(e.session_id, (genBy.get(e.session_id) || 0) + 1);
     for (const b of bills) b.invoiceGens = genBy.get(b.sessionId) || 0;
   }
 

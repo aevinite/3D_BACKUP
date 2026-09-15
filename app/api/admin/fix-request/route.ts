@@ -184,8 +184,14 @@ export async function PATCH(req: NextRequest) {
   const closed = r.data as { action_id?: string | null; restaurant_id?: string | null; pr_url?: string | null } | null;
   if (closed?.action_id && status === "fixed") {
     try {
-      const src = (await sb.from("staff_actions").select("panel, action, detail, restaurant_id")
-        .eq("id", closed.action_id).maybeSingle()).data as
+      // GENUINELY TOLERATED — this whole block is inside a try/catch whose comment says "memory is
+      // an optimisation, not a requirement", and that is still true: failing to record the fix only
+      // means Fix-now will offer the problem again. Written out rather than inlined (T26 sweep #9)
+      // so the tolerance is a decision on the page instead of an unreachable `.error`.
+      const srcQ = await sb.from("staff_actions").select("panel, action, detail, restaurant_id")
+        .eq("id", closed.action_id).maybeSingle();
+      if (srcQ.error) console.error("[admin/fix-request] the fix could not be remembered — the source row would not read:", srcQ.error.message);
+      const src = srcQ.data as
         { panel: string; action: string; detail: string | null; restaurant_id: string | null } | null;
       if (src) {
         await rememberErrorHandled({

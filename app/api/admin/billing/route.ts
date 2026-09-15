@@ -252,7 +252,19 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     // says what happened instead: the payment is in, the date is not.
     let dueMoved: string | null = null;
     if (body.roll_next_due) {
-      const billing = (await sb.from("restaurant_billing").select("cycle").eq("restaurant_id", rid).maybeSingle()).data as { cycle?: string } | null;
+      // ── A BLIP HERE MOVES THE DATE A YEAR INSTEAD OF A MONTH (T26 sweep #9, 2026-09-15) ────────
+      // This took `.data` and ignored `.error`, and the line under it defaults to "yearly". So on a
+      // MONTHLY plan a failed read did not fail — it silently rolled next-due twelve months forward,
+      // and the restaurant then read as paid-up until next year on the card that says who owes us
+      // money. The payment itself is already recorded and must not be undone, so this answers the
+      // same way the write below already does: the payment is in, the date is not, say so.
+      const billingQ = await sb.from("restaurant_billing").select("cycle").eq("restaurant_id", rid).maybeSingle();
+      if (billingQ.error) {
+        console.error("[admin/billing] payment saved but the plan's cycle could not be read:", billingQ.error.message);
+        await logAction("admin", "billing_add_payment", { detail: `₹${amount} · ${paidOn} · next-due NOT moved`, restaurant_id: rid });
+        return ok({ ok: true, id: ins.data?.id, warning: "The payment was saved, but the next-due date could not be moved — set it by hand on the plan." });
+      }
+      const billing = billingQ.data as { cycle?: string } | null;
       const cycle = billing?.cycle === "monthly" ? "monthly" : "yearly";
       const nextDue = rollForward(paidOn, cycle);
       const roll = await sb.from("restaurant_billing").upsert({ restaurant_id: rid, next_due_on: nextDue, updated_at: new Date().toISOString() }, { onConflict: "restaurant_id" });

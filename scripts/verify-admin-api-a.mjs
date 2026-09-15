@@ -522,14 +522,20 @@ for (const rel of PART_A) {
 // `slice(0, 25)`, because LEDGER/INDEX.md records positional ranges leaving a file watched by nobody
 // — a NEW route anywhere is covered from the day it lands, and each name below becomes a no-op the
 // moment its owner fixes it. Remove a name when it reads `ok` on its own.
-const RULE6_PENDING = new Set([
-  "app/api/admin/audit/route.ts",
-  "app/api/admin/billing/route.ts",
-  "app/api/admin/bills/route.ts",
-  "app/api/admin/fix-request/route.ts",
-  "app/api/admin/owners/route.ts",
-  "app/api/admin/printing/[...path]/route.ts",
-]);
+// ── THE CARVE-OUT IS EMPTY — PART A CLEARED IT (T26 sweep #9, 2026-09-15) ───────────────────────
+// T27 wrote this rule and listed six files it could not touch, each marked "owned by admin routes
+// part A". Part A is this terminal, and those eleven reads are done: the bill trail's four (an
+// empty trail read as "nothing happened" instead of "I could not look" — on the screen whose job
+// is proving a sale did not vanish), the next-due CYCLE on the billing page (a blip rolled a
+// MONTHLY plan a whole year forward and the restaurant then read as paid up), the owner activity
+// read (a blip answered "Owner not found." about the card just clicked), the previous main owner's
+// name (the permanent record could say "nobody" when there was somebody), and four genuinely
+// tolerated ones now written out so the tolerance is a decision with a log line rather than an
+// unreachable `.error`.
+//
+// The set stays, empty, on purpose: the self-check below is what stops a carve-out going stale, and
+// an empty list is the honest state of it rather than a deleted rule.
+const RULE6_PENDING = new Set([]);
 // `(await sb…)` / `(await supabaseAdmin…)` closed off and immediately dereferenced — across lines
 // too, because four of the nine hits in this pass were written over two or three.
 const INLINE_DATA = /\(\s*await\s+(?:sb|supabaseAdmin|supabase)\s*\.\s*(?:from|rpc)\s*\([\s\S]{0,700}?\)\s*\.\s*(?:data|error)\b/g;
