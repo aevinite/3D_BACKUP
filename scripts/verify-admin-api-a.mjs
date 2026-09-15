@@ -630,6 +630,26 @@ for (const rel of PART_A) {
   else fail(`${rel} asks a write which row it touched and then ignores the answer (${untested.join(", ")}) — a save that matched nothing is reported as saved. Test <var>.data and answer 404 (rule 7)`);
 }
 
+// ── RULE 8 — A JSONB BAG IS NEVER REBUILT FROM AN UNCHECKED READ (T26 sweep #9, 2026-09-15) ─────
+//
+// `settings.modules` (mig 326) holds EVERY new module's permission ladder AND a restaurant's whole
+// printing address book. Changing one key means read-modify-write of the whole column, so the read
+// is load-bearing in a way an ordinary read is not: swallow its error and the bag becomes `{}`, and
+// the update then REPLACES everything that was in it. The printing board's "stop the queue" button
+// had exactly this shape — one press during a blip would have wiped the address book and every
+// module's flags. lib/printHelpers → writeRoutes carries a comment naming this damage in its own
+// words, which is what makes the unchecked read beside it worth a permanent guard.
+//
+// Flagged: the inline `(await sb.from(...).select(...)...).data` shape in a file that also writes
+// `update({ modules`. Binding the query to a variable and testing `.error` is what passes.
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  if (!/update\s*\(\s*\{\s*modules\b/.test(src)) { ok(`${rel} does not rebuild a jsonb bag`); continue; }
+  const inline = /\(\s*await\s+[\s\S]{0,300}?\.select\s*\(\s*["'`][^"'`]*modules[^"'`]*["'`][\s\S]{0,200}?\)\s*\)\s*\.data/.test(src);
+  if (!inline) ok(`${rel} checks the read behind the jsonb bag it rewrites`);
+  else fail(`${rel} rebuilds settings.modules from a read whose failure it never tests — a blip empties the bag and the update wipes every other module (rule 8)`);
+}
+
 // ── RULE 9 — A NUMBER AIMED AT AN INT COLUMN IS RANGE-CHECKED (T26 sweep #9, 2026-09-15) ────────
 //
 // `sessions.bill_no` and `sessions.invoice_no` are INT (migs 036/037). The bill ledger's search box
