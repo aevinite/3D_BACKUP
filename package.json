@@ -233,7 +233,8 @@
     "verify:print-speed": "node scripts/verify-print-speed.mjs",
     "verify:t5s9": "node scripts/sweep/t5s9/rerun-foreign.mjs && node scripts/sweep/t5s9/rerun-t27-dictionary.mjs && node scripts/sweep/t5s9/new-static.mjs",
     "verify:session-gate": "node scripts/verify-session-gate-taps.mjs",
-    "verify:guest-restaurant": "node scripts/verify-guest-waits-for-its-restaurant.mjs"
+    "verify:guest-restaurant": "node scripts/verify-guest-waits-for-its-restaurant.mjs",
+    "verify:admin-counts-cancelled": "node scripts/verify-admin-counts-cancelled.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"
