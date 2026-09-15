@@ -30,7 +30,7 @@
 // imports it and renders the raw field anyway.
 //
 // Run: node scripts/verify-plain-logs.mjs   (or npm run verify:plain-logs)
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -197,6 +197,89 @@ async function checkTranslator() {
     if (offending) fail(`the ${action} line still contains machine language (matched ${offending}): "${said}"`);
     else ok(`legacy ${action} row reads as English — "${said}"`);
   }
+}
+
+// ── 6 · THE "WHO" COLUMN IS A PERSON, AND AN ADMIN'S ACTION IS THE ADMIN'S LOG ──────────────────
+//
+// Two rules, one call site, and they rot in the same way: `logAction()` takes plain strings, so a
+// new write that passes the wrong thing looks exactly like a correct one in a diff.
+//
+//   1. `actor` is PRINTED. The owner's Audit & logs list renders it as the person. `ownerActorName()`
+//      (lib/ownerScope) exists because five owner routes hand-rolled
+//      `(scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner")` — and `scope.ownerId` is
+//      a UUID, so the screen read, verbatim:
+//          Handled a rating   c0af7b5b-c0d8-40f6-b831-f475e48bab53   2m ago
+//      Those five were fixed on 2026-08-27. A SIXTH (settings → module_toggle) was missed and was
+//      still printing that same uuid a fortnight later, measured on French House 2026-09-15. A
+//      SEVENTH (printing → print_test, added 2026-09-14) passed no `actor` at all, so its Who column
+//      was "—".
+//
+//   2. `panel` decides WHOSE FEED it lands in. `/api/owner/oplog` excludes `panel in (admin,db)` and
+//      nothing else, so an admin action recorded against a staff panel appears in the owner's own
+//      Activity list with the word "admin" in it — the standing "admin = top power, INVISIBLY" rule,
+//      which `ownerLogPanel()` was written to close on 2026-08-12 for `/api/owner/*`. `/api/maintenance`
+//      is reached from the MANAGER panel, so it sat outside that fix and wrote
+//          panel "manager" · actor "admin" · "admin put the guest menu back online"
+//      straight into the owner's feed (measured, same day).
+//
+// So: every `logAction` in a route that an OWNER-scoped session can reach must take its panel from
+// `ownerLogPanel(scope)` (or an explicit admin/owner decision) and its actor from `ownerActorName(scope)`.
+// A literal `"owner"` panel or a `scope.ownerId` actor is refused here.
+function checkWhoAndWhichLog() {
+  // Every route under /api/owner/** plus the two panel routes an admin super-user reaches through
+  // requireRole() with a ?rid= pin. Derived, not typed: a new owner route is covered the day it lands.
+  const dirs = ["app/api/owner"];
+  const extra = ["app/api/maintenance/route.ts"];
+  const files = [];
+  const walk = (d) => {
+    let ents = [];
+    try { ents = readdirSync(join(root, d), { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      if (e.isDirectory()) walk(`${d}/${e.name}`);
+      else if (e.name === "route.ts") files.push(`${d}/${e.name}`);
+    }
+  };
+  for (const d of dirs) walk(d);
+  files.push(...extra);
+  if (files.length < 13) {
+    fail(`only found ${files.length} owner-reachable route files — the walk above is broken, not the routes`);
+    return;
+  }
+  let calls = 0;
+  for (const f of files) {
+    const src = strip(read(f));
+    if (!src) continue;
+    // Each logAction( … ) call, up to its closing `});`. Non-greedy so two calls in one file stay apart.
+    for (const m of src.matchAll(/logAction\(([\s\S]*?)\n\s*\}\);/g)) {
+      const callSrc = m[1];
+      const head = callSrc.slice(0, callSrc.indexOf(",") + 1);
+      calls++;
+      // THE PANEL. A literal "owner" is only honest where the route refuses an admin outright —
+      // /api/owner/settings' self password-change does, and says so in its own comment. Everything
+      // else must ask ownerLogPanel(), which is the one place that decides.
+      const panelLiteral = /^\s*"owner"\s*,/.test(head);
+      if (panelLiteral && !/password_change/.test(callSrc)) {
+        fail(`${f} logs panel "owner" as a literal — an ADMIN act-as session reaches this route too, so the row lands in the owner's own feed. Use ownerLogPanel(scope) (lib/ownerScope).`);
+      }
+      // A PANEL ROUTE the admin super-user also reaches (requireRole passes for a `?rid=` request
+      // with a valid admin cookie) must make the same decision, even though it has no OwnerScope to
+      // ask. A hard-coded staff panel there is the /api/maintenance fault: the admin's own flip went
+      // into the owner's feed because the row said "manager".
+      if (extra.includes(f) && /^\s*"(manager|kitchen|tablet|editor|owner)"\s*,/.test(head)) {
+        fail(`${f} logs a hard-coded panel — the ADMIN super-user reaches this route through requireRole()'s ?rid= pin, so its own action would land in the owner's and the manager's feeds. Decide the panel from whether there is a staff user (see the note at that call).`);
+      }
+      // THE PERSON. A uuid must never be the printed actor.
+      if (/actor:\s*[^,\n]*\bownerId\b/.test(callSrc)) {
+        fail(`${f} records scope.ownerId as the actor — that is a UUID, and the Activity log PRINTS it. Use ownerActorName(scope) (lib/ownerScope).`);
+      }
+      // …and a write with no actor at all renders as "—", which is the same unanswerable screen.
+      if (!/\bactor\s*:/.test(callSrc)) {
+        fail(`${f} writes a log row with no actor — the Who column renders "—", so "who did that?" has no answer. Pass ownerActorName(scope).`);
+      }
+    }
+  }
+  if (calls < 10) fail(`only matched ${calls} logAction call sites across the owner routes — the matcher above has broken, so this guard is asserting nothing`);
+  else ok(`all ${calls} owner-reachable log writes name a person and choose their panel through ownerLogPanel()`);
 }
 
 // ── 2 · NOBODY STRINGIFIES AN OBJECT INTO A LOG DETAIL ──────────────────────────────────────────
@@ -451,6 +534,7 @@ const run = async () => {
   checkAlertsLandOnControls();
   checkManagerPanel();
   checkPhoneAlerts();
+  checkWhoAndWhichLog();
 
   const hook = process.argv.includes("--hook");
   if (fails.length === 0) {
