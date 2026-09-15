@@ -58,18 +58,10 @@ const KNOWN_BACKLOG = new Set([
   "236_write_down_the_unwritten_function.sql|function|lfh_check_ban_scoped", // retired by 281, which predicted this
   "249_merge_is_recorded_and_reversible.sql|function|lfh_merge_group",    // retired by 267 as having no caller
   "296_database_layer_a_sweep_fixes.sql|function|lfh_check_verification", // retired by 297, "undo a resurrection"
-  // Three more, surfaced the day the INDEX kind was added (sweep #9, T29, 2026-09-15). All three sit
-  // OUTSIDE migrations 001–080, so that sweep did not own them; they are written down here rather
-  // than silenced, and each needs the same one-line ending in its own file. None of them FAILS on
-  // today's data — checked, not assumed — so each is a cost, not an abort:
-  //   · 091's index is UNIQUE over ALL staff rows; 245 narrowed it to the LIVE ones so a binned
-  //     login frees its name. No restaurant currently has a live and a binned row sharing a name,
-  //     so re-creating it succeeds — and quietly puts back the rule 245 removed.
-  //   · both of 095's are plain indexes superseded by a covering one with the same key (155 and 267
-  //     say so on the line that drops them), so a resurrection is paid for on every order insert.
-  "091_roles_and_permissions.sql|index|idx_staff_users_username_per_restaurant", // retired by 245
-  "095_orders_analytics_indexes.sql|index|idx_orders_created_at",                // retired by 155
-  "095_orders_analytics_indexes.sql|index|idx_orders_restaurant_created",        // retired by 267
+  // Three index entries lived here for a few hours on 2026-09-15, the day the INDEX kind was added.
+  // All three are FIXED — 091 and 095 now carry the same one-line ending, so the list is back to the
+  // four function entries it held before. A name belongs here only while its file is genuinely
+  // waiting on someone; never add one to silence a new fault.
 ]);
 
 const files = readdirSync(DIR).filter((f) => f.endsWith(".sql")).sort();
