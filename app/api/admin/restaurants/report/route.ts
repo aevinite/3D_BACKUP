@@ -38,8 +38,18 @@ export async function GET(req: NextRequest) {
   // Validate the shape BEFORE it reaches a uuid column — a malformed id used to surface a
   // raw Postgres "invalid input syntax for type uuid" 500 to the client (audit 2026-07-06).
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rid)) return bad("Invalid restaurant_id.");
-  const range = url.searchParams.get("range") || "7d";
-  const { from, to } = rangeBounds(["today", "7d", "30d"].includes(range) ? range : "7d");
+  // ── THE ANSWER ECHOES THE WINDOW IT ACTUALLY USED (T27 sweep #9, item 6, 2026-09-15) ──────────
+  // `range` used to keep whatever arrived and be echoed back verbatim, while `rangeBounds` quietly
+  // fell back to 7 days — so `?range=banana` answered `range:"banana"` over seven days of numbers.
+  // The sibling /api/admin/usage states the rule this breaks on its own last line: "`range` echoes
+  // back what was actually used, so the page labels its own columns from the server's answer rather
+  // than from what it hoped it asked for." Normalise ONCE, and use that one value for both.
+  const RANGES = ["today", "7d", "30d"] as const;
+  const asked = url.searchParams.get("range") || "7d";
+  const range: (typeof RANGES)[number] = (RANGES as readonly string[]).includes(asked)
+    ? (asked as (typeof RANGES)[number])
+    : "7d";
+  const { from, to } = rangeBounds(range);
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
 
