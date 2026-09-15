@@ -53,8 +53,13 @@ export async function POST(req: NextRequest) {
   if (!Object.keys(patch).length) return bad("Nothing to update.");
   // Confirm the restaurant exists — a valid-but-unknown id would update 0 rows and still
   // return {ok:true}, a silent "success" that changed nothing (audit 2026-07-06).
-  const exists = (await sb.from("restaurants").select("id").eq("id", rid).maybeSingle()).data;
-  if (!exists) return bad("Restaurant not found.", 404);
+  // …and a FAILED read is not "not found" (T27 sweep #9, 2026-09-15). The error was unreachable
+  // here, so a database hiccup answered "Restaurant not found." with a 404 about the restaurant
+  // whose name is at the top of the page — and nothing retries a 404, so the colour the admin just
+  // picked is simply lost. Same correction the sibling logo route's DELETE carries.
+  const existsQ = await sb.from("restaurants").select("id").eq("id", rid).maybeSingle();
+  if (existsQ.error) return adminFail("this restaurant's branding", existsQ.error, { action: "save" });
+  if (!existsQ.data) return bad("Restaurant not found.", 404);
   const { error } = await sb.from("restaurants").update(patch).eq("id", rid);
   if (error) return adminFail("this restaurant's branding", error, { action: "save" });
   await logAction("admin", "restaurant_branding", { actor: "admin", restaurant_id: rid, detail: `updated branding (${Object.keys(patch).join(", ")})` });

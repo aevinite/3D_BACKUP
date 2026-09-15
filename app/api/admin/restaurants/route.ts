@@ -312,8 +312,13 @@ export async function PATCH(req: NextRequest) {
   const ownerId = raw == null || raw === "" ? null : String(raw);
   if (ownerId) {
     if (!UUID.test(ownerId)) return bad("That user isn't an owner.", 400);
-    const owner = (await sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1)).data?.[0];
-    if (!owner) return bad("That user isn't an owner.", 400);
+    // A FAILED READ IS NOT "that user isn't an owner" (T27 sweep #9, 2026-09-15). This file gave
+    // four of its reads that correction in sweep #7 and left this one: it is the only refusal on the
+    // page that makes a CLAIM ABOUT A PERSON, so a blip told the admin that the owner he just picked
+    // from the dropdown is not an owner.
+    const ownerQ = await sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1);
+    if (ownerQ.error) return adminFail("this restaurant's owner", ownerQ.error, { action: "load" });
+    if (!ownerQ.data?.[0]) return bad("That user isn't an owner.", 400);
   }
   // The PRIMARY owner is stored on the restaurant (display / back-compat); the
   // SCOPING source of truth is the restaurant_owners join table (migration 097).
@@ -573,7 +578,17 @@ export async function POST(req: NextRequest) {
     // mig 245 gave staff logins). A restaurant sitting in the 90-day recycle bin no longer blocks
     // the name, so "Aangan" deleted this morning can be created again this afternoon without
     // silently becoming "aangan-2".
-    while (((await sb.from("restaurants").select("id").eq("slug", slug).is("deleted_at", null).limit(1)).data || []).length) slug = `${base}-${++n}`;
+    // The check answers for itself (T27 sweep #9, 2026-09-15). A failed read made `.data` null,
+    // `[] || []`, length 0 — i.e. "the name is free" — so the loop stopped early and the insert below
+    // collided on the partial unique index. The 23505 branch then told the admin "That name was just
+    // taken — please try a slightly different name", which is a sentence about a RACE and this was
+    // not one: the check simply never ran. Refuse before writing, so the message matches the cause.
+    for (;;) {
+      const takenQ = await sb.from("restaurants").select("id").eq("slug", slug).is("deleted_at", null).limit(1);
+      if (takenQ.error) return adminFail("whether that name is free", takenQ.error, { action: "load" });
+      if (!(takenQ.data || []).length) break;
+      slug = `${base}-${++n}`;
+    }
     // ── A REUSED WEB ADDRESS INHERITS SOMEBODY ELSE'S PRINTED QR CODES (owner, 2026-08-21) ──────
     // Freeing a binned restaurant's name is deliberate (mig 319, and he asked for it) and that is
     // NOT changed here — this only makes the consequence visible, because it is silent and it is

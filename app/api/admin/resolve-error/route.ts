@@ -105,9 +105,15 @@ export async function POST(req: NextRequest) {
   // happens again it lands on the board as loudly as any other. Reopening forgets the record.
 
   // Look up the row the owner tapped so we can resolve its whole repeat-group.
-  const row = (await sb.from("staff_actions")
+  // A BLIP MUST NOT READ AS "that entry no longer exists" (T27 sweep #9, 2026-09-15). The error was
+  // unreachable here, and the Repair board removes the tile optimistically — so the admin watched the
+  // problem disappear, believed it handled, and it was back on the next refresh with no record that
+  // anything had been attempted. Every OTHER read in this handler already answers for itself.
+  const rowQ = await sb.from("staff_actions")
     .select("panel, action, detail, restaurant_id, level")
-    .eq("id", actionId).maybeSingle()).data as
+    .eq("id", actionId).maybeSingle();
+  if (rowQ.error) return adminFail("that problem's status", rowQ.error, { action: "load" });
+  const row = rowQ.data as
     { panel: string; action: string; detail: string | null; restaurant_id: string | null; level: string } | null;
   if (!row) return NextResponse.json({ error: "that entry no longer exists" }, { status: 404 });
   if (row.level !== "error") return NextResponse.json({ error: "only errors can be resolved" }, { status: 400 });

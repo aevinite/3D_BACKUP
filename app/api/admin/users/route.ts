@@ -172,12 +172,20 @@ export async function POST(req: NextRequest) {
   if (!ROLES.includes(role)) return bad("Pick a valid role.");
   // Exclude binned restaurants — creating staff on a soft-deleted restaurant just makes
   // orphan rows the admin can never reach (login is blocked for binned restaurants).
-  const rest = (await sb.from("restaurants").select("id").eq("id", restaurantId).is("deleted_at", null).limit(1)).data?.[0];
-  if (!rest) return bad("Pick a valid restaurant.");
+  // A FAILED READ IS NOT "pick a valid restaurant" (T27 sweep #9, 2026-09-15) — the same correction
+  // this file's PATCH and DELETE were given in sweep #7, on the one read the CREATE form depends on.
+  const restQ = await sb.from("restaurants").select("id").eq("id", restaurantId).is("deleted_at", null).limit(1);
+  if (restQ.error) return adminFail("this restaurant", restQ.error, { action: "load" });
+  if (!restQ.data?.[0]) return bad("Pick a valid restaurant.");
   // Names are unique PER restaurant (mig 091) — clash-check within this one only.
   // Binned rows don't count: since mig 245 a recycle-bin name is free to re-use.
-  const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).is("deleted_at", null).limit(1)).data?.[0];
-  if (dup) return bad("That username is taken at this restaurant — pick another.", 409);
+  // Answers for itself, like the rename path further down (T27 sweep #9, 2026-09-15): a failed read
+  // skipped the clash check, and the admin got the insert's generic save failure instead of "That
+  // username is taken at this restaurant — pick another." Nothing wrong was ever stored — mig 091's
+  // unique index refuses the collision either way — but the sentence did not name the cause.
+  const dupQ = await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).is("deleted_at", null).limit(1);
+  if (dupQ.error) return adminFail("whether that name is free", dupQ.error, { action: "load" });
+  if (dupQ.data?.[0]) return bad("That username is taken at this restaurant — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const row = {
@@ -387,9 +395,17 @@ export async function PATCH(req: NextRequest) {
       // this user's restaurant — a global check wrongly rejected a name that's free at the
       // user's own restaurant just because another tenant uses it (bug M6, 2026-07-05).
       // Matches the create path, which already scopes by restaurant_id.
-      const target = (await sb.from("staff_users").select("restaurant_id").eq("id", id).maybeSingle()).data;
-      const clash = target ? (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", target.restaurant_id).neq("id", id).is("deleted_at", null).limit(1)).data?.[0] : null;
-      if (clash) return bad("That username is taken — pick another.", 409);
+      // THE RESTAURANT IS ALREADY IN HAND (T27 sweep #9, 2026-09-15). This re-read the person's
+      // restaurant_id — a column `u` above already carries — and then read its own result with the
+      // error unreachable, so a blip made `target` null, `clash` null, and the rename went through
+      // WITH NO CLASH CHECK AT ALL. The unique index (mig 091) still refuses the collision, so
+      // nothing wrong was stored; what the admin got instead of "That username is taken — pick
+      // another." was a generic save failure. One less round trip, and the check can no longer be
+      // skipped by a hiccup.
+      const clashQ = await sb.from("staff_users").select("id")
+        .eq("username", key).eq("restaurant_id", u.restaurant_id).neq("id", id).is("deleted_at", null).limit(1);
+      if (clashQ.error) return adminFail("these details", clashQ.error, { action: "load" });
+      if (clashQ.data?.[0]) return bad("That username is taken — pick another.", 409);
       patch.name = display;
       patch.username = key;
     }
