@@ -53,7 +53,14 @@ export default function Header({ logoText }: { logoText?: string }) {
   // Re-fits whenever the name itself changes — a soft restaurant switch, or the wordmark being
   // edited — and whenever the bar's own box resizes (rotating the phone).
   const brandRef = useFitText<HTMLHeadingElement>(logoText || "little French house");
-  const features = useFeatures(restaurantId); // which restaurant features are switched on
+  // …and the SWITCHES under the same rule (item 14). Every effect below already waits for `ready`
+  // — the two `if (!ready) return;` guards are right there — but this line did not, and a hook
+  // cannot be skipped with an `if`. So it asked restaurant #1 which features a diner at another
+  // restaurant has, which is the one read that still named #1 on a tenant page after the other
+  // eight screens were fixed. What it is asked ABOUT can be withheld: an empty restaurant asks
+  // nobody and falls back to the defaults (lib/features.ts), and the real switches arrive the
+  // moment the id lands, because the hook re-runs on its argument.
+  const features = useFeatures(ready ? restaurantId : ""); // which restaurant features are switched on
   // Each useState below is a labelled memory box the header keeps:
   const [mounted, setMounted] = useState(false); // has the header finished loading in the browser yet?
   const [theme, setTheme] = useState<Theme>("light"); // current look: dark or light

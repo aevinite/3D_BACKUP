@@ -1391,3 +1391,42 @@ to decide, and "solve" handed both decisions back to me.**
 All six changes are guarded by **`npm run verify:session-gate`** (static — no key, no database, no
 app), whose `--self-test` proves each of **eleven** sabotages turns it red, including three that
 bend a second file on disk and put it back.
+
+---
+
+## 2026-09-15 — *"do it"* (item 14: every guest screen waits until it knows which restaurant it is on)
+
+Said to the round-2 report, whose only open item was that **eight other guest screens still borrowed
+restaurant #1's settings for a moment**. Driving it found a **ninth**.
+
+**What it is.** `lib/restaurant-context` resolves the restaurant asynchronously: `id` STARTS at
+restaurant #1 and stays `""` for good if the lookup fails. `useRestaurantId()` handed that raw value
+out, so on every tenant page — and for ever after a failed lookup — those screens asked #1 about a
+diner standing somewhere else. **That is the Aangan sticker fault**: the widgets read #1's
+`sessionsEnabled` (ON) on a restaurant where it is OFF, so tapping "+" opened the join-a-table gate
+instead of adding the dish and the basket stayed empty. A diner scanning their own table's sticker
+could not order at all.
+
+**The fix is ONE rule in ONE place, not nine patches.** `useRestaurantId()` now answers `""` until
+the restaurant is settled — you cannot get an id out of it that we are not sure of. `BanGate` and
+`CustomerGreeter` had been writing that guard by hand since 2026-08-30; nine screens never did.
+
+- **The nine:** the basket, the waiter-call popup and its button, the order-confirm sheet, the
+  live-order strip, the shared-basket sync, the head's approve prompt, the table bill, and the
+  **header** — the ninth, found by driving rather than reading, because its effects waited for
+  `ready` and its feature-switch line did not.
+- **An unknown restaurant now asks NOBODY** (`lib/features.ts`) rather than firing a doomed read:
+  a hook cannot be skipped with an `if`, so it would otherwise have traded a wrong answer for a
+  wasted request, once per screen, on every page load.
+- **`RealtimeProvider` deliberately keeps the raw value** and says why in its own comment — it
+  subscribes to the unscoped topic during the window rather than to the wrong one.
+- **Two route comments were corrected**, because they claimed `useRestaurantId()` "always returns a
+  real id and is never undefined". That was true, and it was the problem.
+
+**Measured on Spice Route, before and after: one settings read naming restaurant #1 per page load →
+ZERO**, in the normal case and with the lookup refused. 22 driven checks green; both menus still
+render (50 and 297 dish cards), switches still land, nothing thrown.
+
+Guarded by **`npm run verify:guest-restaurant`** — static, no key, no app — whose `--self-test`
+proves five sabotages turn it red. It derives the list of screens **from the tree**, so a file that
+starts reading restaurant-keyed data tomorrow is checked tomorrow.

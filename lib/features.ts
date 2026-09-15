@@ -104,6 +104,15 @@ export async function refreshFeatures(restaurantId: string = DEFAULT_RESTAURANT_
 }
 
 export async function getFeatures(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<FeatureMap> {
+  // ── AN EMPTY RESTAURANT MEANS "WE DO NOT KNOW YET", SO ASK NOBODY (owner, 2026-09-15, item 14) ──
+  // `useRestaurantId()` now answers `""` until the restaurant is settled, precisely so a caller
+  // cannot read one restaurant's switches for a diner standing in another. A hook cannot be
+  // skipped with an `if`, so `useFeatures("")` WILL reach here on every tenant page for a few
+  // hundred milliseconds — and firing a read with an empty id would just trade a wrong answer for
+  // a doomed request, once per guest component, on every page load. The defaults are the right
+  // answer for "not known yet": they are what this hook already falls back to when a read fails,
+  // and the real switches arrive a moment later because the hook re-runs on its argument.
+  if (!restaurantId) return { ...FEATURE_DEFAULTS } as FeatureMap;
   const hit = cached.get(restaurantId);
   if (hit) return hit;
   let pending = inflight.get(restaurantId);
@@ -164,6 +173,8 @@ export function useFeatures(
   );
   useEffect(() => {
     let alive = true;
+    // …and nothing is remembered, subscribed to or fetched for a restaurant we cannot name.
+    if (!restaurantId) return;
     if (!cached.get(restaurantId)) { const saved = readSaved(restaurantId); if (saved && alive) setF(saved); }
     getFeatures(restaurantId).then((v) => { if (alive) setF(v); });
     const subs = subsFor(restaurantId);

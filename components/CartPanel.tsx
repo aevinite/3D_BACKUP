@@ -210,6 +210,12 @@ export default function CartPanel() {
   // The big setup effect: runs once when the panel mounts. It loads everything
   // and wires up all the "listen for app messages" handlers.
   useEffect(() => {
+    // ── NOT UNTIL WE KNOW WHICH RESTAURANT (owner, 2026-09-15, item 14) ─────────────────────────
+    // `useRestaurantId()` answers "" until the restaurant is settled — see its own note. Asking
+    // before then meant reading restaurant #1's rules for a diner standing somewhere else, which
+    // is the Aangan sticker fault. This effect already re-runs on `restaurantId`, so the real id
+    // landing wakes it: a wait of a few hundred milliseconds, not a refusal.
+    if (!restaurantId) return;
     loadCart();
     setCurrencyState(getCurrency());
     // The full menu (allergen lookup by dish id, "goes well with" pairings, and

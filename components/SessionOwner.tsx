@@ -79,6 +79,12 @@ export default function SessionOwner() {
   // This runs once when the component first appears. It reads settings, then starts
   // polling on a timer and re-polls on session-change / when the tab is refocused.
   useEffect(() => {
+    // ── NOT UNTIL WE KNOW WHICH RESTAURANT (owner, 2026-09-15, item 14) ─────────────────────────
+    // `useRestaurantId()` answers "" until the restaurant is settled — see its own note. Asking
+    // before then meant reading restaurant #1's rules for a diner standing somewhere else, which
+    // is the Aangan sticker fault. This effect already re-runs on `restaurantId`, so the real id
+    // landing wakes it: a wait of a few hundred milliseconds, not a refusal.
+    if (!restaurantId) return;
     let alive = true; // guards against updating state after the component is gone
     // Find out if the session system is on; if so, do an immediate first poll.
     getSettings(restaurantId)
