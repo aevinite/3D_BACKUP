@@ -85,6 +85,13 @@ for (const it of items || []) (itemsByRest[it.restaurant_id] ||= []).push(it);
 //    "busyness" so the dashboard cards clearly differ. Statuses lean toward
 //    completed/paid, with a few live + the odd cancellation (which revenue
 //    excludes). Some orders are back-dated so all-time > today.
+// `archived_at` rides with `archived`, for the same reason `paid_at` rides with `payment_status`
+// (the note further down, sweep #9 T30 item 2). Round 2 found the other half of that fault: 5,317
+// orders archived in September carried no archive time, against 491 that did. Every PRODUCT path
+// writes the pair together — app/api/tablet, app/api/editor, lib/paySplit.ts, lib/sessionClose.ts
+// and lib/softDelete.ts all do — so "archived, but never archived" is another shape the app cannot
+// produce and only a fixture can. The stamp is applied per order below, back-dated to the order's
+// own time, because a constant here would give every seeded bill the same archive moment.
 const PAID_DONE = { status: "served", payment_status: "paid", archived: true };
 const LIVE = [
   { status: "received", payment_status: "pending", archived: false },
@@ -152,6 +159,11 @@ function makeOrder(rest, createdAt, live) {
     // ledger's own data-integrity row (P25413) go red. Back-dated to the order's own time,
     // which is the only honest stamp available for a bill that was never really settled.
     ...(st === PAID_DONE ? { paid_at: createdAt.toISOString() } : {}),
+    // …and the archive time, for any status that archives (see the note on PAID_DONE above).
+    ...(st.archived ? { archived_at: createdAt.toISOString() } : {}),
+    // A seeded CANCELLED order records when it was cancelled, exactly as the two live functions
+    // migration 388 fixed now do. Without it these rows land in `lfh_staff_performance` as trade.
+    ...(st.status === "cancelled" ? { cancelled_at: createdAt.toISOString() } : {}),
   };
 }
 
