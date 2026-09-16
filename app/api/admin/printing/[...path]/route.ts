@@ -543,10 +543,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     // a sample queued here was fetched by nobody and sat for ever — under a note that said "paper
     // should appear in a moment". The status rows say STOPPED now, and the button is gone with them;
     // this is the other half, because a hidden button has never been the gate here.
+    // PER KIND, not wholesale: a stopped queue holds everything, but the kitchen-slip switch being
+    // off is no reason to refuse a BILL sample — that conflation is the fault fixed on 2026-09-16.
     const run = await printingRunning(rid);
-    if (!run.on) return err(run.why === "paused"
-      ? "The printing queue is stopped, so nothing would come out. Restart it and try again."
-      : "Printing is switched off for this restaurant, so nothing would come out. Switch it on and try again.");
+    if (!run.on) return err("The printing queue is stopped, so nothing would come out. Restart it and try again.");
+    if (sk === "kot" && !run.kot) return err("Automatic kitchen-slip printing is switched off, so no slip would come out. Switch it on and try again.");
     const own = await helperFor(rid, sk);
     if (!own.owned) return err("No computer is set to print that yet — choose a printer for it first.");
     const q = await queueJob(rid, sk, { sample: true }, { requestedBy: "sample · admin" });
@@ -564,10 +565,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     if (!agentId || !printer) return err("Pick a computer and one of its printers.");
     // The same refusal as the sample above, for the same reason: the helper is handed nothing at all
     // while printing is off, so a plain test page would queue and never be fetched.
+    // A plain test page is not a kitchen slip, so only a stopped queue can refuse it.
     const runT = await printingRunning(rid);
-    if (!runT.on) return err(runT.why === "paused"
-      ? "The printing queue is stopped, so nothing would come out. Restart it and try again."
-      : "Printing is switched off for this restaurant, so nothing would come out. Switch it on and try again.");
+    if (!runT.on) return err("The printing queue is stopped, so nothing would come out. Restart it and try again.");
     const agents = await agentsView(rid);
     const a = agents.find((x) => x.id === agentId);
     if (!a) return err("That computer is not one of this restaurant's.");

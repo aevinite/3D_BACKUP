@@ -60,6 +60,10 @@ async function whoIsAsking(req: NextRequest): Promise<AgentRow | null> {
 // (A new way replaces the old one: this function is deleted, not left beside its replacement.)
 // The two reasons it can be off — switched off vs queue stopped — are kept apart there, for the
 // reason recorded there: the tickets are never made in one case and are waiting in the other.
+// `.on` is now the MASTER answer and only a stopped queue turns it off — the kitchen-slip switch
+// suppresses kitchen slips alone, inside claimSome. Before that, a restaurant with its slips on the
+// kitchen screen and its bills on a computer was handed NOTHING and its bills never printed
+// (measured 2026-09-16: /next answered 204 with a live bill route in place).
 const printingOn = async (rid: string): Promise<boolean> => (await printingRunning(rid)).on;
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {

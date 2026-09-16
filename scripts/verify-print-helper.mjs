@@ -1974,6 +1974,64 @@ for (const [who, src2] of [["Aevidine's", adminR], ["the manager's", eroute], ["
     `${who} Test verb still queues a sample when printing is off — it reports success and no paper ever comes out`);
 }
 
+// ── 10c · A FAILED READ IS NOT "NO ROUTES" (2026-09-16) ──────────────────────────────────────
+// Reported by sweep #9's T26 terminal against its own sibling in app/api/admin/printing, which
+// correctly declined to reach into this file. The same shape was here TWICE in one save path:
+//   · writeRoutes merges the patch onto the CURRENT routes, so a failed read of them meant saving
+//     the bill line silently un-routed the kitchen slips and the banquet sheet;
+//   · and it then writes the `modules` bag WHOLE, so a failed read of that wiped every other
+//     module's allowed/enabled state as well.
+// Both now refuse. A press costs nothing to repeat; a wiped address book costs a shop its printing.
+check(/readRoutesChecked/.test(lib) && /failed: true/.test(lib),
+  "a failed read of the printing routes is told apart from a restaurant that has set none up",
+  "readRoutes is back to swallowing its error, so a blip reads as 'no printer is set up' — and writeRoutes saves on top of that guess");
+{
+  const wr = lib.slice(lib.indexOf("export async function writeRoutes"));
+  const body = wr.slice(0, wr.indexOf("\nexport ") > 0 ? wr.indexOf("\nexport ") : 4000);
+  check(/cur0\.failed/.test(body),
+    "…and writeRoutes refuses to save when it could not read what is there now",
+    "writeRoutes merges onto a guess again: choosing a printer for ONE paper would clear the other two");
+  check(/sQ\.error/.test(body),
+    "…and it refuses rather than writing a settings bag it could not read",
+    "writeRoutes writes `modules` whole after an unchecked read again — one blip erases every other module's on/off state");
+  check(!/\(await sb\.from\("settings"\)\.select\("modules"\)[^]]*\)\.data/.test(body),
+    "…so no unchecked `.data` read of the settings bag is left in the save path",
+    "an unchecked read of `modules` is back inside writeRoutes");
+}
+
+// ── 10d · "NOBODY PRINTS THE SLIPS" MUST NOT STOP THE BILLS (2026-09-16) ─────────────────────
+// `auto_print_kot` is the kitchen-slip LINE stored twice, not a master switch — but the helper's
+// door treated it as one and answered 204 for EVERY kind. So a restaurant set up exactly the way
+// the owner described it, slips on the kitchen screen and bills on a computer, was handed nothing
+// and its bills never printed. Measured before the fix: /next answered 204 with a live bill route
+// in place; after it: "GOT: bill on Counter".
+check(/kot: boolean/.test(lib) && /slipsOn/.test(lib),
+  "the kitchen-slip switch is carried separately from 'is anything printing at all'",
+  "the slip switch is a master switch again — a restaurant with its slips on the screen loses its BILLS, silently");
+check(/row\.kind === "kot" && !slipsOn/.test(lib),
+  "…and the claim skips a leftover slip instead of the whole basket",
+  "either every kind is refused when slips are off, or a slip comes out an hour after it was switched off");
+{
+  const pr = lib.slice(lib.indexOf("export async function printingRunning"));
+  const body = pr.slice(0, pr.indexOf("\n/**") > 0 ? pr.indexOf("\n/**") : 2500);
+  // THE RULE, NOT THE SHAPE. The first version of this check forbade the OLD code's exact line, so
+  // putting the master switch back in a DIFFERENT shape (`if (!kot) return { on: false … }`) sailed
+  // through all 302 checks — caught by sabotaging it, which is the only reason it is written this
+  // way now. The property is: there is exactly ONE way for the master answer to be false, and it is
+  // the stopped queue.
+  const offs = (body.match(/on: false/g) || []).length;
+  const pausedOff = /paused === true\) return \{ on: false/.test(body);
+  check(offs === 1 && pausedOff,
+    "…and only a STOPPED QUEUE is a master stop — there is exactly one way to turn all paper off",
+    `the master answer can be turned off ${offs} different way(s); only a stopped queue may do it, or the kitchen-slip switch stops the bills again`);
+  check(/q\.error/.test(body) && /on: true/.test(body),
+    "…and a failed read of it does not stop a whole restaurant's paper",
+    "a blip reading the settings now reports printing as off, which stops every paper over a network hiccup");
+}
+check(/!run\.kot/.test(adminR) && /!runE\.kot/.test(eroute),
+  "a Test refusal is per paper: the slip switch never refuses a BILL sample",
+  "the Test buttons conflate the slip switch with the whole feature again");
+
 // ── 11 · THE FILE TEXT IS SHUT UNTIL SOMEBODY ASKS (owner, 2026-09-14) ───────────────────────
 // *"The code is visible all the time. Make sure there is a button which is written show the code,
 // then only code should be shown — in both worlds, because it is annoying."*

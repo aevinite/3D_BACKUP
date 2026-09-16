@@ -1357,3 +1357,105 @@ run and 1,456 from earlier ones. Both sweeps now **soft-delete and archive** (`d
 `archived`, which is what `lib/liveBoard.ts` filters on, so the row survives and every board is
 clear), and they **count what is left afterwards and say so**. `verify:print-helper` fails if either
 one grows a hard `DELETE` back.
+
+## 2026-09-16 — three faults behind one question: "are these findings right?"
+
+He pasted two findings from a sweep terminal (items 4 and 5 — the printing board saying "saved" for
+writes that saved nothing, and the stop-queue button able to wipe a restaurant's whole setup) and
+asked whether they were real. Both were. **Both are also still unmerged**, on
+`origin/sweep9/t26-admin-api-part-a`, ten commits ahead of main with no open PR.
+
+Checking them turned up three more, all in this file's own area.
+
+### 1 · `writeRoutes` could lose the address book TWO ways, not one
+
+The item-5 fix names a sibling it could not reach: *"the sibling read-modify-write in
+lib/printHelpers → writeRoutes has the same shape… it is reported rather than changed here because
+that file is not this terminal's to edit."* It was right, and it was worse than the one it fixed:
+
+```
+const current = await readRoutes(rid);        // ← unchecked. Blip = EMPTY routes…
+…                                             //   …and the patch is merged ONTO current,
+const s = (await sb…select("modules")…).data  // ← unchecked. Blip = EMPTY bag…
+await sb…update({ modules: bag })             //   …and the bag is written WHOLE.
+```
+
+So one transient read failure while somebody pointed the **bill** line at a printer would silently
+un-route the **kitchen slips and the banquet sheet**; a failure on the second read would additionally
+erase **every other module's allowed/enabled state**. The function whose entire job is not to lose
+the address book could lose it twice over, and its own comment already named the damage
+(*"overwriting `modules` wholesale would silently switch other features off"*) without checking for
+it.
+
+Both reads are checked now, and `readRoutes` gained a sibling — `readRoutesChecked` — so a caller
+that must not guess can tell a failed read from a restaurant that has simply set no printer up.
+`readRoutes` itself still returns a plain `PrintRoutes`, because a throw on the helper's poll path
+would leave a ticket in a worse state than empty routes would.
+
+**Verified:** pointing one paper line at a printer leaves the other two intact and the module bag
+byte-identical — driven through the real API, before and after.
+
+### 2 · "Nobody prints the kitchen slips" stopped the BILLS
+
+`auto_print_kot` is the kitchen-slip **line**, stored twice (`syncKotSwitch` keeps the line and the
+column in step — *"one decision, two places"*). The helper's door treated it as a **master switch**:
+
+```
+if (!(await printingOn(rid))) return 204;     // for EVERY kind
+```
+
+So a restaurant set up exactly the way the owner described it — *slips on the kitchen screen, bills
+on a computer* — was handed **nothing at all**, and its bills never printed. The bill route sat there
+naming a live computer and a real printer.
+
+Measured on 2026-09-16, before: slips → Nobody, bills → a computer, a bill queued, `/next` answered
+**204**. After: **`GOT: bill on Counter`**, while a kitchen-slip sample is still refused in plain
+words. Only a **stopped queue** is a master stop now; the slip switch suppresses slips alone, inside
+`claimSome`, which is safe twice over — mig 335's trigger already refuses to queue a slip while that
+column is false, and the claim only ever hands over a kind whose route names the asking machine.
+
+### 3 · …and it had been invisible, which is why it lasted
+
+Before the **STOPPED** rows landed two days earlier, that restaurant's board said the bill line was
+**LIVE**, and its Test button answered *"Sample sent — paper should appear in a moment"* about paper
+that could not come out. The state that made it visible is what made it findable.
+
+Two corrections to STOPPED itself, both from guards that were already right:
+
+- **never red.** `ok: false` broke a standing rule this file's own type states — *"a deliberate
+  'Nobody' is not red… colouring a decision as a fault is crying wolf."* Switching something off is a
+  decision. Red stays for the one involuntary failure: a computer that owns paper and is not
+  answering.
+- **only where it changes the answer.** If no paper is routed at a computer at all, the per-paper
+  answers are already true *and* more specific. Saying "printing is switched off for this restaurant"
+  told a menu-only restaurant its printing was off when it had simply never set a printer up.
+
+### 4 · The suite was degrading the database it tested against
+
+`verify:print-speed` rang up a brand-new **order** for every ticket it needed — about **1,300 per
+run** — because `newKot` goes through mig 335's trigger, which is the honest path for measuring a
+handover. But most of §3 is about which tickets the **claim** hands over, not about the trigger.
+
+Orders **cannot be hard-deleted** (mig 331; verified again here — even a never-billed, archived test
+order is refused: *"permanent erase only via the 90-day restaurant purge"*). So the table only grows.
+At **19,759 rows** the inserts began hitting Postgres's own `57014` statement timeout, and fifteen
+phases reported *"the ticket was never handed over"* — blaming the printing feature for the harness
+being unable to ring up an order.
+
+- the claim-only phases (the ordering grid, twelve starvation depths, the rush drain, the races, the
+  board-under-load reads) now hang their tickets off **one pooled order**: ~1,300 → **~90** per run;
+- and a `57014` **skips with the real reason** instead of going red, so the answer reads "purge the
+  test restaurant", not "printing is broken".
+
+⚠️ **Still open:** that restaurant needs purging before the trigger-path phases are reliable again.
+Nothing in the app can do it — by design, a sale may never disappear.
+
+### 5 · Two guards of mine that were wrong, caught by sabotage
+
+- one **matched its own obituary comment** (`"Kitchen · KOT printing"` appears in the note recording
+  that the card was deleted), so it went red the moment the deletion was documented properly. Third
+  time this family has done that; it reads `code()` now.
+- one was **pinned to the old code's shape**: it forbade the exact line that made the slip switch a
+  master switch, so putting the master switch back in a *different* shape sailed through all 302
+  checks. It now asserts the rule — there is exactly **one** way to turn all paper off, and it is the
+  stopped queue.

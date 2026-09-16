@@ -5257,10 +5257,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // same one function. While printing is off the poll answers 204 for every kind, so a sample
         // queued here is fetched by nobody; the row above already says STOPPED and hides the button,
         // and a hidden button has never been the gate in this product.
+        // Per kind, like the admin console's — the kitchen-slip switch must not refuse a bill.
         const runE = await printingRunning(rid);
-        if (!runE.on) return err(runE.why === "paused"
-          ? "The printing queue is stopped, so nothing would come out. Restart it and try again."
-          : "Printing is switched off for this restaurant, so nothing would come out — ask Aevidine to switch it on.");
+        if (!runE.on) return err("The printing queue is stopped, so nothing would come out. Restart it and try again.");
+        if (sk === "kot" && !runE.kot) return err("Automatic kitchen-slip printing is switched off, so no slip would come out.");
         const own = await helperFor(rid, sk);
         if (!own.owned) return err("No computer is set to print that yet — choose a printer for it first.", 409);
         const q = await queueJob(rid, sk, { sample: true },
