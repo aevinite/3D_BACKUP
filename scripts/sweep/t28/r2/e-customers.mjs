@@ -3,7 +3,7 @@
 // WHY 45. 421 lines, 26 ledger rows, 4 driven — and it holds the ONLY irreversible write in the
 // owner panel: the DPDP erase. Everything else here can be undone; that cannot. So the erase gets
 // the largest share, driven end to end on a guest this block creates and then erases.
-import { FH, PP, GHOST, GET, DEL, sb, owns, block, of_, code, read } from "./harness.mjs";
+import { FH, PP, GHOST, GET, DEL, sb, owns, undo, block, of_, code, read } from "./harness.mjs";
 
 const S = of_("app/api/owner/customers/route.ts");
 export const E = block(160756, "E · the owner's guest list, and the one erase that cannot be undone");
@@ -168,9 +168,28 @@ row(S("a guest who still OWES pay-later money is refused, and told how much and 
   const o = (ord.data || [])[0];
   if (!o) return "SKIP: no order to attach a debt to";
   const before = await sb.from("orders").select("khata_customer_id, khata_at, payment_status").eq("id", o.id).maybeSingle();
+  // ── THE DETACH IS REGISTERED BEFORE THE ATTACH, NOT AFTER IT (T28 round 2, 2026-09-16) ────────
+  // This restored the order inline, on the happy path only. A run that was interrupted between the
+  // attach and the restore therefore left a real order pointing at this fixture — and then the
+  // fixture could not be deleted at all, because `orders.khata_customer_id` is a foreign key with no
+  // cascade (which is correct: an issued bill is a sales record). The cleanup failed with
+  // "violates foreign key constraint orders_khata_customer_id_fkey", and putting it right by hand
+  // meant guessing one order's payment_status, because the captured value was gone with the process.
+  //
+  // Registered through `undo()` now, which runs in a `finally` AND on SIGINT/SIGTERM, and which
+  // runs BEFORE the row deletions — so the order is always let go of before anything tries to
+  // remove what it points at. Registered first, so an interruption during the attach is covered too.
+  undo(async () => {
+    await sb.from("orders").update({
+      khata_customer_id: before.data.khata_customer_id,
+      khata_at: before.data.khata_at,
+      payment_status: before.data.payment_status,
+    }).eq("id", o.id);
+    const back = await sb.from("orders").select("khata_customer_id").eq("id", o.id).maybeSingle();
+    if (back.data?.khata_customer_id) throw new Error(`order ${o.id} is still attached to a pay-later fixture`);
+  }, `the pay-later attachment on order ${o.id}`);
   await sb.from("orders").update({ khata_customer_id: ins.data.id, khata_at: new Date().toISOString(), payment_status: "unpaid" }).eq("id", o.id);
   const r = await DEL(c.O, "/api/owner/customers", { data: { restaurant_id: FH, phone: ph } });
-  await sb.from("orders").update({ khata_customer_id: before.data.khata_customer_id, khata_at: before.data.khata_at, payment_status: before.data.payment_status }).eq("id", o.id);
   return !!(r.status === 409 && r.j?.reason === "khata_outstanding" && typeof r.j.owed === "number" && /Collect or write that off/i.test(r.j.error || ""))
     || `${r.status} ${JSON.stringify(r.j).slice(0, 150)}`;
 });

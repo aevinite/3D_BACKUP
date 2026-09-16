@@ -470,6 +470,9 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   //    up, not flipping somebody's switch, and the difference is not something a pattern can see —
   //    so the pattern is kept to the tables where a leftover is invisible AND belongs to a real
   //    restaurant.
+  /** Either mechanism counts: the shared helper, or its own signal wiring (verify-realtime's way,
+   *  and it did it first). Comment lines are already stripped from what we are handed. */
+  const covered = (src) => /restoreOnExit\(/.test(src) || (/process\.on\(/.test(src) && /SIG/.test(src));
   const FLIPS = /from\("(settings|restaurants)"\)[\s\S]{0,140}?\.update\(|(settings|restaurants)\?[a-z_]+=eq[^`"']*`?,\s*\{\s*method:\s*"PATCH"|update\s+staff_users\s+set\s+assigned_tables|assigned_tables:\s*\[/;
   const bad = [];
   for (const f of files) {
@@ -478,9 +481,27 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     if (!src) continue;
     const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
     if (!FLIPS.test(code)) continue;
-    if (/restoreOnExit\(/.test(code)) continue;                 // uses the shared helper
-    if (/process\.on\(/.test(code) && /SIG/.test(code)) continue; // wires its own, like verify-realtime
+    if (covered(code)) continue;
     if (/sweep\/restore\.mjs/.test(f)) continue;                 // the helper itself
+    // ── A PUT-BACK MAY BE REGISTERED THROUGH A SIBLING MODULE (2026-09-16) ──────────────────────
+    // T28's round-2 five hundred is ten block files sharing one `harness.mjs`, and the harness is
+    // the single place that registers the restore — so every block that flips a setting looked
+    // uncovered while being, in fact, the best-covered code in the folder. Named the two files and
+    // told them to add an import they must NOT add: two registrations would put the world back
+    // twice and, worse, would make the order of the two mechanisms undefined.
+    //
+    // So follow the file's own imports ONE level, and only RELATIVE ones. One level, because a
+    // chain is how a hatch becomes wide enough to hide a real miss; relative only, because a
+    // package cannot be the thing holding this repo's restore.
+    const viaImport = [...code.matchAll(/from\s+["'](\.{1,2}\/[^"']+)["']/g)].some((m) => {
+      const dep = path.resolve(path.dirname(path.join(ROOT, f)), m[1]);
+      const depSrc = read(path.relative(ROOT, dep));
+      // Comment lines stripped the same way as the file's own, or a module that merely TALKS about
+      // restoreOnExit in its header would excuse every file that imports it.
+      const depCode = depSrc.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+      return !!depSrc && covered(depCode);
+    });
+    if (viaImport) continue;
     bad.push(f);
   }
   check(
