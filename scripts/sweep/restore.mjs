@@ -26,7 +26,9 @@
 //   restoreOnExit("French House · bill_customer_print", () => write(was));
 //
 // HONEST LIMIT, stated rather than implied: `SIGKILL` (kill -9, and what a hard timeout usually
-// sends) cannot be caught by any process, so nothing here can survive it. What this covers is the
+// sends) cannot be caught by any process, so nothing here can survive it. Everything else is
+// covered, including the quietest exit of all — a script whose event loop just empties, which is
+// what left a real setting behind on 2026-09-16 and is why `beforeExit` is hooked below. What this covers is the
 // interruptions that CAN be caught — Ctrl-C, a polite terminate, and a crash the guard did not
 // expect — which is every one this repo has actually been bitten by.
 
@@ -34,10 +36,10 @@ const jobs = [];        // [name, fn] — put back in REVERSE order, so the last
 let wired = false;
 let ran = false;
 
-async function runAll(why) {
+async function runAll(why, quiet = false) {
   if (ran || !jobs.length) return;
   ran = true;
-  console.error(`\n  ${why} — putting the world back before leaving (${jobs.length} thing(s))`);
+  if (!quiet) console.error(`\n  ${why} — putting the world back before leaving (${jobs.length} thing(s))`);
   for (const [name, fn] of [...jobs].reverse()) {
     try { await fn(); console.error(`    · put back: ${name}`); }
     // A failure here is the thing a person MUST see: it is the difference between "we tidied up"
@@ -64,6 +66,24 @@ export function restoreOnExit(name, fn) {
       console.error("\n  a promise was rejected and nobody caught it: " + String(e && e.message || e).slice(0, 200));
       await runAll("crashed"); process.exit(1);
     });
+    // ── THE QUIETEST WAY OUT IS THE ONE THAT WAS NOT COVERED (2026-09-16) ─────────────────────────
+    // Four hooks above, and the exit that actually left a setting behind was none of them: a script
+    // whose event loop simply EMPTIES. Node prints "Detected unsettled top-level await" and leaves
+    // with status 13 — no signal, no exception, nothing for any handler here to hear. Watched on
+    // 2026-09-16: a throwaway script switched French House's `tax_label` to a test string, awaited a
+    // promise that could never settle, and Node walked out. `finally` did not run. Nothing here ran.
+    // The restaurant kept the test string until somebody went looking.
+    //
+    // `beforeExit` is the hook for it, and it is the ONLY one that can: it runs while the loop can
+    // still be revived, so an async put-back genuinely completes. It does NOT fire on an explicit
+    // `process.exit()` or on a fatal error — both of which the four hooks above already own — so
+    // this adds exactly the missing case and overlaps none of them.
+    //
+    // QUIET on purpose. On a normal finish the guard's own teardown has usually already run, and the
+    // `ran` flag makes this a no-op; where it has not, the put-backs are all "write value X back",
+    // which is safe to repeat. A banner at the end of every green run is how a guard learns to be
+    // ignored — so this path says nothing unless a put-back FAILS, which `runAll` still shouts about.
+    process.on("beforeExit", async () => { await runAll("leaving", true); });
   }
   jobs.push([name, fn]);
 }
