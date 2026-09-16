@@ -158,7 +158,7 @@ async function runAttempt(attemptNo) {
   for (const id of mine.orders) {
     await sb.from("order_items").delete().eq("order_id", id);
     const { error } = await sb.from("orders").delete().eq("id", id);
-    if (error) await sb.from("orders").update({ status: "cancelled", deleted_at: new Date().toISOString() }).eq("id", id);
+    if (error) await sb.from("orders").update({ status: "cancelled", cancelled_at: new Date().toISOString(), deleted_at: new Date().toISOString() }).eq("id", id);
   }
   for (const id of mine.sessions) {
     await sb.from("session_members").delete().eq("session_id", id);

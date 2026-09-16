@@ -593,8 +593,49 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
       break;
     }
   }
+  // ── AND THE OTHER TWO STAMPS, AND THE OTHER WAY OF WRITING (sweep #9 T30, item 6) ───────────
+  //
+  // This check found the `paid_at` third and missed the rest twice over:
+  //
+  //   1. IT ONLY KNEW ONE WAY OF WRITING. It looked for `.from("orders").update(…)`, so it never
+  //      saw `db('orders?…', { method: "PATCH", body: … })` — the raw PostgREST shape half the
+  //      guards use. `verify-print-speed.mjs` cleans up with exactly that and set `archived: true`
+  //      with no `archived_at`, which is where FIVE THOUSAND TWO HUNDRED unstamped rows on French
+  //      House table 77 came from. A check that understands one dialect finds one dialect's bugs.
+  //   2. IT ONLY KNEW ONE COLUMN. `archived`/`archived_at` and `status:'cancelled'`/`cancelled_at`
+  //      are the same rule and were the other two thirds of the same fault.
+  //
+  // Every product path writes each pair together, so a fixture writing half of one invents a state
+  // the app cannot reach — and `lfh_owner_report_month_fingerprint` keys a cached month on the
+  // newest of created/edited/paid/cancelled/deleted_at, so a half-written stamp can leave an
+  // owner's report stale.
+  for (const f of files) {
+    const src = read(f);
+    if (!src) continue;
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // A PostgREST write at the orders endpoint: db(`orders?…`, { method: "PATCH"|"POST", body: … })
+    for (const m of code.matchAll(/["'`]orders\?[^"'`]*["'`][\s\S]{0,400}?method:\s*["'](?:PATCH|POST)["'][\s\S]{0,400}?\}\s*\)/g)) {
+      const win = m[0];
+      for (const [flag, stamp, label] of [
+        [/\barchived\s*:\s*true/, /archived_at/, "archived: true with no archived_at"],
+        [/status\s*:\s*["']cancelled["']/, /cancelled_at/, 'status: "cancelled" with no cancelled_at'],
+        [/payment_status\s*:\s*["']paid["']/, /paid_at/, 'payment_status: "paid" with no paid_at'],
+      ]) {
+        if (!flag.test(win) || stamp.test(win)) continue;
+        bad.push(`${f.replace(ROOT + "/", "")} — PATCHes ${label}`);
+      }
+    }
+    // …and the supabase-client shape, for the two columns the original pass did not cover
+    for (const m of code.matchAll(/\.from\(\s*["'`]orders["'`]\s*\)\s*\.\s*(?:insert|update|upsert)\(([\s\S]{0,300})/g)) {
+      const win = m[1];
+      if (/\barchived\s*:\s*true/.test(win) && !/archived_at/.test(win) && !(/\.\.\./.test(win) && /archived_at/.test(code)))
+        bad.push(`${f.replace(ROOT + "/", "")} — writes archived: true to orders with no archived_at`);
+      if (/status\s*:\s*["']cancelled["']/.test(win) && !/cancelled_at/.test(win) && !(/\.\.\./.test(win) && /cancelled_at/.test(code)))
+        bad.push(`${f.replace(ROOT + "/", "")} — writes status: "cancelled" to orders with no cancelled_at`);
+    }
+  }
   check(
-    'no test marks an order paid without stamping paid_at (the product always writes both)',
+    'no test half-writes an order stamp — paid/paid_at, archived/archived_at and cancelled/cancelled_at each travel together, however the write is spelled',
     bad.length === 0,
     bad.join("\n    ") + "\n    Add:  paid_at: new Date().toISOString()  — or the order's own created_at for a back-dated fixture.",
   );

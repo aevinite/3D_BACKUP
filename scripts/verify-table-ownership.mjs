@@ -257,7 +257,7 @@ head("C. Closing a session — its food leaves the floor with it");
       // SOFT-delete: every order here gets a bill number, and the DB rightly refuses to
       // hard-delete an issued bill ("soft-delete it (deleted_at) instead"). Our test rows
       // obey the same rule, so they leave every view without breaking that guarantee.
-      await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true }).in("id", [unpaidId, paidId]);
+      await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true, archived_at: new Date().toISOString() }).in("id", [unpaidId, paidId]);
       await sb.from("sessions").delete().eq("id", s1.id);
     }
   }
@@ -329,7 +329,7 @@ head("C. Closing a session — its food leaves the floor with it");
       await br.close();
     }
 
-    await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true, status: "cancelled" }).in("id", [stray.id, mine.id]);
+    await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true, archived_at: new Date().toISOString(), status: "cancelled", cancelled_at: new Date().toISOString() }).in("id", [stray.id, mine.id]);
     await sb.from("sessions").delete().eq("id", party.id);
     console.log("  · test rows cleaned up");
   }
@@ -520,7 +520,7 @@ if (!BASE) {
     }
   } finally {
     await browser.close();
-    await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true }).eq("id", ghost.id);
+    await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true, archived_at: new Date().toISOString() }).eq("id", ghost.id);
     if (fresh?.id) { await sb.from("sessions").update({ status: "closed" }).eq("id", fresh.id); await sb.from("sessions").delete().eq("id", fresh.id); }
     await sb.from("sessions").delete().eq("id", old.id);
     console.log("  · test rows cleaned up");

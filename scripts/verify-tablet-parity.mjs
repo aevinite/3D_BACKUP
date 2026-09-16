@@ -70,7 +70,7 @@ results.push(await expect("block", "ban → blocklist", async () => {
 // 4) kick: member removed
 results.push(await expect("member", "kick (member removed)", () => svc.from("session_members").update({ removed: true }).eq("id", mem.id)));
 // 5) restart: bulk archive+serve the table's active orders
-results.push(await expect("order", "restart (archive round)", () => svc.from("orders").update({ status: "served", archived: true }).eq("session_id", sess.id).eq("archived", false).neq("status", "cancelled")));
+results.push(await expect("order", "restart (archive round)", () => svc.from("orders").update({ status: "served", archived: true, archived_at: new Date().toISOString() }).eq("session_id", sess.id).eq("archived", false).neq("status", "cancelled")));
 
 } finally {
   // ---- cleanup, WHETHER OR NOT the checks above got that far ----

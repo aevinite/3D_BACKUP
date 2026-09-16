@@ -258,7 +258,7 @@ async function cleanup() {
   for (const id of made.orders) {
     await del(`order ${id} (soft-deleted + unlinked, as the compliance trigger requires)`,
       sb.from("orders").update({
-        deleted_at: new Date().toISOString(), status: "cancelled",
+        deleted_at: new Date().toISOString(), status: "cancelled", cancelled_at: new Date().toISOString(),
         khata_customer_id: null, khata_at: null,
       }).eq("id", id));
   }
