@@ -238,7 +238,8 @@
     "verify:admin-counts-cancelled": "node scripts/verify-admin-counts-cancelled.mjs",
     "verify:binned-restaurant-leaves": "node scripts/verify-binned-restaurant-leaves.mjs",
     "verify:rid-required": "node scripts/verify-rid-required.mjs",
-    "verify:own-hero": "node scripts/verify-own-hero.mjs"
+    "verify:own-hero": "node scripts/verify-own-hero.mjs",
+    "verify:cancel-stamped": "node scripts/verify-cancel-stamped.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"
