@@ -38,10 +38,11 @@ type Health = {
   latencyMs: number;
   tableEstimates: { table: string; estRows: number }[];
   tableEstimatesError: string | null;
-  restaurants: { active: number; suspended: number; total: number };
+  restaurants: { active: number; suspended: number; total: number; capped?: boolean };
   restaurantsError?: string | null;
   staffOnlineNow: number;
   staffTotal: number;
+  staffCapped?: boolean;   // the read hit its ceiling, so the number is a floor (T26 item 11)
   staffError?: string | null;
   offlineLayer?: { shipped: string | null; current: number; behind: number; unknown: number; windowMins: number } | null;
   realtime: { configuredHost: string | null };
@@ -215,7 +216,8 @@ export default function AdminHealth() {
       key: "rest", label: "Restaurants", value: "unknown", tone: "unknown",
       means: "Couldn't read the restaurant list, so this is unknown — not zero.", needsYou: true,
     } : {
-      key: "rest", label: "Restaurants", value: String(h.restaurants.active), tone: h.restaurants.suspended > 0 ? "warn" : "good",
+      // Same "+" as the staff tile when the read was cut short (T26 sweep #9, item 11).
+      key: "rest", label: "Restaurants", value: `${h.restaurants.active}${h.restaurants.capped ? "+" : ""}`, tone: h.restaurants.suspended > 0 ? "warn" : "good",
       means: h.restaurants.suspended > 0
         ? `Open for business. ${h.restaurants.suspended} more ${h.restaurants.suspended === 1 ? "is" : "are"} suspended.`
         : "All open for business — none suspended.",
@@ -227,7 +229,9 @@ export default function AdminHealth() {
     } : {
       // 0 staff online is NORMAL (overnight, between shifts) — it is not a fault, so it is never
       // amber. Only a failed READ is (audit 2026-07-23, kept).
-      key: "staff", label: "Staff signed in", value: `${h.staffOnlineNow} of ${h.staffTotal}`, tone: "plain",
+      // "of 5,000+" when the read was cut short, so the second number is never read as the total
+      // when it is only as far as we looked (T26 sweep #9, item 11).
+      key: "staff", label: "Staff signed in", value: `${h.staffOnlineNow} of ${h.staffTotal}${h.staffCapped ? "+" : ""}`, tone: "plain",
       means: h.staffOnlineNow > 0
         ? "Active in the last 3 minutes. Nobody signed in is normal out of hours."
         : "Nobody in the last 3 minutes — normal when the restaurants are closed.",
@@ -576,7 +580,8 @@ export default function AdminHealth() {
                 <div className="adm-logwrap hx-kv">
                   <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Live-updates host</span><span className="mono adm-muted">{h.realtime.configuredHost || "not configured"}</span></div>
                   <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Database answered in</span><span style={{ fontWeight: 700 }}>{h.latencyMs} ms</span></div>
-                  <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Staff accounts (live restaurants)</span><span style={{ fontWeight: 700 }}>{h.staffTotal}</span></div>
+                  <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Staff accounts (live restaurants)</span><span style={{ fontWeight: 700 }}>{h.staffTotal}{h.staffCapped ? "+" : ""}</span></div>
+                  {h.staffCapped ? <p className="hint">That is as far as this page counts in one go — there are at least this many.</p> : null}
                 </div>
               </div>
             </div>

@@ -19,6 +19,17 @@ const SW_WINDOW_MS = 24 * 60 * 60 * 1000; // a day
 // How many un-uploaded 3D models this page asks for. Named, because a list that comes back exactly
 // this long is a TRUNCATED list and the screen has to say so.
 const BROKEN_3D_LIMIT = 200;
+// ── THE OTHER TWO CEILINGS ON THIS PAGE, NAMED (T26 sweep #9, item 11, owner picked it 2026-09-16)
+// The un-uploaded-3D list above already says out loud when it has been cut short, with the reason
+// written next to it: "A CAPPED COUNT MUST SAY IT IS CAPPED … the page would print a confident
+// '200' and read as the whole story." The staff and restaurant reads on this same page carried the
+// identical shape and said nothing — so past 5,000 active staff or 2,000 live restaurants, "Active
+// staff 5,000" would be the number on screen for ever, falling further behind every month, with
+// nothing to notice. Measured the day this was written: 50 staff, 177 restaurants. A long way off,
+// which is exactly why it costs nothing to make honest now. Named constants, so the ceiling and the
+// flag can never drift apart the way a hard-coded pair does.
+const STAFF_LIMIT = 5000;
+const RESTAURANT_LIMIT = 2000;
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 
 export async function GET(req: NextRequest) {
@@ -41,7 +52,7 @@ export async function GET(req: NextRequest) {
     rd("estimates", () => sb.rpc("lfh_admin_table_estimates")),
     // Live restaurants only (bug H4/#6, 2026-07-06): binned restaurants must not be
     // counted as "suspended". With deleted_at excluded, suspended = live-but-inactive.
-    rd("restaurants", () => sb.from("restaurants").select("id, active").is("deleted_at", null).limit(2000)),
+    rd("restaurants", () => sb.from("restaurants").select("id, active").is("deleted_at", null).limit(RESTAURANT_LIMIT)),
     // Bounded read — this page auto-refreshes every 60s, so cap it so it can't grow
     // into a full-table pull as staff count climbs across all tenants (egress guard).
     //
@@ -53,7 +64,7 @@ export async function GET(req: NextRequest) {
     // attached to a deleted restaurant were counted here and nowhere else. One number, one meaning.
     // sw_version rides along on this SAME read — no extra query for the offline-layer check
     // below (mig 366). One more column on a slice this route already scans.
-    rd("staff", () => sb.from("staff_users").select("id, last_seen_at, restaurant_id, sw_version").eq("active", true).limit(5000)),
+    rd("staff", () => sb.from("staff_users").select("id, last_seen_at, restaurant_id, sw_version").eq("active", true).limit(STAFF_LIMIT)),
     rd("openIssues", () => sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open")),
     // A DISH THAT PROMISES 3D AND CANNOT DELIVER IT (owner, 2026-08-12: *"whenever the 3-D is not
     // available, it should show me as a problem also notification"*).
@@ -129,10 +140,19 @@ export async function GET(req: NextRequest) {
     latencyMs,
     tableEstimates,
     tableEstimatesError: reads.failed("estimates") ? String((reads.error("estimates") as { message?: string })?.message ?? "unreadable") : null,
-    restaurants: { active: activeRestaurants, suspended: suspendedRestaurants, total: restaurants.length },
+    restaurants: {
+      active: activeRestaurants, suspended: suspendedRestaurants, total: restaurants.length,
+      // A list that comes back exactly as long as its ceiling IS a truncated list — the same test,
+      // and the same reason, as `broken3d.capped` below.
+      capped: restaurants.length >= RESTAURANT_LIMIT,
+    },
     restaurantsError: reads.failed("restaurants") ? String((reads.error("restaurants") as { message?: string })?.message ?? "unreadable") : null, // so the page shows "unreadable", not a green "0 live"
     staffOnlineNow,
     staffTotal: staffRows.length,
+    // Measured on ALL the rows that came back, not on the live-restaurant subset below it: the cut
+    // happens in the database, before the filter, so the raw length is the only thing that can tell
+    // us the read was shortened.
+    staffCapped: allStaff.length >= STAFF_LIMIT,
     staffError: reads.failed("staff") ? String((reads.error("staff") as { message?: string })?.message ?? "unreadable") : null,
     // The offline layer, per device (mig 366). `shipped` is null when the file could not be
     // read, and the screen then says "unknown" rather than calling every device behind.
