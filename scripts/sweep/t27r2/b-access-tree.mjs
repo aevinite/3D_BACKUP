@@ -176,6 +176,14 @@ export default function section(c) {
       const mo = await c.model(); const ck = mo.creds[0];
       if (!ck) return "skip:no credential key in the model";
       const pc = (await set("platform_channels")).platform_channels || {};
+      // THIS PHASE WRITES THE COLUMN DIRECTLY — it has to, because no route will store the legacy
+      // shape any more, and that is the point of the check. So it registers its OWN put-back:
+      // verify:test-safety rule 11, "a test that flips a real setting must put it back even if it is
+      // interrupted", and that guard caught this file doing neither. The harness's whole-row restore
+      // covers a normal finish; this covers Ctrl-C between here and the end of the run.
+      c.restoreOnExit("French House · platform_channels (the legacy-shape probe)", async () => {
+        await sq(`settings?restaurant_id=eq.${FH}`, { method: "PATCH", body: JSON.stringify({ platform_channels: pc }) });
+      });
       await sq(`settings?restaurant_id=eq.${FH}`, { method: "PATCH", body: JSON.stringify({ platform_channels: { ...pc, [ck]: { on: true, api_key: "LEGACY-SHAPE" } } }) });
       await save({ creds: { [ck]: "T27R2-NEW-SHAPE" } });
       const after = ((await set("platform_channels")).platform_channels || {})[ck] || {};

@@ -63,6 +63,12 @@ import { createHash } from "node:crypto";
 // stopped app exits 2 with a plain sentence instead of a stack trace (verify:guards-alive enforces
 // it: a guard that cannot run looks exactly like a guard nobody ran, and neither looks like a red).
 import { requireUp } from "./sweep/appUp.mjs";
+// PUT THE WORLD BACK EVEN WHEN NOTHING ASKS US TO — the repo's own helper, not a second copy of it.
+// `finally` covers a throw; it does not cover Ctrl-C or a lane runner killing a guard that ran long.
+// This project's scar is verify:realtime switching a category off across seven restaurants and dying
+// two steps later. verify:test-safety rule 11 requires every script that flips a real setting to use
+// this or wire its own — and it caught this suite's section file doing neither.
+import { restoreOnExit } from "./sweep/restore.mjs";
 
 const arg = (k, d = null) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const BASE = arg("--base", "http://localhost:4427").replace(/\/$/, "");
@@ -218,6 +224,16 @@ async function snapshot() {
   made.restaurantCols = { ...rst };
   // On disk BEFORE the first write, so a killed run leaves something a later run can repair from.
   writeFileSync(SNAP, JSON.stringify({ takenAt: new Date().toISOString(), settings: made.settings, restaurantCols: made.restaurantCols, userId: null }, null, 1));
+  // …and registered with the shared helper, HERE, where the originals are captured. On a normal
+  // finish the `finally` has already put everything back and these do not fire; on Ctrl-C, a polite
+  // kill or an uncaught crash they are the only thing that will.
+  restoreOnExit("French House · the whole settings row", async () => {
+    const rest = { ...made.settings }; delete rest.id; delete rest.restaurant_id;
+    await sq(`settings?restaurant_id=eq.${FH}`, { method: "PATCH", body: JSON.stringify(rest) });
+  });
+  restoreOnExit("French House · manager_permissions, owner_entitlements and access_config", async () => {
+    await sq(`restaurants?id=eq.${FH}`, { method: "PATCH", body: JSON.stringify(made.restaurantCols) });
+  });
 }
 async function restoreAll() {
   const out = [];
@@ -258,19 +274,14 @@ async function actionsSince(since, actions) {
   return rows;
 }
 
-let stopping = false;
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => {
-  if (stopping) return; stopping = true;
-  console.log(`\n\n${sig} — putting French House back before exiting…`);
-  try { for (const l of await restoreAll()) console.log(`  ${l}`); } catch (e) { console.log(`  restore failed: ${e.message}`); }
-  process.exit(130);
-});
-
 // ── the context every section gets ──────────────────────────────────────────────────────────────
 const ctx = {
   phase, sec, req, sq, uncover, actionsSince, made, makeFixtureUser,
   BASE, ADMIN, ADMIN_PW, FH, AANGAN, NOSUCH, DB_WORDS, SECRETS, ROOT,
   src: (rel) => readFileSync(`${ROOT}${rel}`, "utf8"),
+  // A section that writes a real setting DIRECTLY (rather than through a route) registers its own
+  // put-back with this — verify:test-safety rule 11, and it is the right rule.
+  restoreOnExit,
   /**
    * THE MODEL, AS THE APP ITSELF COMPUTES IT — not as a regex guesses it from the source.
    *
