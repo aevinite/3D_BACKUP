@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope, ownerScopeOr503, dbFail, type PartialKey } from "@/lib/ownerScope";
+import { ownerScope, ownerScopeOr503, dbFail, type PartialKey , isRestaurantId} from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { inventoryLadder, inventoryEffectiveByRid } from "@/lib/tableTags";
 import { scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
@@ -68,6 +68,9 @@ export async function GET(req: NextRequest) {
   // Inventory is per-restaurant (stock can't meaningfully sum across kitchens):
   // the page picks one restaurant; default = the owner's first entitled one.
   let rid = sp.get("rid") || "";
+  // See isRestaurantId in lib/ownerScope — a malformed id used to reach the ladder read and answer
+  // "please try again" for ever.
+  if (rid && !isRestaurantId(rid)) return err("Not your restaurant.", 403);
   if (scope.all) {
     if (!rid) return err("Pick a restaurant.", 400);
   } else {

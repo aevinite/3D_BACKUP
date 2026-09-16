@@ -6,7 +6,7 @@
 // Egress-safe: explicit columns, scoped by restaurant_id, .limit — never SELECT *.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail, ownerLogPanel, ownerActorName } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail, ownerLogPanel, ownerActorName , isRestaurantId} from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { expectClash, clashJson } from "@/lib/clash";
@@ -60,7 +60,9 @@ export async function GET(req: NextRequest) {
   catch (e) { if (e instanceof RestaurantListIncomplete) return incompleteListResponse(); throw e; }
   const pinRid = req.nextUrl.searchParams.get("rid");
   if (pinRid) {
-    if (!inScope(scope, pinRid)) return empty();
+    // Same shape test as the complaints list beside it — `inScope` says yes to anything for the
+    // admin, so a malformed pin would otherwise reach the query (see isRestaurantId in lib/ownerScope).
+    if (!isRestaurantId(pinRid) || !inScope(scope, pinRid)) return empty();
     ids = [pinRid];
   }
   if (!ids.length) return empty();

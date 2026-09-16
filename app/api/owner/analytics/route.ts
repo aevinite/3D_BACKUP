@@ -19,7 +19,7 @@
 // the wrong thing. Corrected in the T9 sweep, 2026-08-06.)
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
+import { ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey , isRestaurantId} from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollEffectiveByRid } from "@/lib/tableTags";
 import { istDateOf } from "@/lib/staffProfileShared";
@@ -258,7 +258,12 @@ export async function GET(req: NextRequest) {
   const VALID_RANGES = new Set(["today", "yesterday", "week", "7d", "30d", "month", "lastmonth", "12m", "fy", "all", "custom"]);
   const rawRange = sp.get("range") || "today";
   const range = VALID_RANGES.has(rawRange) ? rawRange : "today";
-  const rid = sp.get("rid");
+  // A drill-in id that is not the SHAPE of a restaurant id is treated as no drill-in at all, not
+  // asked about — see isRestaurantId in lib/ownerScope. It used to reach eight RPCs and come back as
+  // a retryable 503 that could never succeed.
+  const ridRaw = sp.get("rid");
+  if (ridRaw && !isRestaurantId(ridRaw)) return NextResponse.json({ error: "That isn't one of your restaurants." }, { status: 400 });
+  const rid = ridRaw;
   const compare = sp.get("compare") === "1";
   // All-time "records" (lfh_owner_records) is an UNBOUNDED scan of the restaurant's whole
   // order history — cheap to run once, wasteful every 60s. The client asks for it only on
