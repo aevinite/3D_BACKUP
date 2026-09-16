@@ -340,10 +340,40 @@ export async function agentsView(rid: string): Promise<AgentView[]> {
 const bagOf = (s: unknown): Record<string, Record<string, unknown>> =>
   (s && typeof s === "object" ? s as Record<string, Record<string, unknown>> : {});
 
+/**
+ * ── A FAILED READ IS NOT "NO ROUTES" (T26 sweep #9 reported the sibling; this is ours) ────────
+ *
+ * `readRoutes` took `.data` and ignored `.error`, so a transient failure came back as an EMPTY
+ * address book — and empty is a perfectly valid answer meaning "nothing is set up". Every caller
+ * then acted on it: the boards said no printer was set up, the doors offered a browser window
+ * instead of queueing, and `claimSome` handed the helper nothing.
+ *
+ * Worse, and this is why it matters more here than anywhere else: **writeRoutes builds on it.** It
+ * reads the current routes, merges the one line being changed onto them, and writes the result — so
+ * one blip meant saving the bill line SILENTLY WIPED the kitchen-slip and banquet lines.
+ *
+ * So the read is checked. `readRoutes` still returns a plain `PrintRoutes`, because a dozen callers
+ * want exactly that and a throw inside the helper's poll path would leave a ticket in a worse state
+ * than empty routes would (the rule this whole file keeps). The caller that must NOT guess —
+ * writeRoutes — asks `readRoutesChecked` instead and refuses to save on a failed read.
+ */
+export async function readRoutesChecked(rid: string): Promise<{ routes: PrintRoutes; failed: boolean }> {
+  const q = await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle();
+  if (q.error) {
+    // Said out loud rather than absorbed: a silent empty address book is indistinguishable from a
+    // restaurant that has never set a printer up, and that is the whole fault.
+    console.error("[printHelpers] the printing routes could not be read:", q.error.message);
+    return { routes: emptyRoutes(), failed: true };
+  }
+  return { routes: routesFromBag((q.data as { modules?: unknown } | null)?.modules), failed: false };
+}
+
 export async function readRoutes(rid: string): Promise<PrintRoutes> {
-  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as
-    { modules?: unknown } | null;
-  const raw = bagOf(s?.modules)["printing"];
+  return (await readRoutesChecked(rid)).routes;
+}
+
+function routesFromBag(modules: unknown): PrintRoutes {
+  const raw = bagOf(modules)["printing"];
   const stored = raw && typeof raw.routes === "object" && raw.routes ? raw.routes as Record<string, unknown> : {};
   const out = emptyRoutes();
   for (const k of PRINT_KINDS) {
@@ -461,7 +491,19 @@ const routeSignature = (r: unknown): string => {
 export async function writeRoutes(rid: string, patch: Record<string, unknown>, was?: RouteWas): Promise<{ routes: PrintRoutes } | { error: string; clash?: true }> {
   const agents = await agentsView(rid);
   const byId = new Map(agents.map((a) => [a.id, a]));
-  const current = await readRoutes(rid);
+  // ── REFUSE, RATHER THAN SAVE ON TOP OF A GUESS ─────────────────────────────────────────────
+  // The patch is merged onto `current`, so if this read failed and came back empty, saving ONE
+  // paper line would clear the other two — the kitchen slips and the banquet sheet silently
+  // un-routed by somebody choosing a printer for the bills. One press costs nothing to repeat; a
+  // wiped address book costs a restaurant its printing.
+  //
+  // IT IS ALSO WHAT MAKES THE CLASH GATE BELOW HONEST (merged with T26's work, 2026-09-16). That
+  // gate compares what the caller last saw against `current`; on a failed read `current` is empty,
+  // so it would either cry "somebody else changed this" about nobody, or wave through a genuine
+  // clash. Checking the read first is the only order in which both are true.
+  const cur0 = await readRoutesChecked(rid);
+  if (cur0.failed) return { error: "Could not read this restaurant's printing set-up just now, so nothing was changed. Try again." };
+  const current = cur0.routes;
   // The gate. Skipped entirely when the caller sends no `was` — a script, an older tab and the
   // owner panel's own writes are all unaffected.
   if (was) {
@@ -676,9 +718,16 @@ export async function claimSome(
   const out: ClaimedJob[] = [];
   // How many this round already carries for each printer — see `perPrinter` above.
   const lanes = new Map<string, number>();
+  // ── A SLIP LEFT OVER FROM BEFORE THE SWITCH WAS TURNED OFF ─────────────────────────────────
+  // The kitchen-slip switch suppresses kitchen slips and nothing else (see printingRunning, and the
+  // fault it records: treating it as a master switch stopped a restaurant's BILLS). mig 335's
+  // trigger already refuses to queue a slip while it is off, so this only catches one left in the
+  // basket from before — which must not come out an hour later when nobody expects it.
+  const slipsOn = (await printingRunning(rid)).kot;
   for (const row of rows || []) {
     if (out.length >= max) break;
     if (!isPrintKind(row.kind)) continue;
+    if (row.kind === "kot" && !slipsOn) continue;
     const route = R[row.kind];
     let printer: string | null = null;
     // ONLY THE MACHINE THIS PAPER IS ADDRESSED TO. There used to be a second branch here that let
@@ -1072,13 +1121,49 @@ export async function papersForRestaurant(rid: string): Promise<RoutableKind[]> 
  * The two reasons are kept apart because the fix differs: SWITCHED OFF means the tickets are never
  * even made, STOPPED means they are made and waiting and will all come out at once when it restarts.
  */
-export type PrintingRunning = { on: boolean; why: null | "off" | "paused" };
+export type PrintingRunning = {
+  /** Is ANY paper going to come out — the master answer. Only a stopped queue turns this off. */
+  on: boolean;
+  why: null | "off" | "paused";
+  /** ── AND WHETHER KITCHEN SLIPS IN PARTICULAR ARE ON ─────────────────────────────────────────
+   *  `auto_print_kot` is NOT a master switch, however much the door used to treat it as one: it is
+   *  the kitchen-slip LINE, stored twice (syncKotSwitch keeps the line and the column in step — its
+   *  own comment says "one decision, two places"). Answering "Nobody" for the slips writes `false`
+   *  here, and nothing else about the restaurant changes. */
+  kot: boolean;
+};
+
+/**
+ * ── "NOBODY PRINTS THE SLIPS" MUST NOT STOP THE BILLS (2026-09-16) ───────────────────────────
+ *
+ * The door used to answer 204 for EVERY kind unless `auto_print_kot` was true. So a restaurant set
+ * up exactly the way the owner described — *"slips on the kitchen screen, bills on a computer"* —
+ * was handed nothing at all, and its bills never printed. The bill route sat there naming a live
+ * computer and a real printer; the helper was simply never given the job.
+ *
+ * Measured on 2026-09-16 before the fix: slips → Nobody, bills → a computer, a bill sample queued,
+ * and `/next` answered **204**. It was silent before the STOPPED rows existed — the board said LIVE
+ * and the Test button promised paper.
+ *
+ * Only a STOPPED QUEUE is a master stop now. The kitchen-slip switch suppresses kitchen slips and
+ * nothing else — which is safe twice over: mig 335's trigger already refuses to queue a slip while
+ * that column is false, and `claimSome` already only hands over a kind whose route names the asking
+ * machine, so a slip set to "Nobody" is not routed anywhere to begin with. `kot` is carried so the
+ * claim can skip any slip left in the basket from before the switch was turned off.
+ */
 export async function printingRunning(rid: string): Promise<PrintingRunning> {
-  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle())
-    .data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
-  if (s?.modules?.printing?.paused === true) return { on: false, why: "paused" };
-  if (s?.auto_print_kot === true && s?.auto_print_kot_allowed === true) return { on: true, why: null };
-  return { on: false, why: "off" };
+  const q = await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle();
+  if (q.error) {
+    // A read that failed is not "printing is off" — that would stop a whole restaurant's paper over
+    // a blip. Reported, and treated as running, because the claim below can only ever hand over a
+    // job whose route names the asking machine anyway.
+    console.error("[printHelpers] whether printing is running could not be read:", q.error.message);
+    return { on: true, why: null, kot: true };
+  }
+  const s = q.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
+  const kot = s?.auto_print_kot === true && s?.auto_print_kot_allowed === true;
+  if (s?.modules?.printing?.paused === true) return { on: false, why: "paused", kot };
+  return { on: true, why: null, kot };
 }
 
 export async function paperStatus(rid: string): Promise<PaperStatus[]> {
@@ -1089,19 +1174,52 @@ export async function paperStatus(rid: string): Promise<PaperStatus[]> {
   // Said once, above the per-paper answers, because it is true of every paper at once: the poll
   // answers 204 for all three kinds while this is off. `canTest` goes with it — a Test button that
   // queues a page nothing will ever fetch is worse than no button, because it reports success.
-  if (!running.on) {
-    return kinds.map((kind) => ({
-      kind, label: KIND_LABEL[kind] || kind, ok: false, via: "off" as const,
-      agent: null, printer: null, connected: false, secondsAgo: null,
-      state: "STOPPED" as const, canTest: false,
-      words: running.why === "paused"
-        ? "The queue is stopped. Tickets are still being made and are waiting — they all come out the moment it is restarted."
-        : "Printing is switched off for this restaurant, so no ticket is being made at all. Nothing will come out until it is switched back on.",
-    }));
+  // ── ONLY WHERE IT CHANGES THE ANSWER, AND NEVER RED ────────────────────────────────────────
+  // Two corrections to the first cut of this, both from guards that were already right:
+  //
+  //  1. NEVER RED. `ok: false` broke a standing rule this file's own type states: *"A deliberate
+  //     'Nobody' is not red — it is a decision somebody made, and colouring a decision as a fault is
+  //     crying wolf."* Switching printing off is a decision, and so is stopping the queue. Red stays
+  //     reserved for the one involuntary failure: a computer that owns paper and is not answering.
+  //
+  //  2. ONLY WHERE IT CHANGES THE ANSWER. If no paper is routed at a computer at all, the per-paper
+  //     answers below are already true AND more specific — "Nobody prints the slips", "a window
+  //     opens when somebody presses Print". Replacing those with "printing is switched off for this
+  //     restaurant" told a menu-only restaurant its whole printing was off when it had simply never
+  //     set a printer up. STOPPED is worth saying exactly when a computer IS set up and would
+  //     otherwise read LIVE — which is the fault this whole block was added for.
+  const anyComputer = kinds.some((k) => resolveTarget(routes[k], agents, k).kind === "computer");
+  // A STOPPED QUEUE is the only thing that holds every paper back at once.
+  if (!running.on && anyComputer) {
+    return kinds.map((kind) => {
+      const t = resolveTarget(routes[kind], agents, kind);
+      const mine = t.kind === "computer";
+      return {
+        kind, label: KIND_LABEL[kind] || kind, ok: true, via: "off" as const,
+        agent: mine ? t.agent : null, printer: mine ? t.printer : null,
+        connected: false, secondsAgo: null,
+        state: "STOPPED" as const, canTest: false,
+        words: running.why === "paused"
+          ? `The printing queue is stopped${mine ? ` — ${t.printer} is set up and waiting` : ""}. Tickets are still being made and are waiting; they all come out the moment it is restarted.`
+          : `Printing is switched off for this restaurant, so no ticket is being made at all${mine ? ` — ${t.printer} would print this otherwise` : ""}. Nothing comes out until it is switched back on.`,
+      };
+    });
   }
   return kinds.map((kind) => {
     const t = resolveTarget(routes[kind], agents, kind);
     const base = { kind, label: KIND_LABEL[kind] || kind };
+    // ── AND THE SLIP ROW ALONE, WHEN THE SLIP SWITCH IS OFF ──────────────────────────────────
+    // Reachable without contradiction: `syncKotSwitch` refuses to switch slips ON while Aevidine
+    // has not granted auto-printing ("not ours to grant"), so the slips can be pointed at a real
+    // computer while the column stays false. That row used to read LIVE with a working Test button,
+    // about paper that cannot come out — the same fault as the stopped queue, one row wide.
+    if (kind === "kot" && !running.kot && t.kind === "computer") {
+      return {
+        ...base, via: "off" as const, ok: true, state: "STOPPED" as const,
+        agent: t.agent, printer: t.printer, connected: false, secondsAgo: null, canTest: false,
+        words: `${t.printer} is set up for the kitchen slips, but automatic slip printing is switched off, so no slip is being made. Bills and banquet sheets are unaffected.`,
+      };
+    }
     if (t.kind === "computer") {
       const mins = t.secondsAgo == null ? null : Math.round(t.secondsAgo / 60);
       return {

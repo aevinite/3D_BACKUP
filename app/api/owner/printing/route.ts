@@ -202,9 +202,8 @@ export async function POST(req: NextRequest) {
   // other two: while printing is off nothing fetches the sample and the note would promise paper
   // that never comes.
   const runO = await printingRunning(target);
-  if (!runO.on) return NextResponse.json({ error: runO.why === "paused"
-    ? "The printing queue is stopped, so nothing would come out. Restart it and try again."
-    : "Printing is switched off for this restaurant, so nothing would come out." }, { status: 400 });
+  if (!runO.on) return NextResponse.json({ error: "The printing queue is stopped, so nothing would come out. Restart it and try again." }, { status: 400 });
+  if (kind === "kot" && !runO.kot) return NextResponse.json({ error: "Automatic kitchen-slip printing is switched off, so no slip would come out." }, { status: 400 });
   const q = await queueJob(target, kind, { sample: true }, { requestedBy: "sample · owner" });
   if ("error" in q) return NextResponse.json({ error: "Could not send that sample to the printer." }, { status: 500 });
   // ── WHO SENT IT, AND WHOSE LOG IT BELONGS IN (T28 of sweep #9, 2026-09-15) ────────────────────

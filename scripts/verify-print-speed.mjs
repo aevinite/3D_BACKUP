@@ -155,10 +155,24 @@ const lpClear = () => { for (const p of Object.values(VIRT)) { try { execFileSyn
 // ── A KOT THE REAL WAY: an order goes in, mig 335's trigger queues the slip ───────────────────
 // Never an inserted print_jobs row. The trigger IS the feature, and a test that side-steps it is
 // testing a table.
+// ── A DATABASE THAT WILL NOT ACCEPT AN INSERT IS NOT A PRINTING FAULT ────────────────────────
+// The shared test restaurant has ~19,800 orders and they cannot be hard-deleted (mig 331 — a sale
+// may never disappear, even a never-billed test one). At that size the insert began hitting
+// Postgres's own statement timeout, 57014, and fifteen phases reported "the ticket was never handed
+// over" — i.e. they blamed the printing feature for the harness being unable to ring up an order.
+// A timeout here SKIPS with the real reason instead. Not passing quietly: it says what happened, so
+// the answer is "purge the test restaurant", not "printing is broken".
+const DB_TIMEOUT = "skip: the dev database timed out inserting an order (the test restaurant needs purging) — nothing about printing was measured";
 const newKot = async (title) => {
-  const [o] = await db("orders", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
-    restaurant_id: RID, table_number: "77", items: [{ id: "sp", title: title || "Speed dish", qty: 1, price: 90, options: [] }],
-    subtotal: 90, tax: 4.5, total: 94.5, status: "received", placed_by: "speed run" }) });
+  let o;
+  try {
+    [o] = await db("orders", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
+      restaurant_id: RID, table_number: "77", items: [{ id: "sp", title: title || "Speed dish", qty: 1, price: 90, options: [] }],
+      subtotal: 90, tax: 4.5, total: 94.5, status: "received", placed_by: "speed run" }) });
+  } catch (e) {
+    if (/57014|statement timeout/.test(String(e.message))) return { order: null, jobId: null, timedOut: true, queuedInMs: 0 };
+    throw e;
+  }
   made.orders.push(o.id);
   const t0 = Date.now();
   let js = [];
@@ -172,6 +186,39 @@ const newKot = async (title) => {
 // read as "the bill would not queue" while reporting a 200 beside it. The id is normalised once,
 // here, and `sampleId` is the only way any phase gets at it.
 const sampleId = (body) => body?.id || body?.jobId || null;
+// ── A TICKET WITHOUT A NEW ORDER, FOR THE PHASES THAT TEST THE CLAIM ─────────────────────────
+//
+// `newKot` inserts an ORDER so mig 335's trigger makes the slip — the real path, and the only honest
+// way to measure a handover. But most of §3 is not about the trigger at all: the ordering grid, the
+// twelve starvation depths, the rush drain and the races are about which tickets the CLAIM hands
+// over, and they were each paying for a brand-new order to get one.
+//
+// That cost ~1,300 orders PER RUN on a shared restaurant, and orders CANNOT be hard-deleted (mig
+// 331: a sale may never disappear — even a never-billed test one; verified 2026-09-16). So the table
+// only grows, and at 19,759 rows the inserts began hitting Postgres's statement timeout — which read
+// as "the round was empty with tickets waiting", i.e. as a product fault. A test that degrades the
+// database it tests against, and then blames the product, is worse than no test.
+//
+// So: ONE pooled order per run, and the claim-only phases hang their tickets off it. `print_jobs`
+// rows CAN be hard-deleted, and this file deletes its own at the end.
+let POOL_ORDER = null;
+const poolOrder = async () => {
+  if (POOL_ORDER) return POOL_ORDER;
+  const [o] = await db("orders", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
+    restaurant_id: RID, table_number: "77", items: [{ id: "sp", title: "Speed dish", qty: 1, price: 90, options: [] }],
+    subtotal: 90, tax: 4.5, total: 94.5, status: "received", placed_by: "speed run" }) });
+  made.orders.push(o.id);
+  POOL_ORDER = o.id;
+  return o.id;
+};
+const cheapKot = async (title) => {
+  const orderId = await poolOrder();
+  const [j] = await db("print_jobs", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
+    restaurant_id: RID, kind: "kot", order_id: orderId, reprint: true, status: "queued",
+    requested_by: String(title || "speed run").slice(0, 80) }) });
+  made.jobs.push(j.id);
+  return { jobId: j.id };
+};
 const queueSample = async (kind) => {
   const r = await apiJson("/api/admin/printing/test", { method: "POST", body: JSON.stringify({ rid: RID, sample: kind }) });
   const id = sampleId(r.body);
@@ -425,7 +472,7 @@ const maxShapes = [
 for (const s of maxShapes) {
   await phase(`/next${s.q || " (no parameter)"} answers the right shape — ${s.why}`, async () => {
     await drain();
-    for (let i = 0; i < 6; i++) await newKot(`shape ${s.q} ${i}`);
+    for (let i = 0; i < 6; i++) await cheapKot(`shape ${s.q} ${i}`);
     const r = await agentCall("/next" + s.q);
     if (r.status !== 200) return `answered ${r.status} with six tickets waiting`;
     const b = await r.json();
@@ -444,7 +491,9 @@ for (let i = 1; i <= 20; i++) {
   await phase(`a slip rung up is in the helper's hands within 2.5s — round ${i} of 20`, async () => {
     await drain();
     const t0 = Date.now();
-    const { jobId } = await newKot(`handover ${i}`);
+    const k = await newKot(`handover ${i}`);
+    if (k.timedOut) return DB_TIMEOUT;
+    const { jobId } = k;
     if (!jobId) return "the order queued no ticket at all — mig 335's trigger did not fire";
     let got = null;
     for (let k = 0; k < 40 && !got; k++) {
@@ -512,7 +561,7 @@ for (let i = 1; i <= 12; i++) {
   await phase(`two helpers asking at the same instant never both get one ticket — race ${i} of 12`, async () => {
     await drain();
     const mk = [];
-    for (let k = 0; k < 4; k++) mk.push((await newKot(`race ${i}.${k}`)).jobId);
+    for (let k = 0; k < 4; k++) mk.push((await cheapKot(`race ${i}.${k}`)).jobId);
     const [a, b] = await Promise.all([agentCall("/next?max=4"), agentCall("/next?max=4")]);
     const ja = a.status === 200 ? (await a.json()).jobs || [] : [];
     const jb = b.status === 200 ? (await b.json()).jobs || [] : [];
@@ -648,7 +697,7 @@ const buildShape = async (s, tag) => {
   // INTERLEAVED, not all-the-kots-then-all-the-bills. A basket where every bill is newer than every
   // slip cannot tell "oldest first" from "kitchen first", and kitchen-first is the fault.
   for (let i = 0; i < rounds; i++) {
-    if (i < s.kot) { const r = await newKot(`${tag} kot ${i}`); if (r.jobId) madeIds.push({ kind: "kot", id: r.jobId }); }
+    if (i < s.kot) { const r = await cheapKot(`${tag} kot ${i}`); if (r.jobId) madeIds.push({ kind: "kot", id: r.jobId }); }
     if (i < s.bill) { const r = await queueSample("bill"); if (r.id) madeIds.push({ kind: "bill", id: r.id }); }
     if (i < s.banquet) { const r = await queueSample("banquet"); if (r.id) madeIds.push({ kind: "banquet", id: r.id }); }
   }
@@ -734,7 +783,7 @@ for (const s of shapes) {
 for (let N = 1; N <= 12; N++) {
   await phase(`a bill behind ${N} kitchen slip${N === 1 ? "" : "s"} is still in the first round`, async () => {
     await drain();
-    for (let i = 0; i < N; i++) await newKot(`starve ${N}.${i}`);
+    for (let i = 0; i < N; i++) await cheapKot(`starve ${N}.${i}`);
     const r = await queueSample("bill");
     const billId = r.id;
     if (!billId) return `the bill would not queue: ${r.status} ${JSON.stringify(r.body).slice(0, 90)}`;
@@ -747,7 +796,7 @@ for (let N = 1; N <= 12; N++) {
 for (let N = 1; N <= 6; N++) {
   await phase(`a banquet sheet behind ${N} kitchen slip${N === 1 ? "" : "s"} is still in the first round`, async () => {
     await drain();
-    for (let i = 0; i < N; i++) await newKot(`bq starve ${N}.${i}`);
+    for (let i = 0; i < N; i++) await cheapKot(`bq starve ${N}.${i}`);
     const r = await queueSample("banquet");
     const bqId = r.id;
     if (!bqId) return "skip: this restaurant cannot queue a banquet sheet";
@@ -764,7 +813,7 @@ for (let N = 1; N <= 6; N++) {
 {
   await drain();
   const seq = [];
-  for (let i = 0; i < 16; i++) { const r = await newKot(`sequence ${String(i).padStart(2, "0")}`); if (r.jobId) seq.push(r.jobId); }
+  for (let i = 0; i < 16; i++) { const r = await cheapKot(`sequence ${String(i).padStart(2, "0")}`); if (r.jobId) seq.push(r.jobId); }
   const order = await db(`print_jobs?id=in.(${seq.join(",")})&select=id,created_at`);
   const at = Object.fromEntries(order.map((r) => [r.id, r.created_at]));
   const handedOut = [];
@@ -789,7 +838,7 @@ for (let N = 1; N <= 6; N++) {
 for (let i = 1; i <= 8; i++) {
   await phase(`three helpers asking together still hand each ticket to exactly one — race ${i} of 8`, async () => {
     await drain();
-    for (let k = 0; k < 6; k++) await newKot(`triple ${i}.${k}`);
+    for (let k = 0; k < 6; k++) await cheapKot(`triple ${i}.${k}`);
     const rs = await Promise.all([agentCall("/next?max=4"), agentCall("/next?max=4"), agentCall("/next?max=4")]);
     const ids = [];
     for (const r of rs) if (r.status === 200) ids.push(...((await r.json()).jobs || []).map((j) => j.id));
@@ -1285,7 +1334,9 @@ for (let i = 1; i <= 6; i++) {
     await startHelper();
     const before = arrivals().length;
     const t0 = Date.now();
-    const { jobId } = await newKot(`single ${i}`);
+    const k = await newKot(`single ${i}`);
+    if (k.timedOut) return DB_TIMEOUT;
+    const { jobId } = k;
     if (!jobId) return "no ticket was queued";
     let paperMs = null;
     for (let k = 0; k < 120 && paperMs === null; k++) {
@@ -1319,7 +1370,7 @@ for (let i = 1; i <= 3; i++) {
   await phase(`a bill dropped into a running ten-slip backlog prints within 25 seconds — run ${i} of 3`, async () => {
     if (!LIVE) return noLive;
     await stopHelper(); await drain(); lpClear(); clearArrivals();
-    for (let k = 0; k < 10; k++) await newKot(`backlog ${i}.${k}`);
+    for (let k = 0; k < 10; k++) await cheapKot(`backlog ${i}.${k}`);
     await startHelper();
     await sleep(3000);                                   // let the rush get going first
     const t0 = Date.now();
@@ -1338,7 +1389,9 @@ for (let i = 1; i <= 15; i++) {
   await phase(`job made → the helper is handed it — measurement ${i} of 15`, async () => {
     await drain();
     const t0 = Date.now();
-    const { jobId } = await newKot(`pickup ${i}`);
+    const k = await newKot(`pickup ${i}`);
+    if (k.timedOut) return DB_TIMEOUT;
+    const { jobId } = k;
     if (!jobId) return "no ticket was queued";
     let got = false;
     for (let k = 0; k < 50 && !got; k++) {
@@ -1503,12 +1556,23 @@ stash({ settings: { modules: bagWas, ...switchesWas, banquet_allowed: bqWas.banq
 // way that is legal: banquet ON, write every line, and only THEN switch banquet off if this shape is
 // a restaurant that never bought it. Ten phases per shape were reading the previous shape's world
 // before this was understood — and blaming the product for it.
+const setPaused = async (yes) => {
+  const [row] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
+  const m = row.modules || {};
+  const printing = { ...(m.printing || {}) };
+  if (yes) printing.paused = true; else delete printing.paused;
+  await db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ modules: { ...m, printing } }) });
+};
 const arrange = async (s) => {
   await setBanquet(true);
+  await setPaused(false);                 // clear the master stop before writing routes
   await setRoutes(s.routes);
   await setBanquet(s.banquet);
   await setAsleep(!!s.asleep);
-  await setOn(s.on);
+  // THE TWO SWITCHES ARE SET APART. `on` is the master (a stopped queue); `slipsOff` is the
+  // kitchen-slip line alone. Conflating them is the fault this file now covers.
+  await setOn(s.slipsOff ? false : true);
+  await setPaused(!!s.paused);
 };
 const NOBODY = { kot: null, bill: null, banquet: null };
 const KITCHEN_SCREEN = { via: "screen", panel: "kitchen" };
@@ -1529,7 +1593,16 @@ const shapeList = [
     routes: { kot: KITCHEN_SCREEN, bill: { agent: () => AGENT.id, printer: VIRT.counter }, banquet: null } },
   { name: "the computer owns everything but has gone to sleep", banquet: true, on: true, asleep: true, owns: { kot: true, bill: true, banquet: true },
     routes: { kot: { agent: () => AGENT.id, printer: VIRT.kitchen }, bill: { agent: () => AGENT.id, printer: VIRT.counter }, banquet: { agent: () => AGENT.id, printer: VIRT.banquet } } },
-  { name: "printing switched off by Aevidine", banquet: true, on: false, owns: { kot: true, bill: true, banquet: true },
+  // ── THE TWO STATES THAT REALLY EXIST, since 2026-09-16 ─────────────────────────────────────
+  // This was ONE shape called "printing switched off by Aevidine", and it expected every paper to
+  // stop. That was only ever true because the helper's door mistook the kitchen-slip column for a
+  // master switch — the fault fixed that day, where a restaurant with its slips on the screen and
+  // its bills on a computer got no bills. There are two different states and they stop different
+  // things, so there are two shapes.
+  { name: "the printing queue stopped by Aevidine", banquet: true, on: false, paused: true, owns: { kot: true, bill: true, banquet: true },
+    routes: { kot: { agent: () => AGENT.id, printer: VIRT.kitchen }, bill: { agent: () => AGENT.id, printer: VIRT.counter }, banquet: { agent: () => AGENT.id, printer: VIRT.banquet } } },
+  { name: "automatic kitchen slips switched off, bills still on a computer", banquet: true, on: true, slipsOff: true,
+    owns: { kot: true, bill: true, banquet: true },
     routes: { kot: { agent: () => AGENT.id, printer: VIRT.kitchen }, bill: { agent: () => AGENT.id, printer: VIRT.counter }, banquet: { agent: () => AGENT.id, printer: VIRT.banquet } } },
   { name: "slips on the kitchen screen, bills on a computer, no banquet sold", banquet: false, on: true, owns: { bill: true },
     routes: { kot: KITCHEN_SCREEN, bill: { agent: () => AGENT.id, printer: VIRT.counter }, banquet: null } },
@@ -1564,7 +1637,7 @@ for (const s of shapeList) {
     const want = (b) => {
       const kot = (b?.live || []).find((r) => r.kind === "kot");
       if (!kot) return false;
-      return s.owns.kot ? kot.agent !== null : kot.agent === null;
+      return s.owns.kot ? kot.agent !== null || kot.state === "STOPPED" : kot.agent === null;
     };
     const got = await settles(async () => (await apiJson(`/api/editor/printing/state?rid=${RID}`, { headers: { "x-lfh-device": "speed-run" } })).body, want, 8, 700);
     board = got.last;
@@ -1631,7 +1704,7 @@ for (const s of shapeList) {
       // computer is back". Asserting `!asleep` here was asserting my assumption, not the product's
       // rule. Printing being OFF is the different case — nothing is fetched at all — and that one
       // really does take the button away.
-      const shouldTest = !!s.owns[k] && s.on !== false && (k !== "banquet" || s.banquet);
+      const shouldTest = !!s.owns[k] && !s.paused && !(s.slipsOff && k === "kot") && (k !== "banquet" || s.banquet);
       if (row.canTest !== shouldTest) return `${k} offers ${row.canTest ? "a Test button with nothing to print it" : "no Test button although a computer owns it"}`;
     }
     return true;
@@ -1645,9 +1718,21 @@ for (const s of shapeList) {
       // The poll answers 204 for every kind while it is off, so a row that still said LIVE was
       // three green lines on a restaurant where no paper could come out. Found by this phase on
       // 2026-09-14 and fixed in lib/printHelpers → paperStatus.
-      if (s.on === false) {
-        if (row.state !== "STOPPED") return `${k} says ${row.state} while printing is switched off — nothing reaches a helper at all in that state`;
-        if (row.canTest !== false) return `${k} still offers a Test button while printing is switched off`;
+      // A STOPPED QUEUE holds every paper: every row says STOPPED and offers no Test.
+      if (s.paused) {
+        if (row.state !== "STOPPED") return `${k} says ${row.state} while the whole queue is stopped`;
+        if (row.canTest !== false) return `${k} still offers a Test button while the queue is stopped`;
+        continue;
+      }
+      // THE KITCHEN-SLIP SWITCH holds the slips ALONE — and this is the fix, asserted: the bill and
+      // the banquet sheet must still read LIVE, because they still print.
+      if (s.slipsOff) {
+        if (k === "kot") {
+          if (row.state !== "STOPPED") return `the slip row says ${row.state} although automatic slips are switched off`;
+          if (row.canTest !== false) return "a Test button is offered for a slip that cannot be made";
+        } else if (row.state !== "LIVE") {
+          return `${k} says ${row.state} because the KITCHEN-SLIP switch is off — that is the fault where a restaurant lost its bills`;
+        }
         continue;
       }
       const live = row.state === "LIVE";
@@ -1686,7 +1771,7 @@ for (const s of shapeList) {
   });
 }
 // put the restaurant back before anything else reads it
-await setBanquet(bqWas.banquet_allowed); await setOn(true); await setAsleep(false); await allThreeHere();
+await setPaused(false); await setBanquet(bqWas.banquet_allowed); await setOn(true); await setAsleep(false); await allThreeHere();
 
 // ── and the other half: the panels open a window on `noRoute` and on nothing else ────────────
 await phase("the manager panel opens a print window only when the door said nobody owns the paper", () =>
@@ -1723,7 +1808,7 @@ await stopHelper(); await drain(); lpClear();
   // A real backlog in flight, and then the screens read over and over. The fault this catches is a
   // heading counted separately from the rows under it: on 2026-09-14 the breakdown said 14 under a
   // heading saying 15, because they were two counts taken a moment apart.
-  for (let i = 0; i < 14; i++) await newKot(`load ${String(i).padStart(2, "0")}`);
+  for (let i = 0; i < 14; i++) await cheapKot(`load ${String(i).padStart(2, "0")}`);
   await queueSample("bill");
   for (let k = 1; k <= 20; k++) {
     await phase(`read ${k} of 20 under a backlog: the heading matches the rows beneath it`, async () => {
