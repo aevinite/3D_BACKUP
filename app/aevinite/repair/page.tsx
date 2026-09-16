@@ -30,7 +30,10 @@ type Session = { id: string; table_number: string; status: string; bill_no: numb
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
 type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null; err_key?: string | null };
-type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
+// `report` is LAZY (T26 sweep #9, item 15): `undefined` means "not fetched yet", `null` means
+// "asked, and there is none". The list carries `hasReport` instead, because shipping every report
+// body to draw a list cost 67.7 KB of the page's 76.1 KB — see app/api/admin/agent-runs.
+type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; status: "running" | "done" | "closed" | "failed"; hasReport: boolean; report?: string | null; started_at: string; ended_at: string | null };
 // Complaints (staff/owner-raised tickets) — folded in from the old /aevinite/issues page.
 type Issue = TicketLike & { restaurantName: string; restaurantSlug?: string; status: string };
 // At-risk & onboarding — folded in from the old /aevinite/attention page.
@@ -287,6 +290,48 @@ export default function AdminRepair() {
   const [requests, setRequests] = useState<FixRequest[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [openRun, setOpenRun] = useState("");
+  // ── THE HISTORY CAN BE WALKED BACK NOW (T26 sweep #9, item 15, owner picked it 2026-09-16) ────
+  // It answered the newest 30 and stopped: the 31st-oldest session could not be reached from this
+  // console at all, and the chip counted the rows it had been handed as if that were the history.
+  // `runsTotal` is the real number, `runsBefore` is the cursor for the next page back, and it goes
+  // null once a page comes back short — which is how this knows it has reached the oldest one
+  // rather than guessing from a total that may have moved.
+  const [runsTotal, setRunsTotal] = useState<number | null>(null);
+  const [runsBefore, setRunsBefore] = useState<string | null>(null);
+  const [runsMore, setRunsMore] = useState(false);
+
+  // Open a row, fetching its report the first time — the list does not carry the bodies any more.
+  // `report === undefined` means "never asked"; `null` means "asked, there is none", which the row
+  // then says out loud rather than sitting blank.
+  const openRunRow = useCallback(async (id: string) => {
+    if (openRun === id) { setOpenRun(""); return; }
+    setOpenRun(id);
+    const have = runs.find((r) => r.id === id);
+    if (!have || have.report !== undefined) return;
+    const r = await adminFetch<{ report: string | null }>(`/api/admin/agent-runs?report=${encodeURIComponent(id)}`);
+    setRuns((prev) => prev.map((x) => (x.id === id
+      // A FAILED FETCH IS NOT AN EMPTY REPORT. The row only opens because the list said it has one,
+      // so storing "" here would show a blank panel under a promise. `undefined` stays, and the
+      // open panel says it could not be read — pressing again retries.
+      ? { ...x, report: r.ok ? (typeof r.data.report === "string" ? r.data.report : null) : undefined }
+      : x)));
+  }, [openRun, runs]);
+
+  // One page further back. Appends rather than replacing, so the scroll position and any open row
+  // survive — and `nextBefore` going null is what turns the button off, not a count.
+  const loadOlderRuns = useCallback(async () => {
+    if (!runsBefore || runsMore) return;
+    setRunsMore(true);
+    const r = await adminFetch<{ runs: AgentRun[]; nextBefore: string | null }>(`/api/admin/agent-runs?before=${encodeURIComponent(runsBefore)}`);
+    if (r.ok) {
+      const more = Array.isArray(r.data.runs) ? r.data.runs : [];
+      // Keyed by id when merging: two pages can only overlap if a session was written between the
+      // two reads, and a duplicate row in a history list is the thing a cursor exists to prevent.
+      setRuns((prev) => { const seen = new Set(prev.map((x) => x.id)); return [...prev, ...more.filter((x) => !seen.has(x.id))]; });
+      setRunsBefore(typeof r.data.nextBefore === "string" ? r.data.nextBefore : null);
+    }
+    setRunsMore(false);
+  }, [runsBefore, runsMore]);
   const [refreshing, setRefreshing] = useState(false);
 
   // Complaints (staff/owner tickets) — platform-wide, folded in from the old Tickets page.
@@ -356,7 +401,7 @@ export default function AdminRepair() {
       // still shows resolved rows. Without this the board could never be emptied.
       adminFetch<{ actions: Action[]; waiting: number | null }>(`/api/admin/oplog?level=error&limit=${ERROR_FEED_LIMIT}&unresolved=1`),
       adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
-      adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
+      adminFetch<{ runs: AgentRun[]; nextBefore: string | null; total: number | null }>("/api/admin/agent-runs?count=1"),
       adminFetch<{ issues: Issue[] }>("/api/owner/issues?scope=all"),
       adminFetch<AttData>("/api/admin/attention"),
       // `rules` rides along so a hit can be shown by its REAL name. This row used to print
@@ -390,7 +435,11 @@ export default function AdminRepair() {
     const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
     if (e.ok) { setErrors(list<Action>(e.data.actions)); setWaiting(typeof e.data.waiting === "number" ? e.data.waiting : null); } else { failed.push("problems"); setWaiting(null); }
     if (q.ok) setRequests(list<FixRequest>(q.data.requests)); else failed.push("the Claude queue");
-    if (h.ok) setRuns(list<AgentRun>(h.data.runs)); else failed.push("Claude's history");
+    if (h.ok) {
+      setRuns(list<AgentRun>(h.data.runs));
+      setRunsBefore(typeof h.data.nextBefore === "string" ? h.data.nextBefore : null);
+      setRunsTotal(typeof h.data.total === "number" ? h.data.total : null);
+    } else { failed.push("Claude's history"); setRunsBefore(null); setRunsTotal(null); }
     // THE STRIP HAS TO FAIL THE WAY THE SECTIONS DO (T17 sweep #7, 2026-08-27). These two were the
     // only feeds whose failure never reached the counts at the top: with the complaints list
     // unreachable the pill read a confident "0 open complaints", and "need attention" sat on the
@@ -1573,7 +1622,13 @@ export default function AdminRepair() {
         <>
           <div className="rp-sec-h">
             <i className="fas fa-clock-rotate-left" aria-hidden="true" style={{ color: "var(--muted)" }} />
-            <h2>Claude session history</h2><span className="rp-chip">{runs.length}</span>
+            {/* THE CHIP COUNTED THE PAGE, NOT THE HISTORY (T26 sweep #9, item 15). It read
+                `runs.length`, which was always exactly 30 because that is all the route ever sent —
+                so "30" was a fact about the read, printed as a fact about the platform. It says how
+                many are SHOWN of how many EXIST once the total is known, and falls back to the old
+                single number when the count itself could not be read. */}
+            <h2>Claude session history</h2>
+            <span className="rp-chip">{runsTotal != null && runsTotal > runs.length ? `${runs.length} of ${runsTotal}` : runs.length}</span>
           </div>
           {/* ── HOW THE SCHEDULED RUNS ARE ACTUALLY DOING ────────────────────────────────────────
               Found 2026-09-02 while answering "why is the night audit running in the afternoon":
@@ -1661,7 +1716,7 @@ export default function AdminRepair() {
                     <span className="adm-muted" style={{ fontSize: 11.5 }}>
                       {istTime(s.started_at)}
                       {mins !== null ? <> · {mins} min</> : null} · <span style={{ color: st.color }}>{st.label}</span>
-                      {s.report ? <> · {isOpen ? "hide" : "read what it did"}</> : null}
+                      {s.hasReport ? <> · {isOpen ? "hide" : "read what it did"}</> : null}
                     </span>
                     {/* WHY IS A NIGHT JOB STAMPED IN THE MORNING? (owner, 2026-09-02: "why night
                         audit is going on in afternoon"). The schedules are right — 2:30am, 4am,
@@ -1680,7 +1735,7 @@ export default function AdminRepair() {
                     {/* NOTHING TO OPEN, SAID OUT LOUD. Only for a run that ENDED — a run still
                         working has not had the chance to write one yet, and calling that "no
                         report" would be an invented fault. */}
-                    {!s.report && s.ended_at ? (
+                    {!s.hasReport && s.ended_at ? (
                       <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, fontStyle: "italic" }}>
                         No report was saved{s.status === "failed" ? " — it stopped before it could write one." : "."}
                       </span>
@@ -1690,8 +1745,8 @@ export default function AdminRepair() {
               );
               return (
                 <div key={s.id} style={{ padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
-                  {s.report ? (
-                    <button onClick={() => setOpenRun(isOpen ? "" : s.id)} aria-expanded={isOpen}
+                  {s.hasReport ? (
+                    <button onClick={() => void openRunRow(s.id)} aria-expanded={isOpen}
                       style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", background: "none", border: "none", padding: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer", minHeight: 40 }}>
                       {rowBody}
                       <i className={`fas fa-chevron-${isOpen ? "up" : "down"}`} aria-hidden="true" style={{ marginTop: 4, opacity: 0.5, fontSize: 11 }} />
@@ -1699,12 +1754,39 @@ export default function AdminRepair() {
                   ) : (
                     <div style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", minHeight: 40 }}>{rowBody}</div>
                   )}
-                  {isOpen && s.report ? (
-                    <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, lineHeight: 1.55, margin: "8px 0 0", padding: "10px 12px", borderRadius: 8, background: "color-mix(in srgb, var(--card) 60%, transparent)", border: "var(--border)", maxHeight: 320, overflowY: "auto", fontFamily: "inherit" }}>{s.report}</pre>
+                  {/* THE THREE STATES OF A LAZY REPORT (T26 sweep #9, item 15). The body is
+                      fetched when the row is opened, so an open row is in exactly one of three
+                      states and each says which: the text, "fetching", or "couldn't read it".
+                      Blank is not one of them — this row only opens because the list said it HAS a
+                      report, so a silent empty panel would be the row breaking its own promise. */}
+                  {isOpen ? (
+                    s.report ? (
+                      <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, lineHeight: 1.55, margin: "8px 0 0", padding: "10px 12px", borderRadius: 8, background: "color-mix(in srgb, var(--card) 60%, transparent)", border: "var(--border)", maxHeight: 320, overflowY: "auto", fontFamily: "inherit" }}>{s.report}</pre>
+                    ) : s.report === null ? (
+                      <p className="adm-muted" style={{ fontSize: 12, margin: "8px 0 0", fontStyle: "italic" }}>That report is no longer on record.</p>
+                    ) : (
+                      <p className="adm-muted" style={{ fontSize: 12, margin: "8px 0 0" }}>Fetching what it did… <span style={{ opacity: 0.7 }}>(press again if this stays)</span></p>
+                    )
                   ) : null}
                 </div>
               );
             })}
+            {/* ── THE WAY BACK (T26 sweep #9, item 15, owner picked it 2026-09-16) ──────────────
+                There was none: the route answered the newest 30 and this list drew them, so the
+                31st-oldest working session could not be reached from the console at all. The button
+                appears only when there IS an older page — `nextBefore` comes back null once a page
+                is short — so on a platform with fewer than 30 sessions nothing changes on screen. */}
+            {runsBefore ? (
+              <div style={{ paddingTop: 10, textAlign: "center" }}>
+                <button className="adm-btn" onClick={() => void loadOlderRuns()} disabled={runsMore}>
+                  {runsMore ? "Fetching…" : "Show older sessions"}
+                </button>
+              </div>
+            ) : runs.length > 0 ? (
+              <p className="adm-muted" style={{ fontSize: 11.5, textAlign: "center", paddingTop: 10, margin: 0 }}>
+                That is every working session on record.
+              </p>
+            ) : null}
           </div>
         </>
       )}

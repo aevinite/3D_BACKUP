@@ -14,7 +14,7 @@ type PrintingState = {
   // LIST — see the note in the map below for what went wrong when the two were not matched up.
   // Optional so an older deployment's answer still parses; an absent id means "don't apply it".
   restaurantId?: string;
-  allowed: boolean; on: boolean; waiting: number;
+  allowed: boolean; on: boolean; waiting: number | null;   // null = we could not count just now (T26 item 12)
   computers: { name: string; connected: boolean; secondsAgo: number | null;
     printers: { name: string; state: string; paper?: { wMm: number; hMm: number } | null }[] }[];
   /** The four words "ready / paused / not answering / not reported" are said in, from the server —
@@ -486,9 +486,14 @@ export default function OwnerSettings() {
             ) : null}
             <p className="adm-muted" style={{ fontSize: 12, marginTop: 9 }}>
               {printing.on ? "" : "Automatic printing is switched off at the moment — tickets wait and nothing is lost. "}
-              {printing.waiting > 0
-                ? `${printing.waiting} ${printing.waiting === 1 ? "thing is" : "things are"} waiting to print.`
-                : "Nothing is waiting to print."}
+              {/* THREE ANSWERS, NOT TWO (T26 sweep #9, item 12). `waiting` was a number that came
+                  back 0 when the count itself failed, so "Nothing is waiting to print." was said on
+                  a night when plenty was. null is the honest third case and it gets its own words. */}
+              {printing.waiting == null
+                ? "We couldn't check what is waiting just now."
+                : printing.waiting > 0
+                  ? `${printing.waiting} ${printing.waiting === 1 ? "thing is" : "things are"} waiting to print.`
+                  : "Nothing is waiting to print."}
               {" "}Changing which printer gets which paper is done for you by Aevidine — ask and it is one line.
             </p>
           </div>

@@ -29,6 +29,12 @@
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+// THE APP-UP PREFLIGHT. Required of every guard that drives the app (verify:guards-alive), so a
+// port that is not answering says so in one plain sentence and exits 2, instead of a stack trace
+// that reads like the product is broken. This guard was landed on 2026-09-15 without it, which put
+// verify:guards-alive red on `main` — and that guard runs from the repo's PostToolUse hook, so a
+// red there refuses every file save in every session in this folder. (T26 sweep #9, 2026-09-16.)
+import { requireUp } from "./sweep/appUp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 let bad = 0;
@@ -69,6 +75,9 @@ head("B · what three real restaurants actually render");
   if (!base) {
     console.log("⏭  skipped: pass --base http://localhost:<port> to read the rendered heroes. Not a failure.");
   } else {
+    // Only once we know a --base was asked for: half A is a source read and must still run when
+    // nothing is serving.
+    await requireUp(base, "the rendered guest heroes");
     const parseEnv = (t) => Object.fromEntries(t.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
       const k = l.indexOf("="); return [l.slice(0, k).trim(), l.slice(k + 1).trim().replace(/^["']|["']$/g, "")];
     }));

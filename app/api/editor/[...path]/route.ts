@@ -5179,7 +5179,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (g.user && !(await managerCan(g, rid, "print_clear"))) return permDenied("clear the printing queue");
       // Counted first: the update is written WITHOUT `.select()` on purpose — a restaurant three
       // days behind can have hundreds of rows waiting and nothing here needs them.
+      // NULL means "I could not count", which is NOT an empty queue (T26 sweep #9, item 12) — the
+      // manager's copy of the same button, and the same reasoning as the admin's.
       const n = await waitingCount(rid);
+      if (n == null) return err("Couldn't count what is waiting, so nothing was cleared. Please try again.");
       if (!n) return ok({ cleared: 0 });
       const who = g.user?.name || g.user?.username || "Aevidine";
       const upd = await sb.from("print_jobs")

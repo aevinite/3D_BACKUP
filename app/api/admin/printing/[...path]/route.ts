@@ -14,6 +14,8 @@ import { pageAll } from "@/lib/pageAll";
 import { adminFail } from "@/lib/adminFail";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
+// THE ONE CLASH GATE — see lib/clash.ts. Silent unless the board SAID what it was editing from.
+import { expectClash, clashJson } from "@/lib/clash";
 import {
   agentsView, readRoutes, writeRoutes,
   PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch, waitingCount,
@@ -88,9 +90,27 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       // keeps that (no extra round trip below a thousand restaurants) and removes the silent cut.
       pageAll<{ id: string; name: string; slug: string }>("restaurants", (from, to) =>
         sb.from("restaurants").select("id, name, slug").order("name").range(from, to)),
-      sb.from("print_agents").select("id, restaurant_id, name, last_seen_at, printers")
-        .is("revoked_at", null).limit(400),
-      sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules").limit(400),
+      // ── PAGED FOR THE SAME REASON THE LIST ABOVE IS (T26 sweep #9, item 10, owner picked it
+      //    2026-09-16) ────────────────────────────────────────────────────────────────────────────
+      // The restaurants read was moved onto pageAll on 2026-08-31 because "a ceiling of any size is
+      // still a board that silently stops being the whole platform". These two carried .limit(400)
+      // and were left, which moved the silent cut one table across rather than removing it: past 400
+      // rows every later restaurant would render "no computer" and "printing off" — a HARDWARE board
+      // saying a shop's printer is fine when nobody has looked. Measured the day before this fix:
+      // 177 restaurants. Not wrong yet, and that is exactly when it is cheap to fix.
+      //
+      // EGRESS: `settings` is one row per restaurant and `print_agents` one or two, so at today's
+      // size both are a single page and there is no extra round trip at all — pageAll asks for
+      // another page only when the last one came back full. Both keep their column lists; `modules`
+      // is the one wide column and it is already the narrowest form of what this board needs.
+      // (lib/pageAll's own header names this exact shape — "a table with ONE ROW PER RESTAURANT
+      // that must be complete" — as what it is for.)
+      pageAll<{ id: string; restaurant_id: string; name: string; last_seen_at: string | null; printers: unknown }>("print_agents", (from, to) =>
+        sb.from("print_agents").select("id, restaurant_id, name, last_seen_at, printers")
+          .is("revoked_at", null).order("id").range(from, to)),
+      pageAll<{ restaurant_id: string }>("settings", (from, to) =>
+        sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules")
+          .order("restaurant_id").range(from, to)),
       // Only what is STILL WAITING, and only the two columns needed to count it and age it.
       sb.from("print_jobs").select("restaurant_id, kind, created_at")
         .in("status", ["queued", "printing"]).eq("kind", "kot").limit(2000),
@@ -105,8 +125,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     // read answered a 200 with `rows: []` — a Printing overview showing nothing at all, which reads
     // as a healthy platform with nobody printing. Same rule as its neighbours in this console.
     if (rests.error) return adminFail("the printing overview", rests.error as { message?: string }, { action: "load" });
-    if (agents.error) return adminFail("the printing overview", agents.error, { action: "load" });
-    if (sets.error) return adminFail("the printing overview", sets.error, { action: "load" });
+    if (agents.error) return adminFail("the printing overview", agents.error as { message?: string }, { action: "load" });
+    if (sets.error) return adminFail("the printing overview", sets.error as { message?: string }, { action: "load" });
     if (jobs.error) return adminFail("the printing overview", jobs.error, { action: "load" });
     const now = Date.now();
     const byRest = new Map<string, { n: number; oldest: number | null }>();
@@ -118,10 +138,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       byRest.set(j.restaurant_id, cur);
     }
     const agentsBy = new Map<string, { id: string; name: string; last_seen_at: string | null; printers: unknown }[]>();
-    for (const a of (agents.data || []) as { restaurant_id: string; id: string; name: string; last_seen_at: string | null; printers: unknown }[]) {
+    for (const a of (agents.rows || [])) {
       const arr = agentsBy.get(a.restaurant_id) || []; arr.push(a); agentsBy.set(a.restaurant_id, arr);
     }
-    const setBy = new Map((((sets.data || []) as { restaurant_id: string }[])).map((x) => [x.restaurant_id, x as Record<string, unknown>]));
+    const setBy = new Map(((sets.rows || [])).map((x) => [x.restaurant_id, x as unknown as Record<string, unknown>]));
 
     const rows = ((rests.rows || [])).map((r) => {
       const mine = agentsBy.get(r.id) || [];
@@ -301,6 +321,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   if (seg[0] === "agents" && seg[1] && seg[2] === "rename") {
     const name = String(body.name || "").trim();
     if (!name) return err("Give the computer a name.");
+    // ── FIRST SAVE WINS, AND THE LOSER GETS TOLD (owner, 2026-09-16 — T26 sweep #9, item 13) ────
+    // A shop's PC name is a value typed into a box. The gate is scoped to this restaurant by
+    // lib/clash itself (print_agents carries a real restaurant_id), and it does nothing unless the
+    // board sent an expectation — so a script or an older tab is unaffected.
+    {
+      const overwrite = await expectClash(req, rid);
+      if (overwrite) return clashJson(overwrite);
+    }
     const up = await sb.from("print_agents").update({ name }).eq("id", seg[1]).eq("restaurant_id", rid).select("id").maybeSingle();
     if (up.error) return err(up.error.code === "23505" ? "There is already a computer with that name." : "Could not rename it.");
     // A SAVE THAT MATCHED NO ROW IS NOT A SAVE (T26 sweep #9, 2026-09-15). This answered ok:true
@@ -353,8 +381,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
         return err(`This restaurant does not have ${strays.map((k) => KIND_LABEL[k] || k).join(", ")} — switch the feature on first.`);
       }
     }
-    const saved = await writeRoutes(rid, patch);
-    if ("error" in saved) return err(saved.error);
+    // `was` is what the board showed for each line it is changing (T26 sweep #9, item 13). The gate
+    // lives inside writeRoutes because that is where both sides of the comparison are already
+    // normalised by the same function — see the long note over it. Absent `was` = no gate, so every
+    // other caller is unaffected.
+    const was = (body.was && typeof body.was === "object" && !Array.isArray(body.was)) ? body.was as Record<string, unknown> : undefined;
+    const saved = await writeRoutes(rid, patch, was);
+    // A clash is a 409, not a 400: the board reads that as "refresh and look", the same shape every
+    // other protected write on this platform answers with.
+    if ("error" in saved) return err(saved.error, saved.clash ? 409 : 400);
     // The kitchen-slip line IS settings.auto_print_kot — one decision, one column, one control
     // (lib/printHelpers → syncKotSwitch). Without this the two boards drift apart again: the address
     // book would say "nobody prints kitchen slips" while the trigger went on queueing them.
@@ -453,7 +488,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   if (seg[0] === "queue" && seg[1] === "clear") {
     // Counted first, because the update is deliberately written WITHOUT `.select()` — a restaurant
     // three days behind can have hundreds of rows waiting and nothing here needs them.
+    // NULL means "I could not count", which is NOT an empty queue (T26 sweep #9, item 12). This
+    // read `if (!n)` over a helper that answered 0 on failure, so a blip reported success for doing
+    // nothing — to somebody standing in front of a printer three days behind.
     const n = await waitingCount(rid);
+    if (n == null) return err("Couldn't count what is waiting, so nothing was cleared. Please try again.", 500);
     if (!n) return NextResponse.json({ ok: true, cleared: 0 });
     const upd = await sb.from("print_jobs")
       .update({ status: "dismissed", done_at: new Date().toISOString(), error: "cleared from the queue by Aevidine — this ticket was never printed" })

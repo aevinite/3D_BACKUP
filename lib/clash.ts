@@ -112,6 +112,11 @@ const COMPARABLE_TABLES: Record<string, string> = {
   // it joins TENANT_ROW_TABLES below — there is no `restaurant_id` column to scope by because the
   // id already IS one.
   restaurant_billing: "restaurant_id",
+  // The computers that print (mig 341). Added 2026-09-16 on the owner's word (T26 sweep #9, item
+  // 13): the name of a shop's PC is a value typed into a box on Aevinite → Printing, and with this
+  // table unknown here the gate answered "nothing to protect" even if the board asked. It carries a
+  // real `restaurant_id`, so the tenant scope below applies to it normally.
+  print_agents: "id",
 };
 
 /** Tables whose own primary key IS the restaurant, so there is no `restaurant_id` to scope by and
