@@ -10,6 +10,7 @@
 // fixture.
 import { chromium } from "playwright";
 import { adminHeaders, loginAs } from "../../login.mjs";
+import { restoreOnExit } from "../../restore.mjs";
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
@@ -59,7 +60,16 @@ export async function cleanup() {
   }
   if (written.length || restore.length) console.log(`  · cleaned ${written.length} row(s) by id, restored ${restore.length} setting(s)`);
 }
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await cleanup(); process.exit(130); });
+// ── ONE RESTORE MECHANISM IN THIS REPO, AND IT IS NOT THIS FILE'S OWN (2026-09-16) ──────────────
+// This wired `process.on("SIGINT" | "SIGTERM")` by hand. `scripts/sweep/restore.mjs` already exists
+// for exactly this — five guards use it — and it covers one more interruption than the hand-rolled
+// version did: `uncaughtException`. A crash the run did not expect is precisely when a flipped
+// setting gets left behind, so hand-rolling it was strictly worse for no gain.
+//
+// Registered as ONE job, so the order inside `cleanup()` is preserved: settings go back first, then
+// the rows this run created are deleted by their own id. `cleaned` makes it idempotent, so a normal
+// finish (which calls `cleanup()` in its own `finally`) means this job fires and does nothing.
+restoreOnExit("T28 round 2 — the settings this run flipped and the rows it wrote", cleanup);
 
 // ── the callers ──────────────────────────────────────────────────────────────────────────────────
 export async function contexts() {
