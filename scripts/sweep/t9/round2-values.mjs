@@ -238,6 +238,6 @@ async function main() {
     }
   }
   console.log(`  (ids ${results[0].id} … ${results[results.length-1].id})`);
-  process.exit(bad.length ? 1 : 0);
+  process.stdout.write("", () => process.exit(bad.length ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)
 }
 main().catch((e) => { console.error("round2-values threw:", e); process.exit(2); });

@@ -1265,4 +1265,4 @@ if (LEDGER) {
 }
 console.log(`\n${fail.length ? "✗" : "✓"} verify:bill-ledger — ${pass.length} passed · ${fail.length} failed · ${skipped.length} skipped (of ${n} planned)`);
 if (fail.length) { console.log("\nFAILED:"); for (const f of fail) console.log(`  ${f.id} ${f.title}${f.note ? " — " + f.note : ""}`); }
-process.exit(fail.length ? 1 : 0);
+process.stdout.write("", () => process.exit(fail.length ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)

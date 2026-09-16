@@ -452,4 +452,4 @@ console.log(`\n  A-E + G used ${P.used} of 500 ids`);
 if (process.argv.includes("--ledger")) console.log("\n" + P.table());
 const skipped = P.rows.filter((r) => r.result === "⏭").length;
 console.log(`\n${P.failed ? "✗" : "✓"} round 2, groups A-E and G: ${P.used - P.failed - skipped} green · ${skipped} skipped (the object is deliberately retired) · ${P.failed} red, of ${P.used} rows`);
-process.exitCode = P.failed ? 1 : 0;   // NOT process.exit(): it discards buffered stdout, which truncated --ledger when piped
+process.stdout.write("", () => process.exit(P.failed ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)

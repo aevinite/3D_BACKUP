@@ -1942,4 +1942,4 @@ if (!FROM && TO === Infinity) {
   writeFileSync(join(root, R2_RESULT_FILE), JSON.stringify({ at: new Date().toISOString(), base: BASE, live: LIVE_BASE, planned: n, results, notes }, null, 2) + "\n");
 }
 console.log(`\nre-run one band:  node scripts/verify-repair-health-round2.mjs --base ${BASE} --from <n> --to <n>`);
-process.exit(fail.length ? 1 : 0);
+process.stdout.write("", () => process.exit(fail.length ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)

@@ -851,4 +851,4 @@ if (pass.length + fail.length < MIN) {
   console.log(`Only ${pass.length + fail.length} checks actually ran, and this round has ${rows.length}.\nThat is not a pass — it is a round that did not run. Exiting 1.\n`);
   process.exit(1);
 }
-process.exit(fail.length ? 1 : 0);
+process.stdout.write("", () => process.exit(fail.length ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)
