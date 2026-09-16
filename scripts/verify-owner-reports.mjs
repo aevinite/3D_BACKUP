@@ -64,9 +64,22 @@ check("the day sheet's dishes + hours use the SAME window as its money",
 // mint a cache row of its own. This check kept demanding the old spelling, so it failed on the
 // improvement — and since verify:static is one `&&` chain, that took SEVEN later guards and CI's
 // whole access-model step down with it for a day. Match either; refuse a `day` key with no date.
+// ── …AND IT MAY SAY MORE THAN THE DATE (T28 round 2, 2026-09-16) ───────────────────────────────
+// The key is `day:<from>` plus `:live` while that day is still running. It had to be: the window's
+// end is capped at `Date.now()`, so an in-progress day and a finished one were the SAME key, and a
+// sheet opened at 06:08 in the morning was served for ever afterwards holding one hour of that day.
+// Measured — 2026-09-09 served 1.1h, forced fresh 24.0h. The claim here is unchanged and still the
+// point: the key carries the DATE, so two different days can never share a snapshot row.
 check("the day-sheet cache key carries the date",
-  /range === "day" \? `day:\$\{(?:from|sp\.get\("date"\))\}`/.test(reportsRoute),
+  /range === "day" \? `day:\$\{(?:from|sp\.get\("date"\))\}/.test(reportsRoute),
   "two different days would share one snapshot row");
+// MATCHED ON THE KEY EXPRESSION, NOT ON PROSE. Written as `/dayStillRunning/ && /:live/` first, and
+// sabotage showed why that is worthless here: this file does not strip comments, and the long note
+// above the key mentions `:live`, so deleting the suffix from the real key left the check GREEN.
+// This matches the ternary INSIDE the template literal, which only the shipped key can satisfy.
+check("…and it tells a day that is still running from one that has finished",
+  /`day:\$\{from\}\$\{\s*dayStillRunning\s*\?\s*":live"\s*:\s*""\s*\}`/.test(reportsRoute),
+  "an in-progress day and a finished day share one key, so the first hour of a day is served as the whole of it");
 
 console.log("\n── 1b. BETWEEN MIDNIGHT AND 5AM, 'TODAY' IS STILL LAST NIGHT'S SHIFT ──");
 // The T5 re-run at 00:29 IST: the day sheet defaulted to the NEW calendar date, whose business

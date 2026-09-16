@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
+import { ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey , isRestaurantId} from "@/lib/ownerScope";
 import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct, priceTaxMode, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
@@ -207,7 +207,11 @@ export async function GET(req: NextRequest) {
   const type = sp.get("type") || "sales";
   const rawRange = sp.get("range") || "30d";
   const range = VALID_RANGES.has(rawRange) ? rawRange : "today";
-  const rid = sp.get("rid") || null;
+  // Same shape test as the dashboard beside it (see isRestaurantId in lib/ownerScope): a value that
+  // cannot be a restaurant is refused with a sentence, never asked about and answered as a retry.
+  const ridRaw = sp.get("rid") || null;
+  if (ridRaw && !isRestaurantId(ridRaw)) return NextResponse.json({ error: "That isn't one of your restaurants." }, { status: 400 });
+  const rid = ridRaw;
   if (rid && !scope.all && !scope.ids.includes(rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   // Mig 133: a REAL owner only reads reports for restaurants whose "reports" section
   // the admin still allows. The admin's own session (scope.admin — set on every admin
@@ -274,8 +278,39 @@ export async function GET(req: NextRequest) {
   // (`range=day`), so its numbers changed shape-for-shape — old rows must not be served.
   // Built from the RESOLVED window, never the raw query string — windowFor() validates and
   // falls back, the key did not, so junk dates minted a cache row each (T5 sweep, 2026-08-11).
+  // ── v6: A DAY THAT WAS STILL RUNNING IS NOT THE SAME DAY ONCE IT HAS ENDED ────────────────────
+  //    (T28 round 2, 2026-09-16.)
+  //
+  // `windowFor("day")` caps the end of the window at `Date.now()`, which is right and necessary —
+  // a day sheet for TODAY cannot report hours that have not happened. But the key was `day:<from>`,
+  // the day's START and nothing else, so an in-progress day and a finished one are the same key.
+  //
+  // So: open the Day summary at 06:08 in the morning, and the payload stored under that key holds
+  // ONE HOUR of that day. Open the same day a week later and that is what comes back — the first
+  // hour's takings, labelled and totalled as the whole day. MEASURED on this stack, 2026-09-16:
+  //
+  //     2026-09-09 (a day that ended a week ago)   served 1.1h   · forced fresh: 24.0h
+  //     2026-09-15 (yesterday)                     served 1.4h   · the day is over
+  //     2026-09-02 (a day nobody opened early)     served 24.0h  · correct
+  //
+  // AND IT CANNOT HEAL ITSELF, which is the half that makes it serious. The change-detector is
+  // `ordersFingerprint(ids, from, to)` over the SAME truncated window, so every order taken after
+  // 06:08 that day falls outside the only window being watched. The fingerprint never moves, the
+  // snapshot is never recomputed, and the wrong sheet is served for as long as the row survives.
+  // On the dev data those early hours happened to hold no orders, so no wrong money was printed
+  // here; on a restaurant that traded that morning the sheet is a fraction of the day's takings.
+  //
+  // THE FIX IS THE KEY, not the window. A finished day has a fixed 05:00→05:00 window and deserves
+  // one stable key. A day still running keeps a stable key too — so it still caches, which is the
+  // whole point of this table — but a DIFFERENT one, and its fingerprint moves as orders arrive
+  // because they land inside `from`→now. The moment the day ends, the `:live` key stops being
+  // asked for and the complete key computes fresh over the whole 24 hours.
+  //
+  // Same shape as the fix T13 gave `custom` in the analytics route ("keyed to the DAY, exactly as
+  // the eight fixed ranges already are"): identity in the key, freshness in the fingerprint.
+  const dayStillRunning = range === "day" && Date.parse(to) < Date.parse(from) + 86_400_000;
   const rangePart = range === "custom" ? `custom:${from}:${to}`
-    : range === "day" ? `day:${from}`
+    : range === "day" ? `day:${from}${dayStillRunning ? ":live" : ""}`
     : `${range}:${from.slice(0, 10)}`;
   // ── v5: THE PAYLOAD GAINED `window` (T20 round 2, 2026-08-31) ─────────────────────────────────
   // Bumped for exactly the reason the note above states — "BUMP THIS VERSION WHENEVER A PAYLOAD SHAPE
@@ -283,7 +318,12 @@ export async function GET(req: NextRequest) {
   // convincing way possible: `range=today` (uncached, fresh) carried its window and `range=30d`
   // (served from a stored snapshot) came back with `window: undefined`. The screen would have had the
   // field on some ranges and not others, which is worse than not having it at all.
-  const cacheKey = `reports:v5:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${rangePart}`;
+  // v6 AND NOT v5, even though the payload's SHAPE is unchanged. Every `day:<from>` row written
+  // before today may hold a window truncated to the moment somebody first opened it, and those rows
+  // are indistinguishable from correct ones — so they are orphaned rather than trusted. This is the
+  // same reasoning the v3 note above gives ("BUMP THIS VERSION WHENEVER A PAYLOAD SHAPE CHANGES"),
+  // applied to a change in what a key MEANS, which is the other half of the same rule.
+  const cacheKey = `reports:v6:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${rangePart}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
   // Change-detector choice. The precise ordersFingerprint SCANS its window — on a WIDE
