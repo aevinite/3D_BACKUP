@@ -3605,13 +3605,13 @@ for (const id of made.jobs)   { try { await db(`print_jobs?id=eq.${id}`,   { met
 // quietly stop working, which is the whole story of this line.
 const gone = new Date().toISOString();
 for (const id of made.orders) {
-  try { await db(`orders?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true }) }); } catch {}
+  try { await db(`orders?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true, archived_at: gone }) }); } catch {}
 }
 try {
   const stragglers = await db(`orders?restaurant_id=eq.${RID}&placed_by=eq.sweep&archived=eq.false&deleted_at=is.null&select=id`);
   if (stragglers.length) {
     await db(`orders?restaurant_id=eq.${RID}&placed_by=eq.sweep&deleted_at=is.null`,
-      { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true }) });
+      { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true, archived_at: gone }) });
   }
   const left = await db(`orders?restaurant_id=eq.${RID}&placed_by=eq.sweep&archived=eq.false&deleted_at=is.null&select=id`);
   if (left.length) console.log(`  ⚠️  ${left.length} of this run's orders are STILL on the kitchen board — the clean-up did not work.`);

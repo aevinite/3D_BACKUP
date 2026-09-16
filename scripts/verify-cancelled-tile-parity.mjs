@@ -100,7 +100,7 @@ try {
   ]));
 
   // CANCELLED order: 1 dish still 'ready', qty5 → the POISON that leaked into the clicked tile
-  const o2 = (await svc.from("orders").insert({ restaurant_id: RID, table_number: TN, session_id: sessId, items: [], subtotal: 2500, total: 2625, status: "cancelled", payment_status: "pending" }).select("id").single());
+  const o2 = (await svc.from("orders").insert({ restaurant_id: RID, table_number: TN, session_id: sessId, items: [], subtotal: 2500, total: 2625, status: "cancelled", cancelled_at: new Date().toISOString(), payment_status: "pending" }).select("id").single());
   if (o2.error) throw new Error("order2 insert: " + o2.error.message);
   orderIds.push(o2.data.id);
   ins("the cancelled order's dish", await svc.from("order_items").insert([

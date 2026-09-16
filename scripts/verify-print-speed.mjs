@@ -1932,8 +1932,15 @@ await phase("…and the computers this run created are gone", async () => {
 // asserts the board is CLEAR, not that a delete was attempted.
 await phase("…and every order it placed is off the kitchen board", async () => {
   const gone = new Date().toISOString();
+  // `archived_at` RIDES WITH `archived`, and this cleanup is where 5,217 rows without one came
+  // from (sweep #9 T30, item 6). Every PRODUCT path that archives writes the pair together —
+  // app/api/tablet, app/api/editor, lib/paySplit.ts, lib/sessionClose.ts and lib/softDelete.ts all
+  // do — so "archived, but never archived" is a shape the app cannot produce and only a fixture
+  // can. It matters because lfh_owner_report_month_fingerprint keys a cached month on the newest
+  // of created/edited/paid/cancelled/deleted_at, and because a row with no archive time cannot be
+  // placed in time by anything that asks when it left the board.
   await db(`orders?restaurant_id=eq.${RID}&placed_by=eq.speed%20run&deleted_at=is.null`,
-    { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true }) });
+    { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true, archived_at: gone }) });
   const left = await db(`orders?restaurant_id=eq.${RID}&placed_by=eq.speed%20run&archived=eq.false&deleted_at=is.null&select=id`);
   return left.length === 0 || `${left.length} test order(s) are still on somebody's kitchen screen`;
 });
@@ -1950,8 +1957,9 @@ await phase("…and the virtual printers hold nothing", () => { lpClear(); retur
   // even when the run is interrupted — which is exactly what happened on 2026-09-14.
   try {
     const gone = new Date().toISOString();
+    // …and the same pair here, the interrupted path. See the note on the clean-up phase above.
     await db(`orders?restaurant_id=eq.${RID}&placed_by=eq.speed%20run&deleted_at=is.null`,
-      { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true }) });
+      { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true, archived_at: gone }) });
   } catch {}
   try { await drain(); } catch {}
   try { unlinkSync(STASH); } catch {}
