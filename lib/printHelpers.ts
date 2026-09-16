@@ -427,10 +427,50 @@ export function paperFor(route: PrintRoute | undefined, agent: AgentRow | null, 
  * a printer that machine never said it had. A route that cannot print is worse than an empty one —
  * an empty line SAYS "no printer chosen" on screen, while a wrong one just goes quiet.
  */
-export async function writeRoutes(rid: string, patch: Record<string, unknown>): Promise<{ routes: PrintRoutes } | { error: string }> {
+/**
+ * ── FIRST SAVE WINS ON THE ADDRESS BOOK TOO (owner, 2026-09-16 — T26 sweep #9, item 13) ─────────
+ *
+ * `was` is what the board showed for each line when it was tapped. If the stored line has moved
+ * since, this refuses instead of overwriting: two tabs on the same restaurant used to mean the
+ * second Save silently won, and "kitchen slips print at the bar" is not a change anyone should
+ * make by accident.
+ *
+ * WHY THIS IS NOT lib/clash.ts, which every other value edit on the platform uses. That gate
+ * compares COLUMNS on a row, and a printing line is not a column: it lives four levels down inside
+ * `settings.modules.printing.routes.<kind>`, and the shape the board holds is `readRoutes`'
+ * NORMALISED eight-key object while the shape stored in the jsonb is whatever was last written —
+ * often three keys. Comparing those two directly fires on saves that are not clashes, which is the
+ * false-positive machine lib/clash's own header warns about ("a guard that invents a failure is
+ * worse than no guard"). So the comparison happens HERE, where `current` is already normalised by
+ * the same function that normalised what the board was given, and both sides are the same shape by
+ * construction.
+ *
+ * Only the kinds being WRITTEN are compared, so a save of the bill line is never refused because
+ * somebody changed the kitchen line.
+ */
+export type RouteWas = Partial<Record<string, unknown>>;
+
+/** The parts of a line that decide where paper comes out. Compared as a set, so a stored line that
+ *  is missing an optional key reads the same as a normalised one that has it as null. */
+const routeSignature = (r: unknown): string => {
+  const o = (r && typeof r === "object" ? r : {}) as Record<string, unknown>;
+  const pick = (k: string) => (o[k] == null || o[k] === "" ? "" : String(o[k]));
+  return [pick("via"), pick("agent"), pick("printer"), pick("panel"), pick("person"), pick("device"), pick("paper")].join("|");
+};
+
+export async function writeRoutes(rid: string, patch: Record<string, unknown>, was?: RouteWas): Promise<{ routes: PrintRoutes } | { error: string; clash?: true }> {
   const agents = await agentsView(rid);
   const byId = new Map(agents.map((a) => [a.id, a]));
   const current = await readRoutes(rid);
+  // The gate. Skipped entirely when the caller sends no `was` — a script, an older tab and the
+  // owner panel's own writes are all unaffected.
+  if (was) {
+    for (const kind of Object.keys(patch)) {
+      if (!(kind in was)) continue;
+      if (routeSignature(was[kind]) === routeSignature((current as Record<string, unknown>)[kind])) continue;
+      return { error: "Somebody else changed this line while you had it open — the board has been refreshed with what it says now. Have a look and set it again if you still want to.", clash: true };
+    }
+  }
   const next: PrintRoutes = { ...current };
 
   for (const [kind, val] of Object.entries(patch || {})) {
@@ -499,11 +539,28 @@ export async function writeRoutes(rid: string, patch: Record<string, unknown>): 
   // Read-modify-write of ONE jsonb column. The bag holds other modules' ladders, so the entry is
   // merged, never replaced — overwriting `modules` wholesale would silently switch other features
   // off, which is exactly the kind of quiet damage mig 326's bag was designed to avoid.
-  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as { modules?: unknown } | null;
+  //
+  // ── AND THE READ THAT FILLS THE BAG IS CHECKED (T26 sweep #9, owner picked it 2026-09-16) ─────
+  // The paragraph above names the damage exactly, and the line under it took `.data` and ignored
+  // `.error` — so the one failure that CAUSES that damage was the one nobody answered. A transient
+  // read failure made `s` null, `bag` an EMPTY object, and the update below then replaced the whole
+  // column with `{ printing: { routes } }`: every other module's allowed/owner_control/enabled
+  // flags gone, from a press of Save on the printing board. The twin of this line in
+  // app/api/admin/printing was fixed on 2026-09-15; this is the other copy, and it is the one the
+  // owner actually presses most.
+  //
+  // Refusing costs one press. The alternative costs a restaurant's feature switches, silently.
+  const sQ = await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle();
+  if (sQ.error) return { error: "Could not read this restaurant's settings, so nothing was saved. Please try again." };
+  const s = sQ.data as { modules?: unknown } | null;
   const bag = { ...bagOf(s?.modules) };
   bag["printing"] = { ...(bag["printing"] || {}), routes: next };
   const up = await sb.from("settings").update({ modules: bag }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
   if (up.error) return { error: "Could not save the printing routes." };
+  // A SAVE THAT MATCHED NO ROW IS NOT A SAVE — the same rule its three siblings on the admin
+  // printing route were given on 2026-09-15. Without this a restaurant with no settings row was
+  // told its address book had been saved, and the board read the old one back on the next refresh.
+  if (!up.data) return { error: "This restaurant has no settings yet, so there was nowhere to save the printing routes." };
   return { routes: next };
 }
 
