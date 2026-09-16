@@ -14,7 +14,7 @@
 // a hard limit — never a whole-table read.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, inScope, dbFail } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, dbFail , isRestaurantId} from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { loadLogVisibility, logVisibilityUnavailable } from "@/lib/logVisibility";
@@ -74,15 +74,25 @@ export async function GET(req: NextRequest) {
 
   // `count: "exact"` rides along on the same request — it is what lets the footer say "page 2 of 9"
   // instead of a bare "next", which is the difference between navigable and guessing.
+  // ── THE THREE STANDING EXCLUSIONS, NAMED ONCE SO THE COUNT CAN REPEAT THEM EXACTLY ─────────────
+  // A page past the end needs the REAL total (see the PGRST103 branch below), and that count must ask
+  // the identical question this page asks — a count and the list under it drifting apart is a fault
+  // this area has been corrected for three times (T7's khata headline, T9's complaints badge, the
+  // Audit chips). Applying them through a helper loses the row shape (Supabase infers columns from a
+  // literal select), so they are declared here as data and applied in both places, and
+  // `verify:t28-r2` fails if the two applications stop matching.
+  const EXCLUDE_PANELS = "(admin,db)";           // the admin's own actions and direct-database edits
+  const EXCLUDE_LEVEL = "level.is.null,level.neq.error";   // app FAULTS are the admin's signal
+  const EXCLUDE_ACTION = "ui_taps";              // the raw button-tap breadcrumbs
   let q = sb.from("staff_actions").select(COLS, { count: "exact" })
     .order("created_at", { ascending: false }).range(from, from + limit - 1);
-  // Owner never sees the admin's own actions or the direct-database-edit footprints.
-  q = q.not("panel", "in", "(admin,db)");
+  q = q.not("panel", "in", EXCLUDE_PANELS);
+  q = q.or(EXCLUDE_LEVEL);
+  q = q.neq("action", EXCLUDE_ACTION);
   // …nor raw app/system FAULTS (level='error'). Those are technical support signals for the
   // admin side, not the owner — the owner's "problems" surface is Complaints (the issues
   // table), not the error log (owner 2026-07-26). Keep every non-error row, including rows
   // whose level is NULL (an OR so a plain `neq` doesn't silently drop the NULLs).
-  q = q.or("level.is.null,level.neq.error");
   // …nor the raw BUTTON-TAP breadcrumbs (T9 sweep, 2026-08-05). `ui_taps` rows are written by
   // public/panels/errlog.js purely so a support person can see what someone was doing just before a
   // crash — they are level:'info' on a normal panel, so they passed both filters above and landed in
@@ -90,14 +100,15 @@ export async function GET(req: NextRequest) {
   // those push the real staff actions off this 200-row page, which is the same "a board full of
   // non-faults is a board nobody reads" problem the errlog noise filter exists for. They stay in the
   // ADMIN's Everything Log, exactly like the 'admin'/'db' rows excluded above.
-  q = q.neq("action", "ui_taps");
   // Optional ?rid= — narrow to ONE selected restaurant (the top-strip restaurant pick / an
   // admin act-as one restaurant), mirroring how /api/owner/reports scopes. Only honoured when
   // that id is already in the caller's scope (an admin's scope is every restaurant), so it can
   // only NARROW, never widen. Without it, fall back to the owner's full restaurant set.
   const pinRid = url.searchParams.get("rid");
   if (pinRid) {
-    if (!inScope(scope, pinRid)) return NextResponse.json({ actions: [], page: 1, pageSize: limit, total: 0, pages: 1 });
+    // A value that cannot be a restaurant id is answered as an empty page, exactly like one outside
+    // the caller's scope — never put into the query (see isRestaurantId in lib/ownerScope).
+    if (!isRestaurantId(pinRid) || !inScope(scope, pinRid)) return NextResponse.json({ actions: [], page: 1, pageSize: limit, total: 0, pages: 1 });
     q = q.eq("restaurant_id", pinRid);
   } else if (!scope.all) {
     // Restrict to the owner's restaurant(s). A real owner (or admin act-as one restaurant) is
@@ -124,7 +135,44 @@ export async function GET(req: NextRequest) {
     if (safe) q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
   }
 
+  // ── A PAGE PAST THE END IS AN EMPTY PAGE, NOT A RETRYABLE FAILURE (T28 round 2, 2026-09-16) ────
+  // PostgREST answers a `range()` that starts beyond the last row with **PGRST103, "Requested range
+  // not satisfiable"** — an ERROR, not an empty set. That went straight into `dbFail`, so asking for
+  // a page that does not exist answered `503 { transient: true }`: a red "please try again" that can
+  // never succeed however many times it is pressed, and which the client is entitled to keep
+  // retrying because `transient` says it may.
+  //
+  // MEASURED on French House, 2026-09-16: 554 rows, `pages: 3`, and page 4 onwards → 503. Reachable
+  // three ordinary ways — tapping past the end, a bookmarked or shared link to a page that has since
+  // shrunk, and a page number that was valid when the footer was drawn and is not by the time it is
+  // asked for (this log is cleaned up on a retention schedule, so it shrinks by itself).
+  //
+  // The honest answer is the one this route already gives for a `?rid=` outside the caller's scope:
+  // the empty shape, with the REAL total and page count, so the footer can send the person back to
+  // page 1 instead of showing them an error about their connection.
   const r = await q;
+  if (r.error && String(r.error.code) === "PGRST103") {
+    // …AND IT MUST STILL SAY HOW MANY THERE REALLY ARE. PostgREST sends no count with an
+    // unsatisfiable range, so answering `total: 0, pages: 1` would read as "there is nothing here"
+    // — which is a different wrong answer, on a screen whose whole job is to be trusted. One cheap
+    // indexed head-count, on this error path only, so the footer can say "page 1 of 3" and send the
+    // person back rather than implying the record is empty.
+    let hq = sb.from("staff_actions").select("id", { count: "exact", head: true })
+      .not("panel", "in", EXCLUDE_PANELS).or(EXCLUDE_LEVEL).neq("action", EXCLUDE_ACTION);
+    if (pinRid) hq = hq.eq("restaurant_id", pinRid);
+    else if (!scope.all && scope.ids.length) hq = hq.in("restaurant_id", scope.ids);
+    if (level === "warn" || level === "info") hq = hq.eq("level", level);
+    if (actorId && /^[0-9a-f-]{36}$/i.test(actorId)) hq = hq.eq("actor_id", actorId);
+    if (qText) { const safe = safeSearch(qText); if (safe) hq = hq.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`); }
+    const head = await hq;
+    const total = head.error ? 0 : (head.count ?? 0);
+    return NextResponse.json({
+      actions: [], page, pageSize: limit, total, pages: Math.max(1, Math.ceil(total / limit)),
+      // Named so the screen can say "that page no longer exists" rather than drawing an empty list
+      // that looks like a quiet day.
+      pastEnd: true,
+    });
+  }
   if (r.error) return dbFail("owner/oplog", r.error, { message: "Couldn't load the activity log just now — please try again." });
   const fetched = r.data ?? [];
 

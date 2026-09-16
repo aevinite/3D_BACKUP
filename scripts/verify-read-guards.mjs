@@ -483,16 +483,25 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   const rep = read("app/api/owner/reports/route.ts");
   const an = read("app/api/owner/analytics/route.ts");
   // Each field is paired with the version that must be current for it. Add a row when you add a field.
+  // ── AT LEAST that version, not EXACTLY it (T28 round 2, 2026-09-16) ──────────────────────────
+  // These were pinned as the literals `reports:v5:` and `analytics:v6:`, which made the guard fail
+  // on the one act it exists to ask for: bumping the version. Round 2 moved the reports key to v6
+  // (a `day:<from>` row written before the fix can hold a window truncated to whenever somebody
+  // first opened it, and those rows are indistinguishable from correct ones, so they are orphaned
+  // rather than trusted) — and this check went RED over a strictly better key. The claim is that the
+  // field and a version AT LEAST as new as the field travel together; a later bump satisfies it.
   const PAIRS = [
-    [rep, "app/api/owner/reports", /window:\s*\{\s*from,\s*to\s*\}/, /reports:v5:/, "`window` (the resolved from/to)"],
-    [an, "app/api/owner/analytics", /window:\s*\{\s*from,\s*to\s*\}/, /analytics:v6:/, "`window` (the resolved from/to)"],
+    [rep, "app/api/owner/reports", /window:\s*\{\s*from,\s*to\s*\}/, ["reports", 5], "`window` (the resolved from/to)"],
+    [an, "app/api/owner/analytics", /window:\s*\{\s*from,\s*to\s*\}/, ["analytics", 6], "`window` (the resolved from/to)"],
   ];
   for (const [src, name, field, version, what] of PAIRS) {
     if (!src) { fail(`${name} is missing`); continue; }
     const hasField = field.test(src);
-    const hasVersion = version.test(src);
+    const [prefix, minVersion] = version;
+    const seen = [...src.matchAll(new RegExp(`${prefix}:v(\\d+):`, "g"))].map((m) => Number(m[1]));
+    const hasVersion = seen.length > 0 && Math.max(...seen) >= minVersion;
     if (hasField && hasVersion) ok(`${name} carries ${what} AND the cache version that goes with it`);
-    else if (hasField && !hasVersion) fail(`${name} sends ${what} but its cache key version has moved on — a stored snapshot will serve the payload WITHOUT that field, so the screen gets it on some ranges and not others`);
+    else if (hasField && !hasVersion) fail(`${name} sends ${what} but its cache key version is ${seen.length ? `v${Math.max(...seen)}` : "absent"}, older than the v${minVersion} that field arrived at — a stored snapshot will serve the payload WITHOUT it, so the screen gets it on some ranges and not others`);
     else if (!hasField) ok(`${name} no longer sends ${what} — nothing to pair`);
   }
 }

@@ -29,6 +29,30 @@ import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 export type OwnerScope = { all: true; admin?: true } | { all: false; ids: string[]; ownerId: string; ownerName?: string; admin?: true };
 
 /**
+ * IS THAT EVEN THE SHAPE OF A RESTAURANT ID? (T28 round 2, 2026-09-16.)
+ *
+ * `?scope=`, `?rid=` and `?as=` are pins the admin console appends, and they went straight into a
+ * query. A value that is not a uuid therefore reached Postgres, which answered **22P02, "invalid
+ * input syntax for type uuid"** — a read ERROR. Every one of these routes correctly refuses to guess
+ * on a failed read, so that became `503 { transient: true }`: *"please try again."*
+ *
+ * It can never succeed. The id is malformed, so every retry produces the identical error, and the
+ * person is handed a red banner with a Try again button that is a lie. Worse, the project's own
+ * busy-rush rule is that a **5xx is queued and retried like offline while a 4xx tells the person** —
+ * so a malformed link is retried for ever instead of being reported once.
+ *
+ * MEASURED on 2026-09-16, `?rid=not-a-uuid` at every owner route: analytics, reports, oplog, audit,
+ * issues, ratings and inventory all answered 503 `transient: true`; `/api/owner/staff?staff=` did the
+ * same through its own read. The one route that got it right was `/api/owner/audit?detail=`, which
+ * tests `/^\d+$/` before reading and answers a plain 400 — the pattern the others now follow.
+ *
+ * A shape test is not a permission check and is not a substitute for one: `inScope()` still decides
+ * what a caller may see. This only stops a value that CANNOT be a restaurant from being asked about.
+ */
+const RESTAURANT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isRestaurantId = (v: unknown): v is string => typeof v === "string" && RESTAURANT_ID.test(v);
+
+/**
  * "We could not work out what you are allowed to see."
  *
  * Deliberately NOT the same as `null` (which means "you are nobody here" → 401). A scope we failed
@@ -113,7 +137,11 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
     const scopeParam = sp?.get("scope");
     if (scopeParam === "all") return { all: true, admin: true };
     // Legacy: an admin single-restaurant link may still carry ?rid=; honor it as a pin.
-    const acting = scopeParam || sp?.get("rid") || req.cookies.get(ADMIN_ACT_COOKIE)?.value;
+    const actingRaw = scopeParam || sp?.get("rid") || req.cookies.get(ADMIN_ACT_COOKIE)?.value;
+    // A pin that is not the SHAPE of a restaurant id is ignored rather than asked about — see
+    // isRestaurantId above for the 503 that used to produce. Ignoring it leaves the admin with the
+    // view they already have without any pin, which is their own default and widens nothing.
+    const acting = isRestaurantId(actingRaw) ? actingRaw : null;
     if (acting) {
       // Show what the OWNER of the entered restaurant sees: ALL restaurants that owner
       // owns (an owner may run several), not just the one we entered — so the admin's
@@ -150,7 +178,8 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
       // actually co-owns this restaurant; otherwise fall back to primary/first (a stale or
       // crafted id can never widen the view to someone else's restaurants). Per-tab param,
       // never a cookie, so a second admin tab can't repaint this one (same rule as ?scope=).
-      const asOwner = sp?.get("as");
+      // …and the same for `?as=`: a value that cannot be an id is not looked up.
+      const asOwner = isRestaurantId(sp?.get("as")) ? sp?.get("as") : null;
       const ownerId = (asOwner && members.includes(asOwner))
         ? asOwner
         : (primary && members.includes(primary) ? primary : (members[0] ?? primary ?? null));

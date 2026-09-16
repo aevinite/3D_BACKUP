@@ -26,6 +26,7 @@ import { logAction } from "@/lib/oplog";
 // A second hand-picked constant is what let `delete_bill` be a manager row on screen and an
 // "Unknown permission" here (fixed 2026-08-04).
 import { mergeOwnerEntitlements, entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
+import { isRestaurantId } from "@/lib/ownerScope";
 import { managerSettingsOff, type MgrStaffPower } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
@@ -73,6 +74,11 @@ const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { statu
 // emoji is one glyph but two code units, so the old `key.length < 2` let one emoji
 // pass as a login name. Require at least this many alphanumerics to be a valid name.
 const realCharCount = (s: string) => (String(s).match(/[\p{L}\p{N}]/gu) || []).length;
+
+/** Is that even the shape of a staff id? See the note at the `?staff=` read for the 503 it stops.
+ *  A shape test is not a permission check — `in("restaurant_id", ids)` still decides what is yours. */
+const isStaffId = (v: unknown): v is string =>
+  typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
 function genPassword(): string {
   const a = "abcdefghijkmnpqrstuvwxyz23456789";
@@ -154,7 +160,8 @@ async function scope(req: NextRequest): Promise<Scope> {
     // sees/adds staff for the restaurant they're looking at, not a mixed list. The owner
     // panel sends no pin (or scope=all) and keeps the full set. (Mirrors the admin branch.)
     const osp = req.nextUrl?.searchParams;
-    const opin = osp?.get("scope") || osp?.get("rid");
+    const opinRaw = osp?.get("scope") || osp?.get("rid");
+    const opin = opinRaw === "all" || isRestaurantId(opinRaw) ? opinRaw : null;   // see the admin branch below
     const scopeIds = (opin && opin !== "all" && ownedIds.includes(opin)) ? [opin] : ownedIds;
     const { data, error } = await sb.from("restaurants").select(cols).in("id", scopeIds).order("name");
     // A failed READ is not a switched-off feature. Before this, `data` came back null on any DB
@@ -203,7 +210,12 @@ async function scope(req: NextRequest): Promise<Scope> {
   // that owner's set, so two admin tabs on different restaurants don't cross-list staff.
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
     const sp = req.nextUrl?.searchParams;
-    const pin = sp?.get("scope") || sp?.get("rid");
+    const pinRaw = sp?.get("scope") || sp?.get("rid");
+    // A pin that is not the SHAPE of a restaurant id is IGNORED rather than looked up — it used to
+    // reach three reads and answer a retryable 503 that could never succeed. Ignoring it leaves the
+    // admin with the all-restaurants view they have without any pin, which widens nothing.
+    // (T28 round 2, 2026-09-16 — see isRestaurantId in lib/ownerScope.)
+    const pin = pinRaw === "all" || isRestaurantId(pinRaw) ? pinRaw : null;
     if (pin && pin !== "all") {
       // Resolve the pinned restaurant's OWNER via the restaurant_owners JOIN (the scoping
       // source of truth, mig 097) — prefer the primary owner_user_id when it's a member,
@@ -249,7 +261,7 @@ async function scope(req: NextRequest): Promise<Scope> {
       // owner doesn't own would list its whole team under the wrong person's name. Honoured ONLY
       // when that owner really co-owns this restaurant, exactly as ownerScope does, so a stale or
       // hand-typed id can never widen the set; otherwise fall back to primary/first as before.
-      const asOwner = sp?.get("as");
+      const asOwner = isRestaurantId(sp?.get("as")) ? sp?.get("as") : null;
       const ownerId = (asOwner && members.includes(asOwner))
         ? asOwner
         : (primary && members.includes(primary) ? primary : (members[0] ?? null));
@@ -353,6 +365,13 @@ export async function GET(req: NextRequest) {
   // ── ONE person's full profile (the profile page). Loads only when opened, so the roster
   //    never carries payment histories it doesn't show. ────────────────────────────────
   const detailId = sp.get("staff");
+  // ── A MALFORMED ID IS "NOT ON YOUR STAFF", NOT "PLEASE TRY AGAIN" (T28 round 2, 2026-09-16) ────
+  // It went straight into the read, so Postgres answered 22P02 and `rd()` — which correctly refuses
+  // to guess on a failed read — turned that into `503 { transient: true }`. That retry can never
+  // succeed, and the project's own rule queues a 5xx like offline while a 4xx tells the person, so a
+  // malformed link was retried for ever instead of being reported once. The honest answer is the one
+  // this route already gives for an id that is not yours, and it gives nothing away by matching.
+  if (detailId && !isStaffId(detailId)) return bad("That person isn't on your staff.", 404);
   if (detailId) return await staffDetail(s, detailId, sp);
 
   let staff: any[] = [];
@@ -755,6 +774,8 @@ async function noOverwrite(req: NextRequest, rid: string): Promise<Response | nu
 // profile/pay write goes through here, so scoping + the ladder are checked exactly once.
 async function target(s: Extract<Scope, { ok: true }>, id: string) {
   const ids = s.restaurants.map((r) => r.id);
+  // Same rule as the `?staff=` read — a value that cannot be an id is not asked about. (T28, 2026-09-16)
+  if (!isStaffId(id)) return { err: bad("That person isn't on your staff.", 404) };
   // THIS IS A WRITE PATH, AND IT WAS THE WORST PLACE FOR THIS BUG (T9 finding F7, fixed 2026-08-12).
   // `target()` is the front door for every profile and pay write. The read's `.error` was ignored,
   // so a transient database failure while SAVING A SALARY answered "That person isn't on your
@@ -1023,6 +1044,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
   }
 
   if (!id) return bad("Missing staff id.");
+  if (!isStaffId(id)) return bad("That person isn't on your staff.", 404);
   const ids = s.restaurants.map((r) => r.id);
   // Explicit column list — exactly the five fields the handlers below read. It used to be
   // `select("*")`, which needlessly pulled `password_hash` into the route (it was never
@@ -1254,6 +1276,7 @@ async function deleteImpl(req: NextRequest) {
   if (s.actor === "manager") return bad("Managers can disable a login, not delete it — ask the owner or admin to remove someone.", 403);
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return bad("Missing staff id.");
+  if (!isStaffId(id)) return bad("That person isn't on your staff.", 404);
   const ids = s.restaurants.map((r) => r.id);
   // Same rule as patchImpl above (F7's third and fourth reads): a blip must not read as "they
   // aren't yours", least of all on the one action that removes an account for good.

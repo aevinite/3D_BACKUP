@@ -13,7 +13,7 @@
 // greyed-out card, no hint that a feature exists.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, ownerLogPanel, ownerActorName } from "@/lib/ownerScope";
+import { ownerScopeOr503, ownerLogPanel, ownerActorName , isRestaurantId} from "@/lib/ownerScope";
 import { agentsView, readRoutes, waitingCount, PRINT_KINDS, paperStatus, helperFor, queueJob, isRoutableKind } from "@/lib/printHelpers";
 import { KIND_LABEL, PRINTER_STATE_WORDS } from "@/lib/printBoardWords";
 import { printingRunning } from "@/lib/printHelpers";
@@ -42,7 +42,9 @@ export async function GET(req: NextRequest) {
   // So: the `?rid=` when it is in scope, else the first restaurant in scope that printing is
   // actually switched on for, and only then the old fall-back. One extra indexed read, on ids the
   // scope has already resolved.
-  let target = rid && (scope.all || ids.includes(rid)) ? rid : "";
+  // A value that cannot be a restaurant id is treated as no pin at all, not asked about — see
+  // isRestaurantId in lib/ownerScope for the retryable 503 it used to produce. (T28, 2026-09-16)
+  let target = rid && isRestaurantId(rid) && (scope.all || ids.includes(rid)) ? rid : "";
   if (!target) {
     const printsQ = scope.all
       ? await sb.from("settings").select("restaurant_id").eq("auto_print_kot_allowed", true).limit(1)
@@ -178,7 +180,7 @@ export async function POST(req: NextRequest) {
   const ids = scope.all ? [] : scope.ids;
   // THE SCOPE DECIDES, NEVER THE BODY — the same rule the GET above follows. An owner asking about a
   // restaurant that is not theirs is simply told no.
-  const target = rid && (scope.all || ids.includes(rid)) ? rid : ids[0];
+  const target = rid && isRestaurantId(rid) && (scope.all || ids.includes(rid)) ? rid : ids[0];
   if (!target) return NextResponse.json({ error: "Not your restaurant." }, { status: 403 });
 
   const kind = String(body.sample || "");

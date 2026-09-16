@@ -13,7 +13,7 @@
 // hard limit — never a whole-table read. deletion_audit is indexed (restaurant_id, at DESC).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, inScope, dbFail, ownerActorName } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, dbFail, ownerActorName , isRestaurantId} from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 // The admin stays invisible to an owner, in the AUDIT as it already is in the Activity log.
 import { auditForReader, forReader } from "@/lib/auditActor";
@@ -125,14 +125,51 @@ export async function GET(req: NextRequest) {
   }
   const pinRid = url.searchParams.get("rid");
   if (pinRid) {
-    if (!inScope(scope, pinRid)) return NextResponse.json({ removals: [], page: 1, pageSize: limit, total: 0, pages: 1 });
+    // Same shape test as the Activity log beside it — see isRestaurantId in lib/ownerScope.
+    if (!isRestaurantId(pinRid) || !inScope(scope, pinRid)) return NextResponse.json({ removals: [], page: 1, pageSize: limit, total: 0, pages: 1 });
     q = q.eq("restaurant_id", pinRid);
   } else if (!scope.all) {
     if (!scope.ids.length) return NextResponse.json({ removals: [], page: 1, pageSize: limit, total: 0, pages: 1 });
     q = q.in("restaurant_id", scope.ids);
   }
 
+  // ── A PAGE PAST THE END IS AN EMPTY PAGE, NOT A RETRYABLE FAILURE (T28 round 2, 2026-09-16) ────
+  // PostgREST answers a `range()` that starts beyond the last row with **PGRST103, "Requested range
+  // not satisfiable"** — an ERROR, not an empty set. That went straight into `dbFail`, so asking for
+  // a page that does not exist answered `503 { transient: true }`: a red "please try again" that can
+  // never succeed however many times it is pressed, and which the client is entitled to keep
+  // retrying because `transient` says it may.
+  //
+  // MEASURED on French House, 2026-09-16: 554 rows, `pages: 3`, and page 4 onwards → 503. Reachable
+  // three ordinary ways — tapping past the end, a bookmarked or shared link to a page that has since
+  // shrunk, and a page number that was valid when the footer was drawn and is not by the time it is
+  // asked for (a removal can be filtered by kind, so the same page number means different things under different chips).
+  //
+  // The honest answer is the one this route already gives for a `?rid=` outside the caller's scope:
+  // the empty shape, with the REAL total and page count, so the footer can send the person back to
+  // page 1 instead of showing them an error about their connection.
   const r = await q;
+  if (r.error && String(r.error.code) === "PGRST103") {
+    // …AND IT MUST STILL SAY HOW MANY THERE REALLY ARE. PostgREST sends no count with an
+    // unsatisfiable range, so answering `total: 0, pages: 1` would read as "there is nothing here"
+    // — which is a different wrong answer, on a screen whose whole job is to be trusted. One cheap
+    // indexed head-count, on this error path only, so the footer can say "page 1 of 3" and send the
+    // person back rather than implying the record is empty.
+    // The same question the page asked, counted. `kind` and the restaurant narrowing are the only
+    // filters this list carries besides the standing `removal_classified` exclusion.
+    let hq = sb.from("deletion_audit").select("id", { count: "exact", head: true }).neq("kind", "removal_classified");
+    if (kind && /^[a-z_]{3,40}$/.test(kind)) hq = hq.eq("kind", kind);
+    if (pinRid) hq = hq.eq("restaurant_id", pinRid);
+    else if (!scope.all && scope.ids.length) hq = hq.in("restaurant_id", scope.ids);
+    const head = await hq;
+    const total = head.error ? 0 : (head.count ?? 0);
+    return NextResponse.json({
+      removals: [], page, pageSize: limit, total, pages: Math.max(1, Math.ceil(total / limit)),
+      // Named so the screen can say "that page no longer exists" rather than drawing an empty list
+      // that looks like a quiet day.
+      pastEnd: true,
+    });
+  }
   if (r.error) return dbFail("owner/audit", r.error, { message: "Couldn't load the removals record just now — please try again." });
   const rows = r.data ?? [];
 

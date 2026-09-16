@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScopeOr503, inScope, type OwnerScope, dbFail, ownerLogPanel, ownerActorName } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, type OwnerScope, dbFail, ownerLogPanel, ownerActorName , isRestaurantId} from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
@@ -62,7 +62,10 @@ export async function GET(req: NextRequest) {
   // NARROW, never widen.
   const oneRid = req.nextUrl.searchParams.get("rid") || req.nextUrl.searchParams.get("restaurant_id");
   if (oneRid) {
-    if (!inScope(scope, oneRid)) return empty();
+    // A value that cannot be a restaurant id is answered as an empty page, exactly like one outside
+    // the caller's scope — never put into the query. `inScope` says yes to ANYTHING for the admin,
+    // so the shape test has to be here too (see isRestaurantId in lib/ownerScope).
+    if (!isRestaurantId(oneRid) || !inScope(scope, oneRid)) return empty();
     q = q.eq("restaurant_id", oneRid);
   }
   // ── THE BADGE IS COUNTED IN THE DATABASE NOW (T9 finding F19, fixed 2026-08-12) ─────────────────
