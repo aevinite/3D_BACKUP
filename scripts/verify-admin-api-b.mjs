@@ -521,4 +521,4 @@ if (WRITE_LEDGER) {
   console.log(`  ledger written: .claude/sweep/LEDGER/T27-S9-R2.md (${PHASES.length} rows)\n`);
 }
 
-process.exit(fail ? 1 : 0);
+process.stdout.write("", () => process.exit(fail ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)
