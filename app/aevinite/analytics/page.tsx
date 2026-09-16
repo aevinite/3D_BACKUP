@@ -158,6 +158,33 @@ export default function AdminAnalytics() {
   const sources = (data?.bySource || []).filter((s) => s.orders > 0 || s.source === "dine_in");
   const sourceTotal = sources.reduce((s, x) => s + x.orders, 0);
   const maxSource = Math.max(1, ...sources.map((s) => s.orders));
+  /**
+   * ── A SHARE THAT SAYS MORE THAN IT KNOWS (T26 sweep #9 round 2, 2026-09-16) ──────────────────
+   *
+   * `Math.round((n / total) * 100)` on its own told two lies at once, and both were on screen
+   * together. Measured on this platform over 30 days — dine-in 8,650, parcel 1, website 2:
+   *
+   *     Dine-in   8,650   100%          ← it is 99.97%, and there are two more rows below it
+   *     Parcel        1     0%          ← a count of ONE, labelled zero percent, side by side
+   *     Website       2     0%
+   *
+   * So the column read "100% + 0% + 0%" under a heading that says these are the parts of one
+   * whole, and the two smallest rows contradicted the number printed next to them.
+   *
+   * This route already carries the ruling for the first half, on the going-quiet card: "A
+   * restaurant with 2,115 orders that now has 1 is down 99.95%, and Math.round made that read
+   * 'down 100%' beside rows that genuinely have none … Capped at 99 while any order remains, so
+   * 100% can only ever mean zero." Same rule pointed the other way: 100% may only ever mean ALL
+   * of them, and a row with orders in it may never print 0%.
+   */
+  const sharePct = (n: number): string => {
+    if (!sourceTotal || n <= 0) return "0%";
+    if (n >= sourceTotal) return "100%";           // genuinely every one of them
+    const p = Math.round((n / sourceTotal) * 100);
+    if (p >= 100) return "99%";                    // rounded up to "all of them" when it is not
+    if (p <= 0) return "<1%";                      // a real count is never zero percent
+    return `${p}%`;
+  };
 
   // A stat tile: icon chip · label · big proportional value · context line.
   // `href`/`onClick` make the tile itself the way into its detail (house rule:
@@ -326,7 +353,7 @@ export default function AdminAnalytics() {
                       <span>{SOURCE_LABEL[s.source] || s.source}</span>
                       <span>
                         <b style={{ fontVariantNumeric: "tabular-nums" }}>{nf.format(s.orders)}</b>
-                        <span className="adm-muted" style={{ marginLeft: 6 }}>{sourceTotal > 0 ? Math.round((s.orders / sourceTotal) * 100) : 0}%</span>
+                        <span className="adm-muted" style={{ marginLeft: 6 }}>{sharePct(s.orders)}</span>
                       </span>
                     </div>
                     <div style={{ height: 8, borderRadius: 999, background: "color-mix(in srgb, var(--accent) 14%, transparent)", overflow: "hidden" }}>
