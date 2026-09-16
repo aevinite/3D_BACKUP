@@ -1,0 +1,61 @@
+-- 390 — the takings column rounds to paise, and can never be negative
+-- (owner picked item 3 of sweep #9 terminal 30's round-2 report, 2026-09-16)
+--
+-- WHAT WAS WRONG. `orders.net_amount` is GENERATED ALWAYS AS (total − disc_gross) — migration 310's
+-- "one revenue number everywhere". `total` is rounded to paise like every money column on the row;
+-- `disc_gross` is deliberately NOT (see below). Subtracting an unrounded number from a rounded one
+-- can therefore land just below zero:
+--
+--     total 5.76   discount 5.49   rate 5%   →   disc_gross 5.7645   →   net_amount −0.0045
+--
+-- MEASURED on the dev stack: **31 orders carry a negative net amount.** Thirty are that arithmetic,
+-- worst case minus half a paisa; the thirty-first is a demo order with a 100% discount where the
+-- grossed discount (105.00) exceeds a zeroed total. Forty-two rows in all differ from their own
+-- rounded-and-floored value.
+--
+-- ═══ WHAT THIS FILE DELIBERATELY DOES **NOT** DO ═══
+--
+-- The item as picked said "that column rounds to paise like every other money column". `disc_gross`
+-- is NOT the column that gets rounded, and that is not a shortcut — **migration 301 already
+-- considered rounding it and rejected it, with measurements**, and `lfh_fill_disc_gross` carries the
+-- reasoning in its own body:
+--
+--     "NOT rounded. `numeric` is exact, so summing this column gives precisely
+--      SUM(discount_i × rate_i) — each order grossed at its OWN rate, with no per-row rounding
+--      drift… Rounding here to 4dp cost ~0.1 paise over 2,376 discounted rows AND widened the
+--      numeric scale of every revenue figure the API returns."
+--
+-- So the exact source column stays exact, and the rounding happens where the money is actually
+-- READ: in the derived column every screen renders. That change makes the API shape NARROWER (two
+-- decimals, which is what the owner UI already draws), which is the opposite of the concern
+-- migration 301 raised — it is the fix that decision would have wanted, one layer down.
+--
+-- ═══ AND IT FLOORS AT ZERO, WHICH IS A SEPARATE DECISION WORTH STATING ═══
+--
+-- `GREATEST(…, 0)`: you cannot collect less than nothing. When a discount covers the whole bill the
+-- takings are ZERO, not minus half a paisa, and not minus ₹105. The oddity itself stays fully
+-- visible — `discount`, `disc_gross` and `total` are all unchanged on the row, so a discount that
+-- exceeded its bill is still there to find. Only the answer to "what was collected" is corrected.
+--
+-- ⚠️ NOT THE DELETED-BILL RULE AND NOT A WAY TO HIDE A SALE. Nothing is removed, no row is filtered,
+-- and no figure that includes voided or deleted bills stops including them
+-- (docs/COMPLIANCE-GUARDRAILS.md §4, migration 309's asymmetry). This only stops a collected-money
+-- column reading below zero.
+--
+-- ═══ SAFETY, MEASURED BEFORE WRITING ═══
+--
+--   · 42 of 41,334 rows change value; 31 of them are the negatives.
+--   · **ZERO of the 42 are paid and not cancelled**, so no revenue figure on any screen moves by a
+--     paisa. That is the proof this is safe, not an assurance.
+--   · No index and no view reads `net_amount`, so nothing else has to be rebuilt.
+--   · `ALTER COLUMN … SET EXPRESSION` (PostgreSQL 17, and this project is on 17.6) rewrites the
+--     table — 41,334 rows / 32 MB here, seconds. It keeps the column's position, type and every
+--     grant, which DROP + ADD would not.
+--
+-- Guarded by `npm run verify:takings-never-negative`.
+
+ALTER TABLE public.orders
+  ALTER COLUMN net_amount
+  SET EXPRESSION AS (GREATEST(ROUND(total - disc_gross, 2), 0));
+
+NOTIFY pgrst, 'reload schema';
