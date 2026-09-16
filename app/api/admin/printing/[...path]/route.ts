@@ -88,9 +88,27 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       // keeps that (no extra round trip below a thousand restaurants) and removes the silent cut.
       pageAll<{ id: string; name: string; slug: string }>("restaurants", (from, to) =>
         sb.from("restaurants").select("id, name, slug").order("name").range(from, to)),
-      sb.from("print_agents").select("id, restaurant_id, name, last_seen_at, printers")
-        .is("revoked_at", null).limit(400),
-      sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules").limit(400),
+      // ── PAGED FOR THE SAME REASON THE LIST ABOVE IS (T26 sweep #9, item 10, owner picked it
+      //    2026-09-16) ────────────────────────────────────────────────────────────────────────────
+      // The restaurants read was moved onto pageAll on 2026-08-31 because "a ceiling of any size is
+      // still a board that silently stops being the whole platform". These two carried .limit(400)
+      // and were left, which moved the silent cut one table across rather than removing it: past 400
+      // rows every later restaurant would render "no computer" and "printing off" — a HARDWARE board
+      // saying a shop's printer is fine when nobody has looked. Measured the day before this fix:
+      // 177 restaurants. Not wrong yet, and that is exactly when it is cheap to fix.
+      //
+      // EGRESS: `settings` is one row per restaurant and `print_agents` one or two, so at today's
+      // size both are a single page and there is no extra round trip at all — pageAll asks for
+      // another page only when the last one came back full. Both keep their column lists; `modules`
+      // is the one wide column and it is already the narrowest form of what this board needs.
+      // (lib/pageAll's own header names this exact shape — "a table with ONE ROW PER RESTAURANT
+      // that must be complete" — as what it is for.)
+      pageAll<{ id: string; restaurant_id: string; name: string; last_seen_at: string | null; printers: unknown }>("print_agents", (from, to) =>
+        sb.from("print_agents").select("id, restaurant_id, name, last_seen_at, printers")
+          .is("revoked_at", null).order("id").range(from, to)),
+      pageAll<{ restaurant_id: string }>("settings", (from, to) =>
+        sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules")
+          .order("restaurant_id").range(from, to)),
       // Only what is STILL WAITING, and only the two columns needed to count it and age it.
       sb.from("print_jobs").select("restaurant_id, kind, created_at")
         .in("status", ["queued", "printing"]).eq("kind", "kot").limit(2000),
@@ -105,8 +123,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     // read answered a 200 with `rows: []` — a Printing overview showing nothing at all, which reads
     // as a healthy platform with nobody printing. Same rule as its neighbours in this console.
     if (rests.error) return adminFail("the printing overview", rests.error as { message?: string }, { action: "load" });
-    if (agents.error) return adminFail("the printing overview", agents.error, { action: "load" });
-    if (sets.error) return adminFail("the printing overview", sets.error, { action: "load" });
+    if (agents.error) return adminFail("the printing overview", agents.error as { message?: string }, { action: "load" });
+    if (sets.error) return adminFail("the printing overview", sets.error as { message?: string }, { action: "load" });
     if (jobs.error) return adminFail("the printing overview", jobs.error, { action: "load" });
     const now = Date.now();
     const byRest = new Map<string, { n: number; oldest: number | null }>();
@@ -118,10 +136,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       byRest.set(j.restaurant_id, cur);
     }
     const agentsBy = new Map<string, { id: string; name: string; last_seen_at: string | null; printers: unknown }[]>();
-    for (const a of (agents.data || []) as { restaurant_id: string; id: string; name: string; last_seen_at: string | null; printers: unknown }[]) {
+    for (const a of (agents.rows || [])) {
       const arr = agentsBy.get(a.restaurant_id) || []; arr.push(a); agentsBy.set(a.restaurant_id, arr);
     }
-    const setBy = new Map((((sets.data || []) as { restaurant_id: string }[])).map((x) => [x.restaurant_id, x as Record<string, unknown>]));
+    const setBy = new Map(((sets.rows || [])).map((x) => [x.restaurant_id, x as unknown as Record<string, unknown>]));
 
     const rows = ((rests.rows || [])).map((r) => {
       const mine = agentsBy.get(r.id) || [];
