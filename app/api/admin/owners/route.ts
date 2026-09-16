@@ -31,6 +31,10 @@ import { logAction, redactMoney } from "@/lib/oplog";
 import { resolveOwnerHomeRid, loginNameTaken, liveHoldersOfName, nameTakenMessage } from "@/lib/ownerHome";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// THE ONE CLASH GATE — "did someone else change this while you had it open?" (lib/clash.ts). It
+// does nothing at all unless the screen SAID what it was editing from (X-LFH-Expect), so a caller
+// that sends no expectation — a script, an older tab — is completely unaffected.
+import { expectClash, clashJson } from "@/lib/clash";
 // ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site.
@@ -487,7 +491,10 @@ export async function PATCH(req: NextRequest) {
   const ownerId = String(body?.owner_id || "");
   const action = String(body?.action || "");
   if (!ownerId) return bad("Missing owner_id.");
-  const ownerQ = await sb.from("staff_users").select("id, name, username, role").eq("id", ownerId).limit(1);
+  // `restaurant_id` rides along for the clash gate below: a `staff_users` row is scoped by its
+  // anchor restaurant, and an owner's anchor is the only restaurant key their row has (lib/ownerHome
+  // explains why that column exists at all). One more column on a read already being made.
+  const ownerQ = await sb.from("staff_users").select("id, name, username, role, restaurant_id").eq("id", ownerId).limit(1);
   if (ownerQ.error) return adminFail("this owner", ownerQ.error, { action: "load" });
   const owner = ownerQ.data?.[0];
   if (!owner || owner.role !== "owner") return bad("That user isn't an owner.", 404);
@@ -628,6 +635,20 @@ export async function PATCH(req: NextRequest) {
     const key = normalizeLoginName(display);
     if (realCharCount(key) < 2) return bad("The name needs at least 2 letters or numbers.");
     if (key !== owner.username) { const m = await nameTakenMessage(key); if (m) return bad(m, 409); }
+    // ── FIRST SAVE WINS, AND THE LOSER GETS TOLD (owner, 2026-09-16 — T26 sweep #9, item 13) ────
+    // An owner's name is a value typed into a box, and this screen is optimistic: two tabs open on
+    // the same owner and the second Rename silently overwrote the first, with the loser's card
+    // still showing the name that lost. Sweep #6 listed this and left it, honestly, because there
+    // is one admin account — so a clash here is you with two tabs rather than two people. The owner
+    // asked for it anyway, and the reasoning that made it low-priority never made it wrong.
+    //
+    // Scoped by the owner's ANCHOR restaurant, which is the only restaurant key a staff_users row
+    // has. The gate fails OPEN on any lookup trouble: a clash check breaking must never stop an
+    // owner being renamed.
+    {
+      const overwrite = await expectClash(req, String(owner.restaurant_id || ""));
+      if (overwrite) return clashJson(overwrite);
+    }
     const { error } = await sb.from("staff_users").update({ name: display, username: key }).eq("id", ownerId);
     if (error) return adminFail("this owner's name", error, { action: "save" });
     await logAction("admin", "owner_rename", { actor: "admin", restaurant_id: null, detail: `renamed owner "${who}" → "${display}" · owner ${ownerId}` });

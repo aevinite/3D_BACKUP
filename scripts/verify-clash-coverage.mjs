@@ -203,6 +203,36 @@ const REACT_VALUE_EDITS = [
     // same rating. Acknowledging is a transition and deliberately sends nothing.
     patterns: [{ re: /body:\s*JSON\.stringify\(\{\s*id,\s*note:/, name: "reply note on a rating" }],
   },
+  // ── THE ADMIN'S OWN TYPED VALUES (owner, 2026-09-16 — T26 sweep #9, item 13) ──────────────────
+  // Sweep #6 listed these and left them, honestly: there is ONE admin account, so a clash here is
+  // one person with two tabs rather than two people. The owner asked for them anyway, and the
+  // reason they were low-priority never made them wrong — both screens are optimistic and neither
+  // refreshes a field while it is open, so the second Save won in silence and the loser's card kept
+  // showing the value that lost. That is the same sentence sweep #8 wrote about the billing card
+  // one entry up, which IS now protected.
+  {
+    file: "components/admin/OwnersView.tsx",
+    route: "app/api/admin/owners/route.ts",
+    // Renaming an owner. Every other action on this card is a transition (suspend, bin, restore,
+    // reset the password) or a membership change, not a value two people type into one box.
+    patterns: [{ re: /"X-LFH-Expect":\s*[A-Za-z_$][\w.$]*\(\s*expect\b/, name: "sends what the owner was called when the box opened" }],
+  },
+  {
+    file: "app/aevinite/printing/page.tsx",
+    route: "app/api/admin/printing/[...path]/route.ts",
+    // TWO value edits on this board, protected two different ways, and both halves are checked:
+    //   · the COMPUTER'S NAME goes through the one gate (lib/clash → expectClash), because it is a
+    //     plain column on `print_agents`;
+    //   · the ADDRESS BOOK cannot, and the reason is written over writeRoutes in lib/printHelpers:
+    //     a printing line lives four levels down inside a jsonb column, and the shape the board
+    //     holds is normalised while the shape stored is whatever was last written — comparing those
+    //     two fires on saves that are not clashes. So it is compared inside writeRoutes, where both
+    //     sides are normalised by the same function, and the board sends `was`.
+    patterns: [
+      { re: /"X-LFH-Expect":\s*[A-Za-z_$][\w.$]*\(\s*expect\b/, name: "sends what the computer was called when the box opened" },
+      { re: /was:\s*wasFor\(/, name: "sends what the printing line said when the board read it" },
+    ],
+  },
 ];
 
 for (const spec of REACT_VALUE_EDITS) {
@@ -240,7 +270,18 @@ for (const spec of REACT_VALUE_EDITS) {
     // (`profileExpect(...)`), and the first version of this check missed all four of them because
     // it only looked for a lowercase "expect". A guard that misses the real shape of the fix is a
     // guard that gets deleted.
-    if (/expect|fields\s*:/i.test(window)) { covered++; console.log(`  ✅ ${spec.file}:${i + 1}  ${act}`); }
+    // ── `was:` IS AN EXPECTATION TOO (T26 sweep #9, 2026-09-16) ─────────────────────────────────
+    // Almost every protected write on this platform carries what-it-was in the X-LFH-Expect HEADER,
+    // because lib/clash compares COLUMNS on a row. The printing address book cannot: a line lives
+    // four levels down inside a jsonb column and the shape the board holds is normalised while the
+    // shape stored is whatever was last written, so that gate would fire on saves that are not
+    // clashes (the full reasoning is over writeRoutes in lib/printHelpers). Its comparison happens
+    // where both sides are already the same shape, and the board sends `was` in the body.
+    //
+    // So the property this file checks — "the screen says what it was editing from" — is met by a
+    // second spelling, and it is named here rather than exempted: an exemption says "unprotected on
+    // purpose", which would be the opposite of the truth.
+    if (/expect|fields\s*:|\bwas\s*:/i.test(window)) { covered++; console.log(`  ✅ ${spec.file}:${i + 1}  ${act}`); }
     else if (ex) { console.log(`  ➖ ${spec.file}:${i + 1}  ${act} — exempt: ${ex.why}`); }
     else { problems++; console.log(`  ❌ ${spec.file}:${i + 1}  ${act} — VALUE EDIT WITH NO EXPECTATION\n       ${line.trim().slice(0, 110)}`); }
   });

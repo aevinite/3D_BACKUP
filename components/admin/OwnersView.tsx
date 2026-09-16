@@ -17,6 +17,9 @@
 // An error row reads as one plain English sentence; ordinary rows use the shared label list.
 // (owner, 2026-09-02 — this screen was printing raw action codes.)
 import { plainHeadline } from "@/lib/plainError";
+// The X-LFH-Expect header value, ASCII-escaped — a header must be ISO-8859-1 or fetch() throws the
+// whole request away, and an owner's name can carry anything. See lib/accessTree.
+import { expectHeader } from "@/lib/accessTree";
 import { actLabel, detailForList } from "@/components/admin/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
@@ -635,8 +638,15 @@ function OwnerDetail({ owner, rests, sharedName, onBack, busy, setBusy, onChange
   const [confirm, setConfirm] = useState<ConfirmCfg | null>(null);
   const attachable = rests.filter((r) => !owner.restaurants.some((x) => x.id === r.id));
 
-  async function patch(payload: object): Promise<any> {
-    const r = await fetch("/api/admin/owners", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  // `expect` is "what this said when I opened the box" — the ONE clash gate (lib/clash.ts). It
+  // rides as a HEADER and the route ignores its absence, so every other action through patch() is
+  // untouched by it existing.
+  async function patch(payload: object, expect?: unknown): Promise<any> {
+    const r = await fetch("/api/admin/owners", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...(expect ? { "X-LFH-Expect": expectHeader(expect) } : {}) },
+      body: JSON.stringify(payload),
+    });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || "Action failed.");
     return j;
@@ -932,7 +942,15 @@ function OwnerDetail({ owner, rests, sharedName, onBack, busy, setBusy, onChange
       )}
       {showRename && (
         <RenameModal owner={owner} busy={busy} onClose={() => setShowRename(false)}
-          onSave={(name) => { setShowRename(false); run(async () => { await patch({ owner_id: owner.id, action: "rename", name }); }); }} />
+          onSave={(name) => { setShowRename(false); run(async () => {
+            // WHAT THEY WERE CALLED WHEN THE BOX OPENED (T26 sweep #9, item 13, owner picked it
+            // 2026-09-16). This card is optimistic and nothing refreshes a field while it is open,
+            // so two tabs on the same owner meant the second Rename won in silence and the loser's
+            // card kept showing the name that lost. `name` is the display name, which is the box
+            // that was typed in; `username` follows from it on the server.
+            await patch({ owner_id: owner.id, action: "rename", name },
+              { table: "staff_users", id: owner.id, fields: { name: owner.name }, label: "this owner's name" });
+          }); }} />
       )}
       {showAssign && (
         <AssignRestaurantModal owner={owner} attachable={attachable} busy={busy}

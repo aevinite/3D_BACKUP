@@ -14,6 +14,8 @@ import { pageAll } from "@/lib/pageAll";
 import { adminFail } from "@/lib/adminFail";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
+// THE ONE CLASH GATE — see lib/clash.ts. Silent unless the board SAID what it was editing from.
+import { expectClash, clashJson } from "@/lib/clash";
 import {
   agentsView, readRoutes, writeRoutes,
   PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch, waitingCount,
@@ -319,6 +321,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   if (seg[0] === "agents" && seg[1] && seg[2] === "rename") {
     const name = String(body.name || "").trim();
     if (!name) return err("Give the computer a name.");
+    // ── FIRST SAVE WINS, AND THE LOSER GETS TOLD (owner, 2026-09-16 — T26 sweep #9, item 13) ────
+    // A shop's PC name is a value typed into a box. The gate is scoped to this restaurant by
+    // lib/clash itself (print_agents carries a real restaurant_id), and it does nothing unless the
+    // board sent an expectation — so a script or an older tab is unaffected.
+    {
+      const overwrite = await expectClash(req, rid);
+      if (overwrite) return clashJson(overwrite);
+    }
     const up = await sb.from("print_agents").update({ name }).eq("id", seg[1]).eq("restaurant_id", rid).select("id").maybeSingle();
     if (up.error) return err(up.error.code === "23505" ? "There is already a computer with that name." : "Could not rename it.");
     // A SAVE THAT MATCHED NO ROW IS NOT A SAVE (T26 sweep #9, 2026-09-15). This answered ok:true
@@ -371,8 +381,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
         return err(`This restaurant does not have ${strays.map((k) => KIND_LABEL[k] || k).join(", ")} — switch the feature on first.`);
       }
     }
-    const saved = await writeRoutes(rid, patch);
-    if ("error" in saved) return err(saved.error);
+    // `was` is what the board showed for each line it is changing (T26 sweep #9, item 13). The gate
+    // lives inside writeRoutes because that is where both sides of the comparison are already
+    // normalised by the same function — see the long note over it. Absent `was` = no gate, so every
+    // other caller is unaffected.
+    const was = (body.was && typeof body.was === "object" && !Array.isArray(body.was)) ? body.was as Record<string, unknown> : undefined;
+    const saved = await writeRoutes(rid, patch, was);
+    // A clash is a 409, not a 400: the board reads that as "refresh and look", the same shape every
+    // other protected write on this platform answers with.
+    if ("error" in saved) return err(saved.error, saved.clash ? 409 : 400);
     // The kitchen-slip line IS settings.auto_print_kot — one decision, one column, one control
     // (lib/printHelpers → syncKotSwitch). Without this the two boards drift apart again: the address
     // book would say "nobody prints kitchen slips" while the trigger went on queueing them.

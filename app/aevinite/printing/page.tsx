@@ -12,6 +12,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
+// The X-LFH-Expect header value, ASCII-escaped — a header must be ISO-8859-1 or fetch() throws the
+// whole request away, and a computer's name can carry anything a person typed. See lib/accessTree.
+import { expectHeader } from "@/lib/accessTree";
 import { useBackClose } from "@/lib/backStack";
 import { useCrumbs } from "@/components/admin/Crumbs";
 import { SkelList } from "@/components/admin/Skeleton";
@@ -396,6 +399,11 @@ const PANEL_GROUPS: [ string, string ][] = [
   // whose cost has to be explained before it is paid.
   const [os, setOs] = useState<string>("mac");
   const [draft, setDraft] = useState<Record<string, Route>>({});
+  // ── WHAT THE SERVER LAST SAID, kept apart from the draft (T26 sweep #9, item 13) ──────────────
+  // `draft` is the on-screen state and a local edit moves it, so it cannot answer "what was this
+  // when I opened the board" — which is exactly the question the clash gate asks. This is that
+  // answer: replaced only by a load, never by a keystroke.
+  const loadedRoutes = useRef<Record<string, Route>>({});
   const [over, setOver] = useState<Over | null>(null);
   const [overErr, setOverErr] = useState("");
 
@@ -472,6 +480,7 @@ const PANEL_GROUPS: [ string, string ][] = [
     setLoading(false);
     if (!r.ok) { setLoadErr(r.error); setSt(null); return; }
     setLoadErr(""); setSt(r.data); setDraft(r.data.routes as Record<string, Route>);
+    loadedRoutes.current = (r.data.routes || {}) as Record<string, Route>;
   }, [rid]);
   useEffect(() => { void load(); }, [load]);
 
@@ -609,10 +618,15 @@ const PANEL_GROUPS: [ string, string ][] = [
   // `busyKey` exists because ONE path can be several buttons. `test` is now both the plain test page
   // (one per printer) and the three document samples; keying the spinner on the path alone would put
   // "Sending…" on all four at once, which reads as four prints on the way.
-  const post = async (path: string, body: Record<string, unknown>, busyKey?: string) => {
+  // `expect` is "what this said when I tapped it" — the ONE clash gate (lib/clash.ts). It rides as
+  // a HEADER, never in the body, and the server ignores its absence entirely, so every existing
+  // call site on this page is unaffected by it being added here.
+  const post = async (path: string, body: Record<string, unknown>, busyKey?: string, expect?: unknown) => {
     setBusy(busyKey || path);
     const r = await adminFetch<Record<string, unknown>>(`/api/admin/printing/${path}`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rid, ...body }),
+      method: "POST",
+      headers: { "content-type": "application/json", ...(expect ? { "X-LFH-Expect": expectHeader(expect) } : {}) },
+      body: JSON.stringify({ rid, ...body }),
     });
     setBusy("");
     if (!r.ok) { toast(r.error, "err"); return null; }
@@ -656,7 +670,7 @@ const PANEL_GROUPS: [ string, string ][] = [
   const flipWay = async (id: WayId) => {
     if (id === "screen") {
       if (screenOn) { setOpened((o) => ({ ...o, screen: false })); await saveOff("kot"); return; }
-      const d = await post("routes", { routes: { kot: null } });
+      const d = await post("routes", { routes: { kot: null }, was: wasFor(["kot"]) });
       if (d) { toast(kotOnComputer ? "Kitchen slips are back on the kitchen screen." : "Kitchen slips print on the kitchen screen again.", "ok"); void load(); }
       return;
     }
@@ -669,7 +683,7 @@ const PANEL_GROUPS: [ string, string ][] = [
     const patch: Record<string, null> = {};
     computerKinds.forEach((k) => { patch[k] = null; });
     setOpened((o) => ({ ...o, computer: false }));
-    const d = await post("routes", { routes: patch });
+    const d = await post("routes", { routes: patch, was: wasFor(computerKinds) });
     if (d) { toast(`Taken off the computer: ${computerKinds.map((k) => KIND_LABEL[k] || k).join(", ")}.`, "ok"); void load(); }
   };
   /** Is this way's setup on screen? ON, asked for by hand — or HALF DONE.
@@ -705,9 +719,15 @@ const PANEL_GROUPS: [ string, string ][] = [
       : "A computer prints the kitchen slips instead.",
   };
 
+  /** What the server last said about the lines this save is about — the clash gate's `was`
+   *  (lib/printHelpers → writeRoutes). Only the kinds being written, so changing the bill line is
+   *  never refused because somebody moved the kitchen line. */
+  const wasFor = (kinds: string[]): Record<string, unknown> =>
+    Object.fromEntries(kinds.map((k) => [k, loadedRoutes.current[k] ?? null]));
+
   /** "Nobody prints this" — saved as a decision, so screens say so instead of "no printer chosen". */
   const saveOff = async (kind: string) => {
-    const d = await post("routes", { routes: { [kind]: { via: "off" } } });
+    const d = await post("routes", { routes: { [kind]: { via: "off" } }, was: wasFor([kind]) });
     if (d) { toast(`${KIND_LABEL[kind] || kind}: nobody.`, "ok"); void load(); }
   };
   /**
@@ -727,10 +747,10 @@ const PANEL_GROUPS: [ string, string ][] = [
    */
   const pickPrinter = async (kind: string, value: string) => {
     if (value === "off") { await saveOff(kind); return; }
-    if (!value) { const d = await post("routes", { routes: { [kind]: null } }); if (d) void load(); return; }
+    if (!value) { const d = await post("routes", { routes: { [kind]: null }, was: wasFor([kind]) }); if (d) void load(); return; }
     const [agent, ...rest] = value.split("\u0000");
     const printer = rest.join("\u0000");
-    const d = await post("routes", { routes: { [kind]: { via: "computer", agent, printer } } });
+    const d = await post("routes", { routes: { [kind]: { via: "computer", agent, printer } }, was: wasFor([kind]) });
     if (d) {
       // SAY WHAT IT MEANS WHEN THAT COMPUTER IS ASLEEP. A sleeping printer can be chosen now (see
       // the note on the dropdown), so the confirmation has to carry the honest consequence rather
@@ -767,7 +787,7 @@ const PANEL_GROUPS: [ string, string ][] = [
     // (lib/printHelpers → resolveTarget), so this only ever says "and it must be THIS person's
     // screen". Clearing it goes back to the default rather than to silence.
     if (!value) {
-      const d = await post("routes", { routes: { kot: null } });
+      const d = await post("routes", { routes: { kot: null }, was: wasFor(["kot"]) });
       if (d) { toast("Back to the kitchen screen.", "ok"); void load(); }
       return;
     }
@@ -776,7 +796,7 @@ const PANEL_GROUPS: [ string, string ][] = [
     // one the board already knows they are on.
     const who = (st?.people || []).find((x) => x.id === value);
     const panel = (who?.panels || [])[0] || "manager";
-    const d = await post("routes", { routes: { kot: { via: "screen", panel, person: value } } });
+    const d = await post("routes", { routes: { kot: { via: "screen", panel, person: value } }, was: wasFor(["kot"]) });
     if (d) { toast("Saved.", "ok"); void load(); }
   };
 
@@ -1155,7 +1175,16 @@ const PANEL_GROUPS: [ string, string ][] = [
                         <button className="adm-btn" style={{ fontSize: 12 }} disabled={!!busy}
                           onClick={async () => {
                             const name = prompt("What should this computer be called?", a.name);
-                            if (name && name.trim() && name !== a.name) { const d = await post(`agents/${a.id}/rename`, { name: name.trim() }); if (d) void load(); }
+                            if (name && name.trim() && name !== a.name) {
+                              // WHAT IT WAS CALLED WHEN THE BOX OPENED — the ONE clash gate
+                              // (lib/clash.ts). Two tabs on the same computer and the second
+                              // Rename used to overwrite the first in silence; now the loser is
+                              // told. Sent as a header, never in the body, so the server reads it
+                              // the same way every other protected write on this platform does.
+                              const d = await post(`agents/${a.id}/rename`, { name: name.trim() }, undefined,
+                                { table: "print_agents", id: a.id, fields: { name: a.name }, label: "this computer's name" });
+                              if (d) void load();
+                            }
                           }}>Rename</button>
                         <button className="adm-btn danger" style={{ fontSize: 12 }} disabled={!!busy}
                           title="Its code dies at once and anything routed to it needs choosing again. To bring it back: show a setup code, run the file on that computer, and type the code in."
