@@ -783,10 +783,27 @@ export async function syncKotSwitch(rid: string, on: boolean): Promise<void> {
 
 /** How many notes are still waiting — the "Waiting to print: 0" line, and the honest answer to
  *  "did my bill go anywhere?". Counted, not listed: nothing needs the rows. */
-export async function waitingCount(rid: string): Promise<number> {
+/**
+ * How many tickets are waiting — or NULL when we could not find out (T26 sweep #9, owner picked it
+ * 2026-09-16).
+ *
+ * This returned `r.count || 0`, so a failed count was indistinguishable from an empty queue. The
+ * caller that matters is "Clear what is waiting": it asks this first and returns early on zero, so
+ * a blip answered `{ ok: true, cleared: 0 }` — the button reporting success for doing nothing, in
+ * front of somebody staring at a printer three days behind. Nothing was lost and no data moved;
+ * they simply had to guess whether to press it again.
+ *
+ * `null` is the honest third answer, and every caller now decides what to do with it rather than
+ * inheriting a zero nobody chose.
+ */
+export async function waitingCount(rid: string): Promise<number | null> {
   const r = await sb.from("print_jobs").select("id", { count: "exact", head: true })
     .eq("restaurant_id", rid).in("status", ["queued", "printing"]);
-  return r.count || 0;
+  if (r.error) {
+    console.error("[printHelpers] could not count what is waiting to print:", r.error.message);
+    return null;
+  }
+  return r.count ?? 0;
 }
 
 /**

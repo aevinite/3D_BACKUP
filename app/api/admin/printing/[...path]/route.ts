@@ -453,7 +453,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   if (seg[0] === "queue" && seg[1] === "clear") {
     // Counted first, because the update is deliberately written WITHOUT `.select()` — a restaurant
     // three days behind can have hundreds of rows waiting and nothing here needs them.
+    // NULL means "I could not count", which is NOT an empty queue (T26 sweep #9, item 12). This
+    // read `if (!n)` over a helper that answered 0 on failure, so a blip reported success for doing
+    // nothing — to somebody standing in front of a printer three days behind.
     const n = await waitingCount(rid);
+    if (n == null) return err("Couldn't count what is waiting, so nothing was cleared. Please try again.", 500);
     if (!n) return NextResponse.json({ ok: true, cleared: 0 });
     const upd = await sb.from("print_jobs")
       .update({ status: "dismissed", done_at: new Date().toISOString(), error: "cleared from the queue by Aevidine — this ticket was never printed" })
