@@ -375,6 +375,46 @@ function quotedStrings(src) {
       : `not in eslint.config.mjs globalIgnores: ${missing.map((d) => `"${d}/**"`).join(", ")}\n      Bare eslint will walk into it and report its generated chunks as errors, which is how the gate stops being read.`);
 }
 
+// ── 10 · A SCRIPT THAT PRINTS A LEDGER MUST NOT END WITH process.exit() ─────────────────────────
+// MEASURED, not theorised (T29, 2026-09-16). `process.exit()` does not wait for stdout to drain.
+// When stdout is a PIPE and the script has written more than the pipe buffer, whatever is still
+// queued is DISCARDED — no error, no warning, no non-zero exit. Reproduced in isolation: 5,000 rows
+// of ~450 characters, piped, came out as 3,162. Short output never shows it, which is why it sat
+// here unnoticed across eighteen scripts.
+//
+// It matters most in exactly the scripts that have it: the ones that print a LEDGER TABLE with
+// `--ledger`. A truncated table is missing permanent numbered checks, and missing rows look
+// identical to rows nobody wrote. T29's own round-2 table came out as 408 of 469 rows this way and
+// was caught only because the rows were counted back off the file instead of trusted.
+//
+// The ending that is safe on all three counts — no truncation, no hang even with an open handle,
+// and the exit code preserved — is to flush and then exit:
+//
+//     process.stdout.write("", () => process.exit(code));
+//
+// `process.exitCode = code` also flushes, but it lets Node exit only when the event loop empties,
+// so a script holding a timer or a socket would hang instead of ending. This check therefore asks
+// for the flush form and accepts either, rather than forcing one that can stall a guard.
+{
+  const offenders = [];
+  for (const f of scriptFiles) {
+    const txt = read(f);
+    if (!/--ledger|\.table\(\)|ledgerTable/.test(txt)) continue;   // only the ones that print a table
+    const lines = txt.replace(/\n+$/, "").split("\n");
+    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 4); i--) {
+      const l = lines[i];
+      if (/^\s*(\/\/|\*)/.test(l)) continue;                        // a comment, not code
+      if (/process\.stdout\.write\(\s*""\s*,/.test(l)) break;       // already flushes ✓
+      if (/^\s*process\.exitCode\s*=/.test(l)) break;               // also flushes ✓
+      if (/^\s*process\.exit\s*\(/.test(l)) { offenders.push(`${f}:${i + 1}`); break; }
+      break;
+    }
+  }
+  check(`no script that prints a ledger table ends with a bare process.exit() (${scriptFiles.filter((f) => /--ledger|\.table\(\)|ledgerTable/.test(read(f))).length} such scripts checked)`,
+    offenders.length === 0,
+    `${offenders.join("\n      ")}\n      process.exit() throws away buffered stdout when piped — measured at 3,162 of 5,000 long rows.\n      End with:  process.stdout.write("", () => process.exit(code));`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) {
   console.log(`\nARE THE GUARDS ALIVE? — ${scriptFiles.length} script(s) under scripts/ and tests/\n`);

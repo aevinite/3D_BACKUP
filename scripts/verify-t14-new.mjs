@@ -968,4 +968,4 @@ console.log(`ids used: P${FROM}–P${next - 1} (${next - FROM} of ${TO - FROM + 
 if (fail) { console.log("\nFAILURES:"); fails.forEach((f) => console.log("  " + f)); }
 if (LEDGER) { writeFileSync(LEDGER, rows.map((r) => [r.id, r.msg, r.res, r.note].join("\t")).join("\n")); console.log(`ledger rows written: ${rows.length} → ${LEDGER}`); }
 console.log(fail ? "\n❌ FAIL" : "\n✅ PASS — the 500 checks nobody had written yet");
-process.exit(fail ? 1 : 0);
+process.stdout.write("", () => process.exit(fail ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)

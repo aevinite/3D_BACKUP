@@ -155,6 +155,6 @@ async function main() {
   if (process.argv.includes("--ledger")) for (const r of results)
     console.log(`| ${r.id} | ${r.label.replace(/\|/g, "\\|")} | \`node scripts/sweep/t9/${FILE}.mjs --base=<url>\` (driven) | ${r.ok ? "✅" : "❌"} | ${(r.note || "").replace(/\|/g, "\\|").slice(0, 140)} |`);
   console.log(`  (ids ${results[0].id} … ${results[results.length - 1].id})`);
-  process.exit(bad.length ? 1 : 0);
+  process.stdout.write("", () => process.exit(bad.length ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)
 }
 main().catch((e) => { console.error("replay-t6-driven2 threw:", e); process.exit(2); });

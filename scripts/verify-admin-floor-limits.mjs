@@ -980,4 +980,4 @@ for (let i = 0; i < checks.length; i++) {
 }
 console.log(`\nadmin floor & limits (T21): ${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped (--static)` : ""} of ${checks.length} checks (P${FIRST_ID}–P${FIRST_ID + checks.length - 1})`);
 if (fail) { console.log("\nfailed:"); failures.forEach((f) => console.log("  " + f)); }
-process.exit(fail ? 1 : 0);
+process.stdout.write("", () => process.exit(fail ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)

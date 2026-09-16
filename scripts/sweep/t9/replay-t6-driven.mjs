@@ -295,6 +295,6 @@ async function main() {
   for (const r of results) if (!r.ok) console.log(`  ✗ ${r.id}  ${r.label}\n      → ${r.note}`);
   if (process.argv.includes("--ledger")) for (const r of results)
     console.log(`| ${r.id} | ${r.label.replace(/\|/g, "\\|")} | \`node scripts/sweep/t9/${FILE}.mjs --base=<url>\` (driven) | ${r.ok ? "✅" : "❌"} | ${(r.note || "").replace(/\|/g, "\\|").replace(/\n/g, " ").slice(0, 150)} |`);
-  process.exit(bad.length ? 1 : 0);
+  process.stdout.write("", () => process.exit(bad.length ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)
 }
 main().catch((e) => { console.error("replay-t6-driven threw:", e); process.exit(2); });

@@ -902,4 +902,4 @@ writeFileSync(join(root, ".claude/sweep/T17-ROUND2-RESULT.json"), JSON.stringify
   pass: pass.length, fail: fail.length, unanswered: unanswered.length,
   failures: fail, unansweredRows: unanswered,
 }, null, 2));
-process.exit(fail.length ? 1 : 0);
+process.stdout.write("", () => process.exit(fail.length ? 1 : 0));  // flush first: process.exit() DISCARDS buffered stdout (measured: 5,000 long rows piped → 3,162)
