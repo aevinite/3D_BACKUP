@@ -43,8 +43,23 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
   const r = rq.data as Record<string, any>;
 
   const cols = ["features", "platform_channels", ...SETTINGS_COLUMNS];
-  const s = obj((await sb.from("settings").select(Array.from(new Set(cols)).join(", "))
-    .eq("restaurant_id", rid).maybeSingle()).data);
+  const sq = await sb.from("settings").select(Array.from(new Set(cols)).join(", "))
+    .eq("restaurant_id", rid).maybeSingle();
+  // BOTH READS FAIL THE SAME WAY (sweep #9 T35, item 1). The restaurants read has always answered
+  // `null` when it could not be read; this one took `.data` and never looked at `.error`, so a
+  // database blip handed back a state with NO settings in it — and "nothing stored" is precisely
+  // how this model spells "use the row's own default". The Access screen would then have drawn
+  // every switch at its factory value over a restaurant whose real settings say otherwise, and a
+  // person's profile would have reported those defaults as that restaurant's answer. Screen says
+  // ON, server says NO — the one fault this whole model exists to abolish, arriving through the
+  // reader that is supposed to prevent it.
+  //
+  // A restaurant with NO settings row at all is a different thing and still works: maybeSingle()
+  // gives `data: null, error: null` there, so only a real read failure stops us. Callers already
+  // handle `null` — the access-tree route refuses the load, and the owner staff route's
+  // `roleDefault()` answers `null` rather than guessing.
+  if (sq.error) return null;
+  const s = obj(sq.data);
 
   const featOverrides = obj(s.features);
   const features: Record<string, boolean> = {};

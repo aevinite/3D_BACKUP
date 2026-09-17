@@ -1105,6 +1105,31 @@ else ok("the read/write route derives every allow-list from the model");
   }
 }
 
+// ── 56 · "NOTHING STORED" MUST NEVER BE HOW A FAILED READ LOOKS (sweep #9 T35, item 1) ─────────
+//
+// lib/accessState.ts is the ONE reader behind the Access screen, the Per-person tab and every
+// staff profile. Everything in this model treats an absent value as "use the row's own default",
+// so a read that fails and is not noticed does not look like a failure — it looks like a
+// restaurant sitting at factory settings. The screen then draws every switch at a value the
+// database disagrees with, which is the exact fault the whole rebuild exists to abolish.
+//
+// Both reads must therefore fail CLOSED: look at `.error` and answer null, so the callers can say
+// "couldn't load" instead of inventing an answer. A restaurant with no settings row at all is a
+// different case and must keep working — maybeSingle() reports that as data:null with no error.
+{
+  const src = read("lib/accessState.ts");
+  const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
+  const reads = [...code.matchAll(/(?:const (\w+) = )?await sb\s*\n?\s*\.?from\("(\w+)"\)/g)];
+  const missing = [];
+  for (const [, varName, table] of reads) {
+    if (!varName) { missing.push(`${table} (its reply is used inline, so nobody can look at .error)`); continue; }
+    if (!new RegExp(`${varName}\\.error`).test(code)) missing.push(`${table} (\`${varName}.error\` is never read)`);
+  }
+  if (!reads.length) fail("verify:access check 56 could not find the reads in lib/accessState.ts — the guard has lost its subject, fix the guard");
+  else if (missing.length) fail(`lib/accessState.ts takes a read's answer without checking whether it worked: ${missing.join("; ")}. A failed read then reads as "nothing stored", which this model spells "use the default" — so the Access screen would show factory values over a restaurant that has quite different ones.`);
+  else ok(`both of lib/accessState.ts's ${reads.length} reads fail closed, so a database blip can never read as "this restaurant is at its defaults"`);
+}
+
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);
 console.log(fails.length
