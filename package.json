@@ -245,7 +245,8 @@
     "verify:takings-never-negative": "node scripts/verify-takings-never-negative.mjs",
     "verify:bill-number-on-order": "node scripts/verify-bill-number-on-order.mjs",
     "verify:server-only-tables": "node scripts/verify-server-only-tables.mjs",
-    "verify:tax-rate-is-a-rate": "node scripts/verify-tax-rate-is-a-rate.mjs"
+    "verify:tax-rate-is-a-rate": "node scripts/verify-tax-rate-is-a-rate.mjs",
+    "verify:invoice-is-final": "node scripts/verify-invoice-is-final.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"
