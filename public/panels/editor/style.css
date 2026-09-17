@@ -5432,3 +5432,12 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
    decision below them. */
 .sp-newwrap { flex: 0 0 auto; max-height: 40%; overflow-y: auto; scrollbar-width: none; }
 .sp-newwrap::-webkit-scrollbar { width: 0; }
+
+/* FOUR CHIPS ON ONE LINE at 392px (2026-09-17). The head carries the number, the state, the mark
+   (now a button) and KOT ▾; at a phone's width the last one was dropping to a line of its own,
+   which is 26px of head — a dish. Slightly tighter chips fit all four, and the number keeps its
+   size because it is the thing you look for first. */
+.tp-detail-floating .tp-detail-top .tp-pill,
+.tp-detail-floating .tp-detail-top .tp-tagpill { padding: 4px 8px; font-size: 10.5px; }
+.tp-detail-floating .tp-detail-top .tp-kot-head { padding: 4px 8px; font-size: 10.5px; }
+.tp-detail-floating .tp-detail-top { gap: 6px; row-gap: 4px; }
