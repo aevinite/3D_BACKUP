@@ -57,6 +57,30 @@ const putBillFlagsBack = () => sb.from("settings").update({
 }).eq("restaurant_id", RID1);
 restoreOnExit(`French House · bill_customer_print/${BILLFLAGS_WERE.bill_customer_print} + bill_customer_required/${BILLFLAGS_WERE.bill_customer_required}`, putBillFlagsBack);
 
+// ── …AND BORROWING MEANS SETTING IT, NOT HOPING (T28 sweep #9, owner picked item 13, 2026-09-17) ─
+//
+// The block above does half the job perfectly: it reads what the two switches were and puts them
+// back however the run ends. What it never did was SET them — every check below is written for a
+// restaurant where "a bill needs a customer" and "print the customer on the bill" are both ON, and
+// it simply assumed French House was that restaurant.
+//
+// It stopped being that restaurant. Both switches now read `false` there (6 of the 20 restaurants
+// on this stack have `bill_customer_required: false`), and three checks went red on a completely
+// clean `main`:
+//
+//     ✗ refuses with no customer            ← the gate is off, so no customer is legitimate: 200
+//     ✗ Customer + Mobile print when captured  ← printing them is off, so they correctly do not
+//     ✗ sheet opens on invoice generation      ← the sheet only opens when the customer is required
+//
+// Not one of those is a product fault. The product was right all three times and the GUARD was
+// wrong, which is the expensive kind of red: it had been failing long enough that a real
+// regression in this area would have been read as "oh, customers is red again".
+//
+// So borrow properly — switch both on for the length of the run. The put-back above already covers
+// every way out, including an interruption, so this adds no new risk of leaving a restaurant
+// changed. The two checks that need them OFF flip them explicitly and are unaffected.
+await sb.from("settings").update({ bill_customer_print: true, bill_customer_required: true }).eq("restaurant_id", RID1);
+
 const b = await chromium.launch();
 
 /* ─────────────── A. the money + gate rules on the server ─────────────── */

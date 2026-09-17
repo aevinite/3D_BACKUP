@@ -25,7 +25,7 @@ import { useBackClose } from "@/lib/backStack";
 import { partialNote } from "@/lib/partialRead";
 // Client-safe: lib/searchText has zero imports and no server-only code. It is the SAME cleaner the
 // route runs on `?q=`, so this screen can say what was really searched for. See `searched` below.
-import { safeSearch } from "@/lib/searchText";
+import { searchTerm } from "@/lib/searchText";
 // 10 digits read as "97376 38206" — easier to read back to a guest than one long run. The rule
 // moved into lib/phoneText.ts (sweep 8 · T16) when Pay Later needed the same thing: it was written
 // here first, and a second copy of it beside a screen that rings people would have been a third.
@@ -317,14 +317,23 @@ export default function OwnerCustomers() {
   // `)`, `\` — lib/searchText.ts), and sends no `q=` at all when nothing usable is left. The screen
   // branched on the RAW box instead, so typing `*` fetched the whole list and then labelled it
   // "26 matches for “*”", and typing two spaces produced "26 matches for “”". One cleaner, both ends.
-  const searched = safeSearch(search);
+  const searched = searchTerm(search);
   // One footer, rendered by both the phone list and the desktop table, so the two cannot drift.
   // A plain function, not a component: a component declared inside render is a new type on every
   // render (React remounts it, and `react-hooks/static-components` fails the lint on it).
   const listFoot = (gap: number) => {
-    if (searched) return (
+    // ── AND AN EMPTY LIST HAS TO SAY WHY (owner picked item 11, 2026-09-17) ──────────────────────
+    // Typing `*` used to fetch the WHOLE list, because everything the cleaner strips left `""`, and
+    // `""` read as "no search". It now correctly matches nothing — but an empty guest list with no
+    // explanation is its own wrong answer, so the one case that cannot be searched for says so.
+    if (searched.kind === "unsearchable") return (
       <div className="adm-muted" style={{ fontSize: 12, marginTop: gap }}>
-        {rows.length} match{rows.length === 1 ? "" : "es"} for “{searched}”.
+        Nothing to search for — “{search.trim()}” is only characters a search can’t look for. Try a name or a number.
+      </div>
+    );
+    if (searched.kind === "term") return (
+      <div className="adm-muted" style={{ fontSize: 12, marginTop: gap }}>
+        {rows.length} match{rows.length === 1 ? "" : "es"} for “{searched.term}”.
       </div>
     );
     // Nothing is hidden unless the read actually HIT the cap — and the tiles ride a 5-minute

@@ -57,11 +57,26 @@ row(OP("a page past the end is an EMPTY page that still knows the real total —
   return true;
 });
 row(OP("…and the count behind that answer asks the SAME question the page asks"), "read: the three standing exclusions are applied to both", async () => {
+  // EXPECTATION MOVED 2026-09-17, same id, same claim. This counted mentions of three local
+  // consts named EXCLUDE_PANELS / EXCLUDE_LEVEL / EXCLUDE_ACTION. Owner-picked item 12 moved the
+  // three exclusions into lib/logVisibility.ts as `withoutHiddenKinds()` — precisely so the page
+  // and the count CANNOT be narrowed differently, which is what this row is about. Counting a
+  // spelling that the fix deliberately deleted made this go red on correct code.
+  //
+  // The claim is unchanged and is now asserted where it actually lives: the declaration holds all
+  // three, and this route applies it to the page AND to the head count.
+  const lib = code(read("lib/logVisibility.ts"));
+  for (const [what, frag] of [["the admin's own rows", "(admin,db)"],
+                              ["app faults", "level.is.null,level.neq.error"],
+                              ["the raw button taps", "ui_taps"]]) {
+    if (!lib.includes(frag)) return `lib/logVisibility.ts no longer excludes ${what}`;
+  }
   const src = code(read("app/api/owner/oplog/route.ts"));
-  for (const k of ["EXCLUDE_PANELS", "EXCLUDE_LEVEL", "EXCLUDE_ACTION"]) {
-    const uses = (src.match(new RegExp(k, "g")) || []).length;
-    // once as the declaration, once on the page query, once on the head count
-    if (uses < 3) return `${k} is applied ${uses - 1} time(s) — the count and the list can disagree`;
+  const uses = (src.match(/withoutHiddenKinds\(/g) || []).length;
+  if (uses < 2) return `withoutHiddenKinds is applied ${uses} time(s) — the count and the list can disagree`;
+  // …and no copy of the filter has crept back in beside it.
+  if (/\(admin,db\)/.test(src) || /level\.is\.null,level\.neq\.error/.test(src)) {
+    return "the exclusion strings are hand-written in the route again, so the two can drift apart";
   }
   return true;
 });

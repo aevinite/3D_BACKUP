@@ -475,14 +475,32 @@ row(S("…and 'off' from a manager is allowed, because reducing is theirs to do"
   if (r.status === 200) { await PATCH(c.O, "/api/owner/staff", { id: fx.waiter, action: "set_permissions", permissions: { tablet_take_orders: null } }); return true; }
   return `${r.status} ${r.j?.error}`;
 });
-row(S("a waiter cap cannot be granted on a restaurant the admin has not switched that module on for"), "PATCH a module-gated cap", async (c) => {
+row(S("a waiter cap cannot be granted on a restaurant the admin has not switched that module on for"), "PATCH a module-gated cap with the module OFF", async (c) => {
+  // ── THIS USED TO SKIP, AND A SKIP PROVES NOTHING (owner picked item 10, 2026-09-17) ───────────
+  // It looked for a gated module that happened to be off, and every one is on at French House — so
+  // the check reported "⏭ every gated module is switched on for this restaurant" on every run and
+  // the rule it was written for was never once tested. The honest version MAKES the state it needs
+  // and puts it back, which is what the harness's `undo()` is for.
   if (!fx.waiter) return "SKIP";
-  const r0 = await GET(c.O, "/api/owner/staff");
-  const mods = (r0.j.restaurants || []).find((x) => x.id === FH)?.modules || {};
-  const off = ["banquet", "table_tags", "table_ops"].find((k) => mods[k] !== true);
-  if (!off) return "SKIP: every gated module is switched on for this restaurant";
-  const r = await PATCH(c.O, "/api/owner/staff", { id: fx.waiter, action: "set_permissions", permissions: { [`tablet_${off}`]: "on" } });
-  return !!(r.status === 403 && /isn't enabled|can't grant/i.test(r.j?.error || "")) || `${r.status} ${r.j?.error}`;
+  const COL = "banquet_allowed";           // the ADMIN rung — the owner cannot switch this one on
+  const before = await sb.from("settings").select(COL).eq("restaurant_id", FH).maybeSingle();
+  if (before.error || before.data?.[COL] !== true) return `SKIP: could not read ${COL} (${before.error?.message || before.data?.[COL]})`;
+  // Registered BEFORE the flip, so an interruption between the two still puts it back. It runs in a
+  // finally, on SIGINT/SIGTERM, and on a plain exit (scripts/sweep/restore.mjs).
+  undo(async () => { await sb.from("settings").update({ [COL]: true }).eq("restaurant_id", FH); }, `French House ${COL} back to true`);
+  await sb.from("settings").update({ [COL]: false }).eq("restaurant_id", FH);
+  try {
+    const r = await PATCH(c.O, "/api/owner/staff", { id: fx.waiter, action: "set_permissions", permissions: { tablet_banquet: "on" } });
+    // …and the cap must NOT have been written, whatever the status said.
+    const stored = (await sb.from("staff_users").select("permissions").eq("id", fx.waiter).maybeSingle()).data?.permissions || {};
+    const refused = r.status === 403 && /isn't enabled|can't grant|not enabled/i.test(r.j?.error || "");
+    if (!refused) return `${r.status} ${r.j?.error}`;
+    return !("tablet_banquet" in stored) || `refused with ${r.status} but stored it anyway: ${JSON.stringify(stored.tablet_banquet)}`;
+  } finally {
+    // Put it back HERE too, not only at the end of the run: the window in which this restaurant's
+    // banquet module is off is shared with thirty-nine other terminals, so it is kept to one call.
+    await sb.from("settings").update({ [COL]: true }).eq("restaurant_id", FH);
+  }
 });
 row(S("a waiter cap cannot be given to a MANAGER account"), "PATCH tablet_* on a manager", async (c) => {
   if (!fx.mgr) return "SKIP";

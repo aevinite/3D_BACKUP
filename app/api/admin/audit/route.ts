@@ -18,7 +18,7 @@ import { adminFail } from "@/lib/adminFail";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site.
 import { ReadSet, rd } from "@/lib/readGuard";
-import { safeSearch } from "@/lib/searchText";
+import { searchTerm } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
 
@@ -95,8 +95,10 @@ export async function GET(req: NextRequest) {
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   if (qText) {
     // Shared cleaner — see the note in app/api/admin/oplog/route.ts (2026-08-16).
-    const safe = safeSearch(qText);
-    q = q.or(`item_title.ilike.%${safe}%,actor.ilike.%${safe}%,reason_note.ilike.%${safe}%`);
+    // …unconditional too, so an emptied search became `ilike.%%` — every removal, every restaurant.
+    const safe = searchTerm(qText);
+    if (safe.kind === "term") q = q.or(`item_title.ilike.%${safe.term}%,actor.ilike.%${safe.term}%,reason_note.ilike.%${safe.term}%`);
+    else if (safe.kind === "unsearchable") q = q.is("id", null)   // a primary key is never NULL, so this matches nothing — no sentinel value to keep in step;
   }
 
   const reads = new ReadSet("admin/audit", [await rd("removals", () => q)]);

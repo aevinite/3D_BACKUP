@@ -49,7 +49,7 @@ import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 // What never leaves the server inside a settings row (the delivery apps' connection keys).
 import { panelSafeSettings } from "@/lib/panelSettings";
-import { safeSearch } from "@/lib/searchText";
+import { searchTerm } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
 
@@ -662,9 +662,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (kperm === "on" || kperm === "pin" || kperm === "off") kmode = kperm;
       else kmode = String(((await sb.from("settings").select("tablet_khata").eq("restaurant_id", rid).maybeSingle()).data as Record<string, string> | null)?.tablet_khata || "off");
       if (kmode === "off" && g.user) return err("This isn't enabled for you — ask a manager.", 403);
-      const q = safeSearch(new URL(req.url).searchParams.get("q"), 60);
+      const q = searchTerm(new URL(req.url).searchParams.get("q"), 60);
       let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
-      if (q) sel = sel.or(`name.ilike.%${q}%,phone.ilike.%${q}%`);
+      if (q.kind === "term") sel = sel.or(`name.ilike.%${q.term}%,phone.ilike.%${q.term}%`);
+      // A picker that answers the eight most-recent people to a search nobody can run is how a
+      // waiter puts a bill on the wrong person (owner picked item 11).
+      if (q.kind === "unsearchable") return ok({ customers: [], unsearchable: true });
       return ok({ customers: must(await sel) });
     }
 

@@ -17,9 +17,9 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScopeOr503, inScope, dbFail , isRestaurantId} from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
-import { loadLogVisibility, logVisibilityUnavailable } from "@/lib/logVisibility";
+import { loadLogVisibility, logVisibilityUnavailable, withoutHiddenKinds } from "@/lib/logVisibility";
 import { restaurantNames } from "@/lib/restaurantNames";
-import { safeSearch } from "@/lib/searchText";
+import { searchTerm } from "@/lib/searchText";
 import { trailOf } from "@/lib/logTrail";
 
 // WHICH VISIBILITY SWITCH A ROW RIDES now lives in lib/logVisibility.ts, together with the decision
@@ -81,14 +81,13 @@ export async function GET(req: NextRequest) {
   // Audit chips). Applying them through a helper loses the row shape (Supabase infers columns from a
   // literal select), so they are declared here as data and applied in both places, and
   // `verify:t28-r2` fails if the two applications stop matching.
-  const EXCLUDE_PANELS = "(admin,db)";           // the admin's own actions and direct-database edits
-  const EXCLUDE_LEVEL = "level.is.null,level.neq.error";   // app FAULTS are the admin's signal
-  const EXCLUDE_ACTION = "ui_taps";              // the raw button-tap breadcrumbs
-  let q = sb.from("staff_actions").select(COLS, { count: "exact" })
-    .order("created_at", { ascending: false }).range(from, from + limit - 1);
-  q = q.not("panel", "in", EXCLUDE_PANELS);
-  q = q.or(EXCLUDE_LEVEL);
-  q = q.neq("action", EXCLUDE_ACTION);
+  // The three standing exclusions live in lib/logVisibility.ts now (owner picked item 12), applied
+  // to the page AND to the count on the error path below through the SAME function. They were three
+  // local consts here and three hard-coded strings in /api/owner/staff — and two copies of a filter
+  // that decides what is COUNTED is exactly how a footer comes to describe a set the page is not
+  // showing. See that file for what each one hides and why.
+  let q = withoutHiddenKinds(sb.from("staff_actions").select(COLS, { count: "exact" })
+    .order("created_at", { ascending: false }).range(from, from + limit - 1));
   // …nor raw app/system FAULTS (level='error'). Those are technical support signals for the
   // admin side, not the owner — the owner's "problems" surface is Complaints (the issues
   // table), not the error log (owner 2026-07-26). Keep every non-error row, including rows
@@ -131,8 +130,11 @@ export async function GET(req: NextRequest) {
     // copy stripped `%,()` but left `*` alone — and PostgREST translates `*` to `%` inside `ilike`,
     // so searching for `*` matched EVERY row instead of the literal character. lib/searchText.ts is
     // now the only place that decides what a typed search may contain.
-    const safe = safeSearch(qText);
-    if (safe) q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
+    // …and a search that cleans down to NOTHING is not an absent search: `if (safe)` skipped the
+    // filter, so typing `*` listed every row again by a different route (owner picked item 11).
+    const safe = searchTerm(qText);
+    if (safe.kind === "term") q = q.or(`action.ilike.%${safe.term}%,detail.ilike.%${safe.term}%`);
+    else if (safe.kind === "unsearchable") q = q.is("id", null)   // a primary key is never NULL, so this matches nothing — no sentinel value to keep in step;
   }
 
   // ── A PAGE PAST THE END IS AN EMPTY PAGE, NOT A RETRYABLE FAILURE (T28 round 2, 2026-09-16) ────
@@ -157,13 +159,16 @@ export async function GET(req: NextRequest) {
     // — which is a different wrong answer, on a screen whose whole job is to be trusted. One cheap
     // indexed head-count, on this error path only, so the footer can say "page 1 of 3" and send the
     // person back rather than implying the record is empty.
-    let hq = sb.from("staff_actions").select("id", { count: "exact", head: true })
-      .not("panel", "in", EXCLUDE_PANELS).or(EXCLUDE_LEVEL).neq("action", EXCLUDE_ACTION);
+    let hq = withoutHiddenKinds(sb.from("staff_actions").select("id", { count: "exact", head: true }));
     if (pinRid) hq = hq.eq("restaurant_id", pinRid);
     else if (!scope.all && scope.ids.length) hq = hq.in("restaurant_id", scope.ids);
     if (level === "warn" || level === "info") hq = hq.eq("level", level);
     if (actorId && /^[0-9a-f-]{36}$/i.test(actorId)) hq = hq.eq("actor_id", actorId);
-    if (qText) { const safe = safeSearch(qText); if (safe) hq = hq.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`); }
+    if (qText) {
+      const safe = searchTerm(qText);
+      if (safe.kind === "term") hq = hq.or(`action.ilike.%${safe.term}%,detail.ilike.%${safe.term}%`);
+      else if (safe.kind === "unsearchable") hq = hq.is("id", null)   // a primary key is never NULL, so this matches nothing — no sentinel value to keep in step;
+    }
     const head = await hq;
     const total = head.error ? 0 : (head.count ?? 0);
     return NextResponse.json({

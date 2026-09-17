@@ -168,3 +168,76 @@ export function logVisibilityUnavailable(): Response {
     { status: 503 },
   );
 }
+
+// ── AND THREE KINDS THE OWNER NEVER SEES AT ALL, DECLARED ONCE ───────────────────────────────────
+//
+// Everything above answers "may this owner see this KIND of row", which is a per-restaurant switch
+// Aevidine sets. Three exclusions sit underneath that and are not switches at all — no owner sees
+// them, on any restaurant, ever:
+//
+//   · `panel in (admin,db)`  — the admin's own actions and direct-database edits
+//   · `level = 'error'`      — app FAULTS are a support signal for the admin, not the owner. The
+//                              owner's "problems" surface is Complaints (owner, 2026-07-26). An OR
+//                              rather than a plain `neq`, or a NULL level would be dropped too.
+//   · `action = 'ui_taps'`   — the raw button-tap breadcrumbs `public/panels/errlog.js` writes so
+//                              support can see what someone was doing before a crash. They are
+//                              level:'info' on a normal panel, so they passed both filters above
+//                              and landed in the owner's list as "Button taps", hundreds at a time,
+//                              pushing the real staff actions off the page (T9 sweep, 2026-08-05).
+//
+// WHY THEY MOVED HERE (T28 sweep #9, owner picked item 12, 2026-09-17). They were written out twice:
+// as three function-local `const`s in `/api/owner/oplog` (applied to the page AND, since round 2, to
+// the count beside it) and as three hard-coded strings in `/api/owner/staff`'s per-person activity
+// card. Two copies of a filter that decides WHAT IS COUNTED is the shape that produced "page 4 of 3"
+// in this very file's neighbour: the list and its total were filtered differently, so the footer
+// described a set the page was not showing. A third surface would have had to get all three right
+// again from memory.
+//
+// One function, applied to both the rows and the count, so they cannot drift apart.
+
+/** The three standing exclusions, as PostgREST filter fragments. Exported for guards and tests. */
+export const OWNER_LOG_EXCLUDES = {
+  /** `.not("panel", "in", …)` */
+  panels: "(admin,db)",
+  /** `.or(…)` — keeps rows whose level is NULL, drops only `error` */
+  level: "level.is.null,level.neq.error",
+  /** `.neq("action", …)` */
+  action: "ui_taps",
+} as const;
+
+/**
+ * Narrow any `staff_actions` query to the rows an owner is allowed to see at all.
+ *
+ * Generic over the builder rather than typed to one, so the same call works for the paged
+ * `select()` and for the `head: true` count beside it — which is the whole point: a list and the
+ * total under it must be filtered by the same thing or the pager lies.
+ *
+ * **In plain words:** hide the three kinds of row the owner is never shown, in one place, so no
+ * screen can forget one of them.
+ */
+export function withoutHiddenKinds<Q>(q: Q): Q {
+  const f = q as unknown as StaffActionFilter;
+  return f
+    .not("panel", "in", OWNER_LOG_EXCLUDES.panels)
+    .or(OWNER_LOG_EXCLUDES.level)
+    .neq("action", OWNER_LOG_EXCLUDES.action) as unknown as Q;
+}
+
+/** The three methods this needs, and nothing else.
+ *
+ *  `Q` is deliberately UNCONSTRAINED, which is the one compromise in this file and is written down
+ *  rather than hidden. Both structural constraints were tried first — `<Q extends { not(…): Q; … }>`
+ *  and the same shape named separately — and each made TypeScript check PostgrestFilterBuilder's
+ *  whole generic tree for assignability and answer *"TS2589: Type instantiation is excessively deep
+ *  and possibly infinite"* on the head-count call, which is a hard compile error, not a warning.
+ *
+ *  What is lost: the compiler will not stop somebody passing this a thing that is not a query.
+ *  What is kept, and is the actual point: all three exclusions are applied TOGETHER or not at all,
+ *  so no surface can quietly implement two of the three. `verify:t28-picked` asserts that every
+ *  `staff_actions` read on an owner surface comes through here, which is the check the type cannot
+ *  be. */
+type StaffActionFilter = {
+  not(column: string, operator: string, value: string): StaffActionFilter;
+  or(filters: string): StaffActionFilter;
+  neq(column: string, value: string): StaffActionFilter;
+};

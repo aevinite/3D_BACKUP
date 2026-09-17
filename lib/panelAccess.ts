@@ -193,3 +193,61 @@ export async function isRestaurantDeleted(restaurantId: string): Promise<boolean
     return false;
   }
 }
+
+// ── A BINNED RESTAURANT SHOULD LEAVE EVERY SCREEN AT ONCE, NOT WITHIN 30 SECONDS ─────────────────
+//
+// (T28 sweep #9, owner picked item 16, 2026-09-17.)
+//
+// Bin a restaurant and it vanishes from the owner's Dashboard immediately — that page reads the
+// live list. Settings, Team and Guests kept showing it for another 22–35 seconds, MEASURED during
+// the round-2 five hundred. Nothing is wrong: those routes scope through
+// `enabledOwnedRestaurantIds`, which caches for `PANEL_TTL_MS` so the hot polled path adds no read.
+// But "gone here, still there there" reads as a bug to the person looking at it, and the owner was
+// asked whether to shorten the window. Shortening it is the wrong trade — the cache is what keeps
+// every polled owner request from re-reading the ownership links and the settings panels, which is
+// the egress this project spends its time protecting.
+//
+// The right answer is not a shorter guess. It is to stop guessing on the one event that makes the
+// answer wrong: throw the entry away when a restaurant is binned, restored, or has its owner panel
+// switched, so the next request recomputes instead of waiting out a timer.
+//
+// ⚠️ WHAT THIS DOES **NOT** DO, stated rather than implied. These are in-process `Map`s. On Vercel
+// each running instance has its own, so this clears the caches of the instance that handled the
+// write — not of an instance somewhere else that is mid-poll for that owner. Those still correct
+// themselves on the existing 30-second TTL, which stays exactly as it was and remains the backstop.
+// So: immediate wherever one process serves both the write and the next read (this dev stack, and
+// the common case in production), never slower than before, and never claimed to be more.
+
+/**
+ * Forget every cached answer that mentions one restaurant.
+ *
+ * Call it right after a write that changes whether a restaurant EXISTS for someone: binning it,
+ * restoring it, or turning a panel on or off. Cheap — three `Map` walks over entries that expire in
+ * 30 seconds anyway — and safe to call when nothing was cached.
+ *
+ * `ownerIds` is the owners to forget as well. The owner cache is keyed by USER, not by restaurant,
+ * so a caller that already knows who owns it should pass them; when it does not, every owner entry
+ * is dropped, which is correct (they all expire in 30s regardless) and costs one recompute each.
+ *
+ * **In plain words:** when a restaurant is put in the bin or taken out of it, throw away the notes
+ * we were keeping about who can see it, so the next screen asks again instead of using the old note.
+ */
+export function forgetRestaurant(restaurantId: string, ownerIds?: readonly string[]): void {
+  if (!restaurantId) return;
+  _deletedCache.delete(restaurantId);
+  for (const key of [..._panelCache.keys()]) {
+    if (key.startsWith(`${restaurantId}:`)) _panelCache.delete(key);
+  }
+  if (ownerIds) for (const u of ownerIds) _ownerCache.delete(u);
+  else _ownerCache.clear();
+}
+
+/** Who owns this restaurant right now — so `forgetRestaurant` can be precise instead of clearing
+ *  every owner. Never throws: forgetting too much is harmless, and a cleanup must not be the thing
+ *  that fails a bin. */
+export async function ownersOf(restaurantId: string): Promise<string[]> {
+  try {
+    const r = await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", restaurantId).limit(500);
+    return r.error ? [] : (r.data || []).map((x) => x.user_id as string);
+  } catch { return []; }
+}

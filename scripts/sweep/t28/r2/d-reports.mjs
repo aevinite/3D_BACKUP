@@ -6,7 +6,7 @@
 // re-run every sweep and it is green. What it has never touched is everything INSIDE those answers:
 // the tax split's arithmetic, the day sheet's business-day edge, the inventory and staff-pay
 // branches, the list caps, and the `partial` naming. That is where these 55 go.
-import { FH, PP, GET, sb, block, of_, code, read , sameStamp } from "./harness.mjs";
+import { FH, PP, GET, sb, undo, block, of_, code, read , sameStamp } from "./harness.mjs";
 
 const S = of_("app/api/owner/reports/route.ts");
 export const D = block(160701, "D · the owner's Reports — inside the answers the matrix never opened");
@@ -313,10 +313,33 @@ row(S("…and an empty leaderboard is never presented as a team that did nothing
   return !!(/reads\.rows<any>\("staff"\)/.test(perf) && /rd\("staff"/.test(perf))
     || "the staff read is back to a swallowed .data, so a failure would render an empty leaderboard";
 });
-row(S("a detail list that is capped says so, so it cannot quietly stop adding up to the band above it"), "read: listCap and the more-flags ride along", async (c) => {
-  const r = await GET(c.O, `/api/owner/reports?type=invexpenses&range=30d&rid=${FH}`);
-  if (r.status !== 200) return `SKIP: ${r.status}`;
-  return !!(typeof r.j.listCap === "number" && "expensesMore" in r.j) || `listCap=${r.j.listCap} expensesMore=${r.j.expensesMore}`;
+row(S("a detail list that is capped says so, so it cannot quietly stop adding up to the band above it"), "read: listCap and the more-flags ride along, Inventory switched on", async (c) => {
+  // ── THIS USED TO SKIP ON A 403, AND A SKIP PROVES NOTHING (owner picked item 10, 2026-09-17) ──
+  // French House has `inventory_allowed: false`, so every run answered *"Inventory isn't enabled
+  // for this restaurant"* and the check reported "⏭ 403" instead of testing anything. Switch the
+  // admin rung on for the length of one read, then put it back.
+  const COL = "inventory_allowed";
+  const before = await sb.from("settings").select(COL).eq("restaurant_id", FH).maybeSingle();
+  if (before.error) return `SKIP: could not read ${COL} (${before.error.message})`;
+  const was = before.data?.[COL] === true;
+  if (!was) {
+    undo(async () => { await sb.from("settings").update({ [COL]: false }).eq("restaurant_id", FH); }, `French House ${COL} back to false`);
+    await sb.from("settings").update({ [COL]: true }).eq("restaurant_id", FH);
+  }
+  try {
+    // `&refresh=1` IS LOAD-BEARING, and finding out why is the best thing this check did.
+    // Inventory reports ride the compute-on-view snapshot cache. Without forcing a recompute this
+    // reads whatever was STORED earlier — so when I sabotaged the route to stop sending `listCap`
+    // at all, the check stayed green on a payload computed by the previous build. Measured, both
+    // in one run: cached answered `listCap: 300` stamped 02:43, `?refresh=1` answered `listCapX`.
+    // A check that reads a cached report is testing the snapshot, not the code.
+    const r = await GET(c.O, `/api/owner/reports?type=invexpenses&range=30d&rid=${FH}&refresh=1`);
+    if (r.status !== 200) return `${r.status} ${r.j?.error} — Inventory was switched on for this read, so a 403 here is a real refusal`;
+    return !!(typeof r.j.listCap === "number" && "expensesMore" in r.j)
+      || `listCap=${r.j.listCap} expensesMore=${r.j.expensesMore} — a capped list that does not say it is capped stops adding up to the band above it`;
+  } finally {
+    if (!was) await sb.from("settings").update({ [COL]: false }).eq("restaurant_id", FH);
+  }
 });
 row(S("a healthy report names nothing as unread"), "GET six types and check for `partial`", async (c) => {
   for (const t of ["sales", "tax", "daysummary", "dishes", "payments", "byrestaurant"]) {

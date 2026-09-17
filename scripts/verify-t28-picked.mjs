@@ -166,13 +166,143 @@ console.log("\nT28's picked items — a read that failed is never reported as a 
     `item 12 · lib/personalData.ts is down to ${entries} entries — verify:personal-data is what watches for a new phone column, but a shrinking list here silently shrinks the erasure`);
 }
 
+// ── item 11 · a search that cleaned down to nothing is not an absent search ─────────────────────
+//
+// `lib/searchText.ts` used to answer a bare string, so `""` meant BOTH "nothing was typed" and
+// "everything typed was stripped". Nine callers were written `if (safe) q = q.or(…)`, so the second
+// case applied NO FILTER — typing `*` on owner → Guests answered with the whole list. Two admin
+// callers were worse: they built the filter unconditionally, so an emptied search became `ilike.%%`.
+//
+// It now answers a discriminated union (`none` | `term` | `unsearchable`). THE DANGEROUS PART OF
+// THAT CHANGE, and the reason this check exists: an object is ALWAYS truthy and stringifies to
+// `[object Object]`, and TypeScript accepts both — so `if (search)` and `${search}` still COMPILE
+// against the new type while quietly meaning something else. I made exactly that mistake in
+// `app/api/admin/customers/route.ts` while doing this, and `tsc` was silent about it.
+{
+  const CALLERS = [
+    "app/api/owner/customers/route.ts", "app/api/owner/oplog/route.ts",
+    "app/api/admin/customers/route.ts", "app/api/admin/oplog/route.ts", "app/api/admin/audit/route.ts",
+    "app/api/tablet/[...path]/route.ts", "app/api/editor/[...path]/route.ts",
+    "app/owner/customers/page.tsx",
+  ];
+  const lib = code(read("lib/searchText.ts"));
+  need(/export type SearchTerm/.test(lib) && /kind: "unsearchable"/.test(lib),
+    "item 11 · the cleaner answers WHICH of the three things happened, not a bare string",
+    "item 11 · lib/searchText.ts is back to a bare string — \"nothing typed\" and \"nothing searchable typed\" are one value again, and every caller collapses them");
+  need(!/export function safeSearch/.test(lib),
+    "item 11 · …and the old one-value cleaner is gone, not left beside it",
+    "item 11 · safeSearch still exists next to searchTerm — the next search box will pick the one that hides the bug (a new way REPLACES the old one)");
+
+  const stringified = [];
+  const truthy = [];
+  for (const f of CALLERS) {
+    const src = code(read(f));
+    if (!src) continue;
+    // Which local names hold a SearchTerm on this file?
+    const names = [...src.matchAll(/(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*searchTerm\(/g)].map((m) => m[1]);
+    for (const n of names) {
+      // `${name}` without `.term` — an object in a template literal becomes "[object Object]".
+      if (new RegExp("\\$\\{" + n + "\\}").test(src)) stringified.push(`${f} → \${${n}}`);
+      // `if (name)` / `name &&` / `name ?` — always true for an object, so the branch never guards.
+      if (new RegExp("(?:if\\s*\\(|&&\\s*|\\|\\|\\s*)" + n + "\\s*(?:\\)|&&|\\?)").test(src)) truthy.push(`${f} → if (${n})`);
+    }
+  }
+  need(stringified.length === 0,
+    `item 11 · no caller drops a whole SearchTerm into an ilike pattern (${CALLERS.length} files read)`,
+    `item 11 · a SearchTerm is being stringified, which produces the literal text "[object Object]" as the search: ${stringified.join(", ")}`);
+  need(truthy.length === 0,
+    "item 11 · …and none of them tests one for truthiness, which an object always passes",
+    `item 11 · a SearchTerm is used as a condition — an object is ALWAYS truthy, so that branch no longer guards anything: ${truthy.join(", ")}`);
+
+  // The point of the whole change: every caller must handle the unsearchable case somehow.
+  const unhandled = CALLERS.filter((f) => {
+    const src = code(read(f));
+    return src && /searchTerm\(/.test(src) && !/unsearchable/.test(src);
+  });
+  need(unhandled.length === 0,
+    "item 11 · …and every caller answers the unsearchable case instead of falling through to no filter",
+    `item 11 · these use searchTerm but never mention \`unsearchable\`, so a box of wildcards falls through to the unfiltered list again: ${unhandled.join(", ")}`);
+}
+
+// ── item 12 (owner-picked, 2026-09-17) · the owner's three standing exclusions, declared once ───
+//
+// No owner ever sees `panel in (admin,db)`, `level = 'error'`, or `action = 'ui_taps'`. Those three
+// were written out twice — as local consts in /api/owner/oplog (page AND count) and as hard-coded
+// strings in /api/owner/staff's per-person card. Two copies of a filter that decides what is
+// COUNTED is precisely how a footer comes to describe a set the page is not showing, which is the
+// fault that produced "page 4 of 3" in the same file a day earlier.
+//
+// The type cannot enforce this: `withoutHiddenKinds` had to take an unconstrained generic, because
+// every structural constraint made TypeScript answer TS2589 on the head-count. So the check is here.
+{
+  const lib = code(read("lib/logVisibility.ts"));
+  need(/export const OWNER_LOG_EXCLUDES/.test(lib) && /export function withoutHiddenKinds/.test(lib),
+    "item 12 · the three standing exclusions are declared once, in lib/logVisibility.ts",
+    "item 12 · OWNER_LOG_EXCLUDES / withoutHiddenKinds is gone — the exclusions are back to being copied per route");
+  for (const [what, frag] of [["the admin's own rows", '"\\(admin,db\\)"'],
+                              ["app faults", '"level\\.is\\.null,level\\.neq\\.error"'],
+                              ["the raw button taps", '"ui_taps"']]) {
+    need(new RegExp(frag).test(lib), `item 12 · …including ${what}`,
+      `item 12 · lib/logVisibility.ts no longer declares the exclusion for ${what}`);
+  }
+
+  // Every owner surface that reads the activity table must come through the one function.
+  const SURFACES = ["app/api/owner/oplog/route.ts", "app/api/owner/staff/route.ts"];
+  const handRolled = [];
+  const missing = [];
+  for (const f of SURFACES) {
+    const src = code(read(f));
+    if (!src) { missing.push(`${f} (unreadable)`); continue; }
+    if (!/withoutHiddenKinds\(/.test(src)) missing.push(f);
+    // A copy that drifted back in — the literals, anywhere in the route.
+    if (/\(admin,db\)/.test(src) || /level\.is\.null,level\.neq\.error/.test(src) || /neq\("action", "ui_taps"\)/.test(src)) handRolled.push(f);
+  }
+  need(missing.length === 0,
+    `item 12 · …and every owner activity surface applies them through it (${SURFACES.length} read)`,
+    `item 12 · these read staff_actions for an owner without withoutHiddenKinds, so they decide for themselves what is hidden: ${missing.join(", ")}`);
+  need(handRolled.length === 0,
+    "item 12 · …with no route keeping its own copy of the filter beside it",
+    `item 12 · the exclusion strings are hand-written again in: ${handRolled.join(", ")} — two copies of a filter that decides what is COUNTED is how a footer describes a set the page is not showing`);
+
+  // The list and the count beside it must be filtered by the SAME thing — that is the actual bug.
+  const op = code(read("app/api/owner/oplog/route.ts"));
+  const uses = (op.match(/withoutHiddenKinds\(/g) || []).length;
+  need(uses >= 2,
+    `item 12 · …and the Activity page's list and its total both come through it (${uses} call sites)`,
+    `item 12 · only ${uses} call site in /api/owner/oplog — the page and the count beside it must be narrowed by the same filter, or the footer counts rows the page will not show`);
+}
+
+// ── item 16 (owner-picked, 2026-09-17) · a binned restaurant leaves every screen at once ───────
+//
+// MEASURED on a production build, same build both ways, one throwaway restaurant of its own:
+//   without the invalidation → 31.3s on Dashboard, Settings, Team AND Guests
+//   with it                  →  0.6s on all four
+// (`next dev` cannot show this at all — it resets module state between compilations, so the cache
+// never survives long enough to be stale. The first "fix works" run I did there scored 0.6s with
+// the fix REMOVED, which is what sent me to a production build.)
+{
+  const lib = code(read("lib/panelAccess.ts"));
+  need(/export function forgetRestaurant/.test(lib) && /export async function ownersOf/.test(lib),
+    "item 16 · the owner-scope caches can be told a restaurant has changed",
+    "item 16 · forgetRestaurant/ownersOf is gone — a binned restaurant is back to waiting out a 30s timer on Settings, Team and Guests");
+  need(/_deletedCache\.delete/.test(lib) && /_panelCache\.delete/.test(lib) && /_ownerCache\.(delete|clear)/.test(lib),
+    "item 16 · …and it clears all three of them, not just the one the caller happened to think of",
+    "item 16 · forgetRestaurant no longer clears all three caches — the screens will disagree with each other instead of with the database");
+
+  const adm = code(read("app/api/admin/restaurants/route.ts"));
+  const calls = (adm.match(/forgetRestaurant\(/g) || []).length;
+  need(calls >= 2,
+    `item 16 · …and both binning and restoring tell it (${calls} call sites)`,
+    `item 16 · only ${calls} call site in the admin restaurants route — bin and restore are the same event in reverse, and BOTH leave the owner's screens wrong until they are forgotten`);
+}
+
 if (!fails.length) {
   console.log(`\n✅ verify:t28-picked — ${pass} checks, all pass.`);
   process.exit(0);
 }
 console.error(`\n❌ verify:t28-picked — ${fails.length} failed, ${pass} passed.\n`);
 for (const m of fails) console.error(`  FAIL  ${m}`);
-console.error("\nThe rule under all four: a read that FAILED is never reported as a fact. Not as a");
+console.error("\nThe rule under items 9-12: a read that FAILED is never reported as a fact. Not as a");
 console.error("restaurant nobody checked, not as \"you haven't asked\", not as \"nothing has changed\",");
 console.error("and not as a shorter list of what was erased.");
 process.exit(process.argv.includes("--hook") ? 2 : 1);

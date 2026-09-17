@@ -11,7 +11,7 @@ import { adminFail } from "@/lib/adminFail";
 // a tolerated read that says so at the call site.
 import { ReadSet, rd } from "@/lib/readGuard";
 import { redactMoney } from "@/lib/oplog";
-import { safeSearch } from "@/lib/searchText";
+import { searchTerm } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
 
@@ -75,8 +75,11 @@ export async function GET(req: NextRequest) {
     // The shared cleaner (lib/searchText.ts), not a local strip: the local one missed `*`, which
     // PostgREST reads as a wildcard, so typing it matched EVERY row. That is the exact bug the
     // owner-side screens already fixed — the admin twins had kept the old copy (2026-08-16).
-    const safe = safeSearch(qText);
-    q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
+    // …and this one built the filter UNCONDITIONALLY, so an emptied search became `ilike.%%`,
+    // which matches every row by construction (owner picked item 11).
+    const safe = searchTerm(qText);
+    if (safe.kind === "term") q = q.or(`action.ilike.%${safe.term}%,detail.ilike.%${safe.term}%`);
+    else if (safe.kind === "unsearchable") q = q.is("id", null)   // a primary key is never NULL, so this matches nothing — no sentinel value to keep in step;
   }
   // HOW MANY ARE WAITING, so hiding one is never silent (mig 344). A wait is legitimate but it must
   // be visible as a number, or "3 problems open" quietly stops meaning "3 problems exist" — the

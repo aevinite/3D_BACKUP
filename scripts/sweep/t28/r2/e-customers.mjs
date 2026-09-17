@@ -289,12 +289,25 @@ row(S("…and that line does not repeat the whole phone number either"), "read t
 row(S("a guest who was never there is answered without pretending to erase them"), "DELETE a number PROVED absent first", async (c) => {
   // ── NEVER ASSUME A NUMBER IS UNUSED (T28 round 2, 2026-09-16) ─────────────────────────────────
   // This first used the hard-coded `9000000001`, on the assumption that a made-up number belongs to
-  // nobody. Forty terminals share this database and it belonged to one of them: the erase answered
-  // `erased: 1` and a fixture that was not mine is gone. It is reported rather than papered over,
-  // and recreating it was deliberately NOT done — the audit row keeps only the last four digits (by
-  // design), so any "restored" row would have been invented data, which is worse than a known hole.
+  // nobody. Forty terminals share this database, it belonged to somebody, and the erase answered
+  // `erased: 1`.
   //
-  // So the absence is PROVED, immediately before the call, and the number is random.
+  // ── WHAT IT ACTUALLY WAS, traced 2026-09-17 (owner picked item 15) ────────────────────────────
+  // Not a live fixture, and nothing is waiting on it. The number appears in exactly one other place
+  // in this repo — `scripts/sweep/t16/blockE.mjs` — and that file makes ZERO database calls: every
+  // `9000000001` in it is a literal inside a crafted API response handed straight to the page, so
+  // T16 neither created the row nor reads it. What I deleted was the French House half of a PAIR of
+  // hand-made rows named "Audit Walkthrough", first seen 2026-08-02, left behind by a manual
+  // walkthrough over a month earlier. Its twin is still on Aangan and is deliberately left there:
+  // Aangan is the read-only control, and quietly tidying the control is the one thing the control
+  // exists to prevent.
+  //
+  // Recreating the French House one was deliberately NOT done, and that is still right — the
+  // erasure audit keeps only the last four digits by design, so a "restored" row would be invented
+  // data, which is worse than a hole that is written down.
+  //
+  // The rule the mistake earns is the same either way: PROVE the absence, immediately before the
+  // call, with a random number. A made-up constant is somebody's real row on a shared database.
   let ph = null;
   for (let i = 0; i < 12 && !ph; i++) {
     const cand = `9${String(Math.floor(Math.random() * 9e8) + 1e8)}`;

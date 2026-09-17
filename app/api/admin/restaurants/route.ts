@@ -22,6 +22,7 @@ import { MP_DEFAULT } from "@/lib/accessConfig";
 import { adminFail } from "@/lib/adminFail";
 // Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
 import { pageAll } from "@/lib/pageAll";
+import { forgetRestaurant, ownersOf } from "@/lib/panelAccess";
 
 // The remembered "New restaurant" setup (panels + sample-menu), stored in
 // app_config (mig 186) so the create form auto-fills from the admin's last choice.
@@ -405,6 +406,13 @@ export async function POST(req: NextRequest) {
       .update({ deleted_at: new Date().toISOString(), deleted_by: "admin", delete_reason: reason, active: false })
       .eq("id", rid);
     if (error) return adminFail("moving this restaurant to the recycle bin", error, { action: "save" });
+    // ── AND IT LEAVES EVERY OWNER SCREEN NOW, NOT WITHIN 30 SECONDS (owner picked item 16) ──────
+    // The Dashboard drops it at once; Settings, Team and Guests kept it for another 22–35 seconds,
+    // measured. They scope through `enabledOwnedRestaurantIds`, which caches so the polled owner
+    // path adds no read — so the answer is not a shorter guess, it is to throw the note away on the
+    // one event that makes it wrong. Owners looked up first so only they are forgotten. See
+    // lib/panelAccess.ts for what this does NOT cover (another running instance mid-poll).
+    forgetRestaurant(rid, await ownersOf(rid));
     await logAction("admin", "restaurant_soft_delete", { restaurant_id: rid, actor: "admin", detail: `${r.name} moved to recycle bin${reason ? ` · reason: ${reason}` : ""}` });
     return ok({ ok: true, deleted: true });
   }
@@ -494,6 +502,9 @@ export async function POST(req: NextRequest) {
       .update({ deleted_at: null, deleted_by: null, delete_reason: null, active: activate, name, slug })
       .eq("id", rid);
     if (error) return adminFail("restoring this restaurant", error, { action: "save" });
+    // …and coming BACK out of the bin is the same event in reverse: without this the owner's
+    // Settings, Team and Guests would go on insisting it is gone for another half minute.
+    forgetRestaurant(rid, await ownersOf(rid));
     const renamed = slug !== r.slug ? slug : null;
     // ── THE ADDRESS IT LEFT BEHIND GOES ON RECORD (mig 350) ────────────────────────────────────
     // This is the only place in the product where a restaurant's web address changes, so it is the
