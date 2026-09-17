@@ -77,8 +77,15 @@ SELECT
   (SELECT count(*)::int FROM (
       SELECT restaurant_id, seq FROM bill_chain GROUP BY 1, 2 HAVING count(*) > 1) x)              AS dup_chain_seq,
   (SELECT count(*)::int FROM bill_chain WHERE chain_hash IS NULL OR prev_hash IS NULL)             AS unhashed_chain,
+  -- MIGRATION 397 gave a platform-level event a key of its own, so "keyed to its restaurant" is no
+  -- longer the whole rule: a TENANT breadcrumb is keyed to its restaurant, and a PLATFORM one (no
+  -- restaurant) is keyed '<topic>:platform' so that no per-restaurant subscriber matches it. An
+  -- earlier version of this row asserted only the first half and reported 397's own rows as
+  -- miskeyed -- the second time in two days that this suite asserted last hour's behaviour.
   (SELECT count(*)::int FROM realtime_events
-     WHERE topic_rid IS DISTINCT FROM topic || ':' || restaurant_id::text)                         AS miskeyed_breadcrumbs,
+     WHERE CASE WHEN restaurant_id IS NULL THEN topic_rid IS DISTINCT FROM topic || ':platform'
+                ELSE topic_rid IS DISTINCT FROM topic || ':' || restaurant_id::text END)           AS miskeyed_breadcrumbs,
+  (SELECT count(*)::int FROM realtime_events WHERE restaurant_id IS NULL)                          AS platform_breadcrumbs,
   -- MIGRATION 397 changed what the right answer is: a platform event IS announced again (so the
   -- admin console refreshes instantly) but must be keyed to NOBODY. The question is therefore not
   -- "is it announced" any more -- it is "is it announced AS SOMEBODY'S".
@@ -175,10 +182,11 @@ add(M("332_every_bill_is_signed_and_chained.sql"),
 add(M("332_every_bill_is_signed_and_chained.sql"),
   "every row in the signed chain carries both of its hashes, so the chain can actually be verified",
   "count bill_chain rows with a null hash", n(d.unhashed_chain) === 0, `${d.unhashed_chain} unhashed rows`);
-add(M("321_the_sweep_of_layer_b.sql"),
-  "every breadcrumb in the database is keyed to its topic AND its restaurant — realtime is per-restaurant, as the SaaS rule requires",
-  "compare topic_rid against topic || ':' || restaurant_id on every row",
-  n(d.miskeyed_breadcrumbs) === 0, `${d.miskeyed_breadcrumbs} miskeyed rows`);
+add(M("321_the_sweep_of_layer_b.sql") + ", " + M("397_a_platform_event_is_announced_to_nobodys_restaurant.sql"),
+  "every breadcrumb in the database is keyed so that only the right listener matches it — a restaurant's to that restaurant, a platform event to nobody's",
+  "per row: a null restaurant must be keyed '<topic>:platform', and every other must be keyed '<topic>:<its restaurant>'",
+  n(d.miskeyed_breadcrumbs) === 0,
+  `${d.miskeyed_breadcrumbs} miskeyed rows; ${d.platform_breadcrumbs} platform breadcrumbs are currently in the table, which is migration 397 working in production`);
 add(M("397_a_platform_event_is_announced_to_nobodys_restaurant.sql"),
   "no platform-level activity event in the table is announced as a RESTAURANT'S — it is announced to the unscoped admin console and keyed to nobody",
   "join audit breadcrumbs to their staff_actions row, and for those whose action has no restaurant, check the breadcrumb carries no restaurant and is keyed '<topic>:platform'",
