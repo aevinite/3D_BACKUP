@@ -591,7 +591,7 @@ were **stale allowances**, not dead checks.
 | 20 | P09501–P10000 | **The admin server routes, part B + the owner routes** — the last 24 admin routes, and all 12 `app/api/owner/**` | ✅ | 500 | 500 | 0 | 0 |
 | 21 | P10001–P10500 | **The database, migrations 001–118** (positions 1–120 of the sorted list) | ✅ | 500 | 498 | 0 | 2 |
 | 22 | P10501–P11000 | **The database, migrations 119–222** (positions 121–230) | ✅ | 500 | 364 | 0 | 135 |
-| 23 | P11001–P11500 | **The database, migrations 223 onward** (positions 231 to the end) | ✅ | 500 | 443 | 4 | 49 |
+| 23 | P11001–P11500 **+ P26101–P26600 (s7)** | **The database, migrations 223–332** (positions 231–320). *Its header still says "231 to the end"; positions 321 onward are T33's, and T23's own rows stop at `332_…` — corrected by T33, 2026-09-17.* | ✅ | 500 | 443 | 4 | 49 |
 | 24 | P11501–P12000 | **The money and safety libraries** — `lib/{clash,paySplit,tax,taxFiling,idempotency,idempotencyRule,logTrail,userAuth,rateLimit}.ts`, `docs/COMPLIANCE-GUARDRAILS.md`, `docs/SAAS-EFFICIENCY-PLAYBOOK.md` | ✅ | 500 | 499 | 0 | 1 |
 | 25 | P12001–P12500 | **Every other shared library file** — the ~108 files in `lib/` no other terminal owns | ✅ | 500 | 500 | 0 | 0 |
 | 26 | P12501–P13000 | **THE LOOK** — `app/globals.css`, `public/panels/**/style.css`, and every Tailwind/styled-jsx block. Layout, spacing, colour, size, fit. Desktop, Samsung A35, iPad both ways up, both skins | ⚠️ filed on `origin/sweep6/t26-the-look`, not yet merged | 577 | — | — | — |
@@ -599,6 +599,7 @@ were **stale allowances**, not dead checks.
 | 28 | P13501–P14000 | **THE REPO'S OWN TESTS** — `scripts/**`, `tests/**`, and the `verify:*` entries in `package.json`. Is each guard alive, honest, and cleaning up after itself? | ✅ **FILED** — this page said "never filed" and was wrong; `T28.md` has held 500 rows since sweep #6 and all 500 were re-run in sweep #7 | 500 | 490 | 0 | 10 |
 | 29 | P14001–P14500 | **Docs, tooling, root config AND THE REMAINDER** — `docs/**`, `package.json`, `next.config.ts`, `tsconfig*.json`, `.github/**`, plus every file no other territory names | ✅ | 500 | — | — | — |
 | 30 | P14501–P15000 | **Cross-panel truth, and this ledger** — `LEDGER/INDEX.md`, `docs/QA-500-PHASES.md`, `.claude/skills/terminal-test-improve/**` | ✅ | 500 | 342 | 59 | 99 |
+| 33 | P104801–P104900 (round 1) · P152001–P153000 (round 2+) | **The database, migrations at POSITIONS 321 → THE END** (`ls supabase/migrations/*.sql \| sort \| sed -n '321,$p'` — 81 files, 12,898 lines, `314_a_settled_bill_…` → `393_the_last_fifteen_guest_tables_…`; a positional range is NOT a numeric one, so position 321 is the file named `314_…`). **60 of its 81 files had ZERO ledger rows by subject before this file existed** — every migration from `333_…` to `393_…` except two. `T33.md`, filed 2026-09-17 (sweep #9) | ✅ | 50 | 50 | 0 | 0 |
 
 ---
 

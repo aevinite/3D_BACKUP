@@ -13,13 +13,25 @@
 // caller away. That is the shape this file exists to stop: not a bug that is happening, a trap that
 // is set.
 //
-// WHY NOT JUST REMOVE THE DEFAULTS? Because PostgreSQL cannot change a parameter default in place —
-// there is no `ALTER FUNCTION … SET DEFAULT`. Removing them means `CREATE OR REPLACE` on all 25,
-// i.e. re-stating the full body of 25 live functions that price orders, hand out bill numbers and
-// decide permissions. Re-typing that to defend against a hypothetical is a far bigger risk than the
-// trap itself, and this sweep already reverted five function bodies once by re-running an old
-// migration. So the defaults stay and the CALL SITES are what gets checked — which is the thing that
-// actually decides whether a wrong restaurant is ever asked for.
+// THE DEFAULTS ARE GONE NOW — AND THIS GUARD USED TO SAY OTHERWISE (T33, sweep #9, 2026-09-17).
+// This header used to argue that removing them was a worse trade than the trap, and the summary
+// line below used to report "25 of them still default it to #1". Both were true until 2026-09-15,
+// when the owner asked for it: migration 385 removed the DEFAULT from all 22 signatures by
+// DROP + CREATE, re-issuing every grant, and migration 386 replaced the same guess inside the
+// bodies with `lfh_rid()`, which refuses a null instead of answering as French House.
+//
+// The count was wrong because of HOW it was computed, not because nobody updated a comment: the
+// loop below walks EVERY migration file and adds a function to `hasDefault` the first time any
+// file gives it a default — it never noticed a LATER file taking that default away. So it kept
+// reporting a state the folder had left behind, on a line whose whole job is to tell the reader
+// how exposed they still are. It now reads the NEWEST definition of each function, in the
+// filename order the seeder itself applies, which is the technique `verify-rid-required.mjs`
+// already uses for the body half of the same question. Today that number is 0.
+//
+// The ASSERTION has not changed and is still the point of the file: no call site may leave the
+// restaurant out. That matters just as much with the defaults gone — a call that omits the
+// argument now fails to resolve the function at all, which is a broken screen instead of a quiet
+// wrong answer, and it should be caught here rather than in front of a guest.
 //
 // STATIC. Reads the migrations to learn which RPCs take a restaurant, then reads every call site.
 // No database, no network, no writes.
@@ -36,11 +48,29 @@ const fail = (m) => { console.log("  ✗ " + m); failed++; };
 
 // ── 1. which RPCs declare a restaurant parameter, and which give it a default ────────────────
 const MIG = join(root, "supabase", "migrations");
+// LAST DEFINITION WINS, because that is what the database ends up running. The seeder applies
+// these with readdirSync().sort(), so a function redefined in a later file replaces whatever an
+// earlier one said about it — including whether its restaurant has a default. Recording the FIRST
+// sighting instead (which this did until 2026-09-17) reports a default that migration 385 removed.
 const takesRid = new Set(), hasDefault = new Set();
-for (const f of readdirSync(MIG).filter((x) => x.endsWith(".sql")).sort()) {
-  const sql = readFileSync(join(MIG, f), "utf8");
-  for (const m of sql.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?([a-zA-Z0-9_]+)"?\s*\(([\s\S]*?)\)\s*RETURNS/gi)) {
-    const name = m[1].toLowerCase(), args = m[2];
+{
+  // A DROP IS ALSO A NEWEST STATEMENT. Three retired functions — lfh_open_session (dropped by
+  // migration 304) and the two verification stubs (by 267/360) — still carry the old default in
+  // the last file that CREATED them, and counting those reports a guess that no longer exists to
+  // make. Whichever statement about a function comes last in filename order is the one the seeder
+  // leaves standing, so a later DROP removes it from this census exactly as the database does.
+  const latest = new Map();               // function name → the args of its newest definition
+  for (const f of readdirSync(MIG).filter((x) => x.endsWith(".sql")).sort()) {
+    const sql = readFileSync(join(MIG, f), "utf8");
+    const events = [];
+    for (const m of sql.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?([a-zA-Z0-9_]+)"?\s*\(([\s\S]*?)\)\s*RETURNS/gi))
+      events.push([m.index, m[1].toLowerCase(), m[2]]);
+    for (const m of sql.matchAll(/DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?(?:public\.)?"?([a-zA-Z0-9_]+)"?/gi))
+      events.push([m.index, m[1].toLowerCase(), null]);
+    events.sort((a, b) => a[0] - b[0]);
+    for (const [, name, args] of events) { if (args === null) latest.delete(name); else latest.set(name, args); }
+  }
+  for (const [name, args] of latest) {
     if (!/p_restaurant_id/i.test(args)) continue;
     takesRid.add(name);
     if (/p_restaurant_id[^,)]*\bDEFAULT\b/i.test(args)) hasDefault.add(name);
@@ -111,7 +141,8 @@ if (takesRid.size < 20 || checked < 20) {
   process.exit(1);
 }
 console.log("\nEvery call to a restaurant-scoped RPC names its restaurant");
-console.log(`  ${takesRid.size} RPCs take a restaurant (${hasDefault.size} of them still default it to #1); ${checked} call sites checked`);
+console.log(`  ${takesRid.size} RPCs take a restaurant (${hasDefault.size ? hasDefault.size + " of them still default it to #1"
+    : "none of them defaults it — migrations 385/386 took the guess out of the signatures AND the bodies"}); ${checked} call sites checked`);
 if (offenders.length) {
   fail(`${offenders.length} call site(s) do not say which restaurant:`);
   for (const o of offenders) console.log("      · " + o);

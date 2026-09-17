@@ -421,21 +421,78 @@ function checkMigrations() {
   // on the FILENAME, not on intent. Today's 18 duplicate pairs are all disjoint (checked
   // object-by-object in the sweep) so nothing breaks — but a worktree currently holds a
   // DIFFERENT 254_*.sql than main does, and merging it would make the order matter.
-  const dups = Object.entries(byNum).filter(([, v]) => v.length > 1);
-  // 19 since 2026-08-04: two sessions merged a 290 within half an hour of each other
-  // (290_the_blocked_guest_must_be_told + 290_document_dates_follow_the_business_day). Checked
-  // object-by-object like the other 18 and they are disjoint: the first touches only
-  // lfh_check_ban, the second only lfh_doc_date_hi + the lfh_inv_report_* family. Neither is
-  // renumbered because both are already merged AND applied to both databases, and renaming a
-  // migration that has run buys nothing but a diff. The ORDER question that mattered here —
-  // 291 revoking what 290 granted — is settled by mig 293, not by the filename.
-  const KNOWN_DUP_COUNT = 19;
-  if (dups.length > KNOWN_DUP_COUNT) {
-    fail(`${dups.length} duplicate migration numbers (was ${KNOWN_DUP_COUNT}) — a NEW one was added: `
-       + dups.filter(([, v]) => v.length > 1).slice(-3).map(([k, v]) => `${k}: ${v.join(" + ")}`).join("; ")
-       + `. Two files sharing a number apply in filename order, not intent order. Renumber the new one.`);
+  const dups = Object.entries(byNum).filter(([, v]) => v.length > 1).sort();
+
+  // COUNTING PAIRS WAS NOT ENOUGH, AND THE FOLDER PROVED IT (T33, sweep #9, 2026-09-17).
+  // This used to compare dups.length against a hard-coded 19 and then announce "19 historical
+  // pairs, all verified disjoint". Two separate things were wrong with that:
+  //
+  //   1. A COUNT CANNOT SEE A SWAP. The 19 it was written against INCLUDED a 290 pair, which was
+  //      later resolved by renumbering one of them. That freed a slot — so when a genuinely NEW
+  //      pair arrived (388, two files merged within hours of each other on 2026-09-16) the total
+  //      was still 19 and this line stayed green. Pairs are now identified by their NUMBER, so a
+  //      new one is noticed whatever happened to an old one.
+  //   2. IT NEVER CHECKED DISJOINTNESS AT ALL. "All verified disjoint" described a hand check
+  //      someone did once, in a sweep, and then asserted forever. It is checked mechanically
+  //      below, and the 388 pair is NOT disjoint: both files rewrite lfh_delete_order_item.
+  //
+  // Why the overlap is harmless HERE, read line by line rather than assumed: the seeder applies
+  // these with readdirSync().sort(), so "…a_cancelled_order…" runs first and "…a_money_function…"
+  // runs second and wins. The winning copy carries BOTH fixes — it was generated from the live
+  // definition after the first had already landed, so it drops the dead `v_rate := 0.05` (its own
+  // change) AND keeps `cancelled_at = COALESCE(cancelled_at, NOW())` (the other file's). A
+  // re-seed therefore reverts nothing. That is luck plus a careful author, not a property of the
+  // folder, and it is exactly the shape of migration 155's standing lesson — "a migration
+  // recreate reverts a fix" — which an earlier sweep hit for five function bodies at once.
+  const KNOWN_DUP_NUMBERS = new Set([
+    "057", "068", "116", "121", "122", "130", "145", "155", "181", "190",
+    "196", "202", "203", "208", "221", "227", "228", "229", "388",
+  ]);
+  // A pair whose two files declare the same object, with the reason it is safe anyway. Anything
+  // NOT listed here fails: order-sensitive is fine, order-sensitive and unexplained is not.
+  const EXPLAINED_OVERLAPS = {
+    "388": "both rewrite lfh_delete_order_item; the later filename (…a_money_function…) was "
+         + "generated from the live definition AFTER the earlier one landed, so it carries the "
+         + "cancelled_at stamp as well as its own change, and a re-seed reverts nothing",
+  };
+  const declared = (f) => {
+    const src = readFileSync(join(root, "supabase", "migrations", f), "utf8").replace(/--[^\n]*/g, " ");
+    const out = new Set();
+    for (const m of src.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?([a-z0-9_]+)/gi)) out.add(`fn:${m[1].toLowerCase()}`);
+    for (const m of src.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+"?([a-z0-9_]+)/gi)) out.add(`trg:${m[1].toLowerCase()}`);
+    for (const m of src.matchAll(/CREATE\s+TABLE\s+(?:IF NOT EXISTS\s+)?(?:public\.)?"?([a-z0-9_]+)/gi)) out.add(`tbl:${m[1].toLowerCase()}`);
+    for (const m of src.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+(?:public\.)?"?([a-z0-9_]+)/gi)) out.add(`view:${m[1].toLowerCase()}`);
+    return out;
+  };
+  const fresh = dups.filter(([n]) => !KNOWN_DUP_NUMBERS.has(n));
+  if (fresh.length) {
+    fail(`${fresh.length} NEW duplicate migration number(s): `
+       + fresh.map(([k, v]) => `${k}: ${v.join(" + ")}`).join("; ")
+       + `. Two files sharing a number apply in FILENAME order, not intent order. Renumber the new one, `
+       + `or add its number to KNOWN_DUP_NUMBERS with the reason it is safe.`);
   } else {
-    pass(`no new duplicate migration numbers (${dups.length} historical pairs, all verified disjoint)`);
+    pass(`no new duplicate migration number (${dups.length} known pairs)`);
+  }
+  {
+    const overlaps = [];
+    for (const [n, v] of dups) {
+      const sets = v.map(declared);
+      const shared = [...sets[0]].filter((o) => sets.slice(1).some((s) => s.has(o)));
+      if (shared.length) overlaps.push([n, v, shared]);
+    }
+    const unexplained = overlaps.filter(([n]) => !EXPLAINED_OVERLAPS[n]);
+    if (unexplained.length) {
+      fail(`${unexplained.length} duplicate-numbered pair(s) declare the SAME object, with no reason written down: `
+         + unexplained.map(([n, v, sh]) => `${n} (${v.join(" + ")}) both declare ${sh.join(", ")}`).join("; ")
+         + `. Whichever filename sorts later wins on a re-seed, so the earlier file's change is silently `
+         + `reverted unless the later copy carries it too (migration 155's lesson). Read both bodies, then `
+         + `either renumber one file or record the reason in EXPLAINED_OVERLAPS.`);
+    } else if (overlaps.length) {
+      pass(`${dups.length - overlaps.length} pair(s) declare nothing in common; the ${overlaps.length} that do `
+         + `are explained (${overlaps.map(([n]) => n).join(", ")})`);
+    } else {
+      pass(`every duplicate-numbered pair declares nothing in common, so filename order cannot revert a fix`);
+    }
   }
 
   // THE OTHER HALF OF THE SAME QUESTION (sweep 3, F6): the check above counted duplicates and
