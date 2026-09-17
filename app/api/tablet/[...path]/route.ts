@@ -1108,15 +1108,33 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       { const g2 = recordPin(await tabletPerm("tablet_take_orders", req, body, rid, actor)); if (!g2.allow) return g2.resp; }
       const { table, items, allergies, note } = body || {};
       const t = String(table || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
-      // Reject a table that doesn't EXIST (must be 1..table_count). Digits alone let a
-      // typo like "9932" create a phantom order floating on a non-existent table — it
-      // showed orphaned in the order section and couldn't be cleared. (owner, 2026-06-18)
-      const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      // ── THE TABLE AND THE DOUBLE-TAP CHECK ARE ASKED TOGETHER (owner, 2026-09-17) ────────────
+      // Same change as the manager panel's POST /order, for the same measured reason: each of
+      // these is a separate trip to the database (~45-60 ms each from the app to Mumbai) and
+      // neither depends on the other, so they travel together. The refusals below are read in
+      // the order they always were, so every answer is unchanged. Both reads are skipped when a
+      // plain check above has already made them pointless.
+      const tableOk = /^\d+$/.test(t);
+      const itemsOk = Array.isArray(items) && items.length > 0;
+      const skipDupCheck = body?.confirmDuplicate === true;
+      const [tcRow, recentRows] = await Promise.all([
+        // Reject a table that doesn't EXIST (must be 1..table_count). Digits alone let a
+        // typo like "9932" create a phantom order floating on a non-existent table — it
+        // showed orphaned in the order section and couldn't be cleared. (owner, 2026-06-18)
+        tableOk
+          ? sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle()
+          : Promise.resolve({ data: null }),
+        (tableOk && itemsOk && !skipDupCheck)
+          ? sb.from("orders").select("items, allergies")
+              .eq("table_number", t).eq("restaurant_id", rid)
+              .gte("created_at", new Date(Date.now() - 3000).toISOString()).limit(5)
+          : Promise.resolve({ data: [] }),
+      ]);
+      if (!tableOk) return err("valid table required");
       const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
       const tn = Number(t);
       if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
-      if (!Array.isArray(items) || !items.length) return err("items required");
+      if (!itemsOk) return err("items required");
       // Double-tap guard: refuse an IDENTICAL order for the same table within 3s
       // (prevents a fat-fingered "Send" / a network retry from issuing two KOTs). The
       // window used to be 8s, which wrongly blocked a LEGITIMATE second identical order
@@ -1150,9 +1168,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // anyway?"; when the waiter confirms it re-sends with confirmDuplicate:true and we skip
       // the check. The at-most-once idempotency (X-LFH-Action-Id) still dedupes an auto-replay
       // of the SAME queued action, so only the human "yes, really send again" path bypasses.
-      if (!(body && body.confirmDuplicate === true)) {
-        const recent = must(await sb.from("orders").select("items, allergies")
-          .eq("table_number", t).eq("restaurant_id", rid).gte("created_at", new Date(Date.now() - 3000).toISOString()).limit(5));
+      if (!skipDupCheck) {
+        // Read above, alongside the table check — see the note on that Promise.all.
+        const recent = (recentRows.data || []) as { items?: unknown[]; allergies?: unknown }[];
         if (recent.some((o: any) => JSON.stringify({
           items: (o.items || []).map(lineSig),
           allergies: Array.isArray(o.allergies) ? o.allergies : [],
@@ -1186,21 +1204,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // kitchen "accept" step and push it straight onto the pass as "preparing"
       // (same effect as orders/:id/accept). Guest/head orders still arrive as
       // "received" and need accepting. (owner, 2026-06-16 — tablet-only)
+      // ── ONE CALL, NOT THREE, AND THE AUDIT ROW ALONGSIDE IT (owner, 2026-09-17) ──────────────
+      // Was: read the order's dishes, write them back with every status flipped, then flip the
+      // order_items rows, then write the audit row — four round trips for one decision (measured
+      // on the manager panel's identical copy: 49 + 56 + 56 + 45 ms). lfh_staff_mark_placed
+      // (migration 394) does both writes in one call, and the audit row depends on neither, so it
+      // travels with it. WHO punched this rides on the same write (mig 220's columns); NULL still
+      // means "the guest ordered it themselves".
       const placedId = (data as any)?.order_id;
-      if (placedId) {
+      const [mark] = await Promise.all([
         // placedId is server-generated by the scoped placement RPC, but scope by rid anyway
         // for consistency with every other by-id write (defense in depth).
-        const cur = must(await sb.from("orders").select("items").eq("id", placedId).eq("restaurant_id", rid).single());
-        const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-        // WHO punched this order rides along on the SAME update (no extra round trip), so the
-        // performance report can say "this waiter punched 412 bills". NULL keeps meaning
-        // "the guest ordered it themselves". (mig 220 added the columns; 2026-07-29)
-        await sb.from("orders")
-          .update({ items: its, status: "preparing", placed_by_id: actor?.id ?? null, placed_by: actor ? (actor.name || actor.username) : null })
-          .eq("id", placedId).eq("restaurant_id", rid);
-        await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
+        placedId
+          ? sb.rpc("lfh_staff_mark_placed", { p_order: placedId, p_restaurant_id: rid, p_by_id: actor?.id ?? null, p_by: actor ? (actor.name || actor.username) : null })
+          : Promise.resolve({ error: null }),
+        log("order_place", { table_number: t, device_id: dev, order_id: placedId ?? null }),
+      ]);
+      if (mark && (mark as { error?: { message?: string } }).error) {
+        throw new Error((mark as { error: { message?: string } }).error.message || "couldn't put the order on the pass");
       }
-      await log("order_place", { table_number: t, device_id: dev, order_id: placedId ?? null });
       return ok(data);
     }
 

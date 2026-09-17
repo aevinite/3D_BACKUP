@@ -395,6 +395,17 @@ function toast(msg, type = "ok", action, ms) {
   toastTimer = setTimeout(() => (t.hidden = true), ms || 1800);
 }
 
+// Is the message on screen still the one WE put there? Used where a late answer SHARPENS a line
+// that was written the moment a button was pressed — "Order sent to the kitchen ✓" becoming
+// "Sent! Kitchen ticket #105" in the same toast, rather than as a second one. If anything else
+// has spoken in between, that message is the newer truth and stands.
+function toastStillSays(msg) {
+  const t = $("#toast");
+  if (!t || t.hidden) return false;
+  const m = t.querySelector(".toast-msg");
+  return !!m && m.textContent === msg;
+}
+
 // tapGuard(wrap): the speed-click guard shared by confirmDialog + promptDialog.
 //
 // A dialog pops up right under the pointer, so the tail of a fast double-click lands
@@ -4313,6 +4324,7 @@ async function setOrderStatus(id, status, reason) {
 // That is also the honest record — the void stays on the books with its reason, instead of
 // an unpaid bill quietly disappearing behind a closed table.
 async function cancelOrder(id) {
+  if (notYetOnFile(id)) return;
   // A cancelled ticket must say WHY (mig 251). The reason ask replaces the old yes/no confirm — it
   // is a confirmation in itself, and one tap fewer than asking twice.
   const o0 = (state.data.orders || []).find((x) => x.id === id);
@@ -4416,6 +4428,7 @@ async function deleteOrders(ids, opts = {}) {
 // bulk caller (payOrdersWithMethod) can report an HONEST result instead of always toasting
 // success even when the server refused an order (over-collection bug, 2026-07-06).
 async function setOrderPayment(id, paid, opts = {}) {
+  if (notYetOnFile(id)) return;
   if (paid && !opts.skipConfirm) {
     if (!(await confirmDialog("Mark this order PAID? Only confirm if the payment has actually been collected.", "Yes, payment done"))) return false;
   }
@@ -11750,7 +11763,9 @@ function tablePanelParts(t, host = "float") {
   const payAllBtn = anyUnpaidBill ? `<button class="btn primary" id="sxPayAll">💳 Mark ${os.length > 1 ? "all " : ""}paid</button>` : "";
   // The bill discount writes to the first non-cancelled order's record; the bill
   // total already nets every order's discount, so it shows correctly on the merged bill.
-  const discTarget = os.find((o) => o.status !== "cancelled");
+  // …and never the ticket that is still on its way (showPendingOrder): its id is temporary, so a
+  // discount aimed at it would have nothing to land on.
+  const discTarget = os.find((o) => o.status !== "cancelled" && !o._pending);
   // NOT ON AN ISSUED BILL (owner, 2026-08-01: "once the invoice is generated, why the option for
   // discount? Only when you reopen the invoice you can add a discount"). An invoice is a numbered
   // document with a total on it — changing the money behind it while it stands is exactly what a
@@ -12001,6 +12016,7 @@ const allergyPrompt = (already) => new Promise((resolve) => {
 // edit). Lists the live menu with a search; tapping a dish adds it (qty 1) and the
 // bill re-prices itself server-side. Stays open so several can be added. (2026-06-17)
 function openAddDishModal(orderId, rerender) {
+  if (notYetOnFile(orderId)) return;
   document.querySelector(".add-dish-overlay")?.remove();
   const dishes = (state.data.items || []).filter((d) => !(d.tags || []).includes("sold-out"));
   const rowsFor = (q) => {
@@ -12211,6 +12227,22 @@ function openTakeOrder(table, rerender, opts = {}) {
   let q = "";
   let uidSeq = 0;
   const editing = new Set();     // cart-line UIDs whose per-dish editor is open
+
+  // ── AN ORDER THE SERVER REFUSED COMES BACK WHOLE (owner, 2026-09-17) ───────────────────────
+  // The builder now closes the INSTANT "Send to kitchen" is pressed, without waiting for the
+  // server (see send() below). A refusal therefore lands on a screen that has already moved on —
+  // so the refusal RE-OPENS this builder holding the same order, and says why. Nothing is
+  // retyped: the lines, their allergens and notes, the whole-order avoid list, the kitchen note
+  // and the held discount all come back exactly as they were.
+  if (opts.restore) {
+    const rs = opts.restore;
+    (rs.cart || []).forEach((l) => cart.push({ ...l, avoid: new Set(l.avoid || []) }));
+    uidSeq = cart.reduce((m, l) => Math.max(m, Number(l.uid) || 0), 0);
+    (rs.avoid || []).forEach((x) => orderAvoid.add(x));
+    orderNote = rs.note || "";
+    discAmount = Number(rs.disc) || 0;
+    discNote = rs.discNote || "";
+  }
 
   const byUid = (uid) => cart.find((c) => c.uid === uid);
   // A line's identity for de-duping. An open-price line also keys on its PRICE — two
@@ -13036,45 +13068,107 @@ function openTakeOrder(table, rerender, opts = {}) {
     // identical order within 3 seconds (which DOES ask, because then the question is real), and
     // the order can be cancelled from the table.
     sendBtns.forEach((b) => (b.disabled = true));
+    // ── THE TAP LANDS NOW; THE SERVER CATCHES UP (owner, 2026-09-17) ──────────────────────────
+    // "it takes like two or three seconds I want it instantly … it should not feel the gap."
+    //
+    // It used to WAIT here: the builder stayed on screen, over the table, until the server had
+    // priced the order, created it, put it on the pass and answered — 0.7–1.4 s measured — and
+    // then the floor took another ~0.3–0.6 s to refetch. So the most repeated action of a service
+    // was also the only one that froze. Every other optimistic action on this panel (✓ Accept,
+    // Serve, Attend, Approve) has applied itself to the screen first and told the server after,
+    // since June; this is that same pattern, applied to the one place it was missing.
+    //
+    // In order: the builder closes · the dishes appear on the table (showPendingOrder — the cart
+    // he just built, priced from the figures the builder itself showed him) · the toast says so ·
+    // and only then does the request go. When the answer lands the pending row is dropped and the
+    // server's own row takes its place, which is the ONLY version that is ever priced, numbered
+    // or printed.
+    //
+    // A REFUSAL HANDS THE ORDER BACK, WHOLE. The builder re-opens holding the same cart, the same
+    // allergens, notes and held discount (openTakeOrder's `restore`), and says what was wrong.
+    // Nothing is retyped and nothing is lost — which is what makes closing early safe rather than
+    // merely fast. The four ways it can come back:
+    //   · the pricer refuses a dish (sold out / off the menu / needs a price) → the reason;
+    //   · the server thinks this is the same order twice → the question, then yes re-sends;
+    //   · no signal → the queue took it, and the toast says exactly that (never "sent");
+    //   · anything else → "nothing was sent", and the order is back in front of him.
+    const dishN = cart.reduce((s, c) => s + (parseInt(c.qty, 10) || 1), 0);
+    const restore = { cart: cart.map((c) => ({ ...c, avoid: [...c.avoid] })), avoid: [...orderAvoid], note: orderNote, disc: discAmount, discNote };
+    const money = { subtotal: Math.round(cartSub() * 100) / 100, taxableBase: cartSplit().taxableBase, nontax: cartSplit().nontax, discount: discOf() };
+    const tmpId = "sending:" + Date.now() + ":" + Math.random().toString(36).slice(2, 7);
+    const sentLine = `Order sent to the kitchen ✓ · ${dishN} dish${dishN === 1 ? "" : "es"}`;
+    close();
+    showPendingOrder(tmpId, destTable, cart, allergies, money);
+    floorOpsInFlight++;
+    loadSessions(true); if (rerender) rerender();   // paint from what we just put in state — no network
+    toast(sentLine, "ok");
+    let released = false;
+    const release = () => { if (!released) { released = true; floorOpsInFlight--; dropPendingOrder(tmpId); } };
+    // Put the order back in his hands, with the reason, and take the optimistic row off the table.
+    const handBack = async (msg) => {
+      release();
+      toast(msg, "err", undefined, 4500);
+      openTakeOrder(destTable, rerender, { quick, restore });
+      await loadSessions();
+    };
     try {
       // Same rule as the parcel path: the discount is part of the order, applied server-side in
       // the same request. On a table that ALREADY has a bill discount the server ADDS to it
       // rather than replacing it — a discount typed for these dishes must not silently wipe the
       // one the table was already given.
       const r = await api("POST", "/order", { table: String(destTable), items, allergies, note: orderNote || null, discount: discOf() || undefined, discountNote: discOf() > 0 ? (discNote || undefined) : undefined, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
-      if (r && r.queued) { toast("Saved ✓ — it'll send to the kitchen when you're back online.", "ok"); close(); await loadSessions(); if (rerender) rerender(); return; }
+      // SAVED ON THIS DEVICE IS NOT SENT (the QUEUED_LINE rule, owner 2026-08-26). The toast above
+      // said "sent", because on a working connection it is — the moment we learn the queue took it
+      // instead, the SAME toast is rewritten with the one sentence this panel uses everywhere for
+      // work that has not left the device.
+      //
+      // The optimistic row goes (release), exactly as on every other path: it is the tile that
+      // carries a queued change on this floor — mergeServerSummary holds a tile for any table with
+      // unsent work, which is what tablesWithUnsentWork() exists for — while a table's DISH rows
+      // are re-read from the server whenever its detail refreshes (mergeTableSlice replaces a
+      // table's live rows wholesale), so a row kept here would be wiped a second later anyway. The
+      // queue drawer and the ⏳ mark are what say "still going", and the order lands by itself:
+      // measured offline→online on 2026-09-17, the queue drained and the table read 0/1 served.
+      if (r && r.queued) { release(); toast(QUEUED_LINE, "ok", undefined, 4500); await loadSessions(); if (rerender) rerender(); return; }
       // The pricer can REFUSE an order (sold out / off the menu / an open-price line with no
-      // price) and still answer 200 with {ok:false}. Say so honestly and KEEP the cart open so
-      // the flagged dish can be fixed and resent — never toast "sent" for an order that wasn't.
+      // price) and still answer 200 with {ok:false}. Say so honestly and hand the cart back so
+      // the flagged dish can be fixed and resent — never leave "sent" standing for an order
+      // that wasn't.
       if (!r || r.ok !== true) {
         const reason = r && r.reason, item = r && r.item;
         // The RPC runs its OWN double-tap guard under a per-table lock (mig 202) and answers 200
         // with duplicateWarning — a different shape from the route's 409 handled below. Re-offer
         // "send anyway" here too, or a genuine re-send would dead-end.
-        if (r && r.duplicateWarning) {
-          if (await confirmDialog("This looks identical to an order you just sent for this table. Send it AGAIN anyway?", "Send anyway")) return send(true);
-          sendBtns.forEach((b) => (b.disabled = !cart.length));
-          return;
-        }
+        if (r && r.duplicateWarning) return await askDuplicate();
         // Plain language only — never surface a raw reason code to staff.
-        const msg = reason === "sold_out" ? `😕 ${item || "A dish"} just sold out — remove it from the order and send again.`
-          : reason === "unknown_item" ? `😕 ${item || "A dish"} is no longer on the menu — remove it and send again.`
-          : reason === "price_required" ? `💰 ${item || "A dish"} needs a price — tap its amount in the order list and enter one.`
+        const msg = reason === "sold_out" ? `😕 ${item || "A dish"} just sold out — it was NOT sent. Remove it and send again.`
+          : reason === "unknown_item" ? `😕 ${item || "A dish"} is no longer on the menu — it was NOT sent. Remove it and send again.`
+          : reason === "price_required" ? `💰 ${item || "A dish"} needs a price — nothing was sent. Tap its amount and enter one.`
           : reason === "empty_order" ? "There's nothing in this order yet — add a dish first."
           : `Couldn't send the order${item ? ` (${item})` : ""}. Nothing was sent — please try again.`;
-        toast(msg, "err");
-        sendBtns.forEach((b) => (b.disabled = !cart.length));
+        await handBack(msg);
         return;
       }
-      toast(r && r.kot_no != null ? `Sent! Kitchen ticket #${r.kot_no}` : "Order sent to the kitchen", "ok");
-      close(); await loadSessions(); if (rerender) rerender();
+      release();
+      // The ticket number sharpens the toast that is already on screen — the SAME toast, not a
+      // second one (there is one #toast element and calling toast() rewrites it). Only while it is
+      // still showing our line: if the manager has done something else in the meantime, whatever
+      // that told him stands.
+      if (r.kot_no != null && toastStillSays(sentLine)) toast(`Sent! Kitchen ticket #${r.kot_no}`, "ok");
+      await loadSessions(); if (rerender) rerender();
     } catch (e) {
-      sendBtns.forEach((b) => (b.disabled = false));
-      if (e && e.status === 409 && e.data && e.data.duplicateWarning) {
-        if (await confirmDialog("This looks identical to an order you just sent. Send it anyway?", "Send anyway")) return send(true);
-        return;
-      }
-      toast("Couldn't send: " + e.message, "err");
+      if (e && e.status === 409 && e.data && e.data.duplicateWarning) return await askDuplicate();
+      await handBack("Couldn't send: " + errText(e));
+    }
+    // "This looks like the same order twice" — the one refusal that is a QUESTION, so it is asked
+    // rather than reported. Yes re-sends it (confirmDuplicate skips both guards); no hands the
+    // order back untouched, because nothing was placed.
+    async function askDuplicate() {
+      release();
+      await loadSessions();
+      if (await confirmDialog("This looks identical to an order you just sent for this table. Send it AGAIN anyway?", "Send anyway")) return send(true);
+      toast("Nothing was sent — the order is back, unchanged.", "err", undefined, 4500);
+      openTakeOrder(destTable, rerender, { quick, restore });
     }
   }
   // Quick mode's one button doesn't send — it asks WHERE first, and the picker sends.
@@ -13421,7 +13515,7 @@ const KOT_TIPS = {"shift": "Moves this whole party — every order, waiter call 
 
 function openKotColumns(t, sess) {
   document.querySelector(".kotmenu-overlay")?.remove();
-  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && !o._pending);
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   // THE FLOOR'S OWN TABLE LIST, not 1..table_count (T3 sweep, 2026-08-10). floorTableList exists
   // because a table numbered ABOVE the count can still be occupied and must never vanish with its
@@ -13764,7 +13858,7 @@ function openKotMenu(t, sess) {
   document.querySelector(".kotmenu-overlay")?.remove();
   // Movable KOTs = this table's orders that aren't paid or cancelled (same rule the
   // server's RPC enforces — the row is disabled rather than surprising with a 409).
-  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && !o._pending);
   // Other OPEN tables (a merge target must already have a party).
   const nAll = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   let occupiedOthers = 0;
@@ -13931,7 +14025,9 @@ async function sendKotToKitchen(o) {
 }
 function openReprintKotPicker(t) {
   document.querySelector(".reprint-overlay")?.remove();
-  const os = ordersForTable(t).filter((o) => o.status !== "cancelled");
+  // A ticket still ON ITS WAY has no KOT number yet and no real id (showPendingOrder), so it is
+  // not offered here — it becomes printable a third of a second later, when the server answers.
+  const os = ordersForTable(t).filter((o) => o.status !== "cancelled" && !o._pending);
   if (!os.length) { toast("No KOTs on this table", "err"); return; }
   let picked = null; // two steps on a phone: WHICH KOT → WHERE does it print
   const wrap = el(`<div class="sx-modal-overlay reprint-overlay"><div class="sx-modal" style="max-width:420px">
@@ -14628,7 +14724,7 @@ function notePrintTroubleHere() {
 // KOT on the target and BOTH bills re-price server-side (mig 175).
 function openMoveItemPicker(t) {
   document.querySelector(".moveitem-overlay")?.remove();
-  const orders = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const orders = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && !o._pending);
   const groups = orders.map((o) => {
     const items = orderItemRows(o).filter((r) => r.kind === "session");
     if (!items.length) return "";
@@ -14726,7 +14822,7 @@ function openMergePicker(t, sess) {
 // (the KOT joins that party's bill) or free (a fresh session opens for it).
 function openMoveKotPicker(t) {
   document.querySelector(".movekot-overlay")?.remove();
-  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && !o._pending);
   if (!movable.length) { toast("No movable KOTs on this table", "err"); return; }
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   const kotRow = (o) => {
@@ -15392,6 +15488,7 @@ function renderTablePanel() {
 
 // Advance ONE dish in a legacy order (items stored in the order's JSON).
 async function legacyItemStatus(orderId, index, status) {
+  if (notYetOnFile(orderId)) return;
   const o0 = (state.data.orders || []).find((x) => x.id === orderId);
   const prev = (o0 && Array.isArray(o0.items) && o0.items[index]) ? (o0.items[index].status || "received") : null;
   const name = (o0 && Array.isArray(o0.items) && o0.items[index] && o0.items[index].title) || "Dish";
@@ -15419,6 +15516,7 @@ function snapReceived(o) {
       : { kind: "legacy", orderId: r.orderId, idx: r.idx, prev: "received" }));
 }
 async function acceptOrder(orderId) {
+  if (notYetOnFile(orderId)) return;
   const o = (state.data.orders || []).find((x) => x.id === orderId);
   const snap = o ? snapReceived(o) : [];
   if (o) { o.status = "preparing"; flipOrderItems(o, "received", "preparing"); opBegin(o.id); }
@@ -15472,6 +15570,7 @@ async function editorUndoServe(snap) {
 }
 
 async function serveAllOrder(orderId) {
+  if (notYetOnFile(orderId)) return;
   const o = (state.data.orders || []).find((x) => x.id === orderId);
   const snap = o ? snapServable(o) : [];
   if (o) { o.status = "served"; flipOrderItems(o, null, "served"); opBegin(o.id); }
@@ -15607,6 +15706,104 @@ function patchSummaryTileAttend(t) {
   if (touched) patch.tiles = tiles;
   state.summary = Object.assign({}, s, patch);
 }
+
+// ── AN ORDER THAT IS ON ITS WAY IS ALREADY ON THE TABLE (owner, 2026-09-17) ──────────────────
+//
+// "whenever I click on a manager panel table view and take order and then click on send to
+//  kitchen it takes like two or three seconds I want it instantly … it should not feel the gap."
+//
+// Measured before writing this: POST /order took 673–1149 ms (the server half is now ~330 ms, see
+// migration 394), and the floor refresh that follows it another ~300–600 ms. Every millisecond of
+// that used to be spent looking at the order builder, because the builder only closed once the
+// server had answered. So the tap is applied HERE, to the screen, the moment it happens — exactly
+// the way ✓ Accept and Serve have worked on this panel since June — and the server catches up.
+//
+// The row is the cart he just built, in the shape the panel already draws (`o.items`, the legacy
+// JSON path in orderItemRows), and it is priced from the SAME numbers the builder's own total
+// showed him a second earlier — never invented ones. Its money is the cart's split (mig 270's
+// taxable/untaxed rule, via the builder's cartSplit) so the table's total moves by what he was
+// quoted rather than lagging a beat behind it. The server is still the pricer: the instant its
+// answer lands this row is dropped and the real one takes its place.
+//
+// `status: "preparing"` is not optimism, it is what the server does with a manager-placed order:
+// it skips the kitchen's accept step and puts it straight on the pass (migration 394). So the row
+// lands in the BILL half of the detail, never in the "needs accepting" block — which is what the
+// real row does half a second later, so nothing jumps between the two.
+//
+// opBegin() shields it from the 1-second poll, like every other optimistic change here, and
+// `_pending` marks it as not-yet-confirmed for anything that needs to know.
+function pendingOrderRow(tmpId, table, cart, allergies, money) {
+  return {
+    id: tmpId,
+    _pending: true,
+    table_number: String(table),
+    session_id: null,
+    status: "preparing",
+    payment_status: "unpaid",
+    created_at: new Date().toISOString(),
+    kot_no: null,
+    allergies: allergies || [],
+    // The dishes, each already cooking — the same fields orderItemRows() reads off a legacy row.
+    items: cart.map((c) => ({
+      title: c.title, qty: c.qty, price: c.price, status: "preparing",
+      note: (c.note || "").trim() || undefined,
+      removed: [...c.avoid],
+      is_mrp: !!c.is_mrp, tax_mode: c.tax_mode,
+    })),
+    // billMath reads exactly these four (see billMoney in public/panels/billdoc.js).
+    subtotal: money.subtotal, taxable_base: money.taxableBase, nontax_amount: money.nontax,
+    discount: money.discount || 0,
+    // WHO PUNCHED IT: a STAFF member did, and this row must not read as a guest's order for the
+    // half second it is on screen — "no placed_by AND no placed_by_id" is the app's own word for
+    // "the guest ordered it themselves" (mig 220). The panel is not told the signed-in person's
+    // name (/whoami answers powers, not people), so nothing invents one: the id marks it as
+    // staff-placed and the server's answer fills in the real name a moment later.
+    placed_by: null,
+    placed_by_id: tmpId,
+  };
+}
+// A tap on a ticket the server has not confirmed yet — the ~third of a second between "Send to
+// kitchen" and the answer — has no real id to act on. It is refused HERE, with a sentence, rather
+// than sending a temporary id to the server, which would answer with a database error and put a
+// route_error in the admin's log for something nobody did wrong. A tap is never dropped in
+// silence (the panel rule), and the window is over before a second tap lands.
+const isPendingOrderId = (id) => typeof id === "string" && id.startsWith("sending:");
+function notYetOnFile(id) {
+  if (!isPendingOrderId(id)) return false;
+  toast("That ticket is still going to the kitchen — one moment.", "err");
+  return true;
+}
+function showPendingOrder(tmpId, table, cart, allergies, money) {
+  state.data.orders = (state.data.orders || []).concat([pendingOrderRow(tmpId, table, cart, allergies, money)]);
+  opBegin(tmpId);
+  patchSummaryTilePlaced(table, cart.reduce((s, c) => s + (parseInt(c.qty, 10) || 1), 0));
+}
+// Drop it again — either the server's own row has arrived, or nothing was sent. mergeTableSlice
+// purges it too (it replaces a table's live rows wholesale), but only for a table whose detail is
+// open; a quick order sent from the grid never fetches that slice, so the row is removed here.
+function dropPendingOrder(tmpId) {
+  state.data.orders = (state.data.orders || []).filter((o) => o.id !== tmpId);
+  opEnd(tmpId);
+}
+// The TILE for a table nobody has selected is drawn from the slim summary, not from the board
+// (tableTileState), so the row above is invisible there — this is the same one-tile patch
+// patchSummaryTileAccept does for ✓ Accept. A manager-placed order is already accepted, so it
+// adds to the COOKING count and never to "new"; the money is left to the server, because the
+// tile's ₹ due is the one number on the floor a manager reads as final.
+function patchSummaryTilePlaced(t, dishes) {
+  const s = state.summary || {};
+  const key = String(t);
+  const tile = (s.tiles || {})[key];
+  if (!tile) return;
+  const nt = Object.assign({}, tile);
+  const c = Object.assign({ nw: 0, ck: 0, rd: 0, sv: 0 }, nt.counts || {});
+  c.ck += dishes; nt.counts = c;
+  // A table that was sitting empty is now a table with food coming. Any other state (already
+  // preparing, ready, served, part-paid) is left exactly as the server described it — adding the
+  // dishes to the cooking count is the whole change there.
+  if (nt.state === "waiting" || nt.state === "free") { nt.state = "prep"; nt.label = "Preparing"; nt.meta = ""; }
+  state.summary = Object.assign({}, s, { tiles: Object.assign({}, s.tiles, { [key]: nt }) });
+}
 async function acceptTableOrders(t) {
   // TWO-TIER: a tile quick-action can fire on a NON-selected table, whose full order rows
   // aren't in the cache (the grid renders from the slim summary). Ensure this table's slice
@@ -15670,7 +15867,10 @@ async function acceptTableOrders(t) {
 async function serveAllOrders(t) {
   await ensurePartySlices(t); // a merged party's other tables are separate slices
   const all = partyOrders(t);
-  const orders = all.filter((o) => o.status !== "cancelled" && o.status !== "received"
+  // …and a ticket still ON ITS WAY is not serveable either: its id is temporary until the server
+  // answers (showPendingOrder), so it is left out and served by the next tap, a third of a second
+  // later, once it is real.
+  const orders = all.filter((o) => o.status !== "cancelled" && o.status !== "received" && !o._pending
     && orderItemRows(o).some((r) => r.status !== "served"));
   // A tap is never dropped in silence (owner rule): the button is drawn from the tile's summary,
   // which can be a beat behind, so "nothing left to serve" must SAY so and put the tile back in
