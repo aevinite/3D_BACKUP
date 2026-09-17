@@ -78,15 +78,20 @@ try {
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.frameLocator("iframe").first().locator(".ftile").first().waitFor({ timeout: 25000 });
   await openTable(T);   // it has an order now, so the tile opens the bill instead of the builder
-  await page.frameLocator("iframe").first().locator(".sp-wait").first().waitFor({ timeout: 25000 });
-  await shot("02-waiting", "A guest's order has landed. It is ONE amber line, not on the bill yet: what came, what it costs, ✓ Accept, ✕.");
+  await page.frameLocator("iframe").first().locator(".sp-newbox").first().waitFor({ timeout: 25000 });
+  await shot("02-waiting", "A guest's order has landed. It sits at the FOOT of the bill — above the money and the buttons — with every dish showing: quantity, what to leave out, money, the order-wide avoid, then Cancel and Accept.");
 
-  // 3 — the same ticket opened out: the accept detail view
-  await click(".sp-wait-n");
-  await shot("03-accept-detail", "Tap that line and the incoming ticket opens dish by dish — quantities, money, what to avoid in every dish — with Cancel and Accept at the end.");
+  // 3 — the same box on a phone, where the thumb is right next to it
+  await page.setViewportSize({ width: 392, height: 844 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.frameLocator("iframe").first().locator(".sp-newbox").first().waitFor({ timeout: 25000 });
+  await shot("03-waiting-phone", "The same waiting ticket on a phone: it is at the bottom, which is where the thumb already is.", { w: 392, h: 844 });
+  await page.setViewportSize({ width: 1512, height: 900 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.frameLocator("iframe").first().locator(".sp-newbox").first().waitFor({ timeout: 25000 });
 
   // 4 — accepted: it merges into the bill in its menu place
-  await click('.sp-sheet-wait [data-accept]');
+  await click('.sp-newbox [data-accept]');
   await wait(2600);
   await shot("04-accepted", "Accepted. Its dishes are now on the bill, in their menu place, and the amber line is gone.");
 
@@ -151,6 +156,11 @@ try {
     await shot(`11-tag-${tag}`, cap);
   }
   await api.post(`${BASE}/api/editor/tables/${T}/tag`, { data: { tag: "family" } });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.frameLocator("iframe").first().locator(".sp-list").first().waitFor({ timeout: 25000 });
+  await f().evaluate(() => document.querySelector("#sxTagHead").click());
+  await shot("12-type-picker", "Tapping the mark itself opens the picker — VIP, Family, Owner's guest, or Remove mark.", { sel: ".tbl-modal, .tp-detail-floating", settle: 1400 });
+  await page.keyboard.press("Escape"); await wait(700);
 
   // 14 — a discount on the bill
   const oD = await (await api.get(`${BASE}/api/editor/orders?table=${T}`)).json();
