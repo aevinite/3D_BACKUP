@@ -470,6 +470,21 @@ function Kpi({ k, v, money, compact, delta, prevTitle, sub, loading, spark, pill
   pill?: string; onOpen?: () => void;
 }) {
   const hasSpark = !!spark && spark.length >= 2 && !loading;
+  // ── THE TILE IS THE SAME HEIGHT EMPTY AS IT IS FULL (owner, 2026-09-17, item 13/8 of the
+  // optimisation list) ────────────────────────────────────────────────────────────────────────
+  // MEASURED, under Lighthouse's own mobile throttling (4× CPU, Slow 4G): this dashboard scored
+  // CLS 0.433 — "poor" — and the single biggest jump was 0.264, at 4.5 s, from `.adm-stats`. The
+  // cause was these tiles growing the moment the data landed: the caption line appears only when
+  // it is not loading (+~15 px), and the sparkline band's reserved padding flips from 14 px to
+  // 44 px the instant there are enough points (+30 px). Five tiles doing both at once shoved the
+  // whole page down by ~45 px while the owner was reading it.
+  //
+  // So the SPACE is reserved from the first paint, and it is reserved EXACTLY, not guessed:
+  //   · the band is reserved whenever a `spark` prop was passed at all — the five tiles that
+  //     never have one keep their tight padding, which is the T9/T5 fix above and must not regress;
+  //   · the caption line is rendered while loading with a non-breaking space, so it is the same
+  //     line, in the same font, at the same height — the words simply arrive into it.
+  const reserveSpark = spark !== undefined;
   const body = (
     <>
       <div className="ow2-kt">
@@ -486,7 +501,7 @@ function Kpi({ k, v, money, compact, delta, prevTitle, sub, loading, spark, pill
           : v}</div>
         {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
       </div>
-      {sub && !loading && <div className="ow2-sub">{sub}</div>}
+      {sub ? <div className="ow2-sub">{loading ? "\u00a0" : sub}</div> : null}
       {hasSpark && (
         <div className="ow2-spark" aria-hidden="true"><SparkArea points={spark!} color={GREEN} height={34} /></div>
       )}
@@ -556,10 +571,10 @@ function Kpi({ k, v, money, compact, delta, prevTitle, sub, loading, spark, pill
   );
   return onOpen ? (
     <button type="button" onClick={onOpen}
-      className={`adm-stat owx-kpi ow2-kpi ow2-click${hasSpark ? "" : " ow2-nospark"}`}
+      className={`adm-stat owx-kpi ow2-kpi ow2-click${reserveSpark ? "" : " ow2-nospark"}`}
       title={`${k} — tap for the detail`}>{body}{styles}</button>
   ) : (
-    <div className={`adm-stat owx-kpi ow2-kpi${hasSpark ? "" : " ow2-nospark"}`}>{body}{styles}</div>
+    <div className={`adm-stat owx-kpi ow2-kpi${reserveSpark ? "" : " ow2-nospark"}`}>{body}{styles}</div>
   );
 }
 
@@ -1787,12 +1802,21 @@ export default function OwnerDashboard() {
             <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now — recomputes the live numbers">
               <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
             </button>
-            {oldestShown && !refreshing && (
-              <span style={{ fontSize: 10.5, color: "var(--muted)" }}
-                title={`The oldest figures on this page were computed ${new Date(oldestShown).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })}. Each card carries its own time — hover its period chip.`}>
-                {!landed && "your last view · "}updated {timeAgo(oldestShown)}
-              </span>
-            )}
+            {/* ── THE LINE IS ALWAYS THERE; ONLY ITS WORDS ARRIVE (owner, 2026-09-17, item 13 of
+                the optimisation list) ───────────────────────────────────────────────────────────
+                Measured under Lighthouse's mobile throttling: this dashboard scored CLS 0.433 and
+                the single biggest jump — 0.263, at 4.5 s — was everything BELOW this header being
+                pushed down when "updated 2 minutes ago" appeared inside it. The words wait for the
+                data; the space they need does not have to. So the line is rendered from the first
+                paint and simply says nothing until there is something to say (`visibility` keeps
+                its height while hiding it — `display:none` would give the space back and bring the
+                jump with it). */}
+            <span
+              style={{ fontSize: 10.5, color: "var(--muted)", visibility: oldestShown && !refreshing ? "visible" : "hidden" }}
+              aria-hidden={oldestShown && !refreshing ? undefined : true}
+              title={oldestShown ? `The oldest figures on this page were computed ${new Date(oldestShown).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })}. Each card carries its own time — hover its period chip.` : undefined}>
+              {oldestShown && !refreshing ? <>{!landed && "your last view · "}updated {timeAgo(oldestShown)}</> : "\u00a0"}
+            </span>
           </div>
         </div>
       </div>

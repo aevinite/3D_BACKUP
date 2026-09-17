@@ -235,6 +235,13 @@ const HELP_SHOTS: Record<string, string[]> = {
 /** The action rows (Give a discount, Mark a bill paid…) are named after their power flag on both
  *  the manager and the waiter side, and their screenshots were filed under that flag. One rule
  *  covers all twenty of them, so they don't each need a line in the map above. */
+// ── THE LIGHT TWIN IS ASKED FOR FIRST (owner, 2026-09-17: "compress all images") ─────────────
+// Every capture in public/admin-help/ now has a `.webp` beside its `.png`, written by
+// `node scripts/shrink-help-shots.mjs` — the same picture at the same size, 56% fewer bytes over
+// the wire (4.95 MB → 2.19 MB across the 51 shots). The PNG is NOT deleted and stays the
+// fallback: the <img> below swaps back to it once if the WebP is missing (a capture taken after
+// the last conversion run), so a help picture can never vanish because of this.
+const HELP_WEBP = (png: string) => png.replace(/\.png$/, ".webp");
 function helpImages(node: Node): string[] {
   const explicit = HELP_SHOTS[node.id];
   if (explicit) return explicit.map((n) => `/admin-help/${n}.png`);
@@ -1298,7 +1305,24 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
             this shows ALL of them. lazy + static /public files, so an unopened sheet costs
             nothing. See scripts/shot-access-help.mjs to re-capture. */}
         {shots.map((src) => (
-          <img key={src} className="at-sheet-shot" src={src} alt={`Where ${node.name} appears`} />
+          <img
+            key={src}
+            className="at-sheet-shot"
+            src={HELP_WEBP(src)}
+            alt={`Where ${node.name} appears`}
+            /* A sheet can hold three or four of these; only the first is in view. */
+            loading="lazy"
+            decoding="async"
+            /* ONE swap back to the PNG, never a loop: `dataset.fellBack` marks that we have already
+               tried, so a shot that is missing in BOTH formats fails quietly exactly as it did
+               before (the sheet simply shows no picture). */
+            onError={(e) => {
+              const img = e.currentTarget;
+              if (img.dataset.fellBack === "1") return;
+              img.dataset.fellBack = "1";
+              img.src = src;
+            }}
+          />
         ))}
         {/* SAY IT IS AN EXAMPLE (sweep T6, 2026-08-10). These are real captures of the app, but of
             ONE restaurant — opening ⓘ on Menu while Aangan Garden is selected shows Pizza Palace's

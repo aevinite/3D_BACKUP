@@ -174,7 +174,7 @@ export default function BrandingCard({ restaurant }: { restaurant: Restaurant })
         {/* Logo IMAGE — shown on the opening splash AND beside the search bar. */}
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ width: 56, height: 56, borderRadius: 10, border: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", overflow: "hidden" }}>
-            {logoUrl ? <img src={logoUrl} alt="logo" style={{ maxWidth: "100%", maxHeight: "100%" }} /> : <i className="fas fa-image adm-muted" aria-hidden="true" />}
+            {logoUrl ? <img src={logoUrl} alt="logo" loading="lazy" decoding="async" style={{ maxWidth: "100%", maxHeight: "100%" }} /> : <i className="fas fa-image adm-muted" aria-hidden="true" />}
           </div>
           <label className="adm-btn" style={{ cursor: logoBusy ? "default" : "pointer" }}>
             <i className="fas fa-upload" style={{ marginRight: 6 }} aria-hidden="true" />{logoBusy ? "Uploading…" : "Upload logo image"}

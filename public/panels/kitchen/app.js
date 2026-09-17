@@ -2252,7 +2252,16 @@ $("#boardBtn").onclick = openDrawer;
 { const ham = $("#hamburger"); if (ham) ham.onclick = openKitchenMenu; }
 $("#drawerClose").onclick = closeDrawer;
 $("#drawerOverlay").onclick = (e) => { if (e.target.id === "drawerOverlay") closeDrawer(); };
-$("#dishSearch").oninput = renderDishes;
+// ── THE 86 DRAWER'S SEARCH IS DEBOUNCED (owner, 2026-09-17: "debounce input handlers") ───────
+// This rebuilt the WHOLE dish list on every keystroke — the two other panels' search boxes have
+// waited 250 ms since they were written, and this one was the outlier. A cook types "chick" on a
+// 400-dish menu and that was five full re-renders of the drawer, on the oldest device in the
+// building, during service. 120 ms is under the gap between two keystrokes of ordinary typing, so
+// the list still feels live while it is only built once.
+{
+  let dishSearchTimer = null;
+  $("#dishSearch").oninput = () => { clearTimeout(dishSearchTimer); dishSearchTimer = setTimeout(renderDishes, 120); };
+}
 // Wall ⇄ Columns toggle (the "expansion"). Persist the choice per device.
 $("#viewBtn").onclick = () => { view = view === "wall" ? "columns" : "wall"; localStorage.setItem("kds_view", view); applyView(); };
 // The clock, but only while it is actually on screen (owner-picked improvement, 2026-08-07). CSS

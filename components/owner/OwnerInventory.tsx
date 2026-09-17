@@ -441,7 +441,7 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
                     </div>
                     {e.photo_url && (
                       <a href={e.photo_url} target="_blank" rel="noopener noreferrer" title="Open the photo">
-                        <img src={e.photo_url} alt="Expense slip" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />
+                        <img src={e.photo_url} alt="Expense slip" loading="lazy" decoding="async" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />
                       </a>
                     )}
                     <b style={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{inr(e.amount)}</b>

@@ -6,7 +6,7 @@
 // React's built-in tools: useState (remember a value), useEffect (run code at
 // certain times, like after the page appears), useRef (a value that survives
 // re-draws without causing one).
-import { useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { warmDataCache } from "@/lib/warmData";
 // Link = Next's fast, no-full-reload navigation between pages.
 import Link from "next/link";
@@ -1069,8 +1069,21 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // then we drop the marks (̀–ͯ). (Bug fix 2026-07-06.)
   const fold = (s: string) =>
     (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  // ── TYPING STAYS SMOOTH WHILE THE LIST CATCHES UP (owner, 2026-09-17: "debounce input
+  // handlers", "reduce unnecessary re-renders") ────────────────────────────────────────────────
+  // Every keystroke in the search box re-filtered the whole menu and re-rendered every card that
+  // survived — on a 60-dish menu, on a guest's mid-range phone, that is the work that makes a
+  // search box feel like it is fighting you. `useDeferredValue` (React 19) lets the INPUT update
+  // at once — the letter appears the instant it is typed, which is the part a person feels — and
+  // the expensive re-filter run at a lower priority, interrupted and restarted if another letter
+  // arrives. It is better than a timer here because it is not a fixed wait: on a fast phone with a
+  // short menu it is imperceptible, and it only "debounces" when the device actually needs it.
+  //
+  // The box's own value stays `searchQuery` (below), and so do the effects that remember what was
+  // typed — this only changes WHEN the results are recomputed, never what they are.
+  const deferredQuery = useDeferredValue(searchQuery);
   // q = the search text, tidied up (trimmed, lowercased, accent-folded).
-  const q = fold(searchQuery.trim());
+  const q = fold(deferredQuery.trim());
 
   // BACK CLOSES THE SEARCH — IT DOES NOT OFFER TO LEAVE THE SITE (owner, 2026-08-26).
   //
@@ -1762,7 +1775,8 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                   on the deployed site: typing `$&` printed `No dishes found for “{q}”` — the app's
                   own placeholder — and "$`" printed the whole message nested inside itself
                   (guest sweep T1, 2026-08-06). split/join copies the text verbatim. */}
-              {q ? t.noSearchResults.split("{q}").join(searchQuery.trim()) : t.noMatch}
+              {/* the DEFERRED query, so the sentence names the search these results are for */}
+              {q ? t.noSearchResults.split("{q}").join(deferredQuery.trim()) : t.noMatch}
             </h3>
             <p className="fav-empty-sub">
               {q ? t.noSearchResultsSub : t.noMatchSub}

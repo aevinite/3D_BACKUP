@@ -152,24 +152,29 @@
 
   <div id="toast" class="toast" hidden></div>
   <!-- Chart.js powers the Dashboard graphs. SELF-HOSTED (was a jsdelivr CDN link) so the
-       Dashboard still draws when an external CDN hiccups. File in /panels/vendor/. -->
-  <script src="/panels/vendor/chart.umd.min.js?v=9db14121"></script>
+       Dashboard still draws when an external CDN hiccups. File in /panels/vendor/.
+       IT IS NOT LOADED HERE ANY MORE (owner, 2026-09-17: "defer non-critical scripts"). It is
+       209 KB, and this panel OPENS ON THE TABLES TAB — so every manager paid for a charting
+       library on every visit, and most visits never open the Dashboard at all. app.js fetches it
+       the first time a chart is about to be drawn (ensureChartLib), which is the same moment it
+       already handles "the library didn't load" for an offline device. The address lives there,
+       with the library's own version; see scripts/build-vendor.mjs. -->
   <!-- maint.js: the shared staff drawer (name, phone, PIN, panel password), the panel's own
        yes/no + reason cards (LFH_ASK, used by inventory.js), and the write deadline. -->
-  <script src="/panels/maint.js?v=293989ce"></script>
+  <script defer src="/panels/maint.js?v=293989ce"></script>
   <!-- realtime.js: the ONE live-update channel every panel shares (LFH_RT). Must load before
        outbox.js, connbadge.js, offline.js and errlog.js, which all reach for it. -->
-  <script src="/panels/realtime.js?v=122c17eb"></script>
+  <script defer src="/panels/realtime.js?v=122c17eb"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/netretry.js?v=064c1971"></script>
-  <script src="/panels/outbox.js?v=79344a64"></script>
+  <script defer src="/panels/netretry.js?v=064c1971"></script>
+  <script defer src="/panels/outbox.js?v=79344a64"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=004aecb5"></script>
+  <script defer src="/panels/connbadge.js?v=004aecb5"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
-  <script src="/panels/swreg.js?v=0d429b78"></script>
-  <script src="/panels/offline.js?v=9e03ae1a"></script>
+  <script defer src="/panels/swreg.js?v=0d429b78"></script>
+  <script defer src="/panels/offline.js?v=9e03ae1a"></script>
   <!-- What the GUEST MENU is waiting for (owner, 2026-08-13): the 🔔 in the top bar + its sheet.
        Reads NOTHING of its own — the panel hands it rows off the board it already has — and it
        renders nothing at all when the guest menu is switched off for the restaurant.
@@ -179,28 +184,32 @@
        been loaded for a long while by then. The waiter tablet loads the pair in this same
        order. A note that states a rule the file does not follow is how the next reader
        "fixes" a working order. -->
-  <script src="/panels/guestbell.js?v=aa4653da"></script>
+  <script defer src="/panels/guestbell.js?v=aa4653da"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
-  <script src="/panels/backstack.js?v=efe8afdb"></script>
+  <script defer src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- Hand-written per-restaurant floor plans, read only when a restaurant's layout mode is
        Custom (mig 238). Pure data; loads before app.js so the first floor render can see it. -->
-  <script src="/panels/floor-layouts.js?v=f764ed73"></script>
+  <script defer src="/panels/floor-layouts.js?v=f764ed73"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
-  <script src="/panels/errlog.js?v=81a35c3c"></script>
+  <script defer src="/panels/errlog.js?v=81a35c3c"></script>
   <!-- Shared "Report an issue" widget (subject + photo + live voice note). Must load
        BEFORE app.js so openIssueModal() can call it. -->
-  <script src="/panels/issue-raise.js?v=2a56fffc"></script>
+  <!-- shrinkimg.js: caps an uploaded photo at 1280px and re-encodes it as WebP BEFORE it is
+       sent (owner, 2026-09-17: "compress all images"). Used by the dish photo in Edit menu and
+       by a photo attached to an issue; it hands back the original file if anything goes wrong. -->
+  <script defer src="/panels/shrinkimg.js?v=b7109a6e"></script>
+  <script defer src="/panels/issue-raise.js?v=470b3ed0"></script>
   <!-- My profile & pay (mig 220) — shared with the waiter tablet -->
-  <script src="/panels/myprofile.js?v=e194a3d8"></script>
+  <script defer src="/panels/myprofile.js?v=e194a3d8"></script>
   <!-- "there is more this way" on any row that scrolls sideways (T12, 2026-08-13): a soft edge
        fade plus a "-> N more" chip, driven by measurement. Marked rows carry data-swipe-hint. -->
-  <script src="/panels/swipehint.js?v=da7e0a29"></script>
+  <script defer src="/panels/swipehint.js?v=da7e0a29"></script>
   <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
-  <script src="/panels/undobar.js?v=e5a33483"></script>
+  <script defer src="/panels/undobar.js?v=e5a33483"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
-  <script src="/panels/billcustomer.js?v=54fa8930"></script>
+  <script defer src="/panels/billcustomer.js?v=54fa8930"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping.
        `.bill-amt` was REMOVED from this list on 2026-09-03 (T8 sweep #8). It was the Bills tab's
        bill-amount class until the 2026-08-03 Bills rebuild renamed it `.bl-amt`, and the list was
@@ -218,19 +227,19 @@
        renderer long ago — `dashCard()` now writes a bare `<b>` — so the exclusion had nothing to
        exclude, and `.dash-card b.ktext` in style.css had nothing to style. If a word-valued tile
        comes back, the class goes back on the element AND back in this list, together. -->
-  <script src="/panels/fitnums.js?v=0610dc4b" data-fit=".dash-card .kbody b,.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
+  <script defer src="/panels/fitnums.js?v=0610dc4b" data-fit=".dash-card .kbody b,.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
-  <script src="/panels/editor/inventory.js?v=aabfc336"></script>
+  <script defer src="/panels/editor/inventory.js?v=e72d6e01"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC) and shared with
        the kitchen panel and the admin's sample, so a document can never look different in two
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —
        without it, printing a bill throws "LFH_BILLDOC is not defined" and nothing prints. -->
-  <script src="/panels/billdoc.js?v=e26c29a4"></script>
+  <script defer src="/panels/billdoc.js?v=e26c29a4"></script>
   <!-- auditsort: the plain-English words and the sort order for Audit & logs, shared with the
        owner console's Audit screen so the same event can never be worded two ways. -->
-  <script src="/panels/auditsort.js?v=1da861b5"></script>
+  <script defer src="/panels/auditsort.js?v=1da861b5"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=00c916c6"></script>
+  <script defer src="/panels/editor/app.js?v=50f11a05"></script>
 </body>
 </html>

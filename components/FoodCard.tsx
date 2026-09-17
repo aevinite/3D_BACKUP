@@ -315,7 +315,14 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
             alt={item.title}
             width={110}
             height={110}
-            loading="lazy"
+            /* THE FIRST FEW CARDS ARE NOT LAZY (owner, 2026-09-17, item 2 of the optimisation
+               list). A guest opens the menu and the top row is what they are looking at, so the
+               top row is fetched at once and at high priority — one of those photos is the
+               largest thing on the screen and deciding it can wait is how a menu comes up grey.
+               Everything further down the list stays lazy, which is the actual saving: a 60-dish
+               menu only ever downloads the pictures that are scrolled to. */
+            loading={index < 3 ? "eager" : "lazy"}
+            fetchPriority={index === 0 ? "high" : "auto"}
             decoding="async"
             // Hide the img element itself when the photo is broken/missing, the
             // same way the search dropdown does, so no broken glyph shows.

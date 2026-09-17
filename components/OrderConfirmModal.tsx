@@ -276,7 +276,7 @@ export default function OrderConfirmModal() {
 
         {/* The scrollable middle: picture, name, base price, then the choices. */}
         <div className="order-confirm-scroll">
-        <img src={item.image} alt={item.title} className="order-confirm-img" />
+        <img src={item.image} alt={item.title} className="order-confirm-img" loading="lazy" decoding="async" />
         <h3 className="order-confirm-title">{item.title}</h3>
         {/* prettyUsd first so "base" matches the menu card to the rupee. */}
         <div className="order-confirm-unit">{fmtDisp(unitDisplay(prettyUsd(item.price), [], currency || undefined))} base</div>
