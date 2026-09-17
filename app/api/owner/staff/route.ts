@@ -35,7 +35,7 @@ import { accessStateFor } from "@/lib/accessState";
 import { newWaiterTables } from "@/lib/tableAssign";
 import { viewAsPerson, isPersonId } from "@/lib/viewAsPerson";
 import { rd, ReadSet } from "@/lib/readGuard";
-import { loadLogVisibility } from "@/lib/logVisibility";
+import { loadLogVisibility, withoutHiddenKinds } from "@/lib/logVisibility";
 import {
   PROFILE_FIELDS, hasProfile, completeness, mergeProfilePatch, jobPatchFrom, paymentFrom,
   payAccessWith, todayIST, payHistoryBlocksDelete, PAY_HISTORY_DELETE_MESSAGE, type PayAccess,
@@ -675,12 +675,12 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
     // The row-level `action` column is needed so the per-KIND switches can be applied here exactly
     // as they are on the Activity page — this card used to apply the page-level "logs" entitlement
     // and then show every kind, so a sign-in the admin had hidden was still visible one tap deeper.
-    const acts = await rd("activity", () => sb.from("staff_actions")
+    // The same three standing exclusions the Activity page applies, through the same function
+    // (owner picked item 12, 2026-09-17) — they were hard-coded here as three separate strings, so
+    // this card and that page were one typo apart from disagreeing about what an owner may see.
+    const acts = await rd("activity", () => withoutHiddenKinds(sb.from("staff_actions")
       .select("action, detail, created_at, panel, restaurant_id")
-      .eq("restaurant_id", u.restaurant_id).eq("actor_id", id)
-      .not("panel", "in", "(admin,db)")
-      .or("level.is.null,level.neq.error")
-      .neq("action", "ui_taps")
+      .eq("restaurant_id", u.restaurant_id).eq("actor_id", id))
       .order("created_at", { ascending: false }).limit(20));
     if (acts.error) {
       // An unread activity list must not read as "this person has done nothing" (T9 finding F6's

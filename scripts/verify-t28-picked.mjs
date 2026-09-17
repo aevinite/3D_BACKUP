@@ -224,6 +224,54 @@ console.log("\nT28's picked items — a read that failed is never reported as a 
     `item 11 · these use searchTerm but never mention \`unsearchable\`, so a box of wildcards falls through to the unfiltered list again: ${unhandled.join(", ")}`);
 }
 
+// ── item 12 (owner-picked, 2026-09-17) · the owner's three standing exclusions, declared once ───
+//
+// No owner ever sees `panel in (admin,db)`, `level = 'error'`, or `action = 'ui_taps'`. Those three
+// were written out twice — as local consts in /api/owner/oplog (page AND count) and as hard-coded
+// strings in /api/owner/staff's per-person card. Two copies of a filter that decides what is
+// COUNTED is precisely how a footer comes to describe a set the page is not showing, which is the
+// fault that produced "page 4 of 3" in the same file a day earlier.
+//
+// The type cannot enforce this: `withoutHiddenKinds` had to take an unconstrained generic, because
+// every structural constraint made TypeScript answer TS2589 on the head-count. So the check is here.
+{
+  const lib = code(read("lib/logVisibility.ts"));
+  need(/export const OWNER_LOG_EXCLUDES/.test(lib) && /export function withoutHiddenKinds/.test(lib),
+    "item 12 · the three standing exclusions are declared once, in lib/logVisibility.ts",
+    "item 12 · OWNER_LOG_EXCLUDES / withoutHiddenKinds is gone — the exclusions are back to being copied per route");
+  for (const [what, frag] of [["the admin's own rows", '"\\(admin,db\\)"'],
+                              ["app faults", '"level\\.is\\.null,level\\.neq\\.error"'],
+                              ["the raw button taps", '"ui_taps"']]) {
+    need(new RegExp(frag).test(lib), `item 12 · …including ${what}`,
+      `item 12 · lib/logVisibility.ts no longer declares the exclusion for ${what}`);
+  }
+
+  // Every owner surface that reads the activity table must come through the one function.
+  const SURFACES = ["app/api/owner/oplog/route.ts", "app/api/owner/staff/route.ts"];
+  const handRolled = [];
+  const missing = [];
+  for (const f of SURFACES) {
+    const src = code(read(f));
+    if (!src) { missing.push(`${f} (unreadable)`); continue; }
+    if (!/withoutHiddenKinds\(/.test(src)) missing.push(f);
+    // A copy that drifted back in — the literals, anywhere in the route.
+    if (/\(admin,db\)/.test(src) || /level\.is\.null,level\.neq\.error/.test(src) || /neq\("action", "ui_taps"\)/.test(src)) handRolled.push(f);
+  }
+  need(missing.length === 0,
+    `item 12 · …and every owner activity surface applies them through it (${SURFACES.length} read)`,
+    `item 12 · these read staff_actions for an owner without withoutHiddenKinds, so they decide for themselves what is hidden: ${missing.join(", ")}`);
+  need(handRolled.length === 0,
+    "item 12 · …with no route keeping its own copy of the filter beside it",
+    `item 12 · the exclusion strings are hand-written again in: ${handRolled.join(", ")} — two copies of a filter that decides what is COUNTED is how a footer describes a set the page is not showing`);
+
+  // The list and the count beside it must be filtered by the SAME thing — that is the actual bug.
+  const op = code(read("app/api/owner/oplog/route.ts"));
+  const uses = (op.match(/withoutHiddenKinds\(/g) || []).length;
+  need(uses >= 2,
+    `item 12 · …and the Activity page's list and its total both come through it (${uses} call sites)`,
+    `item 12 · only ${uses} call site in /api/owner/oplog — the page and the count beside it must be narrowed by the same filter, or the footer counts rows the page will not show`);
+}
+
 if (!fails.length) {
   console.log(`\n✅ verify:t28-picked — ${pass} checks, all pass.`);
   process.exit(0);
