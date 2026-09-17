@@ -613,6 +613,7 @@ round of the sweep-#6 terminal with the same number — terminal numbers are per
 | T | ID block | territory | filed? | rows | ok | prob | resv |
 |---|---|---|---|---|---|---|---|
 | 34 | P104901–P105000 (50 used) | **The money and compliance libraries** — `lib/{clash,paySplit,tax,taxFiling,idempotency,idempotencyRule,dbRefusal,readGuard}.ts`, `docs/SAAS-EFFICIENCY-PLAYBOOK.md`. Sweep #6's terminal 24 held the same files plus `logTrail`/`userAuth`/`rateLimit`; its 1,000 rows stay in `T24.md` and were re-run before these were written. | ✅ `T34-S9.md` | 50 | 50 | 0 | 0 |
+| 35 | P105001–P105100 (50 used) | **The access and permission libraries** — `lib/{accessConfig,accessModel,accessState,accessTree,staffAuth,staffCaps,staffProfile,staffProfileShared,revealGate}.ts`. Registered here by T34 on 2026-09-18: `T35-S9.md` landed in #1409 with no row anywhere, which left `verify:ledger-index` red on `main` for every session in this folder. | ✅ `T35-S9.md` | 50 | 50 | 0 | 0 |
 
 ---
 
