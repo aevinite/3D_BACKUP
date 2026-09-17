@@ -128,18 +128,43 @@ head("B · the same question, asked of the live dev database");
     console.log("   which is the source of truth for both databases. Not a failure.");
   } else {
     const ref = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
-    const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: `select p.proname, pg_get_functiondef(p.oid) def
-                  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-                 where n.nspname = 'public'
-                   and (p.proname like 'lfh_admin_%' or p.proname like 'lfh_owner_%')`,
-        read_only: true,
-      }),
-    });
-    if (!r.ok) {
+    // ── A SLOW DATABASE IS BUSY, NOT BROKEN (T33, sweep #9, 2026-09-17) ──────────────────────
+    // This handled a non-OK REPLY and not a failed CONNECTION, so when `fetch` itself threw, the
+    // guard died with an uncaught TypeError and a stack trace — no "⏭ skipped", no half-A result,
+    // nothing. Inside a full run that reads as a PRODUCT fault when it is the network. Witnessed
+    // four times in one session: five sweep terminals share this one management endpoint and it
+    // was measured at 4–9 seconds to connect, where Node's undici gives up at a fixed 10s and
+    // tries IPv6 first.
+    //
+    // A generous deadline plus jittered backoff, then stand down with a sentence — this project's
+    // own "busy is treated like offline, both ways" rule applied to its own test rig. A REFUSAL
+    // (401/403, or a SQL error) is NOT retried: that answer is real, and retrying a real refusal
+    // into a skip is how a check stops checking.
+    const nap = (ms) => new Promise((res) => setTimeout(res, ms));
+    let r = null, why = "";
+    for (let i = 0; i < 5 && !r; i++) {
+      try {
+        const attempt = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: `select p.proname, pg_get_functiondef(p.oid) def
+                      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                     where n.nspname = 'public'
+                       and (p.proname like 'lfh_admin_%' or p.proname like 'lfh_owner_%')`,
+            read_only: true,
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (attempt.status === 429 || attempt.status >= 500) why = `HTTP ${attempt.status}`;
+        else { r = attempt; break; }
+      } catch (e) { why = String(e?.cause?.code || e?.message || e).slice(0, 90); }
+      await nap(Math.round(2 ** i * 800 * (0.6 + Math.random() * 0.8)));
+    }
+    if (!r) {
+      console.log(`⏭  skipped: could not reach the database after 5 tries (${why}). Half A stands —`);
+      console.log("   it read every migration file, which is the source of truth for both databases.");
+    } else if (!r.ok) {
       console.log(`⏭  skipped: the database would not answer (${(await r.text()).slice(0, 120)}). Half A stands.`);
     } else {
       const rows = await r.json();

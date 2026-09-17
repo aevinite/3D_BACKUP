@@ -87,12 +87,19 @@ export async function GET(req: NextRequest) {
   }
 
   // ── ONE restaurant's floor. `restaurant_id` is REQUIRED, and that is the whole point of this
-  // block. `lfh_floor_state` declares `p_restaurant_id uuid DEFAULT <restaurant #1>` — a leftover
-  // from the tenancy migration, when a default was how every existing caller kept working. Calling
-  // it with no argument therefore did not fail; it quietly answered with FRENCH HOUSE'S FLOOR, for
-  // whichever restaurant the admin thought they were looking at. Nothing reached this branch today
-  // (the console's only caller uses ?all=1), so nobody had been shown the wrong tables — but it was
-  // one new caller away, and a wrong floor is the kind of mistake that reads as real data.
+  // block. `lfh_floor_state` USED TO declare `p_restaurant_id uuid DEFAULT <restaurant #1>` — a
+  // leftover from the tenancy migration, when a default was how every existing caller kept working.
+  // Calling it with no argument therefore did not fail; it quietly answered with FRENCH HOUSE'S
+  // FLOOR, for whichever restaurant the admin thought they were looking at. Nothing reached this
+  // branch (the console's only caller uses ?all=1), so nobody had been shown the wrong tables — but
+  // it was one new caller away, and a wrong floor is the kind of mistake that reads as real data.
+  //
+  // THAT DEFAULT IS GONE (migration 385, 2026-09-15 — and migration 386 took the same guess out of
+  // the function BODIES, where passing an explicit null still reached it). Calling this with no
+  // restaurant now fails to resolve the function at all, which is a broken screen instead of a
+  // quiet wrong answer — better, but still not something to find out in front of a guest, which is
+  // why the refusal below stays. Corrected from the present tense by T33, sweep #9, 2026-09-17:
+  // this was the last place in the app still stating that the default exists.
   //
   // Now it names the restaurant, and refuses without one, exactly like every other per-restaurant
   // admin read (see /api/admin/oplog, /api/admin/audit, /api/admin/repair). Guarded by

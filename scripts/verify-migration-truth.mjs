@@ -171,14 +171,39 @@ async function live() {
   const env = parseEnv(readFileSync(envPath, "utf8"));
   if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.SUPABASE_ACCESS_TOKEN) return null;
   const ref = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
+  // ── A SLOW DATABASE IS BUSY, NOT BROKEN (T33, sweep #9, 2026-09-17) ────────────────────────
+  // This handled a non-OK REPLY and not a failed CONNECTION, so when `fetch` itself threw the
+  // guard died with an uncaught TypeError and a stack trace. Inside a full run that reads as a
+  // PRODUCT fault when it is the network. Witnessed four times in one session: five sweep
+  // terminals share this one management endpoint and it was measured at 4–9 seconds to connect,
+  // where Node's undici gives up at a fixed 10s and tries IPv6 first.
+  //
+  // So: a generous deadline plus jittered backoff, and if it still cannot connect, say
+  // "couldn't reach the database" and stand down — which is this project's own rule, "busy is
+  // treated like offline, both ways", applied to its own test rig. A REFUSAL is still fatal: a
+  // 401, a 403 or a SQL error means the answer is real and wrong, and must not be retried into
+  // silence.
+  const nap = (ms) => new Promise((r) => setTimeout(r, ms));
   const q = async (sql) => {
-    const res = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ query: sql, read_only: true }),
-    });
-    if (!res.ok) throw new Error(`${ref.slice(0, 6)}…: ${(await res.text()).slice(0, 200)}`);
-    return res.json();
+    let last;
+    for (let i = 0; i < 5; i++) {
+      try {
+        const res = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ query: sql, read_only: true }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (res.status === 429 || res.status >= 500) { last = new Error(`HTTP ${res.status}`); }
+        else if (!res.ok) throw Object.assign(new Error(`${ref.slice(0, 6)}…: ${(await res.text()).slice(0, 200)}`), { refused: true });
+        else return res.json();
+      } catch (e) {
+        if (e.refused) throw e;
+        last = e;
+      }
+      await nap(Math.round(2 ** i * 800 * (0.6 + Math.random() * 0.8)));
+    }
+    throw Object.assign(new Error(`could not reach the database after 5 tries: ${String(last?.message || last).slice(0, 160)}`), { unreachable: true });
   };
   const set = (rows, f) => new Set(rows.map(f));
   const [tbl, col, fn, vw, trg, idx, pol] = await Promise.all([
@@ -241,10 +266,19 @@ const ownerTable = (kind, name, d) => {
 const RETIRED_ELSEWHERE = {};
 
 // ── run ──────────────────────────────────────────────────────────────────────────────────────
-const db = COUNTS ? null : await live();
+let db = null, unreachable = null;
+if (!COUNTS) {
+  try { db = await live(); }
+  catch (e) { if (e?.unreachable) unreachable = e.message; else throw e; }
+}
 if (!COUNTS && !db) {
   console.log("\nsupabase/migrations — every object a file declares is still there");
-  console.log("  – skipped: no .env.local, so there is no database to ask");
+  // TWO DIFFERENT REASONS, SAID DIFFERENTLY. "No keys here" is a checkout without .env.local and is
+  // genuinely nothing; "couldn't reach it" means the check did not run and the reader should know
+  // that, rather than reading the same reassuring line in both cases.
+  console.log(unreachable
+    ? `  – skipped: ${unreachable}. Nothing was checked against the database — re-run when it answers.`
+    : "  – skipped: no .env.local, so there is no database to ask");
   process.exit(0);
 }
 
