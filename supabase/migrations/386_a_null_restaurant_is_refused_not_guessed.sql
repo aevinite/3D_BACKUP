@@ -45,6 +45,38 @@
 --     `v_s.restaurant_id`, …) rather than a parameter. Migration 358 made those columns NOT NULL,
 --     so that arm is unreachable — dead code, not a trap. LEFT ALONE, and reported instead.
 --
+--     ⚠️ CORRECTION (T33, sweep #9, 2026-09-17): that last sentence is true of every one of them
+--     EXCEPT ONE, and the exception was measured, not guessed. There are twenty such bodies, and
+--     the live tables were re-checked column by column: `restaurant_id` is still NULLABLE on six
+--     of the sixty-six tenant tables — action_idempotency, error_signatures, fix_requests,
+--     invoice_events, rate_limit_rules and staff_actions — because migration 358 deliberately
+--     left those, and one of the six feeds one of the twenty.
+--
+--     `lfh_rt_emit` (whose newest definition is migration 267, NOT this file) fires on sixteen
+--     tables, and `staff_actions` is one of them:
+--
+--         r := COALESCE(NEW, OLD);
+--         v_rid := COALESCE(r.restaurant_id, '00000000-…-0001'::uuid);
+--
+--     763 of 6,672 rows in `staff_actions` carry no restaurant, and they are RIGHT to: they are
+--     platform-level admin events that belong to no single restaurant — `owner_create`,
+--     `restaurant_purge`, `owner_suspend`, `admin_reveal_unlocked`, `login`, `client_error` —
+--     with the newest dated 2026-09-16. Each one writes a live-update breadcrumb labelled as MY
+--     LITTLE FRENCH HOUSE'S. So this arm is not dead; it is the one that is actually taken.
+--
+--     NOTHING IS WRONG ON ANY SCREEN TODAY, which is why this is a correction and not a change:
+--     the `audit` topic has exactly one listener (`components/admin/shared.tsx`, and
+--     `lib/useRealtime.ts` says so in as many words), and the admin console subscribes with NO
+--     restaurant — `topic=eq.audit` — so it receives these events either way. The mislabel sits
+--     in the stored breadcrumb's `topic_rid` column, which nothing reads for this topic. It
+--     becomes real the moment anyone subscribes to `audit` WITH a restaurant, which is the
+--     documented way every other topic is consumed.
+--
+--     Sweep #10: the fix belongs in migration 267's function, not here — `lfh_rt_emit` should
+--     emit nothing when the row it fired on has no restaurant, because no scoped subscriber
+--     should hear it. It is recorded for the owner's decision rather than done, since no person
+--     gets a wrong answer from it today.
+--
 -- ═══ THE BODIES BELOW ARE THE LIVE ONES, NOT RE-TYPED ═══
 --
 -- Every definition came out of `pg_get_functiondef()` on the dev database — which at generation

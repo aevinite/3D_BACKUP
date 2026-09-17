@@ -13,9 +13,17 @@
 // name a restaurant". It cannot see this one: a call site can name the restaurant perfectly and
 // still hand over a null, and the COALESCE would swallow it. That is the gap this file closes.
 //
-// Migration 384 replaced every one of those twenty expressions with `lfh_rid(p_restaurant_id)`,
+// Migration 386 replaced every one of those nineteen expressions with `lfh_rid(p_restaurant_id)`,
 // which returns the id it was given or raises 22004. The owner picked it as item 4 of sweep #9
 // terminal 30's report, on 2026-09-15.
+//
+// (This line said "migration 384" and "twenty expressions" until T33 checked, 2026-09-17. The file
+// WAS written as 384_… and renumbered the moment 385 appeared on main — 386's own header says so —
+// and 384 is now a different migration entirely, the last of the retired verification stub. Naming
+// the wrong file in the guard that watches this rule is how the next person looks in the wrong
+// place. Nineteen is the count of parameter-coalescing bodies this file replaced; the twentieth
+// expression is `lfh_rt_emit`'s, which coalesces a ROW's restaurant_id, lives in migration 267 and
+// is deliberately not this rule's subject — see the correction block in migration 386.)
 //
 // THREE HALVES, because the fallback can come back in three different ways:
 //   A  SOURCE   — no migration's NEWEST definition of a function that takes p_restaurant_id may
@@ -154,6 +162,58 @@ if (!env.SUPABASE_ACCESS_TOKEN) {
         + ` and runs as the guest browser (acl: ${f.acl})`);
       ok(f.vol === "i", `it is IMMUTABLE and reads nothing (volatility: ${f.vol})`);
     }
+  } catch (e) { console.log(`⏭  skipped: ${String(e.message).slice(0, 110)}`); }
+}
+
+// ── D · the "dead arm" claim stays true ──────────────────────────────────────────────────────
+// WHY THIS HALF EXISTS (T33, sweep #9, 2026-09-17). Migration 386 left twenty function bodies
+// alone that coalesce a ROW's own restaurant_id — NEW.restaurant_id, v_s.restaurant_id — instead
+// of a parameter, and wrote down the reason: migration 358 made those columns NOT NULL, so the
+// fallback arm cannot be reached. That reason was right for nineteen of them and WRONG for one.
+// Six of the sixty-six tenant tables still have a nullable restaurant_id (358 left them on
+// purpose), and `lfh_rt_emit` fires on one of the six — `staff_actions`, where 763 of 6,672 rows
+// genuinely carry no restaurant because they are platform-level admin events. Those rows write a
+// live-update breadcrumb labelled as restaurant #1's.
+//
+// Nothing is wrong on a screen today: the `audit` topic's only listener is the admin console and
+// it subscribes with no restaurant, so it receives them either way. The trap is that the claim
+// was asserted once in prose and could quietly stop being true again — a newly nullable column,
+// or a new trigger on one of the six. So the claim is now CHECKED: the set of (body × nullable
+// table) pairs must be exactly the one pair we have read and explained. A new pair goes red, and
+// whoever sees it reads the correction block in migration 386 before deciding.
+head("D · every row-coalescing body still reads its restaurant from a NOT NULL column");
+if (!env.SUPABASE_ACCESS_TOKEN) {
+  console.log("⏭  skipped: needs the database.");
+} else {
+  try {
+    const EXPLAINED = new Set(["lfh_rt_emit/staff_actions"]);
+    const fns = await q(`select p.proname nm, pg_get_functiondef(p.oid) d
+                           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                          where n.nspname = 'public' and p.prokind = 'f'
+                            and pg_get_functiondef(p.oid) ~* 'coalesce\\(\\s*(new|old|r|v|v_s|v_o|v_order|v_sess)\\.restaurant_id'`);
+    const nullable = (await q(`select c.table_name t from information_schema.columns c
+                                 join information_schema.tables x on x.table_name = c.table_name
+                                  and x.table_schema = 'public' and x.table_type = 'BASE TABLE'
+                                where c.table_schema = 'public' and c.column_name = 'restaurant_id'
+                                  and c.is_nullable = 'YES'`)).map((r) => r.t);
+    // A trigger body reads NEW/OLD from whatever table its trigger sits on, so ask the catalogue
+    // rather than guessing from the body text — that is what made this reachable arm invisible.
+    const trg = await q(`select p.proname fn, c.relname tbl
+                           from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+                           join pg_class c on c.oid = t.tgrelid
+                          where not t.tgisinternal
+                          group by 1, 2`);
+    const names = new Set(fns.map((f) => f.nm));
+    const pairs = trg.filter((r) => names.has(r.fn) && nullable.includes(r.tbl))
+                     .map((r) => `${r.fn}/${r.tbl}`);
+    const fresh = pairs.filter((x) => !EXPLAINED.has(x));
+    ok(fns.length > 0 && nullable.length > 0, `read ${fns.length} row-coalescing body(ies) against ${nullable.length} still-nullable table(s)`);
+    ok(fresh.length === 0, fresh.length === 0
+      ? `the only body that can actually reach its "restaurant #1" arm is the one already read and explained (${[...EXPLAINED].join(", ")}) — every other one reads a NOT NULL column, so migration 386's reason still holds`
+      : `${fresh.length} NEW body/table pair(s) can reach the restaurant-#1 arm: ${fresh.join(", ")}. `
+        + `A row with no restaurant there would be announced as My Little French House's. Read the `
+        + `correction block in migration 386, then either make the column NOT NULL, stop the body `
+        + `falling back, or add the pair to EXPLAINED with the reason.`);
   } catch (e) { console.log(`⏭  skipped: ${String(e.message).slice(0, 110)}`); }
 }
 
