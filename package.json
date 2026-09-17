@@ -244,7 +244,8 @@
     "verify:cancel-stamped": "node scripts/verify-cancel-stamped.mjs",
     "verify:takings-never-negative": "node scripts/verify-takings-never-negative.mjs",
     "verify:bill-number-on-order": "node scripts/verify-bill-number-on-order.mjs",
-    "verify:server-only-tables": "node scripts/verify-server-only-tables.mjs"
+    "verify:server-only-tables": "node scripts/verify-server-only-tables.mjs",
+    "verify:tax-rate-is-a-rate": "node scripts/verify-tax-rate-is-a-rate.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"
