@@ -11328,7 +11328,16 @@ function tablePanelParts(t, host = "float") {
   // 2026-07-23: "the mark is not showing in that table thing"). tagForTable already
   // gates on the feature being on.
   const hdrTag = TABLE_TAG_INFO[tagForTable(t)];
-  const headTagPill = hdrTag ? `<span class="tp-tagpill tag-${tagForTable(t)}">${hdrTag.emoji} ${esc(hdrTag.label)}</span>` : "";
+  // THE MARK IS ALSO THE BUTTON THAT CHANGES IT (owner, 2026-09-17: "you can able to click on the
+  // family or any type button and change it from there, or maybe remove it — in short, whenever you
+  // click Family button it will open type selector"). It was a label, and the only way to the
+  // picker was the KOT ▾ menu; now the thing you are looking at is the thing you tap. When no mark
+  // is set it is a quiet 🏷 Type button instead, so setting the first one is the same tap.
+  const headTagPill = tableTagsOn()
+    ? (hdrTag
+        ? `<button class="tp-tagpill tag-${tagForTable(t)} sp-tagbtn" id="sxTagHead" title="Change or remove this table's mark">${hdrTag.emoji} ${esc(hdrTag.label)} ▾</button>`
+        : `<button class="tp-tagpill sp-tagbtn sp-tagbtn-off" id="sxTagHead" title="Mark this table — VIP · Family · Owner's guest">🏷 Type ▾</button>`)
+    : "";
   let headPill = `<span class="tp-pill tp-pill-${esc(tile.st)}">● ${esc(tile.label)}</span>${headTagPill}`;
   // …and the party chip is appended to it further down, once the members are known.
   const liveRowsAll = os.filter((o) => o.status !== "cancelled").flatMap((o) => orderItemRows(o));
@@ -11466,22 +11475,44 @@ function tablePanelParts(t, host = "float") {
     // foot — three lines of furniture before you read a dish. It is now one line: when it came,
     // what is on it, what it costs, Accept, Cancel. Accepting still merges it into the bill in
     // its MENU place (the list below re-sorts), which is the whole point of the redesign.
-    const newBlocks = newOrders.map((o) => {
+    // ── THE INCOMING TICKET SITS AT THE BOTTOM, WITH EVERY DISH SHOWING (owner, 2026-09-17) ──
+    // "for accepting order I don't want at top … it should come at bottom like this with all item
+    // visible." It was a one-line amber strip under the view switch, which put the decision above
+    // the bill and hid what was in it until you tapped. Now it is a block at the FOOT of the list,
+    // directly above the money and the buttons — where the hand already is — and it is open: every
+    // dish, its quantity, what to leave out, its money, the order-wide "avoid", then Cancel and
+    // Accept. Nothing to tap to see it.
+    const waitBlocks = newOrders.map((o) => {
       const rows = withAllergens(o);
-      const money = rows.reduce((sum, r) => sum + (Number(r.price) || 0) * (parseInt(r.qty, 10) || 1), 0);
-      const names = rows.map((r) => `${parseInt(r.qty, 10) || 1}× ${esc(r.title)}`).join(", ");
-      const avoid = [...new Set(rows.flatMap((r) => r.removed || []))];
-      const openW = spineState().wait[String(t)] === String(o.id);
-      return `<div class="sp-wait${openW ? " on" : ""}" data-sp-wait="${esc(o.id)}" data-sp-table="${esc(t)}" role="button" tabindex="0">
-        <span class="sp-wait-l" title="Sent ${when(o) ? esc(when(o)) : "just now"} — not on the bill until it is accepted">🔔 ${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "NEW"}</span>
-        <span class="sp-wait-n" title="${esc(names)} — tap to read it dish by dish">${names}${avoid.length ? ` · no ${avoid.map(esc).join(", no ")}` : ""}</span>
-        <span class="sp-wait-a">${inr(money)}</span>
-        <span class="sp-wait-x" title="Read it dish by dish before accepting">${openW ? "▴" : "▾"}</span>
-        <button class="sp-ok" data-accept="${esc(o.id)}" title="Accept — the dishes join the bill in their menu place">✓ Accept</button>
-        ${cancelBtn(o) ? `<button class="sp-no tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this ticket — nothing is charged for it">✕</button>` : ""}
-      </div>${editing ? `<div class="sp-editalg">${orderEditExtras(o)}</div>` : ""}`;
+      const money = rows.reduce((sum, x) => sum + (Number(x.price) || 0) * (parseInt(x.qty, 10) || 1), 0);
+      const alg = Array.isArray(o.allergies) ? o.allergies : [];
+      return `<div class="sp-newbox">
+        <div class="sp-newbox-h">
+          <span class="sp-newbox-l">🔔 ${o.kot_no != null ? `KOT #${esc(o.kot_no)}` : "NEW ORDER"}</span>
+          <span class="sp-newbox-t">${when(o) ? esc(when(o)) : "just now"} · not on the bill yet</span>
+          <span class="sp-newbox-sp"></span>
+          <span class="sp-newbox-a">${rows.length} dish${rows.length === 1 ? "" : "es"} · <b>${inr(money)}</b></span>
+        </div>
+        ${alg.length ? `<div class="sp-wait-alg">⚠ avoid in every dish: <b>${alg.map((x) => esc(algLabel(x))).join(", ")}</b></div>` : ""}
+        <div class="sp-newbox-items">${rows.map((x) => {
+          const q = parseInt(x.qty, 10) || 1;
+          const c = courseOfRow(x);
+          const extras = [x.note, ...((x.removed || []).map((y) => "no " + algLabel(y)))].filter(Boolean).map(esc).join(" · ");
+          return `<div class="sp-newitem">
+            <span class="sp-spine" style="background:${esc(c.tint)}" title="${esc(c.name)}"></span>
+            <span class="sp-qty">${q}×</span>
+            <span class="sp-nm"><b>${esc(x.title)}</b>${extras ? `<i>${extras}</i>` : ""}</span>
+            <span class="sp-am">${inr((Number(x.price) || 0) * q)}</span>
+            ${x.kind === "session" ? `<button class="sp-ib" data-edit-dish="${esc(x.id)}" title="Allergens & kitchen note for this dish">✎</button>` : ""}
+          </div>`;
+        }).join("")}</div>
+        ${editing ? orderEditExtras(o) : ""}
+        <div class="sp-newbox-b">
+          ${cancelBtn(o) ? `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this ticket — nothing is charged for it">✕ Cancel</button>` : ""}
+          <button class="btn small primary sp-newbox-ok" data-accept="${esc(o.id)}" title="Accept — the dishes join the bill in their menu place">✓ Accept${rows.length > 1 ? ` all ${rows.length}` : ""}</button>
+        </div>
+      </div>`;
     }).join("");
-
     // ── THE BILL, ONE DISH PER LINE, IN THE MENU'S OWN ORDER ──────────────────────────────────
     // What this replaces, and why (owner, 2026-09-17): every accepted ticket used to be its own
     // bordered card with a KOT heading — so a table with three tickets spent three lines on
@@ -11627,46 +11658,16 @@ function tablePanelParts(t, host = "float") {
       </div>`;
     }
 
-    // ── THE INCOMING ORDER, DISH BY DISH (owner, 2026-09-17: "for accepting order I also want like
-    // this detail view of one item") ──────────────────────────────────────────────────────────────
-    // Accepting is the one irreversible-ish tap on this screen — it sends food to the kitchen — so
-    // the ticket can be opened out first: every dish with its quantity, its money, what to leave
-    // out and the guest's note, the order-wide allergies, and the same two buttons at the end. It
-    // opens over the bottom of the list, like a dish's own sheet, so nothing moves under the thumb.
-    function waitSheet(o) {
-      const rows = withAllergens(o);
-      const money = rows.reduce((sum, x) => sum + (Number(x.price) || 0) * (parseInt(x.qty, 10) || 1), 0);
-      const alg = Array.isArray(o.allergies) ? o.allergies : [];
-      return `<div class="sp-sheet sp-sheet-wait">
-        <div class="sp-sheet-h"><b>🔔 ${o.kot_no != null ? `KOT #${esc(o.kot_no)}` : "New order"}</b>
-          <span class="sp-sheet-c">${when(o) ? esc(when(o)) : "just now"} · not on the bill yet</span>
-          <span class="sp-sheet-sp"></span>
-          <button class="sp-ib" data-sp-wait="" data-sp-table="${esc(t)}" title="Close">✕</button></div>
-        ${alg.length ? `<div class="sp-wait-alg">⚠ avoid in every dish: <b>${alg.map((x) => esc(algLabel(x))).join(", ")}</b></div>` : ""}
-        <div class="sp-parts-list">${rows.map((x) => {
-          const q = parseInt(x.qty, 10) || 1;
-          const c = courseOfRow(x);
-          const extras = [x.note, ...((x.removed || []).map((y) => "no " + algLabel(y)))].filter(Boolean).map(esc).join(" · ");
-          return `<div class="sp-part sp-part-wait">
-            <span class="sp-spine" style="background:${esc(c.tint)}" title="${esc(c.name)}"></span>
-            <span class="sp-part-q">${q}×</span>
-            <span class="sp-part-n"><b>${esc(x.title)}</b>${extras ? `<i>${extras}</i>` : ""}</span>
-            <span class="sp-part-a">${inr((Number(x.price) || 0) * q)}</span>
-            ${x.kind === "session" ? `<button class="btn small" data-edit-dish="${esc(x.id)}" title="Allergens & kitchen note">✎</button>` : ""}
-          </div>`;
-        }).join("")}</div>
-        <div class="sp-sheet-b">
-          <span class="sp-wait-tot">${rows.length} dish${rows.length === 1 ? "" : "es"} · <b>${inr(money)}</b></span>
-          <span class="sp-sheet-sp"></span>
-          ${cancelBtn(o) ? `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}">✕ Cancel</button>` : ""}
-          <button class="btn small primary" data-accept="${esc(o.id)}" title="Accept — the dishes join the bill in their menu place">✓ Accept</button>
-        </div>
-      </div>`;
+    // OBITUARY — waitSheet() (2026-09-17, same day it was born). It opened the incoming ticket
+    // over the bottom of the list when the amber line was tapped. The ticket now LIVES at the
+    // bottom with every dish showing (see waitBlocks), so there is nothing left to open.
+    let mergedBlock = shownRows.map((r, i) => spineLine(r, shownRows[i - 1])).join("");
+    // A table whose ONLY ticket is still waiting has an empty bill — say so, rather than leaving a
+    // blank half-screen above the amber box.
+    if (!shownRows.length && newOrders.length) {
+      mergedBlock = `<div class="sx-empty">Nothing on the bill yet — accept the ticket below and its dishes land here, in menu order.</div>`;
     }
-
-    const mergedBlock = shownRows.map((r, i) => spineLine(r, shownRows[i - 1])).join("");
     const openRow = shownRows.find((r) => spineKey(r) === openKey);
-    const openWait = newOrders.find((o) => String(o.id) === String(spineState().wait[String(t)]));
     const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} tickets · one bill</span>` : "";
     // Edit/Done toggle: the gated entry to staff editing. The confirm fires on Edit.
     // NOT ONCE THE FOOD IS OUT (owner, 2026-08-01: "after being served, why still an edit
@@ -11702,9 +11703,9 @@ function tablePanelParts(t, host = "float") {
     // everything still to serve sits at the top and the served half sinks.
     ordersSec = `<div class="sp-listwrap">
       <div class="sp-bar">${seg}${mergedBadge}${editToggle}</div>
-      ${newBlocks}
       <div class="sp-list${view === "kot" ? " sp-kotview" : ""}" data-sp-list="${esc(t)}">${mergedBlock}${voidNote}</div>
-      ${openWait ? waitSheet(openWait) : openRow ? spineSheet(openRow) : ""}
+      ${waitBlocks ? `<div class="sp-newwrap">${waitBlocks}</div>` : ""}
+      ${openRow ? spineSheet(openRow) : ""}
     </div>`;
   }
 
@@ -15091,6 +15092,9 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   if (ro && sess) ro.onclick = () => voidInvoice(sess.id);
   const payAll = root.querySelector("#sxPayAll"); if (payAll) payAll.onclick = () => markTablePaid(t);
   const tagB = root.querySelector("#sxTag"); if (tagB) tagB.onclick = () => openTagModal(t);
+  // the mark in the head opens the very same picker (one picker, two doors to it — the head is
+  // where the mark IS, so it is where a hand goes to change it)
+  const tagH = root.querySelector("#sxTagHead"); if (tagH) tagH.onclick = (e) => { e.stopPropagation(); openTagModal(t); };
   // 🍴 Split: with the KOT ladder ON this is the REAL split-settle (several payment
   // legs, mig 176); with it off it stays the old even-share calculator — no regression.
   root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => (tableOpsOn() ? markTablePaid(t, { openSplit: true }) : openSplitBill(parseFloat(b.dataset.split) || 0))));

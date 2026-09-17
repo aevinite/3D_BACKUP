@@ -5385,3 +5385,50 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
   border-radius: 7px; padding: 4px 7px; margin-bottom: 4px; }
 .sp-wait-tot { font-size: 11px; font-weight: 700; }
 .sp-sheet-b { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+
+
+/* ── the incoming ticket, at the FOOT of the bill, open (owner, 2026-09-17) ──────────────────
+   "for accepting order I don't want at top … it should come at bottom like this with all item
+   visible." It sits directly above the money and the buttons — where the hand already is — and it
+   shows every dish without being asked. The old one-line strip under the view switch is gone
+   (OBITUARY: .sp-wait / .sp-wait-* and waitSheet(), which needed a tap to show what was in it). */
+.sp-newbox { flex: 0 0 auto; margin: 4px 7px 0; padding: 6px 8px 7px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--gold) 60%, var(--line));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 15%, transparent), color-mix(in srgb, var(--gold) 8%, transparent));
+  box-shadow: 0 -4px 18px rgba(0,0,0,.12); }
+.sp-newbox + .sp-newbox { margin-top: 5px; }
+.sp-newbox-h { display: flex; align-items: baseline; gap: 7px; }
+.sp-newbox-l { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--gold-ink, var(--gold)); white-space: nowrap; }
+.sp-newbox-t { font-size: 9.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-newbox-sp { flex: 1 1 auto; }
+.sp-newbox-a { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.sp-newbox-a b { color: var(--text); font-size: 12px; }
+.sp-newbox-items { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0;
+  max-height: 34vh; overflow-y: auto; }
+.sp-newitem { display: grid; grid-template-columns: 3px 22px minmax(0, 1fr) 54px 22px; gap: 6px;
+  align-items: center; height: 24px; }
+.sp-newitem .sp-spine { height: 17px; }
+.sp-newbox-b { display: flex; align-items: center; gap: 5px; justify-content: flex-end; margin-top: 5px; }
+.sp-newbox-b .btn.small { padding: 6px 11px; font-size: 11px; }
+.sp-newbox-ok { min-width: 96px; }
+.sp-newbox .tp-edit-extras { margin: 4px 0 0; }
+
+/* the table's mark is the button that changes it */
+.sp-tagbtn { cursor: pointer; font: inherit; }
+.sp-tagbtn-off { border-style: dashed; color: var(--muted); background: transparent; }
+.sp-tagbtn:hover { filter: brightness(1.06); }
+
+/* THE ✕ STAYS ON THE TITLE'S LINE, at every width (2026-09-17). The head's top row wraps so the
+   table number, its state, its mark and KOT ▾ can all breathe; with the mark now a button (it is
+   the thing you tap to change it) that wrap pushed the ✕ onto a line of its own. Pinning it to the
+   corner is what the ≤760px rule already did — it is right everywhere. */
+.tp-detail-floating .tp-detail-top { position: relative; padding-right: 34px; }
+.tp-detail-floating .tp-detail-close { position: absolute; right: 0; top: -2px; margin: 0; }
+
+/* Several tickets can be waiting at once (a table of eight ordering from four phones), and each
+   one shows every dish — so the waiting area is capped at two fifths of the popup and scrolls
+   INSIDE itself. The bill above it keeps its rows; the dishes never get squeezed out by the
+   decision below them. */
+.sp-newwrap { flex: 0 0 auto; max-height: 40%; overflow-y: auto; scrollbar-width: none; }
+.sp-newwrap::-webkit-scrollbar { width: 0; }
