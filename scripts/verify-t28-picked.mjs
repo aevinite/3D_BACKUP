@@ -272,6 +272,30 @@ console.log("\nT28's picked items — a read that failed is never reported as a 
     `item 12 · only ${uses} call site in /api/owner/oplog — the page and the count beside it must be narrowed by the same filter, or the footer counts rows the page will not show`);
 }
 
+// ── item 16 (owner-picked, 2026-09-17) · a binned restaurant leaves every screen at once ───────
+//
+// MEASURED on a production build, same build both ways, one throwaway restaurant of its own:
+//   without the invalidation → 31.3s on Dashboard, Settings, Team AND Guests
+//   with it                  →  0.6s on all four
+// (`next dev` cannot show this at all — it resets module state between compilations, so the cache
+// never survives long enough to be stale. The first "fix works" run I did there scored 0.6s with
+// the fix REMOVED, which is what sent me to a production build.)
+{
+  const lib = code(read("lib/panelAccess.ts"));
+  need(/export function forgetRestaurant/.test(lib) && /export async function ownersOf/.test(lib),
+    "item 16 · the owner-scope caches can be told a restaurant has changed",
+    "item 16 · forgetRestaurant/ownersOf is gone — a binned restaurant is back to waiting out a 30s timer on Settings, Team and Guests");
+  need(/_deletedCache\.delete/.test(lib) && /_panelCache\.delete/.test(lib) && /_ownerCache\.(delete|clear)/.test(lib),
+    "item 16 · …and it clears all three of them, not just the one the caller happened to think of",
+    "item 16 · forgetRestaurant no longer clears all three caches — the screens will disagree with each other instead of with the database");
+
+  const adm = code(read("app/api/admin/restaurants/route.ts"));
+  const calls = (adm.match(/forgetRestaurant\(/g) || []).length;
+  need(calls >= 2,
+    `item 16 · …and both binning and restoring tell it (${calls} call sites)`,
+    `item 16 · only ${calls} call site in the admin restaurants route — bin and restore are the same event in reverse, and BOTH leave the owner's screens wrong until they are forgotten`);
+}
+
 if (!fails.length) {
   console.log(`\n✅ verify:t28-picked — ${pass} checks, all pass.`);
   process.exit(0);
