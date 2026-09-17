@@ -2331,7 +2331,10 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
 .tp-order { margin-bottom: 14px; }
 /* 40px minimum: measured 494×30 on an iPad — "✓ Accept order" is the tap a manager repeats more
    than any other during service, and 30px is thin for a thumb. (T14 tablet sweep, 2026-08-05) */
-.tp-accept { width: 100%; margin-top: 4px; min-height: 40px; }
+/* OBITUARY (2026-09-17): `.tp-accept { width:100%; min-height:40px }` styled the Accept button
+   that sat at the foot of each un-accepted ORDER CARD. There are no order cards any more — the
+   waiting ticket is one line in the popup (.sp-wait) with its own small Accept — and the old rule
+   was stretching that button to 372px, which squeezed the dish names to nothing. */
 
 /* ============================================================================
    Visual polish pass — brand serif headings, warmth & depth. Layered last so it
@@ -2904,7 +2907,21 @@ html[data-theme="light"] .fstat.warn .fstat-n { color: var(--gold-ink); }
   background: linear-gradient(135deg, transparent 0 45%, color-mix(in srgb, var(--gold) 60%, var(--line)) 45% 55%, transparent 55% 70%, color-mix(in srgb, var(--gold) 60%, var(--line)) 70% 80%, transparent 80%);
   border-bottom-right-radius: 14px; opacity: .7; }
 .tp-resize-handle:hover { opacity: 1; }
-@media (max-width: 1040px) { .tp-detail-floating { position: static; width: 100% !important; max-width: none; height: auto !important; max-height: none; margin-top: 14px; left: auto !important; top: auto !important; } .tp-detail-floating .tp-detail-body { overflow-y: visible; } .tp-resize-handle { display: none; } }
+/* PHONE & TABLET: the SAME portrait popup, filling the screen (owner, 2026-09-17 — "in the phone
+   also it should be looking the same"). It used to become a static block in the page below 1040px,
+   which is exactly what made a phone scroll the whole floor to read a bill. */
+@media (max-width: 1040px) {
+  .tp-detail-floating { position: fixed; left: 8px !important; right: 8px; width: auto !important; max-width: none;
+    top: calc(56px + var(--ribbon-h, 0px)) !important; height: calc(100dvh - 66px - var(--ribbon-h, 0px)) !important;
+    max-height: none; margin: 0; }
+  .tp-detail-floating .tp-detail-body { overflow: hidden; }
+  .tp-resize-handle { display: none; }
+}
+@media (max-width: 440px) {
+  .tp-detail-floating { left: 0 !important; right: 0; top: calc(50px + var(--ribbon-h, 0px)) !important;
+    height: calc(100dvh - 50px - var(--ribbon-h, 0px)) !important; }
+  .tp-detail-floating .tp-detail { border-radius: 14px 14px 0 0; }
+}
 
 /* ---- detail header: title + status pill + summary + progress bar ---- */
 .tp-detail { border-radius: 16px; }
@@ -4175,10 +4192,17 @@ html[data-theme="light"] .badge-hidden{ color:#b45309; }
   .tp-detail-floating {
     position: fixed !important; left: 8px !important; right: 8px !important;
     top: calc(62px + var(--ribbon-h, 0px) + var(--sat)) !important; width: auto !important; margin-top: 0;
-    height: auto !important; max-height: calc(100vh - 76px - var(--ribbon-h, 0px)); max-height: calc(100dvh - 76px - var(--ribbon-h, 0px) - var(--sat) - var(--sab));
+    /* TAKES THE HEIGHT, rather than growing to its content (owner, 2026-09-17: "you can decrease
+       the width but not the height"). It used to be `height: auto` with a scrolling body, which is
+       what made a phone scroll a bill: the card grew as long as the order and the dishes ran off
+       the bottom. Now the card is the screen, and the dish rows size themselves to what is left
+       (spineFit in app.js) so twenty of them fit without scrolling. */
+    height: calc(100vh - 76px - var(--ribbon-h, 0px)) !important;
+    height: calc(100dvh - 76px - var(--ribbon-h, 0px) - var(--sat) - var(--sab)) !important;
+    max-height: none;
     z-index: 40;
   }
-  .tp-detail-floating .tp-detail-body { overflow-y: auto; }
+  .tp-detail-floating .tp-detail-body { overflow: hidden; }
   .tp-detail-floating .tp-detail-head { cursor: default; }
   /* KEEP THE ✕ ON THE TITLE'S LINE (T12 phone sweep, 2026-08-05). The floating head wraps its
      top row (so "Table 1 · Preparing · KOT ▾" can breathe), and at 360px that pushed the 36px ✕
@@ -5131,3 +5155,173 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
 .pw-code .btn { position: absolute; top: 8px; right: 8px; z-index: 2; }
 .pw-steps { font-size: 13px; margin: 0 0 10px; padding-left: 20px; line-height: 1.8; color: var(--muted); }
 .pw-steps b { color: var(--text); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+   THE BILL POPUP — design "Spine" (owner picked it on 2026-09-17 out of seven)
+
+   What it replaces: per-ticket cards with KOT headings, a Guests section with a row and four
+   buttons per guest, a Calls section with a row per call, and a six-line Bill card. His words:
+   "everything should be listed in line, not in a category like soup then there is a category …
+   it should not contain space, because it is containing the space it is going down, you have to
+   scroll for like if there is a 10 item or 20 item", and "I want it in a portrait form only,
+   because in the phone also it should be looking the same".
+
+   So: one dish per LINE, the course carried inside the line as a coloured spine + three letters,
+   every band one line tall, and the row height itself measured to the room there is (spineFit in
+   app.js) so twenty dishes never scroll. Serve and ✎ sit on every line; tapping a line opens
+   that dish's own sheet over the bottom — never inline, because growing the list starts the
+   scrolling again.
+   ═══════════════════════════════════════════════════════════════════════════════════════════ */
+.tp-detail-floating .tp-detail-body { padding: 0; gap: 0; overflow: hidden; display: flex; flex-direction: column; }
+.tp-detail-floating .tp-detail-head { padding: 8px 10px 7px; }
+.tp-detail-floating .tp-detail-head h3 { font-size: 19px; }
+.tp-detail-floating .tp-det-sub { gap: 9px; font-size: 11px; margin-top: 5px; }
+.tp-detail-floating .tp-prog { margin-top: 5px; }
+.tp-detail-floating .tp-prog-leg { font-size: 10px; gap: 8px; }
+/* the footer holds every table-wide action, four across, as small labelled buttons */
+.tp-detail-floating .tp-detail-foot { padding: 5px 6px 6px; gap: 4px; display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(66px, 1fr)); align-items: stretch; }
+.tp-detail-floating .tp-detail-foot .btn { width: 100%; min-height: 34px; padding: 4px 3px; font-size: 9.5px;
+  line-height: 1.15; white-space: normal; text-align: center; border-radius: 9px; }
+.tp-detail-floating .tp-detail-foot .tp-foot-spacer { display: none; }
+.tp-detail-floating .tp-detail-foot .sx-unmerge-row { grid-column: 1 / -1; display: flex; gap: 4px; }
+.tp-detail-floating .tp-detail-foot .sx-unmerge-row .btn { min-height: 30px; }
+
+/* ── the bands: party, calls — one line each, never wrapping ──────────────────────────────── */
+.sp-band { display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 9px; flex: 0 0 auto;
+  border-bottom: 1px solid var(--line); overflow: hidden; flex-wrap: nowrap; font-size: 11px; }
+.sp-band-l { font-size: 9px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); flex: 0 0 auto; }
+.sp-band-sp { flex: 1 1 auto; }
+.sp-band-em { color: var(--muted); font-size: 11px; }
+.sp-band-words { color: var(--muted); font-size: 9.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-band .sx-auto { font-size: 9.5px; gap: 3px; flex: 0 0 auto; }
+.sp-gc { flex: 0 0 auto; white-space: nowrap; padding: 2px 6px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel-2); font-size: 9.5px; font-weight: 700; }
+.sp-gc.w { border-color: color-mix(in srgb, var(--gold) 60%, var(--line)); color: var(--gold); }
+.sp-cl { flex: 0 0 auto; min-width: 22px; height: 19px; padding: 0 4px; border-radius: 6px; font-size: 11px;
+  line-height: 1; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line));
+  background: color-mix(in srgb, var(--gold) 12%, transparent); color: var(--text); cursor: pointer; }
+.sp-cl:hover { background: color-mix(in srgb, var(--gold) 26%, transparent); }
+.sp-cl-all { min-width: 30px; font-size: 9px; font-weight: 800; letter-spacing: .04em; }
+.sp-guestrows { flex: 0 0 auto; padding: 4px 9px 6px; border-bottom: 1px solid var(--line);
+  max-height: 34vh; overflow-y: auto; }
+.sp-guestrows .sx-mem { padding: 4px 0; font-size: 12px; }
+
+/* ── the waiting ticket: one line, accept or cancel ───────────────────────────────────────── */
+.sp-wait { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 9px; flex: 0 0 auto;
+  border-bottom: 1px solid color-mix(in srgb, var(--gold) 55%, var(--line));
+  background: color-mix(in srgb, var(--gold) 13%, transparent); overflow: hidden; }
+.sp-wait-l { font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--gold-ink, var(--gold)); white-space: nowrap; flex: 0 0 auto; max-width: 74px; overflow: hidden; }
+.sp-wait-n { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; font-weight: 700; }
+.sp-wait-a { font-size: 10.5px; font-weight: 800; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.sp-ok { flex: 0 0 auto; padding: 5px 8px; white-space: nowrap; border-radius: 8px; border: 1px solid var(--gold);
+  background: var(--gold-grad, var(--gold)); color: var(--gold-on, #2a1c05); font-size: 10px; font-weight: 800; cursor: pointer; }
+.sp-no { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 7px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--muted); font-size: 11px; cursor: pointer; }
+.sp-editalg { flex: 0 0 auto; padding: 4px 9px; border-bottom: 1px solid var(--line); }
+.sp-editalg .tp-edit-extras { margin: 0; }
+
+/* ── the list's only two lines of furniture ───────────────────────────────────────────────── */
+.sp-listwrap { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.sp-bar { display: flex; align-items: center; gap: 5px; padding: 5px 8px 4px; flex: 0 0 auto; }
+.sp-seg { display: flex; flex: 1 1 auto; gap: 2px; padding: 2px; border: 1px solid var(--line);
+  border-radius: 9px; background: var(--panel-2); }
+.sp-seg button { flex: 1 1 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted);
+  padding: 5px 4px; font-size: 10.5px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.sp-seg button.on { background: var(--gold-grad, var(--gold)); color: var(--gold-on, #2a1c05); }
+.sp-bar .sx-badge2 { font-size: 9px; }
+.sp-bar .btn.small { padding: 4px 8px; font-size: 10px; }
+.sp-chips { display: flex; align-items: center; gap: 3px; height: 23px; padding: 0 8px 2px; flex: 0 0 auto;
+  overflow: hidden; flex-wrap: nowrap; }
+.sp-chip { flex: 0 0 auto; padding: 3px 6px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--panel); font-size: 9px; font-weight: 800; letter-spacing: .02em; color: var(--muted);
+  white-space: nowrap; cursor: pointer; }
+.sp-chip.on { background: var(--text); border-color: var(--text); color: var(--panel); }
+
+/* ── ONE DISH, ONE LINE ───────────────────────────────────────────────────────────────────── */
+.sp-list { flex: 1 1 auto; min-height: 0; padding: 0 8px 4px; overflow-y: auto; scrollbar-width: none; }
+.sp-list::-webkit-scrollbar { width: 0; }
+.sp-row { display: grid; grid-template-columns: 3px 22px minmax(0, 1fr) 27px 52px 24px 22px; gap: 5px;
+  align-items: center; height: var(--sp-rh, 26px); border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  cursor: pointer; }
+.sp-row:hover { background: color-mix(in srgb, var(--gold) 7%, transparent); }
+.sp-row.sp-open { background: color-mix(in srgb, var(--gold) 14%, transparent); }
+/* where one kitchen ticket ends and the next begins — a hairline, never a heading row */
+.sp-row.sp-gs { border-top: 2px solid color-mix(in srgb, var(--gold) 55%, var(--line)); }
+.sp-spine { height: calc(var(--sp-rh, 26px) - 7px); border-radius: 2px; }
+.sp-qty { font-size: 11px; font-weight: 800; color: var(--gold-ink, var(--gold)); text-align: right;
+  font-variant-numeric: tabular-nums; }
+.sp-nm { min-width: 0; display: flex; align-items: baseline; gap: 5px; }
+.sp-nm b { font-size: 12.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-nm i { font-style: normal; font-size: 9.5px; color: var(--muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 96px; }
+.sp-mrp { font-size: 8px; font-weight: 800; letter-spacing: .06em; padding: 1px 3px; border-radius: 3px;
+  border: 1px solid var(--line); color: var(--muted); }
+.sp-row.sp-served .sp-nm b { color: var(--muted); text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted) 45%, transparent); }
+.sp-cat { font-size: 8px; font-weight: 800; letter-spacing: .03em; text-align: center; }
+.sp-am { font-size: 11.5px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.sp-st { font-size: 8.5px; font-weight: 800; text-align: center; color: var(--muted); }
+.sp-st-served { color: var(--green); }
+.sp-st-received { color: var(--gold-ink, var(--gold)); }
+.sp-ib { width: min(21px, calc(var(--sp-rh, 26px) - 4px)); height: min(21px, calc(var(--sp-rh, 26px) - 4px));
+  display: grid; place-items: center; padding: 0; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--text); font-size: 10px; line-height: 1; cursor: pointer; }
+.sp-ib:hover { border-color: var(--gold); }
+.sp-ib.sp-go { border-color: color-mix(in srgb, var(--green) 45%, var(--line));
+  background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+.sp-ib-off { opacity: .35; cursor: default; }
+
+/* ── the line's own sheet: this dish, and every button for it ─────────────────────────────── */
+/* over the bottom of the list, never inside it: a sheet that pushed the rows down would
+   make the list taller than its box, which is the scrolling this design exists to remove */
+.sp-sheet { position: absolute; left: 7px; right: 7px; bottom: 4px; z-index: 6;
+  border: 1px solid var(--line); border-left: 3px solid var(--gold); border-radius: 10px;
+  background: var(--panel); padding: 7px 9px; box-shadow: 0 -8px 26px rgba(0,0,0,.28); }
+.sp-sheet-h { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 800; margin-bottom: 5px; }
+.sp-sheet-sp { flex: 1 1 auto; }
+.sp-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 10px; font-size: 11px; margin-bottom: 6px; }
+.sp-kv i { font-style: normal; font-size: 8.5px; font-weight: 800; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+.sp-sheet-b { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.sp-sheet-b .btn.small { padding: 5px 8px; font-size: 10.5px; }
+.sp-stp { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden; background: var(--panel); }
+.sp-stp .sx-qty { width: 24px; height: 22px; border: 0; background: transparent; color: var(--gold-ink, var(--gold));
+  font-size: 13px; font-weight: 800; cursor: pointer; }
+.sp-stp > span { min-width: 20px; text-align: center; font-size: 11px; font-weight: 800; }
+
+/* ── the money, two lines ─────────────────────────────────────────────────────────────────── */
+.sp-money { display: flex; align-items: baseline; gap: 8px; padding: 4px 10px; flex: 0 0 auto;
+  border-top: 1px solid var(--line); background: var(--panel-2); min-height: 28px; }
+.sp-money-b { font-size: 9.5px; color: var(--muted); overflow: hidden; }
+.sp-money-b b { color: var(--text); font-size: 10.5px; }
+.sp-money-t { margin-left: auto; display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.sp-money-t i { font-style: normal; font-size: 8.5px; font-weight: 800; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); }
+.sp-money-t b { font-size: 17px; font-weight: 800; color: var(--gold-ink, var(--gold));
+  font-variant-numeric: tabular-nums; }
+
+/* the requests card keeps its own amber look (it is rare and it matters), just tighter */
+.tp-detail-floating .sx-sec.tp-req-sec { margin: 5px 8px; padding: 6px 8px; flex: 0 0 auto; }
+.tp-detail-floating .sx-sec.tp-req-sec .sx-sec-h { font-size: 11px; margin-bottom: 4px; }
+.tp-detail-floating .sx-req { font-size: 11px; }
+.tp-detail-floating .sx-empty { padding: 14px 10px; font-size: 11.5px; text-align: center; }
+
+/* On a phone every pixel of head is a dish, so the head says the same things in less room. */
+@media (max-width: 440px) {
+  .tp-detail-floating .tp-detail-head { padding: 6px 9px 5px; }
+  .tp-detail-floating .tp-detail-head h3 { font-size: 17px; }
+  .tp-detail-floating .tp-det-sub { font-size: 10px; gap: 7px; margin-top: 4px; }
+  .tp-detail-floating .tp-prog { margin-top: 4px; }
+  .tp-detail-floating .tp-prog-bar { height: 5px; }
+  .tp-detail-floating .tp-prog-leg { font-size: 9px; gap: 6px; margin-top: 3px; }
+  .tp-detail-floating .tp-detail-foot { padding: 4px 5px 5px; gap: 3px; }
+  .tp-detail-floating .tp-detail-foot .btn { min-height: 32px; font-size: 9px; }
+  .sp-bar { padding: 4px 7px 3px; }
+  .sp-money { min-height: 26px; padding: 3px 9px; }
+}
