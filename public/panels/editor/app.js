@@ -11595,8 +11595,13 @@ function tablePanelParts(t, host = "float") {
       const servedParts = parts.filter((x) => x.status === "served");
       const cooked = cookedParts.length > 0;
       // A merged line serves every cooked part of itself in one tap; a single line is the old hook.
+      // EVERY COOKED PART, WHICHEVER WAY IT IS STORED. A merged line can hold a waiter's dish (its
+      // own order_items row) and a guest's (a line inside the order's JSON) — and "Serve" has to
+      // put BOTH out, or the guest's half sits cooking for ever while the line reads served. Each
+      // part is named in the attribute by how it must be served: `s:<item id>` or `l:<order>:<idx>`.
+      const serveList = cookedParts.map((x) => (x.kind === "session" ? `s:${x.id}` : `l:${x.orderId}:${x.idx}`)).join(",");
       const serveAttr = cookedParts.length > 1
-        ? `data-sp-serve="${esc(cookedParts.filter((x) => x.kind === "session").map((x) => x.id).join(","))}"`
+        ? `data-sp-serve="${esc(serveList)}"`
         : cookedParts.length === 1
           ? (cookedParts[0].kind === "session"
               ? `data-item-next="${esc(cookedParts[0].id)}" data-item-status="served"`
@@ -15244,7 +15249,16 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // A dish line opens its own sheet; tapping the open line (or its ✕) closes it again. The
   // buttons ON the line (serve, ✎) stop the event themselves, so a serve never opens a sheet.
   root.querySelectorAll("[data-sp-row]").forEach((b) => (b.onclick = (e) => {
-    if (e.target.closest("[data-item-next],[data-legacy-order],[data-edit-dish],[data-item-del],[data-cancel-order],[data-qty-inc],[data-qty-dec]")) return;
+    // A BUTTON ON THE LINE IS NOT THE LINE (owner, 2026-09-17: "when you click serve, why at the
+    // bottom does it open the detail about that dish? Serve is just for serve — when you click a
+    // dish, then only the detail dish view should be open").
+    // This used to list the action attributes by hand, and the merged line's serve — which carries
+    // data-sp-serve, because it serves every cooked part of itself in one tap — was not on the
+    // list, so serving a merged dish also opened its sheet. Naming them one by one is a list that
+    // goes stale the next time a button is added to a line; ANY button inside the row is now
+    // understood to have handled its own tap, which is true by construction: every one of them is
+    // a real <button> with its own handler.
+    if (e.target.closest("button,[data-item-next],[data-legacy-order],[data-sp-serve],[data-edit-dish],[data-item-del],[data-cancel-order],[data-qty-inc],[data-qty-dec]")) return;
     e.stopPropagation();
     const tt = String(b.dataset.spTable), k = b.dataset.spRow || "";
     spineState().open[tt] = spineState().open[tt] === k ? "" : k;
@@ -15254,9 +15268,15 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // A merged line's 🍽 serves every cooked part of it — one tap for "3× Espresso" that arrived on
   // two tickets. Sequential on purpose: each is its own row and its own audit line, and the second
   // must not be sent before the first is known to have landed.
-  root.querySelectorAll("[data-sp-serve]").forEach((b) => (b.onclick = async () => {
-    const ids = String(b.dataset.spServe || "").split(",").filter(Boolean);
-    for (const id of ids) await itemStatus(id, "served");
+  root.querySelectorAll("[data-sp-serve]").forEach((b) => (b.onclick = async (e) => {
+    e.stopPropagation();
+    // Sequential on purpose: each part is its own row and its own audit line, and the second must
+    // not be sent before the first is known to have landed. `s:` = a dish with its own row,
+    // `l:` = a dish inside an older/guest ticket's JSON — both end up served.
+    for (const part of String(b.dataset.spServe || "").split(",").filter(Boolean)) {
+      if (part.startsWith("s:")) await itemStatus(part.slice(2), "served");
+      else if (part.startsWith("l:")) { const [, oid, idx] = part.split(":"); await legacyItemStatus(oid, idx, "served"); }
+    }
   }));
   // Tapping an incoming ticket opens it dish by dish; the ✕ inside closes it again.
   root.querySelectorAll("[data-sp-wait]").forEach((b) => (b.onclick = (e) => {
