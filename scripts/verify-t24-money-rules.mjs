@@ -26,6 +26,27 @@ import { registerHooks } from "node:module";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => { try { return readFileSync(join(root, p), "utf8"); } catch { return ""; } };
+// ── A COMMENT IS NOT CODE, AND THIS FILE LEARNED THAT THE HARD WAY (T33, sweep #9, 2026-09-17) ──
+// The action-code scan below reads source text looking for `logAction("panel", "code", …)`. It read
+// COMMENTS too, and that is what made this guard RED on clean `main`: on 2026-09-15 another
+// terminal fixed exactly this blind spot in `verify:audit`, and wrote a `//` line in
+// app/api/maintenance/route.ts explaining it — containing the literal
+// `logAction(s.admin ? "admin" : "manager", …)`. So the sentence documenting why this used to go
+// red became the only thing making it go red, and it reported the PANEL names "admin" and
+// "manager" as action codes with no home.
+//
+// Two things were wrong and both are fixed: comments are stripped before any scan (here), and the
+// two ternary patterns now apply the same PANEL_NAMES filter the literal pattern always did (below).
+// Either alone would have silenced today's red; both are needed, because the first stops a comment
+// being read and the second stops a REAL ternary-panel call site being misread — which is the
+// thing the hoisted `const logIn = …` in that route exists to work around, and should not have to.
+//
+// `://` is spared so a URL in a string is not mistaken for a line comment, and block comments go
+// first so a `//` inside one cannot re-open anything.
+const stripComments = (src) => src
+  .replace(/\/\*[\s\S]*?\*\//g, " ")
+  .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+const readCode = (p) => stripComments(read(p));
 
 // `@/x` → <root>/x, adding the extension when the import omits it (Next resolves these; plain
 // Node does not). This is what lets the guard import lib/paySplit.ts, which pulls in
@@ -305,16 +326,23 @@ check("lib/logTrail.ts is client-safe — it imports nothing at all",
       const rel = `${dir}/${e.name}`;
       if (e.isDirectory()) { if (e.name !== "node_modules") scan(rel); continue; }
       if (!/\.(ts|tsx)$/.test(e.name)) continue;
-      const body = read(rel);
+      const body = readCode(rel);
       // logAction("panel", "action", …) / log("panel", "action", …) / the panels' log("action", …)
       for (const m of body.matchAll(/\blog(?:Action)?\(\s*"([a-z0-9_]+)"\s*,\s*(?:"([a-z0-9_]+)"\s*,)?/g)) {
         if (m[2]) written.add(m[2]);
         else if (!PANEL_NAMES.has(m[1])) written.add(m[1]);
       }
       // A ternary second argument writes TWO codes and the literal pattern above sees neither.
+      // The SECOND pattern also matches a ternary FIRST argument — `logAction(x ? "admin" :
+      // "manager", "code", …)` — where the two strings are PANELS, not codes. So the same
+      // PANEL_NAMES filter the literal loop applies is applied here: a pair that is entirely panel
+      // names is a panel choice and contributes no code.
       for (const re of [/\blog(?:Action)?\(\s*[^,]+,\s*[^,;){:]*?\?\s*"([a-z0-9_]+)"\s*:\s*"([a-z0-9_]+)"/g,
                         /\blog(?:Action)?\(\s*[^,;){:"]*?\?\s*"([a-z0-9_]+)"\s*:\s*"([a-z0-9_]+)"/g]) {
-        for (const m of body.matchAll(re)) { written.add(m[1]); written.add(m[2]); }
+        for (const m of body.matchAll(re)) {
+          if (PANEL_NAMES.has(m[1]) && PANEL_NAMES.has(m[2])) continue;
+          written.add(m[1]); written.add(m[2]);
+        }
       }
     }
   };
@@ -337,7 +365,7 @@ check("lib/logTrail.ts is client-safe — it imports nothing at all",
       const rel = `${dir}/${e.name}`;
       if (e.isDirectory()) { if (e.name !== "node_modules") scan2(rel); continue; }
       if (!/\.(ts|tsx)$/.test(e.name)) continue;
-      for (const m of read(rel).matchAll(/\blog(?:Action)?\(\s*"([a-z0-9_-]+)"\s*,\s*"([a-z0-9_]+)"/g)) {
+      for (const m of readCode(rel).matchAll(/\blog(?:Action)?\(\s*"([a-z0-9_-]+)"\s*,\s*"([a-z0-9_]+)"/g)) {
         if (!byPanel.has(m[2])) byPanel.set(m[2], new Set());
         byPanel.get(m[2]).add(m[1]);
       }
