@@ -5245,7 +5245,7 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
 /* ── ONE DISH, ONE LINE ───────────────────────────────────────────────────────────────────── */
 .sp-list { flex: 1 1 auto; min-height: 0; padding: 0 8px 4px; overflow-y: auto; scrollbar-width: none; }
 .sp-list::-webkit-scrollbar { width: 0; }
-.sp-row { display: grid; grid-template-columns: 3px 22px minmax(0, 1fr) 27px 52px 24px 22px; gap: 5px;
+.sp-row { display: grid; grid-template-columns: 3px 22px minmax(0, 1fr) 54px 25px 22px; gap: 6px;
   align-items: center; height: var(--sp-rh, 26px); border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
   cursor: pointer; }
 .sp-row:hover { background: color-mix(in srgb, var(--gold) 7%, transparent); }
@@ -5332,3 +5332,56 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
 .tp-detail-floating.sp-tight .sp-chips { display: none; }
 .tp-detail-floating.sp-tight .tp-prog-leg { display: none; }
 .tp-detail-floating.sp-tight .tp-detail-head { padding-bottom: 5px; }
+
+
+/* ── the popup, second pass (owner, 2026-09-17) ──────────────────────────────────────────────
+   · the same dish from two tickets is ONE line, with a small "2⟩" saying so and the breakdown
+     inside its sheet;
+   · everything already served sinks to the bottom, so the top of the list is what is left;
+   · the course is the coloured spine and nothing else — no letters, no chip strip;
+   · the party sits in the head beside the table's mark;
+   · an incoming ticket can be read dish by dish before it is accepted.
+   ─────────────────────────────────────────────────────────────────────────────────────────── */
+/* OBITUARY: .sp-cat (the SOU/STR/MAI tag on every line) and .sp-chips/.sp-chip (the per-course
+   filter strip) — both said the course in words, which he does not want on this screen. */
+.sp-list.sp-kotview .sp-row { grid-template-columns: 3px 22px minmax(0, 1fr) 24px 52px 25px 22px; }
+.sp-kotmark { font-size: 8.5px; font-weight: 800; letter-spacing: .02em; text-align: center; color: var(--gold-ink, var(--gold)); }
+.sp-parts { font-size: 8.5px; font-weight: 800; color: var(--gold-ink, var(--gold)); flex: 0 0 auto; }
+.sp-st-part { color: var(--gold-ink, var(--gold)); font-variant-numeric: tabular-nums; }
+/* a served line is quiet, but still readable — it is the record of what went out */
+.sp-row.sp-served { opacity: .72; }
+
+/* the party chip, in the head, right after the Family / VIP mark */
+.sp-partychip { cursor: pointer; border-style: solid; }
+.sp-partychip.on { background: var(--gold-grad, var(--gold)); color: var(--gold-on, #2a1c05); border-color: var(--gold); }
+.sp-guestrows { flex: 0 0 auto; padding: 4px 9px 6px; border-bottom: 1px solid var(--line); max-height: 36vh; overflow-y: auto; }
+.sp-guestrows-h { display: flex; align-items: center; gap: 8px; font-size: 9px; font-weight: 800;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--muted); padding: 2px 0 4px; }
+.sp-guestrows-h .sx-auto { margin-left: auto; font-size: 9.5px; letter-spacing: 0; text-transform: none; }
+
+/* a dish's sheet: the line's total, then one row per ticket it came on */
+.sp-sheet-c { font-size: 9.5px; font-weight: 700; color: var(--muted); }
+.sp-parts-list { display: flex; flex-direction: column; gap: 3px; margin-top: 5px; max-height: 40vh; overflow-y: auto; }
+.sp-part { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: 11px; }
+.sp-part-k { font-size: 9px; font-weight: 800; letter-spacing: .04em; color: var(--muted); white-space: nowrap; }
+.sp-part-q { font-size: 11px; font-weight: 800; color: var(--gold-ink, var(--gold)); }
+.sp-part-s { font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.sp-part-b { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.sp-part-b .btn.small { padding: 4px 7px; font-size: 10px; }
+.sp-part-n { min-width: 0; display: flex; flex-direction: column; }
+.sp-part-n b { font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-part-n i { font-style: normal; font-size: 9px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-part-a { margin-left: auto; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sp-part-wait { gap: 6px; }
+.sp-part-wait .sp-spine { height: 18px; width: 3px; border-radius: 2px; }
+
+/* the incoming ticket: tappable, and its own sheet */
+.sp-wait { cursor: pointer; }
+.sp-wait.on { box-shadow: inset 0 0 0 1px var(--gold); }
+.sp-wait-x { font-size: 10px; color: var(--gold-ink, var(--gold)); flex: 0 0 auto; }
+.sp-sheet-wait { border-left-color: var(--gold); }
+.sp-wait-alg { font-size: 10.5px; color: var(--gold-ink, var(--gold)); background: color-mix(in srgb, var(--gold) 12%, transparent);
+  border-radius: 7px; padding: 4px 7px; margin-bottom: 4px; }
+.sp-wait-tot { font-size: 11px; font-weight: 700; }
+.sp-sheet-b { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 7px; }

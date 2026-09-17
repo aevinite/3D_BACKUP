@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The bill popup — every state, and a live one</title>
+<style>
+:root{--bg:#0f1115;--card:#171a20;--line:#272b33;--ink:#e8ecf2;--muted:#8b93a1;--gold:#d4a574}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:22px 24px 10px;max-width:1500px;margin:0 auto}
+h1{margin:0 0 8px;font:700 24px/1.2 ui-sans-serif,sans-serif}
+header p{margin:0 0 4px;color:var(--muted);max-width:980px}
+header b{color:var(--ink)}
+h2{max-width:1500px;margin:26px auto 0;padding:0 24px;font:700 15px/1.2 ui-sans-serif,sans-serif;color:var(--gold);
+  letter-spacing:.06em;text-transform:uppercase}
+.live{max-width:1500px;margin:12px auto 0;padding:0 24px}
+.livebox{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#000;height:860px}
+.livebox iframe{width:100%;height:100%;border:0;display:block}
+.livenote{color:var(--muted);font-size:12.5px;margin:8px 0 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;padding:14px 24px 46px;max-width:1500px;margin:0 auto}
+.c{margin:0;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.shotwrap{background:#0b0d11;border-bottom:1px solid var(--line);display:flex;justify-content:center;align-items:flex-start;
+  max-height:560px;overflow:hidden}
+.c img{display:block;max-width:100%;height:auto}
+figcaption{padding:11px 13px 13px;display:flex;flex-direction:column;gap:5px}
+figcaption b{font:700 13.5px/1.25 ui-sans-serif,sans-serif;text-transform:capitalize}
+figcaption span{color:var(--muted);font-size:12.5px}
+footer{max-width:1500px;margin:0 auto;padding:0 24px 40px;color:var(--muted);font-size:12.5px}
+code{background:#171a20;border:1px solid var(--line);border-radius:5px;padding:1px 5px;color:#cdd4de}
+</style></head>
+<body>
+<header>
+  <h1>The bill popup — every state it can be in, and one live one</h1>
+  <p>Every picture below is the <b>real popup in the real app</b>, photographed by driving the manager panel
+  (table {{TABLE}} on the backup stack, {{AT}}). Nothing is drawn by hand.</p>
+  <p>What it is keeping to: <b>one dish per line, in the menu's own order</b> · the course is only the coloured spine
+  (no words, no chip strip) · <b>the same dish from two tickets is one line</b> with the breakdown inside it ·
+  <b>everything served sinks to the bottom</b> · the party sits in the head beside the table's mark ·
+  serve and ✎ on every line · an incoming ticket can be read dish by dish before it is accepted ·
+  <b>nothing scrolls</b>, on a laptop or a phone.</p>
+</header>
+
+<h2>The live one — this is the app, not a picture</h2>
+<div class="live">
+  <div class="livebox"><iframe src="/manager" title="the live manager panel"></iframe></div>
+  <p class="livenote">Signed in already. Tap table <b>{{TABLE}}</b> or <b>29</b> — both have a full bill on them.
+  Everything works: accept the waiting ticket, serve a dish, open a line, ✎ it, flip to KOT-wise, print.</p>
+</div>
+
+<h2>Every state</h2>
+<div class="grid">{{CARDS}}</div>
+<footer>
+  Made by <code>scripts/tmp-states.mjs</code> driving the panel with Playwright · the popup lives in
+  <code>public/panels/editor/app.js</code> (<code>tablePanelParts</code> → the spine list) and
+  <code>public/panels/editor/style.css</code> (<code>.sp-*</code>).
+</footer>
+</body></html>

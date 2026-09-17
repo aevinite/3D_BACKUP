@@ -1,0 +1,108 @@
+{
+ "table": "17",
+ "shots": [
+  {
+   "name": "01-take-order",
+   "caption": "A free table has nothing to read, so tapping it goes straight to ＋ Take order — the dish builder.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "02-waiting",
+   "caption": "A guest's order has landed. It is ONE amber line, not on the bill yet: what came, what it costs, ✓ Accept, ✕.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "03-accept-detail",
+   "caption": "Tap that line and the incoming ticket opens dish by dish — quantities, money, what to avoid in every dish — with Cancel and Accept at the end.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "04-accepted",
+   "caption": "Accepted. Its dishes are now on the bill, in their menu place, and the amber line is gone.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "05-full-bill",
+   "caption": "The whole bill: 20 dish lines, one per dish, in the menu's own order. The same dish from two tickets is one line, with a small 2⟩ saying so.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "06-served-sinks",
+   "caption": "Served dishes sink to the bottom and go quiet, so the top of the list is only what is still to come.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "07-dish-sheet",
+   "caption": "A dish's own detail: its course, its total, and one row per ticket it came on — each with its own Serve, ✎, quantity, remove and void.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "08-dish-edit",
+   "caption": "✎ on any line: allergens to avoid and the kitchen note for that one dish.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "09-kot-wise",
+   "caption": "The same bill, ticket by ticket. No headings here either: the ticket is on the line, and a hairline shows where one ends.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "10-calls",
+   "caption": "Six calls ringing at once, on one line. Each emoji is the button that clears it; all ✓ clears the lot.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "11-tag-family",
+   "caption": "Marked Family — the mark sits in the head, and the party chip beside it.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "11-tag-vip",
+   "caption": "Marked VIP.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "11-tag-guest",
+   "caption": "Marked Owner's guest.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "14-discount",
+   "caption": "A discount on the bill: the money line carries it, and the total is what is due.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "15-all-served",
+   "caption": "Everything is out. The bar is full, every line is quiet, and the only thing left is the money.",
+   "w": 1512,
+   "h": 900
+  },
+  {
+   "name": "16-phone",
+   "caption": "The same popup on a phone (392 × 844) — the identical thing, edge to edge.",
+   "w": 392,
+   "h": 844
+  },
+  {
+   "name": "17-short-window",
+   "caption": "A short window: the rows shrink to fit rather than scroll, and the progress legend is dropped before the dishes are.",
+   "w": 1512,
+   "h": 900
+  }
+ ],
+ "at": "2026-09-17T08:01:48.198Z"
+}
