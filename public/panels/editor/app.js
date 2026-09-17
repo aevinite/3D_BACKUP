@@ -11608,7 +11608,9 @@ function tablePanelParts(t, host = "float") {
         ${view === "kot" ? `<span class="sp-kotmark" title="Kitchen ticket #${esc(r._kot)} · ${esc(r._at || "")}">K${esc(r._kot != null ? r._kot : "?")}</span>` : ""}
         <span class="sp-am">${inr((Number(r.price) || 0) * qty)}</span>
         ${cooked ? `<button class="sp-ib sp-go" ${serveAttr} title="${cookedParts.length > 1 ? `Serve all ${cookedParts.length} of them` : "Serve this dish"}">🍽</button>` : st}
-        ${r.kind === "session" ? `<button class="sp-ib" data-edit-dish="${esc(parts[0].id)}" title="Edit this dish — allergens & kitchen note">✎</button>` : `<span class="sp-ib sp-ib-off" title="An older order: this dish has no line of its own to edit">✎</span>`}
+        ${r.kind === "session"
+          ? `<button class="sp-ib" data-edit-dish="${esc(parts[0].id)}" title="Edit this dish — allergens & kitchen note">✎</button>`
+          : `<span class="sp-ib-none" title="This dish came on an older ticket, which has no line of its own in the database — its allergens are changed on the whole ticket, in ✎ Edit"></span>`}
       </div>`;
     };
 
@@ -11655,6 +11657,7 @@ function tablePanelParts(t, host = "float") {
           <span><i>Note</i> ${r.note ? esc(r.note) : "—"}</span>
         </div>
         <div class="sp-parts-list">${parts.map(partRow).join("")}</div>
+        ${parts.some((p) => p.kind !== "session") ? `<div class="sp-legacy">This dish came on an older ticket, from before dishes were stored line by line. It can be served and voided, but its allergens and note are changed on the whole ticket — ✎ Edit, at the top of the list.</div>` : ""}
       </div>`;
     }
 

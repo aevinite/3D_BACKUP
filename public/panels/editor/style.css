@@ -5274,7 +5274,15 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
 .sp-ib:hover { border-color: var(--gold); }
 .sp-ib.sp-go { border-color: color-mix(in srgb, var(--green) 45%, var(--line));
   background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
-.sp-ib-off { opacity: .35; cursor: default; }
+/* OBITUARY — .sp-ib-off (2026-09-17). A dimmed ✎ on the rows that cannot be edited one dish at a
+   time (dishes from an older ticket, stored as JSON with no line of their own). The owner asked
+   "why the edit button is diff for both?" — and he was right: at 35% a ✎ stops reading as a
+   disabled pencil and starts reading as a different, broken control. A button that cannot do
+   anything is worse than an empty space, so the space is empty now and the line's own sheet says
+   why in a sentence. */
+.sp-ib-none { width: min(21px, calc(var(--sp-rh, 26px) - 4px)); height: 1px; }
+.sp-legacy { margin-top: 6px; font-size: 10.5px; line-height: 1.45; color: var(--muted);
+  border-top: 1px dashed var(--line); padding-top: 5px; }
 
 /* ── the line's own sheet: this dish, and every button for it ─────────────────────────────── */
 /* over the bottom of the list, never inside it: a sheet that pushed the rows down would
