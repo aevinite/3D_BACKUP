@@ -365,3 +365,18 @@ NOTIFY pgrst, 'reload schema';
 -- database while the 001-118 sweep was running, and what npm run verify:run-alone caught.
 -- A full re-seed ends correctly (354 sorts after this file). This closes the partial-run route.
 DROP FUNCTION IF EXISTS lfh_request_verification(text, text, uuid);
+
+-- ⚠️ RUN-ALONE GUARD, THE SECOND HALF (sweep #9, T32, 2026-09-18).
+-- The line above closes the `lfh_request_verification` half. `lfh_check_verification`, created
+-- earlier in this same file, is the other half and is equally RETIRED: migration 297 — named
+-- "undo a resurrection" — dropped it the very next file, because this file had put back something
+-- migration 267 deleted on purpose as dead code. 297's own header records that this is not
+-- hypothetical: it happened on the shared dev database while a sweep was running.
+--
+-- Left as it was, running THIS FILE ALONE re-creates the checker AND re-grants it to the public
+-- menu key (the GRANT is a few lines under its definition), so a code-checking door comes back for
+-- a feature whose switch is off and whose partner function does not exist.
+--
+-- A FULL re-seed already ends correctly (297 sorts after this file). Idempotent, and safe where it
+-- does not exist. Guarded by `npm run verify:run-alone`.
+DROP FUNCTION IF EXISTS public.lfh_check_verification(text, text, uuid);

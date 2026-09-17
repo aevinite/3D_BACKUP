@@ -283,3 +283,17 @@ BEGIN
 END; $function$;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (sweep #9, T32, 2026-09-18).
+-- `lfh_merge_group` above is RETIRED. Migration 267 dropped it as dead code — nothing in the app or
+-- in any other function ever called it; `lfh_merge_parent_table`, defined in this same file, is the
+-- one the merge paths actually use, and it survives.
+--
+-- Left as it was, running THIS FILE ALONE — the single-file route CLAUDE.md recommends — puts the
+-- dead function back on the database, where the next reader has to work out from scratch which of
+-- the two merge helpers is real. It is service_role-only, so nothing a guest or a staff key can
+-- reach, which is why this is tidiness rather than money: the cost is the next person's time.
+--
+-- A FULL re-seed already ends correctly (267 sorts after this file). Idempotent, and safe where it
+-- does not exist. Guarded by `npm run verify:run-alone`.
+DROP FUNCTION IF EXISTS public.lfh_merge_group(uuid, text);

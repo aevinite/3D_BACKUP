@@ -55,9 +55,11 @@ const head = (m) => console.log("\n" + m);
 // they will come back". Delete an entry as its file is fixed; never add one to silence a new fault.
 const KNOWN_BACKLOG = new Set([
   "218_error_signatures.sql|function|lfh_bump_error_signature",           // retired by 219 (no-muting rework)
-  "236_write_down_the_unwritten_function.sql|function|lfh_check_ban_scoped", // retired by 281, which predicted this
-  "249_merge_is_recorded_and_reversible.sql|function|lfh_merge_group",    // retired by 267 as having no caller
-  "296_database_layer_a_sweep_fixes.sql|function|lfh_check_verification", // retired by 297, "undo a resurrection"
+  // 236, 249 and 296 lived here until 2026-09-18, when sweep #9's T32 — the terminal that owns
+  // migrations at positions 241-320 — gave each of them the same one-line ending this list was
+  // waiting for. 236 was the one migration 281 had predicted ("if 236 is ever re-run alone they
+  // will come back"); 296 was the one migration 297 had already had to undo on a live dev
+  // database. A name belongs here only while its file is genuinely waiting on someone.
   // Three index entries lived here for a few hours on 2026-09-15, the day the INDEX kind was added.
   // All three are FIXED — 091 and 095 now carry the same one-line ending, so the list is back to the
   // four function entries it held before. A name belongs here only while its file is genuinely
