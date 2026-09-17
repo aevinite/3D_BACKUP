@@ -94,8 +94,20 @@ else {
   if (c.attgenerated === "s") pass("it is GENERATED … STORED, so nothing can write it by hand or let it go stale");
   else fail(`orders.net_amount is not a stored generated column (attgenerated=${JSON.stringify(c.attgenerated)})`);
   const expr = (c.expr || "").replace(/\s+/g, " ").trim();
-  if (/^\(?total - disc_gross\)?$/.test(expr)) pass(`its expression is still exactly "${expr}"`);
-  else fail(`its expression changed to "${expr}" — expected "total - disc_gross"`);
+  // MIGRATION 390 (2026-09-16) DELIBERATELY CHANGED THIS EXPRESSION, and this guard was not told.
+  // It read `total - disc_gross` from migration 310 until then; 390 wrapped it in ROUND(…, 2) so the
+  // takings column carries paise like every other money column, and in GREATEST(…, 0) because you
+  // cannot collect less than nothing. That is the whole of the change — the SAME two columns, the
+  // same subtraction, then rounded and floored. Measured when 390 landed and re-measured here: not
+  // one paid, non-cancelled order moved by a paisa, so no revenue figure on any screen changed.
+  // The literal stays a LITERAL on purpose: "the one definition" only means something if a human
+  // has to come here and change it on the day they change the column. Both shapes are accepted so
+  // this guard is honest on a database that has not had 390 applied yet.
+  const PRE_390  = /^\(?total - disc_gross\)?$/;
+  const POST_390 = /^GREATEST\(round\(\(?total - disc_gross\)?, 2\), \(0\)::numeric\)$/i;
+  if (POST_390.test(expr)) pass(`its expression is still exactly "${expr}" (mig 390: rounded to paise, floored at zero)`);
+  else if (PRE_390.test(expr)) pass(`its expression is still exactly "${expr}" (migration 390 not applied on this database yet)`);
+  else fail(`its expression changed to "${expr}" — expected GREATEST(round(total - disc_gross, 2), 0) (mig 390), or the pre-390 "total - disc_gross"`);
   if (c.typ === "numeric") pass("it is numeric, so summing it is exact (no float drift on money)");
   else fail(`orders.net_amount is ${c.typ}, not numeric`);
 }
@@ -148,22 +160,47 @@ for (const [tbl, cols] of [["orders_daily_agg", ["net_paid"]], ["orders_report_m
   if (!missing.length) pass(`${tbl} stores ${cols.join(" + ")} — the owner's older-than-2-days figures read the same number as today's`);
   else fail(`${tbl} is missing ${missing.join(", ")} — those readers are back to subtracting two columns for history`);
 }
-// The two must agree on the same rows, or history and today tell different stories.
+// The two must agree on the same rows, or history and today tell different stories. Compared WITHIN
+// each rollup row, never against a live SUM over `orders` — a rollup is a nightly snapshot, so a
+// live comparison would go red simply because today's orders are newer than last night's cron.
+//
+// WHAT MIGRATION 390 CHANGED HERE (2026-09-16), and why this is not a weakening. `net_paid` and
+// `net_canc` are SUM(net_amount), and 390 made net_amount round each row to paise. The PAID half is
+// still asserted EXACTLY — measured: the gap is 0.00 on every rollup row, because not one paid,
+// non-cancelled order was moved by the rounding. The CANCELLED half is allowed the rounding and
+// nothing more: half a paisa is the most ROUND(…, 2) can move one row, so `0.005 × canc_orders` is
+// the arithmetic ceiling for that row, not a tolerance chosen to make a red check pass. A gap wider
+// than that is still a failure, and it names the row.
 const rollDrift = await q(`
   SELECT (SELECT COALESCE(SUM(net_paid) - SUM(gross_paid - COALESCE(disc_gross_paid,0)), 0) FROM public.orders_daily_agg) AS d,
          (SELECT COALESCE(SUM(net_paid) - SUM(gross_paid - COALESCE(disc_gross_paid,0)), 0) FROM public.orders_report_monthly_agg) AS m,
-         (SELECT COALESCE(SUM(net_canc) - SUM(gross_canc - COALESCE(disc_gross_canc,0)), 0) FROM public.orders_report_monthly_agg) AS c,
-         (SELECT count(*)::int FROM public.orders_daily_agg WHERE net_paid IS NULL) AS nulls`);
+         (SELECT count(*)::int FROM public.orders_daily_agg WHERE net_paid IS NULL) AS nulls,
+         (SELECT count(*)::int FROM public.orders_report_monthly_agg
+            WHERE abs(net_canc - (gross_canc - COALESCE(disc_gross_canc,0))) > 0.005 * GREATEST(canc_orders,1)) AS canc_over,
+         (SELECT COALESCE(max(abs(net_canc - (gross_canc - COALESCE(disc_gross_canc,0)))), 0)
+            FROM public.orders_report_monthly_agg) AS canc_worst`);
 const rd = rollDrift[0];
-if (Number(rd.d) === 0 && Number(rd.m) === 0 && Number(rd.c) === 0) pass("the stored rollup net equals the old gross-minus-discount arithmetic exactly (drift 0)");
-else fail(`a rollup's stored net drifted from the arithmetic it replaced: daily ${rd.d}, monthly ${rd.m}, cancelled ${rd.c}`);
+if (Number(rd.d) === 0 && Number(rd.m) === 0) pass("the stored rollup net equals gross-minus-discount EXACTLY on the paid side (drift 0) — no revenue figure moved");
+else fail(`a rollup's stored PAID net drifted from the arithmetic it replaced: daily ${rd.d}, monthly ${rd.m}`);
+if (Number(rd.canc_over) === 0) pass(`the cancelled side agrees within the per-row rounding mig 390 introduced (worst row off by ${rd.canc_worst}, ceiling is half a paisa × that row's cancelled orders)`);
+else fail(`${rd.canc_over} rollup row(s) have a cancelled net further from gross-minus-discount than rounding can explain (worst ${rd.canc_worst})`);
 if (Number(rd.nulls) === 0) pass("every rollup row carries the net (no row falls back to the old expression)");
 else fail(`${rd.nulls} rollup rows have no net_paid — they silently fall back to the old arithmetic`);
 
 head("the stored column cannot be stale");
-const drift = await q(`SELECT count(*)::int AS n FROM public.orders WHERE net_amount IS DISTINCT FROM (total - disc_gross)`);
-if (drift[0].n === 0) pass(`all orders agree with the definition (0 rows out of step)`);
-else fail(`${drift[0].n} orders have a net_amount that disagrees with total - disc_gross`);
+// ASK THE DATABASE WHAT THE DEFINITION IS, then assert every row obeys THAT. Written this way on
+// 2026-09-18 (sweep #9 T32) because the old version compared every row against a hard-coded
+// `total - disc_gross`, so the day migration 390 rounded the column 82 rows "disagreed" and this
+// guard went red on clean main with nothing wrong. Reading the installed expression makes the check
+// STRONGER, not weaker: it now catches a generated column that has stopped matching its own
+// definition whatever that definition is, which is the only thing this section was ever asking.
+const netExpr = (col[0]?.expr || "").replace(/\s+/g, " ").trim();
+if (!netExpr) fail("orders.net_amount has no generation expression to check the rows against");
+else {
+  const drift = await q(`SELECT count(*)::int AS n FROM public.orders WHERE net_amount IS DISTINCT FROM (${netExpr})`);
+  if (drift[0].n === 0) pass(`all orders agree with the installed definition — ${netExpr} (0 rows out of step)`);
+  else fail(`${drift[0].n} orders have a net_amount that disagrees with its own definition ${netExpr}`);
+}
 
 // ── THE APP-CODE HALF (2026-08-20) ───────────────────────────────────────────────────────────
 // Everything above this line guards the DATABASE. Every check passed, and the admin Bill ledger
