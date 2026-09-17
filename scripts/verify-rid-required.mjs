@@ -181,16 +181,36 @@ if (!env.SUPABASE_ACCESS_TOKEN) {
 // or a new trigger on one of the six. So the claim is now CHECKED: the set of (body × nullable
 // table) pairs must be exactly the one pair we have read and explained. A new pair goes red, and
 // whoever sees it reads the correction block in migration 386 before deciding.
-head("D · every row-coalescing body still reads its restaurant from a NOT NULL column");
+// **MIGRATION 395 CLOSED IT** (the owner picked it as item 7, 2026-09-17): `lfh_rt_emit` now
+// returns without emitting anything when the row it fired on has no restaurant, because no scoped
+// subscriber should hear it. So EXPLAINED below is EMPTY on purpose — there is no longer a body
+// that can reach its restaurant-#1 arm, and a pair reappearing here is a regression, not a known
+// case.
+//
+// CHECKED THREE WAYS, because the claim can stop being true in three different places: no
+// body/table pair can reach the arm, `lfh_rt_emit` still carries its refusal, and every one of its
+// triggers is still AFTER. That last one matters more than it looks — 395's fix is an early
+// `RETURN NULL`, and in a **BEFORE** row trigger returning NULL SKIPS THE WRITE, so a BEFORE
+// trigger added to this function later would silently stop activity rows being recorded at all. An
+// audit table quietly losing rows is the worst failure this product has, so it is asserted.
+//
+// AND THE MATCH IS MADE ON CODE, NOT ON TEXT. 395's own header quotes the line it removed, so a
+// regex over the raw `pg_get_functiondef` still "finds" the fallback in a comment — the same
+// mistake that had `verify:t24-money-rules` red on main for two days. `code()` above strips
+// comments; the filtering therefore happens here in JS, not in the SQL.
+head("D · no function body can reach its restaurant-#1 arm, and 395's refusal is still installed");
 if (!env.SUPABASE_ACCESS_TOKEN) {
   console.log("⏭  skipped: needs the database.");
 } else {
   try {
-    const EXPLAINED = new Set(["lfh_rt_emit/staff_actions"]);
-    const fns = await q(`select p.proname nm, pg_get_functiondef(p.oid) d
-                           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-                          where n.nspname = 'public' and p.prokind = 'f'
-                            and pg_get_functiondef(p.oid) ~* 'coalesce\\(\\s*(new|old|r|v|v_s|v_o|v_order|v_sess)\\.restaurant_id'`);
+    // EMPTY ON PURPOSE since migration 395. An entry here would mean a body that CAN answer as
+    // French House and that somebody read and accepted; there is none.
+    const EXPLAINED = new Set();
+    const allFns = await q(`select p.proname nm, pg_get_functiondef(p.oid) d
+                              from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                             where n.nspname = 'public' and p.prokind = 'f'`);
+    const ROW_FALLBACK = /coalesce\(\s*(?:new|old|r|v|v_s|v_o|v_order|v_sess)\.restaurant_id\s*,\s*'0{8}-0{4}-0{4}-0{4}-0{11}1'/i;
+    const fns = allFns.filter((f) => ROW_FALLBACK.test(code(f.d)));
     const nullable = (await q(`select c.table_name t from information_schema.columns c
                                  join information_schema.tables x on x.table_name = c.table_name
                                   and x.table_schema = 'public' and x.table_type = 'BASE TABLE'
@@ -209,11 +229,32 @@ if (!env.SUPABASE_ACCESS_TOKEN) {
     const fresh = pairs.filter((x) => !EXPLAINED.has(x));
     ok(fns.length > 0 && nullable.length > 0, `read ${fns.length} row-coalescing body(ies) against ${nullable.length} still-nullable table(s)`);
     ok(fresh.length === 0, fresh.length === 0
-      ? `the only body that can actually reach its "restaurant #1" arm is the one already read and explained (${[...EXPLAINED].join(", ")}) — every other one reads a NOT NULL column, so migration 386's reason still holds`
-      : `${fresh.length} NEW body/table pair(s) can reach the restaurant-#1 arm: ${fresh.join(", ")}. `
+      ? `NO body can reach its "restaurant #1" arm from a still-nullable column — the ${fns.length} `
+        + `row-coalescing bodies all read a NOT NULL column, and migration 395 removed the one that `
+        + `did not (lfh_rt_emit, on staff_actions)`
+      : `${fresh.length} body/table pair(s) can reach the restaurant-#1 arm: ${fresh.join(", ")}. `
         + `A row with no restaurant there would be announced as My Little French House's. Read the `
-        + `correction block in migration 386, then either make the column NOT NULL, stop the body `
-        + `falling back, or add the pair to EXPLAINED with the reason.`);
+        + `correction block in migration 386 and migration 395's header, then either make the column `
+        + `NOT NULL, stop the body falling back, or add the pair to EXPLAINED with the reason.`);
+
+    // ── 395's own two invariants ───────────────────────────────────────────────────────────────
+    const emit = code(allFns.find((f) => f.nm === "lfh_rt_emit")?.d || "");
+    ok(/IF\s+r\.restaurant_id\s+IS\s+NULL\s+THEN/i.test(emit) && !ROW_FALLBACK.test(emit),
+      "lfh_rt_emit refuses to announce an event that belongs to no restaurant, instead of stamping it "
+      + "with restaurant #1's id (migration 395)");
+
+    const emitTrg = await q(`select c.relname tbl, t.tgname, (t.tgtype & 2) > 0 as is_before
+                               from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+                               join pg_class c on c.oid = t.tgrelid
+                              where not t.tgisinternal and p.proname = 'lfh_rt_emit'`);
+    const before = emitTrg.filter((x) => x.is_before === true).map((x) => `${x.tbl}.${x.tgname}`);
+    ok(emitTrg.length > 0 && before.length === 0,
+      before.length === 0
+        ? `all ${emitTrg.length} of lfh_rt_emit's triggers are AFTER, so 395's early RETURN NULL cannot skip a write`
+        : `${before.length} of lfh_rt_emit's triggers are BEFORE (${before.join(", ")}). Migration 395's `
+          + `early RETURN NULL SKIPS THE WRITE in a BEFORE row trigger, so those tables would silently `
+          + `stop recording rows with no restaurant. Make the trigger AFTER, or give 395's early exit a `
+          + `RETURN that is correct for a BEFORE trigger.`);
   } catch (e) { console.log(`⏭  skipped: ${String(e.message).slice(0, 110)}`); }
 }
 
