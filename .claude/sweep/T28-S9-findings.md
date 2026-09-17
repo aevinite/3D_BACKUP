@@ -70,3 +70,27 @@ Both were red before this branch existed, and a red guard here blocks every sess
   `lib/printSetupCode.ts` with no `restaurant_id` in the WHERE clause. That is S9-T11's territory.
 - **`verify:abort-guard` — 2 problems**, both `fetch(input, init)` in `lib/netRetry.ts`. Not named
   by any S9 prompt.
+
+## The `9000000001` guest row — closed, 2026-09-17 (owner picked item 15)
+
+During round 2 one of my checks erased a guest on the hard-coded number `9000000001` at French
+House, on the assumption that a made-up number belongs to nobody. It did not; the erase answered
+`erased: 1`. I reported it as "another terminal's fixture". **It was not, and the correction
+matters, so nobody re-investigates it and nobody goes looking for a broken sweep:**
+
+- The number appears in exactly one other place in this repo, `scripts/sweep/t16/blockE.mjs`, and
+  **that file makes zero database calls** — every `9000000001` in it is a literal inside a crafted
+  API response handed straight to the page. T16 neither created the row nor reads it, and nothing
+  else in `scripts/`, `tests/` or `supabase/` mentions the number at all.
+- What was deleted was the French House half of a **pair** of hand-made rows named
+  `Audit Walkthrough`, `first_seen_at` **2026-08-02** — left behind by a manual walkthrough over a
+  month before this sweep, not by any running terminal.
+- **The twin is still on Aangan and is deliberately left there.** Aangan is the read-only control;
+  quietly tidying the control is the one thing the control exists to prevent. It is recorded here
+  so the next person knows what it is rather than deleting it as litter.
+- It was NOT recreated, and that stays right: the erasure audit keeps only the last four digits by
+  design, so a "restored" row would be invented data — worse than a hole that is written down.
+
+The rule the mistake earns is unchanged and is now in the check itself: **prove the absence
+immediately before the call, with a random number.** On a database forty terminals share, a
+made-up constant is somebody's real row.
