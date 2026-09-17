@@ -13,6 +13,40 @@ owner looks, with cache busting, before claiming anything.
 
 ---
 
+- [x] **"Send to kitchen" is INSTANT now** (2026-09-17, mig 394). His words: *"whenever I click on a
+  manager panel table view and uh, take order and then click on uh, send to kitchen it takes like two
+  or three seconds I want it instantly… it should not feel the gap of that thing… everything should
+  update very fast and everything should be done very fast"*.
+  **Where it lives:** manager panel (and the owner's Manager mode) → **Table view** → tap a table →
+  **＋ Take order** → build the cart → **Send to kitchen**. What he SEES: the builder closes the
+  moment he presses it (measured 8–25 ms, was 1,136 ms), the dishes are already on the table behind
+  it, and the toast says "Order sent to the kitchen ✓ · 2 dishes". The waiter tablet's own order
+  screen got the server half of the change, not the instant-close (its screen is untouched).
+  **What was measured first** (dev stack → Mumbai database, three runs): the request itself took
+  673–1,149 ms, and the floor refresh after it another ~300–600 ms. Of that request, ~190 ms was four
+  checks asked one after another, ~205 ms was three database calls doing one job, and ~270 ms was the
+  real work (pricing + placing). So: the four checks now travel together, the three calls became ONE
+  (`lfh_staff_mark_placed`, migration 394 — same result, proved row by row), the audit row rides with
+  them, and the screen applies the tap itself and lets the server catch up, exactly as ✓ Accept and
+  Serve have done since June. Request: **673 ms → ~330 ms**. Wait before the screen moves: **~1.4 s →
+  ~0.02 s**.
+  **A refusal hands the order back whole** — the builder re-opens with the same cart, allergens,
+  notes and held discount, and says why (sold out · off the menu · needs a price · "the same order
+  twice?"). With no signal the toast says *"Saved on this device ✓ — it'll send by itself…"*, never
+  "sent".
+  **Checked, not claimed:** his exact flow driven headless in Chrome (French House, the dev stack's
+  write-to restaurant) — builder gone in 25 ms, dishes on the table in 144 ms, server
+  answered at 684 ms, money identical before and after the real row replaced the optimistic one
+  (₹1,323 both), no console errors, no leftover pending rows · **and on a NON-#1 restaurant** — the
+  two-restaurant owner's own Manager mode on **Pizza Palace**, builder gone in 24 ms, the request
+  scoped to `rid=…0002`, the order marked on that restaurant and nothing on French House · every
+  refusal re-checked word for word
+  on both the manager and tablet routes (same status, same sentence as before) · the no-signal path
+  driven offline→online (queue took it, drained by itself, table read 0/1 served) · `verify:taps`,
+  `verify:ui`, `verify:grants`, `verify:migration-truth`, `verify:clash`, `verify:rpc-contract`,
+  `verify:rpc-scoped`, `verify:rejected`, `verify:no-ask` and `npm run typecheck` all green · the new
+  database function refuses a null restaurant and cannot touch another restaurant's order (probed).
+
 - [x] **The printer helper stopped asking for a login** (2026-09-13, mig 380). His words:
   *"when I'm setting up helper it tells me to login wtf, helper is separate thing it will work on the
   pc itself then why login and which role to login"*, then *"still instead of login make something

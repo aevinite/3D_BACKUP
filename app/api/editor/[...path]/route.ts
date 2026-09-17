@@ -3232,20 +3232,54 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // entitles it AND the owner grants it; managerCan, 2026-07-22). Wrapped by
     // withIdempotency like every editor write, so a replayed offline action places once.
     if (a === "order" && path.length === 1) {
-      // Module rung (mig 179): ordering must be enabled for this restaurant at all,
-      // then the manager needs the take_orders power (admin exists + owner grant).
-      if (!(await takeOrdersLadder(rid)).effective) return err("Order-taking isn't enabled for this restaurant.", 403);
-      if (!(await managerCan(g, rid, "take_orders"))) return permDenied("take new orders");
       const { table, items, allergies, note } = body || {};
       const t = String(table || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
-      // Reject a table that doesn't exist (1..table_count) — a typo would otherwise float
-      // a phantom order on a non-existent table (mirrors the tablet guard).
-      const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      // ── FOUR QUESTIONS, ASKED AT THE SAME TIME (owner, 2026-09-17: "it takes like two or three
+      // seconds, I want it instantly") ──────────────────────────────────────────────────────────
+      // Is ordering switched on · may this person take one · does this table exist · is this the
+      // same order twice. NONE of them depends on the answer to another, and each one is a
+      // separate trip to a database in Mumbai: measured at 48 + 47 + 43 + ~50 ms, they cost
+      // ~190 ms of the ~670 ms a send took, purely in waiting. Asked together they cost the
+      // slowest one (~60 ms).
+      //
+      // THE REFUSALS ARE UNCHANGED, AND SO IS THE ORDER THEY COME IN: the results are read below
+      // in exactly the sequence they used to be computed in, so the same request gets the same
+      // status and the same sentence as before — a person without the power still hears
+      // "you're not allowed", not "that table doesn't exist".
+      //
+      // The two READS are skipped (never started) when the plain checks above them already make
+      // them pointless — a non-numeric table or an empty cart can't be looked up or de-duped.
+      // They DO still run for a request that will be refused on permission; both are
+      // restaurant-scoped, column-named and row-capped, so this costs a refused caller two small
+      // indexed reads and no writes. Worth it: the alternative is keeping ~190 ms of latency on
+      // the single most repeated action of a service to save two reads on a request that
+      // shouldn't have been made.
+      const tableOk = /^\d+$/.test(t);
+      const itemsOk = Array.isArray(items) && items.length > 0;
+      const skipDupCheck = body?.confirmDuplicate === true;
+      const [ladder, canTake, tcRow, recentRows] = await Promise.all([
+        takeOrdersLadder(rid),
+        managerCan(g, rid, "take_orders"),
+        // Reject a table that doesn't exist (1..table_count) — a typo would otherwise float
+        // a phantom order on a non-existent table (mirrors the tablet guard).
+        tableOk
+          ? sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle()
+          : Promise.resolve({ data: null }),
+        (tableOk && itemsOk && !skipDupCheck)
+          ? sb.from("orders").select("items, allergies")
+              .eq("table_number", t).eq("restaurant_id", rid)
+              .gte("created_at", new Date(Date.now() - 3000).toISOString()).limit(5)
+          : Promise.resolve({ data: [] }),
+      ]);
+      // Module rung (mig 179): ordering must be enabled for this restaurant at all,
+      // then the manager needs the take_orders power (admin exists + owner grant).
+      if (!ladder.effective) return err("Order-taking isn't enabled for this restaurant.", 403);
+      if (!canTake) return permDenied("take new orders");
+      if (!tableOk) return err("valid table required");
       const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
       const tn = Number(t);
       if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
-      if (!Array.isArray(items) || !items.length) return err("items required");
+      if (!itemsOk) return err("items required");
       // Overridable double-tap guard: refuse an IDENTICAL order for the same table within
       // 3s unless confirmDuplicate:true (two guests ordering the same drink is legitimate).
       const optSig = (opts: any) => (Array.isArray(opts) && opts.length)
@@ -3257,9 +3291,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // different prices can therefore trip the warning — it's overridable (confirmDuplicate).
       const lineSig = (i: any) => ({ id: i.id, qty: Number(i.qty) || 1, options: optSig(i.options), removed: remSig(i.removed) });
       const sig = JSON.stringify({ items: items.map(lineSig), allergies: Array.isArray(allergies) ? allergies : [] });
-      if (!(body && body.confirmDuplicate === true)) {
-        const recent = (await sb.from("orders").select("items, allergies")
-          .eq("table_number", t).eq("restaurant_id", rid).gte("created_at", new Date(Date.now() - 3000).toISOString()).limit(5)).data || [];
+      if (!skipDupCheck) {
+        // Read above, alongside the other three checks — see the note on that Promise.all.
+        const recent = (recentRows.data || []) as { items?: unknown[]; allergies?: unknown }[];
         if (recent.some((o: any) => JSON.stringify({
           items: (o.items || []).map(lineSig),
           allergies: Array.isArray(o.allergies) ? o.allergies : [],
@@ -3286,17 +3320,31 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       // A manager placed this, so it's already confirmed — skip the kitchen "accept" step
       // and push it straight onto the pass as "preparing" (same as the tablet).
+      //
+      // ── ONE CALL, NOT THREE — AND THE AUDIT ROW TRAVELS WITH IT (owner, 2026-09-17) ──────────
+      // This was: read the order's dishes, write them back with every status flipped, then flip
+      // the order_items rows — three round trips to Mumbai for one decision, measured at 49 + 56
+      // + 56 ms, plus 45 ms for the audit row after them. lfh_staff_mark_placed (migration 394)
+      // does both writes in one call, and the audit row — which depends on nothing here — is
+      // written at the same time instead of after. ~205 ms of waiting becomes ~55 ms.
+      //
+      // WHO punched this order rides along on the SAME write (mig 220's columns), so the
+      // performance report can say "this manager punched 412 bills". NULL keeps meaning
+      // "the guest ordered it themselves".
+      //
+      // THE AUDIT ROW MOVED UP FROM THE FOOT OF THIS HANDLER, and that is a deliberate
+      // improvement, not a side effect: it used to sit AFTER the discount block below, so an
+      // order that was placed and then had its discount refused (over the role's %-cap) was
+      // placed with NO audit row at all. A placed order is now always written down.
       const placedId = (data as any)?.order_id;
-      if (placedId) {
-        const cur = (await sb.from("orders").select("items").eq("id", placedId).eq("restaurant_id", rid).single()).data as { items?: any[] } | null;
-        const its = Array.isArray(cur?.items) ? cur!.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-        // WHO punched this order rides along on the SAME update (no extra round trip), so the
-        // performance report can say "this manager punched 412 bills". NULL keeps meaning
-        // "the guest ordered it themselves". (mig 220 added the columns; 2026-07-29)
-        await sb.from("orders")
-          .update({ items: its, status: "preparing", placed_by_id: g.user?.id ?? null, placed_by: actorName })
-          .eq("id", placedId).eq("restaurant_id", rid);
-        await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
+      const marked = await Promise.all([
+        placedId
+          ? sb.rpc("lfh_staff_mark_placed", { p_order: placedId, p_restaurant_id: rid, p_by_id: g.user?.id ?? null, p_by: actorName })
+          : Promise.resolve({ error: null }),
+        log("editor", "order_place", { restaurant_id: rid, table_number: t, device_id: dev, order_id: placedId ?? null }),
+      ]);
+      if (marked[0] && (marked[0] as { error?: { message?: string } }).error) {
+        throw new Error((marked[0] as { error: { message?: string } }).error.message || "couldn't put the order on the pass");
       }
       // ── A DISCOUNT TYPED IN ⚡ QO/P, applied in the SAME request (owner, 2026-08-03) ──
       // The builder holds the amount while the order is assembled and sends it here rather than
@@ -3333,7 +3381,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         }
         await log("manager", "order_discount", { restaurant_id: rid, order_id: placedId, detail: `quick order discount ₹${amount}${note ? ` · ${note}` : ""}`, device_id: dev });
       }
-      await log("editor", "order_place", { restaurant_id: rid, table_number: t, device_id: dev, order_id: placedId ?? null });
+      // (the order_place audit row is written above, with the mark-placed call)
       return ok(data);
     }
 
