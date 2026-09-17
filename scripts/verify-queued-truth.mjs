@@ -131,19 +131,47 @@ console.log("\nD. no success message states a server figure it cannot have");
 // The narrow version of the rule: a toast that interpolates a field off the reply, inside a window
 // that never asks the queue. Only the six sites above are in scope; this is the net that catches a
 // SEVENTH being added the same way.
+//
+// ⚠️ A PRESENCE CHECK ON THE VERY FIELD COUNTS TOO, AND IT IS THE STRONGER GUARD (T33, sweep #9,
+// 2026-09-17, on the owner's word "do 10"). This rule looked for `wasQueued(` or `.queued` in the
+// window and nothing else, so it went RED on main for a line that is correct:
+//
+//     if (r.kot_no != null && toastStillSays(sentLine)) toast(`Sent! Kitchen ticket #${r.kot_no}`, "ok");
+//
+// (public/panels/editor/app.js, from the "Send to kitchen lands instantly" change, PR #1402.)
+// A queued write resolves `{ ok:true, queued:true }` — `wasQueued` is literally `r.queued === true`
+// — so it carries NO `kot_no`, and `r.kot_no != null` is false offline. The toast never fires and
+// the earlier "saved on this device" line stands, which is exactly what this section is for.
+//
+// It is also STRICTER than asking the queue, not a shortcut past it: asking the queue protects
+// against one cause of a missing field, while checking the field protects against every cause —
+// including a server reply that simply did not include it. So the rule now accepts EITHER, and the
+// presence check must be on the SAME field that is interpolated. That tightness is the whole point:
+// an unrelated `if (x != null)` in the window does not satisfy it, so the net still catches a
+// seventh site added carelessly. Verified by sabotage, both directions.
 {
   const lines = src.split("\n");
   const offenders = [];
   for (let i = 0; i < lines.length; i++) {
     // A PROPERTY OFF THE REPLY, not a bare name. `toast(`Restored ${r}`)` a few hundred lines up
     // counts a local loop variable, not a server field, and flagging it taught nothing.
-    const m = lines[i].match(/toast\(\s*`[^`]*\$\{[^}]*\b(r|r2|cn|res|j)\.[a-z_]/i);
+    const m = lines[i].match(/toast\(\s*`[^`]*\$\{[^}]*\b(r|r2|cn|res|j)\.([a-z_][a-z0-9_]*)/i);
     if (!m) continue;
+    const field = `${m[1]}.${m[2]}`;                       // e.g. "r.kot_no" — the exact expression
     const win = lines.slice(Math.max(0, i - 14), i + 2).join("\n");
-    if (!/wasQueued\(|\.queued\b/.test(win)) offenders.push(`${PANEL}:${i + 1}`);
+    if (/wasQueued\(|\.queued\b/.test(win)) continue;     // asked the queue — the canonical guard
+    const esc = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const guarded = new RegExp(
+      `${esc}\\s*(?:!==?\\s*(?:null|undefined)|&&)` +      // r.kot_no != null / !== undefined / && …
+      `|(?:typeof\\s+)${esc}` +                            // typeof r.kot_no
+      `|Number\\.isFinite\\(\\s*${esc}` +                  // Number.isFinite(r.kot_no)
+      `|(?:null|undefined)\\s*!==?\\s*${esc}`,             // null != r.kot_no
+      "i");
+    if (guarded.test(win)) continue;                       // checked the field itself — stronger
+    offenders.push(`${PANEL}:${i + 1} (quotes ${field})`);
   }
-  if (!offenders.length) ok("every ok-toast that quotes the server's reply sits behind a queue check");
-  else bad(`${offenders.length} ok-toast(s) quote the server's reply with no queue check`, offenders.join(", ") + " — offline these print the word `undefined`");
+  if (!offenders.length) ok("every ok-toast that quotes the server's reply is guarded — by the queue, or by a presence check on that very field");
+  else bad(`${offenders.length} ok-toast(s) quote the server's reply with nothing guarding it`, offenders.join(", ") + " — offline these print the word `undefined`. Route it through okToast(<the api result>, \"…\"), or check that field is present before printing it.");
 }
 
 console.log("\nE. reopen puts the TABLE back, not the bill (owner, 2026-08-26; mig 365)");
