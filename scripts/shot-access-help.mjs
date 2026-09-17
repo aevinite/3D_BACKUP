@@ -3,6 +3,10 @@
 // Each image is a real screenshot of the panel where a feature lives, with the exact
 // control ringed in gold and the panel PATH stamped across the top. Written to
 // public/admin-help/<perm.id>.png and wired per-feature in app/aevinite/access/page.tsx
+//
+// ⚠️ RUN `node scripts/shrink-help-shots.mjs` AFTER THIS (owner, 2026-09-17: "compress all
+// images"). The help sheet asks for a `.webp` twin of each capture and falls back to the PNG, so a
+// shot taken here WORKS immediately — it is just 2-3× heavier until the converter has run.
 // (SHOT_IDS). The access page prefers <perm.id>.png, falling back to the per-area image.
 //
 // OWNER RULE (2026-07-24): these images track the live UI. Whenever a panel's UI changes,

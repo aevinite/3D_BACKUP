@@ -5424,6 +5424,37 @@ async function resolveCall(id) {
 // otherwise → the edit form for the selected dish/category/filter/settings.
 // ---------- Dashboard tab: the restaurant's numbers as graphs ----------
 let dashCharts = []; // live Chart.js instances (destroyed before each redraw)
+// ── THE CHARTING LIBRARY ARRIVES WHEN A CHART DOES (owner, 2026-09-17: "defer non-critical
+// scripts") ───────────────────────────────────────────────────────────────────────────────────
+// chart.umd.min.js is 209 KB and used by exactly one screen — the Dashboard's seven graphs. This
+// panel OPENS ON THE TABLES TAB (owner, 2026-08-02), so it was 209 KB downloaded, parsed and
+// compiled on every single visit for a screen most visits never open. It is now fetched the first
+// time a graph is about to be drawn, and the answer is remembered, so the second visit to the
+// Dashboard costs nothing.
+//
+// The address is HERE rather than in index.html because that is where the load now happens; the
+// ?v= is the library's own version (see scripts/build-vendor.mjs — the cache guard deliberately
+// skips vendor files for exactly that reason).
+//
+// A failure is not a new failure mode: loadDashboard has always had to cope with no Chart at all
+// (an offline device got the numbers and a sentence instead of graphs), and that is the same path
+// this takes — `false` here lands on the identical "the numbers above still work" line.
+const CHART_LIB_SRC = "/panels/vendor/chart.umd.min.js?v=9db14121";
+let chartLibLoad = null;
+function ensureChartLib() {
+  if (typeof Chart !== "undefined") return Promise.resolve(true);
+  if (!chartLibLoad) {
+    chartLibLoad = new Promise((resolve) => {
+      const tag = document.createElement("script");
+      tag.src = CHART_LIB_SRC;
+      tag.onload = () => resolve(typeof Chart !== "undefined");
+      // Let a later visit try again (a dropped connection is not a permanent verdict).
+      tag.onerror = () => { chartLibLoad = null; resolve(false); };
+      document.head.appendChild(tag);
+    });
+  }
+  return chartLibLoad;
+}
 
 // today | yesterday — remembered across reloads. Anything else (a "30d"/"year" left in this
 // browser from before 2026-08-03) reads as today, so an old device can't sit on a range that
@@ -5717,6 +5748,13 @@ async function loadDashboard(useCache) {
   }
   dashCharts.forEach((c) => { try { c.destroy(); } catch {} });
   dashCharts = [];
+  // Fetch the charting library now, if this is the first graph of the session (ensureChartLib).
+  // The numbers above are already on screen at this point, which is the whole idea: the Dashboard
+  // reads as soon as the data lands and the graphs draw themselves in a moment.
+  await ensureChartLib();
+  // The same latest-wins rule the rest of this function obeys: a tab/range double-tap while the
+  // library was in flight means a NEWER run owns the DOM now, and this one must not draw into it.
+  if (seq !== loadDashboard._seq) return;
   if (typeof Chart === "undefined") { body.insertAdjacentHTML("beforeend", `<div class="empty">Charts library didn't load (offline?) — the numbers above still work.</div>`); return; }
   // PERMANENT AXIS RULE (owner 2026-07-05): a time axis picks how many labels it
   // shows from the range AND the width — roughly one label per ~80px of chart, so
@@ -7301,8 +7339,21 @@ function bindEditor() {
     const say = (t) => { if (note) note.textContent = t; };
     if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
     try {
+      // ── THE PHOTO IS SHRUNK HERE, BEFORE IT TRAVELS (owner, 2026-09-17: "compress all images") ──
+      // This dish photo is the picture EVERY GUEST downloads when they open the menu, and the menu
+      // shows it in a card about 300 px wide. A phone camera hands us 3-5 MB at 4,000 px, so
+      // almost all of those bytes were being carried over mobile data to be thrown away by the
+      // browser. public/panels/shrinkimg.js caps the long edge at 1280 px and re-encodes as WebP;
+      // it returns the ORIGINAL file if anything at all goes wrong, so an upload can never fail
+      // because of this. The 4 MB server-side limit is unchanged and still the backstop.
+      let toSend = file;
+      if (window.LFH_IMG) {
+        const sh = await LFH_IMG.shrink(file);
+        toSend = sh.file;
+        if (sh.changed) say("Shrunk for the menu: " + sh.note + " — uploading…");
+      }
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", toSend);
       // What this photo replaces, so the route can drop the old file instead of leaving one
       // behind for every re-photograph. It only ever acts on an address in our own bucket.
       if (state.sel && state.sel.image) fd.append("replaces", String(state.sel.image));

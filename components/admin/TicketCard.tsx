@@ -84,7 +84,7 @@ export default function TicketCard({
                    (T13, sweep #7, 2026-08-27.) */
                 style={{ padding: 0, border: "1px solid var(--border-c, #1d2430)", borderRadius: 9, overflow: "hidden", cursor: "zoom-in", background: "none", lineHeight: 0 }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={issue.image_url} alt="attached photo" width={64} height={64} style={{ width: 64, height: 64, objectFit: "cover", display: "block" }} />
+                <img src={issue.image_url} alt="attached photo" loading="lazy" decoding="async" width={64} height={64} style={{ width: 64, height: 64, objectFit: "cover", display: "block" }} />
               </button>
             )}
             {issue.audio_url && (
@@ -132,7 +132,7 @@ export default function TicketCard({
         <div onClick={() => setImgOpen(false)} role="dialog" aria-label="Photo"
           style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(0,0,0,.8)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, cursor: "zoom-out" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={issue.image_url} alt="attached photo" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10 }} />
+          <img src={issue.image_url} alt="attached photo" loading="lazy" decoding="async" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10 }} />
         </div>
       )}
     </div>

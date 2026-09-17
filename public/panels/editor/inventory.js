@@ -657,7 +657,7 @@
       ${p.voided_at ? `<div class="inv-note">Voided by ${esc(p.voided_by || "?")} — ${esc(p.void_reason || "")}</div>` : ""}
       ${(d.lines || []).map((l) => { const it = itemById(l.item_id) || { name: "?", purchase_uom: "" }; return `<div class="inv-line"><span>${esc(it.name)}</span><span>${l.qty_purchase} ${esc(it.purchase_uom)} × ₹${l.rate}</span><b>${inr(l.amount)}</b></div>`; }).join("")}
       <div class="inv-total">Total: <b>${inr(p.total)}</b>${p.created_by ? `<span class="dim"> · entered by ${esc(p.created_by)}</span>` : ""}</div>
-      ${p.photo_url ? `<a href="${esc(p.photo_url)}" target="_blank" rel="noopener"><img class="inv-photo" src="${esc(p.photo_url)}" alt="bill photo" /></a>` : ""}
+      ${p.photo_url ? `<a href="${esc(p.photo_url)}" target="_blank" rel="noopener"><img class="inv-photo" src="${esc(p.photo_url)}" alt="bill photo" loading="lazy" decoding="async" /></a>` : ""}
       <div class="inv-pop-actions">
         ${!p.voided_at ? `<button class="btn danger" id="pdVoid">Void (with reason)</button>` : ""}
         <span style="flex:1"></span><button class="btn" id="pdClose">Close</button>
@@ -1088,7 +1088,7 @@
         <div class="inv-row static${e.voided_at ? " voided" : ""}">
           <span class="inv-row-name">${EXP_LABELS[e.category] || esc(e.category)} — ${esc(e.title)}${e.voided_at ? ` <span class="inv-badge neg">struck out</span>` : ""}
             <span class="dim block">${esc(e.expense_date)} · ${esc(e.created_by || "")}${e.note ? " · " + esc(e.note) : ""}</span></span>
-          ${e.photo_url ? `<a class="inv-thumb" href="${esc(e.photo_url)}" target="_blank" rel="noopener"><img src="${esc(e.photo_url)}" alt="" /></a>` : ""}
+          ${e.photo_url ? `<a class="inv-thumb" href="${esc(e.photo_url)}" target="_blank" rel="noopener"><img src="${esc(e.photo_url)}" alt="" loading="lazy" decoding="async" /></a>` : ""}
           <span class="inv-row-val">${inr(e.amount)}</span>
           ${!e.voided_at ? `<button class="inv-x" data-voidexp="${e.id}" title="Strike out">✕</button>` : ""}
         </div>`).join("") : `<div class="empty">No expenses recorded in ${esc(monthLabel)}.</div>`}`;

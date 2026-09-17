@@ -885,6 +885,12 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           src={item.image}
           alt={item.title}
           decoding="async"
+          /* THE DISH PHOTO IS THIS PAGE (owner, 2026-09-17, item 2 of the optimisation list). It is
+             the largest thing a guest waits for here, so it is deliberately NOT lazy — it is asked
+             for FIRST, ahead of everything else the page wants. Lazy loading belongs to what is
+             out of sight, and this is the whole screen. */
+          loading="eager"
+          fetchPriority="high"
         />
         {/* A subtle gradient overlay on top of the photo. */}
         <div className="detail-img-overlay"></div>
@@ -937,6 +943,8 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
             src={item.image}
             alt={item.title}
             className="img-lightbox-img"
+            loading="lazy"
+            decoding="async"
             style={{
               transform: `scale(${lbScale}) translate(${lbPos.x / lbScale}px, ${lbPos.y / lbScale}px)`,
               transformOrigin: "center center",

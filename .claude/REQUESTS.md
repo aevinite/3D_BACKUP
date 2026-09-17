@@ -13,6 +13,49 @@ owner looks, with cache busting, before claiming anything.
 
 ---
 
+- [x] **"Optimize" now means his 20-point list — run in full, every line answered** (2026-09-17).
+  His words: *"whenever I tell you to optimize the thing you will do all this stuff… compress all
+  images, add lazy loading, split the code into chunks, cache API responses, add a CDN, minify JS and
+  CSS, index the database, reduce unnecessary re-renders, debounce input handlers, paginate large
+  lists, remove unused dependencies, defer non-critical scripts, add a loading skeleton, add a load
+  balancer, compress API payloads, add database connection pooling, cache expensive computed results,
+  fix N plus one database queries, enable server-side caching, and run a lighthouse audit. Make no
+  mistakes. and do it also if not done"* — and then *"and do for all panels"*.
+  **Where it lives:** the full audit, item by item with the numbers, is `docs/OPTIMIZATION-AUDIT.md`.
+  On screen, what he can SEE: a dish photo he uploads in **Edit menu** now says *"Shrunk for the menu:
+  3.4 MB → 180 KB"* while it uploads; the **manager panel's Dashboard** draws exactly as before but
+  the panel no longer downloads a 209 KB charting library on every visit that never opens it; the
+  **kitchen's 86 board** search no longer rebuilds the list on every keystroke; the **guest menu's**
+  search box stays responsive while a long menu filters; the **admin ⓘ help pictures** are 56%
+  lighter; the **owner dashboard** jumps less while it loads. **Backend only, nothing on screen:**
+  the `defer` on every panel script, the removed `shadcn` dependency.
+  **13 of the 20 were already done** — and each is answered with evidence, not an opinion: 248
+  database indexes with no unused ones and no missing tenant index · four caching layers (the 1.5 s
+  shared floor read, the owner snapshot cache that prunes itself, the service-worker data cache, the
+  in-flight GET de-dupe) · Vercel's edge CDN pinned to Mumbai next to the database · PostgREST
+  pooling (the app holds no Postgres sockets at all) · brotli on the wire (24,243 → 6,631 bytes
+  measured) · paging with `.range()` and a `truncated` flag · skeletons on every panel · and **zero
+  N+1 queries**: all 30 candidates my scan flagged were opened and read, every one already batched.
+  **Two things I did NOT do, and why:** the owner console's 384 KB chart library stays eager (on that
+  screen the charts ARE the screen, so splitting moves the cost instead of removing it, and doing it
+  properly means splitting a 1,078-line module four screens import); and the panels' own JS is not
+  minified by a hand-rolled build step (the platform already brotlis it 1,371 KB → 465 KB, and a
+  second generated copy of `app.js` is a new way for "I edited it and nothing changed" to happen —
+  the exact fault `verify:panel-cache` exists to prevent).
+  **Measured under Lighthouse's own mobile preset (4× CPU, Slow 4G) — the `chrome-devtools` MCP was
+  unavailable, another session held its browser profile, so the same metrics were gathered directly.**
+  Two findings: the guest menu's LCP (5.9 s) is the **intro splash logo revealed by its own
+  animation** — first paint is 868 ms, so this is a design decision for him, not a slow asset; and
+  the owner console scored **CLS 0.433**, with the three shifting blocks named to the pixel. Two of
+  them are fixed; the third (the highlights banner + chart cards above the estate table) is written
+  down with the numbers to verify against.
+  **Checked, not claimed:** all three panels driven in a real browser with their scripts deferred —
+  every shared global present, **zero console errors**, the Dashboard's **7 graphs** drawn from the
+  on-demand library which is requested **0 times** on boot · the shrinker run on a 4032×3024 photo
+  (354 KB → 31 KB, 1280×960 WebP) and on an already-small PNG (**returned untouched**) · the kitchen
+  search proved debounced (59 rows during typing → 1 after the pause) · `npm run typecheck`, the full
+  production build, and the guard suite green.
+
 - [x] **"Send to kitchen" is INSTANT now** (2026-09-17, mig 394). His words: *"whenever I click on a
   manager panel table view and uh, take order and then click on uh, send to kitchen it takes like two
   or three seconds I want it instantly… it should not feel the gap of that thing… everything should

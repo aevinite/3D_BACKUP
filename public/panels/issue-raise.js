@@ -224,7 +224,7 @@
       prevs.innerHTML = "";
       if (imageUrlLocal) {
         var p = document.createElement("div"); p.className = "lfhir-prev";
-        p.innerHTML = '<img src="' + imageUrlLocal + '" alt="attached photo" />' +
+        p.innerHTML = '<img src="' + imageUrlLocal + '" alt="attached photo" loading="lazy" decoding="async" />' +
           '<span style="font-size:12.5px">Photo attached</span>' +
           '<button type="button" class="x" aria-label="Remove photo">×</button>';
         p.querySelector(".x").onclick = clearImage;
@@ -262,6 +262,15 @@
       } catch (e) { return undefined; }
     }
     async function uploadMedia(file, kind) {
+      // A PHOTO IS SHRUNK BEFORE IT TRAVELS (owner, 2026-09-17: "compress all images"). A phone
+      // camera makes a 3-5 MB picture of a broken tap; nobody needs more than 1280 px of it, and
+      // on a restaurant's Wi-Fi those megabytes are exactly why an upload times out at the 30 s
+      // deadline above. One shared helper does it for every panel (public/panels/shrinkimg.js) and
+      // it hands back the ORIGINAL file if anything at all goes wrong, so this can only ever be
+      // faster, never a new way for a ticket to fail. Voice notes are left alone.
+      if (kind !== "audio" && window.LFH_IMG) {
+        try { file = (await LFH_IMG.shrink(file)).file; } catch (e) { /* upload the original */ }
+      }
       var fd = new FormData();
       fd.append("file", file);
       fd.append("kind", kind);
