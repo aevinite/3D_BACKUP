@@ -924,9 +924,16 @@ lpoptions -d "<span data-pname>Kitchen</span>"</pre>
   <pre data-copy>lpoptions -p "<span data-pname>Kitchen</span>" -l</pre>
   <table>
     <tr><th>What the paper looked like</th><th>The setting</th><th>Set it to</th></tr>
+    <tr><td><b>One ticket came out in several pieces</b> — a long bill cut into 3, 4, 5 parts
+          (owner, 2026-09-17: <i>"why printing this bill show in 5 diff parts, it should be combine"</i>)</td>
+        <td><code>PageSize</code></td>
+        <td>A page TALL enough for your longest bill — the <b>tallest</b> size in your list for the roll's
+          width (on an 80 mm roll that is usually <code>X70MMY3276MM</code>, the continuous one, else
+          <code>X70MMY297MM</code>). A KOT is short, so a short page looked fine for months; a
+          twenty-dish bill is about 260&nbsp;mm long, and a 65&nbsp;mm page cuts it into five.</td></tr>
     <tr><td><b>Blank gap before each ticket</b>, or one ticket per big page</td><td><code>PageSize</code></td>
-        <td>The shortest receipt size in <i>your</i> list whose width matches the roll
-          (<b class="you" data-pwidth>80</b> mm). Never A4.</td></tr>
+        <td>Too TALL for this driver — it is feeding the whole page. Step down one size (297&nbsp;mm), and
+          let <code>FeedWhere=AfterJob</code> + <code>FeedDist</code> do the feeding instead. Never A4.</td></tr>
     <tr><td><b>Sideways or half size</b></td><td><code>PageSize</code></td>
         <td>Same — a page shaped differently from the roll is what makes a driver rotate and shrink it.</td></tr>
     <tr><td><b>Cuts mid-ticket</b></td><td><code>CutMedia</code></td><td><code>EndOfJob</code></td></tr>
@@ -936,6 +943,11 @@ lpoptions -d "<span data-pname>Kitchen</span>"</pre>
         <td>Roll width and setting width must agree.</td></tr>
   </table>
   <pre data-copy>sudo lpadmin -p "<span data-pname>Kitchen</span>" -o PageSize=ONE-FROM-YOUR-OWN-LIST -o CutMedia=EndOfJob</pre>
+  <div class="plain"><b>Why the page has to be tall, in plain words:</b> a receipt roll has no pages — but
+    the printing system still thinks in pages, and it cuts the ticket wherever the page ends. A kitchen
+    slip is short, so a short page never showed the problem. A bill for twenty dishes is about a quarter
+    of a metre long: on a 65&nbsp;mm page it arrives in five separate pieces. Give the queue a page taller
+    than your longest bill and the cutter (<code>CutMedia=EndOfJob</code>) cuts once, at the end.</div>
   <div class="plain"><b>What “Raw” means, in plain words:</b> it tells the printing system to pass the job
     straight through without translating it. For many cheap thermal printers that is exactly right and
     needs no driver at all. The catch: a raw queue has no paper settings to change — so if a raw printer
