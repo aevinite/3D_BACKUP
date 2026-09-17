@@ -9316,8 +9316,10 @@ function courseOfRow(r) {
 const spineKey = (r) => (r.kind === "session" ? String(r.id) : `${r.orderId}:${r.idx}`);
 // Which ordering, which course filter, which line is open — per table, so two open popups
 // don't share one state. Kept on `state` because the popup re-renders from scratch.
-function spineState() {
-  state.spine = state.spine || { view: {}, cat: {}, open: {}, guests: {} };
+function spineState(remember) {
+  if (remember) setTimeout(spineRemember, 0);
+  state.spine = state.spine || { view: {}, cat: {}, open: {}, guests: {}, wait: {} };
+  state.spine.wait = state.spine.wait || {};
   return state.spine;
 }
 
@@ -10625,6 +10627,7 @@ function addFloating(t) {
     slot = state.floatCols; state.floatCols += 1; // no gap → grow the grid (existing cards shrink to fit)
   }
   state.floatingTables.push({ table: t, pinned: false, slot, x: null, y: null, w: null, h: null });
+  spineRemember();      // so a reload puts this popup back (see spineRestore)
   return true;
 }
 
@@ -10745,8 +10748,13 @@ function spineFit(root) {
   });
 }
 
+let spineRestoredOnce = false;
 function bindFloor() {
   bindFloorDelegation(); // attach the delegated tile/quick/queue handler ONCE
+  // ONCE per page load: put back whatever bill was open before the tab reloaded (see spineRestore).
+  // It runs here because this is the first moment the floor is on screen, and it guards itself
+  // because openFloatingTable() re-renders — which comes straight back through this function.
+  if (!spineRestoredOnce) { spineRestoredOnce = true; try { spineRestore(); } catch (e) {} }
   syncLegendToDrawer();  // phone: the colour key lives in the ☰ menu (item 23)
   // The dish lines size themselves to the height the popup actually got — after layout, in the
   // same frame, so nobody sees a list at the wrong row height (see spineFit).
@@ -10993,11 +11001,54 @@ function openFloatingTable(table) {
   renderEditor();  // instant, summary-accurate
   loadSessions();  // fetch slice → re-render with full dish rows
 }
+// ── AN OPEN BILL SURVIVES A RELOAD (owner, 2026-09-17) ──────────────────────────────────────
+// "my bill detail view is open, it's auto-closing … I know my internet is fluctuating but this
+// should not happen due to that."
+//
+// It was not the popup closing itself: nothing in this file closes one on a board update. It was
+// the TAB reloading under it. On a flaky connection a piece of the app's own code fails to arrive,
+// and lib/staleCode.ts takes one automatic reload to recover (the right call — a deploy or a lost
+// chunk is exactly what it is for); a reload starts the panel from nothing, and `state.floatingTables`
+// only ever lived in memory, so the bill he was reading was gone. Same for pressing ⌘R by accident.
+//
+// So the open tables are WRITTEN DOWN (sessionStorage: this tab only, gone when the tab closes)
+// together with what the popup was showing — menu order or ticket order, which dish was open, which
+// incoming ticket was opened out, whether the guests were expanded — and put back on boot.
+const SP_OPEN_KEY = "lfh.floor.open";
+function spineRemember() {
+  try {
+    sessionStorage.setItem(SP_OPEN_KEY, JSON.stringify({
+      at: Date.now(),
+      tables: (state.floatingTables || []).map((f) => String(f.table)),
+      spine: state.spine || null,
+    }));
+  } catch { /* private mode can refuse storage — then a reload simply forgets, as before */ }
+}
+function spineRestore() {
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(SP_OPEN_KEY) || "null"); } catch { return; }
+  if (!saved || !Array.isArray(saved.tables) || !saved.tables.length) return;
+  // Only a RECENT memory is honoured: a tab left open overnight should not spring yesterday's
+  // table back up in the morning.
+  if (!saved.at || Date.now() - saved.at > 6 * 60 * 60 * 1000) return;
+  if (saved.spine && typeof saved.spine === "object") state.spine = { view: {}, cat: {}, open: {}, guests: {}, wait: {}, ...saved.spine };
+  let put = 0;
+  saved.tables.slice(0, MAX_FLOATING).forEach((t) => {
+    if (!(state.floatingTables || []).some((f) => String(f.table) === String(t))) { openFloatingTable(String(t)); put++; }
+  });
+  // openFloatingTable only writes to state — the FLOATING LAYER is rebuilt by a full render, and
+  // the board's polls use the tile-patch path on purpose (rebuilding 300 tiles is the freeze this
+  // panel was fixed for). So without this the table was restored in memory and never drawn.
+  if (put) { renderEditor(); requestAnimationFrame(() => spineFit()); }
+}
+
 // closeFloatingTable(t): the ONE way a table popup closes (its ✕, the back button, a table that
 // got freed). It also clears the "open table" marker when nothing is left open — otherwise the
 // tile kept its selected ring and kept pulling that table's full slice on every poll.
 function closeFloatingTable(t) {
   state.floatingTables = state.floatingTables.filter((f) => String(f.table) !== String(t));
+  if (state.spine) { delete state.spine.open[String(t)]; delete state.spine.wait[String(t)]; delete state.spine.guests[String(t)]; }
+  spineRemember();
   if (String(state.selectedTable) === String(t)) {
     state.selectedTable = state.floatingTables.length ? String(state.floatingTables[0].table) : null;
   }
@@ -11279,6 +11330,7 @@ function tablePanelParts(t, host = "float") {
   const hdrTag = TABLE_TAG_INFO[tagForTable(t)];
   const headTagPill = hdrTag ? `<span class="tp-tagpill tag-${tagForTable(t)}">${hdrTag.emoji} ${esc(hdrTag.label)}</span>` : "";
   let headPill = `<span class="tp-pill tp-pill-${esc(tile.st)}">● ${esc(tile.label)}</span>${headTagPill}`;
+  // …and the party chip is appended to it further down, once the members are known.
   const liveRowsAll = os.filter((o) => o.status !== "cancelled").flatMap((o) => orderItemRows(o));
   // Count dishes by QUANTITY (a "2× Cappuccino" row is 2 dishes), matching both the summary
   // tile and the floor tile's "0/3 served" — so the head's numbers stay identical whether
@@ -11307,6 +11359,7 @@ function tablePanelParts(t, host = "float") {
   }
 
   let sessionSec = "";
+  let partyChip = "";       // rides in the HEAD, next to the table's tag (see below)
   if (sessionsOn) {
     if (sess) {
       const mem = membersOf(sess.id);
@@ -11324,24 +11377,26 @@ function tablePanelParts(t, host = "float") {
         acts += `<button class="btn small danger" data-mem-ban="${esc(m.id)}" data-ban-phone="${esc(m.phone || "")}">Ban</button>`;
         return `<div class="sx-mem"><div class="sx-mem-info">${owner ? "👑 " : "🤝 "}<b>${esc(m.name || (owner ? "Head" : "Guest"))}</b> ${status}${m.phone_verified ? ` <span class="sx-ok">✓</span>` : ""}</div><div class="sx-mem-acts">${acts}</div></div>`;
       }).join("") : `<div class="sx-empty">No one has joined yet.</div>`;
-      // ONE LINE, and the full rows one tap under it (owner, 2026-09-17). Each guest used to be a
-      // row 34px tall with four buttons on it — four guests cost more screen than four dishes. The
-      // band says who is here and who is still waiting; ▾ opens the very same rows, unchanged, so
-      // approve / kick / transfer / ban are all still here when they are wanted.
+      // THE PARTY LIVES IN THE HEAD NOW, beside the tag (owner, 2026-09-17: "party line should be
+      // somewhere else, like it should be beside the family thing"). It was a band of its own, and
+      // before that a section with a 34px row and four buttons per guest — four guests cost more
+      // screen than four dishes. What is left in the body is only the EXPANDED rows, and only while
+      // someone has asked for them, so approve / kick / transfer / ban are all still one tap away.
       const open = !!spineState().guests[String(t)];
-      const chips = mem.length
-        ? mem.map((m) => `<span class="sp-gc${m.approved ? "" : " w"}" title="${esc(m.name || "Guest")}${m.approved ? "" : " — waiting to be let in"}">${m.role === "owner" ? "👑" : "🤝"} ${esc((m.name || "Guest").split(" ")[0])}${m.phone_verified ? " ✓" : ""}</span>`).join("")
-        : `<span class="sp-band-em">nobody has joined yet</span>`;
-      sessionSec = `<div class="sp-band">
-          <span class="sp-band-l">Party ${mem.length || ""}</span>${chips}
-          <span class="sp-band-sp"></span>
-          <label class="sx-auto" title="Let anyone who scans this table's QR straight in"><input type="checkbox" id="sxAuto" ${sess.auto_approve ? "checked" : ""}> auto</label>
-          <button class="sp-ib" data-sp-guests="${esc(t)}" title="${open ? "Hide" : "Show"} each guest and what you can do about them">${open ? "▴" : "▾"}</button>
-        </div>${open ? `<div class="sp-guestrows">${memRows}</div>` : ""}`;
+      const head = mem.find((m) => m.role === "owner") || mem[0];
+      partyChip = mem.length
+        ? `<button class="tp-tagpill sp-partychip${open ? " on" : ""}" data-sp-guests="${esc(t)}"
+             title="${esc(mem.map((m) => (m.name || "Guest") + (m.approved ? "" : " — waiting to be let in")).join(" · "))}">👥 ${esc((head && head.name ? head.name.split(" ")[0] : "Guest"))}${mem.length > 1 ? ` +${mem.length - 1}` : ""}${mem.some((m) => !m.approved) ? " ⏳" : ""}</button>`
+        : "";
+      sessionSec = open
+        ? `<div class="sp-guestrows"><div class="sp-guestrows-h">Guests · ${mem.length}
+             <label class="sx-auto" title="Let anyone who scans this table's QR straight in"><input type="checkbox" id="sxAuto" ${sess.auto_approve ? "checked" : ""}> auto-approve</label>
+             <button class="sp-ib" data-sp-guests="${esc(t)}" title="Hide">▴</button></div>${memRows}</div>`
+        : "";
     } else {
       // No party here yet. There is nothing to DO about that any more (no "Open this
       // table" step) — taking an order starts the party — so this just states the fact.
-      sessionSec = `<div class="sp-band"><span class="sp-band-l">Party</span><span class="sp-band-em">nobody here yet — taking an order seats them</span></div>`;
+      sessionSec = "";   // nobody here yet: the head's "0 guests" already says it
     }
   }
 
@@ -11416,10 +11471,12 @@ function tablePanelParts(t, host = "float") {
       const money = rows.reduce((sum, r) => sum + (Number(r.price) || 0) * (parseInt(r.qty, 10) || 1), 0);
       const names = rows.map((r) => `${parseInt(r.qty, 10) || 1}× ${esc(r.title)}`).join(", ");
       const avoid = [...new Set(rows.flatMap((r) => r.removed || []))];
-      return `<div class="sp-wait">
+      const openW = spineState().wait[String(t)] === String(o.id);
+      return `<div class="sp-wait${openW ? " on" : ""}" data-sp-wait="${esc(o.id)}" data-sp-table="${esc(t)}" role="button" tabindex="0">
         <span class="sp-wait-l" title="Sent ${when(o) ? esc(when(o)) : "just now"} — not on the bill until it is accepted">🔔 ${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "NEW"}</span>
-        <span class="sp-wait-n" title="${esc(names)}">${names}${avoid.length ? ` · no ${avoid.map(esc).join(", no ")}` : ""}</span>
+        <span class="sp-wait-n" title="${esc(names)} — tap to read it dish by dish">${names}${avoid.length ? ` · no ${avoid.map(esc).join(", no ")}` : ""}</span>
         <span class="sp-wait-a">${inr(money)}</span>
+        <span class="sp-wait-x" title="Read it dish by dish before accepting">${openW ? "▴" : "▾"}</span>
         <button class="sp-ok" data-accept="${esc(o.id)}" title="Accept — the dishes join the bill in their menu place">✓ Accept</button>
         ${cancelBtn(o) ? `<button class="sp-no tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this ticket — nothing is charged for it">✕</button>` : ""}
       </div>${editing ? `<div class="sp-editalg">${orderEditExtras(o)}</div>` : ""}`;
@@ -11445,79 +11502,171 @@ function tablePanelParts(t, host = "float") {
       _c: courseOfRow(r),
     })));
     const byMenuOrder = (a, b) => (a._c.seq - b._c.seq) || (a._c.itemSeq - b._c.itemSeq) || String(a.title).localeCompare(String(b.title));
-    const sorted = view === "kot"
+    // ── THE SAME DISH ON TWO TICKETS IS ONE LINE (owner, 2026-09-17: "diff kot same item should
+    // merge") ─────────────────────────────────────────────────────────────────────────────────
+    // Two Espressos ordered twenty minutes apart are the same thing to read and the same thing to
+    // carry, so menu order shows "3× Espresso" once. What makes them the same line: the dish, the
+    // kitchen note, what to leave out, the unit price and the MRP flag — anything that would make
+    // them different food, or different money, keeps them apart. Each part is still its own row in
+    // the database and still individually servable: the line's sheet lists them ticket by ticket.
+    // KOT-wise deliberately does NOT merge — there the ticket is the point.
+    const mergeKey = (r) => [String(r.title || ""), String(r.note || ""), (r.removed || []).slice().sort().join(","),
+                             Number(r.price) || 0, r.is_mrp ? 1 : 0, r.kind].join("§");
+    const mergeRows = (rows) => {
+      const groups = new Map();
+      rows.forEach((r) => {
+        const k = mergeKey(r);
+        const g = groups.get(k);
+        if (!g) { groups.set(k, { ...r, _qty: parseInt(r.qty, 10) || 1, _parts: [r] }); return; }
+        g._qty += parseInt(r.qty, 10) || 1;
+        g._parts.push(r);
+        // The merged line's status is the WORST still-open one (new beats cooking beats ready
+        // beats served), because a line is only finished when every part of it is out.
+        const rank = { received: 0, preparing: 1, ready: 2, served: 3 };
+        if ((rank[r.status] ?? 3) < (rank[g.status] ?? 3)) g.status = r.status;
+      });
+      return [...groups.values()].map((g) => ({ ...g, qty: g._qty }));
+    };
+    // SERVED SINKS (owner, 2026-09-17: "which are mark as serve should go to bottom, only left one
+    // on top"). What is still to come is what the screen is for; what is already on the table is
+    // the record. Both halves keep the menu's order inside themselves.
+    const allOut = (r) => (r._parts ? r._parts.every((x) => x.status === "served") : r.status === "served");
+    const shownRows = view === "kot"
       ? [...flat].sort((a, b) => ((a._kot || 0) - (b._kot || 0)) || byMenuOrder(a, b))
-      : [...flat].sort(byMenuOrder);
-    const shownRows = view === "kot" ? sorted : sorted.filter((r) => catFilter === "all" || r._c.slug === catFilter);
+      : mergeRows(flat).sort((a, b) => (allOut(a) ? 1 : 0) - (allOut(b) ? 1 : 0) || byMenuOrder(a, b));
 
     // ONE LINE: spine · qty · dish (+ what to leave out) · course or ticket · money · serve · ✎.
     // Serve and ✎ are on EVERY line ("for particular item, edit button, serve button and
     // everything should be there") and use the same hooks the old rows used, so nothing about
     // what the server is asked to do changes.
+    // ONE LINE: spine · qty · dish (+ what to leave out) · money · serve · ✎.
+    // NO COURSE IN WORDS (owner, 2026-09-17: "we don't want categories describe in this"). The
+    // course is the coloured spine and nothing else — the dishes are in menu order, so the colour
+    // changing IS the course changing, and the three letters were saying it twice. The course is
+    // still named in words inside the line's own sheet, where there is room for it.
     const spineLine = (r, prev) => {
       const k = spineKey(r);
       const qty = parseInt(r.qty, 10) || 1;
-      const cooked = r.status === "preparing" || r.status === "ready";
-      const serveAttr = r.kind === "session"
-        ? `data-item-next="${esc(r.id)}" data-item-status="served"`
-        : `data-legacy-order="${esc(r.orderId)}" data-legacy-idx="${r.idx}" data-legacy-status="served"`;
+      const parts = r._parts || [r];
+      const cookedParts = parts.filter((x) => x.status === "preparing" || x.status === "ready");
+      const servedParts = parts.filter((x) => x.status === "served");
+      const cooked = cookedParts.length > 0;
+      // A merged line serves every cooked part of itself in one tap; a single line is the old hook.
+      const serveAttr = cookedParts.length > 1
+        ? `data-sp-serve="${esc(cookedParts.filter((x) => x.kind === "session").map((x) => x.id).join(","))}"`
+        : cookedParts.length === 1
+          ? (cookedParts[0].kind === "session"
+              ? `data-item-next="${esc(cookedParts[0].id)}" data-item-status="served"`
+              : `data-legacy-order="${esc(cookedParts[0].orderId)}" data-legacy-idx="${cookedParts[0].idx}" data-legacy-status="served"`)
+          : "";
       const extras = [r.note, ...((r.removed || []).map((x) => "no " + algLabel(x)))].filter(Boolean).map(esc).join(" · ");
       const groupStart = view === "kot" && (!prev || prev._kot !== r._kot);
-      const mark = view === "kot"
-        ? `<span class="sp-cat" style="color:var(--gold)" title="Kitchen ticket #${esc(r._kot)} · ${esc(r._at || "")}">K${esc(r._kot != null ? r._kot : "?")}</span>`
-        : `<span class="sp-cat" style="color:${esc(r._c.tint)}" title="${esc(r._c.name)}">${esc(r._c.abbr)}</span>`;
+      // A part-served line says so in its own status slot — "1/3 out" — instead of pretending.
+      const st = servedParts.length && servedParts.length < parts.length
+        ? `<span class="sp-st sp-st-part" title="${servedParts.reduce((n, x) => n + (parseInt(x.qty, 10) || 1), 0)} of ${qty} already served">${servedParts.reduce((n, x) => n + (parseInt(x.qty, 10) || 1), 0)}/${qty}</span>`
+        : `<span class="sp-st sp-st-${esc(r.status)}" title="${esc(STLABEL_SP[r.status] || r.status)}">${r.status === "served" ? "✓" : "new"}</span>`;
+      const ticketTip = view === "kot" ? "" : (parts.length > 1
+        ? ` · on ${parts.length} tickets (KOT ${parts.map((x) => x._kot).join(", ")})`
+        : ` · KOT #${parts[0]._kot != null ? parts[0]._kot : "?"}`);
       return `<div class="sp-row${r.status === "served" ? " sp-served" : ""}${groupStart ? " sp-gs" : ""}${openKey === k ? " sp-open" : ""}"
                    data-sp-row="${esc(k)}" data-sp-table="${esc(t)}" role="button" tabindex="0"
-                   title="${esc(r.title)} — ${esc(STLABEL_SP[r.status] || r.status)}">
-        <span class="sp-spine" style="background:${esc(r._c.tint)}"></span>
+                   title="${esc(r.title)} — ${esc(STLABEL_SP[r.status] || r.status)}${esc(ticketTip)}">
+        <span class="sp-spine" style="background:${esc(r._c.tint)}" title="${esc(r._c.name)}"></span>
         <span class="sp-qty">${qty}×</span>
-        <span class="sp-nm"><b>${esc(r.title)}</b>${r.is_mrp ? `<span class="sp-mrp" title="MRP item — taxed at source">MRP</span>` : ""}${extras ? `<i>${extras}</i>` : ""}${r.removedFlag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : ""}</span>
-        ${mark}
+        <span class="sp-nm"><b>${esc(r.title)}</b>${parts.length > 1 ? `<span class="sp-parts" title="the same dish on ${parts.length} tickets">${parts.length}⟩</span>` : ""}${r.is_mrp ? `<span class="sp-mrp" title="MRP item — taxed at source">MRP</span>` : ""}${extras ? `<i>${extras}</i>` : ""}${r.removedFlag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : ""}</span>
+        ${view === "kot" ? `<span class="sp-kotmark" title="Kitchen ticket #${esc(r._kot)} · ${esc(r._at || "")}">K${esc(r._kot != null ? r._kot : "?")}</span>` : ""}
         <span class="sp-am">${inr((Number(r.price) || 0) * qty)}</span>
-        ${cooked
-          ? `<button class="sp-ib sp-go" ${serveAttr} title="Serve this dish">🍽</button>`
-          : `<span class="sp-st sp-st-${esc(r.status)}" title="${esc(STLABEL_SP[r.status] || r.status)}">${r.status === "served" ? "✓" : "new"}</span>`}
-        ${r.kind === "session" ? `<button class="sp-ib" data-edit-dish="${esc(r.id)}" title="Edit this dish — allergens & kitchen note">✎</button>` : `<span class="sp-ib sp-ib-off" title="An older order: this dish has no line of its own to edit">✎</span>`}
+        ${cooked ? `<button class="sp-ib sp-go" ${serveAttr} title="${cookedParts.length > 1 ? `Serve all ${cookedParts.length} of them` : "Serve this dish"}">🍽</button>` : st}
+        ${r.kind === "session" ? `<button class="sp-ib" data-edit-dish="${esc(parts[0].id)}" title="Edit this dish — allergens & kitchen note">✎</button>` : `<span class="sp-ib sp-ib-off" title="An older order: this dish has no line of its own to edit">✎</span>`}
       </div>`;
     };
 
     // The line's own sheet: everything about THAT dish, and every button for it, over the bottom
     // of the popup — never inline, because growing the list is what starts the scrolling.
     function spineSheet(r) {
+      const parts = r._parts || [r];
       const qty = parseInt(r.qty, 10) || 1;
-      const cooked = r.status === "preparing" || r.status === "ready";
-      const serveAttr = r.kind === "session"
-        ? `data-item-next="${esc(r.id)}" data-item-status="served"`
-        : `data-legacy-order="${esc(r.orderId)}" data-legacy-idx="${r.idx}" data-legacy-status="served"`;
-      const canQty = r.kind === "session" && r.status !== "served" && r.status !== "ready" && !r.invoiceLive;
-      const canDel = r.kind === "session" && r.status !== "served" && !r.invoiceLive;
-      const ord = liveOrders.find((o) => o.id === r._oid);
-      const canCancelKot = !!ord && !anyServed(ord) && !invoiceLive && ord.payment_status !== "paid";
+      const one = parts.length === 1;
+      const canCancel = (p) => { const o = liveOrders.find((x) => x.id === p._oid); return !!o && !anyServed(o) && !invoiceLive && o.payment_status !== "paid"; };
+      const serveAttrOf = (p) => (p.kind === "session"
+        ? `data-item-next="${esc(p.id)}" data-item-status="served"`
+        : `data-legacy-order="${esc(p.orderId)}" data-legacy-idx="${p.idx}" data-legacy-status="served"`);
+      // EVERY PART GETS ITS OWN ROW when the line is a merge of two tickets: the line is one thing
+      // to read and to carry, but KOT #1's two and KOT #3's one are still separate rows in the
+      // kitchen's world, so each is served, edited, removed and voided on its own.
+      const partRow = (p) => {
+        const pq = parseInt(p.qty, 10) || 1;
+        const cooked = p.status === "preparing" || p.status === "ready";
+        const canQty = p.kind === "session" && p.status !== "served" && p.status !== "ready" && !p.invoiceLive;
+        const canDel = p.kind === "session" && p.status !== "served" && !p.invoiceLive;
+        return `<div class="sp-part">
+          <span class="sp-part-k">KOT #${esc(p._kot != null ? p._kot : "?")}${p._at ? ` · ${esc(p._at)}` : ""}</span>
+          <span class="sp-part-q">${pq}×</span>
+          <span class="sp-part-s sp-st-${esc(p.status)}">${esc(STLABEL_SP[p.status] || p.status)}</span>
+          <span class="sp-part-b">
+            ${cooked ? `<button class="btn small primary" ${serveAttrOf(p)}>🍽 Serve</button>` : ""}
+            ${p.kind === "session" ? `<button class="btn small" data-edit-dish="${esc(p.id)}" title="Allergens & kitchen note">✎</button>` : ""}
+            ${canQty ? `<span class="sp-stp"><button class="sx-qty" data-qty-dec="${esc(p.id)}" data-qty="${pq}" title="Fewer">−</button><span>${pq}</span><button class="sx-qty" data-qty-inc="${esc(p.id)}" data-qty="${pq}" title="More">＋</button></span>` : ""}
+            ${canDel ? `<button class="btn small" data-item-del="${esc(p.id)}" data-item-name="${esc(p.title)}" title="Remove this dish from the order">🗑</button>` : ""}
+            ${canCancel(p) ? `<button class="btn small danger" data-cancel-order="${esc(p._oid)}" title="Void this whole ticket — nothing is charged for it">✕ KOT</button>` : ""}
+          </span>
+        </div>`;
+      };
       return `<div class="sp-sheet">
         <div class="sp-sheet-h"><b>${esc(r.title)}</b>
-          <span class="sp-cat" style="color:${esc(r._c.tint)}">${esc(r._c.abbr)}</span>
+          <span class="sp-sheet-c" style="color:${esc(r._c.tint)}">${esc(r._c.name)}</span>
           <span class="sp-sheet-sp"></span>
           <button class="sp-ib" data-sp-row="" data-sp-table="${esc(t)}" title="Close">✕</button></div>
         <div class="sp-kv">
-          <span><i>Course</i> ${esc(r._c.name)}</span>
-          <span><i>Ticket</i> KOT #${esc(r._kot != null ? r._kot : "?")}${r._at ? " · " + esc(r._at) : ""}</span>
-          <span><i>Rate</i> ${inr(Number(r.price) || 0)} × ${qty} = <b>${inr((Number(r.price) || 0) * qty)}</b></span>
-          <span><i>Status</i> ${esc(STLABEL_SP[r.status] || r.status)}${r._paid ? " · paid" : ""}</span>
+          <span><i>Total here</i> ${qty} × ${inr(Number(r.price) || 0)} = <b>${inr((Number(r.price) || 0) * qty)}</b></span>
+          <span><i>${one ? "Ticket" : "Tickets"}</i> ${parts.map((p) => "#" + (p._kot != null ? p._kot : "?")).join(", ")}</span>
           <span><i>Avoid</i> ${(r.removed || []).length ? (r.removed || []).map((x) => esc(algLabel(x))).join(", ") : "—"}</span>
           <span><i>Note</i> ${r.note ? esc(r.note) : "—"}</span>
         </div>
+        <div class="sp-parts-list">${parts.map(partRow).join("")}</div>
+      </div>`;
+    }
+
+    // ── THE INCOMING ORDER, DISH BY DISH (owner, 2026-09-17: "for accepting order I also want like
+    // this detail view of one item") ──────────────────────────────────────────────────────────────
+    // Accepting is the one irreversible-ish tap on this screen — it sends food to the kitchen — so
+    // the ticket can be opened out first: every dish with its quantity, its money, what to leave
+    // out and the guest's note, the order-wide allergies, and the same two buttons at the end. It
+    // opens over the bottom of the list, like a dish's own sheet, so nothing moves under the thumb.
+    function waitSheet(o) {
+      const rows = withAllergens(o);
+      const money = rows.reduce((sum, x) => sum + (Number(x.price) || 0) * (parseInt(x.qty, 10) || 1), 0);
+      const alg = Array.isArray(o.allergies) ? o.allergies : [];
+      return `<div class="sp-sheet sp-sheet-wait">
+        <div class="sp-sheet-h"><b>🔔 ${o.kot_no != null ? `KOT #${esc(o.kot_no)}` : "New order"}</b>
+          <span class="sp-sheet-c">${when(o) ? esc(when(o)) : "just now"} · not on the bill yet</span>
+          <span class="sp-sheet-sp"></span>
+          <button class="sp-ib" data-sp-wait="" data-sp-table="${esc(t)}" title="Close">✕</button></div>
+        ${alg.length ? `<div class="sp-wait-alg">⚠ avoid in every dish: <b>${alg.map((x) => esc(algLabel(x))).join(", ")}</b></div>` : ""}
+        <div class="sp-parts-list">${rows.map((x) => {
+          const q = parseInt(x.qty, 10) || 1;
+          const c = courseOfRow(x);
+          const extras = [x.note, ...((x.removed || []).map((y) => "no " + algLabel(y)))].filter(Boolean).map(esc).join(" · ");
+          return `<div class="sp-part sp-part-wait">
+            <span class="sp-spine" style="background:${esc(c.tint)}" title="${esc(c.name)}"></span>
+            <span class="sp-part-q">${q}×</span>
+            <span class="sp-part-n"><b>${esc(x.title)}</b>${extras ? `<i>${extras}</i>` : ""}</span>
+            <span class="sp-part-a">${inr((Number(x.price) || 0) * q)}</span>
+            ${x.kind === "session" ? `<button class="btn small" data-edit-dish="${esc(x.id)}" title="Allergens & kitchen note">✎</button>` : ""}
+          </div>`;
+        }).join("")}</div>
         <div class="sp-sheet-b">
-          ${cooked ? `<button class="btn small primary" ${serveAttr}>🍽 Serve</button>` : ""}
-          ${r.kind === "session" ? `<button class="btn small" data-edit-dish="${esc(r.id)}">✎ Allergens &amp; note</button>` : ""}
-          ${canQty ? `<span class="sp-stp"><button class="sx-qty" data-qty-dec="${esc(r.id)}" data-qty="${qty}" title="Fewer">−</button><span>${qty}</span><button class="sx-qty" data-qty-inc="${esc(r.id)}" data-qty="${qty}" title="More">＋</button></span>` : ""}
-          ${canDel ? `<button class="btn small" data-item-del="${esc(r.id)}" data-item-name="${esc(r.title)}">🗑 Remove</button>` : ""}
-          ${canCancelKot ? `<button class="btn small danger" data-cancel-order="${esc(r._oid)}" title="Void this whole ticket — nothing is charged for it">✕ Cancel KOT #${esc(r._kot)}</button>` : ""}
+          <span class="sp-wait-tot">${rows.length} dish${rows.length === 1 ? "" : "es"} · <b>${inr(money)}</b></span>
+          <span class="sp-sheet-sp"></span>
+          ${cancelBtn(o) ? `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}">✕ Cancel</button>` : ""}
+          <button class="btn small primary" data-accept="${esc(o.id)}" title="Accept — the dishes join the bill in their menu place">✓ Accept</button>
         </div>
       </div>`;
     }
 
     const mergedBlock = shownRows.map((r, i) => spineLine(r, shownRows[i - 1])).join("");
     const openRow = shownRows.find((r) => spineKey(r) === openKey);
+    const openWait = newOrders.find((o) => String(o.id) === String(spineState().wait[String(t)]));
     const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} tickets · one bill</span>` : "";
     // Edit/Done toggle: the gated entry to staff editing. The confirm fires on Edit.
     // NOT ONCE THE FOOD IS OUT (owner, 2026-08-01: "after being served, why still an edit
@@ -11545,29 +11694,17 @@ function tablePanelParts(t, host = "float") {
       <button class="${view === "menu" ? "on" : ""}" data-sp-view="menu" data-sp-table="${esc(t)}" title="Every dish in the menu's own order — starters first, sweets last">📋 Menu order</button>
       <button class="${view === "kot" ? "on" : ""}" data-sp-view="kot" data-sp-table="${esc(t)}" title="The same dishes, ticket by ticket (KOT #1, #2, #3 …)">🧾 KOT-wise${kotN > 1 ? ` (${kotN})` : ""}</button>
     </div>`;
-    // Course chips: each one says how much of that course is out, so the answer to "what do I
-    // serve next" is on screen without a heading row anywhere.
-    const courseChips = (() => {
-      if (view === "kot") return "";
-      const seen = new Map();
-      flat.forEach((r) => {
-        const c = seen.get(r._c.slug) || { c: r._c, all: 0, out: 0 };
-        c.all += parseInt(r.qty, 10) || 1;
-        if (r.status === "served") c.out += parseInt(r.qty, 10) || 1;
-        seen.set(r._c.slug, c);
-      });
-      const chips = [...seen.values()].sort((a, b) => a.c.seq - b.c.seq).map((x) =>
-        `<button class="sp-chip${catFilter === x.c.slug ? " on" : ""}" style="${catFilter === x.c.slug ? `background:${esc(x.c.tint)};border-color:${esc(x.c.tint)};color:#fff` : `color:${esc(x.c.tint)}`}"
-                 data-sp-cat="${esc(x.c.slug)}" data-sp-table="${esc(t)}" title="${esc(x.c.name)} — ${x.out} of ${x.all} served">${esc(x.c.abbr)} ${x.out}/${x.all}</button>`).join("");
-      if (!chips) return "";
-      return `<div class="sp-chips"><button class="sp-chip${catFilter === "all" ? " on" : ""}" data-sp-cat="all" data-sp-table="${esc(t)}" title="Every course">ALL ${dishN}</button>${chips}</div>`;
-    })();
+    // OBITUARY — the course chip strip (2026-09-17). It was one 23px line of "ALL 29 · SOU 3/3 ·
+    // STR 4/5 …", a filter with a served count per course. He does not want the courses described
+    // on this screen at all ("we don't want categories describe in this"), and the strip was also
+    // the first thing the tight-window mode threw away, which says how much it was earning. What it
+    // answered — how much of a course is out — is still answered by the list itself, now that
+    // everything still to serve sits at the top and the served half sinks.
     ordersSec = `<div class="sp-listwrap">
       <div class="sp-bar">${seg}${mergedBadge}${editToggle}</div>
-      ${courseChips}
       ${newBlocks}
-      <div class="sp-list" data-sp-list="${esc(t)}">${mergedBlock}${voidNote}</div>
-      ${openRow ? spineSheet(openRow) : ""}
+      <div class="sp-list${view === "kot" ? " sp-kotview" : ""}" data-sp-list="${esc(t)}">${mergedBlock}${voidNote}</div>
+      ${openWait ? waitSheet(openWait) : openRow ? spineSheet(openRow) : ""}
     </div>`;
   }
 
@@ -11732,6 +11869,7 @@ function tablePanelParts(t, host = "float") {
       : mergeChildrenOf(t).map((k) => `<button class="btn danger sx-unmerge" data-unmerge="${esc(k)}">⇹ Unmerge T${esc(k)}</button>`).join("");
     foot = `${foot}<div class="sx-unmerge-row">${unmergeBtns}</div>`;
   }
+  if (partyChip) headPill += partyChip;   // beside the Family / VIP mark, as he asked
   return { sess, os, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
 }
 
@@ -15046,11 +15184,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     e.stopPropagation();
     spineState().view[String(b.dataset.spTable)] = b.dataset.spView;
     spineState().open[String(b.dataset.spTable)] = "";   // a line open in the other ordering is not open here
-    if (rerender) rerender();
-  }));
-  root.querySelectorAll("[data-sp-cat]").forEach((b) => (b.onclick = (e) => {
-    e.stopPropagation();
-    spineState().cat[String(b.dataset.spTable)] = b.dataset.spCat;
+    spineRemember();
     if (rerender) rerender();
   }));
   // A dish line opens its own sheet; tapping the open line (or its ✕) closes it again. The
@@ -15060,12 +15194,30 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     e.stopPropagation();
     const tt = String(b.dataset.spTable), k = b.dataset.spRow || "";
     spineState().open[tt] = spineState().open[tt] === k ? "" : k;
+    spineRemember();
+    if (rerender) rerender();
+  }));
+  // A merged line's 🍽 serves every cooked part of it — one tap for "3× Espresso" that arrived on
+  // two tickets. Sequential on purpose: each is its own row and its own audit line, and the second
+  // must not be sent before the first is known to have landed.
+  root.querySelectorAll("[data-sp-serve]").forEach((b) => (b.onclick = async () => {
+    const ids = String(b.dataset.spServe || "").split(",").filter(Boolean);
+    for (const id of ids) await itemStatus(id, "served");
+  }));
+  // Tapping an incoming ticket opens it dish by dish; the ✕ inside closes it again.
+  root.querySelectorAll("[data-sp-wait]").forEach((b) => (b.onclick = (e) => {
+    if (e.target.closest("[data-accept],[data-cancel-order],[data-edit-dish]")) return;
+    e.stopPropagation();
+    const tt = String(b.dataset.spTable), id = b.dataset.spWait || "";
+    spineState().wait[tt] = spineState().wait[tt] === id ? "" : id;
+    spineRemember();
     if (rerender) rerender();
   }));
   root.querySelectorAll("[data-sp-guests]").forEach((b) => (b.onclick = (e) => {
     e.stopPropagation();
     const tt = String(b.dataset.spGuests);
     spineState().guests[tt] = !spineState().guests[tt];
+    spineRemember();
     if (rerender) rerender();
   }));
 
