@@ -327,7 +327,13 @@ row(S("a detail list that is capped says so, so it cannot quietly stop adding up
     await sb.from("settings").update({ [COL]: true }).eq("restaurant_id", FH);
   }
   try {
-    const r = await GET(c.O, `/api/owner/reports?type=invexpenses&range=30d&rid=${FH}`);
+    // `&refresh=1` IS LOAD-BEARING, and finding out why is the best thing this check did.
+    // Inventory reports ride the compute-on-view snapshot cache. Without forcing a recompute this
+    // reads whatever was STORED earlier — so when I sabotaged the route to stop sending `listCap`
+    // at all, the check stayed green on a payload computed by the previous build. Measured, both
+    // in one run: cached answered `listCap: 300` stamped 02:43, `?refresh=1` answered `listCapX`.
+    // A check that reads a cached report is testing the snapshot, not the code.
+    const r = await GET(c.O, `/api/owner/reports?type=invexpenses&range=30d&rid=${FH}&refresh=1`);
     if (r.status !== 200) return `${r.status} ${r.j?.error} — Inventory was switched on for this read, so a 403 here is a real refusal`;
     return !!(typeof r.j.listCap === "number" && "expensesMore" in r.j)
       || `listCap=${r.j.listCap} expensesMore=${r.j.expensesMore} — a capped list that does not say it is capped stops adding up to the band above it`;
