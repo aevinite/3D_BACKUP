@@ -67,6 +67,11 @@ const { PAYMENT_METHODS } = await import("@/lib/payments.ts");
 const srcPaySplit = read("lib/paySplit.ts");
 const srcUserAuth = read("lib/userAuth.ts");
 const srcRateLimit = read("lib/rateLimit.ts");
+// RATE_LABELS MOVED OUT OF rateLimit.ts ON 2026-09-02 and is re-exported from there, so the one
+// check below that reads the map has to follow it (sweep #9 T34, 2026-09-17). Until it did, the
+// slice it took came back empty and the check failed on clean main for a rule that was still true
+// — a guard pointing at where its subject used to live, not a product fault.
+const srcPlainError = read("lib/plainError.ts");
 const srcIdem = read("lib/idempotency.ts");
 const srcClash = read("lib/clash.ts");
 const srcTax = read("lib/tax.ts");
@@ -753,9 +758,11 @@ check("the staff-login wall is the ONE silent alert; every other ping is audible
 check("the admin-login warning does not promise a wait that is not real",
   /Nobody is locked out — this is just a heads-up/.test(srcRateLimit));
 check("every rate key has a name a person would recognise",
-  (() => { const labels = srcRateLimit.slice(srcRateLimit.indexOf("const RATE_LABELS"), srcRateLimit.indexOf("// How long the window"));
+  (() => { const at = srcPlainError.indexOf("export const RATE_LABELS");
+    if (at < 0) return false;                       // the map moved again → say so, never pass blind
+    const labels = srcPlainError.slice(at, srcPlainError.indexOf("};", at));
     const keys = (srcRateLimit.match(/\| "([a-z_]+)"/g) || []).map((m) => m.slice(3, -1));
-    return keys.every((k) => labels.includes(`${k}:`)); })());
+    return keys.length > 0 && keys.every((k) => labels.includes(`${k}:`)); })());
 check("the alert names WHO, WHERE, how many tries and which device",
   /\["Who", who\][\s\S]{0,200}?\["Where", where\][\s\S]{0,200}?\["Tries", tries\][\s\S]{0,200}?\["Device"/.test(srcRateLimit));
 check("…and it does not repeat the restaurant when the 'who' line already names it",

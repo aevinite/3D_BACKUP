@@ -602,6 +602,19 @@ were **stale allowances**, not dead checks.
 | 33 | P104801–P104900 (round 1) · P152001–P153000 (round 2+; **P152001–P152463 spent by round 2, 2026-09-17/18** — 513 phases. Blocks B and C are GENERATED one row per function and one per file, so the total moves when the territory does: 396 added a file (+1), 397 added a file and brought a function into range (+4), and one realtime probe split in two when 397 changed what the right answer was (+1). A real check is not trimmed to hit a round number. Ids come from one allocator, `scripts/sweep/t33/ids.mjs`, rather than a hard-coded start per block — hand-nudging four starts is how an id collision happens and it nearly did twice in one afternoon. Nothing claimed from the *Next free ID* line, which was neither read nor edited) | **The database, migrations at POSITIONS 321 → THE END** (`ls supabase/migrations/*.sql \| sort \| sed -n '321,$p'` — 81 files, 12,898 lines, `314_a_settled_bill_…` → `393_the_last_fifteen_guest_tables_…`; a positional range is NOT a numeric one, so position 321 is the file named `314_…`). **60 of its 81 files had ZERO ledger rows by subject before this file existed** — every migration from `333_…` to `393_…` except two. `T33.md` (round 1, 50 rows) and `T33-S9-R2.md` (round 2, 513 rows — 59 of them DRIVEN: a real write inside a rolled-back transaction, which round 1 had none of), both filed 2026-09-17 (sweep #9) | ✅ | 563 | 563 | 0 | 0 |
 | 35 | P105001–P105100 (fifty used; `P105051`–`P105100` stay free) | **The access and permission libraries** — `lib/accessConfig.ts` · `accessModel.ts` · `accessState.ts` · `accessTree.ts` · `staffAuth.ts` · `staffCaps.ts` · `staffProfile.ts` · `staffProfileShared.ts` (+ its `.test.mjs`) · `revealGate.ts`. Ten files, 3,103 lines (re-derived with `wc -l`, not inherited — the prompt named seven). `T35-S9.md`, filed 2026-09-18 (sweep #9). *Row added by T33 the same day: the ledger was merged in #1409 without it, which turned `verify:ledger-index` RED on `main` for every session in this folder. The guard asks for exactly this and nothing of T35's work was touched.* | ✅ | 50 | — | 2 | — |
 
+### Sweep #9 terminals numbered ABOVE 30 — a register of their own
+
+Sweep #6 had thirty territories, so `T1`–`T30` above are the only terminal numbers that table can
+speak for. Sweep #9 ran **forty**, and a ledger filed by one of the last ten has no parent row up
+there to be answered for. They are registered here instead, by terminal number and ID block, so
+`verify:ledger-index` can find them and the next sweep knows they exist. **These are NOT a second
+round of the sweep-#6 terminal with the same number — terminal numbers are per-sweep.**
+
+| T | ID block | territory | filed? | rows | ok | prob | resv |
+|---|---|---|---|---|---|---|---|
+| 34 | P104901–P105000 (50 used) | **The money and compliance libraries** — `lib/{clash,paySplit,tax,taxFiling,idempotency,idempotencyRule,dbRefusal,readGuard}.ts`, `docs/SAAS-EFFICIENCY-PLAYBOOK.md`. Sweep #6's terminal 24 held the same files plus `logTrail`/`userAuth`/`rateLimit`; its 1,000 rows stay in `T24.md` and were re-run before these were written. | ✅ `T34-S9.md` | 50 | 50 | 0 | 0 |
+| 35 | P105001–P105100 (50 used) | **The access and permission libraries** — `lib/{accessConfig,accessModel,accessState,accessTree,staffAuth,staffCaps,staffProfile,staffProfileShared,revealGate}.ts`. Registered here by T34 on 2026-09-18: `T35-S9.md` landed in #1409 with no row anywhere, which left `verify:ledger-index` red on `main` for every session in this folder. | ✅ `T35-S9.md` | 50 | 50 | 0 | 0 |
+
 ---
 
 ## ✅ The ID faults — found, checked, and fixed (T30, 2026-08-22)
