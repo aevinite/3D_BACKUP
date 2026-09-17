@@ -5325,3 +5325,10 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
   .sp-bar { padding: 4px 7px 3px; }
   .sp-money { min-height: 26px; padding: 3px 9px; }
 }
+
+/* WHEN THE WINDOW IS SHORT, the popup gives up its optional strips before it gives up row height
+   (spineFit adds .sp-tight). The chips are a filter and the legend repeats the bar — the dishes
+   are the thing that must stay readable. */
+.tp-detail-floating.sp-tight .sp-chips { display: none; }
+.tp-detail-floating.sp-tight .tp-prog-leg { display: none; }
+.tp-detail-floating.sp-tight .tp-detail-head { padding-bottom: 5px; }

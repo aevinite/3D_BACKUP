@@ -10716,16 +10716,31 @@ function syncLegendToDrawer() {
 // phone (844px) twenty lines land around 28px; on a short laptop window around 19px.
 // It only ever gives up at 15px, below which the list scrolls rather than hide a dish — an
 // honest floor for the day someone orders forty things.
-const SP_RH_MAX = 30, SP_RH_MIN = 15;
+// A row under ~19px is technically still a row and practically a squint, so before it goes
+// there the popup gives up its OPTIONAL furniture instead: the course-chip strip (a filter, not
+// information — every line already says its course) and the progress legend (the bar says the
+// same thing in colour). Only when that is not enough do the rows keep shrinking, to 15px, which
+// is the point at which hiding a dish would be worse than a small row.
+const SP_RH_MAX = 30, SP_RH_COMFORT = 19, SP_RH_MIN = 15;
 function spineFit(root) {
   (root || document).querySelectorAll(".sp-list").forEach((el) => {
-    let rh = SP_RH_MAX;
-    el.style.setProperty("--sp-rh", rh + "px");
-    // The sheet of an open line is measured too — it is inside the list, so it must be paid for.
-    let guard = SP_RH_MAX - SP_RH_MIN;
-    while (guard-- > 0 && el.scrollHeight > el.clientHeight + 1) {
-      rh -= 1;
+    const card = el.closest(".tp-detail-floating") || el.closest(".tp-detail");
+    const fit = (floor) => {
+      let rh = SP_RH_MAX;
       el.style.setProperty("--sp-rh", rh + "px");
+      let guard = SP_RH_MAX - floor;
+      while (guard-- > 0 && el.scrollHeight > el.clientHeight + 1) {
+        rh -= 1;
+        el.style.setProperty("--sp-rh", rh + "px");
+      }
+      return { rh, fits: el.scrollHeight <= el.clientHeight + 1 };
+    };
+    if (card) card.classList.remove("sp-tight");
+    let r = fit(SP_RH_COMFORT);
+    if (card && (!r.fits || r.rh <= SP_RH_COMFORT)) {
+      card.classList.add("sp-tight");     // drop the chips + the legend, then measure again
+      r = fit(SP_RH_COMFORT);
+      if (!r.fits) fit(SP_RH_MIN);        // still tight: small rows beat a hidden dish
     }
   });
 }
