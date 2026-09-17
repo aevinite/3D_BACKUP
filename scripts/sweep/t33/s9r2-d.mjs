@@ -1,12 +1,11 @@
 // T33 round 2 · BLOCK D — invariants over the REAL data, not a fixture. 60 phases.
 // Read-only throughout. Scoped, column-listed, no full-table analytics.
 import { q, one } from "./tx.mjs";
+import { nextId } from "./ids.mjs";
 
 export const rows = [];
-export let start = 152339;
-let next = start;
 export const add = (subject, check, how, pass, note) => {
-  const id = `P${next++}`;
+  const id = nextId();
   rows.push([id, subject, check, how, pass ? "✅" : "❌", String(note).replace(/\|/g, "／").slice(0, 300)]);
   return pass;
 };
@@ -80,8 +79,12 @@ SELECT
   (SELECT count(*)::int FROM bill_chain WHERE chain_hash IS NULL OR prev_hash IS NULL)             AS unhashed_chain,
   (SELECT count(*)::int FROM realtime_events
      WHERE topic_rid IS DISTINCT FROM topic || ':' || restaurant_id::text)                         AS miskeyed_breadcrumbs,
+  -- MIGRATION 397 changed what the right answer is: a platform event IS announced again (so the
+  -- admin console refreshes instantly) but must be keyed to NOBODY. The question is therefore not
+  -- "is it announced" any more -- it is "is it announced AS SOMEBODY'S".
   (SELECT count(*)::int FROM realtime_events e JOIN staff_actions a ON a.id::text = e.entity_id
-     WHERE e.topic = 'audit' AND a.restaurant_id IS NULL)                                          AS platform_event_announced,
+     WHERE e.topic = 'audit' AND a.restaurant_id IS NULL
+       AND (e.restaurant_id IS NOT NULL OR e.topic_rid <> e.topic || ':platform'))                 AS platform_event_misattributed,
   (SELECT count(*)::int FROM information_schema.tables
      WHERE table_schema='public' AND table_name IN ('verification_codes','print_pairings'))        AS retired_tables_back,
   (SELECT count(*)::int FROM information_schema.columns c
@@ -176,11 +179,11 @@ add(M("321_the_sweep_of_layer_b.sql"),
   "every breadcrumb in the database is keyed to its topic AND its restaurant — realtime is per-restaurant, as the SaaS rule requires",
   "compare topic_rid against topic || ':' || restaurant_id on every row",
   n(d.miskeyed_breadcrumbs) === 0, `${d.miskeyed_breadcrumbs} miskeyed rows`);
-add(M("395_an_event_with_no_restaurant_is_announced_to_nobody.sql"),
-  "no platform-level activity event currently sits announced on a restaurant's channel",
-  "join audit breadcrumbs to their staff_actions row and count those whose action has no restaurant",
-  n(d.platform_event_announced) === 0,
-  `${d.platform_event_announced} such breadcrumbs (migration 395 stopped new ones; the cron prunes within 10 minutes)`);
+add(M("397_a_platform_event_is_announced_to_nobodys_restaurant.sql"),
+  "no platform-level activity event in the table is announced as a RESTAURANT'S — it is announced to the unscoped admin console and keyed to nobody",
+  "join audit breadcrumbs to their staff_actions row, and for those whose action has no restaurant, check the breadcrumb carries no restaurant and is keyed '<topic>:platform'",
+  n(d.platform_event_misattributed) === 0,
+  `${d.platform_event_misattributed} misattributed breadcrumbs (migration 395 stopped the mislabel, 397 gave the instant refresh back without it)`);
 add(M("384_the_last_of_the_retired_stub.sql") + ", " + M("380_a_setup_code_replaces_the_allow_page.sql"),
   "the two retired tables have not come back",
   "look for verification_codes and print_pairings in the catalogue", n(d.retired_tables_back) === 0,

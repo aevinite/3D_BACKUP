@@ -181,11 +181,13 @@ if (!env.SUPABASE_ACCESS_TOKEN) {
 // or a new trigger on one of the six. So the claim is now CHECKED: the set of (body × nullable
 // table) pairs must be exactly the one pair we have read and explained. A new pair goes red, and
 // whoever sees it reads the correction block in migration 386 before deciding.
-// **MIGRATION 395 CLOSED IT** (the owner picked it as item 7, 2026-09-17): `lfh_rt_emit` now
-// returns without emitting anything when the row it fired on has no restaurant, because no scoped
-// subscriber should hear it. So EXPLAINED below is EMPTY on purpose — there is no longer a body
-// that can reach its restaurant-#1 arm, and a pair reappearing here is a regression, not a known
-// case.
+// **MIGRATIONS 395 AND 397 CLOSED IT** (the owner picked both, 2026-09-17). 395 made `lfh_rt_emit`
+// return without emitting when the row it fired on has no restaurant. 397 then gave the admin
+// console its instant refresh back WITHOUT bringing the mislabel with it: the breadcrumb is emitted
+// again, with `restaurant_id` left NULL and `lfh_set_topic_rid` keying it `<topic>:platform`, which
+// no per-restaurant subscriber matches and the unscoped admin console does. So EXPLAINED below is
+// EMPTY on purpose — no body can reach a restaurant-#1 arm, and a pair reappearing here is a
+// regression, not a known case.
 //
 // CHECKED THREE WAYS, because the claim can stop being true in three different places: no
 // body/table pair can reach the arm, `lfh_rt_emit` still carries its refusal, and every one of its
@@ -198,7 +200,7 @@ if (!env.SUPABASE_ACCESS_TOKEN) {
 // regex over the raw `pg_get_functiondef` still "finds" the fallback in a comment — the same
 // mistake that had `verify:t24-money-rules` red on main for two days. `code()` above strips
 // comments; the filtering therefore happens here in JS, not in the SQL.
-head("D · no function body can reach its restaurant-#1 arm, and 395's refusal is still installed");
+head("D · no function body can reach its restaurant-#1 arm, and 397's platform keying is installed");
 if (!env.SUPABASE_ACCESS_TOKEN) {
   console.log("⏭  skipped: needs the database.");
 } else {
@@ -237,11 +239,42 @@ if (!env.SUPABASE_ACCESS_TOKEN) {
         + `correction block in migration 386 and migration 395's header, then either make the column `
         + `NOT NULL, stop the body falling back, or add the pair to EXPLAINED with the reason.`);
 
-    // ── 395's own two invariants ───────────────────────────────────────────────────────────────
+    // ── 397's invariants, which replaced 395's single one ──────────────────────────────────────
     const emit = code(allFns.find((f) => f.nm === "lfh_rt_emit")?.d || "");
-    ok(/IF\s+r\.restaurant_id\s+IS\s+NULL\s+THEN/i.test(emit) && !ROW_FALLBACK.test(emit),
-      "lfh_rt_emit refuses to announce an event that belongs to no restaurant, instead of stamping it "
-      + "with restaurant #1's id (migration 395)");
+    ok(!ROW_FALLBACK.test(emit) && !/IF\s+r\.restaurant_id\s+IS\s+NULL\s+THEN[\s\S]{0,60}RETURN\s+NULL/i.test(emit),
+      "lfh_rt_emit neither stamps an event that belongs to no restaurant with restaurant #1's id "
+      + "(the fault 395 fixed) nor swallows it (the cost 397 bought back) — it emits with a null "
+      + "restaurant");
+
+    const topic = code(allFns.find((f) => f.nm === "lfh_set_topic_rid")?.d || "");
+    ok(/COALESCE\(\s*NEW\.restaurant_id::text\s*,\s*'platform'\s*\)/i.test(topic),
+      "lfh_set_topic_rid keys a null-restaurant breadcrumb '<topic>:platform', so no per-restaurant "
+      + "subscription can match it (migration 397 — it coalesced to restaurant #1's id from migration "
+      + "145 until then, which is the mislabel one level up from 395's)");
+
+    const rtNullable = (await q(`select c.is_nullable n from information_schema.columns c
+                                  where c.table_schema = 'public' and c.table_name = 'realtime_events'
+                                    and c.column_name = 'restaurant_id'`))[0]?.n;
+    ok(rtNullable === "YES",
+      "realtime_events.restaurant_id accepts a NULL, which is what lets a platform event be keyed to "
+      + "nobody rather than to French House. The foreign key to restaurants stays and is satisfied by "
+      + "a null — a sentinel id would have needed a phantom restaurant row and, from an AFTER trigger, "
+      + "would have aborted the write that fired it");
+
+    // AND THE TWO SUBSCRIPTIONS STILL GET WHAT THEY SHOULD. Asserted on the KEYS actually written,
+    // because this is the whole product question: the admin console filters topic=eq.audit with no
+    // restaurant and must receive a platform event; a restaurant filters
+    // topic_rid=eq.audit:<its own id> and must not.
+    const keys = await q(`select count(*) filter (where topic_rid = topic || ':platform')::int AS platform_keyed,
+                                 count(*) filter (where restaurant_id IS NULL
+                                                    AND topic_rid <> topic || ':platform')::int AS miskeyed_nulls,
+                                 count(*) filter (where restaurant_id IS NOT NULL
+                                                    AND topic_rid <> topic || ':' || restaurant_id::text)::int AS miskeyed_tenants
+                            from realtime_events`);
+    ok(Number(keys[0].miskeyed_nulls) === 0 && Number(keys[0].miskeyed_tenants) === 0,
+      `every breadcrumb currently in the table is keyed correctly — ${keys[0].platform_keyed} to 'platform' `
+      + `and the rest to their own restaurant; ${keys[0].miskeyed_nulls} null-restaurant rows carry a `
+      + `restaurant key and ${keys[0].miskeyed_tenants} tenant rows carry the wrong one`);
 
     const emitTrg = await q(`select c.relname tbl, t.tgname, (t.tgtype & 2) > 0 as is_before
                                from pg_trigger t join pg_proc p on p.oid = t.tgfoid
@@ -250,11 +283,11 @@ if (!env.SUPABASE_ACCESS_TOKEN) {
     const before = emitTrg.filter((x) => x.is_before === true).map((x) => `${x.tbl}.${x.tgname}`);
     ok(emitTrg.length > 0 && before.length === 0,
       before.length === 0
-        ? `all ${emitTrg.length} of lfh_rt_emit's triggers are AFTER, so 395's early RETURN NULL cannot skip a write`
-        : `${before.length} of lfh_rt_emit's triggers are BEFORE (${before.join(", ")}). Migration 395's `
-          + `early RETURN NULL SKIPS THE WRITE in a BEFORE row trigger, so those tables would silently `
-          + `stop recording rows with no restaurant. Make the trigger AFTER, or give 395's early exit a `
-          + `RETURN that is correct for a BEFORE trigger.`);
+        ? `all ${emitTrg.length} of lfh_rt_emit's triggers are AFTER — which is what made 395's early RETURN NULL safe, and is why 397's foreign key could not be satisfied by a sentinel id instead of a null (an FK violation in an AFTER trigger aborts the write that fired it)`
+        : `${before.length} of lfh_rt_emit's triggers are BEFORE (${before.join(", ")}). A BEFORE row `
+          + `trigger that returns NULL SKIPS THE WRITE, and an FK violation inside one aborts it too, so `
+          + `those tables could silently stop recording rows. Make the trigger AFTER, or read migrations `
+          + `395 and 397 together before changing this function.`);
   } catch (e) { console.log(`⏭  skipped: ${String(e.message).slice(0, 110)}`); }
 }
 

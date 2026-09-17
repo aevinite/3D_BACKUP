@@ -35,10 +35,19 @@ Territory re-derived, not trusted: \`ls supabase/migrations/*.sql | sort | sed -
 \`396_a_stamped_tax_rate_must_be_a_rate.sql\`. (It was 81 files when round 1 measured it and has
 grown three times since. A positional range is not a numeric one.)
 
-**IDs: \`P104851\`–\`P104900\` (round 1's unspent remainder, contiguous) + \`P152001\`–\`P152450\`
-(this terminal's PRE-ALLOCATED round-2 block from INDEX.md).** 50 + 450 = 500, so only ids this
+**IDs: \`P104851\`–\`P104900\` (round 1's unspent remainder, contiguous) + \`P152001\`–\`${rows[rows.length - 1][0].slice(1)}\`
+(this terminal's PRE-ALLOCATED round-2 block from INDEX.md, which runs to P153000).** Only ids this
 terminal already holds were used — the *Next free ID* line was never read and never edited, which
 is the half of the rule this registry has recorded nine collisions over.
+
+**The count is ${rows.length}, not a round 500, and it moves when the TERRITORY moves.** Blocks B and C
+are generated one row per function and one per file, so a migration landing mid-round changes the
+total: 396 added a file (+1), then 397 added a file and brought a function into range (+4), and one
+realtime probe split in two when 397 changed what the right answer was (+1). A real check is not
+trimmed to hit a round number — T17 (2026-09-02), T13 (2026-09-05) and T27 (2026-09-16) all recorded
+that reasoning. **Ids come from one allocator (\`scripts/sweep/t33/ids.mjs\`) rather than a
+hard-coded start per block**, which is the thing that made those shifts safe: hand-nudging four
+starts is how an id collision happens, and it nearly did twice in one afternoon.
 
 ## What this round was aimed at, and why — the measurement first (S9-RULES rule 2b)
 
@@ -55,10 +64,10 @@ with no row at all**. Every one of the 36 has rows now.
 
 | block | ids | count | what it is |
 |---|---|---|---|
-| A · DRIVEN behaviour | \`P104851\`–\`P104900\`, \`P152001\`–\`P152008\` | ${a.rows.length} | a real write to French House inside a rolled-back transaction, then the answer read back |
-| B+C · every function, three rules each · every file, one composite row | \`P152009\`–\`P152337\` | ${bc.rows.length} | generated from the source, so the count is whatever the territory has |
-| D · invariants over the REAL data | \`P152338\`–\`P152365\` | ${d.rows.length} | 41,159 orders and 62 restaurants, not a fixture |
-| D2+E · one row per live restaurant, then judgment | \`P152366\`–\`P152450\` | ${e.rows.length} | does each restaurant only carry its own numbers · should it work this way |
+| A · DRIVEN behaviour | \`${a.rows[0][0]}\`–\`${a.rows[a.rows.length - 1][0]}\` | ${a.rows.length} | a real write to French House inside a rolled-back transaction, then the answer read back |
+| B+C · every function, three rules each · every file, one composite row | \`${bc.rows[0][0]}\`–\`${bc.rows[bc.rows.length - 1][0]}\` | ${bc.rows.length} | generated from the source, so the count is whatever the territory has |
+| D · invariants over the REAL data | \`${d.rows[0][0]}\`–\`${d.rows[d.rows.length - 1][0]}\` | ${d.rows.length} | 41,159 orders and 62 restaurants, not a fixture |
+| D2+E · one row per live restaurant, then judgment | \`${e.rows[0][0]}\`–\`${e.rows[e.rows.length - 1][0]}\` | ${e.rows.length} | does each restaurant only carry its own numbers · should it work this way |
 
 ## Result
 

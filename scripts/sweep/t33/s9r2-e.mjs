@@ -1,16 +1,9 @@
 // T33 round 2 · BLOCK D2 (one row per live restaurant) + BLOCK E (judgment). 85 phases.
 import { q, one } from "./tx.mjs";
+import { nextId } from "./ids.mjs";
 export const rows = [];
-let next = 152367;
 const add = (subject, check, how, pass, note) => {
-  const id = `P${next++}`;
-  // 152451, not 152450: block B+C grew by one row when migration 396 added a file to the territory
-  // mid-round, so the round is 501 phases and not 500. The ceiling moves rather than a real check
-  // being trimmed to hit a round number — T17 (2026-09-02), T13 (2026-09-05) and T27 (2026-09-16)
-  // all recorded that reasoning. Nothing is CLAIMED by it: this terminal's pre-allocated round-2
-  // block is P152001-P153000, so 152451 is an id it already holds, and the *Next free ID* line is
-  // neither read nor touched.
-  if (next > 152452) throw new Error("blocks D2/E ran past this terminal's own block");
+  const id = nextId();
   rows.push([id, subject, check, how, pass ? "✅" : "❌", String(note).replace(/\|/g, "／").slice(0, 300)]);
   return pass;
 };
