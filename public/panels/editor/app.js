@@ -11488,7 +11488,7 @@ function tablePanelParts(t, host = "float") {
       const alg = Array.isArray(o.allergies) ? o.allergies : [];
       return `<div class="sp-newbox">
         <div class="sp-newbox-h">
-          <span class="sp-newbox-l">🔔 ${o.kot_no != null ? `KOT #${esc(o.kot_no)}` : "NEW ORDER"}</span>
+          <span class="sp-newbox-l">${(!o.placed_by && !o.placed_by_id) ? "👤 GUEST" : "🔔"} ${o.kot_no != null ? `KOT #${esc(o.kot_no)}` : "NEW ORDER"}</span>
           <span class="sp-newbox-t">${when(o) ? esc(when(o)) : "just now"} · not on the bill yet</span>
           <span class="sp-newbox-sp"></span>
           <span class="sp-newbox-a">${rows.length} dish${rows.length === 1 ? "" : "es"} · <b>${inr(money)}</b></span>
@@ -11528,9 +11528,12 @@ function tablePanelParts(t, host = "float") {
     const catFilter = sp.cat[String(t)] || "all";
     const openKey = sp.open[String(t)] || "";
     // Every accepted dish, flattened, each line remembering the ticket it arrived on.
+    // WHO PUNCHED IT: `placed_by` null means the guest ordered it themselves — the app's own
+    // convention since migration 220 ("NULL keeps meaning the guest ordered it themselves").
+    const guestPlaced = (o) => !o.placed_by && !o.placed_by_id;
     const flat = liveOrders.flatMap((o) => withAllergens(o).map((r) => ({
       ...r, _kot: o.kot_no, _at: when(o), _oid: o.id, _paid: o.payment_status === "paid",
-      _c: courseOfRow(r),
+      _guest: guestPlaced(o), _c: courseOfRow(r),
     })));
     const byMenuOrder = (a, b) => (a._c.seq - b._c.seq) || (a._c.itemSeq - b._c.itemSeq) || String(a.title).localeCompare(String(b.title));
     // ── THE SAME DISH ON TWO TICKETS IS ONE LINE (owner, 2026-09-17: "diff kot same item should
@@ -11541,8 +11544,17 @@ function tablePanelParts(t, host = "float") {
     // them different food, or different money, keeps them apart. Each part is still its own row in
     // the database and still individually servable: the line's sheet lists them ticket by ticket.
     // KOT-wise deliberately does NOT merge — there the ticket is the point.
+    // GUEST AND STAFF DISHES MERGE TOO (owner, 2026-09-17: "the guest order and the order taken
+    // will also merge … if there is a diff allergy or diff notes then OK, that should not merge,
+    // but if there is not, it should merge … guest order and taken order act same when they are in
+    // the bill, just like 2 diff KOT — but the guest one will be listed as guest").
+    // `r.kind` was in this key, which is how a dish is STORED (a guest order on a sessions-off
+    // restaurant lands as JSON, a staff order as its own rows) — not what it IS. Storage is not a
+    // reason to make a waiter read the same dish twice. It is out; what stays in is everything that
+    // makes them different food or different money: the dish, the note, what to leave out, the unit
+    // price and the MRP flag. Each part keeps its own row in the sheet, and a guest part says so.
     const mergeKey = (r) => [String(r.title || ""), String(r.note || ""), (r.removed || []).slice().sort().join(","),
-                             Number(r.price) || 0, r.is_mrp ? 1 : 0, r.kind].join("§");
+                             Number(r.price) || 0, r.is_mrp ? 1 : 0].join("§");
     const mergeRows = (rows) => {
       const groups = new Map();
       rows.forEach((r) => {
@@ -11596,16 +11608,17 @@ function tablePanelParts(t, host = "float") {
       const st = servedParts.length && servedParts.length < parts.length
         ? `<span class="sp-st sp-st-part" title="${servedParts.reduce((n, x) => n + (parseInt(x.qty, 10) || 1), 0)} of ${qty} already served">${servedParts.reduce((n, x) => n + (parseInt(x.qty, 10) || 1), 0)}/${qty}</span>`
         : `<span class="sp-st sp-st-${esc(r.status)}" title="${esc(STLABEL_SP[r.status] || r.status)}">${r.status === "served" ? "✓" : "new"}</span>`;
+      const tName = (x) => `${x._guest ? "guest order" : "KOT"} #${x._kot != null ? x._kot : "?"}`;
       const ticketTip = view === "kot" ? "" : (parts.length > 1
-        ? ` · on ${parts.length} tickets (KOT ${parts.map((x) => x._kot).join(", ")})`
-        : ` · KOT #${parts[0]._kot != null ? parts[0]._kot : "?"}`);
+        ? ` · on ${parts.length} tickets (${parts.map(tName).join(", ")})`
+        : ` · ${tName(parts[0])}`);
       return `<div class="sp-row${r.status === "served" ? " sp-served" : ""}${groupStart ? " sp-gs" : ""}${openKey === k ? " sp-open" : ""}"
                    data-sp-row="${esc(k)}" data-sp-table="${esc(t)}" role="button" tabindex="0"
                    title="${esc(r.title)} — ${esc(STLABEL_SP[r.status] || r.status)}${esc(ticketTip)}">
         <span class="sp-spine" style="background:${esc(r._c.tint)}" title="${esc(r._c.name)}"></span>
         <span class="sp-qty">${qty}×</span>
         <span class="sp-nm"><b>${esc(r.title)}</b>${parts.length > 1 ? `<span class="sp-parts" title="the same dish on ${parts.length} tickets">${parts.length}⟩</span>` : ""}${r.is_mrp ? `<span class="sp-mrp" title="MRP item — taxed at source">MRP</span>` : ""}${extras ? `<i>${extras}</i>` : ""}${r.removedFlag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : ""}</span>
-        ${view === "kot" ? `<span class="sp-kotmark" title="Kitchen ticket #${esc(r._kot)} · ${esc(r._at || "")}">K${esc(r._kot != null ? r._kot : "?")}</span>` : ""}
+        ${view === "kot" ? `<span class="sp-kotmark${r._guest ? " sp-guestmark" : ""}" title="${r._guest ? "The guest ordered this themselves" : "Kitchen ticket"} #${esc(r._kot)} · ${esc(r._at || "")}">${r._guest ? "G" : "K"}${esc(r._kot != null ? r._kot : "?")}</span>` : ""}
         <span class="sp-am">${inr((Number(r.price) || 0) * qty)}</span>
         ${cooked ? `<button class="sp-ib sp-go" ${serveAttr} title="${cookedParts.length > 1 ? `Serve all ${cookedParts.length} of them` : "Serve this dish"}">🍽</button>` : st}
         ${r.kind === "session"
@@ -11633,7 +11646,7 @@ function tablePanelParts(t, host = "float") {
         const canQty = p.kind === "session" && p.status !== "served" && p.status !== "ready" && !p.invoiceLive;
         const canDel = p.kind === "session" && p.status !== "served" && !p.invoiceLive;
         return `<div class="sp-part">
-          <span class="sp-part-k">KOT #${esc(p._kot != null ? p._kot : "?")}${p._at ? ` · ${esc(p._at)}` : ""}</span>
+          <span class="sp-part-k${p._guest ? " sp-part-guest" : ""}" title="${p._guest ? "The guest ordered this themselves" : "Punched by staff"}">${p._guest ? "👤 GUEST" : "KOT"} #${esc(p._kot != null ? p._kot : "?")}${p._at ? ` · ${esc(p._at)}` : ""}</span>
           <span class="sp-part-q">${pq}×</span>
           <span class="sp-part-s sp-st-${esc(p.status)}">${esc(STLABEL_SP[p.status] || p.status)}</span>
           <span class="sp-part-b">
@@ -11652,7 +11665,7 @@ function tablePanelParts(t, host = "float") {
           <button class="sp-ib" data-sp-row="" data-sp-table="${esc(t)}" title="Close">✕</button></div>
         <div class="sp-kv">
           <span><i>Total here</i> ${qty} × ${inr(Number(r.price) || 0)} = <b>${inr((Number(r.price) || 0) * qty)}</b></span>
-          <span><i>${one ? "Ticket" : "Tickets"}</i> ${parts.map((p) => "#" + (p._kot != null ? p._kot : "?")).join(", ")}</span>
+          <span><i>${one ? "Ticket" : "Tickets"}</i> ${parts.map((p) => `${p._guest ? "👤" : ""}#${p._kot != null ? p._kot : "?"}`).join(", ")}</span>
           <span><i>Avoid</i> ${(r.removed || []).length ? (r.removed || []).map((x) => esc(algLabel(x))).join(", ") : "—"}</span>
           <span><i>Note</i> ${r.note ? esc(r.note) : "—"}</span>
         </div>
@@ -11739,7 +11752,25 @@ function tablePanelParts(t, host = "float") {
   // billing app must not make easy. Reopen (which voids the invoice, with a reason, on the record)
   // brings the button back. `invoicedNow` is computed below the same way Print/Reopen use it.
   const _inv = !!sess && sess.invoice_no != null && !sess.invoice_voided;
-  const discBtn = discTarget && !_inv ? `<button class="btn" data-disc="${esc(discTarget.id)}" data-disc-cur="${esc(Number(discTarget.discount) || 0)}" data-disc-max="${esc(discTarget.total)}" title="Give a discount on the bill">− Discount</button>` : "";
+  // …AND NOT ONCE THE MONEY IS IN (owner, 2026-09-17: "after mark as paid has been done, why is
+  // there still a discount button? When payment is done, discount is not needed"). He is right, and
+  // it is the same principle as the invoice rule one line up: a discount changes what the guest
+  // owes, and a settled bill is a record of what they actually handed over. Changing it after the
+  // fact would leave the till and the bill disagreeing. The way back is the same as everywhere
+  // else in this app — revert the payment (or ↩ Reopen an invoiced bill), both of which are
+  // recorded — and then the button is here again.
+  //
+  // WHY THE INVOICE TEST WAS NOT ENOUGH: markTablePaid issues the invoice best-effort AFTER taking
+  // the money, so a bill settled on a restaurant where that call did not land (or a single order
+  // paid straight from its row) is paid with `invoice_no` still null — and the button stayed.
+  // WHAT COUNTS AS "the bill is paid": every ticket that is ON the bill. A ticket still waiting to
+  // be accepted is not on it (the box at the foot of the list says so in those words), so it must
+  // not hold the discount button open on a table whose money is already in. `anyUnpaidBill` — the
+  // test the Mark-paid button uses — deliberately counts un-accepted tickets, which is right for
+  // IT and wrong here, so this one is computed on its own.
+  const _onBill = os.filter((o) => o.status !== "cancelled" && o.status !== "received");
+  const _allPaid = _onBill.length > 0 && _onBill.every((o) => o.payment_status === "paid");
+  const discBtn = discTarget && !_inv && !_allPaid ? `<button class="btn" data-disc="${esc(discTarget.id)}" data-disc-cur="${esc(Number(discTarget.discount) || 0)}" data-disc-max="${esc(discTarget.total)}" title="Give a discount on the bill">− Discount</button>` : "";
   // Split-bill helper: tells staff each guest's even share of the bill total. Doesn't change the bill
   // or payment — the manager still marks the whole bill paid once collected.
   // Split among guests = what's still DUE (exclude any order already paid), not the
@@ -13407,7 +13438,15 @@ function openKotColumns(t, sess) {
   const movableTotal = movable.reduce((s2, o) => s2 + (parseFloat(o.total) || 0), 0);
   const OPS = [
     // Works on an EMPTY table too — see the note in openKotMenu.
-    { id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "not enabled" },
+    // A FEATURE THE RESTAURANT DOES NOT HAVE IS NOT LISTED AT ALL (owner, 2026-09-17: "if the
+    // table marks are switched off … there should not be any option to use them too — like in KOT
+    // there should be that thing shown same everywhere, it should be locked completely. That's our
+    // rule for every feature"). This row used to render GREY with the chip "not enabled" whenever
+    // the module was off for the restaurant, which is an advert for something nobody can switch on
+    // from here. It now follows the same shape "Split the bill" already used: the row EXISTS only
+    // when the module does. The greyed state still means what it always meant — the module is on
+    // and this PERSON has not been given the power — which is the X-ray convention and stays.
+    ...(tableTagsOn() ? [{ id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "you don't have that power" }] : []),
     // A MERGED PARTY DOES NOT SHIFT (mig 264): moving it would renumber the child's orders —
     // the numbers an unmerge needs to be exact — and strand the merge record. The server
     // refuses too ('party_merged'); this row says why instead of offering a dead end.
@@ -13737,7 +13776,15 @@ function openKotMenu(t, sess) {
     // Marking a table works with NO order on it — that is the point of reaching this menu from
     // the floor's own KOT button (owner, 2026-07-31: "before a table or order is taken you can
     // mark table as VIP from that option").
-    { id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "not enabled" },
+    // A FEATURE THE RESTAURANT DOES NOT HAVE IS NOT LISTED AT ALL (owner, 2026-09-17: "if the
+    // table marks are switched off … there should not be any option to use them too — like in KOT
+    // there should be that thing shown same everywhere, it should be locked completely. That's our
+    // rule for every feature"). This row used to render GREY with the chip "not enabled" whenever
+    // the module was off for the restaurant, which is an advert for something nobody can switch on
+    // from here. It now follows the same shape "Split the bill" already used: the row EXISTS only
+    // when the module does. The greyed state still means what it always meant — the module is on
+    // and this PERSON has not been given the power — which is the X-ray convention and stays.
+    ...(tableTagsOn() ? [{ id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "you don't have that power" }] : []),
     // A merged party doesn't shift (mig 264) — same rule as the desktop columns above.
     { id: "shift", icon: "⇄", label: "Change table", sub: "Party, orders & bill move to a free table", on: liveHere && !mergeGroupLabel(t), why: mergeGroupLabel(t) ? "unmerge first" : "table is free" },
     { id: "merge", icon: "🪢", label: "Merge tables", sub: bill.total > 0 ? `One table, one bill · this side ${inr(bill.total)}` : "Join another party — one table, one bill",

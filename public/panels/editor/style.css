@@ -5449,3 +5449,11 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
 .tp-detail-floating .tp-detail-top .tp-tagpill { padding: 4px 8px; font-size: 10.5px; }
 .tp-detail-floating .tp-detail-top .tp-kot-head { padding: 4px 8px; font-size: 10.5px; }
 .tp-detail-floating .tp-detail-top { gap: 6px; row-gap: 4px; }
+
+/* A ticket the GUEST punched themselves is named as such wherever a ticket is named — the dish
+   merges with the staff one either way (owner, 2026-09-17: "guest order and taken order act same
+   when they are in the bill, just like 2 diff KOT, but the guest one will be listed as guest"). */
+.sp-guestmark { color: #2563eb; }
+html[data-theme="dark"] .sp-guestmark { color: #7fb3ff; }
+.sp-part-guest { color: #2563eb; }
+html[data-theme="dark"] .sp-part-guest { color: #7fb3ff; }
