@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { q, one, tx1, RID } from "./tx.mjs";
+import { nextId } from "./ids.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const MIG = join(root, "supabase", "migrations");
@@ -17,10 +18,8 @@ const read = (f) => readFileSync(join(MIG, f), "utf8");
 const code = (t) => t.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
 
 export const rows = [];
-let next = 152009;
 const add = (subject, check, how, pass, note) => {
-  const id = `P${next++}`;
-  if (next > 152451) throw new Error("blocks B-E ran past P152450");
+  const id = nextId();
   rows.push([id, subject, check, how, pass ? "✅" : "❌", String(note).replace(/\|/g, "／").slice(0, 300)]);
   return pass;
 };

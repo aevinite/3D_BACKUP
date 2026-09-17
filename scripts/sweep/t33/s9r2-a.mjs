@@ -11,16 +11,13 @@
 // (Recorded because this is indistinguishable from a real fault in the output, and sweep #6 found
 // three of three "dead guard" hits were the detector too.)
 import { tx, tx1, q, one, RID } from "./tx.mjs";
+import { nextId } from "./ids.mjs";
 
 export const rows = [];
 let n = 0;
-const IDS = [];
-for (let i = 104851; i <= 104900; i++) IDS.push(`P${i}`);      // round-1 remainder, contiguous
-for (let i = 152001; i <= 152100; i++) IDS.push(`P${i}`);      // round-2 block
 export const used = () => n;
 const add = (subject, check, how, pass, note) => {
-  const id = IDS[n++];
-  if (!id) throw new Error("block A ran past its 150 ids");
+  const id = nextId(); n++;
   rows.push([id, subject, check, how, pass ? "✅" : "❌", String(note).replace(/\|/g, "／").slice(0, 320)]);
   console.log(`${pass ? "✅" : "❌"} ${id}  ${check} — ${String(note).slice(0, 140)}`);
 };
@@ -324,6 +321,8 @@ const get = (k) => `(SELECT v FROM t33kv WHERE k = '${k}')`;
     ${put("a_rid", `INSERT INTO staff_actions (panel, action, actor, restaurant_id)
                     VALUES ('admin', 't33_probe_tenant', 'T33 rollback probe', '${RID}') RETURNING id`)}
     ${put("pings_no_rid", `SELECT count(*)::text FROM realtime_events WHERE entity_id = ${get("a_no_rid")}`)}
+    ${put("plat_key", `SELECT coalesce(string_agg(topic_rid, ','), 'NONE') FROM realtime_events WHERE entity_id = ${get("a_no_rid")}`)}
+    ${put("plat_rid", `SELECT coalesce(string_agg(coalesce(restaurant_id::text, 'NULL'), ','), 'NONE') FROM realtime_events WHERE entity_id = ${get("a_no_rid")}`)}
     ${put("pings_rid", `SELECT count(*)::text FROM realtime_events WHERE entity_id = ${get("a_rid")}`)}
     ${put("rows_written", `SELECT count(*)::text FROM staff_actions WHERE action LIKE 't33_probe_%'`)}
     ${put("audit_topic", `SELECT coalesce(string_agg(DISTINCT topic, ','), 'NONE') FROM realtime_events WHERE entity_id = ${get("a_rid")}`)}
@@ -334,15 +333,25 @@ const get = (k) => `(SELECT v FROM t33kv WHERE k = '${k}')`;
                 VALUES ('T33G', '[]'::jsonb, 10, 0.5, 10.5, 'received', ${get("s")}::uuid, '${RID}') RETURNING id`)}
     ${put("order_topics", `SELECT coalesce(string_agg(DISTINCT topic, ',' ORDER BY topic), 'NONE') FROM realtime_events WHERE entity_id = ${get("o")}`)}
     ${put("order_keys", `SELECT coalesce(string_agg(DISTINCT topic_rid, ',' ORDER BY topic_rid), 'NONE') FROM realtime_events WHERE entity_id = ${get("o")}`)}
-    SELECT ${get("pings_no_rid")} AS pings_no_rid, ${get("pings_rid")} AS pings_rid,
+    SELECT ${get("pings_no_rid")} AS pings_no_rid, ${get("plat_key")} AS plat_key,
+           ${get("plat_rid")} AS plat_rid, ${get("pings_rid")} AS pings_rid,
            ${get("rows_written")} AS rows_written, ${get("audit_topic")} AS audit_topic,
            ${get("audit_key")} AS audit_key, ${get("order_topics")} AS order_topics,
            ${get("order_keys")} AS order_keys;
   `);
-  add(F("395_an_event_with_no_restaurant_is_announced_to_nobody.sql"),
-    "a platform-level admin event — one that belongs to NO restaurant — is announced to nobody",
+  // UPDATED FOR MIGRATION 397, which the owner picked an hour after 395: the ping is BACK, so the
+  // admin console gets its instant refresh again — but keyed to nobody, so the mislabel 395 fixed
+  // does not come back with it. A suite that still asserted 395's silence would be asserting last
+  // hour's behaviour, which is worse than no suite.
+  add(F("397_a_platform_event_is_announced_to_nobodys_restaurant.sql"),
+    "a platform-level admin event IS announced, so the admin console refreshes instantly",
     "insert a staff_actions row with a null restaurant and count its breadcrumbs",
-    r.pings_no_rid === "0", `breadcrumbs for a no-restaurant event = ${r.pings_no_rid} (it was 1, labelled French House's)`);
+    r.pings_no_rid === "1", `breadcrumbs for a no-restaurant event = ${r.pings_no_rid}`);
+  add(F("397_a_platform_event_is_announced_to_nobodys_restaurant.sql") + ", " + F("395_an_event_with_no_restaurant_is_announced_to_nobody.sql"),
+    "…and it is keyed to NOBODY'S restaurant, so no per-restaurant listener can match it",
+    "read the topic_rid and restaurant_id of that breadcrumb",
+    r.plat_key === "audit:platform" && r.plat_rid === "NULL",
+    `topic_rid '${r.plat_key}', restaurant_id ${r.plat_rid} — the unscoped admin console (topic=eq.audit) matches it, a restaurant's topic_rid=eq.audit:<own id> does not`);
   add(F("395_an_event_with_no_restaurant_is_announced_to_nobody.sql"),
     "…while an event that DOES belong to a restaurant still announces itself, so nothing was silenced wholesale",
     "insert the same shape with a restaurant and count", r.pings_rid === "1",
