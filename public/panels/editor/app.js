@@ -9272,6 +9272,55 @@ function orderItemRows(o) {
   return (o.items || []).map((it, idx) => ({ kind: "legacy", invoiceLive, orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note, price: Number(it.price) || 0, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
 }
 
+// ── THE MENU'S OWN SEQUENCE — the spine of the bill popup (owner picked design "Spine", 2026-09-17)
+// A sold line is frozen by TITLE (order_items deliberately has no menu_item_id: the dish may be
+// renamed or retired and the bill must still say what was sold), so a row's COURSE is looked up
+// by title against the live menu — categories.sort_order for the course order, menu_items.sort_order
+// for the dish's place inside it (migration 002). A dish that is no longer on the menu sorts last
+// and says so, rather than silently claiming a course it isn't in.
+const STLABEL_SP = { received: "new", preparing: "preparing", ready: "ready", served: "served", cancelled: "cancelled" };
+const SPINE_TINTS = ["#c2410c", "#b45309", "#15803d", "#a16207", "#7c3aed", "#be185d", "#0e7490", "#1d4ed8", "#9f1239", "#0f766e"];
+const NO_COURSE = { slug: "", name: "Not on the menu now", abbr: "—", tint: "var(--muted)", seq: 9990 };
+let _menuSeq = null, _menuSeqKey = "";
+function menuSeq() {
+  const items = state.data.items || [], cats = state.data.categories || [];
+  const key = `${items.length}:${cats.length}:${(items[0] || {}).id || ""}:${(cats[0] || {}).slug || ""}`;
+  if (_menuSeq && _menuSeqKey === key) return _menuSeq;  // rebuilt only when the menu itself changes
+  const catBySlug = new Map();
+  [...cats].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)).forEach((c, i) => {
+    const name = nameOf(c.name, c.slug) || c.slug || "—";
+    catBySlug.set(c.slug, {
+      slug: c.slug, name,
+      abbr: (name.replace(/[^A-Za-z]/g, "").slice(0, 3) || "—").toUpperCase(),
+      tint: c.color || SPINE_TINTS[i % SPINE_TINTS.length],
+      seq: i + 1,
+    });
+  });
+  const byTitle = new Map();
+  (items || []).forEach((it) => {
+    const k = String(it.title || "").trim().toLowerCase();
+    if (k && !byTitle.has(k)) byTitle.set(k, { cat: it.category, itemSeq: Number(it.sort_order) || 0 });
+  });
+  _menuSeqKey = key;
+  return (_menuSeq = { catBySlug, byTitle });
+}
+// The course a dish row belongs to, with everything the line needs to say it in three letters.
+function courseOfRow(r) {
+  const m = menuSeq();
+  const hit = m.byTitle.get(String(r.title || "").trim().toLowerCase());
+  const c = hit ? m.catBySlug.get(hit.cat) : null;
+  return { ...(c || NO_COURSE), itemSeq: hit ? hit.itemSeq : 9999 };
+}
+// One stable key per dish LINE, for "which line is open" — session items have a real id,
+// legacy JSON-only orders are identified by their order + index, exactly as itemRowHtml does.
+const spineKey = (r) => (r.kind === "session" ? String(r.id) : `${r.orderId}:${r.idx}`);
+// Which ordering, which course filter, which line is open — per table, so two open popups
+// don't share one state. Kept on `state` because the popup re-renders from scratch.
+function spineState() {
+  state.spine = state.spine || { view: {}, cat: {}, open: {}, guests: {} };
+  return state.spine;
+}
+
 // What the guest tapped, as an emoji for the tile / call list.
 function callEmoji(note) {
   const n = (note || "").toLowerCase();
@@ -10359,7 +10408,11 @@ function floorHtml() {
           <div class="tp-detail-top"><h3>${esc(tableLabel(f.table))}</h3>${headPill}${parts.kotHeadBtn || ""}${dockBtn}<button class="tp-detail-close" data-float-close="${esc(f.table)}" aria-label="Close" title="Close">✕</button></div>
           ${headMeta}
         </div>
-        <div class="tp-detail-body">${requestsSec}${sessionSec}${ordersSec}${callsSec}${billSec}</div>
+        <!-- ORDER OF THE BANDS (owner, 2026-09-17): what someone is WAITING for comes first —
+             requests, the party, the calls — then the bill's dishes, then the money. The calls
+             used to sit under the dish list, which on a phone put six ringing bells below twenty
+             lines of food. -->
+        <div class="tp-detail-body">${requestsSec}${sessionSec}${callsSec}${ordersSec}${billSec}</div>
         <div class="tp-detail-foot">${foot}</div>
       </div>
       <div class="tp-resize-handle" data-float-resize="${esc(f.table)}" title="Drag to resize"></div>
@@ -10536,7 +10589,11 @@ function bindFloorDelegation() {
 // big from the middle again. On a PHONE (isPhoneLayout) it's ONE full-width popup at a
 // time — no drag, no resize, no side-by-side (owner, 2026-07-03).
 const MAX_FLOATING = 5;
-const FLOAT_MAX_W = 640; // don't let 1–2 popups stretch absurdly wide on a big monitor
+// PORTRAIT, PHONE-WIDE, EVERYWHERE (owner, 2026-09-17: "I want it in a portrait form only,
+// because in the phone also it should be looking the same … you can decrease the width but not
+// the height"). 392px is a phone's width, so the popup a manager reads on a laptop is pixel-for-
+// pixel the one a waiter reads on a phone — and the height is taken, not given away.
+const FLOAT_MAX_W = 392;
 // True WHILE a floating popup is being dragged or resized: a background poll's
 // renderEditor() would rebuild #editor and drop the drag, so loadSessions() defers
 // its redraw until pointerup (see the guard in loadSessions + the flush in the up handlers).
@@ -10576,6 +10633,8 @@ function addFloating(t) {
 // indexes are stable, so drag-outs/closes never move the rest; only a grid GROWTH (add with
 // no free gap) re-computes everyone's width. Pinned cards keep their dropped/resized geometry.
 function layoutFloatingRow() {
+  // the cards' heights change here, so the rows must be re-measured right after (see spineFit)
+  setTimeout(() => spineFit(), 0);
   // TOP adds the admin/owner ribbon's height (0 for real staff) — the inline top set
   // below overrides the CSS default, so it must do the same --ribbon-h subtraction or
   // popups tuck under the topbar in admin view.
@@ -10590,7 +10649,16 @@ function layoutFloatingRow() {
   state.floatingTables.forEach((f) => {
     if (f.pinned || f.slot == null) return; // pinned = free-floating; keep its own position
     const el = document.querySelector(`[data-floating-table="${CSS.escape(String(f.table))}"]`);
-    if (el) { el.style.left = (startX + f.slot * (slotW + GAP)) + "px"; el.style.top = (phone ? 62 + ribbonH : TOP) + "px"; el.style.width = slotW + "px"; el.style.height = ""; el.style.right = "auto"; }
+    if (el) {
+      const top = phone ? 62 + ribbonH : TOP;
+      el.style.left = (startX + f.slot * (slotW + GAP)) + "px";
+      el.style.top = top + "px";
+      el.style.width = slotW + "px";
+      // TALL ON PURPOSE: the list's whole job is to hold twenty dishes without scrolling, so the
+      // card takes the height that is there (capped so it doesn't look silly on a big monitor).
+      el.style.height = Math.min(880, window.innerHeight - top - 14) + "px";
+      el.style.right = "auto";
+    }
   });
 }
 
@@ -10640,9 +10708,34 @@ function syncLegendToDrawer() {
   if (held !== live) { if (held) held.remove(); slot.appendChild(live); }
 }
 
+// ── NOTHING SCROLLS, WHATEVER THE SCREEN IS (owner, 2026-09-17) ────────────────────────────
+// "You don't have to scroll at that type of UI you have to make … if there is a 10 item or 20
+// item". A fixed row height cannot promise that: 20 dishes need 520px at 26px a row, and a
+// laptop window 650px tall has about 300 to give. So the rows take the height that is THERE —
+// start at the comfortable height and give back a pixel at a time until the list fits. On a
+// phone (844px) twenty lines land around 28px; on a short laptop window around 19px.
+// It only ever gives up at 15px, below which the list scrolls rather than hide a dish — an
+// honest floor for the day someone orders forty things.
+const SP_RH_MAX = 30, SP_RH_MIN = 15;
+function spineFit(root) {
+  (root || document).querySelectorAll(".sp-list").forEach((el) => {
+    let rh = SP_RH_MAX;
+    el.style.setProperty("--sp-rh", rh + "px");
+    // The sheet of an open line is measured too — it is inside the list, so it must be paid for.
+    let guard = SP_RH_MAX - SP_RH_MIN;
+    while (guard-- > 0 && el.scrollHeight > el.clientHeight + 1) {
+      rh -= 1;
+      el.style.setProperty("--sp-rh", rh + "px");
+    }
+  });
+}
+
 function bindFloor() {
   bindFloorDelegation(); // attach the delegated tile/quick/queue handler ONCE
   syncLegendToDrawer();  // phone: the colour key lives in the ☰ menu (item 23)
+  // The dish lines size themselves to the height the popup actually got — after layout, in the
+  // same frame, so nobody sees a list at the wrong row height (see spineFit).
+  requestAnimationFrame(() => spineFit());
   const ed = $("#editor");
   // Each floor number opens the tables it counted (owner, 2026-09-03). Bound here rather than in
   // the delegated handler because the strip is REPLACED wholesale by the patch path
@@ -10935,57 +11028,17 @@ function refreshTableDetail() {
 // it survives the panel's poll-driven re-renders. (owner, 2026-06-17)
 const editTables = new Set();
 
-// One dish row: its own status pill + next-step tap. Works for session items (order_items)
-// AND legacy items (orders.items JSON) — so dishes are served one at a time either way.
-// `editing` (staff edit mode) adds qty steppers + a note edit on each real dish row.
-function itemRowHtml(row, editing = false) {
-  // Redesigned row layout (master-detail): qty · name+detail · price · [chip + serve + 🗑].
-  // The status now reads as a CHIP on the right next to its actions (was a pill on the
-  // left), so the eye runs name → price → status → action in one line.
-  let serveBtn = "";
-  // A dish that's cooking OR ready (kitchen finished it) can be served from here.
-  if (row.status === "preparing" || row.status === "ready") {
-    const attr = row.kind === "session"
-      ? `data-item-next="${esc(row.id)}" data-item-status="served"`
-      : `data-legacy-order="${esc(row.orderId)}" data-legacy-idx="${row.idx}" data-legacy-status="served"`;
-    serveBtn = `<button class="icon-serve" title="Serve this dish" ${attr}>🍽️</button>`;
-  }
-  const priceTag = `<span class="sx-item-price">${row.price > 0 ? inr(row.price * row.qty) : ""}</span>`;
-  // 🗑 Delete this single dish from the order. ONLY for session items (they have a
-  // real order_item id the server can delete + reconcile); legacy JSON-only orders
-  // have no per-item row, so we don't offer it there. Deleting recomputes the bill
-  // total server-side (see lfh_delete_order_item) so no stale money is left behind.
-  // …but NOT once it's SERVED — a delivered dish is a financial record; you don't
-  // silently delete it (mirror the tablet, which also blocks delete on served).
-  // …and not once the invoice is printed (owner, 2026-08-26) — same rule as the ✕ Cancel above,
-  // and the server has always refused it here (invoiceLockedByItem); the button simply stopped
-  // being offered for the served case only. `itemRowInvoiceLive` is set by the caller from the
-  // session this row belongs to; absent (a legacy order, a parcel) it is false and nothing changes.
-  const delBtn = (row.kind === "session" && row.status !== "served" && !row.invoiceLive) ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
-  // status label: friendlier words for the chip (class stays the raw status for colour).
-  // "preparing", not "cooking": the tile above this card and the guest's own order tracker both
-  // say Preparing (the tile's label comes from the DATABASE, lfh_table_view_summary), so calling
-  // the same status "cooking" here made ONE order read three ways inside one modal — Preparing
-  // on the pill, cooking in the legend, COOKING on the badge (T15 sweep, 2026-08-05). The KITCHEN
-  // board keeps "Cooking" on purpose: that is the word a cook uses, on the cook's own screen.
-  const STLABEL = { received: "new", preparing: "preparing", ready: "ready", served: "served", cancelled: "cancelled" };
-  // STAFF EDIT (a real dish): qty −/＋ steppers + a "✎ Edit" button (allergens +
-  // kitchen note) on a FULL-WIDTH row below the dish. Split into two separate gates:
-  //   qty steppers  — blocked once READY/SERVED (re-prices the bill; you can't
-  //                   un-serve part of a dish once it's out).
-  //   ✎ Edit        — allowed at ANY status (owner, 2026-07-03 — "allergy can be
-  //                   added to all items"). Allergens/notes are metadata, never
-  //                   money, so there's no integrity reason to lock them once served.
-  const canEditQty = editing && row.kind === "session" && row.status !== "served" && row.status !== "ready";
-  const canEditDish = editing && row.kind === "session";
-  const editRow = canEditDish
-    ? `<div class="sx-dish-edit-row">${canEditQty ? `<span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button></span>` : ""}<button class="sx-dish-edit-btn" data-edit-dish="${esc(row.id)}" title="Edit allergens & note for this dish">✎ Edit</button></div>`
-    : "";
-  // ✎− on the dish NAME when an allergen was REMOVED after the order was placed
-  // (we flag that something was removed without naming the gone item).
-  const remMark = row.removedFlag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
-  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}${mrpPill(row)}${remMark}</span>${itemDetailLine(row)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${delBtn}</div>${editRow}</div>`;
-}
+// OBITUARY — itemRowHtml() (2026-09-17). It drew ONE DISH ROW inside a per-ticket order card:
+// qty · name+detail · price · [status chip + 🍽 + 🗑], with the staff-edit extras on a second
+// line below. The cards are gone (the owner picked the "Spine" popup, where the bill is one dish
+// per LINE in the menu's own order), so its last caller went with them and it was deleted rather
+// than left sitting there for someone to call again. Everything it did still happens, on the
+// line itself: spineLine() draws it, and the line's own sheet holds the rest —
+//   · serve            → the same data-item-next / data-legacy-order hooks, on every cooked line
+//   · 🗑 remove         → data-item-del, still refused once served or once an invoice stands
+//   · ✎ allergens/note → data-edit-dish, the same modal, still allowed at any status
+//   · qty −/＋          → data-qty-inc/dec, still blocked once the dish is ready or out
+//   · the "✎−" mark for an allergen removed after the order was placed, and the MRP stamp.
 
 // openDishEditModal: ONE editor for a single placed dish — toggle which allergens to
 // AVOID (the 6 standard ones PLUS any custom like "water"), type a NEW custom allergen,
@@ -11256,11 +11309,24 @@ function tablePanelParts(t, host = "float") {
         acts += `<button class="btn small danger" data-mem-ban="${esc(m.id)}" data-ban-phone="${esc(m.phone || "")}">Ban</button>`;
         return `<div class="sx-mem"><div class="sx-mem-info">${owner ? "👑 " : "🤝 "}<b>${esc(m.name || (owner ? "Head" : "Guest"))}</b> ${status}${m.phone_verified ? ` <span class="sx-ok">✓</span>` : ""}</div><div class="sx-mem-acts">${acts}</div></div>`;
       }).join("") : `<div class="sx-empty">No one has joined yet.</div>`;
-      sessionSec = `<div class="sx-sec"><div class="sx-sec-h">Guests <span class="sub">· ${mem.length}</span><label class="sx-auto"><input type="checkbox" id="sxAuto" ${sess.auto_approve ? "checked" : ""}> auto-approve</label></div>${memRows}</div>`;
+      // ONE LINE, and the full rows one tap under it (owner, 2026-09-17). Each guest used to be a
+      // row 34px tall with four buttons on it — four guests cost more screen than four dishes. The
+      // band says who is here and who is still waiting; ▾ opens the very same rows, unchanged, so
+      // approve / kick / transfer / ban are all still here when they are wanted.
+      const open = !!spineState().guests[String(t)];
+      const chips = mem.length
+        ? mem.map((m) => `<span class="sp-gc${m.approved ? "" : " w"}" title="${esc(m.name || "Guest")}${m.approved ? "" : " — waiting to be let in"}">${m.role === "owner" ? "👑" : "🤝"} ${esc((m.name || "Guest").split(" ")[0])}${m.phone_verified ? " ✓" : ""}</span>`).join("")
+        : `<span class="sp-band-em">nobody has joined yet</span>`;
+      sessionSec = `<div class="sp-band">
+          <span class="sp-band-l">Party ${mem.length || ""}</span>${chips}
+          <span class="sp-band-sp"></span>
+          <label class="sx-auto" title="Let anyone who scans this table's QR straight in"><input type="checkbox" id="sxAuto" ${sess.auto_approve ? "checked" : ""}> auto</label>
+          <button class="sp-ib" data-sp-guests="${esc(t)}" title="${open ? "Hide" : "Show"} each guest and what you can do about them">${open ? "▴" : "▾"}</button>
+        </div>${open ? `<div class="sp-guestrows">${memRows}</div>` : ""}`;
     } else {
       // No party here yet. There is nothing to DO about that any more (no "Open this
       // table" step) — taking an order starts the party — so this just states the fact.
-      sessionSec = `<div class="sx-sec"><div class="sx-sec-h">Guests</div><div class="sx-empty">Nobody here yet — taking an order seats them.</div></div>`;
+      sessionSec = `<div class="sp-band"><span class="sp-band-l">Party</span><span class="sp-band-em">nobody here yet — taking an order seats them</span></div>`;
     }
   }
 
@@ -11325,38 +11391,129 @@ function tablePanelParts(t, host = "float") {
     // A VOIDED invoice does not lock: that bill was reopened on purpose.
     const invoiceLive = !!(sess && sess.invoice_no != null && !sess.invoice_voided);
     const cancelBtn = (o) => ((anyServed(o) || invoiceLive) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this KOT — nothing is charged for it">✕ Cancel</button>`);
+    // ── THE WAITING TICKET, IN ONE LINE (owner, 2026-09-17) ───────────────────────────────────
+    // An un-accepted order used to be a card with its own dish rows, its own head and its own
+    // foot — three lines of furniture before you read a dish. It is now one line: when it came,
+    // what is on it, what it costs, Accept, Cancel. Accepting still merges it into the bill in
+    // its MENU place (the list below re-sorts), which is the whole point of the redesign.
     const newBlocks = newOrders.map((o) => {
-      const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
-      return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}${orderEditExtras(o)}<div class="tp-order-foot">${cancelBtn(o)}<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
+      const rows = withAllergens(o);
+      const money = rows.reduce((sum, r) => sum + (Number(r.price) || 0) * (parseInt(r.qty, 10) || 1), 0);
+      const names = rows.map((r) => `${parseInt(r.qty, 10) || 1}× ${esc(r.title)}`).join(", ");
+      const avoid = [...new Set(rows.flatMap((r) => r.removed || []))];
+      return `<div class="sp-wait">
+        <span class="sp-wait-l" title="Sent ${when(o) ? esc(when(o)) : "just now"} — not on the bill until it is accepted">🔔 ${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "NEW"}</span>
+        <span class="sp-wait-n" title="${esc(names)}">${names}${avoid.length ? ` · no ${avoid.map(esc).join(", no ")}` : ""}</span>
+        <span class="sp-wait-a">${inr(money)}</span>
+        <button class="sp-ok" data-accept="${esc(o.id)}" title="Accept — the dishes join the bill in their menu place">✓ Accept</button>
+        ${cancelBtn(o) ? `<button class="sp-no tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this ticket — nothing is charged for it">✕</button>` : ""}
+      </div>${editing ? `<div class="sp-editalg">${orderEditExtras(o)}</div>` : ""}`;
     }).join("");
-    // ACCEPTED orders are GROUPED into per-KOT cards (so you can see which ticket each
-    // dish came from) but they still settle as ONE bill — no per-order total/pay/discount
-    // (owner, 2026-06-14: one merged bill). Per-dish serve/delete live on each row.
-    const mergedBlock = liveOrders.map((o) => {
-      const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
-      // An already-PAID ticket is not cancellable (the server refuses it too — a refund goes
-      // through mark-unpaid or a credit note), so it shows no Cancel.
-      const cb = o.payment_status === "paid" ? "" : cancelBtn(o);
-      let foot = cb ? `<div class="tp-order-foot">${cb}</div>` : "";
-      return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}</div>${rows}${orderEditExtras(o)}${foot}</div>`;
-    }).join("");
-    const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} merged · one bill</span>` : "";
+
+    // ── THE BILL, ONE DISH PER LINE, IN THE MENU'S OWN ORDER ──────────────────────────────────
+    // What this replaces, and why (owner, 2026-09-17): every accepted ticket used to be its own
+    // bordered card with a KOT heading — so a table with three tickets spent three lines on
+    // headings and four on borders, and twenty dishes ran off the bottom. His words: "everything
+    // should be listed in line, not in a category like soup then there is a category … if you
+    // want to list the category, list the category but it should not contain space, because it is
+    // containing the space it is going down, you have to scroll for like if there is a 10 item or
+    // 20 item". So: NO heading rows at all. The course rides INSIDE the line as a coloured spine
+    // plus three letters, and ticket-by-ticket is the SAME list re-sorted by KOT, with the ticket
+    // on the line and a hairline where one ticket ends.
+    const sp = spineState();
+    const view = sp.view[String(t)] === "kot" ? "kot" : "menu";
+    const catFilter = sp.cat[String(t)] || "all";
+    const openKey = sp.open[String(t)] || "";
+    // Every accepted dish, flattened, each line remembering the ticket it arrived on.
+    const flat = liveOrders.flatMap((o) => withAllergens(o).map((r) => ({
+      ...r, _kot: o.kot_no, _at: when(o), _oid: o.id, _paid: o.payment_status === "paid",
+      _c: courseOfRow(r),
+    })));
+    const byMenuOrder = (a, b) => (a._c.seq - b._c.seq) || (a._c.itemSeq - b._c.itemSeq) || String(a.title).localeCompare(String(b.title));
+    const sorted = view === "kot"
+      ? [...flat].sort((a, b) => ((a._kot || 0) - (b._kot || 0)) || byMenuOrder(a, b))
+      : [...flat].sort(byMenuOrder);
+    const shownRows = view === "kot" ? sorted : sorted.filter((r) => catFilter === "all" || r._c.slug === catFilter);
+
+    // ONE LINE: spine · qty · dish (+ what to leave out) · course or ticket · money · serve · ✎.
+    // Serve and ✎ are on EVERY line ("for particular item, edit button, serve button and
+    // everything should be there") and use the same hooks the old rows used, so nothing about
+    // what the server is asked to do changes.
+    const spineLine = (r, prev) => {
+      const k = spineKey(r);
+      const qty = parseInt(r.qty, 10) || 1;
+      const cooked = r.status === "preparing" || r.status === "ready";
+      const serveAttr = r.kind === "session"
+        ? `data-item-next="${esc(r.id)}" data-item-status="served"`
+        : `data-legacy-order="${esc(r.orderId)}" data-legacy-idx="${r.idx}" data-legacy-status="served"`;
+      const extras = [r.note, ...((r.removed || []).map((x) => "no " + algLabel(x)))].filter(Boolean).map(esc).join(" · ");
+      const groupStart = view === "kot" && (!prev || prev._kot !== r._kot);
+      const mark = view === "kot"
+        ? `<span class="sp-cat" style="color:var(--gold)" title="Kitchen ticket #${esc(r._kot)} · ${esc(r._at || "")}">K${esc(r._kot != null ? r._kot : "?")}</span>`
+        : `<span class="sp-cat" style="color:${esc(r._c.tint)}" title="${esc(r._c.name)}">${esc(r._c.abbr)}</span>`;
+      return `<div class="sp-row${r.status === "served" ? " sp-served" : ""}${groupStart ? " sp-gs" : ""}${openKey === k ? " sp-open" : ""}"
+                   data-sp-row="${esc(k)}" data-sp-table="${esc(t)}" role="button" tabindex="0"
+                   title="${esc(r.title)} — ${esc(STLABEL_SP[r.status] || r.status)}">
+        <span class="sp-spine" style="background:${esc(r._c.tint)}"></span>
+        <span class="sp-qty">${qty}×</span>
+        <span class="sp-nm"><b>${esc(r.title)}</b>${r.is_mrp ? `<span class="sp-mrp" title="MRP item — taxed at source">MRP</span>` : ""}${extras ? `<i>${extras}</i>` : ""}${r.removedFlag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : ""}</span>
+        ${mark}
+        <span class="sp-am">${inr((Number(r.price) || 0) * qty)}</span>
+        ${cooked
+          ? `<button class="sp-ib sp-go" ${serveAttr} title="Serve this dish">🍽</button>`
+          : `<span class="sp-st sp-st-${esc(r.status)}" title="${esc(STLABEL_SP[r.status] || r.status)}">${r.status === "served" ? "✓" : "new"}</span>`}
+        ${r.kind === "session" ? `<button class="sp-ib" data-edit-dish="${esc(r.id)}" title="Edit this dish — allergens & kitchen note">✎</button>` : `<span class="sp-ib sp-ib-off" title="An older order: this dish has no line of its own to edit">✎</span>`}
+      </div>`;
+    };
+
+    // The line's own sheet: everything about THAT dish, and every button for it, over the bottom
+    // of the popup — never inline, because growing the list is what starts the scrolling.
+    function spineSheet(r) {
+      const qty = parseInt(r.qty, 10) || 1;
+      const cooked = r.status === "preparing" || r.status === "ready";
+      const serveAttr = r.kind === "session"
+        ? `data-item-next="${esc(r.id)}" data-item-status="served"`
+        : `data-legacy-order="${esc(r.orderId)}" data-legacy-idx="${r.idx}" data-legacy-status="served"`;
+      const canQty = r.kind === "session" && r.status !== "served" && r.status !== "ready" && !r.invoiceLive;
+      const canDel = r.kind === "session" && r.status !== "served" && !r.invoiceLive;
+      const ord = liveOrders.find((o) => o.id === r._oid);
+      const canCancelKot = !!ord && !anyServed(ord) && !invoiceLive && ord.payment_status !== "paid";
+      return `<div class="sp-sheet">
+        <div class="sp-sheet-h"><b>${esc(r.title)}</b>
+          <span class="sp-cat" style="color:${esc(r._c.tint)}">${esc(r._c.abbr)}</span>
+          <span class="sp-sheet-sp"></span>
+          <button class="sp-ib" data-sp-row="" data-sp-table="${esc(t)}" title="Close">✕</button></div>
+        <div class="sp-kv">
+          <span><i>Course</i> ${esc(r._c.name)}</span>
+          <span><i>Ticket</i> KOT #${esc(r._kot != null ? r._kot : "?")}${r._at ? " · " + esc(r._at) : ""}</span>
+          <span><i>Rate</i> ${inr(Number(r.price) || 0)} × ${qty} = <b>${inr((Number(r.price) || 0) * qty)}</b></span>
+          <span><i>Status</i> ${esc(STLABEL_SP[r.status] || r.status)}${r._paid ? " · paid" : ""}</span>
+          <span><i>Avoid</i> ${(r.removed || []).length ? (r.removed || []).map((x) => esc(algLabel(x))).join(", ") : "—"}</span>
+          <span><i>Note</i> ${r.note ? esc(r.note) : "—"}</span>
+        </div>
+        <div class="sp-sheet-b">
+          ${cooked ? `<button class="btn small primary" ${serveAttr}>🍽 Serve</button>` : ""}
+          ${r.kind === "session" ? `<button class="btn small" data-edit-dish="${esc(r.id)}">✎ Allergens &amp; note</button>` : ""}
+          ${canQty ? `<span class="sp-stp"><button class="sx-qty" data-qty-dec="${esc(r.id)}" data-qty="${qty}" title="Fewer">−</button><span>${qty}</span><button class="sx-qty" data-qty-inc="${esc(r.id)}" data-qty="${qty}" title="More">＋</button></span>` : ""}
+          ${canDel ? `<button class="btn small" data-item-del="${esc(r.id)}" data-item-name="${esc(r.title)}">🗑 Remove</button>` : ""}
+          ${canCancelKot ? `<button class="btn small danger" data-cancel-order="${esc(r._oid)}" title="Void this whole ticket — nothing is charged for it">✕ Cancel KOT #${esc(r._kot)}</button>` : ""}
+        </div>
+      </div>`;
+    }
+
+    const mergedBlock = shownRows.map((r, i) => spineLine(r, shownRows[i - 1])).join("");
+    const openRow = shownRows.find((r) => spineKey(r) === openKey);
+    const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} tickets · one bill</span>` : "";
     // Edit/Done toggle: the gated entry to staff editing. The confirm fires on Edit.
     // NOT ONCE THE FOOD IS OUT (owner, 2026-08-01: "after being served, why still an edit
     // option?"). Editing exists for a ticket being built or cooked — changing a quantity or
     // adding a dish to a meal the guest has already eaten rewrites what happened. Allergen info
-    // is NOT lost with it: each dish keeps its own ✎ inside the bill (Bills → a bill), which is
-    // deliberately allowed at any status (owner, 2026-07-03 — "allergy can be added to all items").
+    // is NOT lost with it: every line keeps its own ✎ (which is allowed at any status, owner
+    // 2026-07-03 — "allergy can be added to all items"); what Edit adds is per-TICKET "avoid in
+    // all dishes" and ＋ Add dish.
     const editToggle = allOut ? "" : (editing
-      ? `<button class="btn small primary tp-edit-toggle" data-done-table="${esc(t)}">✓ Done editing</button>`
+      ? `<button class="btn small primary tp-edit-toggle" data-done-table="${esc(t)}">✓ Done</button>`
       : `<button class="btn small tp-edit-toggle" data-edit-table="${esc(t)}">✎ Edit</button>`);
-    // THE HEADING COUNTS WHAT IS ON THE SCREEN (T5 sweep, 2026-08-17). It counted `os`, which
-    // includes CANCELLED tickets — and a cancelled ticket is deliberately drawn nowhere in this
-    // detail (its record lives in Bills and in Audit). Measured on the backup floor: table 1 held
-    // six voided tickets and the section read "Orders · 6" over an empty box, which reads as a
-    // screen that failed to load rather than a table with nothing on it. So the number is the
-    // number of tickets listed, and when there are none the voided ones are named in a sentence
-    // instead of being counted in silence.
     const shownN = newOrders.length + liveOrders.length;
     const voidedN = os.length - shownN;
     // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R33: this sentence is where it STOPS.
@@ -11366,12 +11523,51 @@ function tablePanelParts(t, host = "float") {
     const voidNote = shownN === 0 && voidedN > 0
       ? `<div class="sx-empty">Nothing on this table — ${voidedN} cancelled ticket${voidedN === 1 ? "" : "s"}, kept in Bills.</div>`
       : "";
-    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${shownN}</span>${mergedBadge}${editToggle}</div>${newBlocks}${mergedBlock}${voidNote}</div>`;
+    // The two orderings, and the course chips. THE ONLY two lines of furniture the list gets:
+    // one to choose menu-order or ticket-order, one to narrow to a course. Both 22px.
+    const kotN = new Set(liveOrders.map((o) => o.kot_no)).size;
+    const seg = `<div class="sp-seg">
+      <button class="${view === "menu" ? "on" : ""}" data-sp-view="menu" data-sp-table="${esc(t)}" title="Every dish in the menu's own order — starters first, sweets last">📋 Menu order</button>
+      <button class="${view === "kot" ? "on" : ""}" data-sp-view="kot" data-sp-table="${esc(t)}" title="The same dishes, ticket by ticket (KOT #1, #2, #3 …)">🧾 KOT-wise${kotN > 1 ? ` (${kotN})` : ""}</button>
+    </div>`;
+    // Course chips: each one says how much of that course is out, so the answer to "what do I
+    // serve next" is on screen without a heading row anywhere.
+    const courseChips = (() => {
+      if (view === "kot") return "";
+      const seen = new Map();
+      flat.forEach((r) => {
+        const c = seen.get(r._c.slug) || { c: r._c, all: 0, out: 0 };
+        c.all += parseInt(r.qty, 10) || 1;
+        if (r.status === "served") c.out += parseInt(r.qty, 10) || 1;
+        seen.set(r._c.slug, c);
+      });
+      const chips = [...seen.values()].sort((a, b) => a.c.seq - b.c.seq).map((x) =>
+        `<button class="sp-chip${catFilter === x.c.slug ? " on" : ""}" style="${catFilter === x.c.slug ? `background:${esc(x.c.tint)};border-color:${esc(x.c.tint)};color:#fff` : `color:${esc(x.c.tint)}`}"
+                 data-sp-cat="${esc(x.c.slug)}" data-sp-table="${esc(t)}" title="${esc(x.c.name)} — ${x.out} of ${x.all} served">${esc(x.c.abbr)} ${x.out}/${x.all}</button>`).join("");
+      if (!chips) return "";
+      return `<div class="sp-chips"><button class="sp-chip${catFilter === "all" ? " on" : ""}" data-sp-cat="all" data-sp-table="${esc(t)}" title="Every course">ALL ${dishN}</button>${chips}</div>`;
+    })();
+    ordersSec = `<div class="sp-listwrap">
+      <div class="sp-bar">${seg}${mergedBadge}${editToggle}</div>
+      ${courseChips}
+      ${newBlocks}
+      <div class="sp-list" data-sp-list="${esc(t)}">${mergedBlock}${voidNote}</div>
+      ${openRow ? spineSheet(openRow) : ""}
+    </div>`;
   }
 
   // Each active call (water, napkins, clean…) gets its own "Done" button so staff
   // can clear them one at a time; if there are several, an "Attend all" clears them together.
-  const callsSec = calls.length ? `<div class="sx-sec"><div class="sx-sec-h">Calls <span class="sub">· ${calls.length}</span></div>${calls.map((c) => `<div class="sx-call">${callEmoji(c.note)} ${esc(c.note || "Waiter call")} <button class="btn small primary" data-call-attend="${esc(c.id)}">Done</button></div>`).join("")}${calls.length > 1 ? `<button class="btn small" data-attend-all="${esc(t)}">✓ Attend all (${calls.length})</button>` : ""}</div>` : "";
+  // ONE LINE, however many are ringing (owner, 2026-09-17). Six calls used to be six rows plus an
+  // "Attend all" — 7 lines, more than a third of a phone screen, for something you clear in a
+  // second. Each call is now a tap: the emoji IS the button, its word is in the tooltip and spelled
+  // out after them while there is room, and "all ✓" still clears the lot.
+  const callsSec = calls.length ? `<div class="sp-band sp-calls">
+      <span class="sp-band-l">Calls ${calls.length}</span>
+      ${calls.map((c) => `<button class="sp-cl" data-call-attend="${esc(c.id)}" title="${esc(c.note || "Waiter call")} — tap when it is done">${callEmoji(c.note)}</button>`).join("")}
+      ${calls.length > 1 ? `<button class="sp-cl sp-cl-all" data-attend-all="${esc(t)}" title="Attend every call">all ✓</button>` : ""}
+      <span class="sp-band-words">${esc(calls.map((c) => c.note || "Waiter call").join(" · "))}</span>
+    </div>` : "";
   // When several orders are still unpaid, offer a single "Mark all paid" so staff
   // settle the whole table at once instead of paying each order separately.
   // Payment + discount now live on the single MERGED bill (per-order pay/disc were
@@ -11436,7 +11632,14 @@ function tablePanelParts(t, host = "float") {
   const sumSub = sumNontax > 0 ? mBill.taxableBase : mBill.subtotal;
   const sumTax = mBill.tax;
   const sumDisc = mBill.disc;
-  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>${sumNontax > 0 ? "Food subtotal" : "Subtotal"}</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount${discPct(sumSub, sumDisc) ? ` (${discPct(sumSub, sumDisc)})` : ""}</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 && !mBill.composition ? `<div class="tp-bl"><span>${esc(taxLabel())}</span><b>${inr(sumTax)}</b></div>` : ""}${sumNontax > 0 ? `<div class="tp-bl"><span>MRP items</span><b>${inr(sumNontax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
+  // THE MONEY IN TWO LINES, not a card (owner, 2026-09-17). Every number the card carried is
+  // still here — subtotal (or "food" when there are MRP lines), the discount and its %, the tax
+  // (never shown to a composition-scheme diner), MRP items, and the total due — they are just
+  // written along two lines instead of six, because those four lines were four dishes.
+  const billSec = os.length ? `<div class="sp-money">
+      <span class="sp-money-b">${sumSub > 0 ? `${sumNontax > 0 ? "food" : "sub"} <b>${inr(sumSub)}</b>` : ""}${sumDisc > 0 ? ` · disc <b>− ${inr(sumDisc)}</b>${discPct(sumSub, sumDisc) ? ` (${discPct(sumSub, sumDisc)})` : ""}` : ""}${sumTax > 0 && !mBill.composition ? ` · ${esc(taxLabel())} <b>${inr(sumTax)}</b>` : ""}${sumNontax > 0 ? ` · MRP <b>${inr(sumNontax)}</b>` : ""}${sess && sess.bill_no != null ? ` · bill <b>#${esc(sess.bill_no)}</b>` : ""}${sess && sess.invoice_no != null && !sess.invoice_voided ? ` · invoice <b>#${esc(sess.invoice_no)}</b>` : ""}</span>
+      <span class="sp-money-t"><i>${due > 0 ? "total due" : "total"}</i><b>${inr(due > 0 ? due : billTotal)}</b></span>
+    </div>` : "";
 
   // The PRIMARY table-wide action: accept everything that's new, else serve everything
   // that's cooked. (Per-order Accept stays on each new card; per-dish Serve on each row.)
@@ -14821,6 +15024,36 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   };
   root.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => editQty(b.dataset.qtyInc, Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1), parseInt(b.dataset.qty, 10) || 1)));
   root.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", "err"); return; } editQty(b.dataset.qtyDec, q, parseInt(b.dataset.qty, 10) || 1); }));
+  // ── THE SPINE LIST's own controls: which ordering, which course, which line is open ──────
+  // Pure screen state (nothing is sent anywhere), kept per table on `state.spine` so two open
+  // popups never share one selection, and so a board refresh redraws them the way they were.
+  root.querySelectorAll("[data-sp-view]").forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    spineState().view[String(b.dataset.spTable)] = b.dataset.spView;
+    spineState().open[String(b.dataset.spTable)] = "";   // a line open in the other ordering is not open here
+    if (rerender) rerender();
+  }));
+  root.querySelectorAll("[data-sp-cat]").forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    spineState().cat[String(b.dataset.spTable)] = b.dataset.spCat;
+    if (rerender) rerender();
+  }));
+  // A dish line opens its own sheet; tapping the open line (or its ✕) closes it again. The
+  // buttons ON the line (serve, ✎) stop the event themselves, so a serve never opens a sheet.
+  root.querySelectorAll("[data-sp-row]").forEach((b) => (b.onclick = (e) => {
+    if (e.target.closest("[data-item-next],[data-legacy-order],[data-edit-dish],[data-item-del],[data-cancel-order],[data-qty-inc],[data-qty-dec]")) return;
+    e.stopPropagation();
+    const tt = String(b.dataset.spTable), k = b.dataset.spRow || "";
+    spineState().open[tt] = spineState().open[tt] === k ? "" : k;
+    if (rerender) rerender();
+  }));
+  root.querySelectorAll("[data-sp-guests]").forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    const tt = String(b.dataset.spGuests);
+    spineState().guests[tt] = !spineState().guests[tt];
+    if (rerender) rerender();
+  }));
+
   // "✎ Edit" on a dish → the unified editor (allergens incl. custom + kitchen note).
   root.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish, rerender)));
   // Per-order allergen toggle chips (edit mode): optimistic flip, then persist.

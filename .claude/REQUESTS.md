@@ -1430,3 +1430,43 @@ render (50 and 297 dish cards), switches still land, nothing thrown.
 Guarded by **`npm run verify:guest-restaurant`** — static, no key, no app — whose `--self-test`
 proves five sabotages turn it red. It derives the list of screens **from the tree**, so a file that
 starts reading restaurant-keyed data tomorrow is checked tomorrow.
+
+## 2026-09-16 — the bill DETAIL VIEW, redesigned: menu order in one box, KOTs behind a button
+
+His words: *"if you go inside a detail view of particular thing, you have to scroll down a lot like a
+literal lot… all orders are separated and it looks shit"*, then the two rules —
+*"while you are going in the detail view of the bill, there should be everything listed according to
+the menu sequence… so they can also understand how much has been served, how much has not been
+served… the starter has been served then at the end they have to serve the dessert, so dessert will
+be the last one"*, and *"all our different different KOT 1 KOT 2 KOT 3 — I want all in one, there
+should be a button"*, plus *"if a new order came… it will show separately on the top that you have to
+accept it or not, and if you accept it it will merge"*, *"you don't have to scroll at that type of UI"*,
+and *"design seven UI UX for bill detail view, I will select… make one fake order… everything should be
+visible on one screen… the detail view button should be working for all seven… show me all seven on
+port 8938"*.
+
+- [x] **Seven designs built and shown on `http://127.0.0.1:8938/`** (`bill-detail-designs/`, `node
+  bill-detail-designs/serve.mjs`). All seven run the SAME fake order (T3, bill #3, 4 guests, KOT
+  #1–#3 accepted, one order waiting, six calls at once, Family tag, birthday request), list dishes in
+  the **menu's own sequence** (`categories.sort_order` → `menu_items.sort_order`), flip to
+  **KOT-wise** on a button, accept a waiting order **into its menu place with its new KOT number**,
+  open a **working detail view** on every dish, show every table-wide action at once, and **do not
+  scroll** (verified 1280×660, 1512×690, 1512×870 — zero overflow in both views).
+  **Where they live:** a prototype server only — nothing is wired into the app, no route, no DB.
+- [x] **REBUILT PORTRAIT 2026-09-17 — the first seven were wrong.** They were full-screen desktop
+  layouts; he wanted the POPUP: *"I want it in a portrait form only, because in the phone also it
+  should be looking the same… you can decrease the width but not the height"*, *"everything should be
+  listed in line, not in a category like soup then there is a category… if you want to list the
+  category, list the category but it should not contain space, because it is containing the space it
+  is going down, you have to scroll for like if there is a 10 item or 20 item"*, and *"for particular
+  item, edit button, serve button and everything should be there"*. All seven are now ONE portrait
+  popup (392px wide, full height, identical on a phone), **one dish per line** with the course said
+  INSIDE the line (no heading rows — same for KOT-wise, where the ticket is on the line and a
+  hairline ends it), **serve + ✎ edit on every line** (edit = qty −/＋, allergens, kitchen note,
+  remove, cancel the whole KOT), and a row-height engine that sizes rows to the height available so
+  **nothing scrolls** — proved on 7 designs × 4 window sizes × 5 states (18 lines, then 20 after
+  accepting the waiting order). The fake order was grown to 18 lines + 2 waiting for that test.
+- [ ] **He picks one (1–7).** Then it replaces `tablePanelParts()`'s detail body in
+  `public/panels/editor/app.js` (manager/editor popup) **and** the tablet floor's copy of it — one
+  new way, the old stacked-per-order body deleted in the same change (the "a new way replaces the old
+  one" rule), verified in Chrome on a non-#1 restaurant at desktop and ~390px.
