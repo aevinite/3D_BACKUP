@@ -240,8 +240,13 @@ export function paymentFrom(body: Record<string, unknown>): {
   let period: string | null = null;
   const rawP = String(body.for_period ?? "").trim();
   if (rawP) {
+    // THE MONTH HAS TO BE A MONTH (sweep #9 T35, item 2). This tested the SHAPE and not the
+    // value, so "2026-13" and "2026-00" walked through and became the date 2026-13-01, which
+    // Postgres refuses — the whole payment was then lost behind "That payment didn't save.",
+    // with nothing saying which field was wrong. This function's contract is that nothing else
+    // reaches the database, and the right refusal was already written one line up.
     const m = /^(\d{4})-(\d{2})/.exec(rawP);
-    if (!m) throw new Error("That pay period isn't a valid month.");
+    if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) throw new Error("That pay period isn't a valid month.");
     period = `${m[1]}-${m[2]}-01`;
   }
   const paid_on = isoDate(body.paid_on) || todayIST();
