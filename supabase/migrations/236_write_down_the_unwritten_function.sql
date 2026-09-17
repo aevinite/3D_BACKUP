@@ -42,3 +42,19 @@ REVOKE ALL ON FUNCTION lfh_check_ban_scoped(text, text, uuid) FROM PUBLIC;
 GRANT  EXECUTE ON FUNCTION lfh_check_ban_scoped(text, text, uuid) TO anon, authenticated, service_role;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (sweep #9, T32, 2026-09-18).
+-- `lfh_check_ban_scoped` above is RETIRED. Migration 267 dropped it, and migration 281 dropped it a
+-- second time while saying the quiet part out loud about this very file: "if 236 is ever re-run
+-- alone they will come back". Migration 293 then made the ban question the guest's own — one door,
+-- `lfh_check_ban`, scoped to the restaurant that is asking.
+--
+-- Left as it was, running THIS FILE ALONE — the single-file route CLAUDE.md actually recommends
+-- (`node scripts/run-migration.mjs 236_…`) — puts a second ban-check door back beside the real one
+-- AND re-grants it to the public menu key, because the GRANT is two lines above. Two doors that
+-- answer "is this guest blocked?" is exactly the state migrations 267, 281 and 293 spent three
+-- files removing.
+--
+-- A FULL re-seed already ends correctly (267, 281 and 293 all sort after this file). Idempotent,
+-- and safe where it does not exist. Guarded by `npm run verify:run-alone`.
+DROP FUNCTION IF EXISTS public.lfh_check_ban_scoped(text, text, uuid);
