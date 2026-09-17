@@ -287,14 +287,27 @@ const RULES = [
   {
     item: 20, file: CUSTOMERS,
     say: "a search says what was actually searched for, and a box of wildcards is not a search",
+    // EXPECTATION MOVED 2026-09-17, same id, same claim. `safeSearch` answered a bare string, so
+    // "nothing was typed" and "what was typed cleaned down to nothing" were the same value and the
+    // whole list came back for `*` (the owner picked that as item 11). It is now `searchTerm`,
+    // which answers WHICH of the three happened. The claim is unchanged — this screen still has to
+    // quote what was really searched for, and a box of wildcards still is not a search — so the
+    // rows below assert the RULE at its new spelling rather than the old function name.
     must: [
-      /import \{ safeSearch \} from "@\/lib\/searchText"/,
-      /const searched = safeSearch\(search\);/,
-      /if \(searched\) return \(/,
-      /match\{rows\.length === 1 \? "" : "es"\} for “\{searched\}”/,
+      /import \{ searchTerm[ ,}]/,
+      /const searched = searchTerm\(search\);/,
+      /if \(searched\.kind === "term"\) return \(/,
+      /match\{rows\.length === 1 \? "" : "es"\} for “\{searched\.term\}”/,
+      // …and the box of wildcards now SAYS so, instead of silently showing everybody.
+      /if \(searched\.kind === "unsearchable"\) return \(/,
+      /Nothing to search for/,
     ],
     mustNot: [
-      /for “\{search\.trim\(\)\}”/,   // the raw box is not what the server looked for
+      // The raw box is not what the server looked for — in the line that reports MATCHES. Quoting
+      // it in the "nothing to search for" sentence is correct and deliberate: there is no cleaned
+      // term to quote there, and the person needs to see what they typed. Anchored to the matches
+      // line so the two cannot be confused.
+      /match\{rows\.length === 1 \? "" : "es"\} for “\{search\.trim\(\)\}”/,
     ],
   },
   {

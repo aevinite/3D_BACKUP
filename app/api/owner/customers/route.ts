@@ -11,7 +11,7 @@ import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { logAction } from "@/lib/oplog";
 import { rd, ReadSet, ReadFailed } from "@/lib/readGuard";
 import { restaurantNames } from "@/lib/restaurantNames";
-import { safeSearch, safePhone } from "@/lib/searchText";
+import { searchTerm, safePhone } from "@/lib/searchText";
 import { ERASABLE, RETAINED, erasureSummary } from "@/lib/personalData";
 // ONE definition of what a bill was worth, shared with the admin's bill ledger and the audit's
 // money detail. See the khata balance below for why this is imported rather than re-derived.
@@ -54,7 +54,10 @@ export async function GET(req: NextRequest) {
 
   // Sanitised search (their own data; strip chars that would break the PostgREST or() filter).
   // One shared sanitiser for every owner search box (T9 finding F15) — see lib/searchText.ts.
-  const search = safeSearch(req.nextUrl.searchParams.get("q"));
+  // `searchTerm` says WHICH of three things happened, because "" used to mean both "nothing was
+  // typed" and "what was typed cleaned down to nothing" — and `if (search)` then applied NO FILTER,
+  // so typing `*` on this screen answered with the whole guest list (owner picked item 11).
+  const search = searchTerm(req.nextUrl.searchParams.get("q"));
   // Narrowing controls (owner, 2026-07-30): one restaurant, a segment, and the sort —
   // all applied in the DATABASE so the payload stays small however many guests exist.
   const sp = req.nextUrl.searchParams;
@@ -64,11 +67,17 @@ export async function GET(req: NextRequest) {
   let q = sb.from("customers").select(COLS)
     .in("restaurant_id", onlyRid && ids.includes(onlyRid) ? [onlyRid] : ids)
     .order(sort, { ascending: false }).limit(300);
-  if (search) q = q.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
+  if (search.kind === "term") q = q.or(`name.ilike.%${search.term}%,phone.ilike.%${search.term}%`);
   if (seg === "regulars") q = q.gte("visits", REPEAT_MIN);
   if (seg === "new") q = q.lt("visits", REPEAT_MIN);
   if (seg === "blocked") q = q.eq("blocked", true);
-  const { data, error } = await q;
+  // Nothing they typed can be searched for, so there is nothing to ask the database. Skipping the
+  // read is the point: it cannot answer "no guests match" any other way, and running it unfiltered
+  // is the bug. The TILES below are counts over the whole segment and are unaffected by a search,
+  // so they still show the true numbers underneath an empty list.
+  const { data, error } = search.kind === "unsearchable"
+    ? { data: [] as unknown[], error: null }
+    : await q;
   if (error) return dbFail("owner/customers", error, { message: "Couldn't load your guest list just now — please try again." });
   const list = (data || []) as Array<{ restaurant_id: string; phone: string; name: string | null; blocked: boolean; visits: number; consent: boolean; first_seen_at: string; last_seen_at: string }>;
 
@@ -172,6 +181,7 @@ export async function GET(req: NextRequest) {
   };
   const restaurantList = ids.map((id) => ({ id, name: names.get(id) || "" })).filter((r) => r.name);
   return NextResponse.json({ summary, customers, restaurants: restaurantList,
+    ...(search.kind === "unsearchable" ? { unsearchable: true } : {}),
     ...(names.partial ? { partial: ["restaurantNames"] } : {}) });
 }
 

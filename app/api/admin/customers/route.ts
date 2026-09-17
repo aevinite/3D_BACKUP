@@ -19,7 +19,7 @@ import { adminFail } from "@/lib/adminFail";
 // a tolerated read that says so at the call site.
 import { ReadSet, rd } from "@/lib/readGuard";
 import { cachedOwnerPayload } from "@/lib/ownerCache";
-import { safeSearch } from "@/lib/searchText";
+import { searchTerm } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   // strip the characters that would break PostgREST's or() filter grammar
   // Shared cleaner — this local copy also missed the backslash, PostgREST's pattern escape
   // (2026-08-16). Same helper the owner-side guest list uses, so the twins cannot drift again.
-  const search = safeSearch(sp.get("q"), 60);
+  const search = searchTerm(sp.get("q"), 60);
   const seg = sp.get("seg") || "all";                     // all | regulars | new | blocked
   const sort = sp.get("sort") === "visits" ? "visits" : "last_seen_at";
   const page = Math.max(0, Math.min(200, parseInt(sp.get("page") || "0", 10) || 0));
@@ -114,7 +114,11 @@ export async function GET(req: NextRequest) {
       .order(sort, { ascending: false })
       .range(page * PAGE, page * PAGE + PAGE - 1);
     if (rid) q = q.eq("restaurant_id", rid);
-    if (search) q = q.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
+    // A search that cleaned down to nothing is not an absent search (owner picked item 11): `""`
+    // used to take this branch's FALSE side and list every guest on the platform. A primary key is
+    // never NULL, so `.is("phone", null)` is empty by definition — no sentinel value to keep in step.
+    if (search.kind === "term") q = q.or(`name.ilike.%${search.term}%,phone.ilike.%${search.term}%`);
+    else if (search.kind === "unsearchable") q = q.is("phone", null);
     if (seg === "regulars") q = q.gte("visits", REPEAT_MIN);
     if (seg === "new") q = q.lt("visits", REPEAT_MIN);
     if (seg === "blocked") q = q.eq("blocked", true);
@@ -135,7 +139,8 @@ export async function GET(req: NextRequest) {
     if (error && (error as { code?: string }).code === "PGRST103") {
       let head = sb.from("customers").select("phone", { count: "exact", head: true });
       if (rid) head = head.eq("restaurant_id", rid);
-      if (search) head = head.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
+      if (search.kind === "term") head = head.or(`name.ilike.%${search.term}%,phone.ilike.%${search.term}%`);
+      else if (search.kind === "unsearchable") head = head.is("phone", null);
       if (seg === "regulars") head = head.gte("visits", REPEAT_MIN);
       if (seg === "new") head = head.lt("visits", REPEAT_MIN);
       if (seg === "blocked") head = head.eq("blocked", true);

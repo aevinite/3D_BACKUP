@@ -19,7 +19,7 @@ import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { loadLogVisibility, logVisibilityUnavailable } from "@/lib/logVisibility";
 import { restaurantNames } from "@/lib/restaurantNames";
-import { safeSearch } from "@/lib/searchText";
+import { searchTerm } from "@/lib/searchText";
 import { trailOf } from "@/lib/logTrail";
 
 // WHICH VISIBILITY SWITCH A ROW RIDES now lives in lib/logVisibility.ts, together with the decision
@@ -131,8 +131,11 @@ export async function GET(req: NextRequest) {
     // copy stripped `%,()` but left `*` alone — and PostgREST translates `*` to `%` inside `ilike`,
     // so searching for `*` matched EVERY row instead of the literal character. lib/searchText.ts is
     // now the only place that decides what a typed search may contain.
-    const safe = safeSearch(qText);
-    if (safe) q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
+    // …and a search that cleans down to NOTHING is not an absent search: `if (safe)` skipped the
+    // filter, so typing `*` listed every row again by a different route (owner picked item 11).
+    const safe = searchTerm(qText);
+    if (safe.kind === "term") q = q.or(`action.ilike.%${safe.term}%,detail.ilike.%${safe.term}%`);
+    else if (safe.kind === "unsearchable") q = q.is("id", null)   // a primary key is never NULL, so this matches nothing — no sentinel value to keep in step;
   }
 
   // ── A PAGE PAST THE END IS AN EMPTY PAGE, NOT A RETRYABLE FAILURE (T28 round 2, 2026-09-16) ────
@@ -163,7 +166,11 @@ export async function GET(req: NextRequest) {
     else if (!scope.all && scope.ids.length) hq = hq.in("restaurant_id", scope.ids);
     if (level === "warn" || level === "info") hq = hq.eq("level", level);
     if (actorId && /^[0-9a-f-]{36}$/i.test(actorId)) hq = hq.eq("actor_id", actorId);
-    if (qText) { const safe = safeSearch(qText); if (safe) hq = hq.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`); }
+    if (qText) {
+      const safe = searchTerm(qText);
+      if (safe.kind === "term") hq = hq.or(`action.ilike.%${safe.term}%,detail.ilike.%${safe.term}%`);
+      else if (safe.kind === "unsearchable") hq = hq.is("id", null)   // a primary key is never NULL, so this matches nothing — no sentinel value to keep in step;
+    }
     const head = await hq;
     const total = head.error ? 0 : (head.count ?? 0);
     return NextResponse.json({

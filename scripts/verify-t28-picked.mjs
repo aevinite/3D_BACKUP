@@ -166,13 +166,71 @@ console.log("\nT28's picked items — a read that failed is never reported as a 
     `item 12 · lib/personalData.ts is down to ${entries} entries — verify:personal-data is what watches for a new phone column, but a shrinking list here silently shrinks the erasure`);
 }
 
+// ── item 11 · a search that cleaned down to nothing is not an absent search ─────────────────────
+//
+// `lib/searchText.ts` used to answer a bare string, so `""` meant BOTH "nothing was typed" and
+// "everything typed was stripped". Nine callers were written `if (safe) q = q.or(…)`, so the second
+// case applied NO FILTER — typing `*` on owner → Guests answered with the whole list. Two admin
+// callers were worse: they built the filter unconditionally, so an emptied search became `ilike.%%`.
+//
+// It now answers a discriminated union (`none` | `term` | `unsearchable`). THE DANGEROUS PART OF
+// THAT CHANGE, and the reason this check exists: an object is ALWAYS truthy and stringifies to
+// `[object Object]`, and TypeScript accepts both — so `if (search)` and `${search}` still COMPILE
+// against the new type while quietly meaning something else. I made exactly that mistake in
+// `app/api/admin/customers/route.ts` while doing this, and `tsc` was silent about it.
+{
+  const CALLERS = [
+    "app/api/owner/customers/route.ts", "app/api/owner/oplog/route.ts",
+    "app/api/admin/customers/route.ts", "app/api/admin/oplog/route.ts", "app/api/admin/audit/route.ts",
+    "app/api/tablet/[...path]/route.ts", "app/api/editor/[...path]/route.ts",
+    "app/owner/customers/page.tsx",
+  ];
+  const lib = code(read("lib/searchText.ts"));
+  need(/export type SearchTerm/.test(lib) && /kind: "unsearchable"/.test(lib),
+    "item 11 · the cleaner answers WHICH of the three things happened, not a bare string",
+    "item 11 · lib/searchText.ts is back to a bare string — \"nothing typed\" and \"nothing searchable typed\" are one value again, and every caller collapses them");
+  need(!/export function safeSearch/.test(lib),
+    "item 11 · …and the old one-value cleaner is gone, not left beside it",
+    "item 11 · safeSearch still exists next to searchTerm — the next search box will pick the one that hides the bug (a new way REPLACES the old one)");
+
+  const stringified = [];
+  const truthy = [];
+  for (const f of CALLERS) {
+    const src = code(read(f));
+    if (!src) continue;
+    // Which local names hold a SearchTerm on this file?
+    const names = [...src.matchAll(/(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*searchTerm\(/g)].map((m) => m[1]);
+    for (const n of names) {
+      // `${name}` without `.term` — an object in a template literal becomes "[object Object]".
+      if (new RegExp("\\$\\{" + n + "\\}").test(src)) stringified.push(`${f} → \${${n}}`);
+      // `if (name)` / `name &&` / `name ?` — always true for an object, so the branch never guards.
+      if (new RegExp("(?:if\\s*\\(|&&\\s*|\\|\\|\\s*)" + n + "\\s*(?:\\)|&&|\\?)").test(src)) truthy.push(`${f} → if (${n})`);
+    }
+  }
+  need(stringified.length === 0,
+    `item 11 · no caller drops a whole SearchTerm into an ilike pattern (${CALLERS.length} files read)`,
+    `item 11 · a SearchTerm is being stringified, which produces the literal text "[object Object]" as the search: ${stringified.join(", ")}`);
+  need(truthy.length === 0,
+    "item 11 · …and none of them tests one for truthiness, which an object always passes",
+    `item 11 · a SearchTerm is used as a condition — an object is ALWAYS truthy, so that branch no longer guards anything: ${truthy.join(", ")}`);
+
+  // The point of the whole change: every caller must handle the unsearchable case somehow.
+  const unhandled = CALLERS.filter((f) => {
+    const src = code(read(f));
+    return src && /searchTerm\(/.test(src) && !/unsearchable/.test(src);
+  });
+  need(unhandled.length === 0,
+    "item 11 · …and every caller answers the unsearchable case instead of falling through to no filter",
+    `item 11 · these use searchTerm but never mention \`unsearchable\`, so a box of wildcards falls through to the unfiltered list again: ${unhandled.join(", ")}`);
+}
+
 if (!fails.length) {
   console.log(`\n✅ verify:t28-picked — ${pass} checks, all pass.`);
   process.exit(0);
 }
 console.error(`\n❌ verify:t28-picked — ${fails.length} failed, ${pass} passed.\n`);
 for (const m of fails) console.error(`  FAIL  ${m}`);
-console.error("\nThe rule under all four: a read that FAILED is never reported as a fact. Not as a");
+console.error("\nThe rule under items 9-12: a read that FAILED is never reported as a fact. Not as a");
 console.error("restaurant nobody checked, not as \"you haven't asked\", not as \"nothing has changed\",");
 console.error("and not as a shorter list of what was erased.");
 process.exit(process.argv.includes("--hook") ? 2 : 1);

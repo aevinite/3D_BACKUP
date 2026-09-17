@@ -153,7 +153,7 @@ import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 // What never leaves the server inside a settings row (the delivery apps' connection keys).
 import { panelSafeSettings } from "@/lib/panelSettings";
-import { safeSearch } from "@/lib/searchText";
+import { searchTerm } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -1050,12 +1050,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // safeSearch, not a bare trim: `,` and `)` END a term in PostgREST's or=(...) grammar and
       // `%`/`*` are wildcards, so a banquet customer called "Sharma, R" used to search for
       // something other than what was typed (T9 finding F15, applied here 2026-08-16).
-      const q = safeSearch(new URL(req.url).searchParams.get("q"), 40);
+      const q = searchTerm(new URL(req.url).searchParams.get("q"), 40);
       const limit = Math.min(100, Math.max(1, Number(new URL(req.url).searchParams.get("limit")) || 40));
       let sel = sb.from("banquet_bills")
         .select("id,bill_no,issued_at,total,received,cust_name,cust_phone,hall,func,fn_date,pax,order_id,voided_at,void_reason")
         .eq("restaurant_id", rid);
-      if (q) sel = sel.or(`cust_name.ilike.%${q}%,cust_phone.ilike.%${q}%,bill_no.ilike.%${q}%`);
+      if (q.kind === "term") sel = sel.or(`cust_name.ilike.%${q.term}%,cust_phone.ilike.%${q.term}%,bill_no.ilike.%${q.term}%`);
+      if (q.kind === "unsearchable") return ok({ bills: [], unsearchable: true });
       const bills = must(await sel.order("issued_at", { ascending: false }).limit(limit));
       return ok({ bills });
     }
@@ -1104,9 +1105,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "khata/customers") {
       if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("use the khata book");
-      const q = safeSearch(new URL(req.url).searchParams.get("q"), 60);
+      const q = searchTerm(new URL(req.url).searchParams.get("q"), 60);
       let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
-      if (q) sel = sel.or(`name.ilike.%${q}%,phone.ilike.%${q}%`);
+      if (q.kind === "term") sel = sel.or(`name.ilike.%${q.term}%,phone.ilike.%${q.term}%`);
+      if (q.kind === "unsearchable") return ok({ customers: [], total: 0, collectedToday: 0, unsearchable: true });
       const people = (must(await sel) || []) as any[];
       // Show each shown person's CURRENT tab so staff see they're adding to an existing debt.
       //
