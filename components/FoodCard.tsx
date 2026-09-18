@@ -321,7 +321,13 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
                largest thing on the screen and deciding it can wait is how a menu comes up grey.
                Everything further down the list stays lazy, which is the actual saving: a 60-dish
                menu only ever downloads the pictures that are scrolled to. */
-            loading={index < 3 ? "eager" : "lazy"}
+            /* ONE eager photo, not three (measured 2026-09-18). Making the top three eager
+               brought the whole first screenful of photos forward — 21 images, 780 KB, on a phone
+               on Slow 4G — for photos a guest may never scroll to. The top-left card is the one
+               that is certainly looked at, so it alone is fetched at once and at high priority;
+               everything else stays lazy, which is the saving. Nothing arrives later than it did
+               before this change; one photo arrives sooner. */
+            loading={index === 0 ? "eager" : "lazy"}
             fetchPriority={index === 0 ? "high" : "auto"}
             decoding="async"
             // Hide the img element itself when the photo is broken/missing, the
