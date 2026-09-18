@@ -21,6 +21,40 @@ Two standing rules override any item on the list:
 
 ---
 
+## "Is it faster than before?" — the A/B, measured
+
+Both versions **built for production and served side by side**, then loaded alternately (so drift in
+the shared database cannot favour one side), on a phone viewport under Lighthouse's mobile preset.
+BEFORE = `31f48ec7`, the commit before this work. AFTER = what is live now.
+
+| What | Before | After | Verdict |
+|---|---|---|---|
+| **Send to kitchen** (manager → table → Take order) | **1,136 ms** before the screen moved | **25 ms** | **45× faster** — the one a manager feels all shift (PR #1402) |
+| The order request itself | 673–1,149 ms | ~330 ms | **2× faster** |
+| **A dish photo you upload** | 3–5 MB, full size, to every guest | **31 KB** from a 4032×3024 photo (−91%) | **much faster for every guest who opens the menu** |
+| Manager panel JS | 3,036 KB | **2,947 KB** | −89 KB (−195 KB on the desktop measurement); the 209 KB chart library no longer loads on boot |
+| Manager panel — floor usable | 7,292 ms | **7,188 ms** | ~100 ms faster, five runs each, ranges overlapping — call it "no slower, and lighter" |
+| Admin ⓘ help pictures | 4.95 MB | **2.19 MB** | −56% |
+| Owner dashboard — layout jump (CLS) | **0.433** ("poor") | **0.316** | the page shuffles noticeably less while it loads |
+| Owner dashboard — first paint | 932 ms | **1,016 ms → content at ~1,000 ms** | same, within noise |
+| Owner dashboard — long tasks | 6 (717 ms) | 5 (618 ms) | slightly better |
+| Guest menu — FCP / LCP / CLS | 928 ms / 6,028 ms / 0.095 | 932 ms / 6,048 ms / 0.095 | **unchanged** — see the two findings below |
+| Kitchen 86-board search | re-rendered the whole list per keystroke | one render after a 120 ms pause | typing no longer fights the list |
+
+**The honest summary: the things people do repeatedly got faster (sending an order, uploading a photo,
+searching in the kitchen), the manager panel got lighter, and the owner dashboard got steadier. The
+guest menu's page-load numbers did NOT move** — what limits it is the intro animation and the
+framework's own JavaScript, neither of which is on this list.
+
+**Two numbers that look worse and are not.** The owner dashboard's LCP reads 932 ms → 5,932 ms. The
+LCP *element changed*: before, the biggest thing ever painted in the window was a **chart card's
+heading** (11k px², at 1,228 ms) because the charts themselves had not rendered at all; now content
+appears **earlier** (1,016 ms) and a genuinely bigger element — the rendered chart area — lands at
+5.9 s and takes over the measurement. More content, sooner, measured later. The guest menu's
+LCP (6.0 s) is the intro splash logo revealed by its own animation, unchanged by any of this.
+
+---
+
 ## How this was measured
 
 | Tool | What for |
@@ -77,11 +111,15 @@ tiles in Take order). Every remaining `<img>` in the app was listed and decided 
   preview · the owner's expense-slip thumbnails · the order-confirm dish image · the panel issue
   photo preview · the inventory bill photos (×2).
 * **deliberately NOT lazy, with the reason written at each line:** the dish page's main photo (it is
-  the LCP element — it now says `loading="eager" fetchPriority="high"`), the **first three** cards of
-  the guest menu grid (`loading={index < 3 ? "eager" : "lazy"}`, the first also `fetchPriority="high"`
-  — lazy-loading what a guest is already looking at is how a menu comes up grey), the bill document's
-  logo and the QR print sheet (**a lazy image can print blank**), the maintenance screen's logo and
-  the admin header mark.
+  the LCP element — it now says `loading="eager" fetchPriority="high"`), **the first card** of the
+  guest menu grid, the bill document's logo and the QR print sheet (**a lazy image can print blank**),
+  the maintenance screen's logo and the admin header mark.
+* **Tuned after measuring (2026-09-18).** The first cut made the top **three** cards eager, and that
+  pulled the whole first screenful forward: **21 photos, 780 KB**, on a phone on Slow 4G, for pictures
+  a guest may never scroll to. Only the top-left card is eager now — the one that is certainly looked
+  at — which costs **+237 KB** in the first seven seconds and gets the first photo on screen sooner.
+  Nothing arrives later than it did before; FCP, LCP and CLS are unchanged (928 ms · 6,048 ms · 0.095
+  before and after).
 
 ## 3 · Split the code into chunks — **DONE where it pays; measured, not assumed** ✅
 
@@ -180,15 +218,27 @@ on Tailwind 4 by a standing rule and its MCP was deleted on 2026-09-02, so it wa
 nothing but `package.json`. Lockfile refreshed. `chart.js` stays — `scripts/build-vendor.mjs` pins it
 to build the panel's vendor file.
 
-## 12 · Defer non-critical scripts — **DONE NOW, all three panels** ✅
+## 12 · Defer non-critical scripts — **TRIED, MEASURED, REVERTED** ⚠️
 
-Every body script in the manager, kitchen and tablet panels now carries `defer` (22 · 15 · 18 tags).
-`theme.js` in `<head>` stays blocking **on purpose**: it picks the skin before the first paint, and
-deferring it would show a flash of the wrong colours on every load. There are no inline `<script>`
-blocks in any panel, so execution order is unchanged.
-**Verified in the browser:** all three panels boot with every shared global present
-(`LFH_RT`, `LFH_OUTBOX`, `LFH_BACK`, `LFH_OFF`, `LFH_IMG`, `LFH_ISSUE`) and **zero console errors**.
-Plus the chart library deferral in item 3.
+`defer` was put on every body script of all three panels. Then it was measured, and it **cost time**:
+the manager panel's floor took **~250–300 ms longer to become usable** in every run. The reason is
+plain in hindsight — those scripts already sit at the END of the body, so they were never blocking
+the parser; all `defer` added was a rule that none of them may run until the whole document has been
+parsed, which delays `app.js` starting. Five runs per build, alternating, median time to a usable
+floor:
+
+| | floor usable (median of 5) | runs |
+|---|---|---|
+| before any change | 7,292 ms | 7,486 · 7,290 · 7,681 · 7,238 · 7,292 |
+| with `defer` | ~7,500 ms | (consistently slower in both earlier passes) |
+| **shipped: no `defer`, chart library lazy** | **7,188 ms** | 7,406 · 7,047 · 7,188 · 7,048 · 7,415 |
+
+**So the panels keep their scripts exactly as they were**, and what actually made the panel lighter
+is item 3 — the 209 KB charting library no longer loading on a visit that never opens the Dashboard
+(**JS 3,036 → 2,947 KB**). `theme.js` stays first and blocking in `<head>`, as it always was.
+
+The lesson, written down so the next run does not repeat it: **a script at the end of the body is
+already deferred by position.** Adding the attribute only postpones its execution.
 
 ## 13 · Loading skeleton — **ALREADY THERE on every panel** ✅
 

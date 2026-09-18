@@ -1848,7 +1848,7 @@ export default function OwnerDashboard() {
                 <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"} · each bar split by restaurant</span></span>
                 <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
               </div>
-              {!trendPayload ? <div className="adm-empty">{loadNote}</div>
+              {!trendPayload ? <div className="adm-empty ow2-chartslot">{loadNote}</div>
                 : <StackedDailyBars data={groupTrend.rows} lines={groupTrend.lines} />}
             </div>
           ) : (
@@ -1862,7 +1862,7 @@ export default function OwnerDashboard() {
               </div>
               <div className="adm-card">
                 <div className="ow2-ct"><span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"}</span></span></div>
-                {!trendPayload ? <div className="adm-empty">{loadNote}</div>
+                {!trendPayload ? <div className="adm-empty ow2-chartslot">{loadNote}</div>
                   : <AreaTrend data={groupTrend.rows} lines={groupTrend.lines} />}
               </div>
             </div>
@@ -1950,7 +1950,7 @@ export default function OwnerDashboard() {
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · {restScopeText}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
-              {!pl("month") ? <div className="adm-empty">{loadNote}</div>
+              {!pl("month") ? <div className="adm-empty ow2-chartslot">{loadNote}</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
                       looked like a crash (owner-panel sweep 2026-08-04). */}
@@ -2026,7 +2026,7 @@ export default function OwnerDashboard() {
               <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"}</span></span>
               <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
             </div>
-            {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">{loadNote}</div>
+            {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty ow2-chartslot">{loadNote}</div>
               : restTrend.length >= 9
                 ? <AreaTrend data={restTrend} lines={[{ key: "Revenue", name: "Revenue", color: GREEN }]} />
                 : <TimeBar data={restTrend.map((r) => ({ label: String(r.label), revenue: Number(r.Revenue) || 0, __orders: Number(r.__orders) || 0 })) as { label: string; revenue: number }[]} color={GREEN} />}
@@ -2035,7 +2035,7 @@ export default function OwnerDashboard() {
           <div className="ow2-two">
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
-              {!pl("month") ? <div className="adm-empty">{loadNote}</div>
+              {!pl("month") ? <div className="adm-empty ow2-chartslot">{loadNote}</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
                       looked like a crash (owner-panel sweep 2026-08-04). */}
@@ -2402,6 +2402,17 @@ export default function OwnerDashboard() {
            one long figure could push its own track wider than the row. The short money form on the
            tile face (compactINR) is the other half of making five fit. */
         :global(.ow2-stats5) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+        /* ── A CHART CARD IS ITS FINAL HEIGHT BEFORE THE CHART ARRIVES (owner, 2026-09-17/18) ──
+           MEASURED, under Lighthouse's mobile preset: this dashboard scored CLS 0.433 and the
+           biggest single jump — 0.264 at 4.6 s — was the estate table being shoved 62 px down when
+           the cards above it swapped their one-line "loading" note for a 260 px chart. Reserving
+           the slot is the whole fix: the card is born the size it will be, the note sits in the
+           middle of it, and the chart lands INTO the space instead of making it.
+           260 px is not a guess — it is the default height of AreaTrend, StackedDailyBars and
+           RevMonthCompare in components/owner/Charts.tsx. A card that can render the 240 px TimeBar
+           instead still reserves 260 and the chart sits in it; a slot that is 20 px generous costs
+           nothing, while a slot that is short brings the jump back. */
+        :global(.adm-empty.ow2-chartslot) { min-height: 260px; display: grid; place-items: center; }
         :global(.ow2-stats5) > * { min-width: 0; }
         .ow2-ct { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 800; margin-bottom: 10px; flex-wrap: wrap; }
         .ow2-ct .mut { color: var(--muted); font-weight: 500; }

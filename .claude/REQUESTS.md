@@ -13,6 +13,30 @@ owner looks, with cache busting, before claiming anything.
 
 ---
 
+- [x] **"Is it faster than before?" — A/B measured, and one of my own changes reverted for it**
+  (2026-09-18). He asked the right question and added the rule: *"do what's left if it's making it
+  faster and not ruining anything and i want every animation and effect to look as same as before or
+  maybe better but not wors​t"*. Both versions were built for production and served **side by side**,
+  loaded alternately on a phone profile under Lighthouse's mobile preset. Full table at the top of
+  `docs/OPTIMIZATION-AUDIT.md`. **Faster:** sending an order **1,136 ms → 25 ms** · the order request
+  673–1,149 ms → ~330 ms · an uploaded dish photo **−91%** (every guest downloads it) · the manager
+  panel **3,036 → 2,947 KB** with the 209 KB chart library no longer loading on boot and the floor
+  usable **7,292 → 7,188 ms** · the admin help pictures **−56%** · the owner dashboard's layout jump
+  **CLS 0.433 → 0.316** with fewer long tasks · the kitchen search no longer re-renders per keystroke.
+  **Unchanged:** the guest menu's page-load numbers (what limits those is the intro animation and the
+  framework's own JavaScript, neither of which is on the list). **NO animation or effect was touched
+  anywhere** — the intro splash, the GSAP timelines, the count-ups and the chart draws are exactly as
+  they were.
+  **REVERTED, because the measurement said so:** the `defer` I put on every panel script made the
+  manager panel **~250–300 ms SLOWER** to a usable floor, every run. Those scripts already sit at the
+  end of the body, so they never blocked anything; `defer` only held `app.js` back until the whole
+  document had been parsed. The panels keep their scripts exactly as they were. **Tuned:** the guest
+  menu's eager images went from the top THREE cards back to the top ONE — three was pulling 21 photos
+  (780 KB) forward on a phone for pictures nobody had scrolled to; one costs +237 KB and puts the
+  first photo up sooner, with FCP/LCP/CLS unchanged. **Done from what was left:** the owner
+  dashboard's chart cards now reserve the chart's own height (260 px) before it arrives, which is
+  what actually moved CLS.
+
 - [x] **"Optimize" now means his 20-point list — run in full, every line answered** (2026-09-17).
   His words: *"whenever I tell you to optimize the thing you will do all this stuff… compress all
   images, add lazy loading, split the code into chunks, cache API responses, add a CDN, minify JS and

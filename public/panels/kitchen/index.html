@@ -61,13 +61,13 @@
   </div>
 
   <div id="toasts" class="toasts"></div>
-  <script defer src="/panels/maint.js?v=293989ce"></script>
-  <script defer src="/panels/realtime.js?v=122c17eb"></script>
+  <script src="/panels/maint.js?v=293989ce"></script>
+  <script src="/panels/realtime.js?v=122c17eb"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script defer src="/panels/netretry.js?v=064c1971"></script>
-  <script defer src="/panels/outbox.js?v=79344a64"></script>
+  <script src="/panels/netretry.js?v=064c1971"></script>
+  <script src="/panels/outbox.js?v=79344a64"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script defer src="/panels/connbadge.js?v=004aecb5"></script>
+  <script src="/panels/connbadge.js?v=004aecb5"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and BEFORE app.js.
@@ -76,23 +76,23 @@
        DOMContentLoaded — by which time every tag here has run. (The old wording claimed the
        opposite of the actual order in this file and would have sent the next person reordering
        these tags the wrong way. T4 sweep, 2026-08-11.) -->
-  <script defer src="/panels/swreg.js?v=0d429b78"></script>
-  <script defer src="/panels/offline.js?v=9e03ae1a"></script>
-  <script defer src="/panels/backstack.js?v=efe8afdb"></script>
+  <script src="/panels/swreg.js?v=0d429b78"></script>
+  <script src="/panels/offline.js?v=9e03ae1a"></script>
+  <script src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
-  <script defer src="/panels/errlog.js?v=81a35c3c"></script>
+  <script src="/panels/errlog.js?v=81a35c3c"></script>
   <!-- shrinkimg.js: caps an uploaded photo at 1280px and re-encodes it as WebP BEFORE it is
        sent (owner, 2026-09-17: "compress all images"). Used by the dish photo in Edit menu and
        by a photo attached to an issue; it hands back the original file if anything goes wrong. -->
-  <script defer src="/panels/shrinkimg.js?v=b7109a6e"></script>
-  <script defer src="/panels/issue-raise.js?v=470b3ed0"></script>
+  <script src="/panels/shrinkimg.js?v=b7109a6e"></script>
+  <script src="/panels/issue-raise.js?v=470b3ed0"></script>
   <!-- undobar: the shared "take it back" bar after a Ready mis-tap. -->
-  <script defer src="/panels/undobar.js?v=e5a33483"></script>
+  <script src="/panels/undobar.js?v=e5a33483"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
-  <script defer src="/panels/fitnums.js?v=0610dc4b" data-fit=".kot"></script>
+  <script src="/panels/fitnums.js?v=0610dc4b" data-fit=".kot"></script>
   <!-- billdoc: THE kitchen ticket, written down once (LFH_BILLDOC) and shared with the manager
        panel and the admin's sample, so a ticket can never look different in two places. -->
-  <script defer src="/panels/billdoc.js?v=e26c29a4"></script>
-  <script defer src="app.js?v=c3ecd08d"></script>
+  <script src="/panels/billdoc.js?v=e26c29a4"></script>
+  <script src="app.js?v=c3ecd08d"></script>
 </body>
 </html>
