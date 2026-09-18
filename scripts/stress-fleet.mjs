@@ -448,8 +448,26 @@ function scalePhases(minutes) {
   // point of this rail is to stop the test becoming the outage.
   const MAX_MB = Number(arg("max-db-mb", "420"));
   let stoppedEarly = null;
+  let lastOkSeen = -1, flatTicks = 0;
   const diskSamples = [];
   const diskTimer = setInterval(async () => {
+    // THE CEILING, SECOND SIGNAL: THROUGHPUT FLATLINED. The bystander check below only fires when
+    // the site stops answering ALTOGETHER, and on 2026-09-19 an all-62 run sat for minutes with
+    // `ok` frozen at 1,104 and failures climbing into the thousands while /api/health was merely
+    // SLOW — so the rail never tripped and the run would have burned its full half hour proving
+    // nothing. A run whose successes have stopped moving has already found the wall.
+    if (!stoppedEarly) {
+      const latestOk = (() => { const m = new Map(); for (const s2 of perTenant) m.set(s2.slug, s2);
+        let n = 0; for (const s2 of m.values()) for (const c of s2.cells) n += c.ok; return n; })();
+      if (latestOk > 0 && latestOk === lastOkSeen) { flatTicks++; } else { flatTicks = 0; lastOkSeen = latestOk; }
+      if (flatTicks >= 8) {   // 8 x 15s = two minutes with not one new success anywhere
+        const el = Math.round((Date.now() - startedAt) / 1000);
+        stoppedEarly = `CEILING FOUND — not one new success across all ${TENANTS} restaurants for two minutes (stuck at ${latestOk}), so the run ended itself at ${Math.floor(el / 60)}m${String(el % 60).padStart(2, "0")}`;
+        log(`⛔ ${stoppedEarly}`);
+        kids.forEach((c) => { try { c.kill("SIGTERM"); } catch {} });
+        return;
+      }
+    }
     // THE CEILING: three probe rounds in a row where the site did not answer at all.
     if (badProbeRounds >= 3 && !stoppedEarly) {
       const el = Math.round((Date.now() - startedAt) / 1000);

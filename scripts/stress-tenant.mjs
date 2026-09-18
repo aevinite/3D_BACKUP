@@ -192,7 +192,7 @@ async function guestTable(tableNo) {
         //    sitting there. This is the app's rule, so the rig obeys it.
         const seated = await viaWaiter(() => panelPOST("waiter_seat", "/api/tablet/sessions/open", { table: String(tableNo) }));
         if (!seated?.ok) { await sleep(jitter(6000)); continue; }
-        markFloor();
+        markFloor(tableNo);
         // 2. The phone scans and joins.
         const j = await rpcAnon("guest_join", "lfh_join_session", {
           p_table: String(tableNo), p_name: rnd(NAMES), p_lat: null, p_lng: null,
@@ -221,7 +221,7 @@ async function guestTable(tableNo) {
         await sleep(r.retryAfter * 1000);
         continue;
       }
-      if (r.ok) { st.orders++; markKitchen(); }
+      if (r.ok) { st.orders++; markKitchen(tableNo); }
       else if (r.refused === "invalid_token" || r.refused === "session_closed") { st.token = null; continue; }
 
       // 6. Watching their own order come along, and the occasional wave at a waiter.
@@ -273,9 +273,31 @@ async function guestTable(tableNo) {
 // So the boards wait for WORK — the flag below stands in for the realtime breadcrumb — or for the
 // backstop, whichever comes first.
 const BACKSTOP_MS = 60000;
-const work = { kitchen: false, floor: false };
-const markKitchen = () => { work.kitchen = true; work.floor = true; };  // a new ticket
-const markFloor = () => { work.floor = true; };                        // anything else that moves
+// A BREADCRUMB NAMES A TABLE, AND THE PANELS USE THAT. This rig used to refetch the WHOLE floor
+// (and the whole dish list with it) on every change — the most expensive call the app has, ~77 KB
+// of which ~50 KB is dishes. The real panels do neither:
+//   public/panels/tablet/app.js:5465   api("GET", "/summary?table=" + t)   ← one tile, ~5 kB
+//   public/panels/tablet/app.js:5559   api("GET", "/summary?nomenu=1")     ← recurring refresh
+//   public/panels/editor/app.js:17207  api("GET", "/summary?table=" + t)
+// and the kitchen board carries the same targeted slice (?table=N). Measuring the app with a
+// client heavier than its own panels is how you report a ceiling that does not exist.
+const work = { kitchen: false, floor: false, kitchenTables: new Set(), floorTables: new Set() };
+const markKitchen = (table) => {                      // a new ticket for this table
+  work.kitchen = true; work.floor = true;
+  if (table != null) { work.kitchenTables.add(String(table)); work.floorTables.add(String(table)); }
+};
+const markFloor = (table) => {                        // anything else that moved on this table
+  work.floor = true;
+  if (table != null) work.floorTables.add(String(table));
+};
+// How many named tables are worth patching one-by-one before a whole-floor read is cheaper.
+const TARGETED_MAX = 4;
+function takeTables(key) {
+  const set = work[key + "Tables"];
+  const list = [...set];
+  set.clear();
+  return list;
+}
 // A FLOOR under a 2.5s minimum, because a breadcrumb is not an instruction to refetch instantly
 // and forever. At the top of the ladder an order lands every 0.7 seconds per restaurant, so a
 // board that refetched on every single one would spin as fast as the network allows — the same
@@ -307,7 +329,7 @@ async function waiterSettles() {
         if (pRes.ok || pRes.status === 409) job.paid = true;
       }
       const c = await panelPOST("waiter_close", `/api/tablet/sessions/${job.sessionId}/close`, {});
-      markFloor();
+      markFloor(job.tableNo);
       // A refusal is the app protecting the party's food, not a failure — the kitchen has dishes
       // still on the pass. Come back when they are out. No new party sits down meanwhile, so this
       // now converges instead of chasing a table that keeps re-filling.
@@ -324,8 +346,14 @@ async function kitchenScreen() {
   await waitForOpening();
   const cooking = new Map();  // order id -> when it comes off the pass
   const toServe = new Map();  // order id -> when a waiter carries it out
+  const tableOf = new Map();  // order id -> its table, so a later breadcrumb can name it
   while (Date.now() < DEADLINE) {
-    const b = await panelGET("kitchen_board", "/api/kitchen/board");
+    // Same shape as the floor: one tile's worth when a breadcrumb named a table, the whole board
+    // only on the backstop or a broad change.
+    const kTables = takeTables("kitchen");
+    const b = kTables.length && kTables.length <= TARGETED_MAX
+      ? await panelGET("kitchen_slice", `/api/kitchen/board?table=${encodeURIComponent(kTables[0])}`)
+      : await panelGET("kitchen_board", "/api/kitchen/board");
     const orders = b.ok ? (b.data?.orders || []) : [];
     const items = b.ok ? (b.data?.items || []) : [];
     const itemsOf = new Map();
@@ -336,9 +364,10 @@ async function kitchenScreen() {
     }
     for (const o of Array.isArray(orders) ? orders : []) {
       if (!o?.id || cooking.has(o.id) || toServe.has(o.id)) continue;
+      if (o.table_number != null) tableOf.set(o.id, o.table_number);
       if (o.status === "received") {
         const a = await panelPOST("kitchen_accept", `/api/kitchen/orders/${o.id}/accept`, {});
-        if (a.ok) { cooking.set(o.id, Date.now() + 20000 + ri(40000)); markFloor(); }   // 20-60s on the stove
+        if (a.ok) { cooking.set(o.id, Date.now() + 20000 + ri(40000)); markFloor(o.table_number); }   // 20-60s on the stove
       } else if (o.status === "preparing") {
         // A FOLLOW-UP ORDER IS ALREADY 'preparing' AND NOBODY PRESSED ACCEPT. Migration 163/357:
         // once staff have accepted one order for a seating, later rounds skip straight to the
@@ -351,7 +380,7 @@ async function kitchenScreen() {
       if (Date.now() < when) continue;
       const r = await panelPOST("kitchen_ready", `/api/kitchen/orders/${id}/ready`, {});
       cooking.delete(id);
-      if (r.ok) { toServe.set(id, Date.now() + 5000 + ri(15000)); markFloor(); }
+      if (r.ok) { toServe.set(id, Date.now() + 5000 + ri(15000)); markFloor(tableOf.get(id)); }
     }
     for (const [id, when] of [...toServe]) {
       if (Date.now() < when) continue;
@@ -370,9 +399,19 @@ async function kitchenScreen() {
 // ── THE FLOOR BOARD — the manager's screen, on its own poll ────────────────────────────────────
 async function floorScreen() {
   await waitForOpening();
+  // The first paint is the only one that needs the dish list; after that the panel keeps its own
+  // cached menu and asks for the floor without it.
+  await panelGET("floor_full", "/api/tablet/summary");
   while (Date.now() < DEADLINE) {
-    await panelGET("floor_summary", "/api/tablet/summary");
     await waitForWork("floor");
+    const tables = takeTables("floor");
+    if (tables.length && tables.length <= TARGETED_MAX) {
+      // Targeted: patch just the tiles that actually changed. Never shared, so a tile updates the
+      // instant its order lands — which is exactly why the app offers it.
+      for (const t of tables) await panelGET("floor_tile", `/api/tablet/summary?table=${encodeURIComponent(t)}`);
+    } else {
+      await panelGET("floor_refresh", "/api/tablet/summary?nomenu=1");
+    }
   }
 }
 
