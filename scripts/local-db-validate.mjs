@@ -38,7 +38,12 @@ const DB_NAME    = 'lfh_dev';
 const SCRIPT_DIR  = fileURLToPath(new URL('.', import.meta.url));
 const REPO_ROOT   = resolve(SCRIPT_DIR, '..');
 const MIGRATIONS  = join(REPO_ROOT, 'supabase', 'migrations');
-const BOOTSTRAP   = '/private/tmp/claude-501/-Users-aevinite-Documents-Projects-backup-Menu/aaf1afaa-8870-43bc-8528-abf58e393fc8/scratchpad/lfh-bootstrap.sql';
+// The bootstrap lives in a SCRATCHPAD, and a scratchpad belongs to one session — the path below
+// is the 2026-08 session's and its directory has since been cleaned, so the hard-coded default
+// now points at nothing. Set LFH_BOOTSTRAP_SQL to your own copy (scripts/LOCAL-DB-NOTES.md lists
+// what it must contain) rather than editing this line, so two sessions never fight over it.
+const BOOTSTRAP   = process.env.LFH_BOOTSTRAP_SQL
+  || '/private/tmp/claude-501/-Users-aevinite-Documents-Projects-backup-Menu/aaf1afaa-8870-43bc-8528-abf58e393fc8/scratchpad/lfh-bootstrap.sql';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function psql(db, sql, opts = {}) {

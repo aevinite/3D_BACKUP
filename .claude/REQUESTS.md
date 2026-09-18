@@ -1604,3 +1604,43 @@ port 8938"*.
   `public/panels/editor/app.js` (manager/editor popup) **and** the tablet floor's copy of it — one
   new way, the old stacked-per-order body deleted in the same change (the "a new way replaces the old
   one" rule), verified in Chrome on a non-#1 restaurant at desktop and ~390px.
+
+## 2026-09-18 — "do the stress test, and solve all this error; my app should survive all the things"
+
+He was shown another session's stress-test output (68% of orders failing, an idle restaurant's floor
+board taking 19 seconds) and asked for the errors to be solved, not just reported. Two sessions
+split it: one owns the rig and the run, this one owns the database profiling and the fixes. One
+document: `docs/STRESS-TEST.md`.
+
+- [x] **The headline correction.** "68% of orders failed" is true of a rig that bypassed the app, and
+  it does NOT mean an order was lost. Every failure was a timeout or a gateway 522 — the database not
+  answering. `public/panels/outbox.js` checks the status code before parsing the body, so a staff
+  write is queued and replayed; `lib/dbRefusal.ts` already classifies 57014 / 53300 / the gateway
+  wording as busy; reads are capped at 15s; the guest door sheds load with a jittered 20-45s wait.
+  Nothing needed changing there — it needed SAYING.
+- [x] **The ceiling is memory, and it is not a code problem.** The dev Postgres has **407 MB of RAM**
+  and was **221 MB into swap while idle**. `max_connections = 60` is a fiction on that box (neither
+  rig ever saw more than 12-14 active backends), and the collapse was paging, not CPU and not locks.
+  Measured from the project's own Prometheus endpoint.
+- [x] **Migration 399 — a breadcrumb no longer sweeps the whole table inside someone's order.**
+  `lfh_rt_emit` rolled a 1% dice on an unindexed full-table DELETE of `realtime_events`, per ROW
+  changed — so 7-8% of orders paid for it (an order emits 8-14 breadcrumbs). 26,984 sequential scans
+  and 1,079,442,494 tuples read, for housekeeping that pg_cron has done every ten minutes since
+  migration 060. Deliberately NO new index — reasons in the migration header.
+- [x] **A diner with a perfect phone was told to check their internet** (`lib/session.ts` → `rpc()`).
+  Under saturation the guest RPCs handed the screen a raw Postgres sentence, which matched no known
+  code, so `SessionGate` fell through to "check your internet and retry" — the exact thing the
+  comment beside it forbids. One line, reusing `isDbUnreachable`; unit-checked against the nine
+  error shapes actually observed.
+- [ ] **Migration 400 — one breadcrumb per write, not one per dish.** Unit-tested on a throwaway
+  Postgres (3 dishes emit 2 rows, not 6; identical payload). It buys WAL, logical decoding and
+  Realtime's per-subscriber RLS work — NOT read volume, because `public/panels/realtime.js` already
+  debounces per topic. Held until it can be verified live on manager + kitchen + tablet, because a
+  regression in realtime is worse than the saving.
+- [ ] **Recommended to him, not done:** is the CLIENT stack on the same 407 MB compute? If AV live is
+  also a free-tier box, this ceiling is a paying-customer problem. Reading AV live is ask-first, so
+  it is his call — and he can answer it from his own billing page without anyone touching it.
+- [ ] **Found in passing, not fixed:** this repo cannot build a database from zero. Migrations 049
+  and 051 called `lfh_already_applied` before migration 307 creates it (that gate added, nothing
+  else); 049 then fails again reading `orders.restaurant_id` before the column exists. Needs its own
+  change, not a stress-test branch.

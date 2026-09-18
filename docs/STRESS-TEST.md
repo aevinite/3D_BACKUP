@@ -415,6 +415,135 @@ minutes and left the old one in place — both ways running side by side, one of
 customer's critical path. **Migration 399** removes it and re-asserts the cron job so the removal
 can never leave the table unpruned.
 
+#### What removing one line actually bought — measured, quiet instance, 40 orders through each door
+
+| | before 399 | after 399 |
+|---|---|---|
+| **staff order — database time (mean)** | **30.2 ms** | **12.5 ms** — −59% |
+| **guest order — database time (mean)** | **31.2 ms** | **7.4 ms** — −76% |
+| staff order, end-to-end p95 / max | 217 ms / 442 ms | **96 ms / 224 ms** |
+| guest order, end-to-end p95 / max | 176 ms / 205 ms | **62 ms / 70 ms** |
+| seating a table (`lfh_join_session`, mean) | 15.3 ms | **2.6 ms** |
+| full sweeps of `realtime_events` per 80 orders | 4 — **27,570 rows read** | **0 — 0 rows** |
+
+A 1-in-100 event cannot halve a mean unless it is enormous, and it is: a sweep scans the whole
+breadcrumb table and then deletes about two-thirds of it, indexes and WAL included — on the order
+of a second and a half. That is why the *average* order was paying ~18 ms for something only 8% of
+orders actually ran, and why the tail was four times the median.
+
+**Proof it is gone, not just quiet:** the live function now has **0 executable lines** matching
+`IF random()` and 1 commented-out line (the obituary), the `lfh-rt-prune` cron job is still active,
+and a mechanical diff of the migration against the previous live definition shows exactly one
+executable line removed and nothing else touched. *(First attempt at that check was a bad test — the
+regex matched the obituary comment I had just written. Re-run properly.)*
+
+### 3a. Where the rest of an order's time goes — all 17 triggers, one at a time
+
+`EXPLAIN ANALYZE` on an INSERT reports each trigger separately, which is the only way to see what
+`orders` really costs. Median of 5, quiet instance, 2 dishes:
+
+| | |
+|---|---|
+| **INSERT INTO orders** | **15.5 ms**, of which **12.2 ms (79%) is triggers** and 3.3 ms is the row |
+| pricing the basket (`lfh_price_order`) | 7.8 ms |
+| the 3-second duplicate guard (staff door only) | **0.15 ms** — index scan, not the O(history) scan feared |
+| the auto-accept check (guest door only, mig 163/357) | **0.12 ms** — index scan on `session_id` |
+
+The triggers, in order of cost:
+
+```
+2.69 ms  trg_orders_fill_tax_split       ← tax
+2.04 ms  trg_stamp_order_tax_rate        ← tax
+1.59 ms  trg_assign_kot
+1.42 ms  rt_emit_orders
+1.25 ms  trg_inv_deplete_order
+0.93 ms  trg_order_joins_closed_session
+0.61 ms  trg_orders_watermark
+0.45 ms  trg_clamp_order_discount
+0.35 ms  trg_resplit_bill_discount
+0.32 ms  trg_kot_queue_autoprint
+0.22 ms  trg_assign_bill_on_order
+0.22 ms  zz_orders_disc_gross
+0.09 ms  trg_removed_order_leaves_every_board
+```
+
+**38% of the trigger time is the two tax triggers.** That is money correctness and it is not being
+touched on the strength of 4.7 ms. `trg_inv_deplete_order` at 1.25 ms is the one worth a later look
+— a restaurant with no inventory module should ideally not pay to find that out — but 1.25 ms of
+15.5 ms is not tonight's problem, and it is written here so the next person has the number.
+
+**And the important correction this makes to my own earlier claim:** I reported an order costing
+193 ms idle / 404 ms under load. On a healthy instance it costs **~30 ms before 399 and ~12 ms
+after**. The 193 ms and 404 ms were almost entirely *waiting*, not working — the memory ceiling
+again, not the code.
+
+### 3b. A seat is cheap — it only *looked* expensive because it goes first
+
+**Where:** waiter tablet / manager panel → tap a free table → Open. `POST /api/tablet/sessions/open`
+→ `lib/openSession.ts`.
+
+Seating was the first thing to time out in the 62-restaurant launches, which reads like "seating is
+expensive". It is not:
+
+| | |
+|---|---|
+| the "is this table already open?" read | **0.13 ms** — index scan on `idx_sessions_rest_table_created`, 2 buffers |
+| **INSERT INTO sessions** | **4.3 ms**, of which 2.6 ms (59%) is triggers (`rt_emit_sessions` 1.77, `resolve_open_requests` 0.78) |
+
+**~4.4 ms in total — a third of an order.** It failed first because it was *first in the queue*, not
+because it is heavy: nothing can happen at a table until it is seated, so seating is what queues up
+when the database has stopped accepting work. Worth knowing, because "make seating cheaper" would
+have been the wrong fix.
+
+### 3c. Exactly how many breadcrumbs one order emits
+
+Counted scoped to one tenant so no other writer could inflate it — this is the number migration
+400 (parked, below) would change:
+
+| | breadcrumbs |
+|---|---|
+| a 3-dish order (staff door, table already seated) | **12** — 6 × `order_item`, 4 × `session`, 2 × `order` |
+| a 3-dish order (staff door, table not yet seated) | **12** |
+| **the kitchen marking that order ready** — one `UPDATE` | **6** — all `order_item`, all carrying the same order id |
+
+Each row-change writes two rows: one on `ops`, one on `table:<n>`. The six from a 3-dish write are
+duplicates of each other as far as any subscriber is concerned.
+
+### 3d. PARKED — one breadcrumb per write, not one per dish
+
+**Where:** backend only, nothing on screen. The file is
+**`docs/STRESS-TEST-migration-400-draft.sql`** — deliberately *not* in `supabase/migrations/`,
+because a re-seed runs every file in that folder with no ledger, and an unverified change to the
+realtime plumbing must not be able to reach a database on its own.
+
+`order_items` announces per ROW. Making it announce per STATEMENT collapses the duplicates in §3c:
+
+| | before | after |
+|---|---|---|
+| 3 dishes in one order | 6 `order_item` rows | **2** |
+| the kitchen readying all 3 | 6 | **2** |
+| one statement spanning 2 orders / 2 tables | 8 | **4** — both table topics |
+| an `UPDATE` matching no row | 0 | **0** |
+| a dish deleted | 6 | **2** — restaurant still taken from the item row |
+| what a subscriber receives | `order_item` / order id / table 7 | **byte-identical** |
+
+Unit-tested on a throwaway PostgreSQL 17 with a stand-in schema (all six cases above), and
+`realtime_events`' own `BEFORE INSERT` trigger `trg_set_topic_rid` still fires per row, so the
+`topic_rid` every subscription filters on is still filled.
+
+**What it buys, stated narrowly:** WAL, logical decoding, and Realtime's per-row per-subscriber RLS
+evaluation — which is the largest single consumer of database time in the schema
+(3,249,528 calls / 23,146 seconds in `pg_stat_statements`). **It does NOT reduce read volume**, and
+an earlier draft of this document implied it did. `public/panels/realtime.js` already debounces
+~200–300 ms per topic with burst-stretching, so those six duplicate breadcrumbs were already
+collapsing into a single panel refetch.
+
+**Why it is parked and not shipped:** realtime is what makes every board feel instant, and a
+regression there is worse than the saving. It ships only after a real browser confirms a new order
+reaching the kitchen board, a dish marked ready moving the manager's tile and the waiter's tablet,
+and a removed dish leaving every board — on a non-#1 restaurant. That check did not fit the night
+this was found.
+
 **No index was added, deliberately.** Retention is 15 minutes and the cron runs every 10, so each
 scheduled prune deletes roughly two-thirds of the table — for a delete that broad a sequential
 scan genuinely *is* the cheaper plan, and an index would be maintained on every insert into the
