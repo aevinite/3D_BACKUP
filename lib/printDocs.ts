@@ -10,6 +10,7 @@
 // It also means a job cannot print a stale bill: the document is built at the moment of printing,
 // from the rows as they are then.
 import BILLDOC from "@/public/panels/billdoc.js";
+import { loyaltyStateFor, settledTotalOf } from "@/lib/loyalty";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 
@@ -157,6 +158,27 @@ export async function billHtmlForSession(rid: string, sessionId: string, opts?: 
   const names = settings.table_names as Record<string, string> | undefined;
   const tableDisp = (names && tnum && names[tnum]) || (tnum ? (/^\d+$/.test(tnum) ? "T" + tnum : tnum) : "—");
 
+  // ── THE GUEST'S POINTS, WHEN THE RESTAURANT HAS LOYALTY ON (mig 400) ───────────────────────
+  // loyaltyStateFor() asks the module's ladder FIRST and answers { on:false } without touching the
+  // database, so a restaurant without loyalty adds no read to the one path that must never stall
+  // — a bill being printed. No phone on the bill ⇒ no recognised guest ⇒ nothing to print, and we
+  // do not even ask.
+  //
+  // `earn` is what THIS bill is worth, from the SAME settledTotalOf() the settle itself will use,
+  // so the paper cannot promise a number the settle then disagrees with.
+  let loyalty: { earn: number; balance: number; toNext: number } | null = null;
+  const custPhone = String(session.cust_phone || "").trim();
+  if (custPhone) {
+    const st = await loyaltyStateFor(rid, custPhone);
+    if (st.on) {
+      const total = await settledTotalOf(rid, sessionId);
+      const earn = Math.floor((total * (st.earn_per_100 ?? 0)) / 100);
+      const bal = st.balance ?? 0;
+      const min = st.min_redeem ?? 0;
+      loyalty = { earn, balance: bal, toNext: Math.max(0, min - (bal + earn)) };
+    }
+  }
+
   // noBar goes to billDocHtml (the DOCUMENT), not to billData (the FIGURES) — they are two different
   // shapes and the compiler said so, which is the third time today a type has caught a real mistake.
   return BILLDOC.billDocHtml({ ...BILLDOC.billData({
@@ -171,6 +193,7 @@ export async function billHtmlForSession(rid: string, sessionId: string, opts?: 
     // `noBar` is the flag the Audit card already uses for the same reason (a bill being READ, not
     // issued). Fewer moving parts in the one path that must not stall.
     noBar: true,
+    loyalty,
   });
 }
 

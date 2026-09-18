@@ -860,6 +860,28 @@
    Do NOT re-add a verification line, a chain reference, a QR code carrying one, or a
    "scan to verify" note here. R50 in docs/REJECTED-IDEAS.md; verify:print-paper §3d fails the
    build if any of it comes back onto the sheet. */
+/* ── LOYALTY POINTS (owner, 2026-09-19) ────────────────────────────────────────────────────────
+   The whole reason this feature costs ₹0 a month to run: the guest is told their balance on the
+   paper they are already holding, so nothing is ever texted or messaged. Two lines, plain ink,
+   no QR and no scan-anything — see the R50 note directly above, which is about a verification
+   mark and is NOT what this is; this is the guest's own points, which is what he asked for.
+
+   WORDED FOR WHEN IT IS PRINTED. A bill is usually handed over BEFORE it is paid, and points are
+   only awarded on the settle — so "you earned 42" would be a claim that is not true yet. "On this
+   bill" and "so far" are both true at every moment the sheet can be printed, including a reprint
+   after payment. Never claim the balance already includes this bill.
+
+   Absent `d.loyalty` ⇒ nothing renders at all, which is what every restaurant with the module off
+   gets: the sheet is byte-for-byte what it prints today. */
++ (d.loyalty
+   ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">'
+     + "\u2b50 Points on this bill: " + String(d.loyalty.earn || 0)
+     + "<br/>Your points so far: " + String(d.loyalty.balance || 0)
+     + (d.loyalty.toNext > 0
+        ? "<br/>" + String(d.loyalty.toNext) + " more to your next reward"
+        : "")
+     + "</div>\n"
+   : "")
 + '<div class="foot">' + footer + "</div>\n"
 + (d.noBar ? "" : pageScript(d.autoPrint));
   }

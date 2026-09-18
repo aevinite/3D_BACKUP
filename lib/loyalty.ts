@@ -128,3 +128,84 @@ export async function redeemPoints(
   };
   return { ok: false, reason: say[String(r.reason)] || "Those points couldn't be used." };
 }
+
+/**
+ * THE MOST MONEY POINTS MAY TAKE OFF THIS BILL, in rupees.
+ *
+ * The same base the discount button itself is clamped to: the Σ TAXABLE base of the unpaid,
+ * non-cancelled orders — NOT the tax-inclusive total, and not the subtotal, because an MRP line's
+ * money is legally final and may never be discounted (mig 270). A NULL taxable_base predates that
+ * migration and means "all of it was taxable", which is what subtotal says.
+ *
+ * Asking this BEFORE spending anything is what stops the guest paying 300 points for a ₹120
+ * discount: lfh_staff_bill_discount would silently clamp the rupees while the points were already
+ * gone.
+ */
+export async function maxSpendRupees(rid: string, sessionId: string, maxPct: number): Promise<number> {
+  const { data } = await sb
+    .from("orders")
+    .select("subtotal, taxable_base")
+    .eq("restaurant_id", rid).eq("session_id", sessionId)
+    .neq("status", "cancelled").neq("payment_status", "paid")
+    .limit(500);
+  const base = (data || []).reduce(
+    (t: number, o: Record<string, unknown>) => t + (Number(o.taxable_base ?? o.subtotal) || 0), 0);
+  return Math.round(base * (Math.max(1, Math.min(100, maxPct)) / 100) * 100) / 100;
+}
+
+/**
+ * SPEND POINTS AND TAKE THE MONEY OFF — one call, so the two can never half-happen.
+ *
+ * The panel used to have to do this in two requests and there is no safe order for that: spend
+ * first and a failed discount leaves a guest robbed of points; discount first and a failed spend
+ * hands the money off twice. So both happen here, and if the money-off write fails after the
+ * points are gone, the points are PUT BACK as an audited `adjust` row rather than silently lost.
+ *
+ * The discount itself goes through `lfh_staff_bill_discount` — the very RPC the Discount button
+ * calls — so the split across tickets, the tax order and the clamp are the proven ones and there
+ * is no second definition of what a discount is.
+ *
+ * CALLERS MUST HAVE CHECKED THE DISCOUNT PERMISSION FIRST. Spending points is taking money off a
+ * bill; this helper does not know who is asking.
+ */
+export async function redeemOntoBill(
+  rid: string, table: string, phone: string, points: number, by: string, sessionId: string | null,
+): Promise<{ ok: boolean; rupees?: number; balance?: number; spent?: number; reason?: string }> {
+  if (!(await loyaltyOn(rid))) return { ok: false, reason: "Loyalty points aren't switched on for this restaurant." };
+  if (!sessionId) return { ok: false, reason: "This table's bill couldn't be found — reopen the pay sheet and try again." };
+
+  const st = await loyaltyStateFor(rid, phone);
+  if (!st.on) return { ok: false, reason: "Loyalty points aren't switched on for this restaurant." };
+
+  // Clamp the ASK to what this bill can actually absorb, before a single point is spent.
+  const perPoint = (st.point_value_paise ?? 100) / 100;
+  const ceilingRupees = await maxSpendRupees(rid, sessionId, st.max_redeem_pct ?? 100);
+  const askPoints = Math.floor(Number(points) || 0);
+  const affordable = Math.min(askPoints, Math.floor(ceilingRupees / Math.max(perPoint, 0.01)));
+  if (affordable <= 0) {
+    return { ok: false, reason: "There is nothing left on this bill for points to come off." };
+  }
+
+  const r = await redeemPoints(rid, table, phone, affordable, by, sessionId);
+  if (!r.ok) return r;
+
+  const rupees = Number(r.rupees) || 0;
+  const { error } = await sb.rpc("lfh_staff_bill_discount", {
+    p_session: sessionId, p_amount: rupees, p_note: `${affordable} loyalty points`,
+  });
+  if (error) {
+    // PUT THE POINTS BACK. A compensating ledger row, not a quiet edit of the balance: the guest's
+    // history must still read as what happened — spent, then returned because the money-off failed.
+    console.error("[loyalty] money-off failed after redeem, returning the points:", error.message);
+    await sb.from("loyalty_ledger").insert({
+      restaurant_id: rid, phone, session_id: null, kind: "adjust", points: affordable,
+      note: "money off the bill failed — points returned", by_staff: by,
+    });
+    const cur = (await sb.from("customers").select("points").eq("restaurant_id", rid).eq("phone", phone).maybeSingle())
+      .data as { points?: number } | null;
+    await sb.from("customers").update({ points: (Number(cur?.points) || 0) + affordable })
+      .eq("restaurant_id", rid).eq("phone", phone);
+    return { ok: false, reason: "The money couldn't be taken off just now — their points are untouched. Try again in a moment." };
+  }
+  return { ok: true, rupees, spent: affordable, balance: r.balance };
+}

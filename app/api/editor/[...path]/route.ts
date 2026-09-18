@@ -145,6 +145,7 @@ import { MANAGER_POWER_FLAGS, getOwnerEntitlements } from "@/lib/ownerEntitlemen
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
+import { earnOnSettle, reverseOnUnpay, loyaltyStateFor, redeemOntoBill } from "@/lib/loyalty";
 import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, MENU_PART_DEFAULTS, type ManagerTabKey } from "@/lib/accessTree";
 import { managerCan } from "@/lib/managerCan";
 import { dashboardReach, clampDashRange, billsReach } from "@/lib/dashRange";
@@ -3203,7 +3204,44 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       });
       if (error) return err(error.message, 500);
       if ((data as { ok?: boolean })?.ok) await log("editor", "customer_saved", { restaurant_id: rid, table_number: t, device_id: dev });
-      return ok(data || { ok: false });
+      // LOYALTY rides the SAME settle (mig 400), on the SAME session the capture just used — so
+      // the manager panel and the waiter tablet can never award points to different parties.
+      // Fire-and-forget: the bill is already settled and a points failure is not a billing error.
+      let earned: { ok: boolean; earned?: number; balance?: number } | null = null;
+      if ((data as { ok?: boolean })?.ok) earned = await earnOnSettle(rid, t, String(body?.phone || "").slice(0, 20), capSession);
+      return ok({ ...(data || { ok: false }), loyalty: earned?.ok ? { earned: earned.earned, balance: earned.balance } : null });
+    }
+
+    // ── Loyalty points — the balance the till shows, and spending it ────────────
+    // The manager twin of the tablet's two endpoints. Both answer { on: false } when the admin
+    // has not switched the module on, so the pay sheet renders nothing at all.
+    if (a === "loyalty") {
+      const tRaw = String(body?.table ?? "").trim();
+      if (!tRaw) return err("valid table required");
+      const t = await mergeParentTable(sb, rid, tRaw);
+      const ent = await getOwnerEntitlements(rid);
+      if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
+      const phone = String(body?.phone || "").slice(0, 20);
+      if (!phone) return ok({ on: false });
+      return ok(await loyaltyStateFor(rid, phone));
+    }
+    if (a === "loyalty-redeem") {
+      const tRaw = String(body?.table ?? "").trim();
+      if (!tRaw) return err("valid table required");
+      const t = await mergeParentTable(sb, rid, tRaw);
+      const ent = await getOwnerEntitlements(rid);
+      if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
+      // Spending points takes money off a bill, so it needs the very permission a discount needs.
+      if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
+      const sess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
+        .eq("table_number", t).eq("status", "open").order("last_activity_at", { ascending: false })
+        .limit(1)).data?.[0] as { id: string } | undefined;
+      // ONE call: spend the points AND take the money off, so the two cannot half-happen.
+      const r = await redeemOntoBill(rid, t, String(body?.phone || "").slice(0, 20),
+        Number(body?.points) || 0, g.user?.name || g.user?.username || "Manager", sess?.id ?? null);
+      if (!r.ok) return err(r.reason || "Those points couldn't be used.", 400);
+      await log("editor", "loyalty_redeemed", { restaurant_id: rid, table_number: t, device_id: dev });
+      return ok(r);
     }
 
     // ── Raise an issue / complaint ────────────────────────────────────────────
@@ -6097,6 +6135,8 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
             p_table: cur.table_number != null ? String(cur.table_number) : "",
             p_session: cur.session_id ?? null,
           });
+          // …and the points that settle paid out, for THIS bill only (mig 233 again).
+          await reverseOnUnpay(rid, cur.table_number != null ? String(cur.table_number) : "", cur.session_id ?? null);
         }
       }
       if (patch.archived === false && cur.archived === true) {
