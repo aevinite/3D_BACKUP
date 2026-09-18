@@ -402,7 +402,27 @@ export default function AdminRepair() {
     setErrLoading(true);
     // ?scope=all forces the platform-wide complaints view (an admin's act-as cookie would
     // otherwise silently collapse it to one restaurant — same fix the old Tickets page used).
-    const [e, q, h, iss, at, rl, mem] = await Promise.all([
+    // `list` IS DECLARED HERE, ABOVE THE FETCHES, AND THAT POSITION MATTERS. It used to sit below
+    // them, which was fine while every result was handled after the await — but the paint
+    // callbacks below run DURING the await, so a `const` declared later is still in its temporal
+    // dead zone and the first feed to land would throw ReferenceError. Neither tsc nor
+    // `node --check` catches that, because the use is inside a closure.
+    //
+    // `|| []` IS NOT ENOUGH FOR A LIST (item 21, 2026-09-05): every read took `x.data.list || []`,
+    // which defends against null and undefined and nothing else. Anything ELSE truthy sails
+    // through — round 2 fed the problems feed `{ actions: "boom" }` and the board rendered "NaN",
+    // because groupErrors() had walked a string character by character.
+    const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+
+    // ── SEVEN FEEDS, SEVEN ARRIVALS — NOT ONE WAIT FOR THE SLOWEST (2026-09-19) ────────────────
+    // These were awaited together and every setState came afterwards, so the board showed NOTHING
+    // until the slowest of seven answered. Each read has a 30-second ceiling (lib/adminFetch.ts),
+    // which means one struggling feed could hold six healthy ones off the screen for half a
+    // minute — and during the database outage on 2026-09-18 that is exactly what "the app is not
+    // responding" was. They are still all issued at once; each one now paints as it lands, and
+    // the "couldn't load" line is assembled once they have all settled. A feed that fails still
+    // fails by name — a failed read is not an all-clear, which is the rule below.
+    const started = [
       // ?unresolved=1 — only errors nobody has cleared yet (mig 181 resolved_at). Resolving one
       // (or a landed fix, via the mig 183 trigger) drops it off this list; the full Logs page
       // still shows resolved rows. Without this the board could never be emptied.
@@ -419,6 +439,17 @@ export default function AdminRepair() {
       // Problems recorded as fixed (migs 218/219) — drives the "came back after the fix" label and
       // the read-only "Already fixed" reference list. Nothing here hides an error.
       adminFetch<{ memories: ErrMemory[] }>("/api/admin/error-memory"),
+    ] as const;
+    // Paint each feed the instant it lands, then wait for all of them for the summary line.
+    const settle = <T,>(pr: Promise<T>, paint: (r: T) => void) => pr.then((r) => { paint(r); return r; });
+    const [e, q, h, iss, at, rl, mem] = await Promise.all([
+      settle(started[0], (r) => { if (r.ok) { setErrors(list<Action>(r.data.actions)); setWaiting(typeof r.data.waiting === "number" ? r.data.waiting : null); setProblemsErr(""); setErrLoading(false); } }),
+      settle(started[1], (r) => { if (r.ok) setRequests(list<FixRequest>(r.data.requests)); }),
+      settle(started[2], (r) => { if (r.ok) { setRuns(list<AgentRun>(r.data.runs)); setRunsBefore(typeof r.data.nextBefore === "string" ? r.data.nextBefore : null); setRunsTotal(typeof r.data.total === "number" ? r.data.total : null); } }),
+      settle(started[3], (r) => { if (r.ok) { setIssues(list<Issue>(r.data.issues)); setIssuesErr(false); } }),
+      settle(started[4], (r) => { if (r.ok) { setAtt(r.data); setAttErr(false); } }),
+      settle(started[5], (r) => { if (r.ok) { setRlHits(list<RlHit>(r.data.events)); setRlRules(list<RlRule>(r.data.rules)); setRlErr(""); } }),
+      settle(started[6], (r) => { if (r.ok) setMemories(list<ErrMemory>(r.data.memories)); }),
     ]);
     // A FAILED READ IS NOT AN ALL-CLEAR (T17 sweep, 2026-08-19). Five of these seven results were
     // used with a bare `if (x.ok)`, so a request that never arrived left its list empty — and an
@@ -439,24 +470,24 @@ export default function AdminRepair() {
     // mis-shaped answer from ANY future version of a route turning into arithmetic on a string. It
     // costs a type check per load and it makes the seven reads say the same thing about their own
     // contract, which `|| []` only half said.
-    const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
-    if (e.ok) { setErrors(list<Action>(e.data.actions)); setWaiting(typeof e.data.waiting === "number" ? e.data.waiting : null); } else { failed.push("problems"); setWaiting(null); }
-    if (q.ok) setRequests(list<FixRequest>(q.data.requests)); else failed.push("the Claude queue");
-    if (h.ok) {
-      setRuns(list<AgentRun>(h.data.runs));
-      setRunsBefore(typeof h.data.nextBefore === "string" ? h.data.nextBefore : null);
-      setRunsTotal(typeof h.data.total === "number" ? h.data.total : null);
-    } else { failed.push("Claude's history"); setRunsBefore(null); setRunsTotal(null); }
+
+    // ONLY THE FAILURES ARE HANDLED HERE NOW. The success of each feed was painted the moment it
+    // landed (above), so repeating it here would be two ways of doing one job — the thing the
+    // standing rule forbids. What is left is the half that genuinely needs every result: the
+    // named list of what could not be loaded.
+    if (!e.ok) { failed.push("problems"); setWaiting(null); }
+    if (!q.ok) failed.push("the Claude queue");
+    if (!h.ok) { failed.push("Claude's history"); setRunsBefore(null); setRunsTotal(null); }
     // THE STRIP HAS TO FAIL THE WAY THE SECTIONS DO (T17 sweep #7, 2026-08-27). These two were the
     // only feeds whose failure never reached the counts at the top: with the complaints list
     // unreachable the pill read a confident "0 open complaints", and "need attention" sat on the
     // still-loading "…" for ever — two inches from the "problems open" pill, which correctly said
     // "—". Watched happen with both routes made to fail. Same rule as every other feed here: a
     // failed read is not an all-clear, and it is named in the line under the strip.
-    if (iss.ok) { setIssues(list<Issue>(iss.data.issues)); setIssuesErr(false); } else { setIssuesErr(true); failed.push("complaints"); }
-    if (at.ok) { setAtt(at.data); setAttErr(false); } else { setAttErr(true); failed.push("account health"); }
-    if (rl.ok) { setRlHits(list<RlHit>(rl.data.events)); setRlRules(list<RlRule>(rl.data.rules)); } else failed.push("rate limits");
-    if (mem.ok) setMemories(list<ErrMemory>(mem.data.memories)); else failed.push("the already-fixed record");
+    if (!iss.ok) { setIssuesErr(true); failed.push("complaints"); }
+    if (!at.ok) { setAttErr(true); failed.push("account health"); }
+    if (!rl.ok) failed.push("rate limits");
+    if (!mem.ok) failed.push("the already-fixed record");
     setProblemsErr(e.ok ? "" : (e.error || "Couldn't load the problem list."));
     setRlErr(rl.ok ? "" : (rl.error || "Couldn't load the rate-limit alerts."));
     setFeedsFailed(failed);
@@ -1665,6 +1696,13 @@ export default function AdminRepair() {
             // plainly instead of naming a control that does not exist — the same rule as every
             // other alert on this board: name the door, or say there isn't one.
             const withReport = failedRuns.filter((r) => r.report).length;
+            // How long the longest reportless failure actually lasted, in whole minutes. This is
+            // what separates "it could not start" from "it was cut off" — see the note below.
+            const longestFailedMin = Math.max(
+              0,
+              ...failedRuns.filter((r) => !r.report && r.ended_at).map((r) =>
+                Math.round((new Date(r.ended_at as string).getTime() - new Date(r.started_at).getTime()) / 60000)),
+            );
             return (
               <div className="adm-card" style={{ marginBottom: 8, borderColor: "var(--adm-warn)", background: "color-mix(in srgb, var(--adm-warn) 8%, var(--card))" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, lineHeight: 1.55 }}>
@@ -1676,7 +1714,18 @@ export default function AdminRepair() {
                       app that night — so problems that would have been found and fixed are still
                       there.{" "}
                       {withReport === 0
-                        ? "None of them saved a report, which usually means the run died before it could start — the jobs themselves are what need a look."
+                        // A RUN THAT WORKED FOR 22 MINUTES DID NOT "DIE BEFORE IT COULD START"
+                        // (2026-09-19). That sentence was here for the genuine case — a job that
+                        // cannot even launch — but it was being shown for runs that had audited
+                        // for 20 to 85 minutes and then hit `You've hit your session limit`. It
+                        // sent the owner to look at launchd for something that was only out of
+                        // budget. The rows carry their own duration, so the page can tell the two
+                        // apart instead of guessing: seconds = it never got going, minutes = it
+                        // ran and was stopped. (The night job now also writes a one-line report
+                        // saying so, and arms a noon catch-up — see scripts/nightly-owner-audit.sh.)
+                        ? (longestFailedMin >= 3
+                          ? `They ran for ${longestFailedMin} minute${longestFailedMin === 1 ? "" : "s"} and then stopped without saving anything — that is normally the Claude usage limit for that window being spent, not a broken job. A catch-up run is scheduled for noon.`
+                          : "None of them got going at all — they stopped within seconds, so the jobs themselves are what need a look.")
                         : withReport === failed
                         ? "Open any red row below and read what it did to see where it stopped."
                         : `${withReport} of the ${failed} saved a report — open ${withReport === 1 ? "that one" : "those"} to see where it stopped. The rest died before they could write one.`}
