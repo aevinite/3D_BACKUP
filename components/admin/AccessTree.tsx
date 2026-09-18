@@ -301,7 +301,7 @@ function defaultLine(node: Node): string {
 // this exact list to prove every row renders a control someone can tap, so dead names in it make
 // the guard's own input untrustworthy. Keep it equal to the boolean binds Control() really draws.
 const isBoolBind = (n: Node) =>
-  ["feature", "setting", "module", "channel", "grant", "section", "tab", "ratingsMaster", "has"].includes(n.bind.t);
+  ["feature", "setting", "module", "moduleBag", "channel", "grant", "section", "tab", "ratingsMaster", "has"].includes(n.bind.t);
 
 /** Does this row read as "on"? Used for the parent gate and the section counter. A row with
  *  no switch of its own (a pure group, e.g. Format / Bill) is always "on" so its children show.
@@ -583,6 +583,9 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
       const b: any = n.bind;
       const fb: any = n.featureBind;
       return n.id === key || b.key === key || b.flag === key || (b.t === "module" && `${b.key}_allowed` === key)
+        // A bag module is reached by its plain key (settings.modules.loyalty), so `b.key === key`
+        // above already matches — this arm is for a panel that links with the bag PATH instead.
+        || (b.t === "moduleBag" && `modules.${b.key}` === key)
         || b.id === key || (fb && (fb.key === key || fb.id === key));
     });
     // NO MATCH IS A REAL ANSWER, and it has to be said out loud (2026-08-04). The staff panels

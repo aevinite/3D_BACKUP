@@ -139,7 +139,8 @@ const INDEX: Entry[] = (() => {
     const walk = (nodes: Node[], ancestors: Node[]) => {
       for (const node of nodes) {
         const b: any = node.bind;
-        const key = [b.key, b.flag, b.id, b.t === "module" ? `${b.key}_allowed` : ""].filter(Boolean).join(" ");
+        const key = [b.key, b.flag, b.id, b.t === "module" ? `${b.key}_allowed` : "",
+          b.t === "moduleBag" ? `modules.${b.key}` : ""].filter(Boolean).join(" ");
         const path = [section.name, ...ancestors.map((a) => a.name)].join(" › ");
         const nameLc = node.name.toLowerCase();
         out.push({

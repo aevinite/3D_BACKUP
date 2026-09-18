@@ -17,7 +17,7 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import {
   SETTINGS_COLUMNS, FEATURE_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS,
-  SECTION_ENTITLEMENTS, TAB_ALLOWED, KNOWN_CONFIG_IDS, type TreeState,
+  SECTION_ENTITLEMENTS, TAB_ALLOWED, KNOWN_CONFIG_IDS, MODULE_BAG_KEYS, type TreeState,
 } from "@/lib/accessTree";
 
 // settings.features keys the model knows about, PLUS "ratings", which the Ratings CHOICE
@@ -42,7 +42,9 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
   if (rq.error || !rq.data) return null;
   const r = rq.data as Record<string, any>;
 
-  const cols = ["features", "platform_channels", ...SETTINGS_COLUMNS];
+  // `modules` is the shared jsonb bag a new module's ladder lives in (mig 326) — one more
+  // column on the SAME select, not a second round-trip.
+  const cols = ["features", "platform_channels", "modules", ...SETTINGS_COLUMNS];
   const sq = await sb.from("settings").select(Array.from(new Set(cols)).join(", "))
     .eq("restaurant_id", rid).maybeSingle();
   // BOTH READS FAIL THE SAME WAY (sweep #9 T35, item 1). The restaurants read has always answered
@@ -67,6 +69,12 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
 
   const settings: Record<string, unknown> = {};
   for (const c of SETTINGS_COLUMNS) if (c in s) settings[c] = s[c];
+
+  // Only the modules this model actually offers a row for. Reading the whole bag would ship any
+  // key some other screen parked in there to the browser, and nodeValue would never look at it.
+  const bag = obj(s.modules);
+  const modules: TreeState["modules"] = {};
+  for (const k of MODULE_BAG_KEYS) if (k in bag) modules[k] = obj(bag[k]);
 
   const pc = obj(s.platform_channels);
   const channels: Record<string, boolean> = {};
@@ -118,5 +126,5 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
     for (const key of TAB_ALLOWED[panel]) if (typeof stored[key] === "boolean") tabs[panel][key] = stored[key];
   }
 
-  return { features, settings, channels, grants, sections, tabs, config: cfg, creds };
+  return { features, settings, modules, channels, grants, sections, tabs, config: cfg, creds };
 }
