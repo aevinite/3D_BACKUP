@@ -1644,3 +1644,41 @@ document: `docs/STRESS-TEST.md`.
   and 051 called `lfh_already_applied` before migration 307 creates it (that gate added, nothing
   else); 049 then fails again reading `orders.restaurant_id` before the column exists. Needs its own
   change, not a stress-test branch.
+
+## 2026-09-19 — "in Fix now there are so many problems, fix all of them … and make sure this never happens"
+
+He could not use the repair board: 992 open "problems", a 99+ bell, and the console hanging. Every
+one of the 992 was the SAME handful of sentences produced by our own 62-restaurant stress test —
+"the database didn't answer" — not one was a product fault.
+
+- [x] **The 11 PM "Allow" dialog is gone — and it was the cause of the failed overnight runs.**
+  `com.rishi.brain-refine` ran `/bin/bash`, which has no Full Disk Access, against a vault under
+  `~/Documents`, which macOS TCC protects. The log said it every night since 09-14:
+  `find: …/Brain/01_Inbox: Operation not permitted`. So macOS asked him to click Allow at 23:00,
+  and if he was asleep the brain simply did not refine until he clicked it in the morning (which is
+  what the 10:30 catch-up run is for). Fixed the way the three aevinite audits were fixed on
+  2026-08-06: launchd starts `/opt/homebrew/bin/node` + `run-job.mjs`, which HAS Full Disk Access,
+  and the shell it spawns inherits it. **Proved with a throwaway probe agent before touching his
+  job** — through node, a launchd job listed the vault and read `_FACTS.md` with no prompt.
+  `com.rishi.aevidine-audit` and `com.rishi.call-analysis` had the identical fault and got the
+  identical fix. All nine scheduled jobs now launch through a binary with Full Disk Access.
+  Originals backed up as `*.plist.bak-2026-09-19`.
+- [x] **1,018 error rows cleared — resolved, never deleted.** Every one still on the Logs page.
+- [x] **Migration 400 — the same failure a thousand times is one line.** `logError` inserted a row
+  per failure, so a rush wrote 463 copies of one sentence AND added indexed writes to a database
+  that was already struggling. `lfh_log_error_once` now bumps `occurrences` + `last_seen_at` on the
+  open row for the same (panel, action, detail) within 6 hours. Proved: 5 identical calls → 1 row
+  reading ×5, a different sentence → its own row. Falls back to the plain insert if the rpc is
+  missing, because losing a log line is not an acceptable price for tidiness.
+- [x] **A real bug the noise was hiding** (`lib/openSession.ts`): the "is this table already open?"
+  read ended `.data?.[0] ?? null`, so a FAILED read looked identical to "no session" — the code then
+  inserted, hit `idx_one_open_session_per_table`, and showed a waiter
+  `duplicate key value violates unique constraint …`. A failed read now propagates and is
+  classified as "the database didn't answer", so the tap is queued and replayed instead.
+- [ ] **Still his call:** the admin console waits up to 30s before saying "took too long"
+  (`lib/adminFetch.ts`, deliberate — some admin reads genuinely assemble a lot). During the outage
+  that is a 30-second spinner, which is what "the app is not responding" was. Shortening it, or
+  rendering the seven feeds as they arrive instead of all together, is a UX decision for him.
+- [ ] **Found, not fixed:** `nightly-call-analysis.sh` has failed every night on
+  `cd: /Users/aevinite/Documents/Call-Analysis-Temp: No such file or directory` — the folder is
+  gone. Does that job still have a purpose?
