@@ -27,10 +27,25 @@ export async function openTableSession(
   tableNumber: string,
   opts: { openedBy?: string } = {},
 ): Promise<OpenedSession> {
-  const readOpen = async (): Promise<OpenedSession> =>
-    ((await sb.from("sessions").select("*")
+  // "I COULDN'T ASK" IS NOT "THERE ISN'T ONE" (2026-09-19, found by the 62-restaurant stress run).
+  // This read used to end `.data?.[0] ?? null`, which gives the SAME answer for "no open session"
+  // and "the read failed" — and under load the read does fail. Two consequences, both seen:
+  //   · a blipped FIRST read looked like a free table, so we went on to INSERT — straight into the
+  //     unique index, and `duplicate key value violates unique constraint
+  //     idx_one_open_session_per_table` reached whoever tapped Open (one real row on the repair
+  //     board, 2026-09-18 18:09);
+  //   · a blipped RE-read after losing the race made the winner invisible, so the loser was handed
+  //     that same constraint message instead of the open table it asked for.
+  // A failed read now propagates. lib/dbRefusal.ts classifies it as "the database didn't answer",
+  // the route answers 503 + X-LFH-Busy, and public/panels/outbox.js queues the tap and replays it —
+  // which is what every other write on a busy database already does.
+  const readOpen = async (): Promise<OpenedSession> => {
+    const r = await sb.from("sessions").select("*")
       .eq("restaurant_id", rid).eq("table_number", tableNumber).neq("status", "closed")
-      .limit(1)).data?.[0] ?? null) as OpenedSession;
+      .limit(1);
+    if (r.error) throw r.error;
+    return (r.data?.[0] ?? null) as OpenedSession;
+  };
 
   const already = await readOpen();
   if (already) return already;

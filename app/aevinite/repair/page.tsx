@@ -117,11 +117,18 @@ const ERROR_FEED_LIMIT = 50;
 type ErrGroup = { key: string; sample: Action; count: number; latest: string };
 function groupErrors(rows: Action[]): ErrGroup[] {
   const map = new Map<string, ErrGroup>();
+  // ONE ROW CAN NOW STAND FOR MANY FAILURES (mig 400). `occurrences` is bumped instead of a new
+  // row being written for the same sentence, so counting ROWS would report 1 where the truth is
+  // 463. Count what the row says it represents; a row from before mig 400 has no `occurrences`
+  // and is worth exactly the 1 it always was.
+  const worth = (a: Action) => Math.max(1, Number(a.occurrences) || 1);
+  // "Latest" likewise means the last time it HAPPENED, not when the row was opened.
+  const when = (a: Action) => (a.last_seen_at && a.last_seen_at > a.created_at ? a.last_seen_at : a.created_at);
   for (const a of rows) {
     const key = errorGroupKey(a);
     const ex = map.get(key);
-    if (ex) { ex.count++; if (a.created_at > ex.latest) ex.latest = a.created_at; }
-    else map.set(key, { key, sample: a, count: 1, latest: a.created_at });
+    if (ex) { ex.count += worth(a); if (when(a) > ex.latest) ex.latest = when(a); }
+    else map.set(key, { key, sample: a, count: worth(a), latest: when(a) });
   }
   return Array.from(map.values()).sort((x, y) => y.latest.localeCompare(x.latest));
 }

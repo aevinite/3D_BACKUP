@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
   // itself still renders only a few of these (small extra columns, low-volume feed).
   // `snoozed_until` (mig 344) rides along so the Logs page can MARK a waiting problem instead of
   // it just being absent — the log shows every row, always; only the Repair board hides a wait.
-  let q = sb.from("staff_actions").select("id, panel, action, actor, actor_id, device_id, order_id, detail, table_number, restaurant_id, level, seen_at, resolved_at, snoozed_until, created_at").order("created_at", { ascending: false }).limit(limit);
+  let q = sb.from("staff_actions").select("id, panel, action, actor, actor_id, device_id, order_id, detail, table_number, restaurant_id, level, seen_at, resolved_at, snoozed_until, created_at, occurrences, last_seen_at").order("created_at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   if (level === "error" || level === "warn" || level === "info") q = q.eq("level", level);
   if (actionOk) q = q.eq("action", actionEq);

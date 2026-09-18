@@ -91,8 +91,43 @@ export async function logError(
   // error page is returned untouched, so no ordinary error changes. (owner ticket, 2026-07-31)
   const msg = readableError(err instanceof Error ? err.message : String(err ?? "unknown error"));
   const detail = `${fields.detail ? fields.detail + " — " : ""}${msg}`.slice(0, 500);
+  // ── THE SAME FAILURE A THOUSAND TIMES IS ONE LINE (mig 400, owner 2026-09-19) ────────────────
+  // A rush that outruns the database produces the SAME sentence over and over, and this used to
+  // insert a row for each: the 62-restaurant stress run left 992 open error rows that were really
+  // six distinct problems (463 of them the one sentence "POST sessions/open — TimeoutError"). Two
+  // harms — the board became unreadable, and `staff_actions` carries twelve indexes, so logging
+  // was adding indexed writes to a database that was already struggling. The busier it got, the
+  // more it was asked to write about being busy.
+  //
+  // lfh_log_error_once bumps `occurrences` on the open row for this exact (panel, action, detail)
+  // when there is one, and inserts otherwise. A NEW failure still appears instantly. `created_at`
+  // still marks when it FIRST happened; `last_seen_at` says whether it is still going.
+  //
+  // IT FALLS BACK TO THE PLAIN INSERT. Losing a log line is not an acceptable price for tidiness,
+  // so if the rpc is missing (a database that has not had mig 400 yet) or fails for any reason,
+  // the original insert still runs.
+  let collapsed = false;
   try {
-    await sb.from("staff_actions").insert({
+    const r = await sb.rpc("lfh_log_error_once", {
+      p_panel: panel,
+      p_action: action,
+      p_detail: detail,
+      p_table_number: fields.table_number ?? null,
+      p_order_id: fields.order_id ?? null,
+      p_device_id: fields.device_id ?? null,
+      p_actor: fields.actor ?? null,
+      p_actor_id: fields.actor_id ?? null,
+      p_restaurant_id: fields.restaurant_id ?? null,
+      // Same distinction lib/oplog's insert makes: omit restaurant_id → the column's DEFAULT (#1);
+      // pass it (including an explicit null for platform-level) → use what the caller said.
+      p_scoped: fields.restaurant_id !== undefined,
+    });
+    collapsed = !r.error;
+  } catch {
+    /* fall through to the insert below */
+  }
+  try {
+    if (!collapsed) await sb.from("staff_actions").insert({
       // panel is a free-text column; 'db'/'guest' are valid tags for non-staff origins.
       panel,
       action,
