@@ -101,7 +101,7 @@ const tsFiles = [];
 // BLOCK 1 — RE-RUN: the 37 existing rows the three T24 guards do not execute
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 const R = (id, what, fn) => check(id, what, "re-run · sweep #9 T34", fn);
-const guestMenu = read("app/menu/page.tsx") + read("components/CartDrawer.tsx") + read("lib/menu.ts")
+const guestMenu = read("app/menu/page.tsx") + read("components/CartPanel.tsx") + read("lib/menu.ts")
   + tsFiles.filter((f) => /guest|cart|menu/i.test(f)).map(read).join("\n");
 const editorRoute = read("app/api/editor/[...path]/route.ts");
 const tabletRoute = read("app/api/tablet/[...path]/route.ts");
@@ -111,7 +111,7 @@ R("P01065", "the cart quotes the rate from lib/tax.ts, never a second formula",
   () => /from "\.\/tax"/.test(read("lib/menu.ts")) && /effectiveTaxRate\(data\)/.test(read("lib/menu.ts"))
      && !/tax_rate\s*\|\|\s*0\.05/.test(read("lib/menu.ts")));
 R("P01456", "the at-most-once id the phone mints is the header lib/idempotency.ts dedups on",
-  () => /x-lfh-action-id/i.test(srcIdem) && tsFiles.concat(["public/panels/outbox.js", "public/app.js"])
+  () => /x-lfh-action-id/i.test(srcIdem) && tsFiles.concat(["public/panels/outbox.js", "public/panels/editor/app.js", "public/panels/tablet/app.js", "public/panels/kitchen/app.js"])
     .some((f) => /X-LFH-Action-Id/i.test(read(f))));
 R("P01457", "a replayed offline order carries the replay marker lib/clash.ts reads",
   () => /x-lfh-replay/i.test(srcClash) && /x-lfh-queued-at/i.test(srcClash));

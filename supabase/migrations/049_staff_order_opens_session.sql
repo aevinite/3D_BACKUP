@@ -65,10 +65,22 @@ GRANT  EXECUTE ON FUNCTION lfh_staff_place_order(text, jsonb, text[], text) TO s
 -- of 9 live restaurants have table sessions off.
 -- Now: keyed on (restaurant_id, table_number) throughout, the created session is stamped, and the
 -- whole block runs only while the ledger has no row for it (migration 311 records it).
+-- ⚠️ THE HELPER MAY NOT EXIST YET, AND THAT IS NOT AN ERROR (the same fix migration 043 already
+-- carries; applied here 2026-09-18 after a from-zero build aborted at THIS file, 49 of 407).
+-- `lfh_already_applied` is created by migration 307 — 258 files after this one. On every live
+-- stack it is present and the check below is a plain lookup. On a FRESH database it is not, and
+-- calling it directly raised `function lfh_already_applied(unknown) does not exist`, so the repo
+-- could not build a database from zero at all — which is the thing you need on the day you have
+-- to rebuild one. `to_regprocedure` asks "is the helper there?" without touching it, and the call
+-- goes through EXECUTE so PostgreSQL only PLANS it when the answer is yes. No helper means
+-- nothing has been recorded, which reads as not-yet-applied — the single legitimate run.
 DO $reseed_guard$
-DECLARE r record; v_sess uuid;
+DECLARE r record; v_sess uuid; v_applied boolean := false;
 BEGIN
-IF lfh_already_applied('049_link_orphan_orders') THEN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('049_link_orphan_orders') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
   RAISE NOTICE '049_link_orphan_orders: already applied — skipped (it could re-link orders across restaurants)';
   RETURN;
 END IF;

@@ -17,9 +17,17 @@
 -- in a single-restaurant frame and was wrong.
 -- Now: PARTITION BY (restaurant_id, table_number), and the whole block runs only while the ledger
 -- has no row for it (migration 311 records it, so every existing database skips it for good).
+-- ⚠️ THE HELPER MAY NOT EXIST YET, AND THAT IS NOT AN ERROR — same retro-fit as migrations 043
+-- and 049 (applied 2026-09-18). `lfh_already_applied` arrives at migration 307; on a FRESH
+-- database this file runs 256 files earlier, and the bare call aborted the whole from-zero build.
+-- "No helper" means nothing has been recorded, which reads as not-yet-applied.
 DO $reseed_guard$
+DECLARE v_applied boolean := false;
 BEGIN
-IF lfh_already_applied('051_one_open_session_per_table') THEN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('051_one_open_session_per_table') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
   RAISE NOTICE '051_one_open_session_per_table: already applied — skipped (it would close live tables)';
   RETURN;
 END IF;

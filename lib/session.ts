@@ -18,6 +18,10 @@ import { DEFAULT_RESTAURANT_ID } from "./tenant";
 // restaurant can never show up — or be resolved — while browsing another
 // restaurant on the same phone (the 2026-07-04 cross-tenant leak).
 import { tget, tset, tremove } from "./tenantStorage";
+// "The database didn't answer" vs "the database refused this value" — the same classifier the
+// panel routes use (lib/panelFailure.ts). It holds no imports of its own, so it is safe in the
+// guest bundle. See the note in rpc() below for why a guest needs it.
+import { isDbUnreachable } from "./dbRefusal";
 const KEY = "lfh_session";
 
 // The shape of the session note we keep on the device: which table it's for,
@@ -168,6 +172,23 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<RpcResult
     // without reason") means nothing to a guest. Give it a code the UI can word properly.
     const msg = String((error as { message?: string }).message || "");
     if (signal?.aborted || /abort/i.test(msg)) return { ok: false, reason: "timed_out" };
+    // A SATURATED DATABASE IS "WE COULDN'T REACH THE RESTAURANT", NOT "CHECK YOUR INTERNET".
+    // (Found by the 62-restaurant stress run, 2026-09-18.) These RPCs go straight to PostgREST,
+    // so there is no route of ours in the way to translate a failure — the reason handed to the
+    // UI is whatever Postgres said. Under load that is `canceling statement due to statement
+    // timeout` (57014), `too many connections` (53300), or a whole Cloudflare gateway page. None
+    // of those matched the abort test above, so `isSessionTimeout()` answered false and
+    // components/SessionGate.tsx fell through to its other branch: "We can't reach the
+    // restaurant's system right now — check your internet and retry." That sends a diner whose
+    // phone is perfectly fine off to fix their Wi-Fi during the exact busy hour when the
+    // restaurant's own database is the thing that is struggling — the mistake the comment three
+    // lines below that sentence explicitly exists to prevent.
+    //
+    // `timed_out` is reused deliberately rather than adding a new code: every call site already
+    // words it as "the restaurant's system isn't answering right now — this one's on us", which
+    // is exactly what a busy database means to a guest. A refusal of the VALUE is untouched —
+    // isDbUnreachable answers false for those, and they must still show their own message.
+    if (isDbUnreachable(error)) return { ok: false, reason: "timed_out" };
     return { ok: false, reason: error.message };
   }
   // Got data -> use it; got nothing -> treat as a failure ("empty").
