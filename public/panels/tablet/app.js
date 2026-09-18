@@ -769,7 +769,7 @@ function billPrintLabel(sess, os, suffix) {
 // admin's preview use. Writing a second assembler here is precisely the fault this sweep removed
 // from the split-payment path, so what this function actually does is small: name the table, and
 // open the window.
-function printTableBill(t) {
+async function printTableBill(t) {
   if (typeof LFH_BILLDOC === "undefined" || !LFH_BILLDOC.billData) { toast("Can't print just now — reload the panel.", false); return; }
   const os = partyOrders(t).filter((o) => o.status !== "cancelled");
   if (!os.length) { toast("Nothing on this table to print yet.", false); return; }
@@ -777,13 +777,23 @@ function printTableBill(t) {
   // The restaurant's own name for the table, and every table of a joined party ("T6 + T7", mig 249).
   const tnum = String(t == null ? "" : t).trim();
   const tableDisp = mergeGroupLabel(tnum) || (/^\d+$/.test(tnum) ? (tname(tnum) || "T" + tnum) : (tnum || "—"));
+  const money = LFH_BILLDOC.billMoney(os, state.data.settings || {});
+  // THE GUEST'S POINTS GO ON THE PAPER THE PANEL PRINTS TOO (mig 400). A restaurant whose paper is
+  // owned by a computer gets this from lib/printDocs.ts; one where the SCREEN prints (mig 341/372
+  // — no helper set up) gets it here, and the two sheets have to say the same thing or the feature
+  // exists on some restaurants' bills and not others.
+  //
+  // Wrapped so it can never stand between a guest and their bill: no phone on the bill, module
+  // off, or a failed read all leave `loyalty` null and the sheet prints exactly as it does today.
+  const loyalty = await loyaltyForBill(t, sess, money);
   const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
     settings: state.data.settings || {},
     restaurant: state.data.restaurant || {},
     orders: os,
-    money: LFH_BILLDOC.billMoney(os, state.data.settings || {}),
+    money,
     session: sess,
     tableDisp,
+    loyalty,
     // The logo only prints when the restaurant really uploaded one; an http(s) check because a bad
     // value would otherwise render a broken image on a guest's bill.
     logo: /^https?:\/\//i.test(String((state.data.restaurant || {}).logo_url || "")) ? String(state.data.restaurant.logo_url) : "",
@@ -4008,6 +4018,23 @@ function openPaymentMethodModal(due, label, opts = {}) {
     }
   });
 }
+// The two lines the BILL prints, worked out from the same rules the server uses. Returns null —
+// and the sheet then carries nothing at all — whenever there is no recognised guest or the admin
+// has not switched the module on. `earn` is what THIS bill is worth and `balance` is what they had
+// BEFORE it, because the paper is usually handed over before the bill is paid.
+async function loyaltyForBill(t, sess, money) {
+  try {
+    const phone = String((sess && sess.cust_phone) || "").trim();
+    if (!phone || t == null || t === "") return null;
+    const st = await api("POST", `/tables/${t}/loyalty`, { phone });
+    if (!st || !st.on) return null;
+    const total = Number(money && money.total) || 0;
+    const earn = Math.floor((total * (Number(st.earn_per_100) || 0)) / 100);
+    const bal = Number(st.balance) || 0;
+    return { earn, balance: bal, toNext: Math.max(0, (Number(st.min_redeem) || 0) - (bal + earn)) };
+  } catch { return null; }
+}
+
 // ── LOYALTY POINTS ON THE PAY SHEET (owner, 2026-09-19) ──────────────────────
 // Renders NOTHING unless the server says the module is on for this restaurant, which is what
 // makes "off means everything stays as it is now" true on screen as well as in the data.

@@ -2401,7 +2401,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         .limit(1)).data?.[0] as { id: string } | undefined;
       // ONE call: spend the points AND take the money off, so the two cannot half-happen.
       const r = await redeemOntoBill(rid, t, String(body?.phone || "").slice(0, 20),
-        Number(body?.points) || 0, actor?.name || actor?.username || "Waiter", sess?.id ?? null);
+        Number(body?.points) || 0, actor?.name || actor?.username || "Waiter", sess?.id ?? null,
+        { user: actor ?? null, deviceId: dev, from: "waiter tablet" });
       if (!r.ok) return err(r.reason || "Those points couldn't be used.", 400);
       await log("loyalty_redeemed", { table_number: t, device_id: dev });
       return ok(r);

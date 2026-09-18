@@ -15,6 +15,8 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { loyaltyLadder } from "@/lib/tableTags";
 import { netOf, type BillOrder } from "@/lib/billLedger";
+import { recordRemoval } from "@/lib/removalAudit";
+import type { StaffUser } from "@/lib/userAuth";
 
 /** What the till shows beside a recognised guest, or `on: false` when the module is off. */
 export type LoyaltyState = {
@@ -170,6 +172,7 @@ export async function maxSpendRupees(rid: string, sessionId: string, maxPct: num
  */
 export async function redeemOntoBill(
   rid: string, table: string, phone: string, points: number, by: string, sessionId: string | null,
+  audit?: { user?: StaffUser | null; deviceId?: string | null; from?: string },
 ): Promise<{ ok: boolean; rupees?: number; balance?: number; spent?: number; reason?: string }> {
   if (!(await loyaltyOn(rid))) return { ok: false, reason: "Loyalty points aren't switched on for this restaurant." };
   if (!sessionId) return { ok: false, reason: "This table's bill couldn't be found — reopen the pay sheet and try again." };
@@ -207,5 +210,20 @@ export async function redeemOntoBill(
       .eq("restaurant_id", rid).eq("phone", phone);
     return { ok: false, reason: "The money couldn't be taken off just now — their points are untouched. Try again in a moment." };
   }
+
+  // ── THE REMOVALS ROW. A DISCOUNT IS A MONEY CHANGE WHEREVER IT COMES FROM ─────────────────────
+  // Caught in testing, 2026-09-19: the money came off the bill correctly and the Removals record
+  // stayed EMPTY. Going straight to `lfh_staff_bill_discount` skipped the recordRemoval() the
+  // bill-discount ROUTE does right after its own call — so "₹268 off" would have been invisible
+  // to the audit, to the owner's Removals screen and to a GST inspector, which is exactly the
+  // class of thing docs/COMPLIANCE-GUARDRAILS.md exists to prevent. Reusing an RPC does NOT
+  // inherit the route's bookkeeping; the bookkeeping has to come with it.
+  await recordRemoval({
+    rid, kind: "discount_given",
+    reason: { code: "loyalty_points", note: `${affordable} loyalty points` },
+    user: audit?.user ?? null, deviceId: audit?.deviceId ?? null,
+    sessionId, amount: rupees, tableNumber: table,
+    meta: { discount: rupees, from: audit?.from || "loyalty", scope: "whole bill", points: affordable, by },
+  });
   return { ok: true, rupees, spent: affordable, balance: r.balance };
 }

@@ -4478,6 +4478,22 @@ async function setOrderPayment(id, paid, opts = {}) {
   }
 }
 
+// The two lines the BILL prints. Same shape and same rules as the waiter tablet's copy — the two
+// panels print one document and must not drift. `earn` is what THIS bill is worth; `balance` is
+// what the guest had BEFORE it, because the paper is usually handed over before it is paid.
+async function loyaltyForBill(t, sess, money) {
+  try {
+    const phone = String((sess && sess.cust_phone) || "").trim();
+    if (!phone || t == null || t === "") return null;
+    const st = await api("POST", "/loyalty", { table: String(t), phone });
+    if (!st || !st.on) return null;
+    const total = Number(money && money.total) || 0;
+    const earn = Math.floor((total * (Number(st.earn_per_100) || 0)) / 100);
+    const bal = Number(st.balance) || 0;
+    return { earn, balance: bal, toNext: Math.max(0, (Number(st.min_redeem) || 0) - (bal + earn)) };
+  } catch { return null; }
+}
+
 // ── LOYALTY POINTS ON THE PAY SHEET (owner, 2026-09-19) ──────────────────────
 // The manager-panel twin of the same block on the waiter tablet — the two panels must not drift,
 // so they are written the same way and both ask the SERVER whether the module is on rather than
@@ -6113,7 +6129,7 @@ function openBillWindow(html) {
   w.document.close();
   try { w.focus(); } catch (e) {} // a REUSED window is already open behind the panel — bring it forward
 }
-function printBill(t, sess, os, opts = {}) {
+async function printBill(t, sess, os, opts = {}) {
   // WHAT GOES ON THE PAPER IS DECIDED ONCE, in /panels/billdoc.js (billData). This function's job is
   // only the three things the PANEL knows: the restaurant's own logo, what to call this table, and
   // the window to write into.
@@ -6141,10 +6157,18 @@ function printBill(t, sess, os, opts = {}) {
   // "Reprint" once paper exists (billPrintedBefore(), used by every print button in this panel),
   // and the first print is stamped once so every device agrees which one was the first.
   const printedBefore = !!((sess && sess.bill_printed_at) || (os || []).some((o) => o && o.bill_printed_at));
+  const money = billMath(os);
+  // THE GUEST'S POINTS GO ON THE PAPER THIS PANEL PRINTS TOO (mig 400) — the twin of the same
+  // three lines on the waiter tablet. A restaurant whose paper is owned by a computer gets this
+  // from lib/printDocs.ts; one where the SCREEN prints (mig 341/372) gets it here, and the two
+  // sheets must say the same thing. Null — and no block on the sheet at all — whenever there is
+  // no recognised guest, the module is off, or the read fails.
+  const loyalty = await loyaltyForBill(t, sess, money);
   const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
     settings: s, restaurant: state.data.restaurant || {}, orders: os,
-    money: billMath(os), session: sess || {}, tableDisp,
+    money, session: sess || {}, tableDisp,
     logo: billLogo(), parcel: !!opts.parcel, autoPrint: true,
+    loyalty,
   }));
   // Tell the server this bill has now been on paper, so every panel's button reads "Reprint" from
   // here on. Idempotent server-side, so calling it after every print is free and a retry is safe;
