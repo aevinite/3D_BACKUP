@@ -8,6 +8,12 @@
 // Prints a running tally; never prints secrets.
 import { readFileSync, appendFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+// THE GUARD BELOW WAS CALLED BUT NEVER IMPORTED (found 2026-09-18). So from the day that safety
+// block was added, this script died with `ReferenceError: refuseUnlessDevTestDb is not defined`
+// before its first request — fail-safe, but it meant the stress suite had silently stopped
+// existing and nobody noticed for six weeks. The guard was always right; only the import was
+// missing. Never call a rail you did not import: a rail that throws refuses the safe case too.
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const env = readFileSync(".env.local", "utf8");
 const get = (k) => ((env.match(new RegExp("^" + k + "=(.*)$", "m")) || [])[1] || "").trim().replace(/^["']|["']$/g, "");

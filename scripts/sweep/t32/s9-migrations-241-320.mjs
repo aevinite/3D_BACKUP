@@ -518,4 +518,4 @@ if (process.argv.includes("--ledger")) {
   console.log("\n─── ledger rows ───");
   for (const r of rows) console.log(`| ${r.id} | ${r.claim.replace(/\|/g, "\\|")} | ${r.how.replace(/\|/g, "\\|")} | ${r.result} | ${r.note.replace(/\|/g, "\\|").replace(/\n\s+/g, " ")} |`);
 }
-process.exit(fails.length ? 1 : 0);
+process.stdout.write("", () => process.exit(fails.length ? 1 : 0));

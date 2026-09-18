@@ -18,6 +18,12 @@
 // Usage:  node scripts/stress-realtime.mjs [subscribers=30] [events=100]
 import fs from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+// THE GUARD BELOW WAS CALLED BUT NEVER IMPORTED (found 2026-09-18). So from the day that safety
+// block was added, this script died with `ReferenceError: refuseUnlessDevTestDb is not defined`
+// before its first request — fail-safe, but it meant the stress suite had silently stopped
+// existing and nobody noticed for six weeks. The guard was always right; only the import was
+// missing. Never call a rail you did not import: a rail that throws refuses the safe case too.
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const N = Number(process.argv[2] || 30);   // simulated devices
 const M = Number(process.argv[3] || 100);  // breadcrumbs fired
