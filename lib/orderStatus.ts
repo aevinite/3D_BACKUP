@@ -28,10 +28,14 @@ export const STATUS_COPY: Record<OrderStatus, { label: string; sub: string; icon
 // never floats over another restaurant's menu on the same phone.
 import { tget, tset } from "./tenantStorage";
 export const ACTIVE_ORDERS_KEY = "lfh_active_orders";
-export const POLL_MS = 1500; // how often a guest re-checks their order's status (snappy near-real-time)
-// With Realtime ON, the guest refetches the instant a breadcrumb arrives (via the
-// `lfh:rt-tick` window event), so the timer below is only a slow safety-net poll
-// for when the WebSocket is asleep/dropped. (Was POLL_MS=1.5s of constant polling.)
+// ── OBITUARY: POLL_MS = 1500 (deleted 2026-09-18) ────────────────────────────────────────────────
+// A guest's order status used to be re-read every 1.5 SECONDS. Realtime replaced it long ago —
+// the guest refetches the instant a breadcrumb arrives (the `lfh:rt-tick` window event) — and the
+// constant had no readers left anywhere in the app; only its own comment mentioned it. It is
+// deleted rather than left lying there because a 1.5-second poll is exactly the shape this project
+// must never grow back (owner, 2026-09-18: "there shouldn't be any kind of pulling like every
+// second they will check because it will increase the egress problem"), and a ready-made constant
+// called POLL_MS is how it would. The only beat left here is the safety net below.
 export const RT_BACKUP_MS = 60 * 1000;
 // HOW LONG A FINISHED ORDER STAYS ON THE FLOATING STRIP — AND WHY THAT IS "UNTIL THE MEAL ENDS".
 //

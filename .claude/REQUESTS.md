@@ -13,6 +13,39 @@ owner looks, with cache busting, before claiming anything.
 
 ---
 
+- [x] **No needless polling — the guest menu stopped re-downloading itself every minute**
+  (2026-09-18, mig none). His words: *"make sure there shouldn’t be any kind of pulling like every
+  second they will check because it will increase the egress problem in the database… I am using
+  Supabase so according to Supabase whatever is the best to do it and also check everything — if it
+  is increasing then only do it otherwise there is no need."*
+  **Answer first: nothing polls every second.** Every repeating timer in the app was listed and
+  read; the fastest network beat is a print helper asking "any paper for me?" every 2 s, which
+  answers **204 with no body** on an index scan (plan checked). Everything else is 10–20 s on one
+  admin page, or the 60-second safety nets — and those are **paused while the tab is hidden**, with
+  the realtime channels torn down on idle and rebuilt on focus. Measured per untouched screen per
+  minute: manager 12.0 KB visible / **1.5 KB hidden** · kitchen 33.0 KB / **nothing** · tablet
+  17.8 KB / **nothing**.
+  **What WAS wrong (and where he’d see it): the guest menu.** A phone left open on a table
+  re-downloaded the **whole menu every 60 seconds** — 24.2 KB, almost always identical — because the
+  safety net cannot tell whether anything changed. Twenty phones for two hours is ~58 MB a day of
+  sending guests a menu they already have. Now the phone says which version it holds and an
+  unchanged menu answers **304, no body**; the route is already served from the Next data cache, so
+  that costs **no Supabase read at all**. The same settings row was also being read **twice** a
+  minute per guest (the poll threw away a read another component had just started) — now once.
+  A dead `POLL_MS = 1500` constant was deleted with an obituary, because a ready-made 1.5-second
+  poll constant is how one grows back. **Guest idle cost: 29.7 KB/min → 2.8 KB/min (10× less).**
+  **Nothing was "optimised" for its own sake:** the panels’ 60-second board reads were left alone
+  (their cost is the database read, which a 304 cannot remove, and the 1.5 s shared floor snapshot
+  already makes several screens cost one read), and `orders_change_watermark` was rejected as the
+  cheap "did anything change?" signal — it has ONE trigger, on `orders`, so a dish marked ready, a
+  bell pressed or a party opening would not move it and a screen that missed the event would stay
+  wrong. Written down in `docs/OPTIMIZATION-AUDIT.md` instead of half-built.
+  **Checked, not claimed — both directions:** with nothing changing, the minute-by-minute refetch
+  answers 304 and the menu is still fully on screen (59 dish cards, read from the DOM); with a
+  manager changing Espresso ₹250 → ₹257, the guest’s **already-open** phone showed ₹257 after
+  **2.3 seconds** and that refetch answered a full 200. Price restored. `typecheck`, `lint`
+  (0 errors), `verify:taps/ui/scoped-reads/rejected/clash` green.
+
 - [x] **"Is it faster than before?" — A/B measured, and one of my own changes reverted for it**
   (2026-09-18). He asked the right question and added the rule: *"do what's left if it's making it
   faster and not ruining anything and i want every animation and effect to look as same as before or

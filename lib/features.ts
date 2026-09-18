@@ -89,7 +89,18 @@ function readSaved(rid: string): FeatureMap | null {
 // Re-fetch settings for ONE restaurant and push the new switches to its live
 // components. Called by the guest menu's useRealtime() when the owner toggles a
 // feature (or admin changes an entitlement).
-export async function refreshFeatures(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<void> {
+export async function refreshFeatures(
+  restaurantId: string = DEFAULT_RESTAURANT_ID,
+  // ── WAS THIS A REAL CHANGE, OR ONLY THE SAFETY NET LOOKING? (owner, 2026-09-18) ───────────────
+  // `fresh` means "a breadcrumb said the row changed" and is the DEFAULT, because that is what
+  // every existing caller means. The one caller that passes `false` is the 60-second poll in the
+  // guest menu: nobody has said anything changed there, and pretending otherwise cost a SECOND
+  // read of the same settings row every minute, on every guest's phone — measured on the deployed
+  // site, two `lfh_guest_settings` calls per tick where one would do. The feature map below is
+  // still dropped either way, so the poll always re-reads; it just no longer throws away the read
+  // another component started a millisecond earlier.
+  opts?: { fresh?: boolean },
+): Promise<void> {
   cached.delete(restaurantId);
   inflight.delete(restaurantId);
   // …AND the settings cache these switches are DERIVED from (T13 sweep, 2026-08-13). Clearing only
@@ -98,7 +109,8 @@ export async function refreshFeatures(restaurantId: string = DEFAULT_RESTAURANT_
   // stored the old feature map in `cached` — which has no TTL — and pushed it to every subscriber as
   // the new truth. The real delivery time for a feature switch was therefore the 60-second backstop,
   // not the breadcrumb that had just arrived. See invalidateSettings() in lib/menu.ts.
-  invalidateSettings(restaurantId);
+  // Only a real breadcrumb drops the settings cache + its in-flight read (see `opts` above).
+  if (opts?.fresh !== false) invalidateSettings(restaurantId);
   const fresh = await getFeatures(restaurantId);
   subsFor(restaurantId).forEach((cb) => cb(fresh));
 }

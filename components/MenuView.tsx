@@ -121,6 +121,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // a NEWER one. realtime nudges can fire refreshMenu() while a previous fetch is
   // still in flight; without this an out-of-order reply would clobber fresh data.
   const menuReqRef = useRef(0);
+  // Which version of the menu bundle this tab already holds, and whose menu it is. Used for the
+  // conditional refetch in refreshMenu() — see the long note there.
+  const menuEtagRef = useRef<{ slug: string; etag: string } | null>(null);
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
   const [showSkeleton, setShowSkeleton] = useState(false);
@@ -359,17 +362,44 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     if (!restaurantSlug) { applyDirect(); return; } // legacy callers w/o a slug
     // Cache-busting query so the BROWSER never holds a stale copy — the dedup we
     // want is the SERVER data cache inside the endpoint, not an HTTP cache.
-    fetch(`/api/r/${restaurantSlug}/menu-data`, { cache: "no-store" })
+    // ── ASK FOR IT ONLY IF IT CHANGED (owner, 2026-09-18: "there shouldn't be any kind of pulling
+    // … it will increase the egress problem") ─────────────────────────────────────────────────────
+    // `useRealtime`'s 60-second safety net re-fires this handler, which is right — with realtime
+    // blocked on a café's wifi it is the only way a price change ever reaches an open phone. What
+    // was wrong is what it COST: measured on a phone left open on a table, the whole bundle came
+    // down every single minute (24.2 KB on French House) and was almost always identical.
+    //
+    // So we tell the server which version we already hold and it answers **304, no body** when that
+    // is still the current one (see the route). ~0.2 KB instead of 24.2 KB, the safety net
+    // unchanged, and a real edit still arrives as a full 200 — instantly via the realtime
+    // breadcrumb, or within the minute if the socket is blocked.
+    //
+    // The tag is kept per SLUG, so a tab that moves to another restaurant can never offer one
+    // restaurant's version against another's menu; and `cache: "no-store"` stays exactly as it was,
+    // because this is OUR conditional request, not a browser or CDN cache we could not bust.
+    const heldFor = menuEtagRef.current;
+    const held = heldFor && heldFor.slug === restaurantSlug ? heldFor.etag : "";
+    fetch(`/api/r/${restaurantSlug}/menu-data`, {
+      cache: "no-store",
+      headers: held ? { "If-None-Match": held } : undefined,
+    })
       .then((res) => {
+        // 304 = this tab is already showing the current menu. Nothing to parse, nothing to set,
+        // and `loaded` is already true — the screen simply stays as it is.
+        if (res.status === 304) { if (seq === menuReqRef.current) setLoaded(true); return null; }
         // A 404 here means the restaurant was DEACTIVATED / deleted while this tab
         // was open. Do NOT fall back to a direct DB read (that bypasses the active
         // check and keeps serving the menu — audit fix 2026-07-06); reload so the
         // server's notFound() shows the proper "not available" page instead.
         if (res.status === 404) { if (seq === menuReqRef.current) window.location.reload(); throw new Error("menu-data 404 (deactivated)"); }
         if (!res.ok) throw new Error(`menu-data ${res.status}`);
+        // Remember this version for the next safety-net tick.
+        const tag = res.headers.get("etag");
+        if (tag) menuEtagRef.current = { slug: restaurantSlug, etag: tag };
         return res.json();
       })
-      .then((bundle: { items?: FoodItem[]; categories?: Category[] }) => {
+      .then((bundle: { items?: FoodItem[]; categories?: Category[] } | null) => {
+        if (!bundle) return;                    // 304 — handled above, nothing to apply
         if (seq !== menuReqRef.current) return; // drop stale replies
         if (Array.isArray(bundle.items)) setMenuData(bundle.items);
         if (Array.isArray(bundle.categories)) setDbCategories(bundle.categories);
@@ -406,7 +436,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Ordering is what makes ONE call safe: this hook is declared ABOVE the effect below, and
   // React runs mount effects in declaration order, so the fetch still starts at exactly the
   // same moment it did before. If you ever move this call, move the fetch with it.
-  useRealtime({ menu: () => { refreshMenu(); refreshFeatures(restaurantId); } }, restaurantId);
+  // `why` = "event" for a real breadcrumb, "poll" for the 60-second safety net (see
+  // lib/useRealtime.ts). It is passed straight through to refreshFeatures, because the two are not
+  // the same question: a breadcrumb must drop every cache in front of the settings row, while the
+  // poll is only checking — and on the poll, dropping an in-flight read cost a second read of the
+  // same row every minute on every guest's phone. refreshMenu() is conditional either way now.
+  useRealtime({ menu: (why) => { refreshMenu(); refreshFeatures(restaurantId, { fresh: why === "event" }); } }, restaurantId);
 
   // The main "load everything" effect — runs once when the page first appears.
   // It restores where you last were and starts listening for favorite changes.
