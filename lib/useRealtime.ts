@@ -18,7 +18,13 @@ const rtDeadline = () => deadline(10_000);
 // floor", and an activity-log row — a login, a menu edit, a tap diagnostic — was making
 // every open staff panel do exactly that. Only the admin console listens to `audit`.
 type Topic = "ops" | "menu" | "audit";
-type Handlers = Partial<Record<Topic, () => void | Promise<void>>>;
+/** WHY a handler is running. A breadcrumb ("event") means something really changed and a cache in
+ *  front of the read has to be dropped; the 60-second safety net ("poll") means nobody knows of a
+ *  change and we are only checking — which must not pretend a change happened, because dropping an
+ *  in-flight read costs a second read of the same row. See the note in components/MenuView.tsx.
+ *  Handlers that do not care can ignore the argument, which is why it is last and optional. */
+export type FireReason = "mount" | "event" | "poll" | "wake";
+type Handlers = Partial<Record<Topic, (why: FireReason) => void | Promise<void>>>;
 
 // One shared client per tab (the anon url+key are public — same values the guest
 // bundle already ships).
@@ -95,16 +101,16 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     const topics = Object.keys(ref.current) as Topic[];
 
     // Run a topic's handler right now (no delay).
-    const run = (topic: Topic) => {
+    const run = (topic: Topic, why: FireReason) => {
       const fn = ref.current[topic];
-      if (fn) Promise.resolve(fn()).catch(() => {});
+      if (fn) Promise.resolve(fn(why)).catch(() => {});
     };
     // Debounced refetch per topic (realtime bursts coalesce into one call).
-    const fire = (topic: Topic) => {
+    const fire = (topic: Topic, why: FireReason) => {
       clearTimeout(timers[topic]);
-      timers[topic] = setTimeout(() => run(topic), 300);
+      timers[topic] = setTimeout(() => run(topic, why), 300);
     };
-    const fireAll = () => topics.forEach(fire);
+    const fireAll = (why: FireReason) => topics.forEach((t) => fire(t, why));
 
     let channels: RealtimeChannel[] = [];
     let sb: SupabaseClient | null = null;
@@ -136,7 +142,7 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
               // (now − when it was written). No extra request — the event already arrived.
               const ts = payload?.new?.created_at;
               if (ts) { const lat = Date.now() - Date.parse(ts); if (lat >= 0 && lat < 60000) reportLatency(lat); }
-              fire(topic); // filter already scoped it; no client-side rid check needed
+              fire(topic, "event"); // filter already scoped it; no client-side rid check needed
             }
           )
           .subscribe(onStatus);
@@ -172,11 +178,11 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
       if (document.hidden) return;
       clearTimeout(idleTimer);
       const now = Date.now();
-      if (torndown) { torndown = false; lastWake = now; subscribe(); fireAll(); return; } // reconnect after idle
-      if (now - lastWake < 1500) { fireAll(); return; } // already rebuilt this wake — just refetch
+      if (torndown) { torndown = false; lastWake = now; subscribe(); fireAll("wake"); return; } // reconnect after idle
+      if (now - lastWake < 1500) { fireAll("wake"); return; } // already rebuilt this wake — just refetch
       lastWake = now;
       subscribe();
-      fireAll();
+      fireAll("wake");
     };
     const onVisibility = () => {
       if (document.hidden) { clearTimeout(idleTimer); idleTimer = setTimeout(teardown, IDLE_MS); } // arm the idle drop
@@ -207,9 +213,9 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) wake(); };
     window.addEventListener("pageshow", onPageShow);
     window.addEventListener("online", wake);
-    const poll = setInterval(() => { if (!document.hidden) fireAll(); }, 60000); // safety net — paused while hidden
+    const poll = setInterval(() => { if (!document.hidden) fireAll("poll"); }, 60000); // safety net — paused while hidden
 
-    topics.forEach(run); // initial load — fire IMMEDIATELY (the 300ms debounce only coalesces realtime bursts)
+    topics.forEach((t) => run(t, "mount")); // initial load — fire IMMEDIATELY (the 300ms debounce only coalesces realtime bursts)
 
     return () => {
       disposed = true;

@@ -55,6 +55,78 @@ LCP (6.0 s) is the intro splash logo revealed by its own animation, unchanged by
 
 ---
 
+## The polling & egress audit (owner, 2026-09-18: *"there shouldn't be any kind of pulling like every second… it will increase the egress problem"*)
+
+**Nothing in this app polls every second.** Every repeating timer in the codebase was listed and
+read. The ones that touch the network, fastest first:
+
+| Beat | What it asks | Cost per call | Guard |
+|---|---|---|---|
+| 2 s | a print helper: "any paper for me?" | **204, no body** — index scan on `print_jobs_agent_idx` (plan checked, not assumed) | one per printer machine; a documented trade for paper latency |
+| 20 s | the manager panel's print pass | 0.5 KB | deliberately runs while hidden — paper must not wait for somebody to look at a screen |
+| 10–15 s | the admin Printing page, the owner's printing card | small | only while that page is open / visible |
+| **60 s** | every panel's board, and the guest menu's safety net | see the table below | **paused while the tab is hidden** |
+
+Realtime is the fast path everywhere; the 60-second reads exist only so a blocked WebSocket can
+never leave a screen permanently wrong. Channels are torn down when a tab goes idle and rebuilt on
+focus (`lib/useRealtime.ts`, `public/panels/realtime.js`) — that is what stops a background tab
+holding a phantom connection.
+
+### Measured: what ONE untouched screen costs per minute
+
+| Screen | on screen | tab hidden |
+|---|---|---|
+| Manager panel | 5 calls, 12.0 KB | **3 calls, 1.5 KB** (the print pass only) |
+| Kitchen | 1 call, 33.0 KB | **nothing** |
+| Waiter tablet | 1 call, 17.8 KB | **nothing** |
+| Guest menu — before | 3 calls, **29.7 KB** | **nothing** |
+| **Guest menu — after this pass** | 2 calls, **2.8 KB** | **nothing** |
+
+### What was actually wrong, and is now fixed
+
+**A guest's phone left open on the table re-downloaded the whole menu every 60 seconds.** 24.2 KB on
+French House, almost always byte-for-byte identical, because the safety net cannot tell whether
+anything changed. Twenty phones for two hours is ~58 MB a day spent sending people a menu they
+already have. The refetch is now **conditional**: the bundle is hashed into a strong `ETag`, the
+phone sends it back in `If-None-Match`, and an unchanged menu answers **304 with no body**.
+`/api/r/[restaurant]/menu-data` is already served from the Next data cache, so that 304 costs **no
+Supabase read at all**.
+
+**The same settings row was read twice a minute, per guest.** The 60-second net fires every topic
+handler; the guest menu's handler called `refreshFeatures()`, which drops the settings cache *and
+its in-flight read*. After a breadcrumb that is exactly right; on a poll it is waste — it threw away
+the read `AppShell` had started a millisecond earlier. Handlers are now told **why** they fired
+(`FireReason`), and only a real breadcrumb invalidates. One read instead of two — and this one is a
+direct browser→Supabase RPC, so it is Supabase egress, not merely Vercel's.
+
+**A dead `POLL_MS = 1500` was deleted** from `lib/orderStatus.ts`. Nothing read it (realtime
+replaced it long ago), but a ready-made constant called `POLL_MS` is precisely how a 1.5-second poll
+grows back. An obituary comment sits in its place.
+
+**Verified in both directions, on the real screens:**
+* nothing changing → the minute-by-minute refetch answers **304** and the menu stays on screen
+  (59 dish cards, checked in the DOM);
+* a manager changing Espresso ₹250 → ₹257 → the guest's already-open phone showed **₹257 after
+  2.3 seconds**, and that refetch answered a full **200**. The saving costs nothing in freshness.
+  (The price was put back.)
+
+### Left alone on purpose, with the reason
+
+* **The panels' 60-second board reads** (33 KB kitchen · 17.8 KB tablet · 10.4 KB manager summary).
+  An ETag would rarely match during service — those payloads change constantly — and their real
+  cost is the Supabase read, which an ETag cannot remove. What already controls that is the
+  **1.5-second shared floor snapshot** (mig 238): several screens asking at the same moment cost
+  ONE database read between them, not one each.
+* **The print helper's 2-second poll** — checked rather than assumed: 204, no body, index scan.
+* **`orders_change_watermark`** looked like the way to make the 60-second net cheap ("did anything
+  change?" first). It is **not safe for that**: it has exactly one trigger, on `orders`, so a cook
+  marking a dish ready (`order_items`), a guest pressing the bell (`calls`) or a party opening
+  (`sessions`) would not move it — and a screen that missed one of those events would stay wrong
+  until something else happened. Widening it to every table the boards read is its own change with
+  its own verification, so it is written down here rather than half-built.
+
+---
+
 ## How this was measured
 
 | Tool | What for |
