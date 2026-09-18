@@ -20,13 +20,24 @@
 
     <!-- 6:00 AM local time (Asia/Calcutta), every day. Shifted from 4:00 so it does not
          collide with the 4:00 tablet audit on the one shared browser. launchd uses local time. -->
+    <!-- 06:00 is the audit; 12:00 is the CATCH-UP and does nothing unless the night run was cut
+         off by the Claude usage limit (the script checks its own marker and exits silently
+         otherwise). Added 2026-09-19 after six of twelve night runs were killed by the limit. -->
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>6</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>6</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>12</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
 
     <key>RunAtLoad</key>
     <false/>
