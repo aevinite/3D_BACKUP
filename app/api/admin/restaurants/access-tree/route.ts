@@ -20,7 +20,7 @@ import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { menuTag } from "@/lib/menuDataServer";
 import {
   ALL_NODES, NODE_BY_ID, FEATURE_KEYS, SETTING_KEYS, CHOICE_KEYS,
-  LIST_KEYS, TEXT_KEYS, MODULE_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
+  LIST_KEYS, TEXT_KEYS, MODULE_KEYS, MODULE_BAG_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
   TABLET_COLS, TAB_ALLOWED, HAS_IDS, KNOWN_CONFIG_IDS,
 } from "@/lib/accessTree";
 import { expectClash, clashJson } from "@/lib/clash";
@@ -92,6 +92,9 @@ function describeAccessPatch(patch: Record<string, any>): string {
   for (const [k, v] of Object.entries(obj(patch.grants))) say(nameOfBind((b) => b.t === "grant" && b.flag === k), k, v);
   for (const [k, v] of Object.entries(obj(patch.sections))) say(nameOfBind((b) => b.t === "section" && b.key === k), k, v);
   for (const [k, v] of Object.entries(obj(patch.channels))) say(nameOfBind((b) => b.t === "channel" && b.key === k), k, v);
+  // Bag modules (settings.modules[key]) — without this line the log for switching Loyalty points
+  // on would say nothing at all, and "Recent changes here" exists to say what just changed.
+  for (const [k, v] of Object.entries(obj(patch.modules))) say(nameOfBind((b) => b.t === "moduleBag" && b.key === k), k, v);
   for (const [k, v] of Object.entries(obj(patch.settings))) {
     const label = nameOfBind((b) => (b.t === "setting" || b.t === "tablet" || b.t === "choice" || b.t === "list" || b.t === "text") && b.key === k)
       || nameOfBind((b) => b.t === "module" && `${b.key}_allowed` === k);
@@ -326,6 +329,28 @@ export async function POST(req: NextRequest) {
     let took = 0;
     for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) { next[k] = v === true; took++; }
     if (took) setPatch.features = next;
+  }
+  // A BAG MODULE'S ON/OFF — settings.modules[key].allowed (mig 326). Same merge discipline as
+  // features directly above, and for the same reason: the bag holds EVERY new module's ladder, so
+  // writing it whole would switch the others off. It also refuses on an unreadable row rather
+  // than starting the merge from `{}` — see the long note above the features branch.
+  //
+  // The entry keeps the full ModuleBagEntry shape lib/tableTags.ts reads. `enabled: true` is
+  // written alongside, exactly as the column-backed `module` bind forces `<x>_enabled` true: the
+  // owner-control rung was retired with the 4-rung ladder, and an entry left `enabled: false`
+  // would read as OFF forever with no screen able to say why.
+  if (patch.modules) {
+    const curModQ = await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle();
+    if (curModQ.error) return adminFail("these permissions", curModQ.error, { action: "load" });
+    const curMod = obj((curModQ.data as { modules?: unknown } | null)?.modules);
+    const next = { ...curMod };
+    let took = 0;
+    for (const [k, v] of Object.entries(obj(patch.modules))) {
+      if (!MODULE_BAG_KEYS.includes(k)) continue;
+      next[k] = { ...obj(next[k]), allowed: v === true, enabled: true };
+      took++;
+    }
+    if (took) setPatch.modules = next;
   }
   // Channels and their API keys live in the SAME column, so they are merged into ONE object here.
   // Doing them in two independent branches would have let a patch carrying both write the column

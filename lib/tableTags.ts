@@ -222,3 +222,28 @@ export async function inventoryEffectiveByRid(ids: string[]): Promise<Record<str
 // PLATFORMS again, under the name most call sites use. An alias of takeawayLadder (ONE
 // feature, two historic names) — NOT of parcelLadder, which is a different feature.
 export const platformLadder = takeawayLadder;
+
+// ── BAG-BACKED MODULES (mig 326) ─────────────────────────────────────────────────────────────
+// `moduleLadder()` above names three COLUMNS. A module that declares `moduleBag: true` has none,
+// so it needs its own one-module read of the shared `settings.modules` jsonb. Same contract, same
+// return type, same `.effective` every call site already reads — only the storage differs.
+//
+// An ABSENT entry reads exactly as absent columns do: not allowed, not transferred, enabled — so
+// a restaurant nobody has touched has the module OFF. That is what makes shipping a new module
+// safe: no existing restaurant changes behaviour until an admin switches it on.
+export async function moduleBagLadder(rid: string, key: string): Promise<TableTagsLadder> {
+  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle())
+    .data as { modules?: Record<string, ModuleBagEntry> } | null;
+  const e = (s?.modules && typeof s.modules === "object" ? s.modules[key] : undefined) || {};
+  const allowed = e.allowed === true;
+  const ownerControl = e.owner_control === true;
+  const enabled = e.enabled !== false;
+  return { allowed, ownerControl, enabled, effective: allowed && (!ownerControl || enabled) };
+}
+
+// LOYALTY POINTS (2026-09-19) — the first bag-backed module. EVERY half of the feature reads this
+// one ladder, which is what makes the owner's rule true ("if it's on then only everything will
+// change otherwise everything will be as it is right now", 2026-09-19): the earn that rides the
+// settle write, the Redeem button on the pay sheet, the two lines on the printed bill and the
+// balance the till shows. Off = none of them exist and billing is byte-for-byte what it is today.
+export const loyaltyLadder = (rid: string) => moduleBagLadder(rid, "loyalty");

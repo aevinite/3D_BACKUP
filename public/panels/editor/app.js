@@ -4478,6 +4478,67 @@ async function setOrderPayment(id, paid, opts = {}) {
   }
 }
 
+// The two lines the BILL prints. Same shape and same rules as the waiter tablet's copy — the two
+// panels print one document and must not drift. `earn` is what THIS bill is worth; `balance` is
+// what the guest had BEFORE it, because the paper is usually handed over before it is paid.
+async function loyaltyForBill(t, sess, money) {
+  try {
+    const phone = String((sess && sess.cust_phone) || "").trim();
+    if (!phone || t == null || t === "") return null;
+    const st = await api("POST", "/loyalty", { table: String(t), phone });
+    if (!st || !st.on) return null;
+    const total = Number(money && money.total) || 0;
+    const earn = Math.floor((total * (Number(st.earn_per_100) || 0)) / 100);
+    const bal = Number(st.balance) || 0;
+    return { earn, balance: bal, toNext: Math.max(0, (Number(st.min_redeem) || 0) - (bal + earn)) };
+  } catch { return null; }
+}
+
+// ── LOYALTY POINTS ON THE PAY SHEET (owner, 2026-09-19) ──────────────────────
+// The manager-panel twin of the same block on the waiter tablet — the two panels must not drift,
+// so they are written the same way and both ask the SERVER whether the module is on rather than
+// keeping their own idea of the flag. Renders nothing at all when it is off.
+function hideLoyalty(root) {
+  const el = root && root.querySelector(".pay-loyalty");
+  if (el) { el.style.display = "none"; el.innerHTML = ""; }
+}
+async function renderLoyalty(root, t, phone) {
+  const el = root && root.querySelector(".pay-loyalty");
+  if (!el) return;
+  // No table means no bill to spend points against (a parcel, a khata collection) — show nothing.
+  if (t == null || t === "") { hideLoyalty(root); return; }
+  let st = null;
+  try { st = await api("POST", "/loyalty", { table: String(t), phone }); } catch { st = null; }
+  if (!st || !st.on) { hideLoyalty(root); return; }
+  const bal = Number(st.balance) || 0;
+  const min = Number(st.min_redeem) || 0;
+  const per = (Number(st.point_value_paise) || 100) / 100;
+  const worth = Math.round(bal * per);
+  const canSpend = min > 0 ? bal >= min : bal > 0;
+  el.style.display = "";
+  el.innerHTML = `<span style="font-weight:700;color:#b45309">⭐ ${bal} point${bal === 1 ? "" : "s"}</span>`
+    + `<span style="color:var(--muted)"> · worth ₹${worth}</span>`
+    + (canSpend
+        ? ` <button type="button" class="pay-loyalty-use" style="margin-left:6px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:12px;font-weight:700;cursor:pointer">Use ₹${worth} off</button>`
+        : ` <span style="color:var(--muted)">· ${min - bal} more to use them</span>`);
+  const btn = el.querySelector(".pay-loyalty-use");
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = "Using…";
+    try {
+      // ONE request: the server spends the points AND takes the money off, so a failure can never
+      // leave the guest short of points with no discount to show for it.
+      const r = await api("POST", "/loyalty-redeem", { table: String(t), phone, points: bal });
+      if (r && r.ok) {
+        toast(`⭐ ₹${Math.round(Number(r.rupees) || 0)} off — ${r.spent} points used`, "ok");
+        renderLoyalty(root, t, phone);
+      } else { btn.disabled = false; btn.textContent = `Use ₹${worth} off`; }
+    } catch {
+      // The route sends a sentence a cashier can read out loud; api() surfaces it.
+      btn.disabled = false; btn.textContent = `Use ₹${worth} off`;
+    }
+  };
+}
+
 // openPaymentMethodModal(due, label): "how did they pay?" — UPI/Cash/Card, or Other
 // with a short typed note. Picking a method IS the confirmation (no separate "are you
 // sure?" step — the old confirmDialog is folded into this one tap). Resolves
@@ -4591,6 +4652,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <input type="tel" inputmode="numeric" class="dish-edit-custominput pay-cust-phone" maxlength="20" placeholder="Mobile number" style="margin-bottom:6px">
           <input type="text" class="dish-edit-custominput pay-cust-name" maxlength="80" placeholder="Name (optional)" style="margin-bottom:6px">
           <div class="pay-cust-chip" style="display:none;font-size:12.5px;font-weight:700;color:#16a34a;margin:0 0 6px"></div>
+          <div class="pay-loyalty" style="display:none;font-size:12.5px;margin:0 0 6px"></div>
           <label style="display:flex;align-items:flex-start;gap:9px;font-size:12.5px;cursor:pointer">
             <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none">
             <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
@@ -5015,6 +5077,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <input type="tel" inputmode="numeric" class="dish-edit-custominput pay-cust-phone" maxlength="20" placeholder="Mobile number" style="margin-bottom:6px" value="${esc(k.phone || "")}">
           <input type="text" class="dish-edit-custominput pay-cust-name" maxlength="80" placeholder="Name (optional)" style="margin-bottom:6px" value="${esc(k.name || "")}">
           <div class="pay-cust-chip" style="display:none;font-size:12.5px;font-weight:700;color:#16a34a;margin:0 0 6px"></div>
+          <div class="pay-loyalty" style="display:none;font-size:12.5px;margin:0 0 6px"></div>
           <label style="display:flex;align-items:flex-start;gap:9px;font-size:12.5px;cursor:pointer">
             <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none" checked>
             <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
@@ -5044,8 +5107,12 @@ function openPaymentMethodModal(due, label, opts = {}) {
               chipEl.textContent = `✨ Repeat customer${v ? ` · visit #${v + 1}` : ""}${r.name ? ` · ${r.name}` : ""}`;
               chipEl.style.display = "";
               if (r.name && !nameEl.value.trim()) nameEl.value = r.name;
-            } else { chipEl.style.display = "none"; }
-          } catch { chipEl.style.display = "none"; }
+              // LOYALTY (mig 401) — the manager twin of the waiter tablet's row. The server
+              // answers { on:false } when the module is off, so this renders nothing and the pay
+              // sheet stays exactly as it is today (owner, 2026-09-19).
+              renderLoyalty(wrap, opts.table, digits);
+            } else { chipEl.style.display = "none"; hideLoyalty(wrap); }
+          } catch { chipEl.style.display = "none"; hideLoyalty(wrap); }
         }, 400);
       });
     }
@@ -5077,6 +5144,9 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   // BEFORE tax. The old Σ(total − discount) taxed the pre-discount amount and told
   // staff to collect discount×rate too much on any discounted bill (2026-07-05 fix).
   const due = billMath(payable).total;
+  // The pay sheet needs to know WHICH bill it is settling before it can show the guest's points
+  // or spend them. Every order in one settle belongs to one table, so the first is the answer.
+  if (opts.table == null) opts.table = payable[0] && payable[0].table_number != null ? String(payable[0].table_number) : "";
   const picked = await openPaymentMethodModal(due, label, opts);
   if (!picked) return false; // cancelled
   // A special settle (khata / on-the-house, mig 166): hand the marker back — the caller
@@ -6059,7 +6129,7 @@ function openBillWindow(html) {
   w.document.close();
   try { w.focus(); } catch (e) {} // a REUSED window is already open behind the panel — bring it forward
 }
-function printBill(t, sess, os, opts = {}) {
+async function printBill(t, sess, os, opts = {}) {
   // WHAT GOES ON THE PAPER IS DECIDED ONCE, in /panels/billdoc.js (billData). This function's job is
   // only the three things the PANEL knows: the restaurant's own logo, what to call this table, and
   // the window to write into.
@@ -6087,10 +6157,18 @@ function printBill(t, sess, os, opts = {}) {
   // "Reprint" once paper exists (billPrintedBefore(), used by every print button in this panel),
   // and the first print is stamped once so every device agrees which one was the first.
   const printedBefore = !!((sess && sess.bill_printed_at) || (os || []).some((o) => o && o.bill_printed_at));
+  const money = billMath(os);
+  // THE GUEST'S POINTS GO ON THE PAPER THIS PANEL PRINTS TOO (mig 401) — the twin of the same
+  // three lines on the waiter tablet. A restaurant whose paper is owned by a computer gets this
+  // from lib/printDocs.ts; one where the SCREEN prints (mig 341/372) gets it here, and the two
+  // sheets must say the same thing. Null — and no block on the sheet at all — whenever there is
+  // no recognised guest, the module is off, or the read fails.
+  const loyalty = await loyaltyForBill(t, sess, money);
   const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
     settings: s, restaurant: state.data.restaurant || {}, orders: os,
-    money: billMath(os), session: sess || {}, tableDisp,
+    money, session: sess || {}, tableDisp,
     logo: billLogo(), parcel: !!opts.parcel, autoPrint: true,
+    loyalty,
   }));
   // Tell the server this bill has now been on paper, so every panel's button reads "Reprint" from
   // here on. Idempotent server-side, so calling it after every print is free and a retry is safe;

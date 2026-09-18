@@ -25,7 +25,7 @@ const {
   nodePatch, defOf, SETTING_KEYS, CHOICE_KEYS, LIST_KEYS, TEXT_KEYS, TABLET_COLS,
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
   waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
-  nodeExpect, expectHeader, MODULE_ALLOWED_DEFAULTS,
+  nodeExpect, expectHeader, MODULE_ALLOWED_DEFAULTS, MODULE_BAG_KEYS,
 } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
@@ -96,6 +96,38 @@ for (const m of tree.matchAll(/t:\s*"module",\s*key:\s*"([^"]+)"/g)) {
   const mod = m[1];
   if (!tableTags.includes(`${mod}_allowed`)) fail(`module "${mod}" has no ladder in lib/tableTags.ts — its switch would save and never be enforced`);
   else ok(`module "${mod}" is read by a ladder in lib/tableTags.ts`);
+}
+
+// ── 3b · the same question for a BAG-BACKED module (mig 326) ───────────────
+// A `moduleBag` row stores nothing in a column, so check 2 (does the column exist) and check 3
+// (does a ladder name the column) both slide straight past it — the row would be unguarded by the
+// very checks that exist to stop a dead switch, which is exactly the "a guard can be narrower
+// than its own comment promises" trap. Ask the three questions that actually apply to the bag:
+// does a ladder read it, does the write route have a branch that lets its key through, and does
+// the state reader fetch the `modules` column at all (without which the switch always reads OFF
+// and flipping it on would silently bounce back).
+{
+  const accessStateSrc = read("lib/accessState.ts");
+  const routeTakesBag = /patch\.modules/.test(treeRoute) && /MODULE_BAG_KEYS/.test(treeRoute);
+  const stateReadsBag = /"modules"/.test(accessStateSrc) && /MODULE_BAG_KEYS/.test(accessStateSrc);
+  for (const m of tree.matchAll(/t:\s*"moduleBag",\s*key:\s*"([^"]+)"/g)) {
+    const mod = m[1];
+    // The ladder must name THIS module, not merely the generic bag reader.
+    if (!new RegExp(`moduleBagLadder\\(rid,\\s*"${mod}"\\)|"${mod}"`).test(tableTags))
+      fail(`bag module "${mod}" has no ladder in lib/tableTags.ts — its switch would save into settings.modules and never be enforced`);
+    else ok(`bag module "${mod}" is read by a ladder in lib/tableTags.ts`);
+    // …and it must be declared in lib/accessModel.ts, or MODULE_DEFS misses it and the manager
+    // panel's derived `features` map never learns the module exists.
+    if (!new RegExp(`moduleBag:\\s*true`).test(accessModel) || !accessModel.includes(`"${mod}"`))
+      fail(`bag module "${mod}" is not declared with moduleBag: true in lib/accessModel.ts — MODULE_DEFS would not carry it, so allModuleLadders() and the editor whoami would both answer as if it did not exist`);
+    else ok(`bag module "${mod}" is declared in lib/accessModel.ts, so MODULE_DEFS carries it`);
+  }
+  if (MODULE_BAG_KEYS.length) {
+    if (!routeTakesBag) fail("the access-tree write route has no patch.modules branch filtered by MODULE_BAG_KEYS — every bag module's switch would move on screen and save nothing");
+    else ok("the write route merges patch.modules through the MODULE_BAG_KEYS allow-list");
+    if (!stateReadsBag) fail("lib/accessState.ts never selects the `modules` column — every bag module would read OFF however it is stored, so switching one on would bounce straight back");
+    else ok("lib/accessState.ts reads the `modules` column, so a bag module's stored value reaches the screen");
+  }
 }
 
 // ── 4 · every manager row must reach code, and every enforced power must have a home ─────
@@ -429,6 +461,7 @@ else ok("the read/write route derives every allow-list from the model");
     features: new Set([...FEATURE_KEYS, "ratings"]),
     settings: new Set([...SETTING_KEYS, ...CHOICE_KEYS, ...LIST_KEYS, ...TEXT_KEYS, ...TABLET_COLS,
       ...MODULE_KEYS.flatMap((m) => [`${m}_allowed`, `${m}_enabled`])]),
+    modules: new Set(MODULE_BAG_KEYS),
     channels: new Set(CHANNEL_KEYS),
     creds: new Set(CREDS_KEYS),
     grants: new Set(GRANT_FLAGS),

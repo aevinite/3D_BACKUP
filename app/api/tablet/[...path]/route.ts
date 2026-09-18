@@ -45,6 +45,7 @@ import { TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/li
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { waiterTables, allows, blockedReason, notYoursMessage, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
+import { earnOnSettle, reverseOnUnpay, loyaltyStateFor, redeemOntoBill } from "@/lib/loyalty";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 // What never leaves the server inside a settings row (the delivery apps' connection keys).
@@ -2360,7 +2361,51 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return err("Couldn't save the guest's details — the bill itself is fine. Try again in a moment.", 500);
       }
       if ((data as { ok?: boolean })?.ok) await log("customer_saved", { table_number: t, device_id: dev });
-      return ok(data || { ok: false });
+      // LOYALTY rides the SAME settle (mig 401). Same session, so the points land on the bill in
+      // front of the waiter and not on whoever is seated here next. Fire-and-forget exactly like
+      // the capture above: the bill has already been settled and a points failure must never read
+      // as a billing error. Returns { on:false }-shaped nothing when the module is off, so a
+      // restaurant without loyalty does not even reach the database.
+      let earned: { ok: boolean; earned?: number; balance?: number } | null = null;
+      if ((data as { ok?: boolean })?.ok) {
+        earned = await earnOnSettle(rid, t, phone, capSess?.id ?? null);
+      }
+      return ok({ ...(data || { ok: false }), loyalty: earned?.ok ? { earned: earned.earned, balance: earned.balance } : null });
+    }
+
+    // ── Loyalty points — the balance the till shows, and spending it ────────────
+    // Both refuse with { on: false } when the admin has not switched the module on, so the pay
+    // sheet simply renders nothing (owner, 2026-09-19: off means everything stays as it is now).
+    if (a === "tables" && c === "loyalty") {
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      const t = await mergeParentTable(sb, rid, tRaw);
+      const ent = await getOwnerEntitlements(rid);
+      if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
+      const phone = String(body?.phone || "").slice(0, 20);
+      if (!phone) return ok({ on: false });
+      return ok(await loyaltyStateFor(rid, phone));
+    }
+    if (a === "tables" && c === "loyalty-redeem") {
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      const t = await mergeParentTable(sb, rid, tRaw);
+      const ent = await getOwnerEntitlements(rid);
+      if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
+      // Spending points is taking money off a bill, so it needs the same permission the discount
+      // itself needs — never a blanket "anyone at the till" (the least-privilege rule).
+      const may = recordPin(await tabletPerm("tablet_discount", req, body, rid, actor));
+      if (!may.allow) return may.resp;
+      const sess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
+        .eq("table_number", t).eq("status", "open").order("last_activity_at", { ascending: false })
+        .limit(1)).data?.[0] as { id: string } | undefined;
+      // ONE call: spend the points AND take the money off, so the two cannot half-happen.
+      const r = await redeemOntoBill(rid, t, String(body?.phone || "").slice(0, 20),
+        Number(body?.points) || 0, actor?.name || actor?.username || "Waiter", sess?.id ?? null,
+        { user: actor ?? null, deviceId: dev, from: "waiter tablet" });
+      if (!r.ok) return err(r.reason || "Those points couldn't be used.", 400);
+      await log("loyalty_redeemed", { table_number: t, device_id: dev });
+      return ok(r);
     }
 
     // ── Table types (VIP / Family / Owner's Guest) + khata — mig 166 ─────────────
@@ -2556,6 +2601,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // party. Passing the session is what stops it deleting the visit of whoever is seated at
       // the table by then (mig 233).
       await sb.rpc("lfh_uncapture_customer", { p_restaurant_id: rid, p_table: t, p_session: openSess.id });
+      // …and the points that settle paid out. Same session for the same reason (mig 233): without
+      // it, un-paying would take points off whoever is sitting here now.
+      await reverseOnUnpay(rid, t, openSess.id);
       return ok({ ok: true, count: paid.length });
     }
 

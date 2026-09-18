@@ -154,6 +154,26 @@ export const PERMISSIONS: Perm[] = [
       { id: "khata_settle", name: "Settle a tab", what: "Takes the money and clears what a person owes." },
       { id: "khata_book", name: "See the whole book", what: "Every person and how much is outstanding." },
     ] },
+  // LOYALTY POINTS (2026-09-19) — the FIRST module to keep its ladder in the shared
+  // `settings.modules` bag instead of three columns of its own (mig 326: the row is already 111
+  // columns wide). `moduleBag: true` is what sends it there; the three names below are the module
+  // KEY repeated, exactly as the ModuleDef doc requires, and no column of any of those names is
+  // ever read or created.
+  //
+  // It is here, and not only in lib/accessTree.ts, for one concrete reason: MODULE_DEFS is built
+  // from THIS list, and both `allModuleLadders()` (lib/tableTags.ts) and the editor whoami's
+  // derived `features` map iterate MODULE_DEFS / PERMISSIONS. A module missing from here would
+  // save its switch on the Access screen and reach no panel and no gate — the dead switch the
+  // access rebuild exists to abolish. The admin-facing ROW lives in lib/accessTree.ts; this entry
+  // is the enforcement wiring, which is all lib/accessModel.ts is still for.
+  { id: "loyalty", group: "money", kind: "ladder", power: "loyalty", ownerUse: "panel",
+    module: { allowed: "loyalty", control: "loyalty", enabled: "loyalty" }, moduleBag: true,
+    moduleLabel: "Loyalty points", name: "Loyalty points",
+    what: "Points earned on a bill and spent as a discount on a later visit. Printed on the bill and shown at the till — nothing is messaged, so it costs nothing to run.",
+    sub: [
+      { id: "loyalty_redeem", name: "Spend a guest's points", what: "Turning points into money off the bill in front of them." },
+      { id: "loyalty_adjust", name: "Correct a balance by hand", what: "Adding or removing points when something went wrong. Always written to the audit log." },
+    ] },
 
   // ─────────────────────────── TABLES & FLOOR (ladder) ─────────────────────
   { id: "take_orders", group: "floor", kind: "ladder", power: "take_orders", tablet: "tablet_take_orders", waiter: true, ownerUse: "manager",

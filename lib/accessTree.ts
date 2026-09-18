@@ -36,6 +36,15 @@ export type Bind =
   | { t: "feature"; key: string }        // settings.features[key]        (guest)
   | { t: "setting"; key: string }        // settings.<key>                (boolean column)
   | { t: "module"; key: string }         // settings.<key>_allowed        (+ _enabled forced true)
+  // settings.modules[key] — a NEW module's ladder, in the shared jsonb bag instead of three
+  // columns of its own (mig 326; the row is already 111 columns wide and each one has to earn
+  // its risk). An ABSENT entry reads as OFF, which is the house default for a new module, so a
+  // restaurant that has never been touched behaves exactly as it does today. Read server-side by
+  // the same lib/tableTags.ts ladder every other module goes through — `allModuleLadders` has
+  // branched on `m.bag` since mig 320 and this is its first real caller. Declare the SAME key in
+  // lib/accessModel.ts with `moduleBag: true` so MODULE_DEFS carries it, or the ladder read
+  // returns nothing and the switch saves into a bag no gate consults.
+  | { t: "moduleBag"; key: string }      // settings.modules[key].allowed
   | { t: "channel"; key: string }        // settings.platform_channels[key].on
   // A `panel` variant (settings.enabled_panels[key]) lived here until 2026-08-04. "Staff apps"
   // was deleted on 2026-07-31 — every restaurant has all four panels — so no node used it, and
@@ -794,6 +803,23 @@ export const SECTIONS: Section[] = [
             what: "Adds stock and expense cost as a line inside the normal sales reports, so profit is shown after cost. OFF keeps it on the inventory pages only." },
         ],
       },
+      // LOYALTY POINTS (2026-09-19). The FIRST bag-backed module: its ladder lives in
+      // settings.modules.loyalty, not in three columns of its own (mig 326).
+      //
+      // OFF MUST MEAN NOTHING CHANGES, and that is the whole point of this row (owner, 2026-09-19:
+      // "if it's on then only everything will change otherwise everything will be as it is right
+      // now"). So every half of the feature reads THIS one switch: the earn that rides the settle
+      // write, the Redeem button on the pay sheet, the two lines on the printed bill, and the
+      // owner's Loyalty page. An absent bag entry reads as OFF, so no existing restaurant is
+      // touched by the migration that ships this — they keep billing exactly as they do today.
+      //
+      // It deliberately has NO messaging of any kind. Points are printed on the bill the guest is
+      // already holding and shown to the cashier at the till, which is why the running cost is
+      // zero; see docs/LOYALTY-PLAN.md for the costing that decided this against WhatsApp.
+      {
+        id: "loyalty", name: "Loyalty points", def: false, bind: { t: "moduleBag", key: "loyalty" },
+        what: "Guests earn points on every bill they are recognised on, and spend them as a discount on a later visit. The points are printed on their bill, and the till shows the balance the moment their number is typed in — nothing is ever texted or messaged, so it costs nothing to run. OFF removes the points lines from the bill and the Redeem button from the pay sheet; billing itself is completely unchanged.",
+      },
     ],
   },
 
@@ -1152,6 +1178,8 @@ export const CHOICE_KEYS = collect((b) => (b.t === "choice" ? b.key : null));
 export const LIST_KEYS = collect((b) => (b.t === "list" ? b.key : null));
 export const TEXT_KEYS = collect((b) => (b.t === "text" ? b.key : null));
 export const MODULE_KEYS = collect((b) => (b.t === "module" ? b.key : null));
+/** Bag-backed modules (settings.modules[key]) — the route's allow-list for that jsonb column. */
+export const MODULE_BAG_KEYS = collect((b) => (b.t === "moduleBag" ? b.key : null));
 export const CHANNEL_KEYS = collect((b) => (b.t === "channel" ? b.key : null));
 export const CREDS_KEYS = collect((b) => (b.t === "creds" ? b.key : null));
 // A "menu" row writes a grant too, so it MUST be in this list — the read/write route builds its
@@ -1274,6 +1302,7 @@ export const defOf = (n: Node): boolean | string | string[] | number =>
 export type TreeState = {
   features: Record<string, boolean>;          // settings.features
   settings: Record<string, unknown>;          // plain settings columns (+ tablet_*, module cols)
+  modules: Record<string, { allowed?: boolean; owner_control?: boolean; enabled?: boolean }>; // settings.modules
   channels: Record<string, boolean>;          // settings.platform_channels[k].on
   grants: Record<string, boolean>;            // restaurants.manager_permissions
   sections: Record<string, boolean>;          // restaurants.owner_entitlements
@@ -1285,12 +1314,15 @@ export type TreeState = {
 };
 
 export const emptyState = (): TreeState => ({
-  features: {}, settings: {}, channels: {}, grants: {}, sections: {}, tabs: {}, config: {}, creds: {},
+  features: {}, settings: {}, modules: {}, channels: {}, grants: {}, sections: {}, tabs: {}, config: {}, creds: {},
 });
 
 export type TreePatch = Partial<{
   features: Record<string, boolean>;
   settings: Record<string, unknown>;
+  // A bag module's on/off. Merged into settings.modules the same way `features` is merged into
+  // settings.features — never written whole, or switching one module off would drop the rest.
+  modules: Record<string, boolean>;
   channels: Record<string, boolean>;
   grants: Record<string, boolean>;
   sections: Record<string, boolean>;
@@ -1310,6 +1342,7 @@ export function nodeValue(n: Node, s: TreeState): any {
     case "feature":  return present(s.features?.[b.key] as boolean, d as boolean);
     case "setting":  return present(s.settings?.[b.key] as boolean, d as boolean) === true;
     case "module":   return present(s.settings?.[`${b.key}_allowed`] as boolean, d as boolean) === true;
+    case "moduleBag":return present(s.modules?.[b.key]?.allowed, d as boolean) === true;
     case "channel":  return present(s.channels?.[b.key], d as boolean);
     case "grant":    return present(s.grants?.[b.flag], d as boolean);
     case "section":  return present(s.sections?.[b.key], d as boolean);
@@ -1374,6 +1407,10 @@ export function nodeExpect(n: Node, s: TreeState, rid: string):
     case "feature":  return at("settings", `features.${b.key}`, s.features?.[b.key]);
     case "setting":  return at("settings", b.key, s.settings?.[b.key]);
     case "module":   return at("settings", `${b.key}_allowed`, s.settings?.[`${b.key}_allowed`]);
+    // One level into a jsonb column, which lib/clash.ts handles: `modules.loyalty` reads the
+    // entry object out of the bag and lib/clashCompare.ts compares objects by CONTENT. The
+    // refusal takes the quiet "someone changed it, go and look" form, which is right for a blob.
+    case "moduleBag":return at("settings", `modules.${b.key}`, s.modules?.[b.key]);
     case "choice":
     case "text":
     case "list":
@@ -1415,6 +1452,7 @@ export function nodePatch(n: Node, v: any): TreePatch {
     // it only ever existed for the old "hand the toggle to the owner" rung, and owners no
     // longer control any feature — leaving it false would silently keep the module off.
     case "module":   return { settings: { [`${b.key}_allowed`]: v === true, [`${b.key}_enabled`]: true } };
+    case "moduleBag":return { modules: { [b.key]: v === true } };
     case "channel":  return { channels: { [b.key]: v === true } };
     case "grant":    return { grants: { [b.flag]: v === true } };
     case "section":  return { sections: { [b.key]: v === true } };
@@ -1489,7 +1527,12 @@ export const isConfigurableGrant = (flag: string) => flag in MANAGER_GRANT_DEFAU
  *  French House has both ON, so every restaurant created was born with Pay later and the whole
  *  payroll module switched on while this screen said they start off. Deriving the list means a
  *  module added here tomorrow is seeded right with no line written there, and a module that is
- *  never reset cannot exist. Guarded by `verify:access` check 55. */
+ *  never reset cannot exist. Guarded by `verify:access` check 55.
+ *
+ *  BAG-BACKED modules (`t: "moduleBag"`) are deliberately NOT in here and need nothing here: they
+ *  have no column to seed, and an absent `settings.modules[key]` entry already reads as OFF in
+ *  lib/tableTags.ts. A clone of restaurant #1 copies its `modules` bag like any other column, and
+ *  that is correct — it is the same "what the flagship has" question the columns answer. */
 export const MODULE_ALLOWED_DEFAULTS: Record<string, boolean> = Object.fromEntries(
   ALL_NODES.filter((n) => n.bind.t === "module")
     .map((n) => [`${(n.bind as Extract<Bind, { t: "module" }>).key}_allowed`, n.def === true]),
