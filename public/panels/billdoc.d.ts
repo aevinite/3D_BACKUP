@@ -109,7 +109,7 @@ export interface BillDocData {
   autoPrint?: boolean;
   /** A line of explanation in the screen-only toolbar. Never printed. */
   note?: string;
-  /** LOYALTY POINTS (mig 400). ABSENT means the module is off for this restaurant, or this bill
+  /** LOYALTY POINTS (mig 401). ABSENT means the module is off for this restaurant, or this bill
    *  has no recognised guest — either way the sheet renders no points block at all and prints
    *  exactly what it prints today. `earn` is what THIS bill is worth and `balance` is what the
    *  guest had BEFORE it, because a bill is usually handed over before it is paid and the points

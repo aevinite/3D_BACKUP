@@ -7,7 +7,7 @@
 //
 // OFF MUST MEAN NOTHING CHANGES (owner, 2026-09-19: "if it's on then only everything will change
 // otherwise everything will be as it is right now"). Every entry point here asks loyaltyLadder()
-// first and returns `{ on: false }` without touching the database. mig 400's functions ask the
+// first and returns `{ on: false }` without touching the database. mig 401's functions ask the
 // same question again in SQL, so a caller that forgets still cannot write a point — belt AND
 // braces, because this decides who gets money off a bill.
 //
@@ -80,7 +80,7 @@ export async function earnOnSettle(
   return (data as { ok: boolean; earned?: number; balance?: number }) || { ok: false };
 }
 
-/** Un-paying a bill takes back exactly the points that bill granted — see mig 400 §7. */
+/** Un-paying a bill takes back exactly the points that bill granted — see mig 401 §7. */
 export async function reverseOnUnpay(rid: string, table: string, sessionId: string | null): Promise<void> {
   if (!(await loyaltyOn(rid))) return;
   const { error } = await sb.rpc("lfh_loyalty_reverse", {

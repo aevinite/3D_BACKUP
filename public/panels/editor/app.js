@@ -5107,7 +5107,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
               chipEl.textContent = `✨ Repeat customer${v ? ` · visit #${v + 1}` : ""}${r.name ? ` · ${r.name}` : ""}`;
               chipEl.style.display = "";
               if (r.name && !nameEl.value.trim()) nameEl.value = r.name;
-              // LOYALTY (mig 400) — the manager twin of the waiter tablet's row. The server
+              // LOYALTY (mig 401) — the manager twin of the waiter tablet's row. The server
               // answers { on:false } when the module is off, so this renders nothing and the pay
               // sheet stays exactly as it is today (owner, 2026-09-19).
               renderLoyalty(wrap, opts.table, digits);
@@ -6158,7 +6158,7 @@ async function printBill(t, sess, os, opts = {}) {
   // and the first print is stamped once so every device agrees which one was the first.
   const printedBefore = !!((sess && sess.bill_printed_at) || (os || []).some((o) => o && o.bill_printed_at));
   const money = billMath(os);
-  // THE GUEST'S POINTS GO ON THE PAPER THIS PANEL PRINTS TOO (mig 400) — the twin of the same
+  // THE GUEST'S POINTS GO ON THE PAPER THIS PANEL PRINTS TOO (mig 401) — the twin of the same
   // three lines on the waiter tablet. A restaurant whose paper is owned by a computer gets this
   // from lib/printDocs.ts; one where the SCREEN prints (mig 341/372) gets it here, and the two
   // sheets must say the same thing. Null — and no block on the sheet at all — whenever there is

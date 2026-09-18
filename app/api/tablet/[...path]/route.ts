@@ -2361,7 +2361,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return err("Couldn't save the guest's details — the bill itself is fine. Try again in a moment.", 500);
       }
       if ((data as { ok?: boolean })?.ok) await log("customer_saved", { table_number: t, device_id: dev });
-      // LOYALTY rides the SAME settle (mig 400). Same session, so the points land on the bill in
+      // LOYALTY rides the SAME settle (mig 401). Same session, so the points land on the bill in
       // front of the waiter and not on whoever is seated here next. Fire-and-forget exactly like
       // the capture above: the bill has already been settled and a points failure must never read
       // as a billing error. Returns { on:false }-shaped nothing when the module is off, so a

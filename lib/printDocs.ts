@@ -158,7 +158,7 @@ export async function billHtmlForSession(rid: string, sessionId: string, opts?: 
   const names = settings.table_names as Record<string, string> | undefined;
   const tableDisp = (names && tnum && names[tnum]) || (tnum ? (/^\d+$/.test(tnum) ? "T" + tnum : tnum) : "—");
 
-  // ── THE GUEST'S POINTS, WHEN THE RESTAURANT HAS LOYALTY ON (mig 400) ───────────────────────
+  // ── THE GUEST'S POINTS, WHEN THE RESTAURANT HAS LOYALTY ON (mig 401) ───────────────────────
   // loyaltyStateFor() asks the module's ladder FIRST and answers { on:false } without touching the
   // database, so a restaurant without loyalty adds no read to the one path that must never stall
   // — a bill being printed. No phone on the bill ⇒ no recognised guest ⇒ nothing to print, and we

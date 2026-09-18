@@ -29,7 +29,7 @@ Shipped 2026-07-27 (PR #495, mig 212, live on backup-1 AND AV live), extended by
 
 ## 2. PHASE 1 — non-guest-mode loyalty. Running cost: ₹0
 
-> ✅ **BUILT 2026-09-19** (branch `feat/loyalty-points`, mig 400). The admin switch is
+> ✅ **BUILT 2026-09-19** (branch `feat/loyalty-points`, mig 401). The admin switch is
 > **Access & permissions → Extra features → Loyalty points**, OFF for every restaurant. Driven in
 > Chrome end to end: the switch saves and reads back; with it OFF the endpoint answers `{on:false}`,
 > the pay-sheet row hides and empties, the bill carries no points block and a redeem is refused in

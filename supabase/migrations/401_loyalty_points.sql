@@ -1,4 +1,4 @@
--- 400_loyalty_points.sql — LOYALTY POINTS (owner, 2026-09-19)
+-- 401_loyalty_points.sql — LOYALTY POINTS (owner, 2026-09-19)
 --
 -- Guests earn points on a bill and spend them as a discount on a later visit. There is NO
 -- messaging of any kind in this feature and that is the design, not an omission: the points are

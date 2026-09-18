@@ -3204,7 +3204,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       });
       if (error) return err(error.message, 500);
       if ((data as { ok?: boolean })?.ok) await log("editor", "customer_saved", { restaurant_id: rid, table_number: t, device_id: dev });
-      // LOYALTY rides the SAME settle (mig 400), on the SAME session the capture just used — so
+      // LOYALTY rides the SAME settle (mig 401), on the SAME session the capture just used — so
       // the manager panel and the waiter tablet can never award points to different parties.
       // Fire-and-forget: the bill is already settled and a points failure is not a billing error.
       let earned: { ok: boolean; earned?: number; balance?: number } | null = null;

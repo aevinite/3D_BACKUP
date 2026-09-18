@@ -1687,7 +1687,7 @@ one of the 992 was the SAME handful of sentences produced by our own 62-restaura
   otherwise everthing will be as it is right now"*). Admin → Access & permissions → Extra features
   → **Loyalty points**, OFF everywhere. Guests earn on a settled bill, spend at the till as a
   discount, and the balance prints on their bill — **no messaging at all, so it costs ₹0/month**
-  (costing vs PetPooja's ₹36k–90k: `docs/LOYALTY-PLAN.md`). mig 400. Verified in Chrome with the
+  (costing vs PetPooja's ₹36k–90k: `docs/LOYALTY-PLAN.md`). mig 401. Verified in Chrome with the
   switch both ways. **Left:** an owner screen to change the earn rate (every restaurant currently
   gets 5 points per ₹100, 1 point = ₹1, minimum 100), and a hand-correction route for a wrong
   balance (`loyalty_ledger.kind='adjust'` exists and nothing writes it yet).

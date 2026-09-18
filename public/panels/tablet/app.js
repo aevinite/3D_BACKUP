@@ -778,7 +778,7 @@ async function printTableBill(t) {
   const tnum = String(t == null ? "" : t).trim();
   const tableDisp = mergeGroupLabel(tnum) || (/^\d+$/.test(tnum) ? (tname(tnum) || "T" + tnum) : (tnum || "—"));
   const money = LFH_BILLDOC.billMoney(os, state.data.settings || {});
-  // THE GUEST'S POINTS GO ON THE PAPER THE PANEL PRINTS TOO (mig 400). A restaurant whose paper is
+  // THE GUEST'S POINTS GO ON THE PAPER THE PANEL PRINTS TOO (mig 401). A restaurant whose paper is
   // owned by a computer gets this from lib/printDocs.ts; one where the SCREEN prints (mig 341/372
   // — no helper set up) gets it here, and the two sheets have to say the same thing or the feature
   // exists on some restaurants' bills and not others.
@@ -4006,7 +4006,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
               chipEl.textContent = `✨ Repeat customer${v ? ` · ${v + 1}${v + 1 === 2 ? "nd" : v + 1 === 3 ? "rd" : "th"} visit` : ""}${r.name ? ` · ${r.name}` : ""}`;
               chipEl.style.display = "";
               if (r.name && !nameEl.value.trim()) nameEl.value = r.name;
-              // LOYALTY (mig 400). The server answers { on:false } when the admin has not switched
+              // LOYALTY (mig 401). The server answers { on:false } when the admin has not switched
               // the module on, so this renders NOTHING and the pay sheet is exactly what it is
               // today (owner, 2026-09-19). Never gate on the panel's own idea of the flag: the
               // server is the one that knows, and hiding is never the only guard.
