@@ -1298,7 +1298,14 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         {/* The "You might like" row — only shown if there are suggestions. */}
         {relatedItems.length > 0 && (
           <>
-            <div className="section-label" style={{ marginTop: 0 }}>{t.youMightLike}</div>
+            {/* THE LABEL NEEDS ITS OWN AIR (owner, 2026-09-20, spotted in the panel film):
+                "YOU MIGHT ALSO LIKE" was touching the VIEW IN 3D button. Nothing above it gives it
+                room — `.btn-row` has no bottom margin, `.section-label` has no top margin, and this
+                instance also carried an inline `marginTop: 0` — so the gap was literally zero px.
+                28px matches the rhythm the rest of the page uses (`.desc-box` margin-bottom). Kept
+                inline so only THIS label moves: `.section-label` is shared with "ABOUT THIS DISH",
+                which already gets its space from the nutrition row above it. */}
+            <div className="section-label" style={{ marginTop: 28 }}>{t.youMightLike}</div>
             <div className="related-section" id="related-section">
               {/* One tappable card per suggested dish. */}
               {relatedItems.map((related) => (
