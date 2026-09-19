@@ -7878,6 +7878,55 @@ async function save() {
   }
 }
 
+// removeRecord: permanently delete the currently-selected dish/category/filter.
+// DO NOT STRIP THIS AS UNUSED: its only caller names it once, in bindEditor() —
+// `if (del) del.onclick = removeRecord`. It was deleted by accident on 2026-09-14 with the
+// neighbouring previewSampleKOT(), and because that reference is evaluated inside bindEditor,
+// opening ANY existing dish/category/tag threw before the field listeners were attached — so
+// typing went nowhere and Save wrote the old values back.
+async function removeRecord() {
+  const it = state.sel;
+  // Use the app's own styled confirm dialog (every other delete does), not the
+  // browser's plain native popup — keeps the look consistent.
+  if (!(await confirmDialog(`Delete "${recLabel(it)}"?`, "Delete"))) return;
+  const kind = state.tab; // the deleted record's kind (items/categories/filters)
+  const restored = { ...it }; // snapshot for Undo
+  try {
+    const _wq = await api("DELETE", "/" + state.tab + "/" + encodeURIComponent(recKey(it)));
+    // If we just deleted the category the Dishes list is filtered by, clear the filter —
+    // otherwise the Dishes tab filters to a category that no longer exists (looks empty).
+    if (state.tab === "categories" && state.catFilter === recKey(it)) state.catFilter = "";
+    state.sel = null;
+    state.isNew = false;
+    await loadAll();
+    renderEditor();
+    // Undo — re-creates the record from the snapshot (safety net for a misclick).
+    //
+    // THE RESTORE'S OWN ANSWER, NOT THE DELETE'S (sweep #8 T6, 2026-09-03). The toast below used to
+    // be handed `_wq`, which is what the DELETE returned — so deleting while online and then pressing
+    // Undo after the signal dropped said a plain "Restored ✓" over a write that had only been saved on
+    // this device. The queue line exists precisely so nobody walks away believing a saved write is a
+    // sent one, and it has to be asked of the write it is describing.
+    //
+    // The note lives HERE, above the closure, and not between the payload and the call: the
+    // `payload.__create = true` line is what tells verify:clash-coverage this write is exempt (an undo
+    // re-creating a deleted row has no concurrent edit to overwrite), and that guard reads only the
+    // three lines either side of the call. Comments pushed in between made a covered write look bare.
+    const undoRec = async () => {
+      try {
+        const payload = { ...restored }; delete payload.created_at; delete payload.updated_at; payload.__create = true;
+        const _undoQ = await api("POST", "/" + kind, payload);
+        okToast(_undoQ, "Restored ✓");
+        if (state.tab === kind) { await loadAll(); renderList(); renderEditor(); }
+      } catch (e) { toast("Couldn't undo: " + e.message, "err"); }
+    };
+    if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted "${recLabel(restored)}"`, sub: "Tap undo to restore it", icon: "🗑️", seconds: 5, onUndo: undoRec });
+    else toast(`Deleted "${recLabel(restored)}"`, "ok", { label: "Undo", fn: undoRec }, 6000);
+  } catch (e) {
+    toast("Delete failed: " + e.message, "err");
+  }
+}
+
 // previewSampleKOT() lived here and was DELETED on 2026-09-14 with the "Kitchen · KOT printing"
 // settings card that was its only caller (see the obituary in SETTINGS_SECTIONS). It printed a
 // made-up ticket on THIS screen through Chrome's print dialog — which is the one thing the owner
