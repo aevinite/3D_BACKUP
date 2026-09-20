@@ -35,6 +35,7 @@ const IST = "Asia/Kolkata";
 type Customer = {
   restaurant_id: string; restaurantName: string; phone: string; name: string | null;
   blocked: boolean; visits: number; consent: boolean; first_seen_at: string; last_seen_at: string; returning: boolean;
+  points?: number;
 };
 // `cachedAt` is when the four tiles were last COUNTED. They are aggregates, so they ride the
 // compute-on-view snapshot cache (`lib/ownerCache.ts`, 5-minute freshness) while the list below is
@@ -127,6 +128,23 @@ export default function OwnerCustomers() {
   const [seg, setSeg] = useState("all");                    // all | regulars | new | blocked
   const [sort, setSort] = useState<"last_seen_at" | "visits">("last_seen_at");
   const [rests, setRests] = useState<Array<{ id: string; name: string }>>([]);
+  // ── LOYALTY POINTS (mig 401/403) ───────────────────────────────────────────────────────────────
+  // `on:false` is the answer for every restaurant whose admin has not switched the module on, and
+  // the whole block below then renders NOTHING — the owner never sees a control for something they
+  // do not have (R36). The rules are per RESTAURANT, so an owner with several has to pick one
+  // before the card appears; showing one restaurant's rate while "All my restaurants" is selected
+  // would be a number that is true for some of them.
+  type Rules = { on: boolean; earn_per_100?: number; point_value_paise?: number; min_redeem?: number; max_redeem_pct?: number };
+  const [rules, setRules] = useState<Rules>({ on: false });
+  const [rulesDraft, setRulesDraft] = useState<Rules | null>(null);
+  const [rulesSaving, setRulesSaving] = useState(false);
+  const [rulesMsg, setRulesMsg] = useState("");
+  const [adjust, setAdjust] = useState<{ rid: string; phone: string; name: string; balance: number } | null>(null);
+  // The restaurants in this scope that HAVE loyalty, straight from the guest-list response. Per
+  // restaurant, because an owner with several may run it on only one of them — gating the points
+  // column on a single restaurant's rules showed it for all of them or for none.
+  const [loyaltyRids, setLoyaltyRids] = useState<string[]>([]);
+  const hasLoyalty = (r: string) => loyaltyRids.includes(r);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   // ── WHICH FIGURE COULD NOT BE READ, SAID OUT LOUD (sweep 6 · T14, 2026-08-18) ───────────────────
@@ -184,8 +202,62 @@ export default function OwnerCustomers() {
       setCustomers(j.customers || []); setSummary(j.summary || null); setErr(null);
       setPartial(Array.isArray(j.partial) ? j.partial : []);
       if (j.restaurants) setRests(j.restaurants);
+      setLoyaltyRids(Array.isArray(j.loyalty_rids) ? j.loyalty_rids : []);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }, [scopePin]);
+
+  // WHICH restaurant the loyalty card is about. One restaurant → that one, always. Several → only
+  // once the owner has picked one, because a rate is per restaurant and showing one while "All my
+  // restaurants" is selected would state a number that is false for the others.
+  // WHICH restaurant the rules card is about. The picked one; else the only one that has loyalty;
+  // else nothing — a rate is per restaurant, and showing one while several are in view would state
+  // a number that is false for the others.
+  const loyaltyRid = (rid && hasLoyalty(rid) ? rid : "") || (loyaltyRids.length === 1 ? loyaltyRids[0] : "");
+
+  const loadRules = useCallback(async (forRid: string) => {
+    if (!forRid) { setRules({ on: false }); setRulesDraft(null); return; }
+    try {
+      const qs = [`restaurant_id=${encodeURIComponent(forRid)}`, asSuffix().replace(/^&/, "")].filter(Boolean).join("&");
+      const j = await (await fetch(`/api/owner/loyalty?${qs}`, { cache: "no-store" })).json();
+      // A FAILED READ IS NOT "THE MODULE IS OFF". Answering `on:false` on an error would hide a
+      // working feature behind a network blip, so an error leaves the card exactly as it was.
+      if (j && typeof j.on === "boolean") { setRules(j); setRulesDraft(j.on ? j : null); }
+    } catch { /* leave the card as it is — see above */ }
+  }, []);
+  useEffect(() => { loadRules(loyaltyRid); }, [loyaltyRid, loadRules]);
+
+  async function saveRules() {
+    if (!rulesDraft || !loyaltyRid) return;
+    setRulesSaving(true); setRulesMsg("");
+    try {
+      const r = await fetch(`/api/owner/loyalty${asSuffix() ? `?${asSuffix().replace(/^&/, "")}` : ""}`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ restaurant_id: loyaltyRid, action: "rules", ...rulesDraft }),
+      });
+      const j = await r.json();
+      if (!r.ok) { setRulesMsg(j.error || "Couldn't save."); return; }
+      setRules(j); setRulesDraft(j); setRulesMsg("Saved.");
+      setTimeout(() => setRulesMsg(""), 2500);
+    } catch (e) { setRulesMsg(e instanceof Error ? e.message : String(e)); }
+    finally { setRulesSaving(false); }
+  }
+
+  // Correcting a balance by hand. A reason is REQUIRED — it is the only record of why points moved
+  // with no bill behind them, and the database refuses without it too, not just this form.
+  async function applyAdjust(delta: number, note: string): Promise<string> {
+    if (!adjust) return "";
+    try {
+      const r = await fetch(`/api/owner/loyalty${asSuffix() ? `?${asSuffix().replace(/^&/, "")}` : ""}`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ restaurant_id: adjust.rid, action: "adjust", phone: adjust.phone, delta, note }),
+      });
+      const j = await r.json();
+      if (!r.ok) return j.error || "Couldn't change the points.";
+      setAdjust(null);
+      await load(true);
+      return "";
+    } catch (e) { return e instanceof Error ? e.message : String(e); }
+  }
 
   // First load is immediate; later reloads (as the owner types) are debounced. A single
   // effect handles both so mount doesn't fire TWO back-to-back requests (audit 2026-07-09).
@@ -282,6 +354,9 @@ export default function OwnerCustomers() {
   // without a back-stack layer the guest record stayed open and Back navigated off the page
   // instead (project rule: every popup registers the moment it's built; found 2026-08-04).
   useBackClose("owner-customer-detail", !!detail || detailBusy, closeDetail);
+  // The points-correction dialog is a popup like any other, so the phone's hardware Back closes it
+  // instead of navigating off the page (project rule: every popup registers the moment it is built).
+  useBackClose("owner-loyalty-adjust", !!adjust, () => setAdjust(null));
 
   const rows = customers || [];
 
@@ -402,6 +477,50 @@ export default function OwnerCustomers() {
             </div>
           )}
 
+          {/* LOYALTY RULES — renders only where the admin has switched the module on (R36: what is
+              withheld is not mentioned at all, not greyed). Four plain numbers with the sentence
+              they produce written underneath, because "point_value_paise" means nothing to the
+              person setting it. */}
+          {rules.on && rulesDraft && (
+            <div className="adm-card" style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
+                <b style={{ fontSize: 15 }}>⭐ Loyalty points</b>
+                <span className="adm-muted" style={{ fontSize: 12.5, flex: 1, minWidth: 180 }}>
+                  How generous your scheme is. Guests see their balance on their bill — nothing is texted, so this costs you nothing to run.
+                </span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+                {([
+                  ["earn_per_100", "Points per ₹100 spent", 0, 1000, 1],
+                  ["point_value_paise", "What 1 point is worth (paise)", 1, 100000, 1],
+                  ["min_redeem", "Fewest points they can use", 0, 100000, 1],
+                  ["max_redeem_pct", "Most of a bill points can pay (%)", 1, 100, 1],
+                ] as const).map(([k, label, min, max, step]) => (
+                  <label key={k} style={{ display: "block" }}>
+                    <span className="adm-muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>{label}</span>
+                    {/* A BOX THE SCREEN FILLS IN MUST ACCEPT ITS OWN NUMBER — step=1 on whole
+                        counts only; nothing here is ever fractional. */}
+                    <input className="adm-input" type="number" inputMode="numeric" min={min} max={max} step={step}
+                      style={{ width: "100%" }}
+                      value={String((rulesDraft as Record<string, unknown>)[k] ?? "")}
+                      onChange={(e) => setRulesDraft({ ...rulesDraft, [k]: Number(e.target.value) })} />
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 11 }}>
+                <span className="adm-muted" style={{ fontSize: 12.5, flex: 1, minWidth: 220 }}>
+                  A ₹1,000 bill earns <b>{Math.floor((1000 * (Number(rulesDraft.earn_per_100) || 0)) / 100)}</b> points,
+                  and {Number(rulesDraft.min_redeem) || 0} points are worth{" "}
+                  <b>₹{Math.round(((Number(rulesDraft.min_redeem) || 0) * (Number(rulesDraft.point_value_paise) || 0)) / 100)}</b> off.
+                </span>
+                {rulesMsg && <span className="adm-muted" style={{ fontSize: 12.5 }}>{rulesMsg}</span>}
+                <button className="adm-btn" disabled={rulesSaving} onClick={saveRules}>
+                  {rulesSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="adm-card">
             <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
               <input className="adm-input" style={{ flex: 1, minWidth: 180 }} placeholder="Search by name or mobile…"
@@ -468,11 +587,20 @@ export default function OwnerCustomers() {
                       <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <span style={{ fontFamily: "ui-monospace, monospace" }}>{showPhone(c.phone)}</span>
                         <span>· {c.visits ?? 0} visit{(c.visits ?? 0) === 1 ? "" : "s"}</span>
+                        {hasLoyalty(c.restaurant_id) && <span style={{ color: "#b45309", fontWeight: 700 }}>· ⭐ {c.points ?? 0}</span>}
                         {rests.length > 1 && <span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>{c.restaurantName}</span>}
                       </div>
                       {/* The dates are NOT here on purpose — they live in the record this opens. */}
                       <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 3 }}>Tap for their visits, dates and bills</div>
                     </button>
+                    {hasLoyalty(c.restaurant_id) && (
+                      <button className="adm-btn" title="Correct this guest's points" aria-label={`Correct points for ${named(c.name) || c.phone || "this guest"}`}
+                        onClick={(e) => { e.stopPropagation(); setAdjust({ rid: c.restaurant_id, phone: c.phone, name: named(c.name) || c.phone, balance: c.points ?? 0 }); }}
+                        style={{ flex: "none", padding: "9px 11px", fontSize: 13, color: "#b45309", background: "transparent",
+                          border: "1px solid transparent", minWidth: 40, minHeight: 40 }}>
+                        <i className="fas fa-star" aria-hidden="true" />
+                      </button>
+                    )}
                     <button className="adm-btn cust-erase" title="Erase this customer (permanent)" aria-label={`Erase ${named(c.name) || c.phone || "this customer"}`}
                       disabled={erasing === `${c.restaurant_id}:${c.phone}`}
                       onClick={(e) => { e.stopPropagation(); erase(c); }}
@@ -492,6 +620,7 @@ export default function OwnerCustomers() {
                       <th style={{ padding: "8px 10px" }}>Name</th>
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>Phone</th>
                       <th style={{ padding: "8px 10px", textAlign: "center" }}>Visits</th>
+                      {loyaltyRids.length > 0 && <th style={{ padding: "8px 10px", textAlign: "center", whiteSpace: "nowrap" }}>Points</th>}
                       {multiRest && <th style={{ padding: "8px 10px" }}>Restaurant</th>}
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>First visit</th>
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>Last visit</th>
@@ -510,6 +639,17 @@ export default function OwnerCustomers() {
                         </td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{showPhone(c.phone)}</td>
                         <td style={{ padding: "9px 10px", textAlign: "center", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{c.visits ?? 0}</td>
+                        {loyaltyRids.length > 0 && (
+                          <td style={{ padding: "9px 10px", textAlign: "center", fontVariantNumeric: "tabular-nums" }}>
+                            {!hasLoyalty(c.restaurant_id) ? <span className="adm-muted">—</span> : (
+                            <button className="adm-btn" title="Correct this guest's points"
+                              onClick={(e) => { e.stopPropagation(); setAdjust({ rid: c.restaurant_id, phone: c.phone, name: named(c.name) || c.phone, balance: c.points ?? 0 }); }}
+                              style={{ padding: "3px 9px", fontSize: 13, fontWeight: 700, color: "#b45309", background: "transparent", border: "1px solid var(--border-c,#e5e7eb)" }}>
+                              ⭐ {c.points ?? 0}
+                            </button>
+                            )}
+                          </td>
+                        )}
                         {multiRest && <td style={{ padding: "9px 10px" }}><span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>{c.restaurantName}</span></td>}
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontSize: 12.5 }}>{fmt(c.first_seen_at)}</td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontSize: 12.5 }}>{fmt(c.last_seen_at)}</td>
@@ -643,8 +783,85 @@ export default function OwnerCustomers() {
               </div>
             </div>
           )}
+
+          {/* ── CORRECT A GUEST'S POINTS BY HAND (mig 403) ───────────────────────────────────────
+              The only way points move with no bill behind them, so the WHY is not optional: the
+              form requires it and so does the database. What happens is written out in words
+              before they tap, because the number they type is signed and "-50" is easy to mistype.
+              Every correction writes a ledger row AND a Removals row — points are worth money. */}
+          {adjust && (
+            <AdjustPoints who={adjust} onClose={() => setAdjust(null)} onApply={applyAdjust} />
+          )}
         </>
       )}
     </>
+  );
+}
+
+/** The points-correction dialog. Its own component so the page keeps one state machine and the
+ *  draft (amount + reason) dies with the dialog rather than lingering on the page. */
+function AdjustPoints({ who, onClose, onApply }: {
+  who: { rid: string; phone: string; name: string; balance: number };
+  onClose: () => void;
+  onApply: (delta: number, note: string) => Promise<string>;
+}) {
+  const [delta, setDelta] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const n = Math.trunc(Number(delta) || 0);
+  // Floored at zero, exactly as the database floors it — the preview must not promise a negative
+  // balance the function will refuse to create.
+  const after = Math.max(0, who.balance + n);
+  const ready = n !== 0 && note.trim().length > 0 && !busy;
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label={`Correct points for ${who.name}`}
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 99992,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} className="adm-card"
+        style={{ width: "min(94vw, 420px)", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 4 }}>
+          <b style={{ fontSize: 15, flex: 1 }}>⭐ Correct points</b>
+          <button className="adm-btn" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="adm-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+          {who.name} has <b>{who.balance}</b> point{who.balance === 1 ? "" : "s"}.
+        </div>
+
+        <label style={{ display: "block", marginBottom: 10 }}>
+          <span className="adm-muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+            Add or take away (use a minus for taking away)
+          </span>
+          <input className="adm-input" type="number" inputMode="numeric" step={1} style={{ width: "100%" }}
+            placeholder="e.g. 50 or -50" value={delta} onChange={(e) => setDelta(e.target.value)} autoFocus />
+        </label>
+
+        <label style={{ display: "block", marginBottom: 10 }}>
+          <span className="adm-muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+            Why? (required — this is the only record of it)
+          </span>
+          <input className="adm-input" maxLength={200} style={{ width: "100%" }}
+            placeholder="e.g. points missed on bill #412" value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+
+        {n !== 0 && (
+          <div style={{ fontSize: 13, marginBottom: 10 }}>
+            Their balance becomes <b>{after}</b>
+            {who.balance + n < 0 && <span className="adm-muted"> — you can&apos;t go below zero, so only {who.balance} will come off.</span>}
+          </div>
+        )}
+        {msg && <div style={{ fontSize: 12.5, color: "var(--adm-danger,#e5484d)", marginBottom: 10 }}>{msg}</div>}
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="adm-btn" onClick={onClose}>Cancel</button>
+          <button className="adm-btn" disabled={!ready}
+            onClick={async () => { setBusy(true); setMsg(""); const e = await onApply(n, note.trim()); if (e) setMsg(e); setBusy(false); }}>
+            {busy ? "Saving…" : "Correct the points"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
