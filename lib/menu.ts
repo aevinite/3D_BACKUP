@@ -16,6 +16,27 @@ import { supabase } from "./supabase";
 import { effectiveTaxRate, priceTaxMode, itemTaxModesAllowed, type DishTaxMode } from "./tax";
 import { DEFAULT_RESTAURANT_ID } from "./tenant";
 
+// One hotspot card on a 3D model (menu_items.model_tags, mig 402).
+//   id/emoji/name/b1/b2  — what the card says
+//   x, y, z              — the point ON the model the connector line touches
+//   nx, ny, nz           — the surface normal there (which way that point faces)
+//   tagPosition          — "tx ty tz": where the card itself floats, as one space-separated string
+// The viewer owns the meaning of every field; this type only has to carry them faithfully.
+export interface ModelTag {
+  id: string;
+  emoji: string;
+  name: string;
+  b1: string;
+  b2: string;
+  x: number;
+  y: number;
+  z: number;
+  nx: number;
+  ny: number;
+  nz: number;
+  tagPosition?: string;
+}
+
 // The shape of one dish in the app. Every field a menu card / detail page might
 // need lives here. Some fields are optional (marked with "?") because not every
 // dish has, say, a 3D model.
@@ -31,6 +52,21 @@ export interface MenuItem {
   modelFolder?: string;
   modelSmallUrl?: string;
   modelOptimizedUrl?: string;
+  // ── THE 3D VIEWER'S HOTSPOT TAGS, AND THEY BELONG TO THIS DISH (mig 402) ─────────────────────
+  // The little labelled cards pinned onto the model on /view/<folder> — "🥐 Croissant / Rich in
+  // Carbs / Buttery & Flaky" with a line drawn to the point on the dish it names. They used to
+  // live in `public/content/items/<folder>/config.json`, keyed on a folder NAME that any owner
+  // could type and two restaurants could share; that is why the 3D screen had to stop reading the
+  // file for every tenant but #1, and why the tags disappeared for everyone else (owner,
+  // 2026-09-20 — "they were the main look for 3D"). The dish row is the only key that is
+  // genuinely per-restaurant.
+  //
+  // DETAIL-ONLY, like `nutrition` and `ingredients` below: absent when the column was not
+  // selected, so the menu grid (CARD_COLUMNS) carries not one byte of it.
+  modelTags?: ModelTag[];
+  // The saved opening camera pose for this dish in 3D, as a model-viewer camera-orbit string
+  // ("<theta>deg <phi>deg <radius>m"). Undefined = the viewer's default framing.
+  modelFrontView?: string;
   description: string;
   // ── DETAIL-ONLY, and OPTIONAL on purpose (T9 improvement 15, 2026-08-06) ──────────────────────
   // A dish CARD never draws these. The grid reads CARD_COLUMNS, which correctly leaves the columns
@@ -155,6 +191,11 @@ function mapRow(row: any, agg?: RatingAgg): MenuItem {
     rating: agg?.avg_rating != null ? Number(agg.avg_rating).toFixed(1) : "",
     reviewCount: agg?.review_count ?? 0,
     time: row.time ?? "",
+    // A dish with no cards placed on its model reads as an empty list, which is what every
+    // non-3D dish already looked like. Array-checked so a hand-edited row can never hand the
+    // viewer something it would try to loop over. (mig 402)
+    ...(has(row, "model_tags") ? { modelTags: Array.isArray(row.model_tags) ? row.model_tags : [] } : {}),
+    ...(has(row, "model_front_view") ? { modelFrontView: row.model_front_view ?? undefined } : {}),
     ...(has(row, "nutrition") ? { nutrition: row.nutrition ?? { calories: "", protein: "", carbs: "", sugar: "" } } : {}),
     ...(has(row, "ingredients") ? { ingredients: row.ingredients ?? [] } : {}),
     ...(has(row, "reviews") ? { reviews: row.reviews ?? [] } : {}),
@@ -686,6 +727,32 @@ export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_R
   // mapped.reviews stays as mapRow left it (the legacy column, always empty). The real list
   // is loaded by whoever actually shows it — see the note above.
   return mapped;
+}
+
+// The dish that owns a 3D model FOLDER, within one restaurant — or null.
+//
+// WHY IT EXISTS (mig 402): the 3D screen is `/view/<folder>`, and the dish is normally carried in
+// the `?from=<slug>` query the menu adds. A 3D link that was BOOKMARKED, forwarded, or opened from
+// the "your model is ready" toast of a dish with no slug has no `from=` at all — and now that the
+// hotspot tags live on the dish row rather than in a file named after the folder, no dish means no
+// tags. Nothing else could answer "which dish is this folder?", so this does, scoped to the
+// restaurant, on the partial index migration 402 adds.
+//
+// It resolves the slug and then goes through getMenuItem, so a folder whose dish is hidden,
+// open-priced, or in a switched-off category gets the same "no such dish" answer as everywhere
+// else — this must not become a second door around those rules.
+export async function getMenuItemByModelFolder(folder: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<MenuItem | null> {
+  if (!folder) return null;
+  requireRestaurant(restaurantId, "load this dish");
+  const { data, error } = await supabase
+    .from("menu_items")
+    .select("slug")
+    .eq("restaurant_id", restaurantId)
+    .eq("model_folder", folder)
+    .limit(1)
+    .maybeSingle();
+  if (error || !data?.slug) return null;
+  return getMenuItem(data.slug, restaurantId);
 }
 
 // The newest real reviews for one dish (capped at 20), reshaped to the

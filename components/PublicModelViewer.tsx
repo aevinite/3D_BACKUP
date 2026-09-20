@@ -7,6 +7,13 @@ import Script from "next/script";
 // The settings this viewer needs: where the 3D model file lives (`modelUrl`)
 // and the list of "hotspot" tags to pin onto the model (the little labelled
 // callouts pointing at parts of the dish).
+//
+// WHERE THE TAGS COME FROM: the DISH'S OWN DATABASE ROW — `menu_items.model_tags`, migration 402.
+// Until 2026-09-20 they were read out of `public/content/items/<folder>/config.json`, keyed on a
+// folder name two restaurants could share; that is why the 3D screen had to stop reading the file
+// for every tenant but #1, and why every other restaurant's model spun with no callouts on it at
+// all. This component does not care where they came from — it just draws what it is handed — but
+// the caller must keep handing it exactly one source. See app/view/[folder]/ViewerClient.tsx.
 interface PublicConfig {
   modelUrl?: string;
   // Camera angle + distance the editor saved ("<theta>deg <phi>deg <radius>m").

@@ -2,14 +2,14 @@
 // (spinning the model, hotspots, AR), so it has to run here.
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation"; // reads the "?from=..." in the address
 import PublicModelViewer from "@/components/PublicModelViewer"; // wraps the <model-viewer> 3D element
 import InfinityLoader from "@/components/InfinityLoader";       // loading spinner
 import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
 import { modelWatchlist } from "@/lib/modelWatchlist"; // tracks who's waiting on a model (for toasts)
-import { getMenuItem, getSettings, type MenuItem } from "@/lib/menu"; // fetch one dish's details
+import { getMenuItem, getMenuItemByModelFolder, getSettings, type MenuItem, type ModelTag } from "@/lib/menu"; // fetch one dish's details
 import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant"; // resolve the restaurant this viewer belongs to
 import { accentPaletteCss, accentCanvasCss } from "@/lib/accent"; // restaurant colour + page canvas
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
@@ -78,33 +78,18 @@ interface PublicConfig {
     carbs?: string;
     price?: string;
   };
-  // A saved camera angle + distance, as a model-viewer camera-orbit string:
-  // "<theta>deg <phi>deg <radius>m" (e.g. "519.36deg 71.39deg 1.937m"). When present, the reveal
-  // spin lands exactly on this pose instead of the default framing.
+  // ⚰️ `tags` AND `frontView` USED TO LIVE HERE, AND THEY ARE GONE FROM THIS FILE ON PURPOSE
+  // (mig 402, owner 2026-09-20). The hotspot cards — the labelled callouts pinned onto the model,
+  // and the whole look of this screen — were read out of `/content/items/<folder>/config.json`,
+  // a file keyed on a folder NAME that any owner can type and two restaurants can share. That is
+  // exactly why this screen had to stop reading the file for every restaurant except #1 (commit
+  // c86318c7), and it took the tags away from every other tenant with it: measured on the dev
+  // stack, `aevidine`'s croissant and waffle showed a bare spinning model with no cards at all.
   //
-  // NOTHING IN THIS REPOSITORY WRITES IT (checked 2026-09-14, owner's item 7). This comment used
-  // to name "the editor's Set front view button"; there is no such button, and no code anywhere
-  // sets this key. The only value that exists is typed by hand into
-  // `public/content/items/Waffle/config.json`, which is restaurant #1's own checked-in demo
-  // content — so exactly ONE dish in the product opens on a saved pose, and no other restaurant
-  // can ever have one (every tenant gets an empty config; see the config effect below).
-  // It is READ and honoured, so it is not dead — it simply has no producer. Kept deliberately:
-  // a future editor control would write exactly this key.
-  frontView?: string;
-  tags?: Array<{
-    id: string;
-    emoji: string;
-    name: string;
-    b1: string;
-    b2: string;
-    x: number;
-    y: number;
-    z: number;
-    nx: number;
-    ny: number;
-    nz: number;
-    tagPosition?: string;
-  }>;
+  // They now live on the DISH ROW — `menu_items.model_tags` / `model_front_view`, reached through
+  // `menuItem` below — which is the only key that is genuinely per-restaurant. Both keys are
+  // deleted from the two config.json files, so there is ONE source and it cannot drift.
+  // DO NOT re-add them here: a second source is how a tenant inherits somebody else's dish.
 }
 
 // Turn a saved "front view" string from config.json into numbers the viewer can
@@ -142,6 +127,25 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // static config unchanged (this stays null for #1), so the gold-standard viewer is
   // untouched. (audit fix 2026-07-07)
   const [dbModel, setDbModel] = useState<{ small?: string; opt?: string } | null>(null);
+  // Has the dish lookup SETTLED? Not "did it find something" — found, not found and failed all
+  // count. The reveal must not START before this is true: it paints the hotspot cards in one by
+  // one, and a card that arrives after its own animation has already run stays invisible for good
+  // (they sit at opacity 0 until `startTagAnimation` lifts them). The tags used to arrive with the
+  // config, which always beat the model; since mig 402 they arrive with the DISH, and nothing
+  // orders those two reads.
+  //
+  // It gates the REVEAL, never the model's `load` listener — see requestReveal. Gating the whole
+  // effect was the obvious version and it is wrong: the listener would then be attached one commit
+  // late, miss a `load` that had already fired, and leave the spinner turning over a model the
+  // guest can already see until the 4s safety net caught it. MEASURED on this stack: one Waffle
+  // open in ten arrived with no cards at all.
+  const [dishSettled, setDishSettled] = useState(false);
+  // dishSettled as a ref, because the load handler is captured in a closure that must read the
+  // CURRENT answer rather than the one that was true when it was created.
+  const dishSettledRef = useRef(false);
+  // "The model is ready and the reveal was asked for, but the dish had not landed yet." The
+  // effect below plays it the moment the dish does.
+  const revealPendingRef = useRef(false);
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
   const [accentCss, setAccentCss] = useState<string>(""); // this restaurant's colour for the viewer chrome
   // Which restaurant this viewer belongs to, resolved from ?r= (defaults to #1
@@ -332,9 +336,17 @@ export default function ViewerClient({ folder }: { folder: string }) {
         const s = await getSettings(rid);
         if (!s.menuEnabled || s.serviceMode) { if (!cancelled) setUnavailable("closed"); return; }
       } catch { /* can't tell → carry on rather than hide a working dish */ }
-      if (cancelled || !fromSlug) return;
+      if (cancelled) return;
       try {
-        const m = await getMenuItem(fromSlug, rid);
+        // A 3D link normally carries `?from=<slug>` — the menu and the dish page both add it.
+        // A BOOKMARKED or forwarded one does not, and neither does the "your model is ready"
+        // ticket for a dish with no slug. That used to cost only the name in the bottom bar,
+        // because the callout cards came from a file named after the folder. They come from the
+        // dish now (mig 402), so no dish means no cards: find it by its folder instead, scoped
+        // to this restaurant, on migration 402's index. One extra read, only on the cold link.
+        const m = fromSlug
+          ? await getMenuItem(fromSlug, rid)
+          : await getMenuItemByModelFolder(folder, rid);
         if (cancelled) return;
         setMenuItem(m);
         // Non-#1 restaurant with its own uploaded model → use it as the source of
@@ -345,9 +357,42 @@ export default function ViewerClient({ folder }: { folder: string }) {
           setDbModel(null);
         }
       } catch {}
+      // SETTLED, whatever the answer was — see `dishSettled`. This runs on the success path, on a
+      // dish that does not exist, and on a thrown read; the two `return`s above (unknown
+      // restaurant / closed menu) deliberately leave it false, because those screens never reach
+      // a model at all.
+      if (!cancelled) setDishSettled(true);
     })();
     return () => { cancelled = true; };
-  }, [fromSlug, fromRestaurant]);
+  }, [fromSlug, fromRestaurant, folder]);
+
+  // ── THE HOTSPOT TAGS, FROM THE DISH'S OWN ROW (mig 402) ──────────────────────────────────────
+  // The labelled cards pinned onto the model. ONE source: `menu_items.model_tags`, scoped to this
+  // restaurant by the query that fetched it — so two restaurants whose folders are both called
+  // "Croissant" get their own cards, and neither can inherit the other's. Memoised because three
+  // separate animation routines walk this list every frame; a fresh array each render would
+  // retire and restart the connector-line loop.
+  const tags = useMemo(() => menuItem?.modelTags ?? [], [menuItem?.modelTags]);
+  // The saved opening pose, same journey and same reasoning (menu_items.model_front_view).
+  const frontView = menuItem?.modelFrontView;
+  // ── AND THE ANIMATIONS READ THEM THROUGH A REF, NOT THROUGH THE CLOSURE ──────────────────────
+  // The three routines that walk this list (the connector-line loop, the staggered reveal, the
+  // reset) are plain functions re-created every render, and they are called from timers and DOM
+  // listeners that were handed a FUNCTION FROM AN EARLIER RENDER. The model's 800 ms reveal timer
+  // is set up by an effect keyed on [loading, error, activeUrl, folder] — none of which move when
+  // the dish arrives — so it happily fires a copy of `runFullSequence` that closed over an empty
+  // tag list.
+  //
+  // MEASURED, and this is what the reset does when that happens: it clears every `.hs-card-wrap`
+  // on the page by selector (opacity 0, scale 0.8) and then walks the EMPTY list to bring them
+  // back, so all three cards exist, sit in the right place, and are invisible forever. Restaurant
+  // #1's croissant, `[DBG] runFullSequence tags= 0` with the dish plainly loaded in the bar below.
+  // Reading the ref at call time is what makes the answer current instead of remembered.
+  const tagsRef = useRef<ModelTag[]>([]);
+  // Same trap, smaller blast radius: the cinematic reads the saved pose when it STARTS, so a
+  // stale copy lands the dish on the default framing instead of the one that was saved for it.
+  const frontViewRef = useRef<string | undefined>(undefined);
+  useEffect(() => { tagsRef.current = tags; frontViewRef.current = frontView; }, [tags, frontView]);
 
   // Pin the display when a restaurant has those pickers switched off (the menu's
   // Header does the same, but the /view route lives outside it). Currency OFF →
@@ -632,6 +677,27 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // connector-line loop. See the note on aliveRef.
     const timers: ReturnType<typeof setTimeout>[] = [];
 
+    // ── SCHEDULING THE REVEAL IS NOT THE SAME AS HAVING PLAYED IT ────────────────────────────
+    // `startedRef` used to be set the moment the 800 ms timer was ARMED, and that timer is
+    // cleared when this effect is torn down — which happens on the ordinary, expected event of
+    // the model upgrading from the ~2 MB preview to the ~9 MB version (`activeUrl` changes). If
+    // the better file lands inside that 800 ms window, the timer is cancelled and the flag says
+    // the reveal already happened, so nothing ever plays it: the callout cards stay at opacity 0
+    // for the whole visit. MEASURED on restaurant #1's waffle, on a SECOND visit — with both GLBs
+    // already in the model cache the two loads are milliseconds apart, so the better the guest's
+    // connection and the more they browse, the likelier they lose the cards entirely.
+    //
+    // So the flag now means PLAYED, set inside the timer, and arming is idempotent. A torn-down
+    // schedule is simply re-armed by the next load, which is what the upgrade fires anyway.
+    const armReveal = (delay: number) => {
+      if (startedRef.current) return;
+      timers.push(setTimeout(() => {
+        if (startedRef.current) return;
+        startedRef.current = true;
+        requestReveal();
+      }, delay));
+    };
+
     // The model finished loading and is now visible.
     const handleLoad = () => {
       modelSeenRef.current = true;             // remember it appeared
@@ -643,10 +709,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       }, 1000));
       // keep the "triple-tap to replay" hint visible as a persistent cue
       // Play the reveal animation once, shortly after the model appears.
-      if (!startedRef.current) {
-        startedRef.current = true;
-        timers.push(setTimeout(runFullSequence, 800));
-      }
+      armReveal(800);
     };
 
     // When the guest enters AR mode, replay the reveal animation.
@@ -666,13 +729,13 @@ export default function ViewerClient({ folder }: { folder: string }) {
     mv.addEventListener("error", handleError);
     mv.addEventListener("ar-status", handleARStatus);
 
+    // The model was ALREADY loaded when this effect (re)ran — either it finished between the
+    // commit that mounted it and this one, or this is the re-run after an upgrade that has
+    // nothing left to load. Either way no further `load` event is coming, so arm here too.
+    if ((mv as any).loaded) armReveal(800);
+
     // Safety net: if "load" never fires within 4s, play the reveal anyway.
-    const startTimeout = setTimeout(() => {
-      if (!startedRef.current) {
-        startedRef.current = true;
-        runFullSequence();
-      }
-    }, 4000);
+    const startTimeout = setTimeout(() => armReveal(0), 4000);
 
     // Cleanup: stop listening and cancel timers/animation when leaving.
     return () => {
@@ -748,7 +811,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     if (!aliveRef.current) return;
     // A newer reveal has taken over — this chain is retired. See loopGenRef.
     if (gen !== loopGenRef.current) return;
-    config?.tags?.forEach(ing => _updateLine(ing));
+    tagsRef.current.forEach(ing => _updateLine(ing));
     requestRef.current = requestAnimationFrame(() => _loop(gen));  // schedule the next frame
   };
 
@@ -772,7 +835,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // menu stops where the editor said it should. If not, we keep the original
     // behaviour (spin the MODEL itself, camera stays at the default framing) so
     // existing dishes look exactly as before.
-    const fv = parseFrontView(config?.frontView);
+    const fv = parseFrontView(frontViewRef.current);
 
     if (fv) {
       // --- frontView path: animate the camera one full lap, ending on the pose.
@@ -828,7 +891,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // After the model settles, reveal the hotspot lines and label cards one by
   // one (staggered), each line "drawing" itself then its card fading/scaling in.
   const startTagAnimation = () => {
-    config?.tags?.forEach((ing, index) => {
+    tagsRef.current.forEach((ing, index) => {
       const delay = index * 260;  // stagger each tag so they appear in turn (was 400ms — see below)
       const line = document.getElementById(`hs-line-${ing.id}`) as SVGLineElement | null;
       const card = document.querySelector(`#hs-card-${ing.id} .hs-card`);
@@ -881,12 +944,33 @@ export default function ViewerClient({ folder }: { folder: string }) {
     });
   };
 
+  // Play the reveal — or book it for the moment the dish lands. Everything that starts the
+  // cinematic goes through here (the model's `load`, the 4s safety net); the triple-tap replay
+  // does not, because by the time a guest can tap, the dish has long since arrived.
+  const requestReveal = () => {
+    if (!dishSettledRef.current) { revealPendingRef.current = true; return; }
+    runFullSequence();
+  };
+
+  // The dish has landed. If the model was ready first, the reveal was waiting for exactly this.
+  // `tags` is already the new list in this render — setMenuItem and setDishSettled are set one
+  // after the other in the same async block, so React commits them together.
+  useEffect(() => {
+    dishSettledRef.current = dishSettled;
+    if (!dishSettled || !revealPendingRef.current) return;
+    revealPendingRef.current = false;
+    runFullSequence();
+    // runFullSequence is re-created every render (it closes over `tags`); depending on its
+    // identity would replay the cinematic on every single render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dishSettled]);
+
   // The whole reveal, start to finish: first RESET every line and card back to
   // hidden, then run the cinematic spin, then play the staggered tag animation
   // and start the line-tracking loop. Called on first load and on triple-tap.
   const runFullSequence = () => {
     // Reset all the connector lines to invisible.
-    config?.tags?.forEach(ing => {
+    tagsRef.current.forEach(ing => {
       const line = document.getElementById(`hs-line-${ing.id}`) as SVGLineElement | null;
       if (!line) return;
       line.classList.remove("line-visible");
@@ -961,8 +1045,12 @@ export default function ViewerClient({ folder }: { folder: string }) {
       if (timer) clearTimeout(timer);
     };
     // runFullSequence is a stable closure (see note above); intentionally omitted.
+    // `dishSettled` IS a dep, and it has to be. This effect captures the `runFullSequence` of the
+    // render it last ran in, and that function's RESET half clears every `.hs-card-wrap` on the
+    // page by selector — while the half that brings them back walks the tag list. Capture it
+    // before the tags land and a triple-tap would blank all three cards and never restore them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, error, activeUrl]);
+  }, [loading, error, activeUrl, dishSettled]);
 
   // This restaurant isn't serving guests right now (Menu switch off / maintenance), or the
   // ?r= slug doesn't resolve. Say so plainly — never fall through to another tenant's dish.
@@ -1145,7 +1233,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
           model file. We pass the chosen file in as modelUrl. */}
       {config && activeUrl && (
         <PublicModelViewer
-          config={{ ...config, modelUrl: activeUrl }}
+          // The model URL is chosen above; the callout cards and the opening pose come from the
+          // DISH, not from the static config (mig 402) — see the note on PublicConfig.
+          config={{ ...config, modelUrl: activeUrl, tags, frontView }}
           /* I4 (2026-08-12): every dish used to announce itself to a screen reader as the same
              "3D food model", so a blind diner could not tell the croissant from the waffle. Prefer
              the LIVE menu name, fall back to the config's, then to the folder — the same order the
