@@ -246,18 +246,32 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
 /* --- CHEF CALL BUTTON --- */
 .chef-call {
   position: fixed;
-  /* --bell-lift is set by MenuView's settleBell(): 0 unless a dish's own tappable control is
-     measured to be underneath, in which case it is exactly the distance needed to clear it.
-     It rides on `bottom` rather than `transform` on purpose — transform is already owned by the
-     float animation, :hover and :active, and a second writer there is how one of them silently
-     stops working. */
-  bottom: calc(24px + env(safe-area-inset-bottom) + var(--bell-lift, 0px));
+  /* THE BELL DOES NOT MOVE ON ITS OWN. ANY OF IT.
+     REJECTED (owner, 2026-08-17, R29 — re-confirmed and widened 2026-09-20): the call-waiter bell
+     may not stand down, hide, fade, shrink, step aside, float, or lift itself out of the way.
+     2026-08-17: "i want like previous bell of call waiter should be stuck at his place we can
+     scroll and click the thing make sure don't change that again."
+     2026-09-20: "why is the bell like flickering… at one point it just goes up and down… the
+     waiter bell is look very unprofessional." 
+     Three separate things used to move it, and MEASURED TOGETHER at 390px they were absurd:
+       · `animation: chefFloat` bobbed it 12px up and down for ever, even at rest;
+       · `body.menu-scrolling` shrank it to 72%, faded it to 45% and dropped it 26px on EVERY
+         scroll, then put it back 450ms later;
+       · `--bell-lift` hopped it up to 260px (96px observed) whenever settleBell() decided a
+         control was underneath.
+     Total travel with the guest sitting perfectly still: 107 px. And it still finished sitting on
+     a `.cat-group-head`, so the machinery did not even achieve the thing it cost all that for.
+     A fixed button that covers a little content is what every floating action button does; a
+     button that jumps a third of a screen while you read is not. Do not re-add a float, a
+     scroll step-aside, a fade, a shrink or a measured lift. */
+  bottom: calc(24px + env(safe-area-inset-bottom));
   right: calc(20px + env(safe-area-inset-right));
   width: clamp(48px, 13vw, 58px); height: clamp(48px, 13vw, 58px);
   background: var(--accent-grad); border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: clamp(20px, 5vw, 24px); color: #1a0f0a; box-shadow: 0 12px 30px var(--accent-glow);
-  z-index: 100; cursor: pointer; animation: chefFloat 3s ease-in-out infinite;
-  transition: all 0.3s;
+  z-index: 100; cursor: pointer;
+  /* transition kept for :hover/:active only — those answer the guest's own finger. */
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
   /* THESE THREE KEEP A <button> PIXEL-IDENTICAL TO THE <div> IT REPLACED (2026-09-14, item 1).
      The bell became a real button so a keyboard and a screen reader can reach it. A browser
      gives every button a default border, padding and font of its own, none of which the div
@@ -270,29 +284,15 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
 .chef-call:focus-visible { outline: 3px solid var(--accent, #d4a574); outline-offset: 3px; }
 .chef-call:hover { transform: scale(1.15) rotate(10deg); box-shadow: 0 16px 40px var(--accent-glow); }
 .chef-call:active { transform: scale(0.95); }
-/* THE BELL MUST NOT SIT ON A DISH'S ADD BUTTON.
-   On a 360px phone the gallery is two columns and each card's add/customise control is
-   pinned to its own bottom-right — which is exactly where this fixed bell floats, so at
-   rest it covered the right-hand card's button (guest sweep 2026-08-04, seen on both
-   restaurants). Two deterministic parts, no change to the owner's chosen layout:
-     · while the guest is SCROLLING (body.menu-scrolling, set by the menu's own scroll
-       handler) the bell steps aside — it shrinks and drops out of the card's control
-       corner — so the button they are scrolling towards is visible and tappable on
-       arrival. It KEEPS its own pointer-events on purpose: making it tap-through would
-       send a tap aimed at the bell into a dish card instead, trading one wrong target
-       for another;
-     · the list gets bottom clearance below, so the LAST row can always be scrolled clear
-       of the bell instead of being permanently pinned under it.
-   Motion is disabled for anyone who asked for reduced motion. */
-body.menu-scrolling .chef-call {
-  transform: translateY(26px) scale(0.72);
-  opacity: 0.45;
-  animation: none;                 /* stop the float so it doesn't fight this */
-}
-@media (prefers-reduced-motion: reduce) {
-  body.menu-scrolling .chef-call { transform: none; opacity: 0.45; }
-}
-@keyframes chefFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+/* OBITUARY (2026-09-20). `body.menu-scrolling .chef-call` (shrink to 72%, fade to 45%, drop
+   26px), its prefers-reduced-motion twin, and `@keyframes chefFloat` all stood here. They were
+   added on 2026-08-04 so the bell would not cover a dish's add button on a two-column phone
+   layout — a real fault, wrongly treated. The cure moved the button constantly and still left it
+   sitting on a control; the owner has now twice asked for a bell that stays put.
+   What KEEPS solving the original fault, without motion: the list's bottom clearance (below), so
+   the last row is always scrollable clear of the bell, and the bell keeping its own
+   pointer-events, so a tap aimed at the bell is never delivered to a card. Everything else is a
+   floating button overlapping some scenery, which is what floating buttons do. */
 
 /* --- OVERLAYS & PANELS --- */
 .overlay { 
