@@ -371,6 +371,83 @@ check(
   );
 }
 
+// ── THE HOTSPOT TAGS ARE THE 3D SCREEN, AND THEY STAY ON (owner, 2026-09-20) ─────────────────
+// "where are the tags in 3D … they were the main look for 3D … after adding it back NEVER remove
+// them." They had been gone since 2026-09-02 for every restaurant except #1 — not deleted on
+// purpose, but lost as a side effect of closing the folder-name collision above, because the only
+// place a tag could live was a file named after the folder. They live on the dish row now
+// (menu_items.model_tags, migration 402). These four checks are what "never remove them" means in
+// code: one source, reachable by every tenant, and revealed after it has actually arrived.
+{
+  const v = read(VIEWER);
+  const menu = read("lib/menu.ts");
+  check(
+    "the 3D screen takes its hotspot tags from the DISH's own row, not from the static config",
+    /menuItem\?\.modelTags/.test(v) && !/config\?\.tags/.test(v) && !/config\.tags/.test(v),
+    "app/view/[folder]/ViewerClient.tsx must read the callout cards from `menuItem.modelTags` " +
+      "(mig 402). Reading `config.tags` again means only restaurant #1 can ever have them — the " +
+      "static config is refused for every other tenant by the check above."
+  );
+  check(
+    "…and lib/menu.ts actually carries model_tags through from the database",
+    /\.\.\.\(has\(row, "model_tags"\) \? \{ modelTags: Array\.isArray\(row\.model_tags\) \? row\.model_tags : \[\] \}/.test(menu) &&
+      /modelTags\?: ModelTag\[\]/.test(menu),
+    "mapRow must map `model_tags` → `modelTags`, or the viewer is handed an empty list and every " +
+      "3D dish in the product loses its callouts."
+  );
+  check(
+    "…and the reveal waits for the dish read to settle before animating the cards in",
+    /if \(!dishSettledRef\.current\) \{ revealPendingRef\.current = true; return; \}/.test(v) &&
+      /armReveal\(800\);/.test(v) &&
+      /startedRef\.current = true;\s*\n\s*requestReveal\(\);/.test(v),
+    "the cards start at opacity 0 and only startTagAnimation lifts them, so a card that arrives " +
+      "after its own animation has run stays invisible for good. Every reveal must go through " +
+      "`requestReveal`, which books it until the dish lands."
+  );
+  check(
+    "…and the animations read the tag list at CALL time, not from the render that armed them",
+    (v.match(/tagsRef\.current\.forEach/g) || []).length === 3 &&
+      /parseFrontView\(frontViewRef\.current\)/.test(v) &&
+      !/^\s*tags\.forEach/m.test(v),
+    "the reveal, the reset and the connector-line loop are re-created every render but are called " +
+      "from a timer armed by an earlier one. Closing over `tags` means a reveal that fires before " +
+      "the dish lands blanks all three cards (the reset clears them by selector) and then walks an " +
+      "empty list to bring them back — measured on restaurant #1. Read tagsRef.current."
+  );
+  check(
+    "…and a reveal cancelled by the model upgrading is re-armed, not written off as played",
+    /startedRef\.current = true;\s*\n\s*requestReveal\(\);\s*\n\s*\}, delay\)\);/.test(v) &&
+      /if \(\(mv as any\)\.loaded\) armReveal\(800\);/.test(v),
+    "`startedRef` must mean PLAYED, not SCHEDULED: the 800 ms timer is cleared when the effect " +
+      "tears down, and the ordinary small→optimized model upgrade does exactly that. Setting the " +
+      "flag at arming time loses the reveal whenever the better file lands inside 800 ms — which " +
+      "is every second visit, when both GLBs are already cached. Measured on #1's waffle."
+  );
+  check(
+    "…and it gates the REVEAL, never the model's load listener",
+    /if \(loading \|\| error \|\| !mvRef\.current \|\| !activeUrl\) return;/.test(v) &&
+      /\[loading, error, activeUrl, folder\]\);/.test(v),
+    "adding `dishSettled` to that effect's condition attaches the `load` listener one commit " +
+      "late, so a model that finished first is never noticed: the spinner keeps turning over a " +
+      "visible dish until the 4s safety net fires. Gate requestReveal instead."
+  );
+  check(
+    "…and a 3D link with no ?from= slug still finds its dish (so a bookmark keeps its tags)",
+    /getMenuItemByModelFolder\(folder, rid\)/.test(v) && /export async function getMenuItemByModelFolder/.test(menu),
+    "a bookmarked /view/<folder> carries no dish slug; without the folder lookup it has no dish, " +
+      "and since mig 402 no dish means no tags."
+  );
+  for (const f of ["public/content/items/Croissant/config.json", "public/content/items/Waffle/config.json"]) {
+    const cfg = JSON.parse(read(f));
+    check(
+      `${f.split("/")[3]}'s static config holds no tags of its own`,
+      !("tags" in cfg) && !("frontView" in cfg),
+      `${f} must not carry \`tags\`/\`frontView\` again: it is keyed on a folder NAME two ` +
+        "restaurants can share, which is the whole reason the tags were lost. One source — the dish row."
+    );
+  }
+}
+
 // ── BACK and AR are big enough for a thumb (owner's item 8, 2026-09-02) ──────────────────────
 // The height is declared in THREE places, and the last two carry `!important`, so moving one alone
 // changes nothing on screen. verify:slow-load measures the RENDERED box; this is the fast half that
@@ -475,7 +552,10 @@ check(
 check(
   "every timer handleLoad starts is cleared when the model effect is torn down",
   /const timers: ReturnType<typeof setTimeout>\[\] = \[\]/.test(src[VIEWER]) &&
-    /timers\.push\(setTimeout\(runFullSequence, 800\)\)/.test(src[VIEWER]) &&
+    // The 800 ms reveal timer is armed through `armReveal` since mig 402, and it still goes into
+    // the same cleared-on-teardown list.
+    /const armReveal = \(delay: number\) => \{\s*\n\s*if \(startedRef\.current\) return;\s*\n\s*timers\.push\(setTimeout\(/.test(src[VIEWER]) &&
+    /armReveal\(800\);/.test(src[VIEWER]) &&
     /timers\.forEach\(clearTimeout\)/.test(src[VIEWER]),
   `${VIEWER} → handleLoad's 800 ms reveal timer and 1 s bar timer must be collected and cleared ` +
     "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",

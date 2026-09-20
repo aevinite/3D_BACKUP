@@ -343,13 +343,23 @@ check("P00165", "a not-serving menu previews neutrally on BOTH menu doors — cl
 // This guard is here so the next person who measures the overlap does not "fix" it a second time:
 // the fallback must stay a plain return-to-the-corner, and the bell must never be hidden, faded or
 // made untappable. Comments are stripped before this runs, so the R29 note above cannot satisfy it.
-check("R29", "the call-waiter bell is never hidden, faded or made untappable", () => {
-  const bellArea = (F.menuView.match(/const settleBell[\s\S]*?\n    \};/) || [""])[0];
-  const banned = [/visibility/, /pointer-events/, /yieldBell/, /opacity/, /display\s*=/, /\.hidden\b/]
-    .filter((r) => r.test(bellArea)).map((r) => String(r));
-  const fallbackIntact = /bell\.style\.removeProperty\("--bell-lift"\);\s*\n\s*\};/.test(bellArea);
-  return { ok: banned.length === 0 && fallbackIntact,
-    note: banned.length ? "bell is being hidden/faded: " + banned.join(", ") : `fallback intact=${fallbackIntact}` };
+// REWRITTEN 2026-09-20, and the rule got STRONGER, not weaker. This used to inspect `settleBell()`
+// — the routine that measured the nearby controls and hopped the bell up to 260px out of their way
+// — and pass as long as that routine still put the bell back afterwards. PR #1421 DELETED the
+// routine outright, on the owner's word ("at one point it just goes up and down… very
+// unprofessional"), together with `body.menu-scrolling` and `@keyframes chefFloat`. So the guard
+// went red while naming nothing: the block it read no longer exists, and "the fallback is intact"
+// is not a question you can ask about a fallback that has no forward path left.
+// What R29 means now is simply: none of the three ways of moving the bell may come back.
+check("R29", "the call-waiter bell is never hidden, faded, moved or made untappable", () => {
+  // The obituaries left behind in globals.css NAME every banned thing, so the stylesheet has to be
+  // read with its /* */ comments stripped — exactly as F.menuView already is.
+  const css = (read("app/globals.css") || "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const noLift = !/settleBell|--bell-lift/.test(F.menuView);
+  const noScrollDodge = !/menu-scrolling/.test(F.menuView) && !/\.menu-scrolling\s+\.chef-call/.test(css);
+  const noFloat = !/@keyframes\s+chefFloat/.test(css) && !/animation:\s*chefFloat/.test(css);
+  return { ok: noLift && noScrollDodge && noFloat,
+    note: `lift machinery gone=${noLift} scroll step-aside gone=${noScrollDodge} float gone=${noFloat}` };
 });
 
 // Two guest surfaces that describe themselves to a screen reader as something they are not. The

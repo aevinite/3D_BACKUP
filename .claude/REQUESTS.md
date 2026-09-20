@@ -1691,3 +1691,22 @@ one of the 992 was the SAME handful of sentences produced by our own 62-restaura
   switch both ways. **Left:** an owner screen to change the earn rate (every restaurant currently
   gets 5 points per ₹100, 1 point = ₹1, minimum 100), and a hand-correction route for a wrong
   balance (`loyalty_ledger.kind='adjust'` exists and nothing writes it yet).
+- [x] **The 3D tags are back, and they are on every restaurant now** (2026-09-20, mig 402). His
+  words: *"where are the tags in 3d make it like like before the tAGS WHERE MAIN THING AFTER ADDING
+  IT BACK NEVER REMOVE THEM THEY WERE THE MAIN LOOK FOR 3D."* The labelled callout cards pinned to
+  the model — Croissant / Sauce / Salad, Ice Cream / Belgian Waffle / Blueberries — were read from
+  `public/content/items/<folder>/config.json`, a file keyed on a folder NAME two restaurants can
+  share. Closing that collision on 2026-09-02 (c86318c7) made the file restaurant-#1-only, and took
+  the cards away from every other tenant: measured, `aevidine` (the film restaurant) showed a bare
+  spinning model. They now live on the dish row (`menu_items.model_tags` / `model_front_view`), so
+  the key is per-restaurant and the collision stays closed. **Two reveal faults found on the way and
+  fixed**: the reveal ran with the tag list captured before the dish landed (it blanks all three
+  cards by selector, then walks an empty list to bring them back — #1's croissant), and the 800 ms
+  reveal timer was cancelled by the ordinary small→optimized model upgrade while the flag said
+  "already played" (#1's waffle, every second visit, cards invisible for the whole visit). Verified
+  in Chrome at 390px and 1440px on french-house AND aevidine, both dishes, the real menu→dish→3D
+  journey, a bookmarked `/view/<folder>` with no dish in the link, and the triple-tap replay.
+  Guarded by 7 new checks in `verify:3d-viewer`. **Left:** nothing on screen — but there is still
+  no UI anywhere to PLACE a tag on a model, so a restaurant that uploads its own GLB gets a model
+  with no cards on it. Placing tags has always been a hand-edited file; it is now a hand-edited
+  column.

@@ -10,49 +10,5 @@
     "carbs": "42g",
     "price": "₹320"
   },
-  "frontView": "519.36deg 71.39deg 1.937m",
-  "tags": [
-    {
-      "id": "croissant",
-      "emoji": "🍦",
-      "name": " Ice Cream",
-      "b1": "Rich and creamy",
-      "b2": "Saffron infused",
-      "x": 0.0127,
-      "y": 0.1446,
-      "z": 0.0523,
-      "nx": 0,
-      "ny": 1,
-      "nz": 0,
-      "tagPosition": "-0.0446 0.2932 0.2078"
-    },
-    {
-      "id": "sauce",
-      "emoji": "🧇",
-      "name": "Belgian Waffle",
-      "b1": "Crispy golden texture",
-      "b2": "Light and fluffy",
-      "x": -0.2083,
-      "y": -0.0466,
-      "z": -0.0017,
-      "nx": 0,
-      "ny": -0.2,
-      "nz": 1,
-      "tagPosition": "-0.3922 0.1610 0.0521"
-    },
-    {
-      "id": "tag101",
-      "emoji": "🫐",
-      "name": " Blueberries",
-      "b1": "Naturally sweet",
-      "b2": "Juicy freshness",
-      "x": 0.2478,
-      "y": -0.0929,
-      "z": -0.0299,
-      "nx": 0,
-      "ny": 1,
-      "nz": 0,
-      "tagPosition": "0.3835 0.1749 -0.0767"
-    }
-  ]
+  "_movedOut": "The hotspot TAGS and the saved frontView pose used to live here and were moved to the dish row — menu_items.model_tags / model_front_view, migration 402 (2026-09-20). This file is keyed on a FOLDER NAME, which any owner can type and two restaurants can share, so it is read only when the visitor really is restaurant #1; keeping the tags here is what took them away from every other restaurant. Do not put them back: one source only."
 }
