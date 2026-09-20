@@ -1,7 +1,7 @@
 // Runs in the browser so it can read/save the cart and react to taps.
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, taxRulesOf, DEFAULT_TAX_RULES, type MenuItem, type TaxRules } from "@/lib/menu";
 // The ONE rule that turns a dish's price into money under the three behaviours (mig 270):
@@ -483,6 +483,12 @@ export default function CartPanel() {
   // number in floating point, and that alone was moving a paisa on 0.3% of carts).
   const totalUsd = Math.round((usdOnTopBase * (1 + taxRate) + (subtotalUsd - usdOnTopBase)) * 100) / 100;
 
+  // dishImage(): the dish's own photo, for the bill line (owner, 2026-09-20 — "IF POSSIBLE ADD
+  // IMAGE LIKE D3"). It comes from the menu the panel has ALREADY loaded for the edit/pairing/
+  // allergen lookups, so no request is made for it — same rule as everything else on this sheet.
+  // Empty string when the dish has no picture or the menu has not arrived yet; the line then
+  // renders a blank cell of the same size, so the grid never shifts when the photo appears.
+  const dishImage = (id: string) => menuItems.find((m) => m.id === id)?.image || "";
   // itemAllergens(): the allergens a given dish contains.
   const itemAllergens = (id: string) => allergenMap[id] || [];
   // conflicts(): of a dish's allergens, which ones the guest said they avoid.
@@ -1023,8 +1029,19 @@ export default function CartPanel() {
               const c = conflicts(item.id); // allergens in THIS dish the guest avoids
               return (
                 <div key={`${item.id}-${item.sig || ""}-${idx}`} className="cart-item">
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* THE DISH'S OWN PHOTO (owner, 2026-09-20: "IF POSSIBLE ADD IMAGE LIKE D3").
+                      Square, the shape every other dish image in this app uses. Plain <img> for
+                      the same reason FoodCard uses one: dish URLs are DB-driven and can be any
+                      host, which next/image's whitelist would reject. Hidden entirely when the
+                      dish has no picture, so the grid closes up rather than showing a grey box. */}
+                  {dishImage(item.id) ? (
+                    <img className="cart-item-img" src={dishImage(item.id)} alt="" loading="lazy" decoding="async" />
+                  ) : (
+                    <span className="cart-item-img" aria-hidden="true" />
+                  )}
+                  <div className="cart-item-main">
                     <div className="cart-item-name">
+                      <span className="cart-item-qty">{item.qty}×</span>
                       {item.title}
                       {isSoldOut(item.id) && (
                         <span className="guest-chip-bad">
@@ -1042,57 +1059,63 @@ export default function CartPanel() {
                           MRP
                         </span>
                       )}
-                    </div>
-                    {/* Chosen options (e.g. "Large, Oat milk"), if any. */}
-                    {item.options && item.options.length > 0 && (
-                      <div className="cart-item-opts">
-                        {item.options.map((o) => o.label).join(", ")}
-                      </div>
-                    )}
-                    {/* Removed allergens shown in red (e.g. "No milk"). */}
-                    {item.removed && item.removed.length > 0 && (
-                      <div className="cart-item-opts guest-ink-bad">
-                        No {item.removed.map((r) => allergenLabel(r).toLowerCase()).join(", ")}
-                      </div>
-                    )}
-                    {/* The guest's free-text note, in quotes. */}
-                    {item.note && <div className="cart-item-opts">“{item.note}”</div>}
-                    {features.allergies && itemAllergens(item.id).length > 0 && (
-                      <div className="cart-item-allergens">
-                        {itemAllergens(item.id).map((a) => (
-                          <span
-                            key={a}
-                            className={`allergen-dot ${declared.includes(a) ? "flag" : ""}`}
-                            title={`Contains ${allergenLabel(a).toLowerCase()}`}
-                          >
-                            {allergenIcon(a)}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {/* A clear warning if this dish conflicts with an avoided allergen. */}
-                    {features.allergies && c.length > 0 && (
-                      <div className="cart-item-warn">
-                        <i className="fas fa-triangle-exclamation"></i> contains {c.map(allergenLabel).join(", ").toLowerCase()}
-                      </div>
-                    )}
-                    {/* Quantity controls: − , the count, + , and an Edit button if customizable. */}
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
-                      <button type="button" aria-label={`Decrease ${item.title}`} onClick={() => decrement(idx)} style={qtyBtn}>−</button>
-                      <span style={{ minWidth: "32px", textAlign: "center", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>{item.qty}x</span>
-                      <button type="button" aria-label={`Increase ${item.title}`} onClick={() => increment(idx)} style={qtyBtn}>+</button>
-                      {canEdit(item.id) && (
-                        <button type="button" className="cart-edit-btn" onClick={() => editLine(item)}>
-                          <i className="fas fa-pen"></i> Edit
-                        </button>
+                      {/* The allergen dots sit ON the name line now, not on a row of their own —
+                          one less line per dish, which is the "thinness" he picked from d4. A dot
+                          the guest has said they avoid still wears its red ring (.flag). */}
+                      {features.allergies && itemAllergens(item.id).length > 0 && (
+                        <span className="cart-item-allergens">
+                          {itemAllergens(item.id).map((a) => (
+                            <span
+                              key={a}
+                              className={`allergen-dot ${declared.includes(a) ? "flag" : ""}`}
+                              title={`Contains ${allergenLabel(a).toLowerCase()}`}
+                            >
+                              {allergenIcon(a)}
+                            </span>
+                          ))}
+                        </span>
                       )}
                     </div>
                   </div>
-                  {/* Right side of the line: this line's price (price × qty) and a trash button. */}
-                  <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    <div className="cart-item-price">{fmtDisp(lineDisp(item))}</div>
-                    <button type="button" className="remove-item" aria-label={`Remove ${item.title}`} onClick={() => removeFromCart(idx)} style={{ background: "transparent", border: "none", padding: "8px" }}>
-                      <i className="fas fa-trash" style={{ fontSize: "18px" }}></i>
+                  {/* This line's price (price × qty). Locked to the name's row by the grid. */}
+                  <div className="cart-item-price">{fmtDisp(lineDisp(item))}</div>
+                  {/* EVERYTHING THE GUEST CHOSE, ON ONE WRAPPING LINE (owner, 2026-09-20: "i want
+                      i order to look in line with the allergy and the note that they have added
+                      and ALL"). Options, then anything taken out in red, then the note in quotes.
+                      It spans to the right edge so a long note wraps instead of being truncated. */}
+                  {(() => {
+                    const bits: ReactNode[] = [];
+                    if (item.options && item.options.length > 0) bits.push(<span key="o">{item.options.map((o) => o.label).join(", ")}</span>);
+                    if (item.removed && item.removed.length > 0) bits.push(
+                      <span key="r" className="guest-ink-bad">No {item.removed.map((r) => allergenLabel(r).toLowerCase()).join(", ")}</span>
+                    );
+                    if (item.note) bits.push(<span key="n" style={{ fontStyle: "italic" }}>&ldquo;{item.note}&rdquo;</span>);
+                    if (!bits.length) return null;
+                    return (
+                      <div className="cart-item-details cart-item-opts">
+                        {bits.map((b, i) => (<Fragment key={i}>{i > 0 ? " · " : ""}{b}</Fragment>))}
+                      </div>
+                    );
+                  })()}
+                  {/* THE "⚠ contains dairy" LINE IS GONE (owner, 2026-09-20: "remove it contain
+                      milk thing from there, they don't need to be shown while that time"). The
+                      information is NOT lost: the allergen dot on the name line still wears a red
+                      ring for anything the guest ticked in "what you avoid" below, and the
+                      order-wide warning under the allergy chips still lists them. Do not re-add a
+                      per-line warning sentence — REJECTED (owner, 2026-09-20), docs/REJECTED-IDEAS.md R58. */}
+                  {/* Quantity, Edit and the bin — on EVERY dish (owner: "THERE SHOULD BE EDIT AND
+                      QUANTY BUTTON FOR EVERY DISH"), never hidden behind a tap. */}
+                  <div className="cart-item-controls">
+                    <button type="button" aria-label={`Decrease ${item.title}`} onClick={() => decrement(idx)} style={qtyBtn}>−</button>
+                    <span style={{ minWidth: "26px", textAlign: "center", fontSize: "13px", fontWeight: 800, color: "var(--text)" }}>{item.qty}</span>
+                    <button type="button" aria-label={`Increase ${item.title}`} onClick={() => increment(idx)} style={qtyBtn}>+</button>
+                    {canEdit(item.id) && (
+                      <button type="button" className="cart-edit-btn" onClick={() => editLine(item)}>
+                        <i className="fas fa-pen"></i> Edit
+                      </button>
+                    )}
+                    <button type="button" className="remove-item" aria-label={`Remove ${item.title}`} onClick={() => removeFromCart(idx)} style={{ background: "transparent", border: "none", padding: "6px" }}>
+                      <i className="fas fa-trash" style={{ fontSize: "16px" }}></i>
                     </button>
                   </div>
                 </div>

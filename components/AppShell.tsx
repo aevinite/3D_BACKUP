@@ -251,6 +251,19 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
     ? `${accentCanvasCss(accentColor)}:root{${accentPaletteCss(accentColor)}}`
     : "";
   const pageBg = accentColor ? accentBackground(accentColor) : null;
+  // ── THE BRAND BAR WEARS THE SAME WASH AS THE PAGE ───────────────────────────────────────────
+  // REJECTED (owner, 2026-09-20): a brand bar painted a different colour from the page under it.
+  // docs/REJECTED-IDEAS.md R59.
+  // *"WHY DOES THE HERO SECTION IS LOOKING LIKE THIS LIKE SEPRATE … IT SHOULD SYNC"*.
+  // `body.menu-frost .nav` paints a FLAT `var(--bg)` while the page beneath it paints the same
+  // --bg PLUS the atmosphere glow — and that glow is at its strongest in exactly the top 64px the
+  // bar covers. So even after the double-mix was removed from accentBackground(), the bar still
+  // read a shade flatter than the hero directly under it, and the seam was visible.
+  // The bar is fixed at top/left/right with the same width and origin as the page, so painting it
+  // with the IDENTICAL background string produces identical pixels — one continuous surface, and
+  // the bar stays fully opaque (content must not show through it; that was settled when the fade
+  // was moved onto the category bar).
+  const navWashCss = pageBg ? `body.menu-frost .nav{background:${pageBg}}` : "";
 
   // Service mode replaces the whole menu with the maintenance screen. Pass THIS
   // restaurant's branding so a non-#1 tenant's maintenance screen shows its own
@@ -280,6 +293,8 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
       {rootAccentCss && <style dangerouslySetInnerHTML={{ __html: rootAccentCss }} />}
       {/* Per-restaurant theme (mode-scoped) — only when this restaurant set a palette. */}
       {themed && <style dangerouslySetInnerHTML={{ __html: themedCss }} />}
+      {/* The brand bar carries the page's own wash, so the top of the menu is one surface. */}
+      {!themed && navWashCss && <style dangerouslySetInnerHTML={{ __html: navWashCss }} />}
       {/* The one-time opening logo animation */}
       <IntroSplash wordmark={logoText} accentColor={accentColor} logoUrl={logoUrl} scopeKey={restaurantId} />
       {/* Floating background bubbles — only if the toggle is on */}

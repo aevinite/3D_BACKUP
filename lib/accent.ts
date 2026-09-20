@@ -202,10 +202,34 @@ export function accentCanvasCss(accentColor: string): string {
 }
 
 // The soft brand-coloured ATMOSPHERE wash for the menu PAGE background only (a
-// top glow + faint tint over the whole menu, so each restaurant feels its own).
+// top glow over the whole menu, so each restaurant feels its own).
 // Kept off :root on purpose — it's a page backdrop, not a widget colour.
+//
+// ── THE HERO USED TO SIT IN A DIFFERENT-COLOURED BOX ───────────────────────────────────────────
+// REJECTED (owner, 2026-09-20): a second colour-mix of the accent on `.page`. docs/REJECTED-IDEAS.md R59.
+// *"WHY DOES THE HERO SECTION IS LOOKING LIKE THIS LIKE SEPRATE FROM THE OTHER COLOUR THING SHOULD
+// SYNC AND ALL IT SHOULD NOT LOOK DIFF"* — three creams stacked on one screen, with hard edges.
+//
+// THE BASE USED TO BE `color-mix(in srgb, <accent> 6%, var(--bg))`, and that is the accent applied
+// TWICE. A themed restaurant's `--bg` is ALREADY `color-mix(in srgb, <accent> 6%, #ffffff)`
+// (accentCanvasCss, above), so mixing another 6% of the same accent into it produced a warmer
+// colour than the rest of the canvas. MEASURED on `aevidine` (accent #e0a920) at 390px:
+//     html / body  →  #fdfaf2      the tenant's real --bg
+//     .nav         →  #fdfaf2      correct, matches
+//     .page        →  #fbf5e5      the double mix — a visibly warmer block
+// `.nav` is transparent-over-blur and `.menu-sticky` fades to --bg, so the mismatch showed up as
+// a distinct band around the hero with an edge at the top AND the bottom. On restaurant #1 it was
+// nearly invisible because its --bg carries no accent; every other tenant wore it.
+//
+// THE BASE IS NOW `var(--bg)` — the exact colour html, body and the nav already paint — so the
+// page is ONE continuous surface. The radial glow is untouched: that is the owner's chosen
+// atmosphere and it fades to transparent, so it tints without creating an edge.
+//
+// DO NOT re-add a colour-mix to this base. If a tenant's page should be tinted, tint `--bg`
+// itself in accentCanvasCss so EVERY surface moves together — that is the only place that can
+// change the canvas without splitting it.
 export function accentBackground(accentColor: string): string | null {
   const rgb = hexToRgbTriplet(accentColor);
   if (!rgb) return null;
-  return `radial-gradient(1200px 620px at 50% -240px, rgba(${rgb}, 0.16), transparent 68%), color-mix(in srgb, ${accentColor} 6%, var(--bg))`;
+  return `radial-gradient(1200px 620px at 50% -240px, rgba(${rgb}, 0.16), transparent 68%), var(--bg)`;
 }

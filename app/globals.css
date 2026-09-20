@@ -1114,7 +1114,9 @@ body.menu-frost .nav {
   background: transparent; color: var(--accent); font-weight: 700; font-size: 13px; cursor: pointer; transition: .15s;
 }
 .pairing-add:hover { background: var(--accent); color: #2a1d0c; }
-.cart-item-allergens { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+/* The dots sit INLINE on the dish name now (mig of the bill layout, 2026-09-20) rather than on
+   a row of their own — one line less per dish, which is the thinness the owner picked. */
+.cart-item-allergens { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; vertical-align: -3px; }
 .allergen-dot {
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: 50%; font-size: 11px; line-height: 1;
@@ -1822,19 +1824,62 @@ body.menu-frost .nav {
   /* The grand-total already draws a rule above itself; two lines 6px apart reads as a mistake. */
   .cart-foot .bill-line.grand { border-top: none; }
 }
-.cart-item { 
-  display: flex; justify-content: space-between; align-items: center; padding: 14px 0; 
-  border-bottom: 1px solid rgba(212,165,116,0.2);
-  transition: all 0.3s;
+/* ── THE BILL LINE (owner, 2026-09-20 — he picked this one from five, "d6") ─────────────────────
+   *"the bill … doesn't look that professional, in the line some are going down"*, then, after
+   seeing the five: *"FROM D4 I LIKE THE THINNESS … FROM D5 I LIKE THIS TICKET DESIGN … THERE
+   SHOULD BE EDIT AND QUANTITY BUTTON FOR EVERY DISH IF POSSIBLE ADD IMAGE LIKE D3"*.
+
+   WHAT WAS WRONG. The row was `display:flex; align-items:center` with the price in the right-hand
+   block — so the price was centred against the WHOLE left column and slid down as soon as a dish
+   carried options or a note. Measured off his own screenshot: the price sat 91px below one dish's
+   name and 65px below the next. That 26px wobble is what read as unprofessional.
+
+   WHAT IT IS NOW. A three-column GRID, so the price is locked to the same row as the name and
+   every price lands on one straight right edge whatever the dish carries:
+       col 1  the dish photo (square — the shape every other dish image in the app uses)
+       col 2  qty × name, chips, allergen dots
+       col 3  the price, top-aligned with the name
+       row 2  options · "No …" · the note — spanning cols 2-3 so a long note WRAPS, never
+              truncates with an ellipsis (*"i want i order to look in line with the allergy and
+              the note that they have added and ALL"*)
+       row 3  − / qty / + , Edit, and the bin — on EVERY dish, not only the one being touched
+   Tabular figures on the price so digits are all the same width and a column of prices cannot
+   drift by a pixel per digit.
+
+   REJECTED (owner, 2026-09-20): do NOT return this to a flex row with a centred price, do not put
+   the controls behind a tap, do not truncate the details, and do not re-add a per-line "contains …"
+   warning. docs/REJECTED-IDEAS.md R58. */
+.cart-item {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  column-gap: 10px;
+  align-items: start;
+  padding: 11px 0;
+  border-bottom: 1px dotted rgba(212,165,116,0.35);
 }
-.cart-item:hover { transform: translateX(4px); }
-[data-theme="light"] .cart-item { border-bottom: 1px solid rgba(139,90,43,0.2); }
-.cart-item-name { font-weight: 700; color: var(--text); font-size: 15px; }
+.cart-item:last-child { border-bottom: 0; }
+[data-theme="light"] .cart-item { border-bottom: 1px dotted rgba(139,90,43,0.3); }
+/* The photo spans the name + details rows so the text block sits beside it. */
+.cart-item-img {
+  grid-column: 1; grid-row: 1 / 3;
+  width: 42px; height: 42px; border-radius: 9px; object-fit: cover;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.cart-item-main { grid-column: 2; grid-row: 1; align-self: center; min-width: 0; }
+.cart-item-qty { color: var(--muted); font-weight: 800; font-size: 12.5px; margin-right: 4px; }
+/* Details span to the right edge so a long note wraps instead of being cut. */
+.cart-item-details { grid-column: 2 / 4; grid-row: 2; }
+.cart-item-controls { grid-column: 2 / 4; grid-row: 3; display: flex; align-items: center; gap: 7px; margin-top: 7px; }
+.cart-item-controls .remove-item { margin-left: auto; }
+.cart-item-name { font-weight: 700; color: var(--text); font-size: 14.5px; line-height: 1.25; }
 .cart-item-price {
+  /* grid-row 1 = the SAME row as the dish name. This is the whole fix: the price can no longer
+     be centred against a column whose height depends on what the guest chose. */
+  grid-column: 3; grid-row: 1; align-self: center; white-space: nowrap;
   font-family: 'Inter', sans-serif;
   color: var(--accent);
-  font-weight: 700;
-  font-size: 18px;
+  font-weight: 800;
+  font-size: 15.5px;
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
   letter-spacing: -0.01em;
@@ -2554,7 +2599,8 @@ body.ar-presenting .viewer-wrapper .hotspot{ display:none; }
 }
 .related-card:hover { transform:translateY(-2px);border-color:var(--accent); }
 .related-img {
-  /* SQUARE, LIKE EVERY OTHER DISH PHOTO IN THE APP (owner, 2026-09-20: "in the you might also
+  /* REJECTED (owner, 2026-09-20): a landscape box for this photo. SQUARE, LIKE EVERY OTHER DISH
+     PHOTO IN THE APP — docs/REJECTED-IDEAS.md R60. His words: "in the you might also
      like this option the images are cut out from top and bottom, fix that, it looks not that
      good"). This was the one place a dish photo was shown in a landscape box — 114x80 — while
      the menu shows them square everywhere else (`.dish-thumb` is 86x86, and `.gallery-mode
