@@ -621,146 +621,31 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // pages keep the brand's normal frosted bar.
     document.body.classList.add("menu-frost");
     let raf = 0;
-    // While the guest is scrolling, mark the body so the floating call-waiter bell steps
-    // aside (see body.menu-scrolling in globals.css). On a phone the bell floats exactly
-    // where each card pins its add button, so it was covering the control the guest was
-    // scrolling towards. The flag clears ~450ms after the last scroll tick.
+    // OBITUARY — THE BELL-DODGING MACHINERY IS GONE (owner, 2026-09-20: "why is the bell like
+    // flickering… at one point it just goes up and down… it looks very unprofessional").
     //
-    // THAT ALONE WAS NOT ENOUGH, and the sweep measured why (T16, 2026-08-05, on the deployed
-    // site which already had the stepping-aside above): the class only applies WHILE scrolling,
-    // and it moves the bell DOWN 26px — so at rest the bell returns to the corner, and even
-    // mid-scroll a ~12px band still overlapped the button while the bell kept its own
-    // pointer-events. A hit-test at the bell's centre returned the bell, not the button, on BOTH
-    // restaurants at 360x780: tapping "+" on the right-hand dish rang for a waiter instead of
-    // adding the dish. Desktop was clean — it is a narrow-viewport fault only.
+    // What stood here: `markScrolling()` added `body.menu-scrolling` on every scroll (the CSS then
+    // shrank the bell to 72%, faded it to 45% and dropped it 26px, restoring 450ms later), and
+    // `settleBell()` measured every nearby control on a 600ms tick, on resize and on scroll-stop,
+    // then hopped the bell upward in 8px steps up to 260px to find a clear resting place.
     //
-    // So the resting position is now decided by MEASUREMENT rather than by a fixed offset that
-    // hopes to miss. After scrolling settles we ask the page what is actually under the bell's
-    // centre; if it is something tappable, the bell is lifted just clear of it. Nothing under it
-    // → no lift at all, so the owner's chosen floating-bell look is untouched (and desktop never
-    // moves). Lifting UP is the safe direction: a card pins its controls to its own BOTTOM, so
-    // the space directly above one is that card's picture, never another control.
-    let scrollIdle: ReturnType<typeof setTimeout> | undefined;
-    const BELL_MAX_LIFT = 260; // a sanity cap, so a surprising layout can never fling it away.
-    // Deliberately BOX INTERSECTION, not elementFromPoint. The first attempt at this probed the
-    // bell's centre point and always came back with the bell's own <i> icon — whose nearest
-    // button/anchor ancestor is null, because the bell is a div — so it read "nothing underneath"
-    // and never lifted. Rectangles have no such blind spot, and they also catch a PARTIAL overlap,
-    // which a single centre probe misses entirely.
+    // MEASURED at 390px on French House before deleting it, with the guest sitting perfectly
+    // still: the bell travelled 107 px (12px of permanent float, plus a 96px lift that fired on
+    // its own), shrank to 36px wide at 45% opacity on every scroll — and STILL ended up sitting on
+    // a `.cat-group-head`. It paid for constant layout reads and constant motion and did not
+    // achieve the thing it existed for.
     //
-    // WHAT COUNTS AS SOMETHING TO CLEAR, and why the size test had to go.
-    // It used to be "anything tappable up to 96px", which let the bell treat a full-width control
-    // as thin air. So the lift walked upward clearing the dish's "+" and its favourite button, ran
-    // out of room at 256px of its 260px cap, and PARKED ON `.cat-group-head` — the button that
-    // folds a category. Measured on the deployed site at 360×780, both restaurants: the bell's box
-    // overlapped "Coffee (6)" by 48px, elementFromPoint in that overlap returned the bell, and an
-    // ordinary tap there rang for a waiter while the category stayed open (guest sweep T1,
-    // 2026-08-06). One tap-theft had been traded for another.
+    // The fault it was written for is real: on a two-column phone the bell's corner is where a
+    // card pins its add button. What answers that WITHOUT motion is already in place — the list's
+    // bottom clearance (globals.css) means the last row can always be scrolled clear, and the bell
+    // keeps its own pointer-events so a tap meant for the bell is never delivered to a card. A
+    // floating button that overlaps some scenery is what floating buttons are; one that jumps a
+    // third of a screen while you read is not.
     //
-    // The only thing the old size test was really trying to exclude is the WHOLE-CARD LINK — a
-    // 160×261 <a> that covers the entire tile. A floating button overlapping part of a picture is
-    // what floating buttons do; overlapping a CONTROL is what steals a tap. So exclude that link by
-    // what it IS, and treat every other control as real, whatever its width.
-    const isCardLink = (el: HTMLElement) => el.classList.contains("item-card-link");
-    // Every control's box, read in ONE pass. The candidate lifts below are then pure arithmetic
-    // against this array — no second layout read — so scanning many positions costs no more than
-    // the single check did.
-    // ONLY MEASURE WHAT IS NEAR THE BELL (T1 improvement 10, 2026-08-12).
-    //
-    // This used to read a rectangle for EVERY button and link in the document, and settleBell() runs
-    // it on the 600ms tick. On Aangan's 199-dish menu that is 600+ layout reads twice a second while
-    // anyone has the menu open — and the early-out ("already clear, leave it alone") happens AFTER the
-    // full sweep, so the cheap case still paid for the expensive one. The cheapest phone at a busy
-    // table is the one that stutters.
-    //
-    // The bell only ever moves within BELL_MAX_LIFT of its resting place, so a control outside that
-    // band plus a little margin can never be relevant. `band` is that window, and the filter is a
-    // pure number comparison per element — no extra layout work, because getBoundingClientRect() is
-    // what we were already paying for. Everything else about the scan is unchanged, deliberately:
-    // it is still RECTANGLES, not elementFromPoint, because a single centre probe has a blind spot
-    // that once made this read "nothing underneath" and never lift at all.
-    const BELL_BAND_PAD = 80;
-    const controlBoxes = (band?: { top: number; bottom: number }): DOMRect[] => {
-      const out: DOMRect[] = [];
-      // Padded by the full lift range in BOTH directions, because the box we are handed may itself
-      // already be lifted — so the resting place can be up to BELL_MAX_LIFT *below* it. Symmetric is
-      // the only version that is correct whatever the current lift is; it is still a ~600px window
-      // instead of the whole document.
-      const top = band ? band.top - BELL_MAX_LIFT - BELL_BAND_PAD : -Infinity;
-      const bottom = band ? band.bottom + BELL_MAX_LIFT + BELL_BAND_PAD : Infinity;
-      document.querySelectorAll<HTMLElement>("button, [role='button'], a").forEach((el) => {
-        if (el.closest(".chef-call")) return; // the bell and its icon are not obstructions
-        if (isCardLink(el)) return;           // the tile itself is scenery, not a control
-        const r = el.getBoundingClientRect();
-        if (!r.width || !r.height) return;
-        // Nowhere near the band the bell can occupy → it can never be in the way.
-        if (r.bottom < top || r.top > bottom) return;
-        out.push(r);
-      });
-      return out;
-    };
-    const hits = (boxes: DOMRect[], left: number, right: number, top: number, bottom: number) =>
-      boxes.some((r) => r.left < right && left < r.right && r.top < bottom && top < r.bottom);
-    // FIND A RESTING PLACE THAT COVERS NO CONTROL AT ALL — searching upward in small steps rather
-    // than hopping "just past the highest thing in the way". The old hop is what overshot into a
-    // category header: clearing one control lands you wherever that puts you, which may be worse.
-    // A scan simply asks each candidate "is anything tappable here?" and takes the first clean one.
-    const STEP = 8;
-    const settleBell = () => {
-      const bell = document.querySelector<HTMLElement>(".chef-call");
-      if (!bell) return;
-      const cur = bell.getBoundingClientRect();
-      if (!cur.width) return;
-      // Read the bell FIRST so the scan can be limited to the band it could move through.
-      const boxes = controlBoxes({ top: cur.top, bottom: cur.bottom });
-      const lift = parseFloat(bell.style.getPropertyValue("--bell-lift")) || 0;
-      // STABILITY FIRST: if where it sits now is already clear, leave it completely alone. Without
-      // this the lift is recomputed from zero on every scroll-stop and the bell visibly hops around
-      // the screen as the guest browses — trading a covered button for a restless one.
-      if (!hits(boxes, cur.left, cur.right, cur.top, cur.bottom)) return;
-      // Rest position = where it would sit with no lift at all.
-      const restTop = cur.top + lift, restBottom = cur.bottom + lift;
-      for (let want = 0; want <= BELL_MAX_LIFT; want += STEP) {
-        if (!hits(boxes, cur.left, cur.right, restTop - want, restBottom - want)) {
-          if (want === 0) bell.style.removeProperty("--bell-lift");
-          else bell.style.setProperty("--bell-lift", `${want}px`);
-          return;
-        }
-      }
-      // NOTHING within reach is clean (a very short screen, or a wall of controls). Go back to the
-      // corner the owner designed rather than staying parked mid-screen on a heading: at rest the
-      // bell is at least where a guest expects to find it, and the scroll step-aside below still
-      // uncovers whatever is under it while they are moving.
-      //
-      // REJECTED (owner, 2026-08-17): the bell must NOT hide, fade, move away or become untappable
-      // when there is nowhere clean — *"i want like previous bell of call waiter should be stuck at
-      // his place we can scrool and click the thing make sure don't change that again"*.
-      // docs/REJECTED-IDEAS.md → R29.
-      //
-      // Guest sweep T1 offered exactly that and it was refused. So nobody re-discovers the
-      // measurements as new: with the search suggestions open, the panel is full-width (x 21..339)
-      // and stacks unbroken from y 362 to 739, so all 33 candidate positions in the 260px band are
-      // covered; the bell returns here to y 707..755 and overlaps a dish's "+" (y 734..776,
-      // x 291..333) by 22px. With every category folded, full-width `.cat-group-head` buttons tile
-      // ~53px apart and the same thing happens with 48px of overlap. Both restaurants, 360x780.
-      // The owner has weighed that and wants the bell to stay put regardless: it is a fixed thing
-      // in a fixed corner that a guest can always find, and scrolling moves the page under it.
-      // Do NOT add a stand-down, a hide-while-searching, a pointer-events yield, a fade, a
-      // horizontal step, or a bigger BELL_MAX_LIFT. Do not re-report the overlap as a fault.
-      bell.style.removeProperty("--bell-lift");
-    };
-    const markScrolling = () => {
-      document.body.classList.add("menu-scrolling");
-      clearTimeout(scrollIdle);
-      scrollIdle = setTimeout(() => {
-        document.body.classList.remove("menu-scrolling");
-        settleBell(); // the guest has stopped — this is the moment they reach out to tap
-      }, 450);
-    };
-    // The very first paint counts too: a guest who never scrolls at all was the case the
-    // measurement above actually caught. Re-checked on resize/rotate for the same reason.
-    const bellRaf = requestAnimationFrame(settleBell);
-    window.addEventListener("resize", settleBell);
+    // R29 (docs/REJECTED-IDEAS.md, owner 2026-08-17) already said it once: "i want like previous
+    // bell of call waiter should be stuck at his place we can scroll and click the thing make sure
+    // don't change that again". Do not re-add a float, a step-aside, a fade, a shrink, or a lift.
+
     // SCROLL-SPY (Petpooja-style): work out which category section sits under
     // the sticky header right now. The chips highlight + follow automatically
     // (Coffee → Beverages → … as the guest scrolls the "All" view).
@@ -789,7 +674,6 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     };
     // Runs every time the guest scrolls.
     const onScroll = () => {
-      markScrolling(); // let the bell step aside off the cards' add buttons
       // Don't save on every single scroll tick — wait for the next animation
       // frame, so we save at most once per frame (gentler on performance).
       cancelAnimationFrame(raf);
@@ -879,34 +763,18 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // Photos lazy-load and reshape the page WITHOUT firing a scroll event, which
     // would leave the spy pointing at the wrong section — so also re-check on a
     // gentle timer (the computation is a handful of rectangle reads, very cheap).
-    // settleBell rides the SAME tick, and it has to. Running it once on mount was not enough, and
-    // the live site proved it after the first deploy: on Vercel the dish photos arrive later than
-    // in a warm local build, so the single mount-time check ran against a page whose cards had not
-    // laid out yet, found nothing under the bell, and — because a guest who never scrolls never
-    // triggers another check — left the bell sitting on the add button exactly as before. It passed
-    // locally and failed live, which is the whole reason the live pass exists.
-    // The check is a handful of rectangle reads and returns immediately once the bell is clear, so
-    // it costs what the scroll-spy beside it costs, and it self-heals for lazy images, a category
-    // fold, a filter change and a language switch alike.
-    // …and skip the whole tick while the tab is hidden. Both halves are pure layout maths about a
-    // screen nobody is looking at, and every other timer in the guest app already checks this
-    // (AppShell's 60s settings poll, useRealtime's safety poll). The `settleBell` on wake is
-    // covered by the resize/scroll handlers and by the next tick.
-    const tick = setInterval(() => { if (document.hidden) return; computeSpy(); settleBell(); }, 600);
+    // …and skip the tick while the tab is hidden: it is pure layout maths about a screen nobody
+    // is looking at, and every other timer in the guest app already checks this (AppShell's 60s
+    // settings poll, useRealtime's safety poll). On wake, the scroll handler catches up.
+    const tick = setInterval(() => { if (document.hidden) return; computeSpy(); }, 600);
     // Run once on mount so the shrink starts at the right value if we restored a
     // scrolled position. Cleanup: stop listening + cancel the pending frame/timer.
     onScroll();
     return () => {
       el.removeEventListener("scroll", onScroll);
       cancelAnimationFrame(raf);
-      cancelAnimationFrame(bellRaf);
-      window.removeEventListener("resize", settleBell);
       clearInterval(tick);
-      clearTimeout(scrollIdle);
       document.body.classList.remove("menu-frost");
-      document.body.classList.remove("menu-scrolling"); // never strand the bell hidden
-      // …and never strand it lifted either: another page's bell must start at rest.
-      document.querySelector<HTMLElement>(".chef-call")?.style.removeProperty("--bell-lift");
     };
   }, []);
 
