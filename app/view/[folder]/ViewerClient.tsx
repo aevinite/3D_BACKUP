@@ -83,6 +83,25 @@ const CARD_BTN = { padding: "12px 24px" } as const;
 // file Quick Look opens is already 40%. The same object is what the WebXR renderer presents.
 const AR_MODEL_SCALE = 0.4;
 
+// ── THE DISH IS NEVER SEEN BEFORE ITS OWN ANIMATION (owner, 2026-09-20) ──────────────────────
+// "whenever you load the 3D model it first shows the 3D model for a very split bit of a second
+// and then that 3D model disappear and my animation start … it looks very unprofessional."
+//
+// He is describing a real gap, and it is not a split second. MEASURED on this stack with a probe
+// sampling every frame: the spinner came off at 904 ms with the model at FULL SIZE, and the
+// cinematic's first frame — which is 30% size — did not land until 1698 ms. So the guest was
+// shown the finished dish for 794 ms, and then watched it shrink to a third and grow back.
+//
+// The 794 ms was the reveal timer, and the snap was the cinematic's opening frame arriving late.
+// Both are fixed here: the model is BORN at the cinematic's opening scale, it is not painted at
+// all until the reveal actually begins (the spinner holds the screen until then), and the wait
+// after the model loads is a settle rather than a pause. There is now no frame, at any point, in
+// which the dish is on screen at a size the animation did not put it at.
+const REVEAL_START_SCALE = 0.3;
+// How long after the model is ready before the curtain goes up. Four frames — enough for
+// <model-viewer> to have painted once, short enough that it reads as "loaded, and away it goes".
+const REVEAL_SETTLE_MS = 64;
+
 // Describes the "config.json" file each dish folder has — the 3D model URLs,
 // the title/subtitle/stats, and the hotspot "tags" pinned onto the model.
 interface PublicConfig {
@@ -409,7 +428,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // Reading the ref at call time is what makes the answer current instead of remembered.
   // What the camera and the smoothing were before the AR handoff shrank the dish (AR_MODEL_SCALE).
   // Null whenever no handoff is in flight, so a double "not-presenting" cannot re-apply anything.
-  const arRestoreRef = useRef<{ orbit: string; decay: number | undefined; minOrbit: string | null } | null>(null);
+  const arRestoreRef = useRef<{ scale: string; orbit: string | null; decay: number | undefined; minOrbit: string | null } | null>(null);
   const tagsRef = useRef<ModelTag[]>([]);
   // Same trap, smaller blast radius: the cinematic reads the saved pose when it STARTS, so a
   // stale copy lands the dish on the default framing instead of the one that was saved for it.
@@ -720,18 +739,20 @@ export default function ViewerClient({ folder }: { folder: string }) {
       }, delay));
     };
 
-    // The model finished loading and is now visible.
+    // The model finished loading. It is READY — it is not yet SHOWN: see REVEAL_START_SCALE.
     const handleLoad = () => {
-      modelSeenRef.current = true;             // remember it appeared
+      modelSeenRef.current = true;             // remember it arrived
       modelWatchlist.unwatchByFolder(folder);  // no need to notify anymore
       setShowTryAgain(false);                  // hide any "taking longer" overlay
-      setLoaderVisible(false);                 // hide the spinner
+      // ⚰️ `setLoaderVisible(false)` STOOD HERE, and that is the fault he reported: the spinner
+      // came off the moment the file was parsed, 794 ms before the animation started, so the
+      // finished dish sat there and then shrank to a third of itself. The spinner now hands over
+      // to the animation directly — runFullSequence takes it down on its own first frame.
       timers.push(setTimeout(() => {
         setBarVisible(true);                   // slide in the bottom info bar after 1s
       }, 1000));
       // keep the "triple-tap to replay" hint visible as a persistent cue
-      // Play the reveal animation once, shortly after the model appears.
-      armReveal(800);
+      armReveal(REVEAL_SETTLE_MS);
     };
 
     // ── AR: NO TAGS IN THE ROOM, AND THE DISH GOES BACK TO ITS SCREEN SIZE ON THE WAY OUT ────
@@ -896,7 +917,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
         const p = Math.min((time - startTime) / duration, 1);  // progress 0→1
         const e = ease(p);                                      // eased progress
         (model as any).cameraOrbit = orbitStr(startTheta + (endTheta - startTheta) * e);
-        const scale = (0.3 + e * 0.7).toFixed(4);               // grow 0.3→1
+        const scale = (REVEAL_START_SCALE + e * (1 - REVEAL_START_SCALE)).toFixed(4);  // grow 0.3→1
         (model as any).scale = `${scale} ${scale} ${scale}`;
         if (p < 1) {
           requestAnimationFrame(animate);
@@ -916,7 +937,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       const p = Math.min((time - startTime) / duration, 1);  // progress 0→1
       const e = ease(p);                                      // eased progress
       (model as any).orientation = `0deg 0deg ${(e * 360).toFixed(2)}deg`;  // spin
-      const scale = (0.3 + e * 0.7).toFixed(4);               // grow 0.3→1
+      const scale = (REVEAL_START_SCALE + e * (1 - REVEAL_START_SCALE)).toFixed(4);  // grow 0.3→1
       (model as any).scale = `${scale} ${scale} ${scale}`;
       if (p < 1) {
         requestAnimationFrame(animate);  // not done — next frame
@@ -1011,6 +1032,24 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // hidden, then run the cinematic spin, then play the staggered tag animation
   // and start the line-tracking loop. Called on first load and on triple-tap.
   const runFullSequence = () => {
+    // ── THE CURTAIN ──────────────────────────────────────────────────────────────────────────
+    // Until this runs, the model has never been painted: `.pre-reveal` holds it at opacity 0 and
+    // the spinner holds the screen. So the ORDER here is the whole fix — put the dish at the
+    // animation's opening size, wait for <model-viewer> to actually apply it, and only then let
+    // it be seen. The guest's first sight of the dish is frame one of the reveal.
+    //
+    // WHY NOT EARLIER, which is the obvious thing to try and is wrong twice over: declaring
+    // `scale="0.3 0.3 0.3"` on the element, or writing it in the `load` handler, both land while
+    // <model-viewer> is working out its framing — and the "auto" radius clamps behind
+    // camera-orbit come from the bounding box AT THAT MOMENT. MEASURED both ways: the 2.2 m orbit
+    // was clamped to 0.617 m and the dish opened 3.3× too big, and it never recovered, because
+    // growing the model back does NOT recompute those clamps (the same asymmetry the AR handoff
+    // works around with min-camera-orbit). After the framing pass, a scale write is free.
+    const mvNow = mvRef.current;
+    if (mvNow) (mvNow as any).scale = `${REVEAL_START_SCALE} ${REVEAL_START_SCALE} ${REVEAL_START_SCALE}`;
+    const raiseCurtain = () => { setLoaderVisible(false); };
+    if (mvNow?.updateComplete) mvNow.updateComplete.then(raiseCurtain, raiseCurtain);
+    else raiseCurtain();
     // Reset all the connector lines to invisible.
     tagsRef.current.forEach(ing => {
       const line = document.getElementById(`hs-line-${ing.id}`) as SVGLineElement | null;
@@ -1056,14 +1095,21 @@ export default function ViewerClient({ folder }: { folder: string }) {
     const mv = mvRef.current;
     const saved = arRestoreRef.current;
     document.body.classList.remove("ar-presenting");
-    if (!mv) return;
-    (mv as any).scale = "1 1 1";
-    if (!saved) return;
+    // NOTHING WAS CHANGED → CHANGE NOTHING BACK. This is called from the effect's cleanup as well
+    // as from the end of a session, and that cleanup runs on every ordinary teardown — React's
+    // Strict Mode remount in development, and in PRODUCTION the small→optimized model upgrade.
+    // It used to restore `scale = "1 1 1"` unconditionally, which snapped the dish to full size
+    // in the middle of its own entrance and undid REVEAL_START_SCALE before the first frame.
+    // MEASURED before this guard: scale went 0.3 → 1 1 1 at 39 ms, while still invisible.
+    if (!mv || !saved) return;
     arRestoreRef.current = null;
+    // Back to whatever it was BEFORE the handoff, not to a hardcoded 1: the guest can tap AR
+    // VIEW while the reveal is still growing the dish.
+    (mv as any).scale = saved.scale;
     try {
       if (saved.minOrbit == null) mv.removeAttribute("min-camera-orbit");
       else mv.setAttribute("min-camera-orbit", saved.minOrbit);
-      mv.cameraOrbit = saved.orbit;
+      if (saved.orbit) mv.cameraOrbit = saved.orbit;
       mv.interpolationDecay = saved.decay ?? 50;
     } catch {}
   };
@@ -1085,12 +1131,15 @@ export default function ViewerClient({ folder }: { folder: string }) {
       // be a new fault, not a fix.
       const o = mv.getCameraOrbit?.();
       const closeUp = o ? `${o.theta}rad ${o.phi}rad ${o.radius * AR_MODEL_SCALE}m` : null;
+      // Recorded even when the camera cannot be read, because its PRESENCE is what tells
+      // endArSizing that a handoff is in flight and there is something to undo.
+      arRestoreRef.current = {
+        scale: String((mv as any).scale ?? "1 1 1"),
+        orbit: o ? `${o.theta}rad ${o.phi}rad ${o.radius}m` : null,
+        decay: mv.interpolationDecay,
+        minOrbit: mv.getAttribute("min-camera-orbit"),
+      };
       if (o && closeUp) {
-        arRestoreRef.current = {
-          orbit: `${o.theta}rad ${o.phi}rad ${o.radius}m`,
-          decay: mv.interpolationDecay,
-          minOrbit: mv.getAttribute("min-camera-orbit"),
-        };
         mv.interpolationDecay = 0;                                  // no glide — the two must move together
         // AND LET THE CAMERA COME THAT CLOSE. `min-camera-orbit`'s radius is "auto", a floor
         // model-viewer works out from the model's bounding sphere — and it does NOT recompute it
@@ -1256,7 +1305,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
 
   // The main viewer screen.
   return (
-    <div className="viewer-wrapper">
+    <div className={`viewer-wrapper${loaderVisible ? " pre-reveal" : ""}`}>
       {/* This restaurant's colour for the viewer chrome (Back/AR/Add buttons). */}
       {accentCss && <style dangerouslySetInnerHTML={{ __html: accentCss }} />}
       {/* The spinner stays up until the model appears (and not while showing

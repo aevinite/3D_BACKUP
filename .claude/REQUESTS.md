@@ -1734,3 +1734,19 @@ one of the 992 was the SAME handful of sentences produced by our own 62-restaura
   phone's camera light estimate. The only real levers are asset-side — a hand-tuned USDZ per dish
   via `ios-src` (needs a converter installed, and it cannot work for a restaurant's own uploaded
   model), or baking an ambient-occlusion map into the GLBs. Neither is a code change here.
+- [x] **The dish is never seen before its own animation** (2026-09-20, no migration). His words:
+  *"whenever you load the 3D model it first shows the 3D model for a very split bit of a second and
+  then that 3D model disappear and my animation start… it looks very unprofessional."* **He was
+  right and it was not a split second.** Measured with a probe sampling every frame: the spinner
+  came off at **904 ms** with the model at FULL size, and the animation's opening frame (30%) did
+  not land until **1698 ms** — 794 ms of finished dish, then a snap to a third of itself. Now: the
+  model is not painted at all until the reveal's own first frame, the spinner holds the screen
+  until then, and the wait after the file loads is a 64 ms settle instead of an 800 ms pause.
+  Measured after: **first visible frame = scale 0.301, zero frames above 0.95 before the
+  animation**, dish visible 113 ms after load instead of 794 ms early. Two traps found on the way,
+  both measured and both now guarded: setting the opening scale as an attribute (or in the load
+  handler) lands while model-viewer is computing its framing and clamped the 2.2 m camera to
+  0.617 m — the dish opened 3.3× too big and never recovered; and `endArSizing` in the effect
+  cleanup was restoring scale 1 on the ordinary small→optimized model upgrade, snapping the dish
+  to full size mid-entrance. Verified on croissant and waffle (including the saved-pose path), AR,
+  and the triple-tap replay. **Left: nothing on screen.**
