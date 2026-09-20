@@ -1151,7 +1151,9 @@ body.menu-frost .nav {
   background: color-mix(in srgb, var(--text) 14%, transparent); /* received / not started */
   transition: background 0.45s var(--ease);
 }
-.stb-seg.preparing { background: #e8a13c; }  /* amber = being prepared */
+/* BLUE, not amber — it sat beside a `.stb-pill.preparing` that was already blue, so one screen
+   drew two colours for one state (owner, 2026-09-20: "PREPARING … IT IS OF COLOUR BLUE"). */
+.stb-seg.preparing { background: #4f9dff; }  /* blue = accepted & being prepared */
 .stb-seg.served    { background: #4ade80; }  /* green = done */
 .stb-items { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .stb-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--text); }
@@ -1167,6 +1169,28 @@ body.menu-frost .nav {
 .stb-pill.received { background: rgba(212,165,116,0.2); color: #d4a574; }
 .stb-pill.preparing { background: rgba(79,157,255,0.18); color: #4f9dff; }
 .stb-pill.served { background: rgba(74,222,128,0.18); color: #4ade80; }
+/* ── THE LIVE CARD'S PER-DISH ROWS (owner, 2026-09-20 — design "L5") ───────────────────────────
+   Each dish carries a coloured left edge for its own state, so a table can see which plate has
+   landed without reading a word. The colours are the ones the app ALREADY uses for these three
+   states (.stb-pill above, .order-tracker below) — amber "awaiting accept", BLUE "preparing",
+   green "served". He corrected a mock-up that invented "Cooking" in amber, and he was right:
+   PREPARING IS BLUE (#4f9dff) here, on the strip, and on the tracker. Do not introduce a fourth
+   word or a fourth colour for a state that already has both. */
+.live-dishes { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 4px; }
+.live-dish {
+  display: flex; align-items: center; gap: 9px; padding: 8px 9px;
+  border-radius: 11px; border-left: 4px solid color-mix(in srgb, var(--text) 22%, transparent);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.live-dish.preparing { border-left-color: #4f9dff; background: rgba(79,157,255,0.09); }
+.live-dish.served    { border-left-color: #4ade80; background: rgba(74,222,128,0.09); }
+.live-dish-img {
+  width: 40px; height: 40px; border-radius: 9px; object-fit: cover; flex: none;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.live-dish-main { flex: 1; min-width: 0; }
+.live-dish-name { font-weight: 700; font-size: 13.6px; line-height: 1.3; color: var(--text); }
+.live-dish-meta { font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
 .stb-bill { margin-top: 14px; }
 .filter-chip {
   padding: 6px 10px;

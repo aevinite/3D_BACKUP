@@ -3,7 +3,7 @@
 
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
-import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, taxRulesOf, DEFAULT_TAX_RULES, type MenuItem, type TaxRules } from "@/lib/menu";
+import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, taxRulesOf, DEFAULT_TAX_RULES, getOrderDishes, type MenuItem, type TaxRules, type OrderDish } from "@/lib/menu";
 // The ONE rule that turns a dish's price into money under the three behaviours (mig 270):
 // GST on top ('excl'), GST already inside ('incl'), never taxed ('exempt' — an MRP bottle).
 // Mirrored byte-for-byte by lfh_split_items_tax in SQL, so the quote and the bill agree.
@@ -81,6 +81,11 @@ const normalize = (raw: unknown): CartItem[] => {
 // CartPanel: the full "Your Bill" slide-out. It lists what's in the cart, lets
 // the guest change quantities, flag allergies, enter their table number, and
 // place the order. It also has a "Previous orders" tab with live + past orders.
+// The per-dish words, matching components/SessionTableBill.tsx exactly so the two live views
+// cannot drift into two vocabularies for one state (owner, 2026-09-20: "COOKING IS NOT A THING
+// THERE IS PREPARING").
+const DISH_STATUS_LABEL: Record<string, string> = { received: "Awaiting accept", preparing: "Preparing", served: "Served" };
+
 export default function CartPanel() {
   const restaurantId = useRestaurantId();
   const features = useFeatures(restaurantId); // which restaurant features are switched on
@@ -101,6 +106,11 @@ export default function CartPanel() {
   const [allergenMap, setAllergenMap] = useState<Record<string, string[]>>({}); // dish id -> its allergens, for warnings
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]); // the full menu (for pairings/editing)
   const [liveOrders, setLiveOrders] = useState<ActiveOrder[]>([]); // orders still in progress
+  // PER-DISH STATE FOR THE LIVE CARDS (owner, 2026-09-20 — design "L5"). Keyed by order id.
+  // Read from get_order_dishes (mig 404), because what the phone saved when the order went in is
+  // only { title, qty } — no status, no note. Until a read lands the card shows what it always
+  // showed, so this can only ever ADD detail, never blank one out.
+  const [orderDishes, setOrderDishes] = useState<Record<string, OrderDish[]>>({});
   const [showHistory, setShowHistory] = useState(false); // which tab: false=current bill, true=previous orders
   const [editingTable, setEditingTable] = useState<string | null>(null); // order id whose table is being corrected
   const [tableDraft, setTableDraft] = useState(""); // the corrected table number being typed
@@ -423,6 +433,30 @@ export default function CartPanel() {
   const lineDisp = (it: CartItem) =>
     unitDisplay(parseFloat(it.price), (it.options || []).map((o) => o.price || 0), currency || undefined) * it.qty;
   // Red dot on the Live-status tab: a live order whose floating strip was hidden.
+  // Ask for each live order's lines when the sheet is open, and again whenever the orders change
+  // (a realtime breadcrumb or the tracker's own poll moves an order's status). One small read per
+  // live order — the same cadence the card itself already refreshes at, and nothing at all while
+  // the sheet is shut, which is the rule every other read in this app follows.
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    const ids = liveOrders.filter((o) => !isFinalStatus(o.status) || !orderDishes[o.id]).map((o) => o.id);
+    if (!ids.length) return;
+    (async () => {
+      for (const id of ids) {
+        try {
+          const rows = await getOrderDishes(id);
+          if (!alive) return;
+          // Only ever replace with something real: an empty answer for an order that already has
+          // lines would blank the card, and "I could not ask" is not "there are no dishes".
+          if (rows.length) setOrderDishes((m) => ({ ...m, [id]: rows }));
+        } catch { /* busy database — keep whatever the card already has */ }
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, liveOrders]);
+
   const hiddenLive = liveOrders.some((o) => o.stripHidden && !isFinalStatus(o.status));
   // ── the three price behaviours (mig 270) ───────────────────────────────────
   // What a dish's own tax_mode is. A line whose dish hasn't loaded yet (the menu is fetched
@@ -958,11 +992,61 @@ export default function CartPanel() {
                           ))}
                         </div>
                       )}
-                      {o.items && o.items.length > 0 && (
+                      {/* ── ONE ROW PER DISH, EACH WITH ITS OWN STATE (owner, 2026-09-20: "I LIKE
+                          L5 … I WANT IT SHOULD SHOW ALERGY AND NOT AND SERVE PREPR STSUS FOR
+                          PERTICULAR DOISH") ──────────────────────────────────────────────────
+                          This was one joined string — "Espresso ×1, Avocado & Cream Cheese ×1" —
+                          under a single status for the whole order, so a table whose coffee had
+                          arrived and whose toast had not was told one flat word for both.
+                          The words and the colours are the app's OWN (`.stb-pill`): received =
+                          "Awaiting accept", preparing = "Preparing" in BLUE #4f9dff, served =
+                          "Served" in green. Not invented ones — the owner caught a mock-up that
+                          said "Cooking" in amber and it was right to: two names for one state is
+                          how a guest and a waiter end up describing different things.
+                          Falls back to the old joined line until the per-dish read lands, so the
+                          card is never emptier than it was before. */}
+                      {orderDishes[o.id]?.length ? (
+                        <div className="live-dishes">
+                          {orderDishes[o.id].map((d, i) => {
+                            const m = menuItems.find((x) => x.title === d.title);
+                            const bits: string[] = [];
+                            if (d.options?.length) bits.push(d.options.map((x) => x.label).filter(Boolean).join(", "));
+                            if (d.removed.length) bits.push(`No ${d.removed.map((r) => allergenLabel(r).toLowerCase()).join(", ")}`);
+                            if (d.note) bits.push(`\u201c${d.note}\u201d`);
+                            return (
+                              <div key={`${d.title}-${i}`} className={`live-dish ${d.status}`}>
+                                {/* The dish's own photo, from the menu already in memory — no
+                                    request. Matched on title because order_items records what was
+                                    ordered, not which menu row it came from; a miss just means no
+                                    picture, never a wrong dish's picture for a different name. */}
+                                {m?.image
+                                  ? <img className="live-dish-img" src={m.image} alt="" loading="lazy" decoding="async" />
+                                  : <span className="live-dish-img" aria-hidden="true" />}
+                                <div className="live-dish-main">
+                                  <div className="live-dish-name">
+                                    <span className="cart-item-qty">{d.qty}×</span>{d.title}
+                                    {features.allergies && m && itemAllergens(m.id).length > 0 && (
+                                      <span className="cart-item-allergens">
+                                        {itemAllergens(m.id).map((a) => (
+                                          <span key={a} className={`allergen-dot ${declared.includes(a) ? "flag" : ""}`} title={`Contains ${allergenLabel(a).toLowerCase()}`}>
+                                            {allergenIcon(a)}
+                                          </span>
+                                        ))}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {bits.length > 0 && <div className="live-dish-meta">{bits.join(" · ")}</div>}
+                                </div>
+                                <span className={`stb-pill ${d.status}`}>{DISH_STATUS_LABEL[d.status] || "Awaiting accept"}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : o.items && o.items.length > 0 ? (
                         <div className="live-order-items">
                           {o.items.map((it) => `${it.title} ×${it.qty}`).join(", ")}
                         </div>
-                      )}
+                      ) : null}
                       <div className="live-order-total"><span>Total</span><span>{showPrice(o.total)}</span></div>
                       {/* WRONG TABLE? Only while the order is still early — once it's served
                           the kitchen has already sent it somewhere, so the number is locked

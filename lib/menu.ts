@@ -472,6 +472,46 @@ export async function updateOrderTableNumber(
 // that round without counting it. `null` keeps meaning exactly what it meant.
 const STATUS_TIMEOUT_MS = 10000;   // shorter than an order's 15s: this is a read, and it repeats
 
+// getOrderDishes(): the LINES of one order, each with its own state — so the live card can say
+// "coffee served, toast still cooking" instead of one flat word for the lot (owner, 2026-09-20:
+// "I WANT IT SHOULD SHOW ALERGY AND NOT AND SERVE PREPR STSUS FOR PERTICULAR DOISH").
+//
+// Same shape and the same deadline discipline as getOrderStatus below, for the same reason: this
+// runs on a diner's phone on a restaurant's wifi, and a read with no ceiling is a spinner that
+// never stops. It returns [] rather than throwing on any failure EXCEPT an unreachable database —
+// the card simply keeps the summary it already has, which is never wrong, only less detailed.
+export type OrderDish = {
+  title: string;
+  qty: number;
+  status: OrderStatus;
+  note: string | null;
+  options: { group?: string; label?: string }[] | null;
+  removed: string[];
+};
+export async function getOrderDishes(id: string): Promise<OrderDish[]> {
+  let signal: AbortSignal | undefined;
+  try {
+    signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(STATUS_TIMEOUT_MS)
+      : undefined;
+  } catch { signal = undefined; }
+  const { data, error } = signal
+    ? await supabase.rpc("get_order_dishes", { order_id: id }).abortSignal(signal)
+    : await supabase.rpc("get_order_dishes", { order_id: id });
+  // A read that was abandoned is not an answer. Raised, so the caller can leave what is on screen
+  // alone rather than redraw it as "no dishes" — the same rule getOrderStatus documents below.
+  if (error && isUnreachable(error)) throw busyError("could not reach the restaurant");
+  if (error || !Array.isArray(data)) return [];
+  return (data as OrderDish[]).map((d) => ({
+    title: String(d.title || ""),
+    qty: Math.max(1, Number(d.qty) || 1),
+    status: (d.status || "received") as OrderStatus,
+    note: d.note || null,
+    options: Array.isArray(d.options) ? d.options : null,
+    removed: Array.isArray(d.removed) ? d.removed : [],
+  }));
+}
+
 export async function getOrderStatus(
   id: string
 ): Promise<{ status: OrderStatus; tableNumber: string | null; createdAt: string } | null> {

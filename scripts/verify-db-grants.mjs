@@ -160,6 +160,7 @@ const ANON_ALLOWED = {
   // the migrations-001-118 sweep. Do not re-add the entry — the live phone path is lfh_send_otp /
   // lfh_verify_otp over `otp_codes`.
   get_order_status:           "guest polls their order's status + KOT number; no money in the result",
+  get_order_dishes:           "guest's live card shows which DISH is served vs still preparing (mig 404). Same key as get_order_status above — the order's own uuid — and the same order's lines, which the bill on that phone already shows. Owner asked for per-dish state, 2026-09-20",
   set_order_table_number:     "narrow relabel: digits only, refuses session orders, derives the restaurant from the order (migs 007/051)",
 
   // ── trigger functions. PostgreSQL does NOT check EXECUTE when firing a trigger, so the
