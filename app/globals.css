@@ -1890,6 +1890,16 @@ body.menu-frost .nav {
    card taken out of the DOM cannot be brought back by the reveal that owns it. Do not add a
    toggle, a flag, or a "tags off while loading" state: docs/REJECTED-IDEAS.md R57. */
 body.ar-presenting .viewer-wrapper .hotspot{ display:none; }
+
+/* THE DISH IS NEVER SEEN BEFORE ITS OWN ANIMATION (owner, 2026-09-20).
+   "it first shows the 3D model for a very split bit of a second and then that 3D model disappear
+   and my animation start … it looks very unprofessional." MEASURED: the spinner came off at
+   904 ms with the model at FULL size, and the cinematic's opening frame (30%) did not land until
+   1698 ms — 794 ms of finished dish, then a snap to a third of itself.
+   The model element is not painted until the reveal's own first frame takes this class off (that
+   is the same moment the spinner goes). No transition on purpose: the cinematic IS the entrance,
+   and a fade here would run against it. See ViewerClient → REVEAL_START_SCALE. */
+.viewer-wrapper.pre-reveal model-viewer{ opacity:0; }
 .viewer-wrapper .hs-card-wrap{
   position:absolute;
   transform:translate(-50%,-50%) scale(0.8);

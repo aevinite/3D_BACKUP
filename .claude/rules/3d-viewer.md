@@ -26,8 +26,28 @@ Both halves are also rows in `docs/REJECTED-IDEAS.md` (**R57**) and guarded by
   hides all three cards for good, silently. Read them through `tagsRef.current` at call time, and
   keep `requestReveal`'s `dishSettled` booking. Two separate faults of exactly this shape were
   measured and fixed on 2026-09-20; both looked like "the cards just aren't there".
-- **A scheduled reveal is not a played one.** The 800 ms timer is cleared on effect teardown, and
+- **A scheduled reveal is not a played one.** The reveal timer is cleared on effect teardown, and
   the ordinary small→optimized model upgrade tears the effect down. `startedRef` means PLAYED.
+
+## 🎬 The dish is never seen before its own animation
+
+Owner, 2026-09-20: *"it first shows the 3D model for a very split bit of a second and then that 3D
+model disappear and my animation start … it looks very unprofessional."* Measured before the fix
+with a per-frame probe: the spinner came off at 904 ms with the model at FULL size, and the
+cinematic's opening frame (30%) did not land until 1698 ms. Four rules keep it gone:
+
+1. **The spinner hands over to the ANIMATION, not to the loaded file.** `setLoaderVisible(false)`
+   lives in `runFullSequence`, never in `handleLoad`.
+2. **`.viewer-wrapper.pre-reveal model-viewer{opacity:0}`** — the element is not painted at all
+   until that moment.
+3. **The opening scale is written, and *applied*, before the curtain.** Set `REVEAL_START_SCALE`,
+   `await mv.updateComplete`, *then* reveal. model-viewer applies `scale` on its own update cycle,
+   so doing both in one tick can still paint one full-size frame.
+4. **Never set that scale as an attribute or in the `load` handler.** Both land while
+   <model-viewer> is computing its framing, and the "auto" radius clamps behind `camera-orbit`
+   come from the bounding box *at that moment* — measured, the 2.2 m orbit was clamped to 0.617 m
+   and the dish opened 3.3× too big, and it never recovered, because growing the model back does
+   not recompute those clamps. (Same asymmetry the AR handoff works around.)
 
 ## 📱 AR: 40% size, and no tags in the room
 

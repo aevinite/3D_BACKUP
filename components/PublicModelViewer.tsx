@@ -142,6 +142,14 @@ export default function PublicModelViewer({
           // Starting camera angle + distance. If the editor saved a front view,
           // open on exactly that pose; otherwise use the default framing.
           "camera-orbit": config.frontView || "0deg 75deg 2.2m",
+          // ⚠️ NO `scale` HERE, AND THAT IS A MEASUREMENT, NOT AN OVERSIGHT (2026-09-20).
+          // The dish must be at the reveal's opening size before it is ever painted — but setting
+          // it as an ATTRIBUTE puts it there before <model-viewer> loads the file, and the
+          // framing it works out at load (the "auto" radius clamps behind camera-orbit) is
+          // derived from the bounding box AT THAT MOMENT. MEASURED: with scale 0.3 declared here,
+          // the 2.2m camera-orbit below was clamped to 0.617m and the dish opened 3.3× too big.
+          // ViewerClient sets the opening scale imperatively on the `load` event instead — after
+          // the framing is fixed, and while the model is still invisible. See REVEAL_START_SCALE.
           "min-camera-orbit": "auto 20deg auto", // how far down the visitor can tilt
           "max-camera-orbit": "auto 160deg auto", // how far up the visitor can tilt
           "shadow-intensity": "1",      // strength of the model's shadow

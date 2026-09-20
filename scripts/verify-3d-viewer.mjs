@@ -437,6 +437,58 @@ check(
     "a bookmarked /view/<folder> carries no dish slug; without the folder lookup it has no dish, " +
       "and since mig 402 no dish means no tags."
   );
+  // ── THE DISH IS NEVER SEEN BEFORE ITS OWN ANIMATION (owner, 2026-09-20) ───────────────────
+  // "it first shows the 3D model for a very split bit of a second and then that 3D model
+  // disappear and my animation start … it looks very unprofessional." MEASURED before the fix,
+  // with a probe sampling every frame: the spinner came off at 904 ms with the model at FULL
+  // size and the cinematic's opening frame (30%) did not land until 1698 ms — 794 ms of finished
+  // dish, then a snap to a third of itself. Measured after: first visible frame = scale 0.301,
+  // zero frames above 0.95 before the animation.
+  {
+    const css = read("app/globals.css");
+    check(
+      "the spinner hands over to the ANIMATION, not to the loaded file",
+      // Comments stripped: the obituary at the old site NAMES the call it replaced, and would
+      // otherwise satisfy a search for it.
+      ((v.replace(/\/\/[^\n]*/g, "").match(/setLoaderVisible\(false\)/g) || []).length === 1) &&
+        /const raiseCurtain = \(\) => \{ setLoaderVisible\(false\); \};/.test(v),
+      "`setLoaderVisible(false)` belongs to the reveal, not to handleLoad. Taking the spinner " +
+        "down when the file is merely parsed shows the guest the finished dish, and then the " +
+        "cinematic shrinks it to 30% in front of them."
+    );
+    check(
+      "…and the model is not painted at all until that moment",
+      /\.viewer-wrapper\.pre-reveal model-viewer\{ opacity:0; \}/.test(css) &&
+        /className=\{`viewer-wrapper\$\{loaderVisible \? " pre-reveal" : ""\}`\}/.test(v),
+      "the model element must be invisible while the spinner is up, or there is still a window " +
+        "in which the dish is on screen at a size the animation did not put it at."
+    );
+    check(
+      "…and the opening scale is applied, and APPLIED, before the curtain goes up",
+      /const REVEAL_START_SCALE = 0\.3;/.test(v) &&
+        /if \(mvNow\) \(mvNow as any\)\.scale = `\$\{REVEAL_START_SCALE\} \$\{REVEAL_START_SCALE\} \$\{REVEAL_START_SCALE\}`;/.test(v) &&
+        /mvNow\?\.updateComplete\) mvNow\.updateComplete\.then\(raiseCurtain, raiseCurtain\)/.test(v),
+      "model-viewer applies `scale` on its own update cycle, so revealing the element in the " +
+        "same tick can still paint one full-size frame. Wait for updateComplete."
+    );
+    check(
+      "…and that scale is NEVER declared on the element or written in the load handler",
+      !/scale: "0\.3 0\.3 0\.3"/.test(read(PUBLIC_MV)) &&
+        !/handleLoad[\s\S]{0,600}?REVEAL_START_SCALE/.test(v),
+      "both of those land while <model-viewer> is working out its framing, and the auto radius " +
+        "clamps behind camera-orbit come from the bounding box at that moment. MEASURED: the " +
+        "2.2 m orbit was clamped to 0.617 m and the dish opened 3.3× too big — and it never " +
+        "recovered, because growing the model back does not recompute those clamps."
+    );
+    check(
+      "…and an ordinary effect teardown does not undo the AR sizing it never did",
+      /if \(!mv \|\| !saved\) return;/.test(v) && /\(mv as any\)\.scale = saved\.scale;/.test(v),
+      "endArSizing runs from the effect cleanup too, and that cleanup fires on the ordinary " +
+        "small→optimized model upgrade. Restoring `1 1 1` unconditionally snapped the dish to " +
+        "full size in the middle of its own entrance (measured: 0.3 → 1 1 1 at 39 ms)."
+    );
+  }
+
   // ── AR: 40% in the room, and the cards stay on the SCREEN (owner, 2026-09-20 — R57) ────────
   {
     const css = read("app/globals.css");
