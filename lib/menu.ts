@@ -63,6 +63,11 @@ export interface MenuItem {
   //
   // DETAIL-ONLY, like `nutrition` and `ingredients` below: absent when the column was not
   // selected, so the menu grid (CARD_COLUMNS) carries not one byte of it.
+  //
+  // REJECTED (owner, 2026-09-20 — R57): the tags are never removed, hidden behind a flag, or given
+  // an off switch — "NEVER REMOVE THEM THEY WERE THE MAIN LOOK FOR 3D". They are also never moved
+  // back into a file named after the folder, and no second source is added beside this one: that
+  // is what lost them for eighteen days. docs/REJECTED-IDEAS.md R57 · .claude/rules/3d-viewer.md.
   modelTags?: ModelTag[];
   // The saved opening camera pose for this dish in 3D, as a model-viewer camera-orbit string
   // ("<theta>deg <phi>deg <radius>m"). Undefined = the viewer's default framing.

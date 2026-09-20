@@ -64,6 +64,25 @@ const CARD_TITLE = { margin: "0 0 8px" } as const;
 const CARD_SUB = { margin: "0 0 20px" } as const;
 const CARD_BTN = { padding: "12px 24px" } as const;
 
+// ── HOW BIG THE DISH IS WHEN IT LANDS IN THE ROOM (owner, 2026-09-20) ────────────────────────
+// "whenever in iphone ar been open it too big make it like it actually appears as 40 percent of
+// what it's appearing right now."
+//
+// AR is the one place a 3D model has a REAL-WORLD SIZE, and this one is wrong: measured with
+// model-viewer's own getDimensions(), the croissant's bounding box is 1.00 m × 0.33 m × 1.00 m —
+// a plate a metre across. On screen that is invisible (the camera is placed in the same units, so
+// it fills the frame either way); in Quick Look it is a dinner plate the size of a coffee table.
+// His screen recording settles the number: he pinched it down and Quick Look's own badge read
+// 41%.
+//
+// Applied to the <model-viewer> `scale` property, NOT baked into the GLB, because the same four
+// files are the reference app's and because a tenant's own uploaded model must get the same
+// treatment without anyone re-exporting anything. Verified in the model-viewer 3.4.0 bundle that
+// this reaches AR on both phones: `applyTransform()` writes it to `scene.model`, `prepareUSDZ()`
+// exports exactly that object, and the USDZ exporter writes each mesh's `matrixWorld` — so the
+// file Quick Look opens is already 40%. The same object is what the WebXR renderer presents.
+const AR_MODEL_SCALE = 0.4;
+
 // Describes the "config.json" file each dish folder has — the 3D model URLs,
 // the title/subtitle/stats, and the hotspot "tags" pinned onto the model.
 interface PublicConfig {
@@ -388,6 +407,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // back, so all three cards exist, sit in the right place, and are invisible forever. Restaurant
   // #1's croissant, `[DBG] runFullSequence tags= 0` with the dish plainly loaded in the bar below.
   // Reading the ref at call time is what makes the answer current instead of remembered.
+  // What the camera and the smoothing were before the AR handoff shrank the dish (AR_MODEL_SCALE).
+  // Null whenever no handoff is in flight, so a double "not-presenting" cannot re-apply anything.
+  const arRestoreRef = useRef<{ orbit: string; decay: number | undefined; minOrbit: string | null } | null>(null);
   const tagsRef = useRef<ModelTag[]>([]);
   // Same trap, smaller blast radius: the cinematic reads the saved pose when it STARTS, so a
   // stale copy lands the dish on the default framing instead of the one that was saved for it.
@@ -712,10 +734,26 @@ export default function ViewerClient({ folder }: { folder: string }) {
       armReveal(800);
     };
 
-    // When the guest enters AR mode, replay the reveal animation.
+    // ── AR: NO TAGS IN THE ROOM, AND THE DISH GOES BACK TO ITS SCREEN SIZE ON THE WAY OUT ────
+    // REJECTED (owner, 2026-09-20 — R57): "in the android also in ar i don't want tags i just want
+    // tags in 3d." An AR session is the ONE place the cards are hidden; everywhere else they stay,
+    // with no switch (docs/REJECTED-IDEAS.md R57, .claude/rules/3d-viewer.md).
+    // On Android the AR session is WebXR, which keeps the PAGE's own DOM on top of the camera
+    // feed — so the three callout cards and their leader lines were floating over his room.
+    // (On an iPhone the session is Quick Look, a separate screen, so they were never there.)
+    //
+    // ⚰️ WHAT STOOD HERE: `session-started` REPLAYED the whole reveal, deliberately, so the cards
+    // animated themselves in over the camera feed. That is the thing he is asking to be rid of;
+    // it is deleted rather than left switched off. The cards are hidden by one class for the
+    // length of the session — never unmounted, because the tags may not be removed (R44) and a
+    // card that is taken out of the DOM cannot come back with the reveal that owns it.
     const handleARStatus = (e: any) => {
-      if (e.detail?.status === "session-started") {
-        runFullSequence();
+      const status = e.detail?.status;
+      if (status === "session-started") {
+        document.body.classList.add("ar-presenting");
+      } else if (status === "not-presenting" || status === "failed") {
+        document.body.classList.remove("ar-presenting");
+        endArSizing();
       }
     };
 
@@ -742,6 +780,10 @@ export default function ViewerClient({ folder }: { folder: string }) {
       mv.removeEventListener("load", handleLoad);
       mv.removeEventListener("error", handleError);
       mv.removeEventListener("ar-status", handleARStatus);
+      // Leaving the screen mid-AR must not strand the class or the 40% size on a component the
+      // next dish will mount into.
+      document.body.classList.remove("ar-presenting");
+      endArSizing();
       clearTimeout(startTimeout);
       timers.forEach(clearTimeout);
       if (requestRef.current) {
@@ -1008,9 +1050,70 @@ export default function ViewerClient({ folder }: { folder: string }) {
 
   // The AR (augmented reality) button: place the dish in the real room via the
   // phone camera. Only works on a secure (HTTPS) page, so warn if it can't.
-  const handleLaunchAR = () => {
+  // Put the dish back to the size the SCREEN wants, and the camera back where the guest left it.
+  // Runs when the AR session ends, when it fails, and when the screen is left mid-session.
+  const endArSizing = () => {
+    const mv = mvRef.current;
+    const saved = arRestoreRef.current;
+    document.body.classList.remove("ar-presenting");
+    if (!mv) return;
+    (mv as any).scale = "1 1 1";
+    if (!saved) return;
+    arRestoreRef.current = null;
+    try {
+      if (saved.minOrbit == null) mv.removeAttribute("min-camera-orbit");
+      else mv.setAttribute("min-camera-orbit", saved.minOrbit);
+      mv.cameraOrbit = saved.orbit;
+      mv.interpolationDecay = saved.decay ?? 50;
+    } catch {}
+  };
+
+  const handleLaunchAR = async () => {
     if (mvRef.current?.canActivateAR && mvRef.current.activateAR) {
-      mvRef.current.activateAR();
+      const mv = mvRef.current;
+      // THE CARDS GO FIRST, BEFORE ANYTHING MOVES. model-viewer hangs its hotspots off the SCENE,
+      // not off the model — so `scale` does not move them, and the camera coming 2.5× closer to
+      // keep the dish the same size flings them 2.5× apart instead: screenshotted, "Saffron
+      // infused" was cut off the top of the screen and its leader line ran to nothing. They are
+      // hidden for the whole handoff, not just for the session, which is also what the guest
+      // expects from the moment he taps AR VIEW. endArSizing's callers take the class off again.
+      document.body.classList.add("ar-presenting");
+      // ── SHRINK THE DISH TO ITS REAL SIZE ON THE WAY INTO AR (see AR_MODEL_SCALE) ───────────
+      // The camera comes in by the SAME factor at the same moment, so nothing changes on the
+      // screen the guest is still looking at: Quick Look takes a second or two to build its file,
+      // and the page is visible for all of it. A model that visibly shrank while he waited would
+      // be a new fault, not a fix.
+      const o = mv.getCameraOrbit?.();
+      const closeUp = o ? `${o.theta}rad ${o.phi}rad ${o.radius * AR_MODEL_SCALE}m` : null;
+      if (o && closeUp) {
+        arRestoreRef.current = {
+          orbit: `${o.theta}rad ${o.phi}rad ${o.radius}m`,
+          decay: mv.interpolationDecay,
+          minOrbit: mv.getAttribute("min-camera-orbit"),
+        };
+        mv.interpolationDecay = 0;                                  // no glide — the two must move together
+        // AND LET THE CAMERA COME THAT CLOSE. `min-camera-orbit`'s radius is "auto", a floor
+        // model-viewer works out from the model's bounding sphere — and it does NOT recompute it
+        // when the scale changes (its update path calls applyTransform/updateBoundingBox, never
+        // updateFraming). So the floor stays the FULL-SIZE dish's, and the camera stops short of
+        // where it was told to go: measured 1.12 m against the 0.82 m asked for, which is a 26%
+        // shrink on screen. Lifted for the handoff, put back in endArSizing. Measured after:
+        // 0.87 m, a 6% difference nobody can see.
+        mv.setAttribute("min-camera-orbit", "auto 20deg 0.05m");
+        mv.cameraOrbit = closeUp;
+      }
+      (mv as any).scale = `${AR_MODEL_SCALE} ${AR_MODEL_SCALE} ${AR_MODEL_SCALE}`;
+      // model-viewer is a Lit element: setting `scale` only SCHEDULES applyTransform(). Quick
+      // Look's file is built inside activateAR(), so going straight there exports the old size.
+      try { await mv.updateComplete; } catch {}
+      // WRITE THE CAMERA A SECOND TIME, AFTER the model has actually shrunk. model-viewer CLAMPS
+      // how close the camera may come to the model's bounding sphere, and it clamps at the moment
+      // you write it — so the first write above was measured against the full-size dish and
+      // stopped short (1.12 m where 0.82 m was asked for, measured). One more write, now that the
+      // sphere is 40% of what it was, lands where it was meant to and the dish on screen does not
+      // change size while Quick Look builds its file.
+      if (closeUp) { try { mv.cameraOrbit = closeUp; } catch {} }
+      mv.activateAR!();
     } else {
       // Guest-facing message (no internal dev instructions). AR needs a supported
       // phone/tablet; on desktop or unsupported devices it just isn't available.

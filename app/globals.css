@@ -1879,6 +1879,17 @@ body.menu-frost .nav {
   overflow:visible;
   pointer-events:none;
 }
+/* REJECTED (owner, 2026-09-20 — R57): the callout cards belong to the 3D screen, not to the room,
+   and they are never REMOVED anywhere else.
+   "in the android also in ar i don't want tags i just want tags in 3d."
+   An Android AR session is WebXR, which draws the camera feed BEHIND this page and leaves the
+   page's own DOM on top — so the three cards and their leader lines hung in his living room.
+   (An iPhone hands over to Quick Look, a separate screen, so they were never there.)
+   ViewerClient adds `ar-presenting` to <body> for the length of the session and takes it off
+   again on `not-presenting`. HIDDEN, never unmounted: the tags may not be removed (R44), and a
+   card taken out of the DOM cannot be brought back by the reveal that owns it. Do not add a
+   toggle, a flag, or a "tags off while loading" state: docs/REJECTED-IDEAS.md R57. */
+body.ar-presenting .viewer-wrapper .hotspot{ display:none; }
 .viewer-wrapper .hs-card-wrap{
   position:absolute;
   transform:translate(-50%,-50%) scale(0.8);
