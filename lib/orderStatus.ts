@@ -117,8 +117,32 @@ export const liveActiveOrders = (list: ActiveOrder[], now: number = Date.now()):
       // no timed disappearance.
       return true;
     })
-    // .sort with (b - a) puts the most recently placed order first (newest first).
-    .sort((a, b) => b.placedAt - a.placedAt);
+    // WHAT IS STILL COMING SITS ABOVE WHAT HAS ARRIVED (owner, 2026-09-20: "even though second
+    // dish has been prepared and served, the first one is still on waiting … at the bottom it
+    // should show that the first one has been done … the order changes … it looks very
+    // unprofessional").
+    //
+    // It used to be newest-first and nothing else, so the list was ordered by an accident of
+    // timing: a table that ordered twice saw "Awaiting accept" above "Served — enjoy!" simply
+    // because the waiting one was placed later. Finished and unfinished work were interleaved,
+    // and every new order re-shuffled what the guest was already reading.
+    //
+    // Two keys now, in this order:
+    //   1. NOT DONE before DONE. `isFinalStatus` is served-or-cancelled — the two states where
+    //      there is nothing left to wait for. So everything the kitchen still owes the table is
+    //      at the top, and the finished orders stack up underneath in the order they completed.
+    //   2. Newest first WITHIN each group, which is the old behaviour, kept.
+    // An order therefore moves exactly ONCE — down, when it is served — instead of the list
+    // rearranging itself around it.
+    //
+    // This also improves the floating strip, which reads `visible[0]`: it now shows the order the
+    // guest is actually waiting on rather than whichever happened to be placed last.
+    .sort((a, b) => {
+      const aDone = isFinalStatus(a.status) ? 1 : 0;
+      const bDone = isFinalStatus(b.status) ? 1 : 0;
+      if (aDone !== bDone) return aDone - bDone;
+      return b.placedAt - a.placedAt;
+    });
 
 // True when an order is still cooking (received/preparing) AND its floating
 // strip was hidden (dragged to the cross). That's exactly when we show the red
