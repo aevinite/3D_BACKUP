@@ -19,7 +19,7 @@ If you only read one thing: `CLAUDE.md` in the repo root is the rulebook, and
 |---|---|
 | **`RUNBOOK.md`** | the operational page: run it, check it, ship it, and what to do when a guard goes red. Written for somebody with no history here. Every command on it has been run — if one stops being true, that is a bug in that page. |
 | **`CLAUDE-DETAIL.md`** | the full text of every rule in `CLAUDE.md`, under the same heading. The one to open before acting. |
-| **`GUARD-MAP.md`** | "I changed this file — which of the 219 checks covers it?" Start here before running anything. |
+| **`GUARD-MAP.md`** | "I changed this file — which of the 222 checks covers it?" Start here before running anything. |
 | **`REJECTED-IDEAS.md`** | what the owner has already said NO to. **Read before suggesting any improvement.** |
 | `ACCESS-MODEL.md` | how permissions actually work now (the live model — replaces the retired ladder). |
 | `ACCESS-REDESIGN-SPEC.md` | the access work still owed. A live working list, not history. |
@@ -36,6 +36,8 @@ If you only read one thing: `CLAUDE.md` in the repo root is the rulebook, and
 | `PRINT-HELPER.md` | the helper program that lets a COMPUTER own the paper (mig 341). One basket, each kind of paper its own printer. |
 | `PRINT-TEST-PLAN.md` | the whole printing test plan and what running it found. Re-run it after touching printing. |
 | `CANCEL-AND-LOSS-SPEC.md` | was the food actually made? — cancelling, real loss, and the audit tags behind it. |
+| `OPTIMIZATION-AUDIT.md` | what "optimize it" means here — the owner's 20 points, each answered with a measurement rather than an opinion, plus the two that were tried and reverted because the numbers said so. |
+| `STRESS-TEST.md` | what happened when 62 restaurants were driven at once: where the ceiling actually is (a 407 MB database box, not the code), what recovery looks like, and the faults the run exposed. Read before claiming a load limit. |
 
 ## STUDIES — a plan for work that is NOT built
 
