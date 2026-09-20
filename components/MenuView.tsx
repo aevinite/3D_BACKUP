@@ -76,7 +76,7 @@ const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
 
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
-export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor, theme, logoUrl, qrTable, defaultLayout }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string; theme?: Record<string, unknown>; logoUrl?: string; qrTable?: string; /* Access → Menu → Format → Default layout: what a first-time guest sees. Resolved on
+export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, heroI18n, taglineI18n, accentColor, theme, logoUrl, qrTable, defaultLayout }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; heroI18n?: Record<string, string> | null; taglineI18n?: Record<string, string> | null; accentColor?: string; theme?: Record<string, unknown>; logoUrl?: string; qrTable?: string; /* Access → Menu → Format → Default layout: what a first-time guest sees. Resolved on
       the server so there is no flash of the wrong layout. */ defaultLayout?: "gallery" | "list" }) {
   // Restaurant #1 keeps its exact current chrome (localized hero, hardcoded
   // wordmark, theme accent); other restaurants get their own brand.
@@ -1209,7 +1209,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
               guest's language, because a stored tagline is one string. That matches R30's own
               words — "i want english only for all" — and R15/R23, which park the guest menu's
               half-finished translation rather than finish it. */}
-          <HeroTitle greeting={tagline || (isDefault ? t.greeting : "Welcome")} title={heroTitle || (isDefault ? t.heroTitle : "Our Menu")} />
+          {/* A restaurant may now supply its greeting and hero line PER LANGUAGE (mig 405). When it has
+              not — which is every restaurant by default — this falls through to exactly the
+              behaviour described above, so nothing changes for anyone else. */}
+          <HeroTitle
+            greeting={localized(taglineI18n || {}, lang) || tagline || (isDefault ? t.greeting : "Welcome")}
+            title={localized(heroI18n || {}, lang) || heroTitle || (isDefault ? t.heroTitle : "Our Menu")} />
         </div>
 
         {/* Categories heading + pinned bar hide entirely once we know the menu is

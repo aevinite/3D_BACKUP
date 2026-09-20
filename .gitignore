@@ -130,3 +130,6 @@ docs/research/
 /All_compitior_POs_INFO/
 # The owner's handover PDF (760 KB, last changed 2026-07-25). Read by a person, never by the app.
 /PROJECT-HANDOFF.pdf
+
+# /brag skill render output — multi-MB mp4/jpg, never commit
+brag-output*/

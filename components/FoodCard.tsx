@@ -16,13 +16,15 @@ import { useFitText } from "@/lib/useFitText";
 // The sold-out pill has a translation in all six languages (t.notAvailable) and the DISH PAGE
 // already used it — only this card rendered the English literal, so a Hindi guest saw
 // "Not available" on the grid and "उपलब्ध नहीं" the moment they opened it (T15 sweep).
-import { useTranslation } from "@/lib/i18n";
+import { useTranslation, useLanguage } from "@/lib/i18n";
+import { localized } from "@/lib/menu";
 
 // The full set of details one dish can have. The "?" ones are optional.
 interface FoodItem {
   id: string;
   slug: string;          // the short url-friendly name, e.g. "onion-soup"
   title: string;
+  titleI18n?: Record<string, string> | null;   // optional per-language name (mig 405)
   price: string;
   image: string;
   category: string;
@@ -94,6 +96,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
   // font until the WHOLE name fits, instead of being cut off. (owner, 2026-08-05)
   const nameRef = useFitText(item.title);
   const t = useTranslation();                 // the guest's language, for the sold-out pill
+  const lang = useLanguage();                 // …and for a dish name the owner has translated (mig 405)
   // Inside a specific restaurant's menu (/r/<slug>/menu) the dish link must stay in
   // that restaurant (/r/<slug>/item/...). No slug = the default menu → global /item.
   const base = restaurantSlug ? `/r/${restaurantSlug}` : "";
@@ -349,7 +352,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
         </div>
         <div className="dish-info">
           <div className="dish-name" ref={nameRef}>
-            {item.title}
+            {localized(item.titleI18n || {}, lang) || item.title}
             {/* A small cube icon beside the name for 4D dishes */}
             {has3d ? <i className="fas fa-cube dish-4d-icon"></i> : null}
           </div>

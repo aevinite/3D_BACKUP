@@ -44,6 +44,11 @@ export interface MenuItem {
   id: string;
   slug: string;
   title: string;
+  /* OPTIONAL per-language display title (mig 405). NULL/absent for every restaurant that has not
+     filled it in, which is all of them by default — `title` is then shown exactly as before.
+     This is not an auto-translator: docs/REJECTED-IDEAS.md R14 says the owner supplies the words,
+     and this is the field they go in. */
+  titleI18n?: LocalizedText | null;
   price: string;
   image: string;
   category: string;
@@ -174,6 +179,7 @@ function mapRow(row: any, agg?: RatingAgg): MenuItem {
     id: row.id,
     slug: row.slug,
     title: row.title,
+    titleI18n: (row as { title_i18n?: LocalizedText | null }).title_i18n ?? null,
     price: row.price,
     image: row.image,
     category: row.category,
@@ -570,7 +576,9 @@ export const CARD_COLUMNS =
   //
   // This is the single hottest read in the product. If a card ever needs a description, add it back
   // here on purpose.
-  "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, tags, allergens, search_alias, options, open_price, tax_mode, time, sort_order";
+  // title_i18n rides along too (mig 405): it is NULL for every restaurant that has not filled
+  // it in, and it is what lets a card show its dish name in the guest's own language.
+  "id, slug, title, title_i18n, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, tags, allergens, search_alias, options, open_price, tax_mode, time, sort_order";
 
 // The slugs of the categories this restaurant currently has switched ON.
 //

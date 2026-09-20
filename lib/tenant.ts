@@ -20,6 +20,8 @@ export interface Restaurant {
   active: boolean;
   logoText: string | null;
   heroTitle: string | null;
+  heroI18n: Record<string, string> | null;      // optional per-language hero (mig 405)
+  taglineI18n: Record<string, string> | null;   // optional per-language greeting (mig 405)
   tagline: string | null;
   accentColor: string | null;
   theme: Record<string, unknown> | null;
@@ -138,6 +140,7 @@ export async function getRestaurantBySlug(slugRaw: string): Promise<Restaurant |
       ? {
           id: data.id, slug: data.slug, name: data.name, active: !!data.active,
           logoText: data.logo_text ?? null, heroTitle: data.hero_title ?? null,
+          heroI18n: data.hero_i18n ?? null, taglineI18n: data.tagline_i18n ?? null,
           tagline: data.tagline ?? null, accentColor: data.accent_color ?? null,
           theme: (data.theme && typeof data.theme === "object") ? data.theme as Record<string, unknown> : null,
           logoUrl: data.logo_url ?? null,
