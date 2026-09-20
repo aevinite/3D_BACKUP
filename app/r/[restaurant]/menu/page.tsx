@@ -170,6 +170,8 @@ export default async function RestaurantMenuPage({
         logoText={r.logoText ?? undefined}
         heroTitle={r.heroTitle ?? undefined}
         tagline={r.tagline ?? undefined}
+        heroI18n={r.heroI18n ?? null}
+        taglineI18n={r.taglineI18n ?? null}
         accentColor={r.accentColor ?? undefined}
         theme={r.theme ?? undefined}
         logoUrl={r.logoUrl ?? undefined}

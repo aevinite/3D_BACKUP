@@ -142,6 +142,8 @@ export default async function TableQrPage({ params }: { params: Promise<{ code: 
       logoText={hit.r.logoText ?? undefined}
       heroTitle={hit.r.heroTitle ?? undefined}
       tagline={hit.r.tagline ?? undefined}
+        heroI18n={hit.r.heroI18n ?? null}
+        taglineI18n={hit.r.taglineI18n ?? null}
       accentColor={hit.r.accentColor ?? undefined}
       theme={hit.r.theme ?? undefined}
       logoUrl={hit.r.logoUrl ?? undefined}
