@@ -12,6 +12,7 @@ import { logAction } from "@/lib/oplog";
 import { rd, ReadSet, ReadFailed } from "@/lib/readGuard";
 import { restaurantNames } from "@/lib/restaurantNames";
 import { searchTerm, safePhone } from "@/lib/searchText";
+import { loyaltyOnByRid } from "@/lib/loyalty";
 import { ERASABLE, RETAINED, erasureSummary } from "@/lib/personalData";
 // ONE definition of what a bill was worth, shared with the admin's bill ledger and the audit's
 // money detail. See the khata balance below for why this is imported rather than re-derived.
@@ -20,7 +21,10 @@ import { netOf, type BillOrder } from "@/lib/billLedger";
 export const dynamic = "force-dynamic";
 // visits/consent added by Customer CRM (mig 212): a REAL repeat count + the DPDP
 // opt-in flag. Still money-free (no spend column exists).
-const COLS = "restaurant_id, phone, name, blocked, visits, consent, first_seen_at, last_seen_at";
+// `points` rides the list the screen already fetches (mig 401) rather than a second read per guest
+// — the balance is one integer on a row we are selecting anyway. It reads 0 for every restaurant
+// whose admin has not switched Loyalty on, and the screen renders nothing for it there.
+const COLS = "restaurant_id, phone, name, blocked, visits, consent, first_seen_at, last_seen_at, points";
 const REPEAT_MIN = 2; // visits >= 2 = a returning customer (real count, not a time heuristic)
 
 // The concrete id list for this scope. Shared helper (lib/ownerScope) because the
@@ -180,7 +184,12 @@ export async function GET(req: NextRequest) {
     cachedAt: counted.cachedAt,
   };
   const restaurantList = ids.map((id) => ({ id, name: names.get(id) || "" })).filter((r) => r.name);
-  return NextResponse.json({ summary, customers, restaurants: restaurantList,
+  // WHICH of these restaurants have Loyalty on. The screen needs it per RESTAURANT, not per owner:
+  // an owner with several may have it on for one of them, and a points column that appeared for all
+  // of them (or none) would be wrong either way. One chunked read for the whole scope — never one
+  // per restaurant, and never per row.
+  const loyaltyRids = Object.entries(await loyaltyOnByRid(ids)).filter(([, on]) => on).map(([id]) => id);
+  return NextResponse.json({ summary, customers, restaurants: restaurantList, loyalty_rids: loyaltyRids,
     ...(search.kind === "unsearchable" ? { unsearchable: true } : {}),
     ...(names.partial ? { partial: ["restaurantNames"] } : {}) });
 }

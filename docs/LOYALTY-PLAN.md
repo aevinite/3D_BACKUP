@@ -36,8 +36,14 @@ Shipped 2026-07-27 (PR #495, mig 212, live on backup-1 AND AV live), extended by
 > plain words; with it ON a ₹1,000 bill earns 50, 268 points become ₹268 off (order net 768.60 =
 > the tax-correct gross-up), the ledger and the `deletion_audit` row are both written. 24 SQL
 > behaviour checks + 5 rendered-paper checks. Every test row was deleted and the restaurant put
-> back to OFF. **Not yet built:** the owner-facing screen for editing the earn rate (the defaults
-> below are what every restaurant gets), and the hand-correction route for `kind='adjust'`.
+> back to OFF.
+>
+> ✅ **COMPLETED 2026-09-20** (mig 403). The last two gaps are closed: **Owner panel → Customers**
+> now carries a **⭐ Loyalty points** card for setting the four rules (with the sentence they
+> produce written underneath), a **Points** column per guest, and a **Correct points** dialog that
+> demands a reason and writes both a ledger row and a Removals row. 23 more behaviour checks, plus
+> the whole screen driven in Chrome with the switch both ways — with Loyalty off the card, the
+> column, the star and the button are all absent and the guest list is untouched.
 
 Three touchpoints exist without guest mode: the **counter tablet**, the **printed bill**, and the
 **cashier's mouth**. That is enough for a complete programme.

@@ -14,6 +14,7 @@
 // SERVER-ONLY (imports supabaseAdmin).
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { loyaltyLadder } from "@/lib/tableTags";
+import { readInChunks } from "@/lib/inChunks";
 import { netOf, type BillOrder } from "@/lib/billLedger";
 import { recordRemoval } from "@/lib/removalAudit";
 import type { StaffUser } from "@/lib/userAuth";
@@ -226,4 +227,120 @@ export async function redeemOntoBill(
     meta: { discount: rupees, from: audit?.from || "loyalty", scope: "whole bill", points: affordable, by },
   });
   return { ok: true, rupees, spent: affordable, balance: r.balance };
+}
+
+/** The rules one restaurant runs on, with the defaults filled in. `on:false` when the module is off. */
+export type LoyaltyRules = {
+  on: boolean;
+  earn_per_100?: number; point_value_paise?: number; min_redeem?: number; max_redeem_pct?: number;
+};
+
+/** Read the rules (mig 401 §5 fills the defaults, so a restaurant that never opened the screen
+ *  still answers). Ladder-gated like everything else here. */
+export async function loyaltyRules(rid: string): Promise<LoyaltyRules> {
+  if (!(await loyaltyOn(rid))) return { on: false };
+  const { data, error } = await sb.rpc("lfh_loyalty_state", { p_restaurant_id: rid, p_phone: "" });
+  if (error) { console.error("[loyalty] rules read failed:", error.message); return { on: false }; }
+  const r = (data as LoyaltyState) || { on: false };
+  return r.on
+    ? { on: true, earn_per_100: r.earn_per_100, point_value_paise: r.point_value_paise,
+        min_redeem: r.min_redeem, max_redeem_pct: r.max_redeem_pct }
+    : { on: false };
+}
+
+/**
+ * SAVE the rules (mig 403). Refusals come back as sentences — this screen belongs to the restaurant
+ * owner, and a CHECK-constraint violation reaches a person as a Postgres string.
+ */
+export async function saveLoyaltyRules(
+  rid: string,
+  v: { earn_per_100: number; point_value_paise: number; min_redeem: number; max_redeem_pct: number },
+): Promise<{ ok: boolean; reason?: string }> {
+  if (!(await loyaltyOn(rid))) return { ok: false, reason: "Loyalty points aren't switched on for this restaurant." };
+  const { data, error } = await sb.rpc("lfh_loyalty_set_rules", {
+    p_restaurant_id: rid,
+    p_earn_per_100: Math.floor(Number(v.earn_per_100)),
+    p_point_value_paise: Math.floor(Number(v.point_value_paise)),
+    p_min_redeem: Math.floor(Number(v.min_redeem)),
+    p_max_redeem_pct: Math.floor(Number(v.max_redeem_pct)),
+  });
+  if (error) { console.error("[loyalty] rules save failed:", error.message); return { ok: false, reason: "Couldn't save just now — try again in a moment." }; }
+  const r = (data as { ok: boolean; reason?: string }) || { ok: false };
+  if (r.ok) return { ok: true };
+  const say: Record<string, string> = {
+    loyalty_off: "Loyalty points aren't switched on for this restaurant.",
+    out_of_range: "Check the numbers: points per ₹100 up to 1000, a point worth 1 paisa to ₹1,000, and points may cover 1–100% of a bill.",
+  };
+  return { ok: false, reason: say[String(r.reason)] || "Those settings couldn't be saved." };
+}
+
+/**
+ * CORRECT a balance by hand (mig 403) — the only way points move with no bill behind them.
+ *
+ * It writes a LEDGER ROW, never a quiet edit of the cached balance, so a guest's history can still
+ * explain itself. And it leaves a Removals row: points are worth money, so moving them by hand is a
+ * money change like any other — the lesson from the loyalty discount that moved ₹268 and recorded
+ * nothing (2026-09-19). A reason is required by the function, not just by the form.
+ */
+export async function adjustPoints(
+  rid: string, phone: string, delta: number, note: string, by: string,
+  audit?: { user?: StaffUser | null; deviceId?: string | null; from?: string },
+): Promise<{ ok: boolean; moved?: number; balance?: number; reason?: string }> {
+  if (!(await loyaltyOn(rid))) return { ok: false, reason: "Loyalty points aren't switched on for this restaurant." };
+  const { data, error } = await sb.rpc("lfh_loyalty_adjust", {
+    p_restaurant_id: rid, p_phone: phone, p_delta: Math.trunc(Number(delta) || 0),
+    p_note: String(note || ""), p_by: by,
+  });
+  if (error) { console.error("[loyalty] adjust failed:", error.message); return { ok: false, reason: "Couldn't change the points just now — try again in a moment." }; }
+  const r = (data as { ok: boolean; moved?: number; balance?: number; reason?: string }) || { ok: false };
+  if (!r.ok) {
+    const say: Record<string, string> = {
+      loyalty_off: "Loyalty points aren't switched on for this restaurant.",
+      nothing_to_change: "Enter how many points to add or take away.",
+      reason_required: "Say why the points are being changed — it is the only record of it.",
+      unknown_guest: "That guest isn't saved on this restaurant.",
+    };
+    return { ok: false, reason: say[String(r.reason)] || "Those points couldn't be changed." };
+  }
+  const moved = Number(r.moved) || 0;
+  if (moved !== 0) {
+    await recordRemoval({
+      rid, kind: "discount_given",
+      reason: { code: "loyalty_adjust", note: `${moved > 0 ? "+" : ""}${moved} points — ${String(note).slice(0, 160)}` },
+      user: audit?.user ?? null, deviceId: audit?.deviceId ?? null,
+      amount: null, meta: { points: moved, balance: r.balance, phone_last4: String(phone).slice(-4), from: audit?.from || "owner panel", by },
+    });
+  }
+  return { ok: true, moved, balance: r.balance };
+}
+
+/** One guest's points history, newest first — capped in SQL. For justifying a correction. */
+export async function loyaltyHistory(rid: string, phone: string, limit = 20): Promise<Array<Record<string, unknown>>> {
+  if (!(await loyaltyOn(rid))) return [];
+  const { data, error } = await sb.rpc("lfh_loyalty_history", { p_restaurant_id: rid, p_phone: phone, p_limit: limit });
+  if (error) { console.error("[loyalty] history failed:", error.message); return []; }
+  return (data as Array<Record<string, unknown>>) || [];
+}
+
+/**
+ * WHICH of these restaurants have Loyalty on — one chunked read for a whole scope.
+ *
+ * `loyaltyOn()` is per restaurant, so asking it in a loop costs a round-trip each: fine for one
+ * restaurant, wrong for the owner list, which can hold several (and the admin's view holds every
+ * restaurant on the platform). Same shape and same reason as payrollEffectiveByRid in
+ * lib/tableTags.ts — chunked and limited, because an `.in()` list of hundreds of uuids answers
+ * "Bad Request" and an unlimited select is silently capped at 1,000 rows. A truncated answer here
+ * reads as `undefined` → falsy → a restaurant whose loyalty IS on would show no points at all.
+ */
+export async function loyaltyOnByRid(ids: string[]): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  if (!ids.length) return out;
+  const { rows } = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
+    sb.from("settings").select("restaurant_id, modules").in("restaurant_id", chunk).limit(chunk.length));
+  for (const r of rows || []) {
+    const bag = (r.modules && typeof r.modules === "object" ? r.modules : {}) as Record<string, { allowed?: boolean; enabled?: boolean }>;
+    const e = bag.loyalty || {};
+    out[String(r.restaurant_id)] = e.allowed === true && e.enabled !== false;
+  }
+  return out;
 }

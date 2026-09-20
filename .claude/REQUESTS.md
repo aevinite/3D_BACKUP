@@ -1691,6 +1691,13 @@ one of the 992 was the SAME handful of sentences produced by our own 62-restaura
   switch both ways. **Left:** an owner screen to change the earn rate (every restaurant currently
   gets 5 points per ₹100, 1 point = ₹1, minimum 100), and a hand-correction route for a wrong
   balance (`loyalty_ledger.kind='adjust'` exists and nothing writes it yet).
+- [x] **…and those two are now built too, 2026-09-20** (owner: *"DO WHAT'S LEFT COMPLETE
+  EVERYTHING"*). Owner panel → **Customers** → a **⭐ Loyalty points** card sets points per ₹100,
+  what a point is worth, the minimum, and the most of a bill points may pay; a **Points** column
+  shows each guest's balance; tapping it opens **Correct points**, which requires a reason and
+  writes a ledger row AND a Removals row. mig 403. All of it renders only where the admin has
+  switched Loyalty on. **Nothing left on loyalty** except the guest-screen version, parked on
+  purpose in `docs/LOYALTY-PLAN.md` §3 until a restaurant runs guest mode.
 - [x] **The 3D tags are back, and they are on every restaurant now** (2026-09-20, mig 402). His
   words: *"where are the tags in 3d make it like like before the tAGS WHERE MAIN THING AFTER ADDING
   IT BACK NEVER REMOVE THEM THEY WERE THE MAIN LOOK FOR 3D."* The labelled callout cards pinned to
