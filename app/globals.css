@@ -1848,6 +1848,54 @@ body.menu-frost .nav {
   /* The grand-total already draws a rule above itself; two lines 6px apart reads as a mistake. */
   .cart-foot .bill-line.grand { border-top: none; }
 }
+/* ── THE TICKET THE BILL LINES SIT ON (owner, 2026-09-21) ──────────────────────────────────────
+   *"in the hybrid one I am unable to see that ticket thing … ship the exact one that we have
+   decided"* — and he was right: on 2026-09-20 I shipped d6's ROW layout and not the SHEET it
+   sits on, so the lines floated on the page background and it did not read as a bill at all.
+
+   The sheet is the half of d6 he picked out of d5: a card with a TORN TOP EDGE, a letterspaced
+   "Your order" heading, the dishes on dotted rules, and the money on the same piece of paper.
+   The torn edge is a repeating diagonal gradient in the card's own colour, so it works on any
+   tenant's palette and in both skins without a second rule.
+
+   REJECTED (owner, 2026-09-21): floating the bill lines straight on the page with no sheet —
+   docs/REJECTED-IDEAS.md R58. Do not remove the ticket, its torn edge, or its heading.
+
+   The totals live INSIDE it on purpose, and that is not a regression of the sticky-foot fix
+   (components/CartPanel.tsx) — it is a better version of it: they now sit directly under the
+   dishes near the top of the sheet, visible on open without anything being pinned. Only the
+   Place Order button stays sticky, because that is the action. */
+.cart-ticket {
+  position: relative;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  border-radius: 5px;
+  padding: 14px 13px 12px;
+  margin-top: 9px;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--text) 7%, transparent);
+}
+.cart-ticket::before {
+  content: "";
+  position: absolute; left: 0; right: 0; top: -7px; height: 8px;
+  background: repeating-linear-gradient(135deg, var(--card) 0 7px, transparent 7px 14px);
+}
+.cart-ticket-head {
+  text-align: center;
+  font: 800 11.5px/1 Georgia, 'Times New Roman', serif;
+  letter-spacing: 2.6px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-bottom: 11px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  margin-bottom: 2px;
+}
+/* The money continues the same sheet: a rule across it, not a card of its own. */
+.cart-ticket .bill-rows {
+  margin-top: 11px;
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+}
+
 /* ── THE BILL LINE (owner, 2026-09-20 — he picked this one from five, "d6") ─────────────────────
    *"the bill … doesn't look that professional, in the line some are going down"*, then, after
    seeing the five: *"FROM D4 I LIKE THE THINNESS … FROM D5 I LIKE THIS TICKET DESIGN … THERE

@@ -1100,6 +1100,14 @@ export default function CartPanel() {
         ) : (
         /* ── CURRENT BILL TAB ── */
         <>
+        {/* ── THE TICKET (owner, 2026-09-21: "in the hybrid one I am unable to see that ticket
+            thing … ship the exact one that we have decided") ──────────────────────────────────
+            The d6 design he chose is a ticket: one sheet with a torn top edge, a letterspaced
+            YOUR ORDER heading, the dishes on dotted rules, and THE TOTALS ON THE SAME SHEET. I
+            shipped the row layout on 2026-09-20 and not the sheet it sits on, which is why it did
+            not read as a bill. This is the rest of it. */}
+        <div className="cart-ticket">
+          <div className="cart-ticket-head">Your order</div>
         {/* The scrollable list of cart lines. */}
         <div id="cart-list" className="cart-list">
           {cart.length === 0 ? (
@@ -1207,6 +1215,29 @@ export default function CartPanel() {
             })
           )}
         </div>
+
+            {cart.length > 0 && (
+          <div className="bill-rows">
+                <div className="bill-line"><span>Subtotal</span><span>{fmtDisp(subtotal)}</span></div>
+                {nontaxDisp > 0 && (
+                  <div className="bill-line" style={{ color: "var(--muted)" }}>
+                    <span>MRP items (no GST)</span><span>{fmtDisp(nontaxDisp)}</span>
+                  </div>
+                )}
+                {showTaxRow && (
+                  <div className="bill-line"><span>GST ({Math.round(taxRate * 10000) / 100}%)</span><span>{fmtDisp(tax)}</span></div>
+                )}
+                <div className="bill-line grand"><span>Total</span><span>{fmtDisp(total)}</span></div>
+                {!showTaxRow && !dispSplit.composition && subtotal > 0 && (
+                  // Tax-inclusive prices: say WHY there's no GST line, or the guest reads the
+                  // missing row as the restaurant forgetting to charge it.
+                  <div className="bill-line" style={{ color: "var(--muted)", fontSize: "12px" }}>
+                    <span>{nontaxDisp >= subtotal ? "No GST on these items" : "GST is already included in these prices"}</span><span />
+                  </div>
+                )}
+              </div>
+          )}
+        </div>{/* /cart-ticket */}
 
         {/* Everything below only shows when there's at least one item in the cart. */}
         {cart.length > 0 && (
@@ -1392,28 +1423,15 @@ export default function CartPanel() {
                 is the breakpoint at which .panel already stops being full-width and becomes a
                 480px centred card, which is exactly when "below the fold" stops reading as a
                 scroll and starts reading as a mistake. The phone is unchanged, byte for byte. */}
-            <div className="cart-foot">
-            <div className="bill-rows">
-              <div className="bill-line"><span>Subtotal</span><span>{fmtDisp(subtotal)}</span></div>
-              {nontaxDisp > 0 && (
-                <div className="bill-line" style={{ color: "var(--muted)" }}>
-                  <span>MRP items (no GST)</span><span>{fmtDisp(nontaxDisp)}</span>
-                </div>
-              )}
-              {showTaxRow && (
-                <div className="bill-line"><span>GST ({Math.round(taxRate * 10000) / 100}%)</span><span>{fmtDisp(tax)}</span></div>
-              )}
-              <div className="bill-line grand"><span>Total</span><span>{fmtDisp(total)}</span></div>
-              {!showTaxRow && !dispSplit.composition && subtotal > 0 && (
-                // Tax-inclusive prices: say WHY there's no GST line, or the guest reads the
-                // missing row as the restaurant forgetting to charge it.
-                <div className="bill-line" style={{ color: "var(--muted)", fontSize: "12px" }}>
-                  <span>{nontaxDisp >= subtotal ? "No GST on these items" : "GST is already included in these prices"}</span><span />
-                </div>
-              )}
-            </div>
 
-            {/* The Place Order button. Disabled while an order is being sent. */}
+            {/* PLACE ORDER STAYS IN THE STICKY FOOT, and the totals do NOT join it — that is a
+                deliberate difference from the mock-up, for a reason already written down above:
+                .cart-foot is `position: sticky` from 760px up because on a 1280x800 desktop the
+                money and the button sat below the fold with ONE dish in the basket. Moving the
+                totals onto the ticket does not undo that fix, it does it better — they now sit
+                directly under the dishes, near the top of the sheet, so they are visible on open
+                without anything being pinned. The button stays pinned because it is the action. */}
+            <div className="cart-foot">
             <button className="btn btn-gold" onClick={placeOrder} disabled={placing}>
               <i className="fas fa-circle-check"></i> {placing ? "Placing…" : "Place Order"}
             </button>
