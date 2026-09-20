@@ -437,6 +437,62 @@ check(
     "a bookmarked /view/<folder> carries no dish slug; without the folder lookup it has no dish, " +
       "and since mig 402 no dish means no tags."
   );
+  // ── AR: 40% in the room, and the cards stay on the SCREEN (owner, 2026-09-20 — R57) ────────
+  {
+    const css = read("app/globals.css");
+    check(
+      "the dish goes into AR at 40% of its own size, and the camera comes in with it",
+      /const AR_MODEL_SCALE = 0\.4;/.test(v) &&
+        /const closeUp = o \? `\$\{o\.theta\}rad \$\{o\.phi\}rad \$\{o\.radius \* AR_MODEL_SCALE\}m` : null;/.test(v) &&
+        /\(mv as any\)\.scale = `\$\{AR_MODEL_SCALE\} \$\{AR_MODEL_SCALE\} \$\{AR_MODEL_SCALE\}`/.test(v),
+      "the models are a metre across (getDimensions: 1.00 × 0.33 × 1.00 m), so a plate arrived in " +
+        "the room the size of a coffee table — the owner's recording shows him pinching it to 41%. " +
+        "The camera must move with it, or the dish visibly shrinks on the page while Quick Look " +
+        "spends a second or two building its file."
+    );
+    check(
+      "…and it waits for model-viewer to apply that before handing over to Quick Look",
+      /await mv\.updateComplete;/.test(v) && /await mv\.updateComplete;[\s\S]{0,900}?mv\.activateAR!\(\);/.test(v),
+      "model-viewer is a Lit element: writing `scale` only SCHEDULES applyTransform(), and " +
+        "prepareUSDZ() runs inside activateAR(). Skip the await and iOS gets the old size."
+    );
+    check(
+      "…and it lifts the closest-approach clamp, or the camera stops short and the dish shrinks",
+      /mv\.setAttribute\("min-camera-orbit", "auto 20deg 0\.05m"\);/.test(v) &&
+        /if \(saved\.minOrbit == null\) mv\.removeAttribute\("min-camera-orbit"\);/.test(v) &&
+        // the camera is written again AFTER the model has shrunk, or the clamp is recomputed too late
+        /if \(closeUp\) \{ try \{ mv\.cameraOrbit = closeUp; \} catch \{\} \}/.test(v),
+      "`min-camera-orbit`'s radius is auto — a floor derived from the FULL-SIZE bounding sphere, " +
+        "and model-viewer never recomputes it on a scale change. Leave it in place and the camera " +
+        "lands at 1.12 m instead of 0.82 m: a 26% shrink on the page the guest is still watching. " +
+        "Measured with it lifted: 0.82 m, and the on-screen size does not change at all."
+    );
+    check(
+      "…and both the size and the guest's camera are put back when the session ends",
+      /const endArSizing = \(\) => \{/.test(v) &&
+        /status === "not-presenting" \|\| status === "failed"/.test(v) &&
+        (v.match(/endArSizing\(\);/g) || []).length >= 2,
+      "a session that ends (or fails, or is left mid-way) must restore scale 1 and the orbit the " +
+        "guest had, including in the effect's cleanup — otherwise the next dish opens at 40%."
+    );
+    check(
+      "the callout cards are hidden for a live AR session only, and hidden rather than unmounted",
+      /body\.ar-presenting \.viewer-wrapper \.hotspot\{ display:none; \}/.test(css) &&
+        /document\.body\.classList\.add\("ar-presenting"\)/.test(v) &&
+        (v.match(/classList\.remove\("ar-presenting"\)/g) || []).length >= 2,
+      "R57: Android AR is WebXR, which keeps this page's DOM over the camera feed, so the cards " +
+        "hung in his room. Hide them by class for the session — never unmount them, because a " +
+        "card taken out of the DOM cannot be brought back by the reveal that owns it, and never " +
+        "leave the class behind on the way out."
+    );
+    check(
+      "…and entering AR no longer REPLAYS the reveal over the camera feed",
+      !/session-started"\)\s*\{\s*\n\s*runFullSequence\(\)/.test(v),
+      "`session-started` used to replay the whole reveal so the cards animated themselves in over " +
+        "the room. That is the thing R57 removes — delete it, don't leave it switched off."
+    );
+  }
+
   for (const f of ["public/content/items/Croissant/config.json", "public/content/items/Waffle/config.json"]) {
     const cfg = JSON.parse(read(f));
     check(

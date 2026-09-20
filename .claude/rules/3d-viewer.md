@@ -1,0 +1,48 @@
+---
+paths:
+  - "app/view/**"
+  - "components/PublicModelViewer.tsx"
+  - "public/content/items/**"
+  - "public/models/**"
+---
+# The 3D dish screen — the tags, and how big the dish is in AR
+
+Written 2026-09-20 on the owner's instruction: *"after adding it back NEVER remove them they were
+the main look for 3D… and make sure you make a rule don't remove tags again."*
+Both halves are also rows in `docs/REJECTED-IDEAS.md` (**R57**) and guarded by
+`node scripts/verify-3d-viewer.mjs`.
+
+## 🏷 The callout tags are the screen. They do not get removed — by anyone, for any reason.
+
+- **They live on the DISH ROW** — `menu_items.model_tags` and `model_front_view`, migration 402 —
+  never in a file named after the folder. A folder name is typed by an owner and two restaurants
+  can share one; that is how the tags were lost for eighteen days in September 2026 when the
+  folder-collision leak was closed. Do not move them back into
+  `public/content/items/<folder>/config.json`, and do not add a second source "as a fallback".
+- **No flag, no setting, no "temporarily off".** If a change means a dish shows no cards, the
+  change is wrong. The ONLY place they are hidden is inside a live AR session (below).
+- **A reveal must never run before the tags have arrived.** `runFullSequence`'s reset clears every
+  `.hs-card-wrap` by SELECTOR and then walks the tag list to put them back — so an empty list
+  hides all three cards for good, silently. Read them through `tagsRef.current` at call time, and
+  keep `requestReveal`'s `dishSettled` booking. Two separate faults of exactly this shape were
+  measured and fixed on 2026-09-20; both looked like "the cards just aren't there".
+- **A scheduled reveal is not a played one.** The 800 ms timer is cleared on effect teardown, and
+  the ordinary small→optimized model upgrade tears the effect down. `startedRef` means PLAYED.
+
+## 📱 AR: 40% size, and no tags in the room
+
+- **`AR_MODEL_SCALE = 0.4`** is applied to `<model-viewer>`'s `scale` on the way into AR, with the
+  camera pulled in by the same factor so nothing changes on the screen the guest is still looking
+  at, and both restored on `not-presenting`. The models really are a metre wide
+  (`getDimensions()` → 1.00 × 0.33 × 1.00 m), which is why a plate arrived the size of a coffee
+  table; the owner's recording shows him pinching it to **41%**. Applied at runtime, NOT baked
+  into the GLBs — the same four files belong to the reference app, and a tenant's own uploaded
+  model has to get the same treatment without anyone re-exporting anything.
+- **`body.ar-presenting` hides the hotspots for the length of the session** (`app/globals.css`).
+  Android AR is WebXR, which keeps this page's DOM on top of the camera feed; iPhone AR is Quick
+  Look, a separate screen. Hidden, never unmounted.
+- **Quick Look does its own lighting.** `prepareUSDZ()` exports the scene through three.js's USDZ
+  exporter, which carries base colour, normal, metallic and roughness — and NOT
+  `environment-image`, `exposure`, tone mapping or any KHR material extension. A dish therefore
+  looks flatter in iPhone AR than on the screen, and no attribute on this page changes that; the
+  only real lever is shipping a hand-tuned USDZ per dish via `ios-src`. Don't chase it in CSS.

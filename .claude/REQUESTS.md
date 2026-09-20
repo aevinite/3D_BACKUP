@@ -1710,3 +1710,27 @@ one of the 992 was the SAME handful of sentences produced by our own 62-restaura
   no UI anywhere to PLACE a tag on a model, so a restaurant that uploads its own GLB gets a model
   with no cards on it. Placing tags has always been a hand-edited file; it is now a hand-edited
   column.
+- [x] **AR: the dish lands at 40%, and the tags stay out of the room** (2026-09-20, no migration).
+  His words: *"whenever in iphone ar been open it too big make it like it actually appears as 40
+  percent of what it's appearing right now… in the android also in ar i don't want tags i just want
+  tags in 3d and make sure you make a rule don't remove tags again."* His screen recording settles
+  the number — Quick Look's own badge reads **41%** where he pinched it to. **Why it was huge:**
+  measured with model-viewer's `getDimensions()`, the models are **1.00 m × 0.33 m × 1.00 m** — a
+  plate a metre across. On the screen that is invisible (the camera sits in the same units); in AR
+  it is the real size of the thing in your room. `AR_MODEL_SCALE = 0.4` is now applied to
+  `<model-viewer>`'s `scale` on the way in — measured 1.00 m → 0.400 m, and the on-screen size does
+  not change by one pixel, because the camera comes in by the same factor (2.058 m → 0.823 m) with
+  the closest-approach clamp lifted for the handoff. Everything is put back when the session ends.
+  **Tags in AR:** Android AR is WebXR, which keeps this page's DOM over the camera feed, so the
+  cards were floating in his living room; they are hidden from the moment AR VIEW is tapped until
+  the session ends — hidden, never unmounted. **The rule he asked for** is `docs/REJECTED-IDEAS.md`
+  **R57** + a `REJECTED (owner, 2026-09-20)` comment at all three code sites + a new path-scoped
+  `.claude/rules/3d-viewer.md` + 6 more checks in `verify:3d-viewer` (15 in total on the tags),
+  every one sabotage-tested. **Left — and this one is honest, not parked:** the model looks flatter
+  in iPhone AR than on the screen and no setting on our side changes that. model-viewer builds the
+  iPhone's file in the browser with three.js's USDZ exporter, which carries the colour, normal,
+  metallic and roughness maps and **not** our environment image, our exposure or our tone mapping
+  (its own code says "USDZ only supports MeshStandardMaterial"); Apple then lights it with the
+  phone's camera light estimate. The only real levers are asset-side — a hand-tuned USDZ per dish
+  via `ios-src` (needs a converter installed, and it cannot work for a restaurant's own uploaded
+  model), or baking an ambient-occlusion map into the GLBs. Neither is a code change here.
