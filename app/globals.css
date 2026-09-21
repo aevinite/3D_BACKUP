@@ -246,32 +246,40 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
 /* --- CHEF CALL BUTTON --- */
 .chef-call {
   position: fixed;
-  /* THE BELL DOES NOT MOVE ON ITS OWN. ANY OF IT.
-     REJECTED (owner, 2026-08-17, R29 — re-confirmed and widened 2026-09-20): the call-waiter bell
-     may not stand down, hide, fade, shrink, step aside, float, or lift itself out of the way.
+  /* THE BELL KEEPS ITS OWN GENTLE FLOAT. IT MAY NOT DODGE ANYTHING.
+     REJECTED (owner, 2026-08-17, R29 — widened 2026-09-20, CORRECTED 2026-09-21): the call-waiter
+     bell may not stand down, hide, fade, shrink, step aside, or LIFT itself out of the way of a
+     dish's "+" button. Its 12px idle float is NOT part of that and must stay.
      2026-08-17: "i want like previous bell of call waiter should be stuck at his place we can
      scroll and click the thing make sure don't change that again."
      2026-09-20: "why is the bell like flickering… at one point it just goes up and down… the
-     waiter bell is look very unprofessional." 
-     Three separate things used to move it, and MEASURED TOGETHER at 390px they were absurd:
-       · `animation: chefFloat` bobbed it 12px up and down for ever, even at rest;
+     waiter bell is look very unprofessional."
+     2026-09-21, after I removed the float too: "why does the bell has no animation, i want waiter
+     call it how it was, just that due to plus button it goes up and down — due to plus I don't
+     want that."  So: the FLOAT is the design and it is back; what he was pointing at was the
+     MEASURED LIFT that jumped it up to 260px to miss a card's add button, and the scroll
+     step-aside that shrank and faded it. Those two stay dead. Telling them apart is the whole
+     point of this note — "the bell moves" was never the complaint, "the bell dodges" was. 
+     WHAT WAS MEASURED at 390px, with the guest sitting perfectly still — 107 px of travel, from
+     three sources that had to be told apart rather than swept away together:
+       · `--bell-lift` hopped it up to 260px (96px observed in one sample) whenever settleBell()
+         decided a control was underneath — THE ONE HE MEANT. Gone.
        · `body.menu-scrolling` shrank it to 72%, faded it to 45% and dropped it 26px on EVERY
-         scroll, then put it back 450ms later;
-       · `--bell-lift` hopped it up to 260px (96px observed) whenever settleBell() decided a
-         control was underneath.
-     Total travel with the guest sitting perfectly still: 107 px. And it still finished sitting on
-     a `.cat-group-head`, so the machinery did not even achieve the thing it cost all that for.
-     A fixed button that covers a little content is what every floating action button does; a
-     button that jumps a third of a screen while you read is not. Do not re-add a float, a
-     scroll step-aside, a fade, a shrink or a measured lift. */
+         scroll, then put it back 450ms later — the "flickering". Gone.
+       · `animation: chefFloat`, a 12px idle bob — 12 of those 107 px, and the only one that is
+         DESIGN rather than dodging. KEPT (restored 2026-09-21 after I wrongly took it with the
+         other two).
+     And the dodging never even worked: it still finished sitting on a `.cat-group-head`. A
+     floating button that covers a little content is what every floating action button does; one
+     that jumps a third of a screen to avoid a "+" is not.
+     Do not re-add a scroll step-aside, a fade, a shrink or a measured lift. The float stays. */
   bottom: calc(24px + env(safe-area-inset-bottom));
   right: calc(20px + env(safe-area-inset-right));
   width: clamp(48px, 13vw, 58px); height: clamp(48px, 13vw, 58px);
   background: var(--accent-grad); border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: clamp(20px, 5vw, 24px); color: #1a0f0a; box-shadow: 0 12px 30px var(--accent-glow);
-  z-index: 100; cursor: pointer;
-  /* transition kept for :hover/:active only — those answer the guest's own finger. */
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  z-index: 100; cursor: pointer; animation: chefFloat 3s ease-in-out infinite;
+  transition: all 0.3s;
   /* THESE THREE KEEP A <button> PIXEL-IDENTICAL TO THE <div> IT REPLACED (2026-09-14, item 1).
      The bell became a real button so a keyboard and a screen reader can reach it. A browser
      gives every button a default border, padding and font of its own, none of which the div
@@ -284,15 +292,22 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
 .chef-call:focus-visible { outline: 3px solid var(--accent, #d4a574); outline-offset: 3px; }
 .chef-call:hover { transform: scale(1.15) rotate(10deg); box-shadow: 0 16px 40px var(--accent-glow); }
 .chef-call:active { transform: scale(0.95); }
-/* OBITUARY (2026-09-20). `body.menu-scrolling .chef-call` (shrink to 72%, fade to 45%, drop
-   26px), its prefers-reduced-motion twin, and `@keyframes chefFloat` all stood here. They were
-   added on 2026-08-04 so the bell would not cover a dish's add button on a two-column phone
-   layout — a real fault, wrongly treated. The cure moved the button constantly and still left it
-   sitting on a control; the owner has now twice asked for a bell that stays put.
-   What KEEPS solving the original fault, without motion: the list's bottom clearance (below), so
-   the last row is always scrollable clear of the bell, and the bell keeping its own
-   pointer-events, so a tap aimed at the bell is never delivered to a card. Everything else is a
+/* OBITUARY (2026-09-20, corrected 2026-09-21). `body.menu-scrolling .chef-call` — shrink to 72%,
+   fade to 45%, drop 26px on every scroll — stood here with its prefers-reduced-motion twin, and
+   it is gone for good. So is the measured `--bell-lift` that hopped the bell up to 260px to miss
+   a card's add button. Both were added on 2026-08-04 for a real fault (on a two-column phone the
+   bell's corner is where a card pins its "+"), and both were the wrong cure: they moved the
+   button constantly and it still finished sitting on a control.
+   THE FLOAT CAME BACK on 2026-09-21 and is below — removing it was my over-correction, not his
+   request. What still answers the original fault without any dodging: the list's bottom
+   clearance, so the last row can always be scrolled clear, and the bell keeping its own
+   pointer-events, so a tap meant for the bell is never delivered to a card. Everything else is a
    floating button overlapping some scenery, which is what floating buttons do. */
+@keyframes chefFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+/* Anyone who has asked their phone for less motion gets a still bell — the float is decoration,
+   and this is the one rule that was missing from the original (it only ever covered the scroll
+   step-aside, which no longer exists). The bell itself is unchanged for everyone else. */
+@media (prefers-reduced-motion: reduce) { .chef-call { animation: none; } }
 
 /* --- OVERLAYS & PANELS --- */
 .overlay { 
