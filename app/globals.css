@@ -595,9 +595,14 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
 
 /* ── FLOATING PARTICLES ── */
 .particles{position:fixed;inset:0;pointer-events:none;z-index:10;}
-.particle{position:absolute;width:4px;height:4px;background:var(--accent);border-radius:50%;opacity:0.6;animation:float 6s linear infinite;}
-.particle:nth-child(2n){background:rgba(16,185,129,0.8);animation-duration:8s;}
-.particle:nth-child(3n){background:rgba(59,130,246,0.8);animation-duration:10s;}
+/* AMBIENT MEANS AMBIENT (owner, 2026-09-21, watching the 4K film: "the bubbles that go up they
+   are going massively fastly up"). A dot crossing the whole screen in SIX seconds is ~160px a
+   second — on a phone held at arm's length you never look at it, but the eye follows it every
+   time on a big screen, and it pulled attention off the dish. Tripled: the motion is still alive,
+   it just no longer races the content. Nothing else about them changed. */
+.particle{position:absolute;width:4px;height:4px;background:var(--accent);border-radius:50%;opacity:0.6;animation:float 18s linear infinite;}
+.particle:nth-child(2n){background:rgba(16,185,129,0.8);animation-duration:24s;}
+.particle:nth-child(3n){background:rgba(59,130,246,0.8);animation-duration:30s;}
 @keyframes float{0%{transform:translateY(100vh) rotate(0deg);opacity:0;}10%{opacity:0.6;}90%{opacity:0.6;}100%{transform:translateY(-100px) rotate(360deg);opacity:0;}}
 @keyframes fadeIn{0%{opacity:0;transform:translateY(20px);}100%{opacity:1;transform:translateY(0);}}
 .fade-in{animation:fadeIn 0.6s var(--ease) forwards;}
