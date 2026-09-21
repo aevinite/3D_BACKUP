@@ -1,5 +1,9 @@
--- 188 — index the analytics "effective date" so the owner reports engine range-scans
+-- 193 — index the analytics "effective date" so the owner reports engine range-scans
 -- instead of reading every order for a restaurant.
+--
+-- ⚠ RENUMBERED: this header said 188 until 2026-09-18. The file was written for slot 188 and
+--   renumbered around parallel PRs; 188 went to 188_bill_ledger_soft_delete.sql, which still
+--   holds it. A single additive CREATE INDEX — correct at ANY number, no ordering dependency.
 --
 -- WHY: mig 185 (Pay Later) changed lfh_owner_sales_report's date filter from o.created_at
 -- to  CASE WHEN khata_at IS NOT NULL AND paid_at IS NOT NULL THEN paid_at ELSE created_at END

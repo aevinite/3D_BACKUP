@@ -21,6 +21,7 @@
     "verify:grants": "node scripts/verify-db-grants.mjs",
     "verify:migration-truth": "node scripts/verify-migration-truth.mjs",
     "verify:migrations-1-80": "node scripts/verify-migrations-1-80.mjs",
+    "verify:migrations-161-240": "node scripts/verify-migrations-161-240.mjs",
     "verify:run-alone": "node scripts/verify-migration-run-alone.mjs",
     "verify:rpc-scoped": "node scripts/verify-rpc-scoped.mjs",
     "verify:one-number": "node scripts/verify-one-number.mjs",

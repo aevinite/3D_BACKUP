@@ -1,4 +1,7 @@
--- 188_owner_analytics_workmem.sql
+-- 192_owner_analytics_workmem.sql
+-- (RENUMBERED: this file's header said 188 until 2026-09-18. It was written for slot 188 and
+--  renumbered around parallel PRs; 188 went to 188_bill_ledger_soft_delete.sql, which still
+--  holds it. Pure execution tuning — correct at ANY number, no ordering dependency.)
 -- Stops the owner dashboard "canceling statement due to statement timeout" on the
 -- "All restaurants / All time" view.
 --
