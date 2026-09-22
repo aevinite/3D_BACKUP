@@ -1953,6 +1953,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const oldOW = new Set((Array.isArray(prev.allergies) ? prev.allergies : []).map((x: any) => String(x).toLowerCase()));
       const addedOW = allergies.filter((s) => !oldOW.has(s));
       const removedOW = [...oldOW].filter((s) => !allergies.includes(s));
+      // ── AN ALLERGY IS NEVER CHANGED WITHOUT A REASON (owner, 2026-09-23) ──────────────────
+      // Word for word the manager route's rule, on the SAME endpoint name, for the same reason
+      // the long note above gives: one action, one behaviour, whichever panel it came from. A
+      // rule the waiter's tablet can walk around is not a rule — it just moves where the
+      // unexplained change gets made.
+      const owReason = reasonFromBody(body);
+      if ((addedOW.length || removedOW.length) && !owReason.note && !owReason.code) {
+        return err("Say why the allergy is changing — that line is what the kitchen cooks to.", 400);
+      }
       must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).eq("restaurant_id", rid));
       if (addedOW.length || removedOW.length) {
         const items = must(await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", b).eq("restaurant_id", rid));
@@ -2091,8 +2100,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       for (const s of justAdded) addedMark.add(s);
       for (const s of justRemoved) { if (addedMark.has(s)) addedMark.delete(s); else removedFlag = true; }
       const added_allergens = [...addedMark].filter((s) => removed.includes(s));
+      // Same rule as `orders/:id/allergies` above and as the manager route — see that note.
+      const algReason = reasonFromBody(body);
+      if ((justAdded.length || justRemoved.length) && !algReason.note && !algReason.code) {
+        return err("Say why the allergy is changing — that line is what the kitchen cooks to.", 400);
+      }
       const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).eq("restaurant_id", rid).select());
-      const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
+      const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : "",
+        algReason.note ? `— ${algReason.note}` : ""].filter(Boolean).join("; ") || "no change";
       await log("order_item_removed", { order_id: item.order_id, detail, device_id: dev });
       await stampEdited(item.order_id, rid);
       return ok(rowU[0] || { ok: true });

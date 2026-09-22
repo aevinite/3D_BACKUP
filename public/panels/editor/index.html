@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=b6e55516" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=185b02cd" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=60446809" />
   <!-- the "who is this bill for?" box — shared with the other panel that opens it -->
   <link rel="stylesheet" href="/panels/billcustomer.css?v=23b15d10" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
@@ -59,7 +59,12 @@
       <!-- Banquet module (mig 130): admin-entitled per restaurant — unhidden by syncBanquetTab() only when settings.banquet_allowed. -->
       <button class="tab" data-tab="banquet" hidden title="Banquet"><i class="tab-ico" aria-hidden="true">🎪</i><span class="tab-lbl">Banquet</span></button>
       <!-- Inventory module (mig 221): admin-entitled per restaurant — unhidden by syncInventoryTab(). -->
-      <button class="tab" data-tab="inventory" hidden title="Inventory"><i class="tab-ico" aria-hidden="true">📦</i><span class="tab-lbl">Inventory</span></button>
+      <!-- "Inventory management", not "Inventory" (owner, 2026-09-23: "inventory management,
+           call it inventory management only"). Only the LABEL changed: the tab key, the stored
+           menus key and the grant all keep their names — same rule as when "Ratings" became
+           "Rating review" and "Audit" became "Audit & logs". Renaming a label must never
+           rename a key. -->
+      <button class="tab" data-tab="inventory" hidden title="Inventory management"><i class="tab-ico" aria-hidden="true">📦</i><span class="tab-lbl">Inventory management</span></button>
       <!-- Every drawer row carries a glyph: on a phone the icon is the fastest thing to aim at,
            and Dashboard + Settings were the only two bare-text rows in the list, which read as
            half-finished beside the other seven (T12 phone sweep, 2026-08-05). -->
@@ -233,7 +238,7 @@
        renderer long ago — `dashCard()` now writes a bare `<b>` — so the exclusion had nothing to
        exclude, and `.dash-card b.ktext` in style.css had nothing to style. If a word-valued tile
        comes back, the class goes back on the element AND back in this list, together. -->
-  <script src="/panels/fitnums.js?v=0610dc4b" data-fit=".dash-card .kbody b,.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
+  <script src="/panels/fitnums.js?v=0610dc4b" data-fit=".dash-card .kval,.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
   <script src="/panels/editor/inventory.js?v=e72d6e01"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC) and shared with
@@ -246,6 +251,6 @@
   <script src="/panels/auditsort.js?v=1da861b5"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=444927f0"></script>
+  <script src="/panels/editor/app.js?v=8cefc98d"></script>
 </body>
 </html>

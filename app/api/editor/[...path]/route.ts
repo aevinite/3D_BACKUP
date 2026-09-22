@@ -148,7 +148,7 @@ import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 import { earnOnSettle, reverseOnUnpay, loyaltyStateFor, redeemOntoBill } from "@/lib/loyalty";
 import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, MENU_PART_DEFAULTS, type ManagerTabKey } from "@/lib/accessTree";
 import { managerCan } from "@/lib/managerCan";
-import { dashboardReach, clampDashRange, billsReach } from "@/lib/dashRange";
+import { dashboardReach, clampDashRange, billsReach, reachDays } from "@/lib/dashRange";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
@@ -2000,10 +2000,48 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "gst-report") {
       if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
       const sp = new URL(req.url).searchParams;
-      const monthStr = /^\d{4}-\d{2}$/.test(sp.get("month") || "") ? sp.get("month")! : new Date().toISOString().slice(0, 7);
-      const [y, m] = monthStr.split("-").map(Number);
-      const startIso = new Date(`${monthStr}-01T00:00:00+05:30`).toISOString();
-      const endIso = new Date(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01T00:00:00+05:30`).toISOString();
+      // ── THIS DOCUMENT REACHES EXACTLY AS FAR AS THE DASHBOARD DOES (owner, 2026-09-23) ────
+      // "Why does it take the GST report of the month? The manager has only access today."
+      // He was right, and it was the plainest hole on the panel: the dashboard three buttons
+      // to the left refused anything but today, and this handed the same person the whole
+      // month's taxable sales, bill count and day-by-day table — the same numbers, through a
+      // door nobody had gated. It now measures itself against the SAME `mgr_dash_range` grant
+      // (lib/dashRange.ts), and the window is clamped HERE, not merely hidden on the screen.
+      //   · 1 or 2 days  → the window IS those days; the month picker is not offered at all.
+      //   · 7 days       → the last seven business days.
+      //   · 30 days      → the full calendar month a filing actually needs, and the picker
+      //                    comes back (current month and the one before it — a return is filed
+      //                    for the month just ended, so "last month" has to be reachable).
+      // A GST report is a monthly filing document: clipping a month at day 23 would produce a
+      // sheet that is wrong for the only purpose it has, which is why the widest rung buys a
+      // whole month rather than a rolling thirty days.
+      const gstReach = dashboardReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+      const gstDays = reachDays(gstReach);
+      const IST = 5.5 * 3600e3;
+      const istNow = new Date(Date.now() + IST);
+      const thisMonth = istNow.toISOString().slice(0, 7);
+      const prevMonth = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+      const askedMonth = /^\d{4}-\d{2}$/.test(sp.get("month") || "") ? sp.get("month")! : thisMonth;
+      // Whole-month mode is the 30-day rung only, and only for the two months a filing can be
+      // about. Anything else asked for falls back to this month — never an error, same rule as
+      // clampDashRange: a wider word in the URL must not reach further than the screen offers.
+      const monthMode = gstDays >= 30;
+      const monthStr = monthMode ? (askedMonth === prevMonth ? prevMonth : thisMonth) : thisMonth;
+      let startIso: string, endIso: string, windowLabel: string;
+      if (monthMode) {
+        const [y, m] = monthStr.split("-").map(Number);
+        startIso = new Date(`${monthStr}-01T00:00:00+05:30`).toISOString();
+        endIso = new Date(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01T00:00:00+05:30`).toISOString();
+        windowLabel = new Date(`${monthStr}-01T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", month: "long", year: "numeric" });
+      } else {
+        // The same 05:00-IST business day the dashboard and the day-close sheet use, so a bill
+        // taken at 1 a.m. lands on the night it was taken on every document alike.
+        const dayStart = new Date(businessDayStartIso());
+        const back = gstDays - 1;
+        startIso = new Date(dayStart.getTime() - back * 864e5).toISOString();
+        endIso = new Date(Date.now()).toISOString();
+        windowLabel = gstDays === 1 ? "today" : gstDays === 2 ? "today and yesterday" : `the last ${gstDays} days`;
+      }
       // Complete read (page past PostgREST's ~1000-row cap) so a busy month isn't undercounted.
       const orders: any[] = [];
       for (let from = 0, guard = 0; guard < 500; guard++) {
@@ -2083,12 +2121,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       });
       return ok({
         month: monthStr,
+        // The panel draws its own head from these three: no month picker unless `monthMode`,
+        // and the window said in words either way, so nobody has to infer what they are
+        // looking at from a date range in a table.
+        monthMode, windowLabel, reach: gstReach,
+        months: monthMode ? [thisMonth, prevMonth] : [],
         restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
         ratePct: Math.round(rate * 10000) / 100,
         components,
         totals: { bills: bills.size, taxable: r2(taxable), tax: r2(tax), mrp: r2(mrp), gross: r2(gross) },
         days: [...byDay.entries()].sort().map(([date, v]) => ({ date, taxable: r2(v.taxable), tax: r2(v.tax), mrp: r2(v.mrp), gross: r2(v.gross), bills: v.bills })),
-        note: "Paid dine-in bills only (this restaurant's own sales; excludes Zomato/Swiggy). Discount applied before tax."
+        note: `Paid dine-in bills for ${windowLabel} (this restaurant's own sales; excludes Zomato/Swiggy). Discount applied before tax.`
           + (mrp > 0 ? " MRP / nil-rated turnover is listed separately — no GST is charged on it." : ""),
       });
     }
@@ -2395,7 +2438,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // not today-and-yesterday lumped together, which would make every figure on the screen
       // mean two different days at once and read as double the takings.
       const dayStart = new Date(businessDayStartIso());
-      const since = range === "yesterday" ? new Date(dayStart.getTime() - 864e5) : dayStart;
+      // ── AND TWO WINDOWS THAT ARE NOT ONE DAY (owner, 2026-09-23) ─────────────────────────
+      // `last7` / `last30` = that many business days ENDING NOW, today included — six (or
+      // twenty-nine) whole 05:00→05:00 days plus today so far. So "last 7 days" always means
+      // the same thing whether it is read at 11am or at midnight, and the delta chip below
+      // compares it against the seven days before it, cut at the same elapsed point.
+      const spanDays = range === "last7" ? 7 : range === "last30" ? 30 : 1;
+      const since = range === "yesterday" ? new Date(dayStart.getTime() - 864e5)
+        : spanDays > 1 ? new Date(dayStart.getTime() - (spanDays - 1) * 864e5)
+        : dayStart;
       const until = range === "yesterday" ? dayStart : now;
 
       // Crazy-dashboard upgrade (owner, 2026-07-05): fetch ONE window covering the
@@ -2408,7 +2459,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // The day before this one. On "today" the cut is the same ELAPSED time (today till 5pm vs
       // yesterday till 5pm); on "yesterday" the day is already complete, so elapsed = the whole
       // 24h and the ghost line is the full day before it.
-      const prevSince = new Date(since.getTime() - 864e5);
+      // THE PREVIOUS PERIOD IS AS LONG AS THIS ONE, not always one day. It was hard-coded to
+      // 24h, which was right while both ranges were a single day and would have compared a
+      // 30-day total against ONE day the moment the wide rungs arrived — a "30× more than last
+      // time" chip on a perfectly ordinary month.
+      const prevSince = new Date(since.getTime() - spanDays * 864e5);
       const elapsedMs = until.getTime() - since.getTime();
       const [dishesQ, setQ, platRangeQ] = await Promise.all([
         // Bounded like every other read (egress rule). Unbounded, PostgREST capped it at ~1000
@@ -2505,14 +2560,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Payment-method breakdown (owner, 2026-07-01): revenue + bill count per method
       // for whatever's ALREADY marked paid in this range — no extra query, same orders array.
       const paymentMethods: Record<string, { rev: number; bills: number }> = {};
-      // ONE bucket size now: both ranges are a single business day, so the series is 24 hourly
-      // points either way. (The day/month buckets went with the 30-day and 12-month views on
-      // 2026-08-03 — see the range comment above.)
+      // TWO bucket sizes (2026-09-23): a single-day range is 24 hourly points, as it always
+      // was; a 7- or 30-day range is one point PER BUSINESS DAY. Bucketing a month by hour
+      // would draw thirty days of dinner service stacked on one 20:00 column and call it a
+      // sales chart. The hour-of-day histogram (`hours`, the Busy hours chart) stays hourly in
+      // BOTH cases — across a month it is exactly the question that chart asks.
       // ALL hour-of-day stats bucket in IST explicitly — dt.getHours() was server-local,
       // which on Vercel (UTC) shifted the busy-hours chart by 5½ hours (latent bug).
       const IST_OFF = 5.5 * 3600e3;
       const istHour = (d: Date) => new Date(d.getTime() + IST_OFF).getUTCHours();
-      const keyFor = (d: Date) => String(istHour(d));
+      const byDayBuckets = spanDays > 1;
+      // Which BUSINESS day a moment belongs to: the 05:00-IST day, so a 1 a.m. bill stays on
+      // the night it was taken — the same boundary businessDayStartIso draws.
+      const bizDayIdx = (d: Date) => Math.floor((d.getTime() + IST_OFF - 5 * 3600e3) / 864e5);
+      const sinceDayIdx = bizDayIdx(since);
+      const keyFor = (d: Date) => String(byDayBuckets ? bizDayIdx(d) - sinceDayIdx : istHour(d));
       // Day parts (PetPooja pattern): 7–11 breakfast · 11–15 lunch · 15–19 evening ·
       // 19–23 dinner · 23–7 late.
       const DAY_PARTS = ["Breakfast 7–11", "Lunch 11–15", "Evening 15–19", "Dinner 19–23", "Late 23–7"] as const;
@@ -2591,7 +2653,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // chips + a bucket-aligned series so the sales chart can draw it as the dashed
       // "last time" ghost line. Same PER-BILL rule as above so the delta compares
       // like with like.
-      const prevSeries = Array(24).fill(0);
+      // The ghost line has to have the SAME number of points as the line it sits behind.
+      const prevSeries = Array(byDayBuckets ? spanDays : 24).fill(0);
       let prevRevenue = 0, prevOrders = 0, prevCancelled = 0;
       const prevBills = new Map<string, { sub: number; disc: number; tot: number; dt: Date }>();
       for (const o of prevRows) {
@@ -2609,7 +2672,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       for (const b of prevBills.values()) {
         const amt = Math.max(0, (Number(b.tot) || 0) - b.disc * (1 + rate)); // collected basis (B9), matches billAgg + owner
         prevRevenue += amt;
-        prevSeries[istHour(b.dt)] += amt;
+        // ...and bucket the same way: the previous period's day 0 is its own first day.
+        const pi = byDayBuckets ? bizDayIdx(b.dt) - (sinceDayIdx - spanDays) : istHour(b.dt);
+        if (pi >= 0 && pi < prevSeries.length) prevSeries[pi] += amt;
       }
       // Channel split for the WHOLE range: dine-in from the same orders rows, the
       // three platform channels from the one scoped aggregator query above.
@@ -2622,10 +2687,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const ch = channels[pr.source] || (channels[pr.source] = { rev: 0, count: 0 });
         ch.rev += Number(pr.total) || 0; ch.count++;
       }
-      // Zero-filled, ordered revenue series with friendly labels: the 24 hours of the day.
+      // Zero-filled, ordered revenue series with friendly labels: the 24 hours of one day, or
+      // one point per business day across a wide range (labelled "12 Sep", IST).
       const series: { label: string; revenue: number }[] = [];
       const r2 = (n: number) => Math.round(n * 100) / 100;
-      for (let h = 0; h < 24; h++) series.push({ label: `${h}:00`, revenue: r2(seriesMap[String(h)] || 0) });
+      if (byDayBuckets) {
+        const dayLabel = (i: number) => new Date((sinceDayIdx + i) * 864e5 + 5 * 3600e3)
+          .toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
+        for (let i = 0; i < spanDays; i++) series.push({ label: dayLabel(i), revenue: r2(seriesMap[String(i)] || 0) });
+      } else {
+        for (let h = 0; h < 24; h++) series.push({ label: `${h}:00`, revenue: r2(seriesMap[String(h)] || 0) });
+      }
       // Average per BILL (revenue is aggregated per bill): divide by the number of paid BILLS,
       // not paid ORDERS — dividing by orders understated the average on any multi-order table,
       // and the card is labelled "/bill". billAgg holds exactly one entry per paid bill.
@@ -2784,13 +2856,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // bills and who deleted them — a switch on the Access screen that saved and was never read
       // on this path, which is the dead-switch shape the access rebuild exists to remove.
       if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
-      // Same two ranges as the dashboard it sits on, clamped by the same helper — this card
+      // The same ranges as the dashboard it sits on, clamped by the same helper — this card
       // must not reach further back than the screen around it (a manager asking ?range=year
-      // used to get a year of staff-watch rows). today | yesterday, one business day each.
+      // used to get a year of staff-watch rows). Four rungs since 2026-09-23; the two wide
+      // ones are that many business days ending now, exactly as /stats computes them, so the
+      // card and the charts above it can never be counting different days.
       const riskReach = dashboardReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
       const range = clampDashRange(new URL(req.url).searchParams.get("range"), riskReach);
       const riskDayStart = new Date(businessDayStartIso()).getTime();
-      const sinceMs = range === "yesterday" ? riskDayStart - 864e5 : riskDayStart;
+      const riskSpan = range === "last7" ? 7 : range === "last30" ? 30 : 1;
+      const sinceMs = range === "yesterday" ? riskDayStart - 864e5 : riskDayStart - (riskSpan - 1) * 864e5;
       const untilMs = range === "yesterday" ? riskDayStart : Date.now();
       const sinceIso = new Date(sinceMs).toISOString();
       const untilIso = new Date(untilMs).toISOString();
@@ -4091,6 +4166,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const oldOW = new Set((Array.isArray(prev.allergies) ? prev.allergies : []).map((x: any) => String(x).toLowerCase()));
       const addedOW = allergies.filter((s) => !oldOW.has(s));
       const removedOW = [...oldOW].filter((s) => !allergies.includes(s));
+      // Same rule as the per-dish list directly above — the WHOLE order's allergy line is the
+      // one the kitchen reads first, so it cannot move without a reason either. Leaving this
+      // door open would have made the modal's question theatre: one save writes both lists.
+      const owReason = reasonFromBody(body);
+      if ((addedOW.length || removedOW.length) && !owReason.note && !owReason.code) {
+        return err("Say why the allergy is changing — that line is what the kitchen cooks to.", 400);
+      }
       must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).eq("restaurant_id", rid));
       if (addedOW.length || removedOW.length) {
         const items = must(await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", b).eq("restaurant_id", rid));
@@ -4102,7 +4184,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           await sb.from("order_items").update({ added_allergens: [...mark], removed_flag: rf }).eq("id", it.id).eq("restaurant_id", rid);
         }
       }
-      const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
+      const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : "",
+        owReason.note ? `— ${owReason.note}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
       await log("editor", "order_allergies", { restaurant_id: rid, order_id: b, detail, device_id: dev });
       return ok({ ok: true });
     }
@@ -4745,8 +4828,20 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       for (const s of justAdded) addedMark.add(s);   // staff-added allergen → mark it "added"
       for (const s of justRemoved) { if (addedMark.has(s)) addedMark.delete(s); else removedFlag = true; } // un-mark a re-removed add; else flag a real removal
       const added_allergens = [...addedMark].filter((s) => removed.includes(s)); // keep only ones still present
+      // ── AN ALLERGY IS NEVER CHANGED WITHOUT A REASON (owner, 2026-09-23) ──────────────────
+      // "whenever you go to change the allergy and click the edit button, you have to write the
+      // reason." A "NO PEANUTS" going onto a ticket — or worse, coming OFF one — is the single
+      // line on this whole panel that can put someone in hospital, and until now it was the one
+      // edit that needed nothing but a tap. Refused HERE and not only in the modal, because a
+      // screen that asks is not a rule (docs/ACCESS-MODEL.md — "hiding is never the only guard").
+      // A no-op save (nothing actually moved) still goes through with nothing to explain.
+      const algReason = reasonFromBody(body);
+      if ((justAdded.length || justRemoved.length) && !algReason.note && !algReason.code) {
+        return err("Say why the allergy is changing — that line is what the kitchen cooks to.", 400);
+      }
       const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).eq("restaurant_id", rid).select());
-      const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
+      const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : "",
+        algReason.note ? `— ${algReason.note}` : ""].filter(Boolean).join("; ") || "no change";
       await log("editor", "order_item_removed", { restaurant_id: rid, order_id: item.order_id, detail, device_id: dev });
       // Same rule as the note above: allowed after the bill, and RECORDED when the bill was already
       // settled — minor, no money (owner, 2026-08-13). `detail` says which allergens moved, so the
@@ -4755,7 +4850,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         await recordRemoval({
           rid, kind: "bill_annotated", user: g.user, deviceId: dev,
           orderId: item.order_id, itemId: b,
-          reason: reasonFromBody(body),
+          reason: algReason,
           meta: { field: "allergy", added: justAdded, removed: justRemoved },
         });
       }

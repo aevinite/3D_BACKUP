@@ -182,7 +182,7 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
   return (
     <div className="adm-page">
       <div className="adm-page-head" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <h1 className="adm-page-h" style={{ margin: 0 }}>Inventory &amp; expenses</h1>
+        <h1 className="adm-page-h" style={{ margin: 0 }}>Inventory management</h1>{/* ONE NAME (owner, 2026-09-23: "inventory management, call it inventory management only") */}
         {multi && (where === "one" ? (
           <>
             {/* NOT the words "All restaurants" — the cockpit's own sidebar already has a nav item

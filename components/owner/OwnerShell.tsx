@@ -60,7 +60,7 @@ const GROUPS: NavGroup[] = [
       // Inventory & expenses (mig 221): gated on the inventory MODULE being effective for the
       // restaurant (ent key injected by the layout from inventoryLadder), same as Pay Later —
       // it appears only for restaurants the admin gave the module to (no dead section).
-      { href: "/owner/inventory", label: "Inventory & expenses", icon: "fa-boxes-stacked", ent: "inventory" },
+      { href: "/owner/inventory", label: "Inventory management", icon: "fa-boxes-stacked", ent: "inventory" },   // ONE NAME (owner, 2026-09-23: "inventory management, call it inventory management only")
       { href: "/owner/issues", label: "Feedback & complaints", icon: "fa-triangle-exclamation", ent: "issues" },
     ],
   },

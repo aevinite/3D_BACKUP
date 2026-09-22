@@ -827,22 +827,45 @@ body[data-tab]:not([data-tab="items"]) #bulkBtn { display: none !important; }
 
 /* ── Dashboard + Customers tabs ───────────────────────────────────────────── */
 .dash-body { padding: 4px 0; }
-.dash-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 12px; margin-bottom: 16px; }
+/* auto-FIT, not auto-FILL (2026-09-23). auto-fill keeps every 196px track it can fit — on a
+   1600px screen that is eight tracks for five cards, so the row stopped two-thirds of the way
+   across and left a third of the width blank beside a "Right now" strip directly above it that
+   spans the whole page. auto-fit collapses the empty tracks, so the five cards share the full
+   width and line up with the strip above them. Part of "the bottom boxes are not even and not
+   looking good". */
+.dash-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); gap: 12px; margin-bottom: 16px; }
 /* KPI card (2026-07-05): icon chip + big tabular number + a helping sub-line. */
-.dash-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 13px 15px; display: grid; grid-template-columns: 34px 1fr auto; column-gap: 11px; align-items: center; font: inherit; color: inherit; text-align: left; cursor: pointer; position: relative; transition: border-color 0.15s, transform 0.15s; }
+/* THREE SHARED ROWS — see the note over kpi() in app.js. `1fr` on the last row is what pins
+   every card's small print to its own bottom edge, so five cards holding one, two and three
+   lines of it still line up along the bottom. */
+.dash-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 13px 15px; display: grid; grid-template-columns: 34px 1fr auto; grid-template-rows: auto auto 1fr; column-gap: 11px; align-items: center; font: inherit; color: inherit; text-align: left; cursor: pointer; position: relative; transition: border-color 0.15s, transform 0.15s; }
+.dash-card .kic { grid-column: 1; grid-row: 1 / 3; align-self: start; margin-top: 1px; }
+/* The label takes the WHOLE width beside the icon — the chevron moved to the bottom-right
+   corner (below) to give it those last twenty pixels, because "Lost to cancellations" is the
+   longest label on the row and it is a name this product uses on the owner's report too, so
+   shortening it here would give one thing two names on two screens. */
+.dash-card .klbl { grid-column: 2 / 4; grid-row: 1; align-self: center; font-size: 11px; letter-spacing: 0.15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The number, its delta chip and its sparkline are one wrapping FLEX line, not three inline
+   things relying on margins — which is how the revenue card ended up three lines tall beside
+   four cards that were one. */
+.dash-card .kval { grid-column: 2 / 4; grid-row: 2; align-self: start; min-height: 27px; line-height: 1.3;
+  display: flex; flex-wrap: wrap; align-items: center; column-gap: 7px; row-gap: 1px; }
+.dash-card .ksub { align-self: end; }
 .dash-card:hover { border-color: var(--gold); transform: translateY(-1px); }
 .dash-card .kic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-size: 14px; }
 .dash-card small { color: var(--muted); display: block; font-size: 11.5px; font-weight: 600; letter-spacing: 0.2px; }
-.dash-card .kbody { min-width: 0; } /* let the 1fr grid track shrink — without this an
-   overlong figure EXPANDS the track past the card edge and fitnums.js can't see the
-   overflow (grid blowout), so the big number could never shrink-to-fit. */
+/* min-width:0 on BOTH cells that sit in the 1fr track — without it an overlong figure
+   EXPANDS the track past the card edge and fitnums.js can't see the overflow (grid
+   blowout), so the big number could never shrink-to-fit. It used to live on the single
+   `.kbody` wrapper those two cells replaced (2026-09-23). */
+.dash-card .klbl, .dash-card .kval { min-width: 0; }
 .dash-card b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; }
 /* OBITUARY (2026-09-03): `.dash-card b.ktext` styled a dashboard tile whose value was WORDS
    rather than a figure — smaller, one line, ellipsised. The renderer stopped applying that class
    (dashCard() writes a bare `<b>`), so this rule and the matching `:not(.ktext)` on the fitnums
    tag were both styling and excluding nothing. Removed together with it. */
-.dash-card .ksub { grid-column: 2 / 4; color: var(--muted); font-size: 11px; margin-top: 1px; font-variant-numeric: tabular-nums; }
-.dash-card .kgo { grid-column: 3; grid-row: 1; color: var(--muted); font-size: 10px; opacity: 0.55; }
+.dash-card .ksub { grid-column: 2; grid-row: 3; color: var(--muted); font-size: 11px; margin-top: 5px; font-variant-numeric: tabular-nums; line-height: 1.45; }
+.dash-card .kgo { grid-column: 3; grid-row: 3; align-self: end; justify-self: end; color: var(--muted); font-size: 10px; opacity: 0.55; }
 .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
 .dash-chart { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
 .dash-chart.wide { grid-column: 1 / -1; }
@@ -871,7 +894,7 @@ body[data-tab]:not([data-tab="items"]) #bulkBtn { display: none !important; }
 /* Crazy-dashboard v2 (2026-07-05) */
 .dash-fresh { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
 .dash-fresh i { margin-right: 5px; }
-.dash-card .kchip { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 99px; vertical-align: 3px; margin-left: 7px; }
+.dash-card .kchip { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 99px; }
 /* The LIGHT values are deepened one step (T26 sweep #7, 2026-08-31 — item 19). These two already
    had explicit DARK overrides below, which is the tell: someone tuned the dark skin and left the
    light one at the value that had been picked for a dark card. On their own 13% tints they measured
@@ -882,7 +905,7 @@ body[data-tab]:not([data-tab="items"]) #bulkBtn { display: none !important; }
 .dash-card .kchip.flat { background: rgba(150,140,125,.14); color: var(--muted); }
 html[data-theme="dark"] .dash-card .kchip.up { color: #4fd6a5; }
 html[data-theme="dark"] .dash-card .kchip.dn { color: #f08c8c; }
-.dash-card .kspark { margin-left: 8px; vertical-align: -2px; }
+.dash-card .kspark { flex: none; }
 /* The generic .dash-card b block rule is for the BIG number only — bolds inside
    the sub-line must stay inline or every amount stacks on its own line. */
 .dash-card .ksub b { display: inline; font-size: inherit; font-weight: 800; letter-spacing: 0; }
@@ -1230,10 +1253,40 @@ body {
 /* "Loading details…" line shown in a detail section while the table's full slice streams
    in behind an instant summary-driven head (stale-while-revalidate). A soft pulsing dot
    signals "working", not "empty" — it's only on screen for a sub-second in practice. */
-.sx-loading { color: var(--muted); font-size: 13px; padding: 8px 0; display: flex; align-items: center; gap: 8px; }
-.sx-load-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: sxLoadPulse 1s ease-in-out infinite; }
-@keyframes sxLoadPulse { 0%, 100% { opacity: .35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.1); } }
-@media (prefers-reduced-motion: reduce) { .sx-load-dot { animation: none; } }
+/* ── THE TABLE POPUP'S LOADING STATE ────────────────────────────────────────────────────────
+   OBITUARY (2026-09-23): `.sx-loading` / `.sx-load-dot` / `@keyframes sxLoadPulse` — one gold
+   dot pulsing beside "Loading details…", drawn twice in every popup that opened on a busy
+   table. Owner: "the UI of loading is trash right now … it is not looking aesthetic." Replaced,
+   not switched off, under his standing "a new way replaces the old one" rule. Do not bring a
+   spinner, a dot or a "Loading…" sentence back to this card.
+   Placeholder rows in the SHAPE of the real ones, so nothing re-flows when the data lands.
+   The shimmer is mixed from --text (NOT a hard-coded cream) because this panel has a light
+   skin and the two older skeletons above all but vanish on it — same lesson, same fix. */
+.sx-skel { display: flex; flex-direction: column; gap: 9px; padding: 3px 0 1px; }
+.sx-skel-row { display: flex; align-items: center; gap: 9px; opacity: calc(1 - var(--i) * 0.18); }
+.sx-skel-bar, .sx-skel-dot {
+  display: block; border-radius: 7px; height: 11px;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--text) 6%, transparent) 30%,
+    color-mix(in srgb, var(--text) 15%, transparent) 50%,
+    color-mix(in srgb, var(--text) 6%, transparent) 70%);
+  background-size: 220px 100%; animation: edSkelShimmer 1.2s linear infinite;
+  /* every row starts its sweep a little later, so the list reads as one wave and not as
+     four identical bars blinking in lockstep */
+  animation-delay: calc(var(--i) * 0.14s);
+}
+.sx-skel-dot { width: 20px; height: 20px; border-radius: 50%; flex: none; }
+.sx-skel-name { width: 42%; }
+.sx-skel-chip { width: 54px; height: 9px; margin-left: auto; flex: none; }
+.sx-skel-qty { width: 26px; height: 16px; border-radius: 6px; flex: none; }
+.sx-skel-title { flex: 1 1 auto; max-width: 62%; }
+.sx-skel-price { width: 48px; margin-left: auto; flex: none; }
+/* the second and third titles are shorter — a column of identical bars reads as a table, and
+   a dish list is not a table */
+.sx-skel-row:nth-child(2) .sx-skel-title { max-width: 48%; }
+.sx-skel-row:nth-child(3) .sx-skel-title { max-width: 55%; }
+.sx-skel-row:nth-child(4) .sx-skel-title { max-width: 40%; }
+@media (prefers-reduced-motion: reduce) { .sx-skel-bar, .sx-skel-dot { animation: none; } }
 .sx-req { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 9px 0; border-top: 1px solid var(--line); }
 .sx-req:first-of-type { border-top: none; }
 .sx-req-info { font-size: 14px; }
@@ -2033,8 +2086,14 @@ html[data-theme="light"] .ft-take:hover { color: var(--text); }
    shimmer feel as the customer menu's loading cards, tuned to the dark editor. */
 .ftile-skel { pointer-events: none; cursor: default; }
 .ftile-skel:hover { transform: none; box-shadow: none; }
+/* Mixed from --text, not a hard-coded cream (2026-09-23). The cream was written for the dark
+   skin and all but vanished on the light one, so a returning device's floor skeleton was three
+   dozen blank squares. Same fix the boot block had already had. */
 .ftile-skel .sk-num, .ftile-skel .sk-lbl, .ftile-skel .sk-meta {
-  background: linear-gradient(100deg, rgba(245,236,221,0.04) 30%, rgba(245,236,221,0.11) 50%, rgba(245,236,221,0.04) 70%);
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--text) 6%, transparent) 30%,
+    color-mix(in srgb, var(--text) 15%, transparent) 50%,
+    color-mix(in srgb, var(--text) 6%, transparent) 70%);
   background-size: 220px 100%; animation: edSkelShimmer 1.2s linear infinite; border-radius: 8px;
 }
 .ftile-skel .sk-num { width: 32px; height: 32px; border-radius: 9px; }
@@ -2042,46 +2101,49 @@ html[data-theme="light"] .ft-take:hover { color: var(--text); }
 .ftile-skel .sk-meta { width: 46%; height: 10px; margin-top: 8px; }
 @keyframes edSkelShimmer { 0% { background-position: -110px 0; } 100% { background-position: 110px 0; } }
 
-/* ── "WE DO NOT KNOW THE SHAPE YET" — a loading block, not a pretend floor ─────────────────
-   Not the same thing as .ftile-skel above, and the difference is the whole point. That one is
-   a floor of the RIGHT size waiting for its data, and it is only ever drawn once this device
-   knows how many tables this restaurant has and how many sit on a row. THIS one is the other
-   case — the first open on a new device — where drawing tiles would mean inventing a size,
-   showing it, and then resizing every tile in front of the manager (owner, 2026-09-22: "it
-   shows something completely different ... this is a shit thing, it looks very unprofessional").
-   Three bars read as "loading". Twelve tiny tiles read as "these are your tables", and they
-   were not.
-   The shimmer is mixed from --text, NOT the hard-coded cream the two skeletons above use: those
-   were written for the dark skin and all but vanish on the light one. */
-.floor-booting { display: flex; flex-direction: column; gap: 14px; padding: 20px 2px 10px; }
-.floor-booting .fb-bars { display: flex; flex-direction: column; gap: 10px; }
-.floor-booting .fb-bars i {
-  display: block; height: 54px; border-radius: 14px;
-  background: linear-gradient(100deg,
-    color-mix(in srgb, var(--text) 5%, transparent) 30%,
-    color-mix(in srgb, var(--text) 13%, transparent) 50%,
-    color-mix(in srgb, var(--text) 5%, transparent) 70%);
-  background-size: 220px 100%; animation: edSkelShimmer 1.2s linear infinite;
-}
-.floor-booting .fb-bars i:nth-child(2) { opacity: 0.72; }
-.floor-booting .fb-bars i:nth-child(3) { opacity: 0.46; }
-.floor-booting .fb-msg { text-align: center; font-size: 13px; color: var(--muted); }
-@media (prefers-reduced-motion: reduce) { .floor-booting .fb-bars i { animation: none; } }
+/* ── "WE DO NOT KNOW THE SHAPE YET" — one loading block for the whole panel ────────────────
+   OBITUARY (2026-09-23): `.floor-booting` / `.fb-bars` / `.fb-msg` — three full-width bars in
+   a grey mixed from --text, which on the cream skin read as smudges on the paper rather than
+   as a skeleton, and which filled a tenth of the screen and left the rest blank. Owner: "the
+   UI of loading is trash right now … it is not looking aesthetic." Replaced, not switched off.
+   Do not bring the three bars back.
 
-/* Side-panel skeleton — matches the real .fc-card cards on the right so the
-   whole floor layout is present from the first frame, not just the tiles. */
-.fc-card-skel { display: flex; flex-direction: column; gap: 11px; }
-.fc-card-skel .sk-cardtitle, .fc-card-skel .sk-row {
-  background: linear-gradient(100deg, rgba(245,236,221,0.04) 30%, rgba(245,236,221,0.11) 50%, rgba(245,236,221,0.04) 70%);
-  background-size: 220px 100%; animation: edSkelShimmer 1.2s linear infinite; border-radius: 8px;
+   What it still refuses to do is invent content (owner, 2026-09-22: "it shows something
+   completely different … this is a shit thing, it looks very unprofessional"). Where the shape
+   IS known — a returning device's floor, a table card's dish rows — a skeleton in that shape is
+   still drawn, and those are the two blocks directly above and below this one. This is the
+   answer for everywhere else: three gold beads breathing in sequence, the sentence under them,
+   centred in the space that is waiting to be filled. Gold mixed from --gold and text from
+   --muted, so it belongs to both skins. */
+/* It sits in the optical centre of the space it is waiting to fill, not pinned to the top of
+   it: at the top of a 900px-tall empty panel the block reads as a stray line of text. */
+.lfh-load { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 40px 20px; min-height: min(48vh, 420px); text-align: center; }
+.lfh-load-beads { display: flex; gap: 9px; }
+.lfh-load-beads i {
+  width: 11px; height: 11px; border-radius: 50%; display: block;
+  background: var(--gold);
+  animation: lfhLoadBead 1.25s cubic-bezier(.45, 0, .55, 1) infinite;
 }
-.fc-card-skel .sk-cardtitle { height: 14px; margin-bottom: 4px; }
-.fc-card-skel .sk-row { width: 100%; height: 11px; }
-.fc-card-skel .sk-row:last-child { width: 70%; }
-
+.lfh-load-beads i:nth-child(2) { animation-delay: 0.16s; }
+.lfh-load-beads i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes lfhLoadBead {
+  0%, 70%, 100% { transform: translateY(0) scale(0.72); opacity: 0.30; }
+  32%           { transform: translateY(-9px) scale(1);  opacity: 1; }
+}
+.lfh-load-msg { font-size: 14.5px; font-weight: 650; color: var(--text); letter-spacing: 0.1px; }
+.lfh-load-sub { font-size: 12.5px; color: var(--muted); margin-top: -7px; }
 @media (prefers-reduced-motion: reduce) {
-  .ftile-skel .sk-num, .ftile-skel .sk-lbl, .ftile-skel .sk-meta,
-  .fc-card-skel .sk-cardtitle, .fc-card-skel .sk-row { animation: none; }
+  .lfh-load-beads i { animation: none; opacity: 0.55; transform: none; }
+}
+
+/* OBITUARY (2026-09-23): `.fc-card-skel` / `.sk-cardtitle` / `.sk-row` — the skeleton for the
+   right-hand rail of cards. That rail was DELETED on 2026-07-31 ("we don't even need the right
+   side panel"), so these styled a shape nothing has rendered for two months. Found while
+   redoing the loading states; deleted rather than left, because a style that reaches no screen
+   reads as live and the next person edits it and nothing changes. */
+@media (prefers-reduced-motion: reduce) {
+  .ftile-skel .sk-num, .ftile-skel .sk-lbl, .ftile-skel .sk-meta { animation: none; }
 }
 
 /* side control cards */
@@ -2923,7 +2985,12 @@ html[data-theme="light"] .fstat.warn .fstat-n { color: var(--gold-ink); }
 .tp-detail-floating.dragging { transition: none; z-index: 42; }
 .tp-detail-floating .tp-detail { flex: 1 1 auto; min-height: 0; max-height: 100%; box-shadow: var(--shadow-md); }
 .tp-detail-floating.tp-pinned .tp-detail { box-shadow: 0 0 0 2px var(--gold), var(--shadow-md); }
-.tp-detail-floating .tp-detail-body { flex: 1; min-height: 0; overflow-y: auto; }
+/* `1 1 auto`, NOT `1` (2026-09-23). `flex: 1` is shorthand for `flex-basis: 0%`, which means
+   the dish list contributes NOTHING to the card's intrinsic height — so a card left to size
+   itself came out the same height whether it held two dishes or fourteen, which is the
+   "too much large for one item" he reported. `auto` lets the content decide, and grow:1 still
+   fills the extra space when a card has been dragged taller or is holding its max-height. */
+.tp-detail-floating .tp-detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .tp-detail-floating .tp-detail-head { cursor: grab; }
 .tp-detail-floating .tp-detail-head:active { cursor: grabbing; }
 .tp-detail-floating .tp-detail-top { flex-wrap: wrap; row-gap: 6px; }

@@ -483,6 +483,49 @@ const allergyPrompt = (already) => new Promise((resolve) => {
   ov.onclick = (e) => { if (e.target === ov) done(null); };
 });
 
+// ── AN ALLERGY IS NEVER CHANGED WITHOUT A REASON (owner, 2026-09-23) ───────────────────────
+// "whenever you go to change the allergy and click the edit button you have to write the
+// reason." He said it about the manager panel; it is built on BOTH, because a safety rule a
+// waiter's tablet can walk around is not a rule — it only moves where the unexplained change
+// gets made. The server refuses a reasonless allergy change on this route too, so this is the
+// polite half. Same overlay language as allergyPrompt above so the two read as one widget.
+// The kitchen NOTE is deliberately not covered: "less ice" is not a safety record.
+const REASONS_ALLERGY = ["The guest told us", "The guest changed their mind", "Added by mistake", "Kitchen checked the dish", "Wrong dish"];
+const askAllergyReason = (what) => new Promise((resolve) => {
+  const ov = document.createElement("div");
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100001", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  const box = document.createElement("div");
+  Object.assign(box.style, { width: "min(94vw,400px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
+  box.innerHTML = `
+    <div style="font-size:16px;font-weight:800;margin:0 0 6px">⚠ Why is this changing?</div>
+    <div style="font-size:13px;color:var(--muted);margin:0 0 12px">${esc(what)}</div>
+    <div class="alg-why-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${REASONS_ALLERGY.map((r) => `<button type="button" data-v="${esc(r)}" style="padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer">${esc(r)}</button>`).join("")}</div>
+    <input class="alg-why-in" type="text" maxlength="200" placeholder="Or type it" autocomplete="off"
+      style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px;font-weight:600;outline:none" />
+    <div class="alg-why-err" style="font-size:12px;color:#fca5a5;min-height:16px;margin:6px 2px 0"></div>
+    <div style="display:flex;gap:10px;margin-top:10px">
+      <button class="alg-why-cancel" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--panel-2);color:var(--text);cursor:pointer">Cancel</button>
+      <button class="alg-why-ok" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--gold);color:#14110d;cursor:pointer">Save the reason</button>
+    </div>`;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const input = box.querySelector(".alg-why-in");
+  const errEl = box.querySelector(".alg-why-err");
+  setTimeout(() => { try { input.focus(); } catch {} }, 50);
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-allergy-why", () => done(null)) : null;
+  const done = (val) => { if (backOff) { backOff(); backOff = null; } ov.remove(); resolve(val ? { reason: val } : null); };
+  box.querySelectorAll(".alg-why-chips button").forEach((c) => (c.onclick = () => done(c.dataset.v)));
+  box.querySelector(".alg-why-cancel").onclick = () => done(null);
+  box.querySelector(".alg-why-ok").onclick = () => {
+    const v = String(input.value || "").trim();
+    if (!v) { errEl.textContent = "Pick one above, or type why."; return; }   // a refusal always says why
+    done(v);
+  };
+  input.oninput = () => { errEl.textContent = ""; };
+  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); box.querySelector(".alg-why-ok").click(); } else if (e.key === "Escape") done(null); };
+  ov.onclick = (e) => { if (e.target === ov) done(null); };
+});
+
 // Run an action that MAY need a manager PIN: try it plainly first (so it stays
 // frictionless when no PIN is configured yet, or for the admin super-user); if the
 // server answers "manager PIN required", prompt once and retry with it. Reloads on
@@ -1838,6 +1881,15 @@ function openDishEditModal(itemId) {
     const added = [...working].filter((s) => !initial.has(s));    // new avoids → this dish only
     const newItemRemoved = [...new Set([...itemRemoved.filter((s) => !removed.includes(s)), ...added])];
     const newOrderAllergies = orderAllergies.filter((s) => !removed.includes(s));
+    // Ask BEFORE the first write, and only when an allergy actually moved — a note-only save
+    // ("less ice") is not interrogated. One answer covers both writes: to the waiter pressing
+    // Save it was one act. Same rule and same words as the manager panel.
+    const algMoved = !same(newItemRemoved, itemRemoved) || (order.id && !same(newOrderAllergies, orderAllergies));
+    let algWhy = null;
+    if (algMoved) {
+      algWhy = await askAllergyReason(`Allergies for “${item.title}” are changing.`);
+      if (!algWhy) return;   // backed out — nothing is written, the modal stays open
+    }
     try {
       // Each save carries the value this modal OPENED with. If another device changed the
       // same thing while it was open, the server refuses and says what it holds now, instead
@@ -1846,10 +1898,10 @@ function openDishEditModal(itemId) {
         await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
       }
       if (!same(newItemRemoved, itemRemoved)) {
-        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
+        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved, ...algWhy }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
       }
       if (order.id && !same(newOrderAllergies, orderAllergies)) {
-        await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } });
+        await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies, ...algWhy }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } });
       }
       close();
       await load(); if (!state.ordering) renderPanel();
@@ -2353,13 +2405,17 @@ function renderPanel() {
     // ＋ Other → ask for the word, then treat it exactly like tapping a standard chip on.
     let slug = chip.dataset.slug;
     if (chip.dataset.algOther) { slug = await allergyPrompt(cur); if (!slug) return; }
+    // Ask BEFORE the optimistic flip: a chip that lights up and then un-lights because the
+    // waiter cancelled the question is "a tap vanishing in silence" in reverse.
+    const _why = await askAllergyReason(`“${slug}” is being ${cur.has(slug) ? "removed from" : "added to"} this order.`);
+    if (!_why) return;
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
     o.allergies = [...cur];        // OPTIMISTIC: update local state now so any re-render reflects it
     // A standard chip only flips on/off in place (no flicker); a TYPED one adds or removes a
     // whole chip, so the panel redraws to show it.
     if (ALG_STD.includes(slug)) chip.classList.toggle("on");  // INSTANT visual feedback — before this it only hit the server, so the tap felt dead ("allergy not clicking")
     else renderPanel();
-    act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }));
+    act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur], ..._why }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }));
   }));
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   const mob = $("#moveOrderBtn"); if (mob && s) mob.onclick = () => renderMoveOrderPicker(t);   // was dead: renderMoveOrderPicker/Target existed but nothing opened them (fixed 2026-07-06)

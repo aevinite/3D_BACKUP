@@ -67,7 +67,8 @@ export const GROUPS: { id: string; name: string; blurb: string; icon: string }[]
   { id: "floor", name: "Tables & floor", blurb: "Taking orders and moving parties around the floor.", icon: "grip" },
   { id: "kitchen", name: "Kitchen & printing", blurb: "Who prints this restaurant's paper, and on which printer (the admin decides; the setup itself is on Printing).", icon: "fire" },
   { id: "banquet", name: "Banquet & events", blurb: "Per-plate event billing. A special feature the admin switches on.", icon: "sparkles" },
-  { id: "inventory", name: "Inventory & expenses", blurb: "Stock, purchases, counting, waste and the expense book. A special feature the admin switches on.", icon: "box" },
+  // ONE NAME (owner, 2026-09-23: "inventory management, call it inventory management only") — see lib/accessTree.ts.
+  { id: "inventory", name: "Inventory management", blurb: "Stock, purchases, counting, waste and the expense book. A special feature the admin switches on.", icon: "box" },
   { id: "reports", name: "Reports & insights", blurb: "Numbers, ratings and the activity log.", icon: "chart" },
   { id: "staff", name: "Staff & settings", blurb: "Managing people and the restaurant's own settings.", icon: "users" },
   { id: "panels", name: "Staff apps", blurb: "Which of the four staff apps this restaurant has. Off refuses the login.", icon: "grid" },

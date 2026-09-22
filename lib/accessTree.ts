@@ -796,7 +796,13 @@ export const SECTIONS: Section[] = [
         what: "Each person's profile (details, job, documents), a record of salary and advances paid, and the team performance report. Pay counts as an expense wherever money is shown: a “Staff pay out” line in the day book and “Staff pay out” + “After staff pay” on the owner dashboard. OFF removes all of it — pages, report and expense lines — from the owner, manager and waiter panels.",
       },
       {
-        id: "inventory", name: "Inventory", def: false, bind: { t: "module", key: "inventory" },
+        // ONE NAME (owner, 2026-09-23: "inventory management, call it inventory management only"). The module was called three
+        // different things on three screens — "Inventory" here, "Inventory & expenses" on the
+        // admin's Main-features card and in the owner's nav — which is exactly what the note
+        // over `payroll` above warns against. One name, everywhere the MODULE is named. (The
+        // owner's "Inventory & stock" REPORT card keeps its own name: it titles a report, not
+        // the module.) Only the label moved — id, bind key and settings column are untouched.
+        id: "inventory", name: "Inventory management", def: false, bind: { t: "module", key: "inventory" },
         what: "Ingredients, purchases, stock counting, waste and the expense book.",
         children: [
           { id: "inventory_in_reports", name: "Show cost in the main reports", leftToBuild: true, bind: { t: "none" },
@@ -927,11 +933,22 @@ export const SECTIONS: Section[] = [
           id: "mgr_tab_dash", name: "Dashboard", def: true, bind: { t: "grant", flag: "view_dashboard" },
           what: "The numbers screen and the day's report.",
           children: [
+            // ── FOUR RUNGS (owner, 2026-09-23) ───────────────────────────────────────────
+            // "Make sure you can change the access to 30 days, one day, two day — and that
+            // all should be from the admin panel. And whatever day he has been given, he
+            // could only be able to give report of that particular thing."
+            // This row is no longer only the Dashboard's range: it is EVERYTHING on the panel
+            // that answers with a window — the dashboard, the staff-risk sheet, the menu
+            // winners AND the 🧾 GST report, which until today handed a today-only manager a
+            // whole month. lib/dashRange.ts holds the ladder; every one of those endpoints
+            // clamps against it on the server, so a rung not granted is not merely hidden.
             { id: "mgr_dash_range", name: "How far back it reaches", def: "today", bind: { t: "opt", id: "view_dashboard", side: "manager", key: "range" },
-              what: "Every restaurant starts on TODAY — a manager who can see yesterday can work out what a shift took, so it is handed over deliberately.",
+              what: "Every restaurant starts on TODAY — a manager who can see yesterday can work out what a shift took, so it is handed over deliberately. This also decides how far the 🧾 GST report reaches: a manager given one day cannot pull a month.",
               choices: [
-                { value: "today", label: "Today only", what: "The shift they are standing in. Nothing before this morning." },
-                { value: "today_yesterday", label: "Today + yesterday", what: "Lets them compare against the day before." },
+                { value: "today", label: "Today only", what: "The shift they are standing in. Nothing before this morning. The GST report is today's sales." },
+                { value: "today_yesterday", label: "Today + yesterday", what: "Lets them compare against the day before. The GST report covers both days." },
+                { value: "last7", label: "Last 7 days", what: "A week of trading, so they can see a weekend against a weekday. The GST report covers the same seven days." },
+                { value: "last30", label: "Last 30 days", what: "A month of trading — and the only rung that gives the GST report a whole calendar month, this one or the one before, which is what a filing is actually made from. Hand this over to a manager you trust with the restaurant's takings." },
               ] },
           ],
         },

@@ -576,6 +576,43 @@ function promptDialog(message, opts = {}) {
 // Quick-pick reason chips for reverting a payment (owner 2026-07-23). Free text still allowed;
 // these just save typing for the common cases. Kept short so they fit on a phone.
 const REASONS_REVERT = ["Mis-tap / misclick", "Wrong amount", "Refund to customer", "Paid by mistake", "Redo the bill"];
+
+// ── AN ALLERGY IS NEVER CHANGED WITHOUT A REASON (owner, 2026-09-23) ───────────────────────
+// "whenever you go to change the allergy and click the edit button you have to write the
+// reason." Every door in this panel that can move an allergy — the ✎ dish editor and both
+// copies of the per-order chip row — asks the SAME question through this one helper, so the
+// four of them cannot drift apart. The server refuses a reasonless allergy change outright
+// (app/api/editor → `items/:id/removed` and `orders/:id/allergies`), so this is the polite
+// half of a rule, not the rule itself.
+// The kitchen NOTE is deliberately NOT covered: "less ice" is not a safety record, and making
+// staff justify it would teach them to type anything to get past the box.
+// ── ONE WAY OF SAYING "FETCHING" (owner, 2026-09-23: "the UI of loading is trash right now,
+// it is not looking aesthetic") ────────────────────────────────────────────────────────────
+// The panel had four different answers to the same moment: three muddy grey bars on the floor,
+// a pulsing gold dot in a table card, a bare `<div class="empty">Loading…</div>` in five
+// modals, and nothing at all elsewhere. This is the one answer — three gold beads breathing in
+// sequence over the sentence — used everywhere a screen is waiting and has nothing honest to
+// draw yet. Where we DO know the shape of what is coming (a table's dish rows, the floor of a
+// device that has opened this restaurant before), a skeleton in that shape is still the better
+// answer and is kept; this is for the rest.
+// It deliberately does NOT invent content: no fake tiles, no fake rows (owner, 2026-09-22 —
+// "it shows something completely different … this is a shit thing, it looks very
+// unprofessional"). It says "waiting", beautifully, and then gets out of the way.
+const loadingHtml = (msg = "Loading…", sub = "") =>
+  `<div class="lfh-load" role="status" aria-live="polite">`
+  + `<div class="lfh-load-beads" aria-hidden="true"><i></i><i></i><i></i></div>`
+  + `<div class="lfh-load-msg">${esc(msg)}</div>`
+  + (sub ? `<div class="lfh-load-sub">${esc(sub)}</div>` : "")
+  + `</div>`;
+
+const REASONS_ALLERGY = ["The guest told us", "The guest changed their mind", "Added by mistake", "Kitchen checked the dish", "Wrong dish"];
+async function askAllergyReason(what) {
+  const note = await promptDialog(what, {
+    confirmLabel: "Save the reason", placeholder: "Why is this changing?",
+    required: true, danger: false, presets: REASONS_ALLERGY,
+  });
+  return note ? { reason: note } : null;   // null = they backed out; write nothing
+}
 // REASONS_DELETE and REASONS_CLOSE lived here and were DELETED on 2026-09-03 (sweep #8 T6): each was
 // declared, and mentioned nowhere else in the file. Deleting a bill has asked through
 // askRemovalReason() and its shared REMOVAL_REASONS since migration 251, which is the same six
@@ -5546,36 +5583,54 @@ function ensureChartLib() {
   return chartLibLoad;
 }
 
-// today | yesterday — remembered across reloads. Anything else (a "30d"/"year" left in this
-// browser from before 2026-08-03) reads as today, so an old device can't sit on a range that
-// no longer exists.
-let dashRange = (() => { try { return localStorage.getItem("lfh_dash_range") === "yesterday" ? "yesterday" : "today"; } catch { return "today"; } })();
-// Does this restaurant hand the manager panel yesterday as well as today? It is ONE setting
-// (Access → Manager → Manager menu → Dashboard → "How far back it reaches"), answered by the
-// server in /whoami, and the same helper clamps /stats — so the rail can never offer a day the
-// server won't return. Unknown (whoami still in flight) = today only.
-function dashReachAllowsYesterday() {
-  return !!(XRAY_WHO && XRAY_WHO.dashReach === "today_yesterday");
-}
+// ── THE FOUR RUNGS (owner, 2026-09-23) ─────────────────────────────────────────────────────
+// today | yesterday | last7 | last30, and which of them this restaurant may ask for is the ONE
+// admin setting (Access → Manager → Manager menu → Dashboard → "How far back it reaches").
+// lib/dashRange.ts holds the ladder and the server clamps every ranged endpoint against it, so
+// this list can never offer a day the server would refuse. Unknown (whoami still in flight),
+// or a rung this restaurant lost, both read as TODAY — never as the widest.
+const DASH_RUNG = { today: 1, yesterday: 2, last7: 7, last30: 30 };
+const REACH_RUNG = { today: 1, today_yesterday: 2, last7: 7, last30: 30 };
+let dashRange = (() => { try { const v = localStorage.getItem("lfh_dash_range"); return DASH_RUNG[v] ? v : "today"; } catch { return "today"; } })();
+function dashReachDays() { return REACH_RUNG[XRAY_WHO && XRAY_WHO.dashReach] || 1; }
+function dashRangeAllowed(k) { return (DASH_RUNG[k] || 99) <= dashReachDays(); }
+// The remembered range has to be re-checked against the CURRENT grant every time the dashboard
+// is drawn: an admin who narrows a restaurant from 30 days back to today must not leave the
+// manager's browser sitting on a month it can no longer ask for. The server would clamp it and
+// the screen would then be labelled one thing and showing another.
+function dashRangeEffective() { return dashRangeAllowed(dashRange) ? dashRange : "today"; }
 // ── THE RANGE IS A SMALL TOGGLE UNDER THE TITLE, NOT A WHOLE COLUMN (owner, 2026-08-05) ────────
 // "you can set the toggle at the top — not at the very top — and when there is today, you don't
 // need even toggle also." So: it sits just under the Dashboard heading (never in the top bar), and
 // a restaurant that only reaches Today gets NOTHING — a one-option chooser is a control that
 // cannot be used, which is the dead-switch the access rebuild deleted everywhere else.
 // The old left-hand rail is gone (see the `dash` branch of renderList).
+const DASH_RANGE_BTN = {
+  today: ["⚡ Today", "live"],
+  yesterday: ["Yesterday", "the day before"],
+  last7: ["Last 7 days", "a week of trading"],
+  last30: ["Last 30 days", "a month of trading"],
+};
 function dashRangeToggleHtml() {
-  if (!dashReachAllowsYesterday()) return "";
-  const on = (k) => (dashRange === k ? " active" : "");
-  return `<div class="dash-range" role="group" aria-label="Which day to show">
-    <button type="button" class="dash-range-btn${on("today")}" data-dash-range="today">⚡ Today <small>live</small></button>
-    <button type="button" class="dash-range-btn${on("yesterday")}" data-dash-range="yesterday">Yesterday <small>the day before</small></button>
-  </div>`;
+  // Draw only the rungs this restaurant was GIVEN. One rung = no chooser at all, which is his
+  // 2026-08-05 rule above and the dead-switch rule everywhere else: a control with one option
+  // is a control nobody can use. No greyed-out extras either — that is precisely what he had
+  // deleted on 2026-08-03 ("the thirty days and one year is showing… there is literally no
+  // need for it"); a rung is either granted and usable, or it is not on the screen.
+  const keys = Object.keys(DASH_RANGE_BTN).filter(dashRangeAllowed);
+  if (keys.length < 2) return "";
+  const cur = dashRangeEffective();
+  return `<div class="dash-range" role="group" aria-label="How far back to show">${keys.map((k) => {
+    const [lbl, sub] = DASH_RANGE_BTN[k];
+    return `<button type="button" class="dash-range-btn${cur === k ? " active" : ""}" data-dash-range="${k}">${lbl} <small>${sub}</small></button>`;
+  }).join("")}</div>`;
 }
 function bindDashRangeToggle() {
   document.querySelectorAll(".dash-range-btn").forEach((b) => {
     b.onclick = () => {
       const key = b.dataset.dashRange;
       if (key === dashRange) return;              // already showing it — nothing to do
+      if (!dashRangeAllowed(key)) return;         // not granted — the button should not exist at all
       dashRange = key;
       try { localStorage.setItem("lfh_dash_range", key); } catch {}
       // repaint the toggle's own highlight immediately, then fetch — a tap that looks like
@@ -5697,7 +5752,7 @@ async function loadDashboard(useCache) {
   if (useCache && loadDashboard._last && loadDashboard._lastRange === dashRange) {
     s = loadDashboard._last;
   } else {
-    try { s = await api("GET", "/stats?range=" + dashRange); }
+    try { s = await api("GET", "/stats?range=" + dashRangeEffective()); }
     catch (e) { if (seq === loadDashboard._seq) body.innerHTML = `<div class="empty">Couldn't load stats: ${esc(e.message)}</div>`; return; }
     if (seq !== loadDashboard._seq) return;
     loadDashboard._last = s; loadDashboard._lastRange = dashRange;
@@ -5705,27 +5760,38 @@ async function loadDashboard(useCache) {
   // If the owner switched tabs during the async /stats fetch, #dashBody is detached — bail before
   // rendering + drawing Chart.js onto a null canvas (rapid tab-switching threw getContext-of-null).
   if (state.tab !== "dash") return;
-  const RL = { today: "today", yesterday: "yesterday" };
+  const RL = { today: "today", yesterday: "yesterday", last7: "the last 7 days", last30: "the last 30 days" };
   const rangeLabel = RL[dashRange] || dashRange;
   // The range sub-nav lives in the LEFT SIDEBAR (renderList), so the content is
   // full-width: the Today view leads with the live per-channel summary box.
-  const summary = dashRange === "today" ? dashTodayBox(s) : "";
+  const summary = dashRange === "today" ? dashTodayBox(s) : "";   // a live snapshot, so it belongs to today alone
   // KPI cards (redesign 2026-07-05): icon chip + big number + a helping sub-line,
   // derived ONLY from fields /stats already returns — no new reads. Every card is
   // a BUTTON that opens its detail (owner's rule: no dead stat tiles), and no card
   // repeats a number another card's sub-line already states.
+  // ── FIVE CARDS, ONE RHYTHM (owner, 2026-09-23: "the bottom boxes are not even and not
+  // looking good — make it perfect") ───────────────────────────────────────────────────────
+  // The label and the big number used to live together inside one `.kbody` cell, so the row
+  // heights were decided per card: "Busiest hour so far" wrapped onto a second line and pushed
+  // ITS number a line lower than the four beside it, and the small print hung wherever its own
+  // length left it, giving five different amounts of dead space at the bottom of five cards
+  // that are all the same height. They are four separate grid cells now — icon · label ·
+  // number · small print — so every card shares the same three rows: the labels sit on one
+  // line, the numbers share a baseline, and the small print is pinned to the bottom edge.
   const kpi = (id, icon, tint, label, value, sub, opts = {}) => `
     <button class="dash-card${opts.alert ? " kalert" : ""}" data-kpi="${id}" type="button" title="Open detail">
       <span class="kic" style="background:${tint}22;color:${tint}"><i class="fa-solid ${icon}"></i></span>
-      <span class="kbody"><small>${label}</small><b>${value}</b></span>
-      <span class="ksub">${sub}</span>
+      <small class="klbl">${label}</small>
       <i class="fa-solid fa-chevron-right kgo" aria-hidden="true"></i>
+      <b class="kval">${value}</b>
+      <span class="ksub">${sub}</span>
     </button>`;
   // Crazy-dashboard v2 (owner, 2026-07-05): honest deltas, sparkline, narration,
   // day-parts and the channel split — every number the server already sends,
   // spelled out with context so nothing reads "blunt".
   const pctOf = (n, total) => { const p = (n / total) * 100; return p > 0 && p < 1 ? "<1" : String(Math.round(p)); };
-  const CMP_LABEL = { today: "vs yesterday till this time", yesterday: "vs the day before" };
+  const CMP_LABEL = { today: "vs yesterday till this time", yesterday: "vs the day before",
+    last7: "vs the 7 days before", last30: "vs the 30 days before" };
   const cmpLabel = CMP_LABEL[dashRange] || "vs the day before";
   // lowerIsBetter: for a "bad" metric (e.g. cancellations) a RISE should read as bad (red),
   // not green — so the COLOUR reflects good/bad while the ARROW still shows the real
@@ -5740,7 +5806,7 @@ async function loadDashboard(useCache) {
   };
   const sparkSvg = (pts, color) => {
     if (!Array.isArray(pts) || pts.length < 2 || !pts.some((v) => v > 0)) return "";
-    const w = 64, h = 22, lo = Math.min(...pts), hi = Math.max(...pts), span = hi - lo || 1, step = w / (pts.length - 1);
+    const w = 54, h = 20, lo = Math.min(...pts), hi = Math.max(...pts), span = hi - lo || 1, step = w / (pts.length - 1);
     const d = pts.map((v, i) => `${i ? "L" : "M"}${(i * step).toFixed(1)},${(h - ((v - lo) / span) * (h - 3) - 1.5).toFixed(1)}`).join(" ");
     return `<svg class="kspark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/></svg>`;
   };
@@ -5765,7 +5831,9 @@ async function loadDashboard(useCache) {
   // Plain-English narration (the Square trick): say what happened in one sentence.
   let narrate = "";
   if (s.revenue > 0) {
-    const when = dashRange === "today" ? `Today till ${freshT}` : "Yesterday";
+    const when = dashRange === "today" ? `Today till ${freshT}`
+      : dashRange === "yesterday" ? "Yesterday"
+      : dashRange === "last7" ? "Over the last 7 days" : "Over the last 30 days";
     let cmp = "";
     if (prev.revenue > 0) {
       const p = Math.round(((s.revenue - prev.revenue) / prev.revenue) * 100);
@@ -5782,7 +5850,9 @@ async function loadDashboard(useCache) {
     <div class="dash-cards">
       ${kpi("revenue", "fa-indian-rupee-sign", "#b97f35", `Revenue · ${rangeLabel}`, `<span data-cu="${s.revenue}" data-cu-fmt="inr">${inr(s.revenue)}</span>${deltaChip(s.revenue, prev.revenue)}${sparkSvg((s.series || []).map((p) => p.revenue), "#b97f35")}`, revSub)}
       ${kpi("orders", "fa-utensils", "#2a78d6", "Orders", `<span data-cu="${s.orderCount}">${s.orderCount}</span>${deltaChip(s.orderCount, prev.orders)}`, ordSub)}
-      ${kpi("peak", "fa-clock", "#168e5d", `Busiest hour${dashRange === "today" ? " so far" : ""}`, peakHour < 0 ? "—" : `${peakHour}:00`, peakHour < 0 ? "no orders yet" : `<b>${s.hours[peakHour]}</b> order${s.hours[peakHour] === 1 ? "" : "s"} in that hour`)}
+      ${kpi("peak", "fa-clock", "#168e5d", "Busiest hour"  /* not "Busiest hour so far": it was the one label that wrapped to a
+        second line and dropped its own number below the other four. The Today/Yesterday toggle
+        sitting directly above the row already says which day every card is counting. */, peakHour < 0 ? "—" : `${peakHour}:00`, peakHour < 0 ? "no orders yet" : `<b>${s.hours[peakHour]}</b> order${s.hours[peakHour] === 1 ? "" : "s"} in that hour`)}
       ${kpi("given", "fa-tag", "#a86e00", "Given away", `<span data-cu="${disc.total}" data-cu-fmt="inr">${inr(disc.total)}</span>`, disc.count ? `discounts on <b>${disc.count}</b> bill${disc.count === 1 ? "" : "s"}${s.revenue > 0 ? ` (${pctOf(disc.total, s.revenue + disc.total)}% given up)` : ""}${disc.max ? `<br>largest <b>${inr(disc.max.amt)}</b>${disc.max.table ? ` on T${esc(disc.max.table)}` : ""}` : ""}` : "no discounts — full price all round")}
       ${kpi("cancelled", "fa-ban", "#b34a4a", "Lost to cancellations", `<span data-cu="${s.cancelledValue || 0}" data-cu-fmt="inr">${inr(s.cancelledValue || 0)}</span>${deltaChip(s.cancelled, prev.cancelled, true)}`, s.cancelled ? `<b>${s.cancelled}</b> cancelled order${s.cancelled === 1 ? "" : "s"} — tap to inspect` : "none — clean sheet", { alert: s.cancelled > 0 })}
     </div>
@@ -5867,12 +5937,12 @@ async function loadDashboard(useCache) {
   // same elapsed time). Clicking a point opens that day's / that period's bills.
   const salesPts = s.series.map((p) => Math.round((p.revenue || 0) * INR_RATE));
   const prevPts = (prev.series || []).map((v) => Math.round((v || 0) * INR_RATE));
-  const GHOST = dashRange === "today" ? "Yesterday" : "The day before";
+  const GHOST = { today: "Yesterday", yesterday: "The day before", last7: "The 7 days before", last30: "The 30 days before" }[dashRange] || "Last time";
   if (salesPts.some((v) => v > 0)) {
     const sctx = document.getElementById("chSales").getContext("2d");
     const grad = sctx.createLinearGradient(0, 0, 0, 260);
     grad.addColorStop(0, "rgba(185,127,53,.28)"); grad.addColorStop(1, "rgba(185,127,53,.02)");
-    const datasets = [{ label: dashRange === "today" ? "Today" : "Yesterday", data: salesPts, borderColor: gold, backgroundColor: grad, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2.25 }];
+    const datasets = [{ label: { today: "Today", yesterday: "Yesterday", last7: "Last 7 days", last30: "Last 30 days" }[dashRange] || "This range", data: salesPts, borderColor: gold, backgroundColor: grad, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2.25 }];
     if (prevPts.some((v) => v > 0))
       datasets.push({ label: GHOST, data: prevPts, borderColor: "rgba(150,140,125,.55)", borderDash: [5, 4], fill: false, tension: 0.35, pointRadius: 0, pointHoverRadius: 4, borderWidth: 1.5 });
     dashCharts.push(new Chart(sctx, {
@@ -6260,14 +6330,14 @@ async function printBill(t, sess, os, opts = {}) {
 // colour. Reuses the same /stats the Dashboard already shows.
 async function printManagerReport() {
   let s;
-  try { s = await api("GET", "/stats?range=" + dashRange); }
+  try { s = await api("GET", "/stats?range=" + dashRangeEffective()); }
   catch (e) { toast("Couldn't build the report: " + e.message, "err"); return; }
   const r = state.data.restaurant || {};
   const set = state.data.settings || {};
   const isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
   const name = esc(set.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")));
   const accent = (r.accent_color && /^#[0-9a-fA-F]{3,6}$/.test(r.accent_color)) ? r.accent_color : "#d4a574";
-  const RL = { today: "Today", yesterday: "Yesterday" };
+  const RL = { today: "Today", yesterday: "Yesterday", last7: "Last 7 days", last30: "Last 30 days" };
   const rangeLabel = RL[dashRange] || dashRange;
   const now = new Date();
   const top = (s.topDishes || []).slice(0, 8);
@@ -6327,7 +6397,7 @@ async function openStaffRisk() {
   const rangeLbl = { today: "today", yesterday: "yesterday" }[dashRange] || dashRange;
   const wrap = el(`<div class="sx-modal-overlay sr-overlay"><div class="sx-modal" style="max-width:620px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🔍 Staff watch</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
-    <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">Discounts, voids, deletes &amp; paid-reverts by staff over ${esc(rangeLbl)} (follows the Dashboard range). A high count is just worth a glance — not proof of anything.</div><div id="srBody"><div class="empty">Loading…</div></div></div>
+    <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">Discounts, voids, deletes &amp; paid-reverts by staff over ${esc(rangeLbl)} (follows the Dashboard range). A high count is just worth a glance — not proof of anything.</div><div id="srBody">${loadingHtml("Counting the day\u2019s edits\u2026")}</div></div>
   </div></div>`);
   document.body.appendChild(wrap);
   const close = () => wrap.remove();
@@ -6359,7 +6429,7 @@ async function openMenuMatrix() {
   const rangeLbl = { today: "today", yesterday: "yesterday" }[dashRange] || dashRange;
   const wrap = el(`<div class="sx-modal-overlay mm-overlay"><div class="sx-modal" style="max-width:820px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>📊 Menu winners &amp; losers</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
-    <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">By how often each dish sells × the revenue it brings, over ${esc(rangeLbl)}. (Revenue, not profit — cost tracking comes with the inventory module.)</div><div id="mmBody"><div class="empty">Loading…</div></div></div>
+    <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">By how often each dish sells × the revenue it brings, over ${esc(rangeLbl)}. (Revenue, not profit — cost tracking comes with the inventory module.)</div><div id="mmBody">${loadingHtml("Working out which dishes win\u2026")}</div></div>
   </div></div>`);
   document.body.appendChild(wrap);
   const close = () => wrap.remove();
@@ -6388,24 +6458,30 @@ async function openMenuMatrix() {
   };
   // Reuse the Dashboard's already-loaded stats for the current range if present (no extra fetch).
   if (loadDashboard._last && loadDashboard._lastRange === dashRange) paint(loadDashboard._last);
-  else { try { paint(await api("GET", "/stats?range=" + dashRange)); } catch (e) { const b = wrap.querySelector("#mmBody"); if (b) b.innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; } }
+  else { try { paint(await api("GET", "/stats?range=" + dashRangeEffective())); } catch (e) { const b = wrap.querySelector("#mmBody"); if (b) b.innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; } }
 }
 
-// Monthly GST report for THIS restaurant's own dine-in sales (paid bills, discount-before-tax —
-// the same server math as the Z-report). A month picker, the GST breakdown (CGST/SGST lines when the
-// restaurant uses named components, else one GST line), a per-day table, and a CSV for the accountant.
+// GST report for THIS restaurant's own dine-in sales (paid bills, discount-before-tax — the
+// same server math as the Z-report). The GST breakdown (CGST/SGST lines when the restaurant
+// uses named components, else one GST line), a per-day table, and a CSV for the accountant.
+//
+// ── IT REACHES AS FAR AS THE DASHBOARD DOES, AND NOT ONE DAY FURTHER (owner, 2026-09-23) ────
+// "Why does it take the GST report of the month? The manager has only access today." It used
+// to open on a month picker for everybody. Now the SERVER decides the window from the same
+// `mgr_dash_range` grant and tells this modal what it did: `monthMode` (is a whole month even
+// on the table?), `months` (which ones), and `windowLabel` (the window in plain words). So a
+// manager given one day sees a document headed "today" with no picker to tempt them, and a
+// manager given thirty sees the month picker a filing actually needs. The picker is drawn
+// from the server's own list — not guessed here — so the two can never disagree.
 async function openGstReport() {
   document.querySelector(".gst-overlay")?.remove();
-  const defMonth = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 7); // current month (IST)
   const wrap = el(`<div class="sx-modal-overlay gst-overlay"><div class="sx-modal" style="max-width:640px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 GST report</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body">
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-        <label class="dish-edit-lbl" style="margin:0">Month</label>
-        <input type="month" id="gstMonth" value="${defMonth}" max="${defMonth}" class="dish-edit-custominput" style="width:auto"/>
+      <div id="gstHead" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
         <button class="btn" id="gstCsv" title="Download as a spreadsheet">⬇ CSV</button>
       </div>
-      <div id="gstBody"><div class="empty">Loading…</div></div>
+      <div id="gstBody">${loadingHtml("Adding up the tax\u2026")}</div>
     </div>
   </div></div>`);
   document.body.appendChild(wrap);
@@ -6413,12 +6489,33 @@ async function openGstReport() {
   wrap.querySelector(".tbl-modal-close").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   let last = null;
+  let askMonth = "";            // empty until the server says a month picker is even on offer
+  const MONTH_NAME = (m) => { const [y, mm] = String(m).split("-"); return new Date(Date.UTC(+y, +mm - 1, 1)).toLocaleDateString("en-IN", { timeZone: "UTC", month: "long", year: "numeric" }); };
   const load = async () => {
-    const month = wrap.querySelector("#gstMonth").value || defMonth;
-    wrap.querySelector("#gstBody").innerHTML = `<div class="empty">Loading…</div>`;
+    wrap.querySelector("#gstBody").innerHTML = loadingHtml("Adding up the tax\u2026");
     try {
-      const d = await api("GET", `/gst-report?month=${encodeURIComponent(month)}`);
+      const d = await api("GET", `/gst-report${askMonth ? `?month=${encodeURIComponent(askMonth)}` : ""}`);
       last = d;
+      // Redraw the head from what came back: a month chooser only where a month is allowed,
+      // and in every case the window said out loud so nobody has to infer it from the table.
+      const head = wrap.querySelector("#gstHead");
+      const csvBtn = head.querySelector("#gstCsv");
+      head.innerHTML = "";
+      if (d.monthMode && Array.isArray(d.months) && d.months.length > 1) {
+        const lbl = document.createElement("label");
+        lbl.className = "dish-edit-lbl"; lbl.style.margin = "0"; lbl.textContent = "Month";
+        const sel = document.createElement("select");
+        sel.className = "dish-edit-custominput"; sel.style.width = "auto"; sel.id = "gstMonth";
+        d.months.forEach((m) => { const o = document.createElement("option"); o.value = m; o.textContent = MONTH_NAME(m); if (m === d.month) o.selected = true; sel.appendChild(o); });
+        sel.onchange = () => { askMonth = sel.value; load(); };
+        head.appendChild(lbl); head.appendChild(sel);
+      } else {
+        const span = document.createElement("span");
+        span.className = "dish-edit-lbl"; span.style.margin = "0";
+        span.textContent = `Covering ${d.windowLabel || "today"}`;
+        head.appendChild(span);
+      }
+      head.appendChild(csvBtn);
       const t = d.totals || {};
       const compRows = (d.components && d.components.length)
         ? d.components.map((c) => `<div class="tp-bl"><span>${esc(c.label)} (${c.rate}%)</span><b>${inr(c.amount)}</b></div>`).join("")
@@ -6443,13 +6540,12 @@ async function openGstReport() {
         ${dayRows ? `<table class="gst-table" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left">Day</th><th style="text-align:right">Bills</th><th style="text-align:right">Taxable</th><th style="text-align:right">GST</th>${anyMrp ? `<th style="text-align:right">MRP</th>` : ""}<th style="text-align:right">Total</th></tr></thead><tbody>${dayRows}</tbody></table>` : `<div class="empty">No paid bills in this month.</div>`}`;
     } catch (e) { wrap.querySelector("#gstBody").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
   };
-  wrap.querySelector("#gstMonth").onchange = load;
   wrap.querySelector("#gstCsv").onclick = () => {
     if (!last) return;
     const t = last.totals || {};
     const anyMrpCsv = (Number(t.mrp) || 0) > 0;
     const rows = [
-      ["GST report", last.restaurant && last.restaurant.name || "", last.month],
+      ["GST report", last.restaurant && last.restaurant.name || "", last.windowLabel || last.month],
       ["GSTIN", last.restaurant && last.restaurant.gstin || "(not set)"],
       [],
       // The MRP column is in the spreadsheet whenever the month has any (mig 270) — the
@@ -6467,7 +6563,7 @@ async function openGstReport() {
     const csv = rows.map((row) => row.map(cell).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = `gst-${last.month}.csv`; a.click(); URL.revokeObjectURL(a.href);
+    a.download = `gst-${last.monthMode ? last.month : (last.days || []).map((r) => r.date).slice(-1)[0] || last.month}.csv`; a.click(); URL.revokeObjectURL(a.href);
   };
   load();
 }
@@ -7071,10 +7167,14 @@ function renderEditor() {
         // ＋ Other → ask for the word, then treat it exactly like tapping a standard chip on.
         let slug = chip.dataset.slug;
         if (chip.dataset.algOther) { slug = await allergyPrompt(cur); if (!slug) return; }
+        // Ask BEFORE the optimistic flip — a chip that lights up and then un-lights because the
+        // person cancelled the question is the "never drop a tap in silence" fault in reverse.
+        const _why = await askAllergyReason(`“${slug}” is being ${cur.has(slug) ? "removed from" : "added to"} this order. Why?`);
+        if (!_why) return;
         if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
         o.allergies = [...cur];          // flip the screen now
         opBegin(id); renderEditor();
-        try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }); }
+        try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies, ..._why }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }); }
         catch (e) {
           // Same rule as the table detail's copy of this chip row (T3 sweep, 2026-08-06): put the
           // refused allergen BACK on screen, and say why in words rather than showing the raw
@@ -8622,7 +8722,7 @@ function allowedLogView() {
 }
 function auditHtml() {
   const rows = Array.isArray(state.audit) ? state.audit : null;
-  if (!rows) return `<div class="ed-head"><h2>Audit · removals</h2></div><div class="empty">${state.audit && state.audit.error ? esc("Couldn't load: " + state.audit.error) : "Loading…"}</div>`;
+  if (!rows) return `<div class="ed-head"><h2>Audit · removals</h2></div>` + (state.audit && state.audit.error ? `<div class="empty">${esc("Couldn't load: " + state.audit.error)}</div>` : loadingHtml("Opening the record\u2026"));
   const q = (state.auditQ || "").toLowerCase().trim();
   // SORT + FILTER BY TYPE, from the SAME module the owner console and the admin console use
   // (owner, 2026-08-11: "make something like sort thing where everything can be sorted, like what
@@ -10508,10 +10608,8 @@ function floorHtml() {
   if (!floorShapeKnown() && !state.settingsSettled) {
     return `<div class="floor-wrap floor-collapsed"><div class="floor-main">`
       + `<div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2></div>`
-      + `<div class="floor-booting" role="status" aria-live="polite">`
-      + `<div class="fb-bars" aria-hidden="true"><i></i><i></i><i></i></div>`
-      + `<div class="fb-msg">Loading your tables\u2026</div>`
-      + `</div></div></div>`;
+      + loadingHtml("Setting your room out\u2026", "the tables land as soon as they arrive")
+      + `</div></div>`;
   }
 
   if (!state.boardLoaded) {
@@ -10661,8 +10759,18 @@ function floorHtml() {
     const dockBtn = ""; // nothing to dock INTO any more — the side panel is gone (2026-07-31)
     // A PINNED card keeps its dragged/resized geometry (x/y/w/h); a free one gets only its
     // auto-arrange width here and its left/top/width from layoutFloatingRow after render.
-    const styleParts = [`width:${f.w || 400}px`];
-    if (f.pinned && f.x != null) { styleParts.push(`left:${f.x}px`, `top:${f.y}px`, "right:auto"); if (f.h) styleParts.push(`height:${f.h}px`); }
+    // BORN AT ITS FINAL WIDTH (owner, 2026-09-23) — see floatSlotGeom's note. A free card asks
+    // the layout pass's own function where its slot is, so opening a second popup is ONE
+    // movement instead of "400px, paint, now shrink everybody".
+    const styleParts = [];
+    if (f.pinned && f.x != null) {
+      styleParts.push(`width:${f.w || 400}px`, `left:${f.x}px`, `top:${f.y}px`, "right:auto");
+      if (f.h) styleParts.push(`height:${f.h}px`);
+    } else {
+      const g = floatSlotGeom();
+      styleParts.push(`width:${g.slotW}px`, `left:${f.slot != null ? g.left(f.slot) : g.startX}px`,
+        `top:${g.top}px`, `max-height:${g.maxH}px`, "right:auto");
+    }
     return `<div class="tp-detail-floating${f.pinned ? " tp-pinned" : ""}" data-floating-table="${esc(f.table)}" style="${styleParts.join(";")}">
       <div class="tp-detail" data-table-detail="${esc(f.table)}">
         <div class="tp-detail-head">
@@ -10894,31 +11002,54 @@ function addFloating(t) {
 // (state.floatCols columns, centered as a row, each column capped at FLOAT_MAX_W). Slot
 // indexes are stable, so drag-outs/closes never move the rest; only a grid GROWTH (add with
 // no free gap) re-computes everyone's width. Pinned cards keep their dropped/resized geometry.
-function layoutFloatingRow() {
-  // the cards' heights change here, so the rows must be re-measured right after (see spineFit)
-  setTimeout(() => spineFit(), 0);
-  // TOP adds the admin/owner ribbon's height (0 for real staff) — the inline top set
-  // below overrides the CSS default, so it must do the same --ribbon-h subtraction or
-  // popups tuck under the topbar in admin view.
+// floatSlotGeom(): where slot N sits and how wide it is, for the CURRENT number of columns.
+// ── ONE ANSWER, TWO READERS (owner, 2026-09-23) ─────────────────────────────────────────────
+// "whenever you drag out and click any other table, at that time it auto shrinks — it should
+// shrink from first." Opening a second popup used to happen in two visible steps: the markup
+// shipped every card at `width:400px`, the browser painted that, and only then did
+// layoutFloatingRow() come along and narrow them all to their real slot width. With a 0.22s
+// width transition on the card, a card already 340px wide GREW to 400 and then shrank again —
+// which is the wobble he watched. Now the markup asks this function the same question the
+// layout pass asks, so a card is born at the width it is going to keep and only the genuine
+// change (four columns becoming five) ever animates.
+function floatSlotGeom() {
   const ribbonH = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--ribbon-h")) || 0;
-  const GAP = 14, MARGIN = 20, TOP = 70 + ribbonH;
+  const GAP = 14, MARGIN = 20;
   const phone = isPhoneLayout();
   const cols = Math.max(1, Math.min(MAX_FLOATING, state.floatCols || 1));
   const avail = window.innerWidth - (phone ? 16 : MARGIN * 2);
   const slotW = phone ? avail : Math.min((avail - (cols - 1) * GAP) / cols, FLOAT_MAX_W);
   const rowW = cols * slotW + (cols - 1) * GAP;
   const startX = Math.max(phone ? 8 : MARGIN, (window.innerWidth - rowW) / 2);
+  const top = phone ? 62 + ribbonH : 70 + ribbonH;
+  // The CEILING, not the height. See layoutFloatingRow's note.
+  const maxH = Math.min(880, window.innerHeight - top - 14);
+  return { GAP, slotW, startX, top, maxH, left: (slot) => startX + slot * (slotW + GAP) };
+}
+
+function layoutFloatingRow() {
+  // the cards' heights change here, so the rows must be re-measured right after (see spineFit)
+  setTimeout(() => spineFit(), 0);
+  // TOP adds the admin/owner ribbon's height (0 for real staff) — the inline top set
+  // below overrides the CSS default, so it must do the same --ribbon-h subtraction or
+  // popups tuck under the topbar in admin view.
+  const g = floatSlotGeom();
   state.floatingTables.forEach((f) => {
     if (f.pinned || f.slot == null) return; // pinned = free-floating; keep its own position
     const el = document.querySelector(`[data-floating-table="${CSS.escape(String(f.table))}"]`);
     if (el) {
-      const top = phone ? 62 + ribbonH : TOP;
-      el.style.left = (startX + f.slot * (slotW + GAP)) + "px";
-      el.style.top = top + "px";
-      el.style.width = slotW + "px";
-      // TALL ON PURPOSE: the list's whole job is to hold twenty dishes without scrolling, so the
-      // card takes the height that is there (capped so it doesn't look silly on a big monitor).
-      el.style.height = Math.min(880, window.innerHeight - top - 14) + "px";
+      el.style.left = g.left(f.slot) + "px";
+      el.style.top = g.top + "px";
+      el.style.width = g.slotW + "px";
+      // ── A CEILING, NOT A HEIGHT (owner, 2026-09-23) ───────────────────────────────────────
+      // "if there is only one item, the pop-up which is coming on the screen is too much large."
+      // He is right and the old comment here was wrong to call it a feature: this line SET the
+      // height, so a table with one drink got the same 880px sheet as a table with twenty
+      // dishes — most of it empty. The list still never has to scroll when it is long, because
+      // the stylesheet's `height:auto` + this max-height give it every pixel it can use; it
+      // simply stops taking pixels it has nothing to put in.
+      el.style.height = "";
+      el.style.maxHeight = g.maxH + "px";
       el.style.right = "auto";
     }
   });
@@ -11452,6 +11583,15 @@ function openDishEditModal(itemId, rerender) {
     // avoid-list and the whole order's allergies in one press. If any of them only reached this
     // device, the whole save is a queued one and the sentence has to say so.
     let anyQueued = false;
+    // Ask BEFORE the first write, and only when an allergy actually moved: a save that only
+    // changes the kitchen note must not be interrogated (see askAllergyReason's note). The
+    // one answer covers both writes below, because to the person pressing Save it was one act.
+    const algMoved = !same(newItemRemoved, itemRemoved) || (order.id && !same(newOrderAllergies, orderAllergies));
+    let algWhy = null;
+    if (algMoved) {
+      algWhy = await askAllergyReason(`Allergies for “${item.title}” are changing. Why?`);
+      if (!algWhy) return;   // backed out — nothing is written and the modal stays open
+    }
     try {
       // Each save carries the value this modal OPENED with. If another device changed the
       // same thing while it was open, the server refuses and says what it holds now, instead
@@ -11468,10 +11608,10 @@ function openDishEditModal(itemId, rerender) {
         anyQueued = wasQueued(await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } })) || anyQueued;
       }
       if (!same(newItemRemoved, itemRemoved)) {
-        anyQueued = wasQueued(await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } })) || anyQueued;
+        anyQueued = wasQueued(await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved, ...algWhy }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } })) || anyQueued;
       }
       if (order.id && !same(newOrderAllergies, orderAllergies)) {
-        anyQueued = wasQueued(await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } })) || anyQueued;
+        anyQueued = wasQueued(await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies, ...algWhy }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } })) || anyQueued;
       }
       close();
       await loadSessions(); if (rerender) rerender();
@@ -11620,9 +11760,23 @@ function tablePanelParts(t, host = "float") {
   // bill breakdown, action buttons) needs the slice, so show a light shimmer line for each
   // until it lands. Return here so the heavy per-order builders below never run on empty data.
   if (streaming) {
-    const loadRow = `<div class="sx-loading"><span class="sx-load-dot"></span> Loading details…</div>`;
-    const sessionSec = sessionsOn ? `<div class="sx-sec"><div class="sx-sec-h">Guests <span class="sub">· ${guestsN}</span></div>${loadRow}</div>` : "";
-    const ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${dishN}</span></div>${loadRow}</div>`;
+    // ── A SHAPE, NOT A SENTENCE (owner, 2026-09-23: "the UI of loading is trash right now …
+    // it is not looking aesthetic") ───────────────────────────────────────────────────────
+    // What was here: one gold dot pulsing beside the words "Loading details…", twice. It told
+    // the reader nothing about what was coming and it looked like a placeholder somebody meant
+    // to finish. What is here now is the same thing the floor already does while the board is
+    // in flight — placeholder rows in the SHAPE of the real ones, so the card does not change
+    // layout when the data lands, only fills in. The guest rows get a face-dot and a name; the
+    // dish rows get a quantity pill, a title of a believable length and a price on the right.
+    // How many rows: as many as the summary tile already told us are there, capped, so a table
+    // with one drink shows ONE placeholder and not three (which is the same complaint as the
+    // over-tall card — see floatSlotGeom).
+    const skelRows = (n, inner) => Array.from({ length: Math.max(1, Math.min(n || 1, 4)) },
+      (_, i) => `<div class="sx-skel-row" style="--i:${i}">${inner}</div>`).join("");
+    const memSkel = skelRows(guestsN, `<i class="sx-skel-dot"></i><i class="sx-skel-bar sx-skel-name"></i><i class="sx-skel-bar sx-skel-chip"></i>`);
+    const dishSkel = skelRows(dishN, `<i class="sx-skel-bar sx-skel-qty"></i><i class="sx-skel-bar sx-skel-title"></i><i class="sx-skel-bar sx-skel-price"></i>`);
+    const sessionSec = sessionsOn ? `<div class="sx-sec"><div class="sx-sec-h">Guests <span class="sub">· ${guestsN}</span></div><div class="sx-skel" aria-label="Loading the guests" aria-busy="true">${memSkel}</div></div>` : "";
+    const ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${dishN}</span></div><div class="sx-skel" aria-label="Loading the dishes" aria-busy="true">${dishSkel}</div></div>`;
     return { sess: null, os: [], headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec: "", billSec: "", foot: "" };
   }
 
@@ -15649,9 +15803,12 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     // ＋ Other → ask for the word, then treat it exactly like tapping a standard chip on.
     let slug = chip.dataset.slug;
     if (chip.dataset.algOther) { slug = await allergyPrompt(cur); if (!slug) return; }
+    // Same question, same helper, as the twin copy of this row above — see askAllergyReason.
+    const _why = await askAllergyReason(`“${slug}” is being ${cur.has(slug) ? "removed from" : "added to"} this order. Why?`);
+    if (!_why) return;
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
     o.allergies = [...cur]; if (rerender) rerender(); // flip the screen now
-    try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }); await loadSessions(); if (rerender) rerender(); }
+    try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies, ..._why }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }); await loadSessions(); if (rerender) rerender(); }
     catch (e) {
       // AN ALLERGEN THE SERVER REFUSED MUST NOT STAY ON THE SCREEN (T3 sweep, 2026-08-06).
       // Two faults here, and this is a safety field: the chip was flipped optimistically two lines
@@ -18095,7 +18252,7 @@ function bqMath(lines) {
 
 function banquetHtml() {
   const bq = state.banquet;
-  if (!bq.loaded) return `<div class="ed-head"><h2>🎪 Banquet</h2></div><div class="empty">Loading…</div>`;
+  if (!bq.loaded) return `<div class="ed-head"><h2>🎪 Banquet</h2></div>` + loadingHtml("Opening the function book\u2026");
   const sub = bq.sub || "new";
   const chip = (id, label) => `<button class="btn small${sub === id ? " primary" : ""}" data-bqsub="${id}">${label}</button>`;
   const head = `<div class="ed-head"><h2>🎪 Banquet</h2>
@@ -19538,14 +19695,16 @@ document.addEventListener("click", (e) => {
 // picked up after an hour re-reads its powers before its first tap.
 function applyWhoami(w) {
   XRAY_WHO = w;
-  // The dashboard rail is drawn from THIS answer: Today always, Yesterday only when the
-  // restaurant's Access setting reaches that far (w.dashReach). Two things to settle now that
-  // we know it — and both matter on the FIRST paint, before anyone taps:
+  // The dashboard's range buttons are drawn from THIS answer: Today always, and each wider
+  // rung only as far as the restaurant's Access setting reaches (w.dashReach — today ·
+  // today + yesterday · last 7 days · last 30 days). Two things to settle now that we know
+  // it — and both matter on the FIRST paint, before anyone taps:
   //   1. a range remembered in localStorage that this restaurant no longer allows (a device
-  //      that saw "Yesterday" at another restaurant, or a pre-2026-08-03 "30d") snaps back to
-  //      today, so nobody sits on a view with no row to return from. The server clamps too.
-  //   2. the Yesterday row only exists once whoami has answered, so the rail is redrawn here.
-  const allowed = dashRange === "today" || (dashRange === "yesterday" && dashReachAllowsYesterday());
+  //      that saw "Last 30 days" at another restaurant, or one whose admin has just narrowed
+  //      it) snaps back to today, so nobody sits on a view with no row to return from and no
+  //      screen is labelled one window while showing another. The server clamps too.
+  //   2. the wider rows only exist once whoami has answered, so the row is redrawn here.
+  const allowed = dashRangeAllowed(dashRange);
   if (!allowed) {
     dashRange = "today";
     try { localStorage.setItem("lfh_dash_range", "today"); } catch {}

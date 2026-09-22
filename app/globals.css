@@ -610,14 +610,18 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
 
 /* ── FLOATING PARTICLES ── */
 .particles{position:fixed;inset:0;pointer-events:none;z-index:10;}
-/* AMBIENT MEANS AMBIENT (owner, 2026-09-21, watching the 4K film: "the bubbles that go up they
-   are going massively fastly up"). A dot crossing the whole screen in SIX seconds is ~160px a
-   second — on a phone held at arm's length you never look at it, but the eye follows it every
-   time on a big screen, and it pulled attention off the dish. Tripled: the motion is still alive,
-   it just no longer races the content. Nothing else about them changed. */
-.particle{position:absolute;width:4px;height:4px;background:var(--accent);border-radius:50%;opacity:0.6;animation:float 18s linear infinite;}
-.particle:nth-child(2n){background:rgba(16,185,129,0.8);animation-duration:24s;}
-.particle:nth-child(3n){background:rgba(59,130,246,0.8);animation-duration:30s;}
+/* BACK TO 6s — THE BUBBLES WERE NEVER FAST, MY RECORDING WAS (2026-09-21).
+   These were tripled to 18/24/30s the day he said "the bubbles that go up they are going
+   massively fastly up" while watching the 4K film. He was seeing a real fault, but not in the
+   app: the film's capture rig froze Chrome's MAIN-thread clock and photographed the page slowly,
+   while these keyframes run on the COMPOSITOR, which kept real time — so they were painted about
+   nine times too fast in the film alone. Measured on the app's `chefFloat 3s` bell: 0.333s per
+   cycle in the film, 3.004s on his phone. Tripling the duration was me compensating for my own
+   bug inside the product, which is exactly what he then told me not to do ("you don't have to
+   slow the animation of actual app"). The rig records in real time now; these are the originals. */
+.particle{position:absolute;width:4px;height:4px;background:var(--accent);border-radius:50%;opacity:0.6;animation:float 6s linear infinite;}
+.particle:nth-child(2n){background:rgba(16,185,129,0.8);animation-duration:8s;}
+.particle:nth-child(3n){background:rgba(59,130,246,0.8);animation-duration:10s;}
 @keyframes float{0%{transform:translateY(100vh) rotate(0deg);opacity:0;}10%{opacity:0.6;}90%{opacity:0.6;}100%{transform:translateY(-100px) rotate(360deg);opacity:0;}}
 @keyframes fadeIn{0%{opacity:0;transform:translateY(20px);}100%{opacity:1;transform:translateY(0);}}
 .fade-in{animation:fadeIn 0.6s var(--ease) forwards;}
@@ -3731,44 +3735,55 @@ a:focus:not(:focus-visible) { outline: none; }
 
 /* --- TRANSPARENT EDGE STRIPS for prev/next navigation --- */
 @keyframes peekPrev {
-  0%, 100% { transform: translateX(0); opacity: 0.2; }
-  50% { transform: translateX(-3px); opacity: 0.45; }
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-3px); }
 }
 @keyframes peekNext {
-  0%, 100% { transform: translateX(0); opacity: 0.2; }
-  50% { transform: translateX(3px); opacity: 0.45; }
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(3px); }
 }
+/* PREV / NEXT DISH — AN EDGE HANDLE, NOT TWO LOOSE ARROWS.
+   Owner, 2026-09-21, pointing at a frame of the film: "see why the category return thing is
+   going out of the box". He was right, and the measurement says exactly why: the dish content
+   column ends at x=362 on a 390px phone, and the old strip put its two chevrons at 362.8-369 and
+   375.7-382 — the first one starting ON the content's edge, the second floating in a 28px gutter
+   with no background, no border and nothing to belong to. Two grey ">" marks hanging in the
+   margin at the viewport's vertical centre read as a rendering fault, not as a control.
+   (An earlier note here defended the pair as a "chasing" animation; that fixed a different
+   complaint — arrows stacked VERTICALLY — and is superseded, not contradicted.)
+   So: one chevron, inside a real handle that is flush to the screen edge and sits wholly in the
+   gutter. It still does the same job — walk to the next dish in the same category. */
 .dish-nav-strip {
   position: fixed;
-  top: calc(64px + env(safe-area-inset-top));
-  bottom: 0;
-  width: 36px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 58px;
   display: flex;
-  /* ROW, not column: the two chevrons are a staggered "chasing" pair and the
-     animations that drive them (peekPrev/peekNext) translate on X. Stacked
-     vertically they read as two disconnected arrows / a rendering glitch. */
-  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   z-index: 49;
   text-decoration: none;
-  background: transparent;
+  background: var(--card);
+  border: var(--border);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
   -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.3s var(--ease);
+  opacity: 0.55;
 }
-.dish-nav-strip.prev { left: 0; }
-.dish-nav-strip.next { right: 0; }
+/* Flush to its own edge: the handle is rounded on the inner side only, so it reads as a tab
+   growing out of the screen edge rather than a button someone forgot to place. */
+.dish-nav-strip.prev { left: 0; border-left: 0; border-radius: 0 14px 14px 0; }
+.dish-nav-strip.next { right: 0; border-right: 0; border-radius: 14px 0 0 14px; }
 .dish-nav-strip i {
   color: var(--text);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
 }
 .dish-nav-strip.prev i { animation: peekPrev 2s ease-in-out infinite; }
-.dish-nav-strip.prev i:nth-child(2) { animation-delay: 0.3s; }
 .dish-nav-strip.next i { animation: peekNext 2s ease-in-out infinite; }
-.dish-nav-strip.next i:nth-child(2) { animation-delay: 0.3s; }
-.dish-nav-strip:hover i,
-.dish-nav-strip:active i { opacity: 0.7; }
+.dish-nav-strip:hover,
+.dish-nav-strip:active { opacity: 1; }
 
 /* --- 4D BADGE: boost visibility in light mode --- */
 [data-theme="light"] .badge-4d {
@@ -5613,7 +5628,9 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px;
   color: var(--text) !important; text-decoration: none; font-size: 13px; font-weight: 500;
   transition: background .15s ease, color .15s ease;
-  /* ONE LINE, ALWAYS (T11 sweep, 2026-08-15). "Inventory & expenses" is the longest label in this
+  /* ONE LINE, ALWAYS (T11 sweep, 2026-08-15). "Inventory management" is the longest label in this
+     menu (it was "Inventory & expenses" until 2026-09-23 — the same 20 characters, so the
+     measurement below still stands),
      menu, and the ACTIVE style's heavier weight tipped it just past the 203px column — so opening
      that one page wrapped its row from 30px to 46px and slid every item below it (and the whole
      restaurant list) down 16px, WHILE the pointer was still on it. Measured: every other page

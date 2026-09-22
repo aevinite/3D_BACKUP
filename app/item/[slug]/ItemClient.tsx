@@ -1354,7 +1354,8 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
                   title={prev.title}
                   aria-label={`${t.previous}: ${prev.title}`}
                 >
-                  <i className="fas fa-chevron-left"></i>
+                  {/* ONE chevron: the handle is the affordance now, not a pair of loose arrows
+                      (owner, 2026-09-21 — "going out of the box"). See `.dish-nav-strip`. */}
                   <i className="fas fa-chevron-left"></i>
                 </Link>
               )}
@@ -1366,7 +1367,6 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
                   title={next.title}
                   aria-label={`${t.next}: ${next.title}`}
                 >
-                  <i className="fas fa-chevron-right"></i>
                   <i className="fas fa-chevron-right"></i>
                 </Link>
               )}
