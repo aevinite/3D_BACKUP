@@ -28,7 +28,10 @@ export const metadata = { title: "Manager — Aevidine" };
 
 export default async function ManagerPanel({ searchParams }: { searchParams: Promise<{ rid?: string; as?: string; view?: string }> }) {
   const { rid, as, view } = await searchParams;
-  const adminRid = await panelAdminRid("manager", rid);
-  const src = panelIframeSrc("/panels/editor/index.html", adminRid, { as, view });
+  const { adminRid, selfRid } = await panelAdminRid("manager", rid);
+  // selfRid → ?skel= : a real manager's own restaurant id, handed over so the floor can read this
+  // device's remembered layout on its FIRST frame instead of guessing 12-per-row and re-flowing.
+  // Cosmetic only — see panelIframeSrc. An admin tab already has ?rid= and gets no ?skel=.
+  const src = panelIframeSrc("/panels/editor/index.html", adminRid, { as, view, skelRid: selfRid });
   return <PanelFrame src={src} title="Manager" />;
 }

@@ -58,7 +58,18 @@ export async function requirePanel(role: Role, next: string): Promise<void> {
 // rarer, admin-only, self-inflicted case not worth a per-request existence read.)
 const RID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function panelAdminRid(role: Role, rid: string | undefined): Promise<string | null> {
+// Returns TWO ids, because the page needs two different answers from one cookie read:
+//   adminRid — the admin's per-tab pin (null for a real staff login), the one that is echoed on
+//              every API call and that scopes the panel's DATA.
+//   selfRid  — the restaurant the SIGNED-IN STAFF belong to. Cosmetic only: it is handed to the
+//              iframe as ?skel= so the floor can read its own remembered shape on the FIRST frame
+//              (see panelIframeSrc). It is never sent back to the server and never scopes data.
+// They are returned together on purpose. userFromCookie() is a DB read, and the page used to get
+// only adminRid from it — asking a second time for selfRid would have added a third read of
+// staff_users to every panel open (the layout gate already makes one).
+export async function panelAdminRid(
+  role: Role, rid: string | undefined,
+): Promise<{ adminRid: string | null; selfRid: string | null }> {
   const store = await cookies();
   // PER-TAB ADMIN PIN first (owner, 2026-07-28): a valid ?rid= + the admin cookie marks
   // THIS TAB as an admin view even when a real staff login for the same role exists in
@@ -66,13 +77,15 @@ export async function panelAdminRid(role: Role, rid: string | undefined): Promis
   // in one tab silently turned every admin-opened panel tab into that staff session
   // (and Visit-panel landed on the staff view instead of the admin one). Only the
   // console's act-as flow appends ?rid=, and it's ignored without the admin cookie.
-  if (rid && RID_RE.test(rid) && (await tokenIsValid(store.get(AUTH_COOKIE)?.value))) return rid;
+  if (rid && RID_RE.test(rid) && (await tokenIsValid(store.get(AUTH_COOKIE)?.value))) return { adminRid: rid, selfRid: null };
   const u = await userFromCookie(store.get(USER_COOKIE)?.value);
-  if (u && u.role === role) return null; // real staff login — the layout already vetted them
+  // Real staff login — the layout already vetted them. No admin pin, but we DO know whose
+  // restaurant this is, so the paint hint can ride along.
+  if (u && u.role === role) return { adminRid: null, selfRid: u.restaurant_id || null };
   if (await tokenIsValid(store.get(AUTH_COOKIE)?.value)) {
     redirect("/aevinite"); // admin, but no (valid) restaurant named for THIS tab
   }
-  return null; // not staff, not admin — the layout gate already bounced them to /login
+  return { adminRid: null, selfRid: null }; // not staff, not admin — the layout gate already bounced them to /login
 }
 
 // The panel iframe's src, with the admin view's per-tab pins carried into it.
@@ -91,10 +104,30 @@ export async function panelAdminRid(role: Role, rid: string | undefined): Promis
 // A malformed/unknown `as` is simply dropped by the server (lib/viewAsPerson) and the
 // tab shows the ordinary admin view — the panel only ever names a person the server
 // confirmed, so the ribbon can never claim a view it isn't showing.
+//
+// A FOURTH thing rides along, and it is NOT a pin — `skel`, the paint hint.
+//
+// The floor remembers each restaurant's shape (how many tables, how many per row) in this
+// device's localStorage, keyed by restaurant id, so the next open draws it at the right size
+// straight away. An ADMIN tab always had that id on the first frame, in `rid`. A real staff
+// login had nothing: the id only arrived with /all, ~700ms later, so every open painted a
+// generic 12-per-row floor of 12 tiny tiles and then re-flowed to the real one (owner,
+// 2026-09-22: "it shows something completely different ... this is a shit thing, it looks very
+// unprofessional"). `skel` hands the staff's OWN restaurant id across at t=0 so the cache can
+// be read on the first frame.
+//
+// It is deliberately a SEPARATE name from `rid`, and the panel treats it as one: `skel` is
+// never echoed on an API call, never scopes a query, and decides nothing but the width of a
+// shimmer. `rid` means "show me this restaurant's data" and is admin-only for that reason;
+// giving a manager a parameter that LOOKED like it would be sending the wrong signal. When an
+// admin pin is present `skel` is not added at all — `rid` already answers the same question.
 export function panelIframeSrc(
-  base: string, adminRid: string | null, pins?: { as?: string; view?: string },
+  base: string, adminRid: string | null, pins?: { as?: string; view?: string; skelRid?: string | null },
 ): string {
-  if (!adminRid) return base;
+  if (!adminRid) {
+    const skel = pins?.skelRid;
+    return skel && /^[0-9a-f-]{36}$/i.test(skel) ? `${base}?skel=${encodeURIComponent(skel)}` : base;
+  }
   let src = `${base}?rid=${encodeURIComponent(adminRid)}`;
   const as = pins?.as;
   if (as && /^[0-9a-f-]{36}$/i.test(as)) src += `&as=${encodeURIComponent(as)}`;

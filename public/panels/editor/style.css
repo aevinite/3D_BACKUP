@@ -355,6 +355,11 @@ body.nav-rail .top-actions { margin-left: auto; }
 @media (prefers-reduced-motion: reduce) {
   body.nav-rail .tabs, body.nav-rail .layout { transition: none; }
 }
+/* ARRIVING IS NOT A CLICK. The two transitions above exist for the » button; on page load the
+   rail class lands a moment after first paint and they animated the ENTIRE page 62px sideways,
+   shrinking every table tile while it ran. See the note on <body class="nav-booting"> in
+   index.html — the class ships in the markup and syncNavRail drops it a frame later. */
+body.nav-booting .tabs, body.nav-booting .layout { transition: none !important; }
 .rail-toggle { display: none; }   /* the rail's own control never shows in the drawer or the bar */
 /* BROWSE WIDE, THEN SPLIT (owner, 2026-08-14: "when you choose any one dish it will go side like
    right now, till then it show full screen"). Before anything is picked there is nothing to show
@@ -2036,6 +2041,32 @@ html[data-theme="light"] .ft-take:hover { color: var(--text); }
 .ftile-skel .sk-lbl { width: 62%; height: 13px; margin-top: auto; }
 .ftile-skel .sk-meta { width: 46%; height: 10px; margin-top: 8px; }
 @keyframes edSkelShimmer { 0% { background-position: -110px 0; } 100% { background-position: 110px 0; } }
+
+/* ── "WE DO NOT KNOW THE SHAPE YET" — a loading block, not a pretend floor ─────────────────
+   Not the same thing as .ftile-skel above, and the difference is the whole point. That one is
+   a floor of the RIGHT size waiting for its data, and it is only ever drawn once this device
+   knows how many tables this restaurant has and how many sit on a row. THIS one is the other
+   case — the first open on a new device — where drawing tiles would mean inventing a size,
+   showing it, and then resizing every tile in front of the manager (owner, 2026-09-22: "it
+   shows something completely different ... this is a shit thing, it looks very unprofessional").
+   Three bars read as "loading". Twelve tiny tiles read as "these are your tables", and they
+   were not.
+   The shimmer is mixed from --text, NOT the hard-coded cream the two skeletons above use: those
+   were written for the dark skin and all but vanish on the light one. */
+.floor-booting { display: flex; flex-direction: column; gap: 14px; padding: 20px 2px 10px; }
+.floor-booting .fb-bars { display: flex; flex-direction: column; gap: 10px; }
+.floor-booting .fb-bars i {
+  display: block; height: 54px; border-radius: 14px;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--text) 5%, transparent) 30%,
+    color-mix(in srgb, var(--text) 13%, transparent) 50%,
+    color-mix(in srgb, var(--text) 5%, transparent) 70%);
+  background-size: 220px 100%; animation: edSkelShimmer 1.2s linear infinite;
+}
+.floor-booting .fb-bars i:nth-child(2) { opacity: 0.72; }
+.floor-booting .fb-bars i:nth-child(3) { opacity: 0.46; }
+.floor-booting .fb-msg { text-align: center; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .floor-booting .fb-bars i { animation: none; } }
 
 /* Side-panel skeleton — matches the real .fc-card cards on the right so the
    whole floor layout is present from the first frame, not just the tiles. */

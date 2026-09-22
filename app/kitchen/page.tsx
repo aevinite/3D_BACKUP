@@ -22,7 +22,7 @@ export const metadata = { title: "Kitchen — Aevidine" };
 
 export default async function KitchenPanel({ searchParams }: { searchParams: Promise<{ rid?: string; as?: string; view?: string }> }) {
   const { rid, as, view } = await searchParams;
-  const adminRid = await panelAdminRid("kitchen", rid);
+  const { adminRid } = await panelAdminRid("kitchen", rid);
   const src = panelIframeSrc("/panels/kitchen/index.html", adminRid, { as, view });
   return <PanelFrame src={src} title="Kitchen — live orders" />;
 }

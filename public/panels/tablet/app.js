@@ -93,6 +93,11 @@ const state = {
   // longer ships the whole floor's order rows on every poll — it mirrors the manager exactly.
   summary: { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] },
   data: { settings: null, sessions: [], members: [], orders: [], items: [], calls: [], dishes: [], categories: [], requests: [] },
+  // false until the FIRST load() has settled — succeeded OR failed. While it is false AND the
+  // floor's shape is unknown (a device that has never opened this restaurant), renderFloor shows
+  // a loading block instead of inventing a size and correcting it on screen. Set on failure too,
+  // so a waiter can never be left looking at a spinner that never resolves.
+  settingsSettled: false,
   table: null,          // which table the panel is showing
   ordering: false,      // true while the waiter is building an order (freezes panel redraws)
   cart: [],             // [{ id, title, price, qty }]
@@ -118,6 +123,37 @@ const PANEL_VIEW_REAL = PANEL_RID && new URLSearchParams(location.search).get("v
 // section of the floor and their own permission overrides. Echoed on every call like
 // ?rid and ?view; re-checked server-side every time; ignored for real staff logins.
 const PANEL_AS = PANEL_RID ? (new URLSearchParams(location.search).get("as") || "") : "";
+// THE PAINT HINT (?skel=, 2026-09-22) — the manager panel's, mirrored here for the same reason.
+// A real waiter's login carries no ?rid (that pin is admin-only), so this floor knew of no
+// restaurant on its first frame and drew from the generic defaults: measured 6 tiles at 217px,
+// replaced 460ms later by 34 tiles at 186px, every single open. The server now hands a real staff
+// login its OWN restaurant id across purely so the two caches below can be read at t=0. It is
+// NEVER echoed on a request (ridQ ignores it) and scopes nothing but tile size.
+const PANEL_SKEL_RID = new URLSearchParams(location.search).get("skel") || "";
+// Scoped per restaurant so a shared device can never first-paint one restaurant's floor using
+// another's numbers — the same rule the manager panel's copy of this follows.
+const panelRid = () => PANEL_RID || (state && state.data && state.data.restaurant && state.data.restaurant.id) || PANEL_SKEL_RID || "";
+const perRowKey = () => { const r = panelRid(); return r ? "lfh_tablet_per_row:" + r : ""; };
+const tableCountKey = () => { const r = panelRid(); return r ? "lfh_tablet_table_count:" + r : ""; };
+const cachedPerRow = () => {
+  const k = perRowKey();
+  const v = k ? parseInt(localStorage.getItem(k), 10) : NaN;
+  return Number.isFinite(v) ? Math.min(Math.max(v, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX) : NaN;
+};
+const cachedTableCount = () => {
+  const k = tableCountKey();
+  const v = k ? parseInt(localStorage.getItem(k), 10) : NaN;
+  return Number.isFinite(v) && v > 0 ? v : NaN;
+};
+// Do we KNOW how wide and how long this floor is, or would we be guessing and then correcting it
+// on screen in front of a waiter? Only the second is a bug — see the manager's floorShapeKnown().
+function floorShapeKnown() {
+  const s = (state.data || {}).settings || {};
+  const num = (v) => (v == null || v === "" ? NaN : Number(v));   // Number(null) is 0, not "unset"
+  const perRowOk = Number.isFinite(num(s.floor_per_row)) || Number.isFinite(cachedPerRow());
+  const countOk = parseInt(s.table_count, 10) > 0 || Number.isFinite(cachedTableCount());
+  return perRowOk && countOk;
+}
 const ridQ = (path) => {
   if (!PANEL_RID) return path;
   path += (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID);
@@ -949,7 +985,18 @@ function needsAttention(i) {
   return !!(own.hasCall || own.hasReq || party.hasNew || (party.counts && party.counts.rd > 0));
 }
 
-function tableCount() { return Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12); }
+// The remembered count is the FIRST-PAINT fallback, not the generic 12: a floor that draws 12
+// tiles and then becomes 30 is the flicker this cache exists to stop (owner, 2026-09-22).
+function tableCount() {
+  const real = parseInt((state.data.settings || {}).table_count, 10);
+  if (real > 0) {
+    const k = tableCountKey();
+    if (k) { try { localStorage.setItem(k, String(real)); } catch (e) {} }
+    return real;
+  }
+  const cached = cachedTableCount();
+  return Math.max(1, Number.isFinite(cached) ? cached : 12);
+}
 
 // floorDrawCount: how far the grid actually draws. Normally 1…table_count, but a table
 // numbered ABOVE the current count can still be OCCUPIED — the count was lowered while it
@@ -1412,9 +1459,23 @@ function isTouchDevice() {
   try { return window.matchMedia("(pointer: coarse)").matches; } catch { return false; }
 }
 function floorPerRow() {
+  const clamp = (v) => Math.min(Math.max(v, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX);
+  const cap = (v) => (isTouchDevice() ? Math.min(v, FLOOR_PER_ROW_TOUCH_MAX) : v);
   const n = Math.round(Number((state.data.settings || {}).floor_per_row));
-  const set = Number.isFinite(n) ? Math.min(Math.max(n, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX) : FLOOR_PER_ROW_DEFAULT;
-  return isTouchDevice() ? Math.min(set, FLOOR_PER_ROW_TOUCH_MAX) : set;
+  if (Number.isFinite(n)) {
+    const v = clamp(n);
+    // Remember the restaurant's number UNCAPPED — the touch cap is a property of the DEVICE, not
+    // of the restaurant, so a waiter's iPad must not teach a laptop to draw 6 (the manager panel's
+    // copy of this carries the same warning).
+    const k = perRowKey();
+    if (k) { try { localStorage.setItem(k, String(v)); } catch (e) {} }
+    return cap(v);
+  }
+  // Settings haven't landed — draw what this device drew for this restaurant last time, so the
+  // first frame is already the right size. The generic default is for a device that has never
+  // opened this floor, and renderFloor withholds the grid in that case rather than guess.
+  const cached = cachedPerRow();
+  return cap(Number.isFinite(cached) ? cached : FLOOR_PER_ROW_DEFAULT);
 }
 
 // Is a guest-facing feature on for this restaurant? Mirrors the manager's featureOn(): the
@@ -1505,6 +1566,17 @@ function syncGuestBell() {
 
 function renderFloor() {
   bindFloorDelegation(); // attach the ONE delegated tile/quick/chip handler (boolean-guarded)
+  // THE SHAPE IS NOT KNOWN YET — say "loading", do not invent a floor (owner, 2026-09-22, about
+  // the manager panel; this is the waiter's copy of the same floor and it did the same thing).
+  // First open on this device for this restaurant: no remembered numbers, settings not in yet.
+  // Drawing tiles would mean picking a size, showing it, and resizing every tile a moment later.
+  if (!floorShapeKnown() && !state.settingsSettled) {
+    const g = $("#tiles");
+    if (g) g.innerHTML = `<div class="floor-booting" role="status" aria-live="polite">`
+      + `<div class="fb-bars" aria-hidden="true"><i></i><i></i><i></i></div>`
+      + `<div class="fb-msg">Loading your tables\u2026</div></div>`;
+    return;
+  }
   // DEFERRED ON PURPOSE. Both panels rebuild chunks of their own chrome during the render that
   // follows this call, and the waiter tablet's rebuild takes the top bar with it — so mounting
   // the bell first meant mounting it into markup that was about to be thrown away, and the
@@ -5673,6 +5745,7 @@ async function loadImpl() {
     patch.dishes = state.data.dishes || [];
   }
   state.data = Object.assign({}, state.data, patch);
+  state.settingsSettled = true;   // the real numbers are in — the floor may stop withholding
   if (sel != null && selSlice) mergeSelectedSlice(sel, selSlice);
   // A MERGED PARTY SPANS SEVERAL TABLES' SLICES (mig 249) — and the wipe above dropped all of
   // them. Re-pulling only the selected table put HALF the party back: a merged child's open
@@ -5742,6 +5815,10 @@ state._menuStale = true;
 // public/panels/offline.js, unused here. Wording matches the manager panel's errText(), so all
 // three panels say the same thing about the same state.
 load().catch((e) => {
+  // The boot read is finished, however badly: fall back to whatever numbers we have and draw a
+  // floor. A floor a waiter can work with beats a loading block that never resolves.
+  state.settingsSettled = true;
+  try { renderFloor(); } catch (err) {}
   if (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e)) return;                  // the offline bar says it
   if (window.LFH_OFF && window.LFH_OFF.isBusyErr && window.LFH_OFF.isBusyErr(e)) // up, but not answering
     return toast("The system is very busy right now — this will come back by itself in a moment.", false);

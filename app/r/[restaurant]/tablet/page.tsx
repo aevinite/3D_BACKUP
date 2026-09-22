@@ -42,7 +42,9 @@ export default async function ScopedTabletPanel(
   const { restaurant } = await params;
   const { as, view } = await searchParams;
   const { restaurantId, admin } = await requirePanelAt("tablet", restaurant);
-  const src = panelIframeSrc("/panels/tablet/index.html", admin ? restaurantId : null, { as, view });
+  // For a real waiter login the slug already resolved to THEIR restaurant, so the paint hint is
+  // free here — same job as /tablet's selfRid: the floor draws at its real width on frame one.
+  const src = panelIframeSrc("/panels/tablet/index.html", admin ? restaurantId : null, { as, view, skelRid: admin ? null : restaurantId });
   // PanelFrame (not a raw iframe) — sizes to the VISIBLE viewport and bridges the
   // phone's safe-area insets into the panel. See components/PanelFrame.tsx.
   return <PanelFrame src={src} title="Waiter tablet" />;

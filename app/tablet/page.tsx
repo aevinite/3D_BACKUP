@@ -21,8 +21,11 @@ export const metadata = { title: "Waiter tablet — Aevidine" };
 
 export default async function TabletPanel({ searchParams }: { searchParams: Promise<{ rid?: string; as?: string; view?: string }> }) {
   const { rid, as, view } = await searchParams;
-  const adminRid = await panelAdminRid("tablet", rid);
-  const src = panelIframeSrc("/panels/tablet/index.html", adminRid, { as, view });
+  const { adminRid, selfRid } = await panelAdminRid("tablet", rid);
+  // selfRid → ?skel= : a real waiter's own restaurant id, so the floor can read this device's
+  // remembered layout on its FIRST frame instead of guessing and re-flowing. Cosmetic only —
+  // see panelIframeSrc. Same fault, same fix as the manager panel (owner, 2026-09-22).
+  const src = panelIframeSrc("/panels/tablet/index.html", adminRid, { as, view, skelRid: selfRid });
   // PanelFrame renders the iframe sized to the VISIBLE viewport AND pushes the phone's real
   // safe-area insets into it (env() doesn't resolve inside a nested iframe — see PanelFrame.tsx).
   return <PanelFrame src={src} title="Waiter tablet" />;

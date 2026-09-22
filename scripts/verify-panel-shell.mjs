@@ -134,7 +134,11 @@ console.log("\n→ the manager panel's shell still agrees with the code it descr
       "a made-up view value would be passed on");
   }
   ok("panelIframeSrc is still the ONE builder both manager doors use",
-    /panelIframeSrc\("\/panels\/editor\/index\.html", adminRid, \{ as, view \}\)/.test(PAGE)
+    // `[^}]*` on purpose: the pin list GROWS (skelRid joined it on 2026-09-22 — the floor's
+    // first-paint hint). Pinning the exact argument text made this guard fail on a correct
+    // change, which is the failure mode this suite's own header warns about. What matters is
+    // that both doors go through the one builder, not how many pins it carries today.
+    /panelIframeSrc\("\/panels\/editor\/index\.html", adminRid, \{ as, view[^}]*\}\)/.test(PAGE)
     && /panelIframeSrc\("\/panels\/editor\/index\.html"/.test(rd("app/r/[restaurant]/manager/page.tsx")),
     "one of the two manager addresses builds its iframe url by hand again");
   ok("…and the host page's own note names all three pins it forwards",

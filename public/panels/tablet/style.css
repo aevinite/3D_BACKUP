@@ -16,7 +16,6 @@
      Take-order category heading). In the DARK skin the bright gold on a dark panel already reads
      6.4-10.4:1, so ink IS the accent here; the light block darkens it. */
   --gold-ink: var(--gold);
-  --skel-hi: #4a3f29;   /* the first-paint sheen: one step LIGHTER than --line in this skin */
   --merge-ink: #c084fc;   /* "served as one party" — the one non-gold hue on this panel, per skin */
 /* ── ONE DIM FOR EVERY FULL-SCREEN OVERLAY (owner, 2026-08-22) ────────────────────────────────
    Every sheet, drawer and confirm box on this panel dims the page behind it, and each one had
@@ -178,22 +177,14 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   @media (min-width: 600px) { .tiles { --per-row: 4; } }
 }
 
-/* First-paint SKELETON tiles: shimmer placeholders written into the HTML so the
-   floor shows structure instantly instead of a blank grid while /state loads. The
-   first render of #tiles overwrites them, so they vanish when real tiles arrive. */
-.skel-tile { aspect-ratio: 1 / 1; border-radius: 15px; border: 1.5px solid var(--line); background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-/* THE SHEEN IS A TOKEN, NOT A LITERAL (T26 sweep, 2026-08-22). #4a3f29 is one gentle step LIGHTER
-   than the dark skin's --line (1.26:1) — a soft sweep. On the LIGHT skin --line is a pale cream and
-   the same literal is a near-BLACK bar crossing a white tile: the very first thing a waiter sees on
-   every open, in the default skin, and it reads as "something is broken", not "loading". Screenshot
-   read at 1280×800 with the floor read held open. --skel-hi keeps the same 1.25:1 relationship to
-   --line in each skin. */
-.skel-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--line) 25%, var(--skel-hi) 37%, var(--line) 63%); background-size: 400% 100%; animation: skel-shimmer 1.3s ease-in-out infinite; }
-.skel-line.title { height: 18px; width: 45%; }
-.skel-line.short { width: 60%; }
-.skel-line.foot { margin-top: auto; width: 75%; }
-@keyframes skel-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) { .skel-line { animation: none; } }
+/* OBITUARY (2026-09-22): .skel-tile / .skel-line / @keyframes skel-shimmer and the --skel-hi
+   token that fed them lived here. They painted six square placeholder tiles into #tiles from the
+   markup — structure "instantly", but at a size this restaurant's floor does not use, so every
+   open showed six 217px tiles and then 34 at 186px. The replacement is .floor-booting at the
+   bottom of this file: bars, not tables. The KITCHEN panel has its own copy of those classes in
+   its own stylesheet and is untouched. (The T26 note that used to sit here — the sheen must be a
+   token, never a literal, or the light skin gets a near-black bar — is why .floor-booting mixes
+   its gradient from --text instead of hard-coding a colour. That lesson is kept, not lost.) */
 /* Tiles match the manager's floor exactly: a per-state --c accent driving a soft gradient
    fill + border (the same ft-* colours). Every tile is the same SQUARE whatever state it is
    in, so the grid never goes ragged. */
@@ -876,7 +867,6 @@ html[data-theme="light"]{
      ＋ and ✎ sit on (a glyph, where the 3:1 floor applies). Fills, borders and glows keep the
      bright gold and look exactly as they did. */
   --gold-ink: color-mix(in srgb, var(--gold) 65%, #000);
-  --skel-hi:#d3c5a8;   /* the sheen, one step DARKER than this skin's --line — same 1.25:1 step */
   --merge-ink:#7e22ce;   /* the merge purple, deepened for white: 6.98:1 (the tile already used it) */
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
 }
@@ -1629,3 +1619,26 @@ html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb,
 /* The rail needs room for the chip to sit over, exactly as the manager's does. Keyed on the bare
    presence of data-more, which the script sets only when the row can really scroll. */
 .om-nav[data-more] { margin-right: 84px; }
+
+/* ── "WE DO NOT KNOW THE SHAPE YET" — a loading block, not a pretend floor ─────────────────
+   The waiter's copy of the manager panel's block, and it exists for the same measured reason:
+   this floor used to paint 6 tiles at 217px and become 34 tiles at 186px ~460ms later, on every
+   single open (owner, 2026-09-22, about the manager: "it shows something completely different
+   ... this is a shit thing, it looks very unprofessional"). Once this device has opened this
+   restaurant's floor once it never shows again — the remembered numbers draw the real thing on
+   frame one. Mixed from --text so it is visible on the light skin as well as the dark. */
+.floor-booting { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 14px; padding: 18px 2px 10px; }
+.floor-booting .fb-bars { display: flex; flex-direction: column; gap: 10px; }
+.floor-booting .fb-bars i {
+  display: block; height: 54px; border-radius: 14px;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--text) 5%, transparent) 30%,
+    color-mix(in srgb, var(--text) 13%, transparent) 50%,
+    color-mix(in srgb, var(--text) 5%, transparent) 70%);
+  background-size: 220px 100%; animation: tabSkelShimmer 1.2s linear infinite;
+}
+.floor-booting .fb-bars i:nth-child(2) { opacity: 0.72; }
+.floor-booting .fb-bars i:nth-child(3) { opacity: 0.46; }
+.floor-booting .fb-msg { text-align: center; font-size: 13px; color: var(--muted); }
+@keyframes tabSkelShimmer { 0% { background-position: -110px 0; } 100% { background-position: 110px 0; } }
+@media (prefers-reduced-motion: reduce) { .floor-booting .fb-bars i { animation: none; } }

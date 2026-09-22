@@ -6,7 +6,7 @@
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=b08d90d7">
+  <link rel="stylesheet" href="style.css?v=dac25640">
   <!-- the "who is this bill for?" box — shared with the other panel that opens it -->
   <link rel="stylesheet" href="/panels/billcustomer.css?v=23b15d10" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
@@ -39,15 +39,22 @@
       <!-- Waiter sections (mig 222): "Your tables · 1-6". Stays empty (and takes no
            space) for anyone who isn't restricted to a section. Filled by renderFloor. -->
       <div class="my-section" id="mySection" hidden></div>
-      <!-- Skeleton tiles show instantly on open; the first render of #tiles (app.js)
-           replaces them with the live floor. Six is enough to fill the first row. -->
+      <!-- A LOADING BLOCK, NOT SIX PRETEND TABLES (owner, 2026-09-22).
+           Six .skel-tile boxes used to sit here, and the comment said "six is enough to fill the
+           first row" — which is exactly the problem: they filled it at the WRONG size. Measured
+           on every open, warm or cold: six tiles 217px wide, replaced ~460ms later by the real
+           34 tiles at 186px. A waiter saw one floor turn into a different floor. The manager
+           panel had the same fault on the same floor and he called it "a shit thing ... very
+           unprofessional".
+           Three bars cannot be mistaken for tables. app.js's renderFloor replaces this with the
+           real grid, and because the panel now remembers this restaurant's shape per device
+           (see floorPerRow / tableCount) that grid is the right size the first time it is drawn.
+           OBITUARY: .skel-tile / .skel-line had no other user and went with them. -->
       <div class="tiles" id="tiles">
-        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
-        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
-        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
-        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
-        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
-        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
+        <div class="floor-booting" role="status" aria-live="polite">
+          <div class="fb-bars" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="fb-msg">Loading your tables…</div>
+        </div>
       </div>
     </section>
 
@@ -112,6 +119,6 @@
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
   <script src="/panels/billdoc.js?v=ca188407"></script>
-  <script src="app.js?v=15834ee5"></script>
+  <script src="app.js?v=a044c95b"></script>
 </body>
 </html>

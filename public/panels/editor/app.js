@@ -192,6 +192,14 @@ const state = {
   // The aggregates (calls/requests/joiners/blocklist + order_count) feed the tile badges + chimes.
   summary: { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] },
   boardLoaded: false, // false until the live board arrives once → drives the floor skeleton (no "all Free" flash on load)
+  // false until the FIRST /all has settled — succeeded OR failed. boardLoaded is not the same
+  // question: the live board (summary) often lands BEFORE /all, and it carries no settings, so
+  // the floor could go boardLoaded=true while still not knowing how wide it is. Measured on a
+  // cold device: real tiles drawn at the default 12-per-row at t=696ms, re-flowed to the real 7
+  // at t=756ms. While this is false AND the shape is unknown, floorHtml() shows a plain loading
+  // block rather than inventing a floor. It is set on FAILURE too, so a device that has never
+  // seen this restaurant and cannot reach the server still gets a usable floor.
+  settingsSettled: false,
   openSess: null, // table number whose session modal is open
   selectedTable: null, // the table whose popup is open — marks its tile and makes it read the full slice. null = nothing open.
   // Floating popups (owner request, 2026-07-02 — "I want many popups at the same time"):
@@ -615,7 +623,18 @@ const ridQ = (path) => {
 // /all returns. Used to SCOPE per-restaurant device caches so one restaurant's
 // floor can never first-paint with another restaurant's data on a shared device
 // (cross-tenant leak fixed 2026-07-04 — the table-count skeleton hint below).
-const panelRid = () => PANEL_RID || (state && state.data && state.data.restaurant && state.data.restaurant.id) || "";
+// THE PAINT HINT (?skel=, 2026-09-22). A real manager's login carries no ?rid — that pin is
+// admin-only — so on the first frame this panel knew of no restaurant at all, the two caches
+// below resolved to an empty key, and the floor was drawn from the GENERIC defaults: 12 tiles at
+// 12 per row, tiny, replaced ~700ms later by the real shape. Measured on a warm cache: 12 columns
+// of 103px tiles for 130ms, then 7 columns of 177px (owner, 2026-09-22 — "it shows something
+// completely different ... this is a shit thing, it looks very unprofessional").
+// The server now hands a real staff login its OWN restaurant id across as ?skel= (lib/panelGate),
+// purely so these caches can be read at t=0. It is NEVER echoed on a request — ridQ() above does
+// not touch it — and it scopes nothing but a shimmer, so it cannot show one restaurant another's
+// data. An admin tab has ?rid and never sends ?skel.
+const PANEL_SKEL_RID = new URLSearchParams(location.search).get("skel") || "";
+const panelRid = () => PANEL_RID || (state && state.data && state.data.restaurant && state.data.restaurant.id) || PANEL_SKEL_RID || "";
 // The device cache key for THIS restaurant's table count. Empty until we know the
 // restaurant — callers then fall back to the neutral default skeleton (no leak).
 const tableCountKey = () => { const r = panelRid(); return r ? "lfh_editor_table_count:" + r : ""; };
@@ -766,6 +785,7 @@ async function loadAll() {
   // "seated · no orders" until the next board poll repopulates it (~5-7s). (2026-06-18)
   const prev = state.data || {};
   state.data = { ...data, orders: prev.orders || [], calls: prev.calls || [] };
+  state.settingsSettled = true; // settings are in hand — the floor may stop withholding its shape
   // Name THIS restaurant in the top bar so staff (and the admin viewing as a tenant)
   // always know which restaurant they're managing. (owner 2026-06-26)
   const rr = data.restaurant || {};
@@ -10333,15 +10353,47 @@ function floorPerRow() {
   }
   // Settings haven't arrived yet — use what this restaurant drew last time, not the generic
   // default. Falls back to the default only on a device that has never opened this floor.
-  const k = perRowKey();
-  const cached = k ? parseInt(localStorage.getItem(k), 10) : NaN;
-  return touchCap(Number.isFinite(cached) ? clamp(cached) : FLOOR_PER_ROW_DEFAULT);
+  const cached = cachedPerRow();
+  return touchCap(Number.isFinite(cached) ? cached : FLOOR_PER_ROW_DEFAULT);
 }
 // The cap, in one place, applied to BOTH the settings answer and the cached-first-paint one — a
 // first paint that drew 12 and then re-flowed to 6 is exactly the flicker the cache exists to stop.
 function touchCap(v) {
   if (FLOOR_PREVIEW) return v;                       // the admin is previewing the PC floor
   return isTouchDevice() ? Math.min(v, FLOOR_PER_ROW_TOUCH_MAX) : v;
+}
+
+// ── DO WE ACTUALLY KNOW THIS FLOOR'S SHAPE, OR WOULD WE BE GUESSING? ─────────────────────────
+// Two numbers decide what the floor LOOKS like before a single tile holds any data: how many
+// tables there are, and how many sit on a row — and the second one is what sets tile SIZE.
+// Both come from settings, and both are remembered per restaurant on this device. Until one of
+// those two sources answers, anything drawn is the generic guess (12 tables at 12 per row),
+// which is the smallest tile this floor can draw and looks nothing like a real one.
+//
+// The guess itself was never the bug; CORRECTING IT ON SCREEN was (owner, 2026-09-22: "it shows
+// something completely different ... then it shows the actual table size ... this is a shit
+// thing, it looks very unprofessional"). So the rule is: shape known → draw the floor at its
+// real size immediately; shape unknown → draw a plain loading block and draw the floor ONCE,
+// right, when the numbers land. Never a floor that is about to change shape under him.
+const cachedPerRow = () => {
+  const k = perRowKey();
+  const v = k ? parseInt(localStorage.getItem(k), 10) : NaN;
+  return Number.isFinite(v) ? Math.min(Math.max(v, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX) : NaN;
+};
+const cachedTableCount = () => {
+  const k = tableCountKey();
+  const v = k ? parseInt(localStorage.getItem(k), 10) : NaN;
+  return Number.isFinite(v) && v > 0 ? v : NaN;
+};
+function floorShapeKnown() {
+  if (state.floorPerRowPreview != null) return true;   // the admin's slider IS the answer
+  const s = state.data.settings || {};
+  // `null` is not a number: Number(null) is 0 and would sail through a bare isFinite() check,
+  // so a settings row with the column unset would count as "known" and paint a floor 0 wide.
+  const num = (v) => (v == null || v === "" ? NaN : Number(v));
+  const perRowOk = Number.isFinite(num(s.floor_per_row)) || Number.isFinite(cachedPerRow());
+  const countOk = parseInt(s.table_count, 10) > 0 || Number.isFinite(cachedTableCount());
+  return perRowOk && countOk;
 }
 
 // The admin layout-preview slider talks to this panel here. Only listened for in preview
@@ -10446,6 +10498,22 @@ function floorHtml() {
   // (that looked like the whole floor had reset on every refresh). The board
   // loads a moment later — boardLoaded flips true — and the real tiles replace
   // this. Mirrors the menu's loading skeleton so the two screens feel the same.
+  // THE SHAPE IS NOT KNOWN YET — say "loading", do not invent a floor (owner, 2026-09-22).
+  // This is the first time this DEVICE has opened THIS restaurant's floor: no remembered table
+  // count, no remembered tables-per-row, and /all has not answered. Drawing tiles here would
+  // mean picking a size, showing it, and then resizing every tile in front of him. Three
+  // shimmer bars cannot be mistaken for "these are your tables"; twelve tiny tiles were.
+  // The `settingsSettled` half is the escape hatch: once the boot read has finished — even if
+  // it FAILED — the floor draws with whatever it has rather than waiting forever.
+  if (!floorShapeKnown() && !state.settingsSettled) {
+    return `<div class="floor-wrap floor-collapsed"><div class="floor-main">`
+      + `<div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2></div>`
+      + `<div class="floor-booting" role="status" aria-live="polite">`
+      + `<div class="fb-bars" aria-hidden="true"><i></i><i></i><i></i></div>`
+      + `<div class="fb-msg">Loading your tables\u2026</div>`
+      + `</div></div></div>`;
+  }
+
   if (!state.boardLoaded) {
     // left: a shimmer tile per table, sized to the (cached) real count.
     let skel = "";
@@ -17585,6 +17653,13 @@ function railOpen() { try { return localStorage.getItem(RAIL_KEY) === "1"; } cat
 function syncNavRail() {
   const on = window.innerWidth >= RAIL_MIN_W;
   document.body.classList.toggle("nav-rail", on);
+  // The rail is now where it belongs, so the arrival freeze can go and the » button gets its
+  // animation back. TWO frames: one for the class above to be laid out, one for the browser to
+  // finish that layout — dropping it in the same frame lets the transition catch the change and
+  // animate it anyway, which is the whole thing we are stopping (see index.html's note).
+  if (document.body.classList.contains("nav-booting")) {
+    requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.remove("nav-booting")));
+  }
   const open = on && railOpen();
   document.body.classList.toggle("nav-rail-open", open);
   const btn = document.getElementById("railToggle");
@@ -19534,6 +19609,10 @@ window.addEventListener("lfh:outbox-flushed", () => { if (!document.hidden) { tr
 loadAll()
   .then(bootPaint)
   .catch((e) => {
+    // The boot read is DONE, however badly. Anything still waiting on the real numbers must now
+    // fall back to what it has (a remembered shape, else the defaults) — a floor a manager can
+    // work with beats a loading block that never resolves.
+    state.settingsSettled = true;
     // NO INTERNET is a different situation from a broken server, and it must not leave
     // the panel as a dead shell (that was the old behaviour: renderEditor + the live
     // poll never started, so the manager panel was unusable until a successful reload).

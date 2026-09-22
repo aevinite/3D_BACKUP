@@ -12,13 +12,19 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=b6e55516" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=c2cce95d" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=185b02cd" />
   <!-- the "who is this bill for?" box — shared with the other panel that opens it -->
   <link rel="stylesheet" href="/panels/billcustomer.css?v=23b15d10" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=7aaf299f"></script>
 </head>
-<body>
+<!-- THE ARRIVAL FREEZE (class nav-booting) — the desktop rail's width and the content's matching margin BOTH animate (.16s),
+     which is right when a person clicks » and wrong on arrival — app.js adds body.nav-rail a
+     moment after first paint, so the whole floor slid 62px and every tile shrank ~9px while the
+     animation ran (measured 1440→1378px over 170ms, owner 2026-09-22). The class is in the
+     MARKUP, not added by script, so the freeze is in force before anything can move; syncNavRail
+     lifts it one frame after the rail is in place, and the click animation works as designed. -->
+<body class="nav-booting">
   <header class="topbar">
     <!-- Phone-only (≤760px) hamburger: opens the .tabs nav as a left slide-in drawer.
          Hidden on desktop, where the tabs sit in the bar as always. Wired in app.js. -->
@@ -240,6 +246,6 @@
   <script src="/panels/auditsort.js?v=1da861b5"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=e4c91413"></script>
+  <script src="/panels/editor/app.js?v=444927f0"></script>
 </body>
 </html>

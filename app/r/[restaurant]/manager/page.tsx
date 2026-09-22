@@ -39,6 +39,8 @@ export default async function ScopedManagerPanel(
   const { restaurant } = await params;
   const { as, view } = await searchParams;
   const { restaurantId, admin } = await requirePanelAt("manager", restaurant);
-  const src = panelIframeSrc("/panels/editor/index.html", admin ? restaurantId : null, { as, view });
+  // For a real staff login the slug already resolved to THEIR restaurant, so the paint hint is
+  // free here — same job as /manager's selfRid: the floor draws at its real width on frame one.
+  const src = panelIframeSrc("/panels/editor/index.html", admin ? restaurantId : null, { as, view, skelRid: admin ? null : restaurantId });
   return <PanelFrame src={src} title="Manager" />;
 }
