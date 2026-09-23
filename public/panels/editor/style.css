@@ -5555,3 +5555,51 @@ html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
 html[data-theme="dark"] .sp-guestmark { color: #7fb3ff; }
 .sp-part-guest { color: #2563eb; }
 html[data-theme="dark"] .sp-part-guest { color: #7fb3ff; }
+
+
+/* ── THE DAY-CLOSE (Z) REPORT, AS A REPORT ────────────────────────────────────────────────
+   Owner, 2026-09-23: "why is the Z report coming in KOT form? It should be completely
+   different, a report type." It was a pop-up window carrying printBill's thermal recipe —
+   monospace, 66mm wide — so the only way to READ the day was to look at a picture of a till
+   roll. The till roll still exists behind the Print button; this is the thing on screen.
+   Built from the same tokens as the GST report so the two read as one product. */
+.zr-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.zr-head .zr-acts { margin-left: auto; display: flex; gap: 8px; }
+
+/* The number the whole sheet exists for, stated once, at the top. */
+.zr-grand { display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 16px 20px; margin-bottom: 16px; border-radius: 14px;
+  background: color-mix(in srgb, var(--gold) 12%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--gold) 34%, transparent); }
+.zr-grand span { font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: .2px; }
+.zr-grand b { font-size: 30px; font-variant-numeric: tabular-nums; letter-spacing: -.5px; }
+
+.zr-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.zr-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+.zr-card.zr-wide { margin-top: 12px; }
+.zr-card h4 { margin: 0 0 10px; font-size: 10.5px; font-weight: 800; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); }
+.zr-line { display: flex; justify-content: space-between; gap: 14px; padding: 5px 0;
+  font-size: 13px; font-variant-numeric: tabular-nums; }
+.zr-line > span:first-child { color: var(--muted); }
+.zr-line.total { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 9px; font-size: 14px; }
+.zr-line.total > span:first-child { color: var(--text); font-weight: 650; }
+.zr-line.warn > span:first-child { color: #b34a4a; }
+html[data-theme="dark"] .zr-line.warn > span:first-child { color: #f08c8c; }
+
+.zr-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.zr-table th, .zr-table td { padding: 7px 8px; text-align: left; }
+.zr-table th.n, .zr-table td.n { text-align: right; }
+.zr-table thead th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); border-bottom: 1px solid var(--line); font-weight: 800; }
+.zr-table tbody tr + tr td { border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.zr-table tfoot th { border-top: 2px solid var(--line); font-weight: 800; }
+
+/* The ledger verdict is a sentence, because it is the one line worth reading on this page. */
+.zr-verdict { padding: 11px 14px; border-radius: 11px; font-size: 13.5px; font-weight: 600; }
+.zr-verdict.ok { background: rgba(34,197,94,.12); color: #15803d; border: 1px solid rgba(34,197,94,.3); }
+.zr-verdict.bad { background: rgba(192,82,82,.12); color: #b3413f; border: 1px solid rgba(192,82,82,.34); }
+.zr-verdict.unknown { background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--muted); border: 1px solid var(--line); }
+html[data-theme="dark"] .zr-verdict.ok { color: #4fd6a5; }
+html[data-theme="dark"] .zr-verdict.bad { color: #f08c8c; }
+.zr-notes { margin: 10px 0 0; padding-left: 20px; font-size: 12.5px; line-height: 1.7; }

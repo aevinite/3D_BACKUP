@@ -6605,9 +6605,140 @@ function zNumbering(n, row) {
   return h;
 }
 
-async function printZReport() {
-  let z;
-  try { z = await api("GET", "/zreport"); } catch (e) { toast("Couldn't build the report: " + e.message, "err"); return; }
+// ── THE Z REPORT IS A REPORT ON SCREEN, AND A TILL ROLL ONLY WHEN YOU PRESS PRINT ──────────
+// (owner, 2026-09-23: "why is the Z report coming in KOT form? It should be completely
+// different, a report type.")
+//
+// He is right, and it was not a styling accident: pressing Day-close (Z) opened a POP-UP
+// WINDOW containing `printBill`'s own thermal recipe — monospace, 66mm wide, `@page{margin:0}`
+// — and then called print() on a timer. So the only way to READ the day's numbers was to look
+// at a picture of a till roll, or to actually print one. A day-close sheet is the document a
+// manager reads, signs and counts the drawer against; it is the least till-roll-shaped thing
+// in the product.
+//
+// Now: this opens a proper report — the same modal shape as the GST report, so the two feel
+// like one product — with the figures in readable columns, the money-by-method as a table,
+// and the ledger verdict as a sentence. `printZReport()` still exists and still produces the
+// thermal document, because a till roll IS the right thing to hand somebody; it is just
+// behind the Print button now instead of being the whole feature.
+//
+// It also unblocked the film: a pop-up window stalls the capture rig, which is how chapter
+// 1.7.10 hung for seventy-two minutes.
+async function openZReport() {
+  document.querySelector(".zr-overlay")?.remove();
+  const wrap = el(`<div class="sx-modal-overlay zr-overlay"><div class="sx-modal" style="max-width:860px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>📋 Day-close · Z report</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body">
+      <div class="zr-head"><span class="zr-when muted small"></span><span class="zr-acts">
+        <button class="btn" id="zrCsv" title="Download as a spreadsheet">⬇ CSV</button>
+        <button class="btn primary" id="zrPrint" title="Print the till-roll copy">🖨 Print</button>
+      </span></div>
+      <div id="zrBody">${loadingHtml("Closing the day\u2026")}</div>
+    </div>
+  </div></div>`);
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  wrap.__lfhClose = close;
+
+  let z = null;
+  try { z = await api("GET", "/zreport"); }
+  catch (e) { wrap.querySelector("#zrBody").innerHTML = `<div class="empty">Couldn't build the report: ${esc(e.message)}</div>`; return; }
+
+  const di = z.dineIn;
+  const money = (v) => `<b>${inr(v)}</b>`;
+  const line = (l, v, cls = "") => `<div class="zr-line ${cls}"><span>${esc(l)}</span><span>${v}</span></div>`;
+  const card = (title, body) => `<section class="zr-card"><h4>${esc(title)}</h4>${body}</section>`;
+
+  // The money a manager counts the drawer against — its own table, not a run of lines.
+  const payRows = (z.payments && z.payments.rows.length)
+    ? `<table class="zr-table"><thead><tr><th>How it came in</th><th class="n">Bills</th><th class="n">Amount</th></tr></thead><tbody>`
+      + z.payments.rows.map((p2) => `<tr><td>${esc(p2.method)}</td><td class="n">${p2.bills}</td><td class="n">${inr(p2.amount)}</td></tr>`).join("")
+      + `</tbody><tfoot><tr><th>Total collected</th><th class="n">${z.payments.rows.reduce((a, r) => a + r.bills, 0)}</th><th class="n">${inr(z.payments.total)}</th></tr></tfoot></table>`
+      + (z.payments.reversed > 0 ? line(`Payments reversed (not collected)`, `${z.payments.reversedCount} · − ${inr(z.payments.reversed)}`, "warn") : "")
+      + (z.payments.aside > 0 ? line("Taken from tables still open (not closed yet)", `${z.payments.asideCount} · ${inr(z.payments.aside)}`) : "")
+      + (di.paidNet - z.payments.total > 1 ? line("⚠ Settled with no method recorded", inr(di.paidNet - z.payments.total), "warn") : "")
+    : `<div class="empty">Nothing collected yet today.</div>`;
+
+  // The ledger verdict is a SENTENCE, not a row of dashes — it is the one line worth reading.
+  const chain = !z.chain ? ""
+    : z.chain.error ? `<div class="zr-verdict unknown">The bill ledger could not be checked.</div>`
+    : z.chain.ok ? `<div class="zr-verdict ok">✓ Every one of today's ${z.chain.bills} bill${z.chain.bills === 1 ? "" : "s"} is signed and unchanged.</div>`
+    : `<div class="zr-verdict bad">⚠ ${z.chain.problems.length} thing${z.chain.problems.length === 1 ? "" : "s"} on the bill ledger need the owner.</div>`;
+  const notes = [...((z.chain && z.chain.problems) || []), ...((z.chain && z.chain.notes) || [])].map((p) => {
+    const what = p.kind === "bill_changed" ? `bill #${p.bill_no ?? "—"} changed after signing`
+      : p.kind === "chain_broken" ? `an entry before #${p.bill_no ?? "—"} is missing`
+      : p.kind === "bill_binned" ? `bill #${p.bill_no ?? "—"} is in the recycle bin`
+      : p.kind === "bill_cancelled" ? `bill #${p.bill_no ?? "—"} was cancelled after invoicing`
+      : p.kind === "bill_gone" ? `bill #${p.bill_no ?? "—"} — its record is gone`
+      : `entry #${p.bill_no ?? "—"} was rewritten`;
+    return `<li>${esc(what)}<span class="muted small"> — ${esc(String(p.detail || "")).slice(0, 80)}</span></li>`;
+  }).join("");
+
+  const miss = z.numbering && (z.numbering.unaccountedTotal || (z.numbering.unaccounted || []).length);
+  wrap.querySelector(".zr-when").textContent = `${z.restaurant.name} · ${z.date}${z.restaurant.gstin ? " · GSTIN " + z.restaurant.gstin : ""}`;
+  wrap.querySelector("#zrBody").innerHTML = `
+    <div class="zr-grand"><span>Grand total for the day</span><b>${inr(z.grandTotal)}</b></div>
+    <div class="zr-cards">
+      ${card("Dine-in", [
+        line("Bills", di.bills), line("Kitchen tickets", di.orderCount),
+        line("Gross (subtotal)", inr(di.gross)), line("Discounts", "− " + inr(di.discount)),
+        line("Taxable value", inr(di.taxable)), line("Tax (CGST + SGST)", inr(di.tax)),
+        di.mrp > 0 ? line("MRP / nil-rated (no GST)", inr(di.mrp)) : "",
+        line("Net sales", money(di.net), "total"),
+      ].join(""))}
+      ${card("Settled, and not", [
+        line("Paid bills", `${di.paidCount} · ${inr(di.paidNet)}`),
+        line("Unpaid bills", `${di.unpaidCount} · ${inr(di.unpaidNet)}`),
+        di.onHouseCount > 0 ? line("On the house (nothing collected)", `${di.onHouseCount} · ${inr(di.onHouseNet)}`) : "",
+        line("Cancelled (nothing collected)", `${di.cancelled}${di.cancelledNet > 0 ? " · " + inr(di.cancelledNet) + " not charged" : ""}`),
+        di.tips > 0 ? line("Tips collected (staff)", money(di.tips), "total") : "",
+      ].join(""))}
+      ${card("Platform", [
+        line("Orders", z.platform.count), line("Revenue", money(z.platform.revenue), "total"),
+      ].join(""))}
+      ${card("Invoices", [
+        line("Generated today", z.invoicesGenerated), line("Voided today", z.invoicesVoided),
+        miss ? line(`Not on any bill (${miss})`, esc((z.numbering.unaccounted || []).map((x) => "#" + x).join(", ")), "warn")
+             : line("Every number accounted for", "✓"),
+      ].join(""))}
+    </div>
+    <section class="zr-card zr-wide"><h4>Money collected, by method</h4>${payRows}</section>
+    <section class="zr-card zr-wide"><h4>The bill ledger</h4>${chain}${notes ? `<ul class="zr-notes">${notes}</ul>` : ""}</section>
+  `;
+
+  wrap.querySelector("#zrPrint").onclick = () => printZReport(z);
+  wrap.querySelector("#zrCsv").onclick = () => {
+    const rows = [
+      ["Day-close (Z) report", z.restaurant.name, z.date],
+      ["GSTIN", z.restaurant.gstin || "(not set)"], [],
+      ["Dine-in"], ["Bills", di.bills], ["Kitchen tickets", di.orderCount],
+      ["Gross", di.gross], ["Discounts", di.discount], ["Taxable", di.taxable], ["Tax", di.tax],
+      ...(di.mrp > 0 ? [["MRP / nil-rated", di.mrp]] : []),
+      ["Net sales", di.net], ["Paid bills", di.paidCount, di.paidNet],
+      ["Unpaid bills", di.unpaidCount, di.unpaidNet],
+      ...(di.onHouseCount > 0 ? [["On the house", di.onHouseCount, di.onHouseNet]] : []),
+      ["Cancelled", di.cancelled, di.cancelledNet], [],
+      ["Money collected, by method"], ["Method", "Bills", "Amount"],
+      ...((z.payments && z.payments.rows) || []).map((p2) => [p2.method, p2.bills, p2.amount]),
+      ["Total collected", "", (z.payments && z.payments.total) || 0], [],
+      ["Platform orders", z.platform.count], ["Platform revenue", z.platform.revenue], [],
+      ["GRAND TOTAL", z.grandTotal],
+    ];
+    const cell = (v) => { let t = String(v ?? ""); if (/^[=+\-@]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([rows.map((r) => r.map(cell).join(",")).join("\n")], { type: "text/csv" }));
+    a.download = `day-close-${z.date}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  };
+}
+
+// The TILL-ROLL copy. Reached from the report's Print button (see openZReport above), which
+// hands it the figures it already has — so pressing Print never asks the server twice and can
+// never print a different day from the one on screen.
+async function printZReport(pre) {
+  let z = pre;
+  if (!z) { try { z = await api("GET", "/zreport"); } catch (e) { toast("Couldn't build the report: " + e.message, "err"); return; } }
   const di = z.dineIn;
   const row = (l, v, b) => `<div class="zr${b ? " b" : ""}"><span>${esc(l)}</span><span>${v}</span></div>`;
   // A RECORDED ACT IS STATED, NOT ACCUSED (mig 353). A bill in the recycle bin, a sale cancelled
@@ -7100,7 +7231,7 @@ function renderEditor() {
     ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="mgrReport">📄 Download report</button><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="gstReport">🧾 GST report</button><button class="btn" id="menuMatrix">📊 Menu winners</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div>${dashRangeToggleHtml()}<div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
     bindDashRangeToggle();
     document.getElementById("dashRefresh").onclick = () => renderEditor();
-    document.getElementById("zReport").onclick = () => printZReport();
+    document.getElementById("zReport").onclick = () => openZReport();
     document.getElementById("mgrReport").onclick = () => printManagerReport();
     document.getElementById("gstReport").onclick = () => openGstReport();
     document.getElementById("menuMatrix").onclick = () => openMenuMatrix();
