@@ -2498,7 +2498,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const STATS_ROW_CAP = 12000;
       const STATS_PAGE = 1000;
       let statsTruncated = false;
-      const statsPage = (from: number) => sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).lt("created_at", until.toISOString()).order("created_at", { ascending: false }).range(from, from + STATS_PAGE - 1);
+      // ── A DELETED BILL LEAVES THIS PANEL, INCLUDING ITS NUMBERS (owner, 2026-08-04: "it will
+      // show only to admin — it will delete from manager and stuff like that") ────────────────
+      // The Bills feed a thousand lines above has obeyed that since the day he said it. This
+      // query never did: `deleted_at` was not in the column list, so it could not be filtered
+      // even later, and every figure on the Dashboard counted bills the manager can no longer
+      // open. Measured on the Aevidine demo restaurant with 124 tombstoned fixtures present:
+      // Revenue ₹3,06,771 against a Bills record of ₹46,757, 135 "paid orders" against 21.
+      // Same panel, same person, same day, two answers.
+      //
+      // NOT DONE HERE, DELIBERATELY: the Z report (`p === "zreport"`) and the GST report
+      // (`p === "gst-report"`) read `orders` the same way and are NOT filtered, because
+      // `lib/softDelete.ts` says a tombstoned row is "retained for tax/audit" — taking sales out
+      // of a tax document is the CGST-132 shape this codebase exists to avoid. That tension is
+      // written up in brag-output/managerfilm/FINDINGS.md §2 and is the owner's call, not mine.
+      const statsPage = (from: number) => sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number,deleted_at").eq("restaurant_id", rid).is("deleted_at", null).gte("created_at", prevSince.toISOString()).lt("created_at", until.toISOString()).order("created_at", { ascending: false }).range(from, from + STATS_PAGE - 1);
       // Fetch those pages in DOUBLING PARALLEL WAVES — 1, then 2, then 4, then 8 at a time —
       // stopping the moment a wave comes back short. This used to be up to 12 STRICTLY
       // SEQUENTIAL round-trips: on the busiest restaurant a full-year Dashboard spent ~5.5s
