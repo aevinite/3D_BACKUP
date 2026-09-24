@@ -18678,7 +18678,37 @@ function bindBanquet() {
   }));
 
   // ── bill screen ──
-  const bind = (id, fn, ev) => { const el = document.getElementById(id); if (el) el[ev || "oninput"] = () => { fn(el.value); renderEditor(); }; };
+  // ── A FULL RE-RENDER ON EVERY KEYSTROKE THREW THE TYPIST OUT OF THE FIELD ───────────────
+  // `renderEditor()` rebuilds the whole of #editor, so the input being typed into is replaced
+  // mid-word and focus goes to the body. Measured on the real panel, typing 120 into No. of
+  // plates: after "1" the value was 1 and focus was already on BODY; after "2" the banquet form
+  // was GONE (7 cards → 0). In other words a manager could not enter a two-digit head count,
+  // a per-plate price, a discount or an advance at all — every one of these four uses `bind`.
+  // The live totals are worth keeping, so the re-render stays and the caret is put back after
+  // it: same element id, same focus, same selection. `preventScroll` because a fresh focus on
+  // a rebuilt form otherwise jumps the page to the top.
+  const bind = (id, fn, ev) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el[ev || "oninput"] = () => {
+      let at = null, to = null;
+      try { at = el.selectionStart; to = el.selectionEnd; } catch (e) {}   // type=number may refuse
+      const wasFocused = document.activeElement === el;
+      fn(el.value);
+      renderEditor();
+      if (!wasFocused) return;
+      const again = document.getElementById(id);
+      if (!again) return;
+      try { again.focus({ preventScroll: true }); } catch (e) { again.focus(); }
+      // `<input type="number">` refuses selectionStart/setSelectionRange, so `at` is null for
+      // every field here and the caret fell back to position 0 — typing 120 produced "21",
+      // each new digit landing in FRONT of the last. Re-assigning the value is the one move a
+      // number input does honour, and it leaves the caret at the end, which is where somebody
+      // typing a number expects it.
+      if (at != null) { try { again.setSelectionRange(at, to); return; } catch (e) {} }
+      const v = again.value; again.value = ""; again.value = v;
+    };
+  };
   const bindQuiet = (id, fn, ev) => { const el = document.getElementById(id); if (el) el[ev || "oninput"] = () => fn(el.value); };
   bindQuiet("bqName", (v) => (f.cust_name = v));
   bindQuiet("bqGstin", (v) => (f.cust_gstin = v.toUpperCase()));
