@@ -49,7 +49,7 @@
  * installer must be able to prove the TCC chain without taking it.
  */
 import { spawn } from "node:child_process";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 const selftest = args.includes("--selftest");
@@ -82,10 +82,18 @@ if (selftest) {
   process.exit(0);
 }
 
-console.log(`[${stamp()}] run-job.mjs → /bin/zsh ${script}`);
-const child = spawn("/bin/zsh", [script], { stdio: "inherit" });
+// Run the script in the shell its OWN first line names. Until 2026-09-24 this was always zsh,
+// and two of the five jobs (brain-refine.sh, aevidine-audit.sh) are `#!/bin/bash`. zsh aborts
+// on a glob that matches nothing (bash just leaves it as text), so the night the brain's inbox
+// had no dated files the refine died at `for f in [0-9]…-*.md` — code=1, with the inbox
+// archive, lint, re-index and capsule rebuild all skipped. Anything that is not bash stays zsh.
+const firstLine = readFileSync(script, "utf8").split("\n", 1)[0];
+const shell = /^#!\s*(\/usr\/bin\/env\s+bash|\/bin\/bash)\b/.test(firstLine) ? "/bin/bash" : "/bin/zsh";
+
+console.log(`[${stamp()}] run-job.mjs → ${shell} ${script}`);
+const child = spawn(shell, [script], { stdio: "inherit" });
 child.on("error", (e) => {
-  console.error(`[${stamp()}] run-job.mjs could not start zsh: ${e.message}`);
+  console.error(`[${stamp()}] run-job.mjs could not start ${shell}: ${e.message}`);
   process.exit(70); // EX_SOFTWARE
 });
 child.on("exit", (code, signal) => {
