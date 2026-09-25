@@ -110,6 +110,12 @@ const PLACE: Record<string, Place> = {
   orders_delete: { area: "Orders & bills", screen: "Billing" },
   order_discount: { area: "Orders & bills", screen: "Discount" },
   bill_discount: { area: "Orders & bills", screen: "Discount" },
+  // Spending loyalty points takes money off a bill and is gated by the discount permission, so
+  // it belongs on the same screen as the discount that it is. It had NO home at all until
+  // 2026-09-25 — `verify:t24-money-rules` and `verify:bill-ledger` were both red on main because
+  // of it, and the Activity log was showing the act with no area and no screen, which is the one
+  // thing every listing is required to say.
+  loyalty_redeemed: { area: "Orders & bills", screen: "Discount" },
   bill_paid: { area: "Orders & bills", screen: "Settle the bill" },
   bill_split: { area: "Orders & bills", screen: "Settle the bill" },
   bill_restore: { area: "Orders & bills", screen: "Billing" },

@@ -3406,7 +3406,9 @@ function ordersPreviousHtml(today, previous) {
       // "cancelled" / "void" from the line above.
       b.cancelled ? "" : b.paid ? "paid settled" : "unpaid outstanding due",
       b.partPaid ? "partpaid partly" : "",
-      b.invVoided ? "reopened voided retired" : "",
+      // A bill that was reopened and then put back is still findable by "reopened" — before
+      // mig 407 the only trace was invoice_voided, which clears the moment it goes live again.
+      (b.invVoided || b.invReopens) ? "reopened voided retired" : "",
       (b.kots || []).map((k) => "kot " + k).join(" "),
       // the dish names, so "biryani" finds the bill that had one
       b.kind === "parcel"
@@ -3465,6 +3467,9 @@ function ordersPreviousHtml(today, previous) {
       kind: "dinein", g, key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
       billNo: o0.bill_no, invNo: o0.invoice_no, invoiceAt: o0.invoice_at,
       invVoided: !!o0.invoice_voided,
+      // A bill that is LIVE again still has to say it was reopened (mig 407) — the number did
+      // not change, so the count is the only thing that remembers.
+      invReopens: Number(o0.invoice_reopen_count) || 0,
       // "open" while the party is still at the table; anything else means the table has been
       // closed and this bill is finished. Enriched by the bills read (see its note there).
       sessionClosed: !!o0.session_status && o0.session_status !== "open",
@@ -3727,7 +3732,7 @@ function billReceiptHtml(b) {
   // a reopen the old number is RETIRED, not reused (mig 331). Printing "—" for both would hide
   // that difference, which is exactly the thing a manager is checking for.
   const invTxt = b.invNo != null
-    ? `${esc(String(invFmt(b.invNo, b.invoiceAt)))}${b.invVoided ? ` <span class="br-retired">retired \u2014 reopened</span>` : ""}`
+    ? `${esc(String(invFmt(b.invNo, b.invoiceAt)))}${b.invVoided ? ` <span class="br-retired">reopened</span>` : (b.invReopens ? ` <span class="br-retired">reopened \u00d7${esc(b.invReopens)}</span>` : "")}`
     : `<span class="br-none">not issued yet</span>`;
 
   // The totals stack is the SHARED one (mrpTotalsRows) — the same rows the bill modal and the
@@ -3832,7 +3837,7 @@ function billReceiptActions(b, st) {
       // (mig 365) and is refused unless the table is free. Same word on the button, because from
       // the manager's side it is the same intent; different endpoint, because it is not the same act.
       btns.push(b.sessionClosed
-        ? `<button class="ord-btn ghost" data-reopen-table="${esc(b.g[0].session_id)}" title="Put this table back on the floor so this party can order again. The invoice number is retired and a new one is drawn when you print.">\u21a9 Reopen</button>`
+        ? `<button class="ord-btn ghost" data-reopen-table="${esc(b.g[0].session_id)}" title="Put this table back on the floor so this party can order again. The bill keeps its invoice number and is marked reopened; what is already on it cannot be taken off, but you can add to it.">\u21a9 Reopen</button>`
         : `<button class="ord-btn ghost" data-void-invoice="${esc(b.g[0].session_id)}">\u21a9 Reopen</button>`);
       btns.push(`<button class="ord-btn ghost" data-credit-note="${esc(b.g[0].session_id)}">\u{1F9FE}\u2212 Credit note</button>`);
     }
@@ -5854,7 +5859,9 @@ async function loadDashboard(useCache) {
         second line and dropped its own number below the other four. The Today/Yesterday toggle
         sitting directly above the row already says which day every card is counting. */, peakHour < 0 ? "—" : `${peakHour}:00`, peakHour < 0 ? "no orders yet" : `<b>${s.hours[peakHour]}</b> order${s.hours[peakHour] === 1 ? "" : "s"} in that hour`)}
       ${kpi("given", "fa-tag", "#a86e00", "Given away", `<span data-cu="${disc.total}" data-cu-fmt="inr">${inr(disc.total)}</span>`, disc.count ? `discounts on <b>${disc.count}</b> bill${disc.count === 1 ? "" : "s"}${s.revenue > 0 ? ` (${pctOf(disc.total, s.revenue + disc.total)}% given up)` : ""}${disc.max ? `<br>largest <b>${inr(disc.max.amt)}</b>${disc.max.table ? ` on T${esc(disc.max.table)}` : ""}` : ""}` : "no discounts — full price all round")}
-      ${kpi("cancelled", "fa-ban", "#b34a4a", "Lost to cancellations", `<span data-cu="${s.cancelledValue || 0}" data-cu-fmt="inr">${inr(s.cancelledValue || 0)}</span>${deltaChip(s.cancelled, prev.cancelled, true)}`, s.cancelled ? `<b>${s.cancelled}</b> cancelled order${s.cancelled === 1 ? "" : "s"} — tap to inspect` : "none — clean sheet", { alert: s.cancelled > 0 })}
+      ${kpi("cancelled", "fa-ban", "#b34a4a", "Lost to cancellations", `<span data-cu="${s.cancelledValue || 0}" data-cu-fmt="inr">${inr(s.cancelledValue || 0)}</span>${deltaChip(s.cancelled, prev.cancelled, true)}`, s.cancelled
+        ? `<b>${s.cancelled}</b> cancelled order${s.cancelled === 1 ? "" : "s"} where the food was made — tap to inspect${s.cancelledNoLoss ? `<br><b>${s.cancelledNoLoss}</b> more cancelled before cooking — no loss` : ""}${s.cancelledUnanswered ? `<br><b>${s.cancelledUnanswered}</b> not yet answered` : ""}`
+        : (s.cancelledNoLoss ? `<b>${s.cancelledNoLoss}</b> cancelled before cooking — nothing lost` : "none — clean sheet"), { alert: s.cancelled > 0 })}
     </div>
     <div class="dash-grid">
       <div class="dash-chart wide"><h4>Sales <span>· ${rangeLabel} — click a point to open those bills</span></h4><div class="chart-wrap tall"><canvas id="chSales"></canvas></div>${narrate}</div>
@@ -6692,7 +6699,15 @@ async function openZReport() {
         line("Paid bills", `${di.paidCount} · ${inr(di.paidNet)}`),
         line("Unpaid bills", `${di.unpaidCount} · ${inr(di.unpaidNet)}`),
         di.onHouseCount > 0 ? line("On the house (nothing collected)", `${di.onHouseCount} · ${inr(di.onHouseNet)}`) : "",
-        line("Cancelled (nothing collected)", `${di.cancelled}${di.cancelledNet > 0 ? " · " + inr(di.cancelledNet) + " not charged" : ""}`),
+        // ── WHAT WAS COOKED, AND WHAT WAS NOT (owner, 2026-09-25) ──────────────────────────
+        // "only keep in which food are already made". One line became three, because the two
+        // numbers mean opposite things at day close: food cooked and then voided is stock that
+        // is gone, and a ticket killed before the kitchen started it cost nothing. Showing the
+        // free ones too is what keeps the counts adding up — a manager who knew there were
+        // eleven cancellations must not read six and wonder where five went.
+        line("Cancelled — food was made", `${di.cancelled}${di.cancelledNet > 0 ? " · " + inr(di.cancelledNet) + " not charged" : ""}`),
+        di.cancelledNoLoss > 0 ? line("Cancelled before cooking (no loss)", `${di.cancelledNoLoss} · ingredients went back`) : "",
+        di.cancelledUnanswered > 0 ? line("Cancelled — not yet answered", `${di.cancelledUnanswered} · counted as made until someone says`) : "",
         di.tips > 0 ? line("Tips collected (staff)", money(di.tips), "total") : "",
       ].join(""))}
       ${card("Platform", [
@@ -6719,7 +6734,9 @@ async function openZReport() {
       ["Net sales", di.net], ["Paid bills", di.paidCount, di.paidNet],
       ["Unpaid bills", di.unpaidCount, di.unpaidNet],
       ...(di.onHouseCount > 0 ? [["On the house", di.onHouseCount, di.onHouseNet]] : []),
-      ["Cancelled", di.cancelled, di.cancelledNet], [],
+      ["Cancelled — food was made", di.cancelled, di.cancelledNet],
+      ...(di.cancelledNoLoss > 0 ? [["Cancelled before cooking (no loss)", di.cancelledNoLoss, 0]] : []),
+      ...(di.cancelledUnanswered > 0 ? [["Cancelled — not yet answered", di.cancelledUnanswered, 0]] : []), [],
       ["Money collected, by method"], ["Method", "Bills", "Amount"],
       ...((z.payments && z.payments.rows) || []).map((p2) => [p2.method, p2.bills, p2.amount]),
       ["Total collected", "", (z.payments && z.payments.total) || 0], [],
@@ -9697,15 +9714,39 @@ const partyCalls = (t) => {
 const reqsForTable = (t) => (state.board.requests || []).filter((r) => String(r.table_number) === String(t) && !(r.type === "open" && openSessionForTable(t)));
 const itemsForOrder = (oid) => (state.board.items || []).filter((i) => i.order_id === oid); // the session items belonging to one order
 
+// ── WHAT WAS ON THE PAPER STAYS ON THE BILL (owner, 2026-09-25) ──────────────────────────────
+// *"reopen one also item can be added can't be remove and added item only can be remove im
+//  taking about item which are added after reopen"*
+//
+// Until today "locked" meant `invoice_no != null && !invoice_voided`, so a REOPEN unlocked the
+// whole bill — original items included — and a line the guest is holding paper for could be
+// taken off the sale behind it. Reopening now KEEPS the invoice number (mig 407), which also
+// keeps `invoice_at` frozen, and that frozen date is the honest line to cut on:
+//   · no invoice number  → nothing here applies, normal rules
+//   · invoice LIVE       → the whole bill is locked, exactly as before
+//   · invoice REOPENED   → only what existed when it was issued is locked; anything punched
+//                          after the reopen was never on the paper, so it can still come off
+// The server enforces the same three cases (invoiceLocksOrder in the editor route); this only
+// stops offering a button that would be refused, because hiding is never the guard.
+function invoiceLocksOrder(sess, o) {
+  if (!sess || sess.invoice_no == null) return false;
+  if (!sess.invoice_voided) return true;
+  // CANNOT PROVE IT CAME AFTER THE PAPER → TREAT IT AS ON THE PAPER. A missing timestamp must
+  // never be the thing that lets a printed line off a bill.
+  if (!sess.invoice_at || !o || !o.created_at) return true;
+  return new Date(o.created_at).getTime() <= new Date(sess.invoice_at).getTime();
+}
+
 // Per-item rows for an order, unified: session order_items if present, else the items JSON.
 function orderItemRows(o) {
   const rows = itemsForOrder(o.id);
-  // IS THIS ORDER'S BILL ALREADY INVOICED? (owner, 2026-08-26.) Worked out ONCE here rather than
-  // at each of the ~6 places that draw a dish row, so "invoiced" cannot come to mean two things on
-  // two screens. A live invoice number locks the row's 🗑; a VOIDED one does not, because that
-  // bill was deliberately reopened. Rides on every row so itemRowHtml() needs no extra argument.
+  // IS THIS ORDER LOCKED BY ITS BILL'S PAPER? (owner, 2026-08-26, narrowed 2026-09-25.) Worked
+  // out ONCE here rather than at each of the ~6 places that draw a dish row, so "locked" cannot
+  // come to mean two things on two screens. A live invoice locks the row's 🗑; a REOPENED one
+  // locks only the orders that were on the paper when it was issued — see invoiceLocksOrder().
+  // Rides on every row so itemRowHtml() needs no extra argument.
   const _s = o.session_id ? (state.board.sessions || []).find((x) => x.id === o.session_id) : null;
-  const invoiceLive = !!(_s && _s.invoice_no != null && !_s.invoice_voided);
+  const invoiceLive = invoiceLocksOrder(_s, o);
   // Carry options/removed/note through so the table panel can show the full
   // customization (what the guest chose, what to leave out) — not just the name.
   // is_mrp rides along from order_items (mig 270) so every screen that lists a dish can wear
@@ -12012,8 +12053,7 @@ function tablePanelParts(t, host = "float") {
     // sale on the books. The server refuses it as well (invoiceLockedByOrder in the editor route);
     // this only stops offering a button that would be refused, because hiding is never the guard.
     // A VOIDED invoice does not lock: that bill was reopened on purpose.
-    const invoiceLive = !!(sess && sess.invoice_no != null && !sess.invoice_voided);
-    const cancelBtn = (o) => ((anyServed(o) || invoiceLive) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this KOT — nothing is charged for it">✕ Cancel</button>`);
+    const cancelBtn = (o) => ((anyServed(o) || invoiceLocksOrder(sess, o)) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this KOT — nothing is charged for it">✕ Cancel</button>`);
     // ── THE WAITING TICKET, IN ONE LINE (owner, 2026-09-17) ───────────────────────────────────
     // An un-accepted order used to be a card with its own dish rows, its own head and its own
     // foot — three lines of furniture before you read a dish. It is now one line: when it came,
@@ -12182,7 +12222,7 @@ function tablePanelParts(t, host = "float") {
       const parts = r._parts || [r];
       const qty = parseInt(r.qty, 10) || 1;
       const one = parts.length === 1;
-      const canCancel = (p) => { const o = liveOrders.find((x) => x.id === p._oid); return !!o && !anyServed(o) && !invoiceLive && o.payment_status !== "paid"; };
+      const canCancel = (p) => { const o = liveOrders.find((x) => x.id === p._oid); return !!o && !anyServed(o) && !invoiceLocksOrder(sess, o) && o.payment_status !== "paid"; };
       const serveAttrOf = (p) => (p.kind === "session"
         ? `data-item-next="${esc(p.id)}" data-item-status="served"`
         : `data-legacy-order="${esc(p.orderId)}" data-legacy-idx="${p.idx}" data-legacy-status="served"`);

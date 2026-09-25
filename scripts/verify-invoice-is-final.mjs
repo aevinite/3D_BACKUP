@@ -154,6 +154,60 @@ ROLLBACK;`, false)[0];
       ok(val === "ok", `${label} still works — the lock has a legitimate key, it is not a trap`);
   }
 
+  // ── C2 · A REOPEN KEEPS THE NUMBER — THE ONE TRANSITION THIS GUARD NEVER PERFORMED ─────────
+  // Added 2026-09-25, after reopening an invoiced bill was found to fail outright on the real
+  // database. This file already drove "void an open invoice" and "edit the money after a void"
+  // and both passed — but it never tried to RE-ISSUE, which is what the manager panel does the
+  // moment you print a reopened bill, and which mig 398's identity trigger refused because
+  // mig 331 was written to draw a fresh number. Mig 407 makes the re-issue keep the number, so
+  // the trigger is never asked to allow anything. A guard that does not PERFORM a transition
+  // cannot notice that transition is broken; this performs it.
+  head("C2 · reopening an invoiced bill works, and its number does not move");
+  if (RID) {
+    const Q = String.fromCharCode(39);              // a single quote, so the SQL below stays readable
+    const lit = (x) => Q + x + Q;                   // 'x'  inside the outer SQL
+    const inner = (x) => Q + Q + x + Q + Q;         // ''x''  inside a quoted EXECUTE string
+    const sid = "(SELECT v FROM kv2 WHERE k=" + lit("sid") + ")";
+    const call = (fn, extra) => "t_inv_try(" + lit("SELECT " + fn + "(") + " || " + inner("") +
+      " || " + sid + " || " + inner("") + (extra ? " || " + lit(extra) : "") + " || " + lit(")") + ")";
+    const r2 = q(`
+BEGIN;
+CREATE OR REPLACE FUNCTION t_inv_try(p_sql text) RETURNS text LANGUAGE plpgsql AS $t$
+BEGIN EXECUTE p_sql; RETURN 'ok';
+EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ' ' || left(SQLERRM, 120); END $t$;
+CREATE TEMP TABLE kv2 (k text PRIMARY KEY, v text) ON COMMIT DROP;
+WITH w AS (INSERT INTO sessions (table_number, status, opened_by, restaurant_id)
+           VALUES ('VIF2','open','waiter','${RID}') RETURNING id)
+  INSERT INTO kv2 SELECT 'sid', (SELECT id::text FROM w);
+INSERT INTO orders (table_number, items, subtotal, tax, total, taxable_base, nontax_amount, status, session_id, restaurant_id)
+  VALUES ('VIF2', jsonb_build_array(jsonb_build_object('title','probe','qty',1,'unit_price',200)),
+          200, 10, 210, 200, 0, 'served', ${sid}::uuid, '${RID}');
+INSERT INTO kv2 SELECT 'issued',  ${call("lfh_generate_invoice")};
+INSERT INTO kv2 SELECT 'no1',     (SELECT invoice_no::text FROM sessions WHERE id = ${sid}::uuid);
+INSERT INTO kv2 SELECT 'at1',     (SELECT invoice_at::text FROM sessions WHERE id = ${sid}::uuid);
+INSERT INTO kv2 SELECT 'voided',  ${call("lfh_void_invoice", ", ''guest wants another round''")};
+INSERT INTO kv2 SELECT 'reissue', ${call("lfh_generate_invoice")};
+SELECT (SELECT v FROM kv2 WHERE k='issued')  AS issued,
+       (SELECT v FROM kv2 WHERE k='voided')  AS voided,
+       (SELECT v FROM kv2 WHERE k='reissue') AS reissue,
+       (SELECT v FROM kv2 WHERE k='no1')     AS no_before,
+       (SELECT v FROM kv2 WHERE k='at1')     AS at_before,
+       (SELECT invoice_no::text           FROM sessions WHERE id = ${sid}::uuid) AS no_after,
+       (SELECT invoice_at::text           FROM sessions WHERE id = ${sid}::uuid) AS at_after,
+       (SELECT invoice_voided::text       FROM sessions WHERE id = ${sid}::uuid) AS voided_after,
+       (SELECT invoice_reopen_count::text FROM sessions WHERE id = ${sid}::uuid) AS reopens,
+       t_inv_try('UPDATE sessions SET invoice_no = 99998 WHERE id = ' || quote_literal(${sid})) AS renumber_after;
+ROLLBACK;`, false)[0];
+    ok(r2.issued === "ok", `issuing it works (${r2.issued})`);
+    ok(r2.voided === "ok", `voiding it works (${r2.voided})`);
+    ok(r2.reissue === "ok", `RE-ISSUING a voided invoice works — this is the call that used to fail (${r2.reissue})`);
+    ok(!!r2.no_before && r2.no_after === r2.no_before, `the number did not move across the reopen (${r2.no_before} → ${r2.no_after})`);
+    ok(!!r2.at_before && r2.at_after === r2.at_before, "the issue date did not move either");
+    ok(r2.voided_after === "false", "the bill is live again after the re-issue");
+    ok(Number(r2.reopens) === 1, `the reopen is on the record (invoice_reopen_count = ${r2.reopens})`);
+    ok(r2.renumber_after !== "ok", `and a real renumber is STILL refused afterwards — ${String(r2.renumber_after).slice(0, 80)}`);
+  }
+
   // ── D · the state that started this stays empty ─────────────────────────────────────────────
   head("D · no invoiced bill is sitting fully cancelled with nothing recording the correction");
   const s = q(`select

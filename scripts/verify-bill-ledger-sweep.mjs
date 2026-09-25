@@ -915,8 +915,15 @@ async function render(path, w, h, skin) {
       controls: [...document.querySelectorAll("input, select, button, textarea")].map((e) => ({
         tag: e.tagName, named: !!(e.getAttribute("aria-label") || e.getAttribute("title") || (e.textContent || "").trim() || e.labels?.length),
       })),
+      // A DECORATIVE GLYPH IS NOT A WORD (2026-09-25). This phase is called "keeps every word
+      // readable", and it was failing on the breadcrumb separator — `<span class="sep"
+      // aria-hidden="true">\u203a</span>` at 9px. An element the page has explicitly hidden from
+      // assistive technology is, by the page's own statement, not something anyone reads; the
+      // same is true of anything inside one. Growing the chevron to satisfy the count would have
+      // been changing the app to suit the ruler. Real words are still measured.
       tiny: [...document.querySelectorAll("body *")].filter((el) => {
         if (!el.childNodes.length || ![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) return false;
+        if (el.closest("[aria-hidden='true']")) return false;
         return parseFloat(getComputedStyle(el).fontSize) < 9.5;
       }).length,
     };
@@ -1174,7 +1181,13 @@ await phase("live: a Change log page past the end still has a way back on it (it
       });
       await p.goto(BASE + "/aevinite/bill-audit/changes", { waitUntil: "networkidle", timeout: 60000 });
       await p.waitForTimeout(2000);
-      await p.fill("#chg-jump", "9");
+      // A PAGE THAT CANNOT EXIST, NOT A PAGE THAT HAPPENED NOT TO (2026-09-25). This asked for
+      // page 9, which was past the end when the check was written and is not any more — the dev
+      // log has grown to fourteen pages, so page 9 came back full and the phase failed while the
+      // screen was perfectly correct. Driven at 9,999 the empty state is exactly right: "Nothing
+      // on page 9,999 — this is past the end of the log", with both ways back on it. The number
+      // has to be one no amount of data can reach, or this goes red again on a busy day.
+      await p.fill("#chg-jump", "99999");
       await p.click(".chg-pager form button[type=submit]");
       await p.waitForTimeout(2500);
       const out = await p.evaluate(() => ({

@@ -617,10 +617,16 @@ async function dishPhotoUpload(req: NextRequest, g: { user: StaffUser | null }, 
   return ok({ ok: true, url });
 }
 
-// Money-integrity lock: while a session holds a LIVE (non-voided) invoice, its bill
-// is frozen — reject any money-changing edit so the printed invoice total can't drift.
-// Reopen (void) the invoice first. (work-checker 2026-06-21)
-const LOCKED_MSG = "This bill is invoiced — reopen it (void the invoice) before changing the order.";
+// Money-integrity lock: a line that was on the printed invoice is frozen, so the paper the
+// guest is holding and the sale in the books can never disagree. (work-checker 2026-06-21;
+// narrowed 2026-09-25 so a reopen no longer unlocks it — see invoiceLockedByOrder below.)
+//
+// THE MESSAGE HAD TO CHANGE WITH THE RULE. It used to say "reopen it (void the invoice) before
+// changing the order", and after 2026-09-25 that is advice that cannot work: reopening keeps
+// the number and keeps the original lines locked. Telling someone to try the one thing that
+// will also be refused is worse than refusing plainly, so it now names the two things that DO
+// work — add to the bill, or correct it with a credit note.
+const LOCKED_MSG = "This was on the printed bill, so it can't be taken off. Reopen the bill to add to it, or issue a credit note to correct it.";
 // ── IT ASKS ABOUT *THIS* RESTAURANT'S ROW (T24 sweep #8, 2026-09-06) ──────────────────────────
 // These three reads were keyed on an id ALONE, and the id comes straight off the request path —
 // no caller proves the order is this restaurant's first. Nothing was wrong on the floor (every
@@ -629,15 +635,65 @@ const LOCKED_MSG = "This bill is invoiced — reopen it (void the invoice) befor
 // database's own row rules, so the WHERE clause is the only scope there is. Every call site
 // already had `rid` in hand. Required, not optional — an optional scope is one a future caller
 // forgets, which is the note lib/sessionClose.ts carries for the same reason.
+// ── A REOPEN NO LONGER UNLOCKS WHAT WAS ON THE PAPER (owner, 2026-09-25) ──────────────────
+// *"reopen one also item can be added can't be remove and added item only can be remove im
+//  taking about item which are added after reopen"*
+//
+// This used to answer `invoice_no != null && !invoice_voided`, so reopening a bill unlocked all
+// of it — including the lines the guest is holding paper for. Since mig 407 a reopen KEEPS the
+// invoice number, so `invoice_at` is a frozen, trustworthy line to cut on:
+//   · no number   → not locked
+//   · LIVE        → locked, unchanged
+//   · REOPENED    → locked only if this order was already on the bill when it was issued
+// `created_at` missing, or `invoice_at` missing, means LOCKED: a missing timestamp must never
+// be the thing that lets a printed line off a bill. Mirrored by invoiceLocksOrder() in
+// public/panels/editor/app.js — the panel hides the button, this refuses the request.
 async function invoiceLockedByOrder(orderId: string, rid: string): Promise<boolean> {
-  const o = (await sb.from("orders").select("session_id").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { session_id?: string } | null;
+  const o = (await sb.from("orders").select("session_id,created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { session_id?: string; created_at?: string | null } | null;
   if (!o?.session_id) return false;
-  const s = (await sb.from("sessions").select("invoice_no,invoice_voided").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean } | null;
-  return !!(s && s.invoice_no != null && !s.invoice_voided);
+  const s = (await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
+  if (!s || s.invoice_no == null) return false;
+  if (!s.invoice_voided) return true;
+  if (!s.invoice_at || !o.created_at) return true;
+  return new Date(o.created_at).getTime() <= new Date(s.invoice_at).getTime();
 }
 async function invoiceLockedByItem(itemId: string, rid: string): Promise<boolean> {
   const it = (await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string } | null;
   return it?.order_id ? invoiceLockedByOrder(it.order_id, rid) : false;
+}
+
+// ── WAS THE FOOD ACTUALLY MADE? THE CURRENT ANSWER, PER ORDER (owner, 2026-09-25) ────────
+// Asked which of the manager's money screens should count a cancelled bill, he said: *"only
+// keep in which food are already made"*. He is right, and the distinction is the one mig 340
+// already captures. A cancellation where nothing was ever cooked cost the restaurant NOTHING —
+// the consumption is reversed and the ingredients go back on the shelf. Reporting it as money
+// lost overstates the damage and buries the cancellations that were real.
+//
+// THE ANSWER IS APPEND-ONLY. It is first written on the 'order_cancelled' row, and any later
+// correction rides on its own 'removal_classified' row; the LATEST row wins, which is why this
+// reads ascending and lets a later row overwrite an earlier one.
+//
+// UNANSWERED COUNTS AS A LOSS, DELIBERATELY. Rows from before mig 340, an offline replay, or
+// the automatic archive at table-close carry no answer. A loss figure that quietly shrinks
+// itself on missing data is the flattering error, so those still count — and are reported
+// separately, so somebody can go and answer them instead of the number hiding the question.
+async function madeAnswers(orderIds: string[], rid: string): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  const ids = orderIds.filter(Boolean);
+  if (!ids.length) return out;
+  // Chunked and scoped with a column list and a limit — a cancelled-order set is small, but
+  // this is a report query and the egress rules have no exception for those.
+  for (let i = 0; i < ids.length; i += 200) {
+    const rows = (await sb.from("deletion_audit")
+      .select("order_id,at,made:meta->>made")
+      .eq("restaurant_id", rid)
+      .in("order_id", ids.slice(i, i + 200))
+      .in("kind", ["order_cancelled", "removal_classified"])
+      .order("at", { ascending: true })
+      .limit(2000)).data as { order_id?: string | null; made?: string | null }[] | null;
+    for (const r of rows || []) if (r.order_id && r.made != null) out.set(r.order_id, r.made === "true");
+  }
+  return out;
 }
 
 // ── WHAT A DISCOUNT MAY WORK ON (mig 270 + 271) ──────────────────────────────────────────
@@ -1448,7 +1504,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // otherwise still say "Print". REJECTED (owner, 2026-08-19): this must NOT put anything on
         // the paper or in the Audit — it changes one word on one button, nothing else.
         const [sessQ, memQ, chainQ, payQ] = await Promise.all([
-          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
+          // `invoice_reopen_count` (mig 407) rides along so a bill that is LIVE again can still
+          // show it was reopened — invoice_voided only covers the state while it is on the floor.
+          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,invoice_reopen_count,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
           sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
           // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
           // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
@@ -1500,6 +1558,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const s = map[o.session_id];
           if (s) {
             o.invoice_no = s.invoice_no; o.invoice_voided = s.invoice_voided; o.invoice_at = s.invoice_at; o.bill_no = s.bill_no;
+            o.invoice_reopen_count = s.invoice_reopen_count;
             // IS THE TABLE STILL ON THE FLOOR? (owner, 2026-08-26.) The Bills tab has to tell a
             // LIVE bill being corrected before payment from a FINISHED one whose party has left —
             // they take two different doors (void-invoice vs reopen-table, mig 365) and the button
@@ -1712,9 +1771,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // was collected on any of it, so this never touches gross/net/tax; it is stated beside them.
       // Same shape as the money below: the taxable base plus the untaxed part, falling back to
       // subtotal for legacy rows — i.e. what the guest WOULD have been charged before tax.
-      let orderCount = 0, cancelled = 0, cancelledNet = 0;
+      // ── ONLY FOOD THAT WAS ACTUALLY MADE IS A LOSS (owner, 2026-09-25) ───────────────────
+      // "only keep in which food are already made". A ticket voided before the kitchen touched
+      // it put its ingredients back on the shelf (mig 340) and cost nothing, so counting it
+      // here inflated "lost to cancellations" with cancellations that were free. The ones that
+      // were never answered still count — see madeAnswers() for why that is the safe default —
+      // and are reported on their own so the gap is visible instead of silent.
+      const zMade = await madeAnswers(orders.filter((o: any) => o.status === "cancelled").map((o: any) => o.id), rid);
+      let orderCount = 0, cancelled = 0, cancelledNet = 0, cancelledNoLoss = 0, cancelledUnanswered = 0;
       for (const o of orders) {
         if (o.status === "cancelled") {
+          const m = zMade.get(o.id);
+          if (m === false) { cancelledNoLoss++; continue; }
+          if (m === undefined) cancelledUnanswered++;
           cancelled++;
           cancelledNet += (o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0))
             + (Number(o.nontax_amount) || 0);
@@ -1937,7 +2006,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           // MRP / nil-rated turnover, shown as its own line so the day's takings still add up
           // on the page: taxable + tax + mrp = net. 0 for every restaurant not using it.
           mrp: r2(mrp),
-          paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled, cancelledNet: r2(cancelledNet), tips,
+          paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled, cancelledNet: r2(cancelledNet),
+          cancelledNoLoss, cancelledUnanswered, tips,
           onHouseCount, onHouseNet: r2(onHouseNet) },
         // The till count: what came in and how. `total` is the sum of the methods, so a manager can
         // check it against paidNet — a gap means a bill was settled without a method recorded.
@@ -2594,7 +2664,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const DAY_PARTS = ["Breakfast 7–11", "Lunch 11–15", "Evening 15–19", "Dinner 19–23", "Late 23–7"] as const;
       const partOf = (h: number) => (h >= 7 && h < 11 ? 0 : h >= 11 && h < 15 ? 1 : h >= 15 && h < 19 ? 2 : h >= 19 && h < 23 ? 3 : 4);
       const dayParts = DAY_PARTS.map((label) => ({ label, revenue: 0, orders: 0 }));
+      // The SAME rule as the Z report's cancellations line (owner, 2026-09-25) — these two
+      // screens show the same figure and must not be able to disagree about what it means.
+      const dashMade = await madeAnswers(orders.filter((o: any) => o.status === "cancelled").map((o: any) => o.id), rid);
       let paid = 0, unpaid = 0, cancelled = 0, revenue = 0, cancelledValue = 0, taxCollected = 0;
+      let cancelledNoLoss = 0, cancelledUnanswered = 0;
       let discTotal = 0, discCount = 0;
       let discMax: { amt: number; table: string } | null = null;
       let biggestBill: { amt: number; table: string } | null = null;
@@ -2607,7 +2681,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const h = istHour(dt);
         if (o.status === "cancelled") {
           // What the cancelled order WOULD have billed (its own net, gross of tax) —
-          // "lost business", shown on the dashboard as cancelledValue.
+          // "lost business", shown on the dashboard as cancelledValue. A ticket voided before
+          // the kitchen started it is NOT lost business: its ingredients went back on the
+          // shelf, so it is counted apart (owner, 2026-09-25 — see madeAnswers()).
+          const dm = dashMade.get(o.id);
+          if (dm === false) { cancelledNoLoss++; continue; }
+          if (dm === undefined) cancelledUnanswered++;
           cancelled++;
           cancelledValue += Math.max(0, (Number(o.subtotal) || 0) - (Number(o.discount) || 0)) * (1 + rate);
           continue;
@@ -2784,7 +2863,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         discounts: { total: r2(discTotal), count: discCount, max: discMax ? { amt: r2(discMax.amt), table: discMax.table } : null },
         taxCollected: r2(taxCollected),
         biggestBill: biggestBill ? { amt: r2(biggestBill.amt), table: biggestBill.table } : null,
-        cancelledValue: r2(cancelledValue),
+        cancelledValue: r2(cancelledValue), cancelledNoLoss, cancelledUnanswered,
         channels: Object.fromEntries(Object.entries(channels).map(([k, v]) => [k, { rev: r2(v.rev), count: v.count }])),
         // Honesty flag: on a very busy restaurant a wide range can exceed STATS_ROW_CAP, so these
         // totals + the menu-winners split reflect only the most recent N orders. The dashboard shows
@@ -6155,11 +6234,17 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // obeys.
       //
       // ONE RULE, ONE PLACE: invoiceLockedByOrder() is the same helper that already locks the
-      // per-dish delete, the quantity stepper and the discount. A live invoice number locks the
-      // bill; a VOIDED one does not, because the bill was deliberately reopened and is editable
-      // again. Reusing it is what stops "invoiced" meaning four slightly different things.
+      // per-dish delete, the quantity stepper and the discount. A live invoice locks the whole
+      // bill; a REOPENED one locks the tickets that were on the paper and frees only what was
+      // punched afterwards (owner, 2026-09-25). Reusing it is what stops "invoiced" meaning four
+      // slightly different things.
+      //
+      // THE MESSAGE CHANGED WITH THE RULE. It used to say "reopen the bill first — that retires
+      // the invoice number", which after 2026-09-25 is wrong twice over: a reopen keeps the
+      // number (mig 407), and it does not free this ticket either. Sending someone to the one
+      // door that will also refuse them is worse than a plain no.
       if (patch.status === "cancelled" && await invoiceLockedByOrder(id, rid)) {
-        return err("This bill's invoice has already been printed, so no KOT can be taken off it. Reopen the bill first — that retires the invoice number and records why — or issue a credit note if it is already settled.", 409);
+        return err("This ticket was on the printed bill, so it can't be taken off. Reopen the bill to add to it, or issue a credit note if it is already settled.", 409);
       }
       // CANCELLING A TICKET IS NOT GATED (restored 2026-08-02, and here is why it changed twice).
       // On 2026-07-31 it was put behind void_bills, reasoning that a cancel voids money. Then on
