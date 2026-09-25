@@ -1757,3 +1757,33 @@ one of the 992 was the SAME handful of sentences produced by our own 62-restaura
   cleanup was restoring scale 1 on the ordinary small→optimized model upgrade, snapping the dish
   to full size mid-entrance. Verified on croissant and waffle (including the saved-pose path), AR,
   and the triple-tap replay. **Left: nothing on screen.**
+
+## 2026-09-25 — A reopened bill keeps its number, and only cooked food is a loss ✅
+
+Asked, after the manager films raised three open questions, *"is there option for cancel bill …
+maybe there is only option of deleting kot right? … you can't delete bill right you can delete
+the kot only that's the logic"*. He was right on every point, and the app already matched him on
+one of the three.
+
+1. **"Was the food actually made?" was already built, exactly where he said it belongs** — on the
+   KOT cancel, nowhere else, and the Remove button stays disabled until it is answered. I had
+   listed it as open; that was my list being stale, not the app. Only ONE code path sets a ticket
+   to cancelled and it always asks; the tablet and kitchen can only read the state.
+   **Nothing to build.** (`askRemovalReason(..., { askMade: true })`, owner's own words dated
+   2026-08-18 in the comment above it.)
+
+2. **Reopening an invoiced bill failed outright** — mig 331 drew a new number for a voided
+   invoice, mig 398's trigger refuses any change to one. He chose: *"repoining will have same no
+   it will show that it was reopen … reopen one also item can be added can't be remove and added
+   item only can be remove im taking about item which are added after reopen"*. Shipped as
+   **mig 407** + the per-order lock cut on the frozen `invoice_at`. Both refusal messages were
+   rewritten, because both used to send people to "reopen the bill first", which no longer works.
+   `verify-invoice-is-final.mjs` now PERFORMS the re-issue (section C2) — the one transition it
+   had never driven — and was sabotage-tested against the old function.
+
+3. **Z report + Dashboard: only cooked food is lost money** — *"only keep in which food are
+   already made"*. A ticket voided before the kitchen started it puts its ingredients back and
+   cost nothing. Unanswered still counts and gets its own line. The **GST report needed no
+   change**: it never included a cancelled sale, and no paid sale is filtered anywhere.
+
+**Left: nothing on screen.** Live on backup (`40233c5f`), `verify:live` 13/13.
