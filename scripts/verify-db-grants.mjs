@@ -232,6 +232,34 @@ async function checkDb(label, env) {
     pass(`no function outside the ${Object.keys(ANON_ALLOWED).length}-entry allow-list is reachable with the public menu key`);
   }
 
+  // 1b. A "trigger:" ENTRY IS DOCUMENTATION, NOT PERMISSION (2026-09-25).
+  //     The note further down already says so in as many words — those functions are "deliberately
+  //     revoked from anon" and nothing calls them by name — but check 1 above reads the allow-list
+  //     as permission, so an open trigger helper matched an entry and sailed straight through.
+  //     That is exactly what happened: `lfh_session_delete_cleanup` sat EXECUTE-able by anon on
+  //     backup while migration 374 had revoked it, and this file passed every time. It surfaced
+  //     only when the two databases' schema fingerprints were finally compared — open44 here
+  //     against open43 on the client stack, and the CLIENT was the correct one.
+  //
+  //     A trigger fires as part of the operation on its table; PostgreSQL does not check EXECUTE
+  //     on the trigger function when it runs. So the grant buys the trigger nothing and only
+  //     leaves the helper callable directly with the key that ships in every guest's browser.
+  //     Four migrations replace that one function and only 374 revokes — and a replaced function
+  //     is PUBLIC-executable again by default (the mig 038/267 lesson), so any run that applied
+  //     an earlier one afterwards re-opened it. Migration 408 re-asserts the revoke last-in-order.
+  const openTriggers = fns.filter((f) => (f.anon || f.auth)
+    && /^trigger:/i.test(ANON_ALLOWED[f.name] || ""));
+  if (openTriggers.length) {
+    for (const f of openTriggers) {
+      fail(`${f.name}() is a TRIGGER helper and is EXECUTE-able by ${f.anon ? "anon" : "authenticated"}`
+         + ` — a trigger never needs it, and its allow-list entry is documentation, not permission.`
+         + ` Add a REVOKE in a new migration (see 408).`);
+    }
+  } else {
+    const n = Object.values(ANON_ALLOWED).filter((r) => /^trigger:/i.test(r)).length;
+    pass(`all ${n} trigger helper(s) in the allow-list are revoked, as their own entries say they should be`);
+  }
+
   // 2. The allow-list has not rotted: every name in it still exists.
   const live = new Set(fns.map((f) => f.name));
   const ghosts = Object.keys(ANON_ALLOWED).filter((n) => !live.has(n));
