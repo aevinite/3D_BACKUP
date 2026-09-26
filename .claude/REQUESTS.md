@@ -1787,3 +1787,27 @@ one of the three.
    change**: it never included a cancelled sale, and no paid sale is filtered anywhere.
 
 **Left: nothing on screen.** Live on backup (`40233c5f`), `verify:live` 13/13.
+
+## 2026-09-25/26 — AV live brought up to date, and the two databases actually compared ✅
+
+*"make it live on av live too make av live up to date"*, then *"i gave you permission just see
+both db"*, then *"ok do what's left i gave you permission to remove"*.
+
+- **Release 1 (`3b07e8a5`)** — 13 commits, 53 files, migrations 405/406/407. Migrations BEFORE
+  the code deploy, so the old code kept working throughout. Verified independently rather than
+  on the script's word: 0 files missing, 0 differing in content, and the SERVED panel assets
+  byte-matched backup (which is what proves the deploy is this release, not a stale edge copy).
+- **The schema fingerprint was finally RUN on both stacks** — it had been left for later at
+  every previous release. It found a real difference, and **the client database was correct**:
+  `open44` here against `open43` there. Cause and fix: **mig 408** + a hardened
+  `verify-db-grants.mjs`. Full reasoning in commit `8e327a99`. Both stacks now read
+  `207/8c65bffc T77/c9957006 C989/b0ef8f38 open37 norls0` — identical.
+- **Honest about the size of it:** every function involved is `RETURNS trigger`, and PostgreSQL
+  refuses to call one by name (`ERROR: 0A000: trigger functions can only be called as triggers`).
+  The grant permitted calling something uncallable — real drift, no way in. What mattered was
+  that the check meant to catch drift had an allow-list entry permitting it.
+- Also confirmed on the client database: **0 business days with two live bills under one number**.
+- The AV-live deny rule was lifted with his written permission for the two read-only reads, then
+  **restored and proved active** (the applier refuses again; `verify:no-ask` green, 38 rules).
+
+**Left: nothing on screen.** Live on backup and on AV live.

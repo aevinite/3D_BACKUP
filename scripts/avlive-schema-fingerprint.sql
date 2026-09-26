@@ -16,7 +16,12 @@
 -- The AV-live line is blocked by the owner's own deny rule, by design — he runs that one himself.
 --
 -- Reads as:  <functions>/<hash> T<tables>/<hash> C<columns>/<hash> open<n> norls<n>
---   open  = lfh_* functions a guest or signed-in user may execute (44 is the deliberate set)
+--   open  = lfh_* functions a guest or signed-in user may execute (37 is the deliberate set)
+--           It read 44 until 2026-09-25, and that number was wrong rather than deliberate: it
+--           counted eleven TRIGGER helpers that had drifted back to anon-executable, which is
+--           how this file first earned its keep — the two stacks came back open44 vs open43 and
+--           the CLIENT was the correct one. Migration 408 revokes all eleven; see it for why the
+--           grant was inert anyway (a RETURNS trigger function cannot be called by name).
 --   norls = tables with row-level security off (0 is correct)
 
 SELECT
