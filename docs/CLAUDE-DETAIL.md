@@ -457,7 +457,7 @@ migration on its own; it touches nothing else.
 
 ## ONE unified app (2026-06-13 — was four separate servers, now merged)
 
-Everything is a SINGLE Next app on **port 4000** (`npm run dev` / `START-ALL.bat`).
+Everything is a SINGLE Next app on **port 4000** (`npm run dev` / double-click `START.command`).
 The panels are routes inside it:
 
 - **/menu** — guest menu (`app/`). Scroll-spy category strip in `#sticky-header`.

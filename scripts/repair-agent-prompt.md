@@ -26,7 +26,7 @@ one-line "nothing to repair" report and STOP.
 5. Open a PR: `gh pr create` with a plain-language title + body describing the problem, the cause,
    and how you verified. End the PR body with the Claude Code footer.
 6. Stamp the request: set its row `status='fixed'`, `pr_url=<the PR url>`, `resolved_at=now()`
-   (via the Management API SQL pattern in scripts/apply-migration.mjs — it's a plain UPDATE).
+   (via the Management API SQL pattern in scripts/run-migration.mjs — it's a plain UPDATE).
    RULE (owner 2026-07-24): "whatever you fix, mark it resolved too." When you stamp a request
    `fixed`/`dismissed`, the error it came from is cleared from admin → Repair "Problems right now"
    AUTOMATICALLY — a DB trigger (mig 183) resolves the linked error row + its repeat-group off

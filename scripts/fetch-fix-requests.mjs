@@ -1,6 +1,6 @@
 // Gather the overnight repair agent's INPUT: every OPEN fix_request + the last 24h of
 // error-level log rows, written as a plain-language markdown file the agent reads.
-// Reads PROD via the Management API (same PAT pattern as apply-migration.mjs). Prints only
+// Reads PROD via the Management API (same PAT pattern as run-migration.mjs). Prints only
 // a summary + the output path — never a secret. Usage: node scripts/fetch-fix-requests.mjs
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";

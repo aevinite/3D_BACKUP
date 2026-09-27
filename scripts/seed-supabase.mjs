@@ -5,7 +5,7 @@
 //     3D configs, sold-out marks. CLAUDE.md has said so for months while this file described
 //     the behaviour as a feature; the 2026-08-04 sweep found it was also the only destructive
 //     script with no database refusal at all. To apply a new migration, run JUST the migration
-//     (scripts/apply-migration.mjs) — do not reseed. A full reseed needs a DB-vs-menu.json
+//     (scripts/run-migration.mjs) — do not reseed. A full reseed needs a DB-vs-menu.json
 //     diff first.
 //
 // What it does, in order:

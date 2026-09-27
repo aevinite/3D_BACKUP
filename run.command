@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ===========================================================================
 #  Little French House - start the MENU app only (http://localhost:4000).
-#  Mac version of run.bat. If something is already using port 4000 it is
+#  If something is already using port 4000 it is
 #  closed first, then a fresh server is started.
-#  (Use START.command to launch the menu, or START-ALL.command for the
-#   single unified server.)
+#  (START.command is the double-click version: it opens this in its own
+#   Terminal window. Every panel lives on this one server.)
 # ===========================================================================
 cd "$(dirname "$0")" || exit 1
 
