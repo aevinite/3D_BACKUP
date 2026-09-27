@@ -3579,6 +3579,38 @@ function ordersPreviousHtml(today, previous) {
         t.voided ? ` · <i class="bill-day-void">${t.voided} cancelled</i>` : ""}</span></div>`;
   };
 
+  // ── WHILE IT IS STILL LOADING, SAY SO — DO NOT SAY "NO BILLS" (owner, 2026-09-27) ──────────
+  // *"redesign the whole loading thing for the bill … right now the loading screen looks shit."*
+  // He is describing a screen that LIES. There was no loading state here at all: until the record
+  // arrives, `state.billsRec` is null, so the heading rendered "0 bills · ₹0 collected" and the
+  // body rendered the sentence "No bills settled today yet." — a restaurant that had taken forty
+  // bills was told it had taken none, and then they popped in underneath.
+  //
+  // A loading state is STATUS, and status is one of the four kinds of feedback a screen owes the
+  // person using it. It must never be confusable with the completion state that means "nothing
+  // here". So: the skeleton stands in for the whole group — heading total included — and the
+  // empty sentence cannot be reached until the record has actually landed once.
+  //
+  // The bars mirror .bill-line field for field (number · table+name over time+invoice · amount
+  // over how it was paid · state pill) so nothing MOVES when the real rows replace them; a
+  // skeleton of generic bars that then reflows is worse than none. Each row's sweep is delayed
+  // by its index — the list reads as one wave instead of five bars blinking in lockstep — and
+  // the whole thing is inert under prefers-reduced-motion.
+  if (!state.billsRec) {
+    const row = (i) => `<div class="bill-line bskel-row" style="--i:${i}" aria-hidden="true">
+        <span class="bskel bskel-no"></span>
+        <span class="bl-mid"><span class="bskel bskel-1"></span><span class="bskel bskel-2"></span></span>
+        <span class="bskel-amt"><span class="bskel bskel-a1"></span><span class="bskel bskel-a2"></span></span>
+        <span class="bskel bskel-pill"></span>
+      </div>`;
+    return `<div class="ord-prev" aria-busy="true">
+      <div class="ord-section-divider"><h3>\u{1F4C5} Today's bills</h3>
+        <span class="bill-day-total bskel-head"><span class="bskel bskel-head-bar"></span></span></div>
+      <div class="bill-lines bskel-lines">${[0, 1, 2, 3, 4].map(row).join("")}</div>
+      <p class="bskel-say">Reading today\u2019s bills\u2026</p>
+    </div>`;
+  }
+
   const groups = [];
   const todayList = shown.filter((b) => b.ts >= dayStart);
   groups.push(["\u{1F4C5} Today's bills", todayList, "No bills settled today yet.", "No bill from today matches that search."]);

@@ -5023,6 +5023,53 @@ html[data-theme="light"] .au-side-r.au-hot > b { color: #96690f; }
   font-variant-numeric: tabular-nums; }
 .bl-amt small { display: block; font-weight: 500; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
 
+/* ── THE BILLS RECORD WHILE IT IS STILL READING (owner, 2026-09-27) ────────────────────────
+   "redesign the whole loading thing for the bill … right now the loading screen looks shit."
+   There was no loading state: the screen said "No bills settled today yet." while it was still
+   fetching. These bars mirror .bill-line field for field so the real rows drop straight into the
+   same geometry and nothing shifts — a skeleton that reflows on arrival is worse than none.
+   Tokens only (--text / --line / --panel), so it belongs to whichever skin is on. */
+.bskel-lines { pointer-events: none; }
+.bskel-row { cursor: default; }
+.bskel {
+  display: block; border-radius: 6px; height: 11px;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--text) 6%, transparent) 30%,
+    color-mix(in srgb, var(--text) 14%, transparent) 50%,
+    color-mix(in srgb, var(--text) 6%, transparent) 70%);
+  background-size: 220px 100%;
+  animation: edSkelShimmer 1.2s linear infinite;
+  /* one wave down the list, not five bars blinking together */
+  animation-delay: calc(var(--i, 0) * 0.11s);
+}
+/* each bar takes the width of the thing it stands in for, and the rows are not identical —
+   a column of equal bars reads as a table, and a day's bills are not a table */
+.bskel-no   { width: 30px; height: 13px; flex: none; }
+.bskel-1    { width: 44%; height: 12px; }
+.bskel-2    { width: 62%; height: 10px; margin-top: 5px; }
+.bskel-row:nth-child(2) .bskel-1 { width: 37%; } .bskel-row:nth-child(2) .bskel-2 { width: 54%; }
+.bskel-row:nth-child(3) .bskel-1 { width: 52%; } .bskel-row:nth-child(3) .bskel-2 { width: 47%; }
+.bskel-row:nth-child(4) .bskel-1 { width: 33%; } .bskel-row:nth-child(4) .bskel-2 { width: 59%; }
+.bskel-row:nth-child(5) .bskel-1 { width: 46%; } .bskel-row:nth-child(5) .bskel-2 { width: 41%; }
+.bskel-amt  { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: none; }
+.bskel-a1   { width: 58px; height: 13px; }
+.bskel-a2   { width: 40px; height: 9px; }
+.bskel-pill { width: 62px; height: 20px; border-radius: 999px; flex: none; }
+.bskel-head-bar { width: 190px; height: 10px; display: inline-block; vertical-align: middle; }
+/* The list is doing something, and it says so in words as well as in motion — a shimmer alone
+   is decoration, and someone on a slow connection deserves a sentence. */
+.bskel-say {
+  margin: 10px 2px 0; font-size: 11.5px; color: var(--muted);
+  animation: bskelSay 1.6s ease-in-out infinite;
+}
+@keyframes bskelSay { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+/* Reduced motion keeps the SHAPE and the sentence, and drops the movement — the status is the
+   point, the shimmer was only ever how it was carried. */
+@media (prefers-reduced-motion: reduce) {
+  .bskel { animation: none; background: color-mix(in srgb, var(--text) 9%, transparent); }
+  .bskel-say { animation: none; opacity: .8; }
+}
+
 /* ── state chips: a word AND a colour, never a colour alone ───────────────────────────────── */
 .bill-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; flex: 0 0 auto;
   border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid; white-space: nowrap; }
