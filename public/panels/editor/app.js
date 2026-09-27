@@ -15679,7 +15679,7 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
       </div>
       <div class="disc-cap-msg" id="discCapMsg" role="status" hidden></div>
       <div class="disc-hint muted small">Change any one of the three — the other two follow.${nontax > 0 ? ` The % is off the discountable part only — ${lockedNote} of this bill ${lockedMrp > 0 ? "is MRP items, whose price is final" : "carries no GST"}.` : ""}</div>
-      <label class="dish-edit-lbl" style="margin-top:14px">Reason <span class="muted small">(optional, shows on the bill)</span></label>
+      <label class="dish-edit-lbl" style="margin-top:14px">Reason <span class="muted small">(required — it is kept with your name, and shows on the bill)</span></label>
       <input type="text" class="dish-edit-custominput" id="discNoteInput" maxlength="200" placeholder="e.g. loyalty, comp, manager approval">
     </div>
     <div class="dish-edit-foot">
@@ -15713,7 +15713,39 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   // a number", never "they pay ₹0" — comping a whole bill by deleting three characters is the
   // kind of silent money mistake this panel has been bitten by before (the waiter panel carries
   // the same guard). While a box is empty or nonsense, the old discount stands and Apply waits.
-  const setBlank = (blank) => { applyBtn.disabled = blank; applyBtn.style.opacity = blank ? ".5" : ""; };
+  // ── A DISCOUNT NOW CARRIES A REASON, LIKE EVERY OTHER WAY MONEY LEAVES A BILL ──────────
+  // (owner, 2026-09-27, having handed me the decision: "you have free will to take the decision".)
+  //
+  // The audit already calls this act discount_given — "money taken off a bill" — and records who
+  // did it and when. But the REASON was optional, while taking a dish off refuses to proceed
+  // without one. Those are the same act held to two different standards: a manager could shave
+  // money off every bill in the restaurant and the record would say only that a discount was
+  // given, never why. That is the shape docs/COMPLIANCE-GUARDRAILS.md exists to prevent, and it
+  // was open on the one path nobody had closed.
+  //
+  // Found because film 1.1 narrates "every discount asks for a reason, and every reason is kept"
+  // over a field labelled "(optional)" — the film was describing the product we meant to have.
+  //
+  // NOT ON AV LIVE. This adds a required field to a paying restaurant's till, and his message
+  // naming the stack is what authorises that. Backup only until he says so.
+  // ── …AND APPLY WAITS FOR IT ────────────────────────────────────────────────────────────
+  // `blank` is the old rule (a half-typed figure is not appliable). The reason joins it: a
+  // discount of zero needs no reason — that is just clearing one — but any amount above zero
+  // does. Checked on every keystroke in either box, so the button's state always matches what
+  // the form actually holds.
+  const noteEl = wrap.querySelector("#discNoteInput");
+  let lastBlank = false;
+  const syncApply = () => {
+    const wantsMoney = (parseFloat(amtInput.value) || 0) > 0 || (parseFloat(pctInput.value) || 0) > 0;
+    const off = lastBlank || (wantsMoney && !noteEl.value.trim());
+    applyBtn.disabled = off; applyBtn.style.opacity = off ? ".5" : "";
+    applyBtn.title = (wantsMoney && !noteEl.value.trim()) ? "Say why this discount is being given" : "";
+  };
+  const setBlank = (blank) => { lastBlank = blank; syncApply(); };
+  noteEl.addEventListener("input", syncApply);
+  pctInput.addEventListener("input", syncApply);
+  amtInput.addEventListener("input", syncApply);
+  setTimeout(syncApply, 0);
 
   // A REFUSAL IS SHOWN, NEVER A SILENT TRIM (the "a user's tap must never vanish in silence"
   // rule). Typing more than the bill can carry used to be clamped with NOTHING on screen: the
