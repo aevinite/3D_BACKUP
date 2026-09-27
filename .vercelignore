@@ -18,7 +18,6 @@
 # Owner-facing explainer docs, read on GitHub, not by the app.
 /LEARN-MY-APP
 # Design explorations whose chosen design has already shipped.
-/access-designs
 # The frozen pre-rewrite reference (the code snapshot is already gitignored).
 /reference
 # The migrations. 362 SQL files / 371 files in all, and the SINGLE SOURCE OF TRUTH for both
@@ -40,6 +39,5 @@
 !/README.md
 /PROJECT-HANDOFF.pdf
 # Test + sweep output
-/test-results
 /tests
 /.claude

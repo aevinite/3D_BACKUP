@@ -133,3 +133,6 @@ docs/research/
 
 # /brag skill render output — multi-MB mp4/jpg, never commit
 brag-output*/
+
+# Playwright's last-run marker (was tracked by accident until 2026-09-27)
+test-results/

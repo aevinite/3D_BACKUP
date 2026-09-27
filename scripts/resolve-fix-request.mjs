@@ -39,7 +39,7 @@
 // single-character wildcard, so a pattern match would quietly clear more than it was asked to.
 //
 // Reads the DB through the Management API (same PAT pattern as fetch-fix-requests.mjs /
-// apply-migration.mjs). Prints only counts and plain sentences — never a secret.
+// run-migration.mjs). Prints only counts and plain sentences — never a secret.
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";

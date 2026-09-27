@@ -5,11 +5,9 @@ This folder is the safety net taken **before** the unified-app rewrite, on
 app can copy exact behaviour from the old one.
 
 ## What's inside
-- **code-snapshot/** — a full copy of the old working code: the four panels
-  (`app/` guest menu, `editor/`, `kitchen/`, `tablet/`) plus the old `admin/`
-  control room, `lib/`, `components/`, `supabase/migrations/`, `scripts/`,
-  configs. Heavy/secret things were left out on purpose: `node_modules`,
-  `.next`, `.git`, `.vercel`, GLB models, and all `.env` files.
+- **code-snapshot/** — REMOVED 2026-09-27. It was an untracked local copy of the
+  old code; the git tag below holds exactly the same thing, and that tag is now
+  pushed to GitHub too, so the copy protected nothing extra.
 - **DATABASE.md** — the live Supabase schema (tables, columns, RPC functions)
   at freeze time. The rewrite reuses this SAME database — don't recreate it.
 
