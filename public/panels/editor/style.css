@@ -5056,18 +5056,60 @@ html[data-theme="light"] .au-side-r.au-hot > b { color: #96690f; }
 .bskel-a2   { width: 40px; height: 9px; }
 .bskel-pill { width: 62px; height: 20px; border-radius: 999px; flex: none; }
 .bskel-head-bar { width: 190px; height: 10px; display: inline-block; vertical-align: middle; }
-/* The list is doing something, and it says so in words as well as in motion — a shimmer alone
-   is decoration, and someone on a slow connection deserves a sentence. */
-.bskel-say {
-  margin: 10px 2px 0; font-size: 11.5px; color: var(--muted);
-  animation: bskelSay 1.6s ease-in-out infinite;
+/* ── "COUNTED": HOW FAR IT HAS GOT, FROM SOMETHING TRUE ────────────────────────────────────
+   Owner picked this of five, for one reason: "you can tell the difference between nearly there
+   and stuck." The mock-up counted rows; that number cannot be real, because the day arrives in
+   ONE response. Elapsed time is real, so the bar and the sentence are driven by that.
+
+   Every animation is delayed by NEGATIVE `--was` — the seconds already spent — so a re-render
+   mid-read resumes exactly where it was instead of snapping back to the start.
+
+   The bar eases towards 92% and stops. It is never finished by the clock; only the data
+   arriving replaces this whole block. So a bar that has stopped short always means "still
+   going", and there is no moment where a full bar sits there lying about being done. */
+.bskel-bar {
+  height: 3px; margin: 13px 2px 0; border-radius: 3px; overflow: hidden;
+  background: color-mix(in srgb, var(--gold) 20%, transparent);
 }
-@keyframes bskelSay { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.bskel-bar i {
+  display: block; height: 100%; width: 0; border-radius: 3px; background: var(--gold);
+  /* LINEAR, and slow. The first curve reached 87% in five seconds — measured in the browser —
+     which tells the reader "almost done" while the read has barely started, and is the same
+     species of lie as the empty-state sentence this block replaced. Linear over 20s means the
+     position is proportional to the time actually spent: 23% at 5s, 46% at 10s. No easing, so
+     nothing about the shape implies progress the read has not made. */
+  animation: bskelFill 20s linear forwards;
+  animation-delay: calc(-1 * var(--was, 0s));
+}
+@keyframes bskelFill { from { width: 4%; } to { width: 92%; } }
+
+/* Three sentences, each taking over from the last. Same negative delay, so the wording is
+   correct for how long it has ACTUALLY been going, not for how long this render has existed. */
+.bskel-say { margin: 9px 2px 0; font-size: 11.5px; color: var(--muted); position: relative; min-height: 1.4em; }
+/* VISIBILITY, NOT JUST OPACITY. All three sentences live in the DOM so the wording can change
+   with no JS timer — but an element at opacity 0 is still READ OUT, and this carries
+   role="status". At opacity 0 alone a screen reader announced all three at once, including "this
+   is slower than usual" one second into a normal read. `visibility: hidden` takes them out of
+   the accessibility tree as well as out of sight. */
+.bskel-say span { position: absolute; inset: 0; opacity: 0; visibility: hidden;
+  animation-fill-mode: forwards; animation-delay: calc(-1 * var(--was, 0s)); }
+.bskel-say .bs-1 { animation: bsHold 5s linear; }
+.bskel-say .bs-2 { animation: bsShow 12s linear; }
+.bskel-say .bs-3 { animation: bsLast 30s linear; }
+@keyframes bsHold { 0%, 92% { opacity: 1; visibility: visible; } 100% { opacity: 0; visibility: hidden; } }
+@keyframes bsShow { 0%, 40% { opacity: 0; visibility: hidden; } 42%, 92% { opacity: 1; visibility: visible; } 100% { opacity: 0; visibility: hidden; } }
+@keyframes bsLast { 0%, 56% { opacity: 0; visibility: hidden; } 60%, 100% { opacity: 1; visibility: visible; } }
 /* Reduced motion keeps the SHAPE and the sentence, and drops the movement — the status is the
    point, the shimmer was only ever how it was carried. */
+/* Reduced motion keeps the SHAPE, the bar and the sentence, and drops the movement. The status
+   is the point; the animation was only ever how it was carried. The bar still shows its real
+   position, it simply does not travel there. */
 @media (prefers-reduced-motion: reduce) {
   .bskel { animation: none; background: color-mix(in srgb, var(--text) 9%, transparent); }
-  .bskel-say { animation: none; opacity: .8; }
+  .bskel-bar i { animation: none; width: 55%; }
+  .bskel-say span { animation: none; }
+  .bskel-say .bs-2, .bskel-say .bs-3 { display: none; }
+  .bskel-say .bs-1 { opacity: .85; visibility: visible; }
 }
 
 /* ── state chips: a word AND a colour, never a colour alone ───────────────────────────────── */

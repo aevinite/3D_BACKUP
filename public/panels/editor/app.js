@@ -3247,6 +3247,7 @@ function ordersBuckets() {
 // Previous-bills view renders, refreshed at most every 30s — realtime re-renders keep it
 // current while the view is open, and nothing polls while it isn't.
 let _billsRecLoading = false;
+let _billsReadStart = 0;
 async function loadBillsRecord(force) {
   if (_billsRecLoading) return;
   // force = "THIS device just changed a bill, refetch now" (only user actions reach it —
@@ -3255,6 +3256,10 @@ async function loadBillsRecord(force) {
   // in this file keeps — re-renders while the view is open are what call this, so a busy
   // board must not turn into a faster poll (PR #748 review).
   if (state.billsRec && Date.now() - (state.billsRec.at || 0) < (force ? 3000 : 60000)) return;
+  // WHEN the read started, so the loading state can say how long it has been going. Set before
+  // the await, and only for the FIRST read — a 60s background refresh must not restart the bar
+  // under a list that is already on screen.
+  if (!state.billsRec && !_billsReadStart) _billsReadStart = Date.now();
   _billsRecLoading = true;
   try {
     const r = await api("GET", "/orders?bills=1");
@@ -3597,17 +3602,39 @@ function ordersPreviousHtml(today, previous) {
   // by its index — the list reads as one wave instead of five bars blinking in lockstep — and
   // the whole thing is inert under prefers-reduced-motion.
   if (!state.billsRec) {
+    // ── "COUNTED" — IT SAYS HOW FAR IT HAS GOT (owner picked this one, 2026-09-27) ──────────
+    // Shown five options, he chose the one that reports progress: *"you can tell the difference
+    // between nearly there and stuck."*
+    //
+    // ONE HONEST CHANGE FROM THE MOCK-UP. The mock counted rows — "3 of 5 read" — and that
+    // number CANNOT be real here: `/orders?bills=1` answers once, with the whole day in one
+    // response. There is no row-by-row arrival to count, so a tally would be invented, which is
+    // the exact fault this whole loading state was built to remove. What IS real is how long the
+    // read has been going, so that is what it reports: the bar advances with ELAPSED TIME and
+    // the sentence escalates with it. It still answers "nearly there or stuck" — from something
+    // true rather than from a number made up to look reassuring.
+    //
+    // NO JS TIMER. The bar and the three sentences are CSS animations whose start is pulled
+    // backwards by the time already spent (`--was`), so a re-render mid-read resumes them where
+    // they were instead of snapping back to zero. The bar eases towards 92% and never reaches
+    // the end on its own: only the data arriving finishes it, so a full bar always means done.
+    const was = _billsReadStart ? Math.min(30, (Date.now() - _billsReadStart) / 1000) : 0;
     const row = (i) => `<div class="bill-line bskel-row" style="--i:${i}" aria-hidden="true">
         <span class="bskel bskel-no"></span>
         <span class="bl-mid"><span class="bskel bskel-1"></span><span class="bskel bskel-2"></span></span>
         <span class="bskel-amt"><span class="bskel bskel-a1"></span><span class="bskel bskel-a2"></span></span>
         <span class="bskel bskel-pill"></span>
       </div>`;
-    return `<div class="ord-prev" aria-busy="true">
+    return `<div class="ord-prev bskel-wrap" aria-busy="true" style="--was:${was.toFixed(2)}s">
       <div class="ord-section-divider"><h3>\u{1F4C5} Today's bills</h3>
         <span class="bill-day-total bskel-head"><span class="bskel bskel-head-bar"></span></span></div>
       <div class="bill-lines bskel-lines">${[0, 1, 2, 3, 4].map(row).join("")}</div>
-      <p class="bskel-say">Reading today\u2019s bills\u2026</p>
+      <div class="bskel-bar"><i></i></div>
+      <p class="bskel-say" role="status">
+        <span class="bs-1">Reading today\u2019s bills\u2026</span>
+        <span class="bs-2">Still reading \u2014 a long day takes a moment.</span>
+        <span class="bs-3">This is slower than usual. It is still going.</span>
+      </p>
     </div>`;
   }
 
