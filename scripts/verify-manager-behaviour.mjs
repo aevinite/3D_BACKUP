@@ -344,8 +344,17 @@ async function t5Fixes() {
     ? ok("…and so is 🍴 Split") : bad("Split is back to counting cancelled tickets");
   // …and the heading counts what is drawn, not what exists: "Orders · 6" over an empty box reads
   // as a screen that failed to load.
-  /Orders <span class="sub">· \$\{shownN\}<\/span>/.test(app)
-    ? ok("the Orders heading counts the tickets actually listed") : bad("the Orders heading counts cancelled tickets again");
+  // Since #1391 (2026-09-17) the populated list is one dish per line and carries NO count heading;
+  // only the loading skeleton says "Orders · N", and N there is the dish count. So the RULE is
+  // asserted, not the old spelling: every "Orders · ${x}" the panel draws must count what is shown
+  // (shownN) or the skeleton's dishes (dishN) — never every order, cancelled ones included.
+  {
+    const counts = [...app.matchAll(/Orders <span class="sub">· \$\{([^}]+)\}/g)].map((m) => m[1].trim());
+    const wrong = counts.filter((v) => v !== "shownN" && v !== "dishN");
+    !wrong.length
+      ? ok(`no Orders heading counts cancelled tickets (${counts.length ? counts.join(", ") : "no count heading at all"})`)
+      : bad(`the Orders heading counts cancelled tickets again: \${${wrong.join("}, ${")}}`);
+  }
 
   // H2 · the top-bar 🔔 is part of the floor, so the INCREMENTAL path has to refresh it too —
   // that is the path every realtime breadcrumb takes.
