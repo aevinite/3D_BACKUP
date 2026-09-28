@@ -1811,3 +1811,16 @@ both db"*, then *"ok do what's left i gave you permission to remove"*.
   **restored and proved active** (the applier refuses again; `verify:no-ask` green, 38 rules).
 
 **Left: nothing on screen.** Live on backup and on AV live.
+
+## 2026-09-28 — the manager panel's BILL section should look as good as the printed bill ☐ (not built)
+
+His words, while reviewing the reels: *"instead of showing the bill in manager panel you can show the
+actual bill which will look way too cool and put this in the thing that we are later gonna change the
+UI also of the manager panel bill section — it doesn't look as cool as it should look."*
+
+- [ ] **Redesign the Bills screen in the manager panel** (manager panel → Bills tab → the bill cards and
+  the bill detail). What he'd SEE today: busy cream cards with small type; what he wants: something as
+  clean and striking as the printed TAX INVOICE (`public/panels/billdoc.js`). Files: `public/panels/editor/app.js`
+  (bill list + detail), `public/panels/editor/style.css`. Design work → UI/UX skill first, compare
+  approaches; keep every compliance rule (a sale can be cancelled, never disappear; numbering untouched).
+  Asked for LATER — nothing is built yet.
