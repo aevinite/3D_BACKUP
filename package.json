@@ -19,6 +19,7 @@
     "verify:lifecycle": "node scripts/verify-table-lifecycle.mjs",
     "verify:db-parity": "node scripts/verify-db-parity.mjs",
     "verify:grants": "node scripts/verify-db-grants.mjs",
+    "verify:order-keys": "node scripts/verify-order-line-keys.mjs",
     "verify:migration-truth": "node scripts/verify-migration-truth.mjs",
     "verify:migrations-1-80": "node scripts/verify-migrations-1-80.mjs",
     "verify:migrations-161-240": "node scripts/verify-migrations-161-240.mjs",
