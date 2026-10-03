@@ -239,6 +239,31 @@ that passed on 2026-09-29.
       warns about). Fetched once per restaurant, never polled.
       Caught in testing: the badge first showed low+negative, but `lfh_inv_report_summary`'s
       `low_count` ALREADY includes the ones below zero — it was reporting one ingredient twice.
+- [x] **B3 the other four views** — Purchases, Count, Waste and Expenses had only inherited the
+      shared furniture, and two of them were quietly broken BY it. `.inv-row` was a three-track
+      grid, but Waste rows carry a fourth child (the ✕ strike-out) and Expenses a fifth (the
+      receipt thumb), so the extras fell onto an implicit second row — the ✕ sat under the name.
+      Flex now; grid was buying nothing anyway, because each row is its own grid and the columns
+      never lined up with the row above (what aligns them is `min-width` + `tabular-nums`). The
+      corner rounding was `:first-of-type`, which asks "first DIV among siblings" rather than
+      "first row of this block" — it worked in Stock only because its rows are `<button>` and the
+      heading is a `<div>`. Structural now. All three ledgers gained the `.inv-cat` day heading via
+      one `byDay` helper that re-sorts by the BUSINESS date, because both lists arrive ordered by
+      `created_at` and a bill entered Friday for Tuesday's delivery would print Tuesday twice.
+      Tested on interleaved dates: two headings not four, entry order kept inside each day.
+- [x] **B7 THE REAL GAP — stock was never deducted when a dish sold** (mig 409). Not a UI matter
+      and the heart of his ask. mig 224 built depletion fifteen months ago and it had never fired
+      once: it joined order lines on `slug`, and `lfh_price_order` — the single builder behind all
+      three order doors — writes `{id,title,price,qty,options,removed,note,tax_mode,is_mrp}` with
+      no `slug` at all, so the trigger's own filter threw every line away before the recipe join.
+      Fail-open by design, so it never raised or logged. The same dead join silently zeroed
+      `lfh_inv_dish_cost` (every recipe cost money and earned nothing) and `lfh_inv_coverage`
+      (the denominator of the food-cost %, which mig 227 calls "the honesty gate"). THIRD time this
+      has shipped — mig 089 had it, mig 130 fixed it and wrote the shape down, 224 and 227 brought
+      it back — so it comes with `verify:order-keys`, which asks the RUNNING database, proven red
+      against a deliberately bad function and green again after. `reset-demo-history.mjs` was the
+      source of every slug-shaped row and now writes `id` like the app. Coverage went from 0 of 0
+      to 13 of 59 dishes, 28.75L covered of 97.56L, ~33% food cost.
 - [x] **B5 owner page — ALREADY BUILT; my gap assessment was wrong.** I recorded it as "68 lines,
       almost certainly not showing what he expects". Those 68 lines are a server shell; the real
       screen is `components/owner/OwnerInventory.tsx`, 474 lines, and it already carries the
@@ -260,6 +285,12 @@ that passed on 2026-09-29.
       button that was boxed and never pressed. Pressing it IS the feature: it asks how the money
       came in (UPI / Cash / Card / Other), records it against that person, and the bill leaves the
       tab book. The chapter now presses it, boxes the method grid, and pays with Cash.
+- [x] **C2b "make sure pay off also have every feature" — AUDITED, nothing missing.** The product
+      half of his sentence, checked rather than assumed. The collect sheet offers UPI, Cash, Card
+      and Other, plus Split payment, On the house and Pay Later (khata) as first-class choices, and
+      a tip that can be entered as an amount or a percentage with the change worked out against
+      what the guest handed over. A discount carries a reason (shipped 37acb55b). Collect-all pays
+      every open bill at once. That is the full set; no gap found, so nothing was built.
 - [x] **C3 toggles — VERIFIED, and they were already correct.** Proved on screen rather than from
       code: with everything on the strip reads Dine-in · Zomato · Swiggy; with Zomato and Swiggy
       switched off in `settings.platform_channels` it reads Dine-in · Website · Parcel — both cards
