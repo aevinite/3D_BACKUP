@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=b6e55516" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=b79438b3" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=9746f754" />
   <!-- the "who is this bill for?" box — shared with the other panel that opens it -->
   <link rel="stylesheet" href="/panels/billcustomer.css?v=23b15d10" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
@@ -180,7 +180,7 @@
   <script src="/panels/netretry.js?v=064c1971"></script>
   <script src="/panels/outbox.js?v=79344a64"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=004aecb5"></script>
+  <script src="/panels/connbadge.js?v=689dbf4f"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
@@ -245,12 +245,12 @@
        the kitchen panel and the admin's sample, so a document can never look different in two
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —
        without it, printing a bill throws "LFH_BILLDOC is not defined" and nothing prints. -->
-  <script src="/panels/billdoc.js?v=ca188407"></script>
+  <script src="/panels/billdoc.js?v=006ad0c6"></script>
   <!-- auditsort: the plain-English words and the sort order for Audit & logs, shared with the
        owner console's Audit screen so the same event can never be worded two ways. -->
   <script src="/panels/auditsort.js?v=1da861b5"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=114cd0c2"></script>
+  <script src="/panels/editor/app.js?v=219d1956"></script>
 </body>
 </html>

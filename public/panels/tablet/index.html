@@ -81,7 +81,7 @@
   <script src="/panels/netretry.js?v=064c1971"></script>
   <script src="/panels/outbox.js?v=79344a64"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=004aecb5"></script>
+  <script src="/panels/connbadge.js?v=689dbf4f"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and BEFORE app.js.
@@ -118,7 +118,7 @@
        not print, but it reads the shared money rules from here — discPct(), the one definition of
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
-  <script src="/panels/billdoc.js?v=ca188407"></script>
+  <script src="/panels/billdoc.js?v=006ad0c6"></script>
   <script src="app.js?v=c3db3829"></script>
 </body>
 </html>

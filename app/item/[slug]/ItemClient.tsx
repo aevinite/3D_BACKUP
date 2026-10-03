@@ -830,7 +830,9 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
 
   // From here down is the actual dish page layout (the markup).
   return (
-    <div id="detail-page" className="page active item-detail-page">
+    // <main>, not <div>: a dish page renders OUTSIDE the AppShell, so it had no "main content"
+    // landmark at all — a screen reader's "jump to main" found nothing (Lighthouse, 2026-10-03).
+    <main id="detail-page" className="page active item-detail-page">
       {/* The floating top bar: a back arrow on the left, the heart on the right. */}
       <div className="nav" style={{ position: 'fixed', top: 0, left: 0, width: '100%', background: 'transparent', backdropFilter: 'none', WebkitBackdropFilter: 'none', borderBottom: 'none', zIndex: 51 }}>
         {/* Back to the menu. */}
@@ -876,8 +878,18 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         </div>
       )}
 
-      {/* The big dish photo. Tapping it opens the full-screen zoom view. */}
-      <div className="detail-visual" onClick={() => setImgZoom(true)} style={{ cursor: 'zoom-in' }}>
+      {/* The big dish photo. Tapping it opens the full-screen zoom view. It is a div, so it also
+          says it is a button and answers Enter/Space — otherwise someone on a keyboard or a screen
+          reader could never open the zoom (accessibility check, 2026-10-03). */}
+      <div
+        className="detail-visual"
+        role="button"
+        tabIndex={0}
+        aria-label={`Zoom in on ${item.title}`}
+        onClick={() => setImgZoom(true)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setImgZoom(true); } }}
+        style={{ cursor: 'zoom-in' }}
+      >
         {/* The photo fades in (the "show" class is added once it's loaded). */}
         <img
           id="detail-img"
@@ -1397,6 +1409,6 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           </button>
         </div>
       )}
-    </div>
+    </main>
   );
 }

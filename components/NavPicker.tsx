@@ -19,10 +19,16 @@ interface Option {
 // clicking the button reveals the list, and picking an option runs its action.
 export default function NavPicker({
   buttonLabel,
+  buttonValue,
   buttonContent,
   options,
 }: {
   buttonLabel: string;
+  // What the button visibly SHOWS ("EN", "₹"). A screen reader's name for the button must include
+  // the words a sighted person sees on it — "Language" alone, on a button reading "EN", fails that
+  // (Lighthouse label-content-name-mismatch, 2026-10-03), and a voice-control user saying "click
+  // EN" gets nothing. Kept apart from buttonLabel, which is also the back-button layer's id.
+  buttonValue?: string;
   buttonContent: ReactNode;
   options: Option[];
 }) {
@@ -65,7 +71,7 @@ export default function NavPicker({
       <button
         type="button"
         className="nav-btn"
-        aria-label={buttonLabel}
+        aria-label={buttonValue ? `${buttonLabel}: ${buttonValue}` : buttonLabel}
         aria-expanded={open}
         aria-haspopup="listbox"
         onClick={() => setOpen((v) => !v)}

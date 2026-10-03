@@ -176,6 +176,7 @@
     "verify:slow-load": "node scripts/verify-slow-load.mjs",
     "verify:staff-accounts": "node scripts/verify-staff-accounts.mjs",
     "verify:static": "node scripts/verify-static.mjs",
+    "verify:launch-risks": "node scripts/verify-launch-risks.mjs",
     "verify:summary-parity": "node scripts/verify-summary-parity.mjs",
     "verify:tablet-parity": "node scripts/verify-tablet-parity.mjs",
     "verify:tablet-wants-in": "node scripts/verify-tablet-wants-in.mjs",

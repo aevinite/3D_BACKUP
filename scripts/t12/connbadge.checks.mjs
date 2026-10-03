@@ -62,9 +62,18 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
   check("P04146", "[data-skin=light] beats the document-level dark rule", () =>
     /html \[data-skin="light"\] \.lfh-conn-txt/.test(css) &&
     before(css, /\[data-skin="dark"\] \.lfh-conn-txt/, /html \[data-skin="light"\] \.lfh-conn-txt/));
-  check("P04147", "the ink values are the re-measured ones from the T11 contrast pass", () =>
-    /text: "#166534"/.test(tier) && /text: "#a16207"/.test(tier) &&
-    /text: "#c2410c"/.test(tier) && /text: "#b91c1c"/.test(tier) && /text: "#15803d"/.test(compute));
+  // Asserts the RULE (every light-skin ink reads at ≥ 4.5:1 on its own wash over white), not the
+  // spelling: the inks moved a step darker again on 2026-10-03 after Lighthouse measured "Live" at
+  // 4.01:1, and a list of hex codes would have gone red for a change that made the screen better.
+  check("P04147", "every light-skin ink reads at 4.5:1 or better on its own tint", () => {
+    const lum = (h) => { const c = h.match(/\w\w/g).map((x) => parseInt(x, 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+    const rows = [...(tier + compute).matchAll(/text: "#([0-9a-f]{6})", tint: "rgba\((\d+),(\d+),(\d+),([.\d]+)\)"/g)];
+    return rows.length >= 6 && rows.every(([, ink, r, g, b, a]) => {
+      const bg = [r, g, b].map((v) => Math.round(+a * +v + (1 - +a) * 255).toString(16).padStart(2, "0")).join("");
+      const [x, y] = [lum(ink), lum(bg)];
+      return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) >= 4.5;
+    });
+  });
   check("P04148", "the waiting count appears on the pill itself", () =>
     /nEl\.textContent = extra \? "· " \+ extra : ""/.test(render));
   check("P04149", "a failed row turns the count red", () =>
