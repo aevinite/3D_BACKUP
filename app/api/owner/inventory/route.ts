@@ -32,6 +32,16 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams;
   const force = sp.get("refresh") === "1";
+  // ── ?only=counts — TWO NUMBERS, NOT THE WHOLE REPORT (owner, 2026-10-03) ─────────────────────
+  // *"the notification of this thing is less… should be coming on also, manager and owner panel."*
+  // The owner's DASHBOARD has nothing about stock on it at all — you have to think to open the
+  // Inventory page to learn you are out of something. It needs a line saying so.
+  //
+  // It must not pay for the whole report to get it. The full payload is snapshot-cached, so it is
+  // cheap in READS — but it carries up to 300 expenses, 500 low items and 100 bills, and shipping
+  // all of that to render "15 below par" is exactly the egress the playbook says not to spend.
+  // This path runs the one aggregate the counts come from and returns nothing else.
+  const countsOnly = sp.get("only") === "counts";
   // A REAL MONTH, not just the SHAPE of one (T25 round 2, 2026-08-31). This used to test
   // `^\d{4}-\d{2}$`, which accepts `2026-13` and `2026-00` — and so did the window helper, so
   // `?month=2026-13` answered with **January 2027's** purchases labelled "2026-13". Guarded by
@@ -79,6 +89,19 @@ export async function GET(req: NextRequest) {
     if (!rid) return err("No restaurant available.", 400);
   }
   if (!(await inventoryLadder(rid)).effective) return err("Inventory isn't enabled for this restaurant.", 403);
+
+  // ?only=counts — see the note where the flag is read. One aggregate, two numbers, nothing else.
+  // It sits AFTER the scope, the restaurant check and the module ladder, so it is exactly as
+  // guarded as the full report; the only thing it skips is the payload.
+  if (countsOnly) {
+    const s = await sb.rpc("lfh_inv_report_summary", { p_restaurant: rid, p_from: fromIso, p_to: toIso });
+    if (s.error) return err("Couldn't read the stock summary.", 503);
+    const row = Array.isArray(s.data) ? s.data[0] : s.data;
+    return NextResponse.json({
+      lowCount: Number((row && row.low_count) || 0),
+      negativeCount: Number((row && row.negative_count) || 0),
+    });
+  }
 
   // Change detector: the ledger head + the newest expense row move on every relevant
   // write, so an unchanged fingerprint means the stored snapshot is still exact.

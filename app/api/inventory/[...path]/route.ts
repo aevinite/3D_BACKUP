@@ -296,7 +296,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     // The hook: "what to order today" — par-based suggestions in purchase units.
     if (path[0] === "order-list") {
       const r = await sb.from("inv_items")
-        .select("id, name, category, purchase_uom, purchase_factor, par_qty, min_qty, qty_base, last_rate, default_vendor_id")
+        // avg_cost joins the list so the screen can say what the shopping list will COST
+        // (owner, 2026-10-03: sixteen things to buy and no total anywhere). One more column
+        // on a select that is already scoped and limited — no extra read. It is cost per
+        // BASE unit, the same figure the stock view values stock with, so the two cannot
+        // disagree; last_rate is per purchase unit and mixing them is the silent factor-of-
+        // the-pack error the unit research warns about.
+        .select("id, name, category, purchase_uom, purchase_factor, par_qty, min_qty, qty_base, last_rate, avg_cost, default_vendor_id")
         .eq("restaurant_id", rid).eq("active", true).not("par_qty", "is", null).limit(500);
       if (r.error) return readFail("the order list", r.error);
       const list = (r.data || [])

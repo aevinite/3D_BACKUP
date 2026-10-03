@@ -4522,13 +4522,36 @@ html[data-theme="light"] .plat-unpaid { color: #b91c1c; }
 
 /* ═══════════════════ 📦 Inventory tab (mig 221, inventory.js) ═══════════════════
    Phone-first: one column, big tap targets; the tab runs full-width (no-sidebar). */
-.inv-wrap { max-width: 860px; margin: 0 auto; padding: 14px 14px 90px; }
-.inv-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+/* ── REDESIGN 2026-10-03 (owner: "it look completely shit… make five and decide on your own") ──
+   Five directions were drawn and judged against three real users — a kitchen manager on a laptop
+   at 11pm, the same person one-handed on a tablet by the walk-in, and the owner on a phone. The
+   winner was "one screen, three zones": a tight stat bar, then what NEEDS you, then the full
+   stock, dense and aligned. Reasoning and the four rejected directions:
+   docs/INVENTORY-AND-FILM-PLAN.md § Phase B.
+
+   FAULT 1 — a quarter of the screen was empty. `max-width: 860px; margin: 0 auto` centred the
+   whole tab in a narrow column while the floor, the dashboard, the orders board and the platform
+   board all run the full width of the editor pane. None of them caps its width; inventory was the
+   odd one out, and that is why it read as unfinished rather than merely plain. The cap is gone.
+   1320px is a reading limit for the TEXT-heavy views, not a box the tab sits inside. */
+.inv-wrap { width: 100%; padding: 14px 18px 90px; }
+.inv-wrap > * { max-width: 1320px; }
+/* FAULT 2 — the pills wrapped onto a second line and orphaned "Expenses" next to a stranded
+   refresh button. Eight pills never fit one line on a laptop, and wrapping is the wrong answer:
+   it makes the tab's own navigation look broken. They scroll sideways instead, which is what a
+   phone already expects and what the floor's own section strip does. */
+.inv-pills { display: flex; gap: 8px; flex-wrap: nowrap; margin-bottom: 14px;
+  overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.inv-pills::-webkit-scrollbar { display: none; }
+.inv-pill { flex: none; }
 .inv-pill { border: 1px solid var(--line); background: var(--panel); color: var(--text);
   border-radius: 999px; padding: 9px 14px; font-size: 14px; cursor: pointer; }
 .inv-pill.on { background: var(--gold); border-color: var(--gold); color: #1d1812; font-weight: 600; }
 .inv-pill.ghost { margin-left: auto; }
-.inv-statrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
+/* Four equal boxes said four equally important things. They are not: "below zero" is money you
+   have already lost track of, "stock value" is a number you glance at once a month. Hierarchy by
+   weight and colour, not by making them all shout. */
+.inv-statrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .inv-stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
 .inv-stat span { display: block; font-size: 12px; color: var(--muted); }
 .inv-stat b { font-size: 18px; }
@@ -4540,17 +4563,47 @@ html[data-theme="light"] .plat-unpaid { color: #b91c1c; }
 .inv-toolbar { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin: 10px 0; flex-wrap: wrap; }
 .inv-search { flex: 1; min-width: 160px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--panel); color: inherit; }
-.inv-cat { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
-.inv-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 6px; color: inherit;
-  cursor: pointer; font-size: 14px; }
+/* A category heading is a signpost, not a whisper: weight and a rule carry it instead of size. */
+.inv-cat { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
+  color: var(--muted); margin: 20px 0 7px; display: flex; align-items: center; gap: 10px; }
+.inv-cat::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+/* FAULTS 3 + 6 — every row was an identical floating pill and every number was right-ragged, so
+   there was no rhythm to scan and no column to read down. The rows are now one continuous list
+   with hairline separators (a list, not sixteen cards), and the numbers sit in their own column
+   with tabular figures so the digits line up. Apple's typography note: tabular-nums is what stops
+   a column of money jittering as the values change. */
+.inv-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 14px;
+  width: 100%; text-align: left; background: var(--panel);
+  border: 1px solid var(--line); border-top-color: transparent; border-radius: 0;
+  padding: 13px 14px; margin: 0; color: inherit; cursor: pointer; font-size: 14px;
+  transition: background 120ms ease; }
+.inv-row:first-of-type { border-top-color: var(--line); border-radius: 12px 12px 0 0; }
+.inv-row:last-of-type { border-radius: 0 0 12px 12px; }
+.inv-row:only-of-type { border-radius: 12px; }
+/* Response: the press is felt immediately, not on release (apple-design §1). */
+.inv-row:hover { background: color-mix(in srgb, var(--gold) 6%, var(--panel)); }
+.inv-row:active { background: color-mix(in srgb, var(--gold) 11%, var(--panel)); }
+/* FAULT 5 — a stock-owing ingredient wore the same red dot as one that was merely low. Three
+   states now LOOK like three states: a left edge carries the severity, so it reads down the list
+   without reading a single word. */
+.inv-row.sev-low { box-shadow: inset 3px 0 0 #f59e0b; }
+.inv-row.sev-neg { box-shadow: inset 3px 0 0 #ef4444; background: rgba(239,68,68,.045); }
 .inv-row.static { cursor: default; }
 .inv-row.voided { opacity: .55; }
 .inv-row.voided .inv-row-name { text-decoration: line-through; }
 .inv-row-name { flex: 1; min-width: 0; }
 .inv-row-name .block { display: block; font-size: 12px; margin-top: 2px; }
-.inv-row-qty { color: var(--muted); white-space: nowrap; }
-.inv-row-val { font-weight: 600; white-space: nowrap; }
+.inv-row-qty { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums;
+  text-align: right; min-width: 9ch; }
+.inv-row-val { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums;
+  text-align: right; min-width: 7ch; }
+/* FAULT 4 — "have 1.42 12 box  buy 3.6 12 box" printed the pack size twice and ran the count into
+   the unit. The count is now separated from its pack by a thin multiplication sign, and the pack
+   is said ONCE per row. */
+.inv-qnum { font-weight: 600; color: var(--text); }
+.inv-qunit { color: var(--muted); font-size: 12.5px; margin-left: 3px; }
+/* FAULT 7 — sixteen things to buy and nowhere did it say what that would cost. */
+.inv-buytotal { font-variant-numeric: tabular-nums; font-weight: 700; }
 .inv-badge { font-size: 11px; border-radius: 6px; padding: 1px 6px; margin-left: 4px; vertical-align: middle; }
 .inv-badge.low { background: rgba(245,158,11,.18); color: #f59e0b; }
 .inv-badge.neg { background: rgba(239,68,68,.18); color: #ef4444; }
@@ -4558,6 +4611,26 @@ html[data-theme="light"] .plat-unpaid { color: #b91c1c; }
 .inv-x { border: none; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; padding: 6px; }
 .inv-x:hover { color: #ef4444; }
 .inv-hist { max-height: 55vh; overflow-y: auto; }
+
+/* ── Searchable ingredient picker (owner, 2026-10-03) ─────────────────────────────────────────
+   Replaces a native <select> that could not be typed into. The list is anchored to the field it
+   came from (apple-design §7: a popover belongs to its trigger, not to the middle of the screen)
+   and it is a floating layer over the sheet, so adding an ingredient never reflows the lines
+   above it. */
+.inv-combo { position: relative; flex: 1; min-width: 180px; }
+.inv-combo > input[type="text"] { width: 100%; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel); color: inherit; font-size: 14px; }
+.inv-combo > input[type="text"]:focus { outline: none; border-color: var(--gold); }
+.inv-combo-list { position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 6px);
+  max-height: 260px; overflow-y: auto; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.22); padding: 4px; }
+.inv-combo-opt { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; text-align: left; background: none; border: 0; border-radius: 8px;
+  padding: 9px 10px; color: inherit; font-size: 14px; cursor: pointer; }
+/* Highlight follows the keyboard AND the pointer, so both ways of choosing feel the same. */
+.inv-combo-opt:hover, .inv-combo-opt.on { background: color-mix(in srgb, var(--gold) 15%, var(--panel)); }
+.inv-combo-none { padding: 12px 10px; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-transparency: reduce) { .inv-combo-list { box-shadow: 0 2px 0 var(--line); } }
 .inv-hist-row { display: flex; flex-direction: column; gap: 1px; padding: 8px 2px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .inv-hist-row .in { color: #22c55e; } .inv-hist-row .out { color: #ef4444; }
 .inv-hist-row .dim, .dim { color: var(--muted); }

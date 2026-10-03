@@ -7216,6 +7216,44 @@ function syncGuestBell() {
       }
       rows.push(row);
     }
+    // ── LOW STOCK RINGS THE BELL (owner, 2026-10-03) ──────────────────────────────────────────
+    // *"the notification of this thing is less and all that should be coming on also, manager and
+    //  owner panel"*. Par levels and the To-order list already existed — but they were a page you
+    //  had to think to open. Nothing told anyone. An ingredient you have run OUT of is the whole
+    //  reason a dish goes off the menu mid-service, so it belongs where the other "deal with this"
+    //  rows live rather than behind a tab.
+    //
+    // TWO ROWS, NOT TWENTY. Sixteen ingredients under par would bury every other alert and train
+    // him to ignore the bell — the owner's own standing rule about alerts (a wait is not a mute,
+    // and over-feedback trains people to ignore all of it). So it is summarised: one row for what
+    // has actually run out, one for what is merely low, each opening the Inventory tab.
+    //
+    // It reads the inventory summary the tab already fetches; it does not add a poll of its own.
+    try {
+      // The SAME entitlement the tab itself uses (syncInventoryTab): admin allows it, the owner
+      // has not switched it off, and this manager is granted the stock permission. A bell row for
+      // a module someone cannot open would be worse than silence.
+      const sInv = state.data.settings || {};
+      const invOn = sInv.inventory_allowed === true
+        && (sInv.inventory_owner_control !== true || sInv.inventory_enabled !== false)
+        && (!XRAY_WHO || XRAY_WHO.higherView || xrayGrantedForManager("inv_stock"));
+      const inv = invOn && window.LFH_INV && window.LFH_INV.stockAlert ? window.LFH_INV.stockAlert() : null;
+      if (inv) {
+        if (inv.negative > 0) {
+          rows.push({ kind: "stock", key: "stock:owing", at: 0,
+            title: `${inv.negative} ingredient${inv.negative === 1 ? " shows" : "s show"} less than zero`,
+            text: "Usually a delivery that was never entered — the count is wrong until it is.",
+            action: { label: "Open stock", run: () => { try { setTab("inventory"); } catch (e) {} } } });
+        }
+        if (inv.low > 0) {
+          rows.push({ kind: "stock", key: "stock:low", at: 0,
+            title: `${inv.low} ingredient${inv.low === 1 ? " is" : "s are"} below par`,
+            text: inv.lowNames ? inv.lowNames : "Open To order for the shopping list.",
+            action: { label: "What to buy", run: () => { try { setTab("inventory"); } catch (e) {} } } });
+        }
+      }
+    } catch (e) { /* the bell must never be the thing that breaks */ }
+
     const pt = printTargetSays;
     if (pt && pt.helper && pt.helper.owned) {
       rows.push({ kind: "printer", key: "printer-where:helper:" + pt.helper.agent,
