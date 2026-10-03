@@ -41,7 +41,19 @@ import { execFileSync } from "node:child_process";
 // EMPTY IS THE GOAL, NOT A COINCIDENCE. If you are about to add a name here, first check whether a
 // fix exists — the last nine did. Add one only when it genuinely cannot be fixed now, with a reason,
 // and never to silence something fresh.
-const ACKNOWLEDGED = new Map([]);
+// REOPENED 2026-10-03, at FIVE, all one chain. The same day `next` went critical (GHSA-vcvr-r3jv-pc5j,
+// next/og ImageResponse — unused here, but it ships inside Next regardless) and was FIXED, not parked:
+// 16.3.4 → 16.3.8. What remains cannot be fixed by anyone yet — the reason is on each line.
+// npm audit offers `eslint-config-next@14.2.35` as the "fix": a two-major DOWNGRADE of the lint
+// config to a Next 14 ruleset. That is not a fix; do not take it.
+const LINT_ONLY_NO_FIX = "lint tooling only (devDependency chain eslint-config-next → @next/eslint-plugin-next → fast-glob → micromatch → braces); absent from `npm ls --omit=dev`, so it never reaches the server or a browser. GHSA-vfj7-8cjw-p6xm covers braces <=3.0.3 and 3.0.3 is the newest release — no fix exists to take. Delete these five the day braces ships a patch.";
+const ACKNOWLEDGED = new Map([
+  ["braces", LINT_ONLY_NO_FIX],
+  ["micromatch", LINT_ONLY_NO_FIX],
+  ["fast-glob", LINT_ONLY_NO_FIX],
+  ["@next/eslint-plugin-next", LINT_ONLY_NO_FIX],
+  ["eslint-config-next", LINT_ONLY_NO_FIX],
+]);
 
 // Only these two block a build. Moderate/low are reported and do not fail — the point is to be
 // believed when it does fail.
