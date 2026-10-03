@@ -4572,14 +4572,33 @@ html[data-theme="light"] .plat-unpaid { color: #b91c1c; }
    with hairline separators (a list, not sixteen cards), and the numbers sit in their own column
    with tabular figures so the digits line up. Apple's typography note: tabular-nums is what stops
    a column of money jittering as the values change. */
-.inv-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 14px;
+/* FLEX, NOT GRID — and the reason is worth keeping (2026-10-03, caught re-reading my own redesign).
+   This started as `grid-template-columns: 1fr auto auto`, three tracks, because the list reads best
+   as name / quantity / value. But Waste rows carry a FOURTH child (the ✕ strike-out) and Expenses
+   rows a fifth (the receipt thumbnail), and a grid with three named tracks silently drops the extras
+   onto an implicit second row — the ✕ ended up under the name. Grid also bought nothing it looked
+   like it was buying: every .inv-row is its OWN grid, so the columns never lined up with the row
+   above regardless. What actually aligns the numbers down the list is `min-width` + `tabular-nums`
+   + right alignment on the two number spans, and those are unchanged. */
+.inv-row { display: flex; align-items: center; gap: 14px;
   width: 100%; text-align: left; background: var(--panel);
   border: 1px solid var(--line); border-top-color: transparent; border-radius: 0;
   padding: 13px 14px; margin: 0; color: inherit; cursor: pointer; font-size: 14px;
   transition: background 120ms ease; }
-.inv-row:first-of-type { border-top-color: var(--line); border-radius: 12px 12px 0 0; }
-.inv-row:last-of-type { border-radius: 0 0 12px 12px; }
-.inv-row:only-of-type { border-radius: 12px; }
+/* ROUNDING IS STRUCTURAL, NOT TYPE-BASED (2026-10-03). These were `:first-of-type` /
+   `:last-of-type`, which ask "is this the first DIV among its siblings" — not "is this the first
+   row of this block". It worked in Stock only because its rows happen to be <button> while the
+   `.inv-cat` day heading is a <div>, so the two never competed. The moment Purchases and Waste
+   grew the same day headings, their <div> rows stopped being first-of-type at all and every
+   group lost its top border and its rounded corners. A row is now "first" when it starts the
+   list or follows a heading, and "last" when it ends the list or a heading comes next. */
+.inv-row:first-child,
+.inv-cat + .inv-row { border-top-color: var(--line); border-radius: 12px 12px 0 0; }
+.inv-row:last-child,
+.inv-row:has(+ .inv-cat) { border-radius: 0 0 12px 12px; }
+.inv-row:first-child:last-child,
+.inv-cat + .inv-row:last-child,
+.inv-cat + .inv-row:has(+ .inv-cat) { border-radius: 12px; }
 /* Response: the press is felt immediately, not on release (apple-design §1). */
 .inv-row:hover { background: color-mix(in srgb, var(--gold) 6%, var(--panel)); }
 .inv-row:active { background: color-mix(in srgb, var(--gold) 11%, var(--panel)); }
@@ -4593,10 +4612,12 @@ html[data-theme="light"] .plat-unpaid { color: #b91c1c; }
 .inv-row.voided .inv-row-name { text-decoration: line-through; }
 .inv-row-name { flex: 1; min-width: 0; }
 .inv-row-name .block { display: block; font-size: 12px; margin-top: 2px; }
-.inv-row-qty { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums;
+.inv-row-qty { flex: none; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums;
   text-align: right; min-width: 9ch; }
-.inv-row-val { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums;
+.inv-row-val { flex: none; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums;
   text-align: right; min-width: 7ch; }
+/* The optional trailing controls: never squeezed, never pushed to a second line. */
+.inv-row > .inv-thumb, .inv-row > .inv-x { flex: none; }
 /* FAULT 4 — "have 1.42 12 box  buy 3.6 12 box" printed the pack size twice and ran the count into
    the unit. The count is now separated from its pack by a thin multiplication sign, and the pack
    is said ONCE per row. */

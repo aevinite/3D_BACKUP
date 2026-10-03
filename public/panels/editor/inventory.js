@@ -183,6 +183,39 @@
   };
   const itemById = (id) => S.items.find((i) => i.id === id);
 
+  // ── A LEDGER IS READ BY DAY, SO IT IS GROUPED BY DAY ────────────────────────
+  // Purchases and Waste were flat walls of up to 200 rows with the date tucked into the middle
+  // column, so "what did we buy on Tuesday" meant reading every line. Both now carry the same
+  // `.inv-cat` day heading the Count sheet and the Stock list already use.
+  //
+  // They are RE-SORTED by the business date first, deliberately. Both lists arrive ordered by
+  // `created_at` (when it was typed in), but they are grouped by `bill_date` / `waste_date` (when
+  // it actually happened) — and a bill entered on Friday for Tuesday's delivery would otherwise
+  // make Tuesday's heading appear twice, which reads as a bug. Sorting by the heading's own key
+  // is the only way a grouped list can be honest. Ties keep entry order, so two bills on one day
+  // stay newest-first.
+  const dayLabel = (iso) => {
+    if (!iso) return "No date";
+    const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+    const yday = new Date(Date.now() + 5.5 * 3600_000 - 86400_000).toISOString().slice(0, 10);
+    if (iso === today) return "Today";
+    if (iso === yday) return "Yesterday";
+    const d = new Date(iso + "T00:00:00");
+    return isNaN(d) ? iso : d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+  };
+  const byDay = (rows, dateKey, rowHtml) => {
+    const order = new Map(rows.map((r, i) => [r, i]));          // stable tie-break on entry order
+    const sorted = rows.slice().sort((a, b) =>
+      String(b[dateKey] || "").localeCompare(String(a[dateKey] || "")) || order.get(a) - order.get(b));
+    let out = "", seen = null;
+    for (const r of sorted) {
+      const d = r[dateKey] || "";
+      if (d !== seen) { out += `<div class="inv-cat">${esc(dayLabel(d))}</div>`; seen = d; }
+      out += rowHtml(r);
+    }
+    return out;
+  };
+
   // ── back-button layers: every popup peels off with hardware BACK ────────────
   let offLayer = null;
   /* ASKING, WITHOUT THE BROWSER'S OWN DIALOG (T9 third sweep, 2026-08-31).
@@ -556,12 +589,11 @@
         <button class="btn primary" id="invNewBill">+ Vendor bill</button>
         <button class="btn" id="invNewCash">⚡ Quick cash buy</button>
       </div>
-      ${S.purchases.length ? S.purchases.map((p) => `
+      ${S.purchases.length ? byDay(S.purchases, "bill_date", (p) => `
         <button class="inv-row${p.voided_at ? " voided" : ""}" data-pur="${p.id}">
           <span class="inv-row-name">${p.kind === "cash" ? "⚡ Cash buy" : "🧾 " + esc(p.vendor_name || "Bill")}${p.bill_no ? ` <span class="dim">#${esc(p.bill_no)}</span>` : ""}${p.voided_at ? ` <span class="inv-badge neg">voided</span>` : ""}</span>
-          <span class="inv-row-qty dim">${esc(p.bill_date)}</span>
           <span class="inv-row-val">${inr(p.total)}</span>
-        </button>`).join("") : `<div class="empty">No purchases yet. Enter your first bill — stock and rates update on their own.</div>`}`;
+        </button>`) : `<div class="empty">No purchases yet. Enter your first bill — stock and rates update on their own.</div>`}`;
     $("#invNewBill").onclick = () => purchasePop("bill");
     $("#invNewCash").onclick = () => purchasePop("cash");
     body.querySelectorAll("[data-pur]").forEach((r) => { r.onclick = () => purchaseDetailPop(r.dataset.pur); });
@@ -857,7 +889,7 @@
         <span class="dim">Last 30 days: <b>${inr(total)}</b> wasted</span>
         <button class="btn primary" id="invNewWaste">+ Log waste</button>
       </div>
-      ${S.waste.length ? S.waste.map((w) => {
+      ${S.waste.length ? byDay(S.waste, "waste_date", (w) => {
         const it = itemById(w.item_id) || { name: "?", purchase_factor: 1, purchase_uom: "" };
         return `<div class="inv-row static${w.voided_at ? " voided" : ""}" data-waste="${w.id}">
           <span class="inv-row-name">${WASTE_LABELS[w.reason] || esc(w.reason)} — ${esc(it.name)}${w.voided_at ? ` <span class="inv-badge neg">struck out</span>` : ""}</span>
@@ -865,7 +897,7 @@
           <span class="inv-row-val">${inr(Number(w.qty_base) * Number(w.unit_cost_snap))}</span>
           ${!w.voided_at ? `<button class="inv-x" data-void="${w.id}" title="Strike out">✕</button>` : ""}
         </div>`;
-      }).join("") : `<div class="empty">Nothing wasted in the last 30 days — or nothing logged yet.</div>`}`;
+      }) : `<div class="empty">Nothing wasted in the last 30 days — or nothing logged yet.</div>`}`;
     $("#invNewWaste").onclick = wastePop;
     body.querySelectorAll("[data-void]").forEach((x) => {
       x.onclick = async (e) => {
@@ -1171,14 +1203,14 @@
         <div class="inv-stat"><span>This month</span><b>${inr(d.total)}</b></div>
         ${Object.entries(d.totals).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `<div class="inv-stat"><span>${EXP_LABELS[k] || k}</span><b>${inr(v)}</b></div>`).join("")}
       </div>
-      ${(d.expenses || []).length ? d.expenses.map((e) => `
+      ${(d.expenses || []).length ? byDay(d.expenses, "expense_date", (e) => `
         <div class="inv-row static${e.voided_at ? " voided" : ""}">
           <span class="inv-row-name">${EXP_LABELS[e.category] || esc(e.category)} — ${esc(e.title)}${e.voided_at ? ` <span class="inv-badge neg">struck out</span>` : ""}
-            <span class="dim block">${esc(e.expense_date)} · ${esc(e.created_by || "")}${e.note ? " · " + esc(e.note) : ""}</span></span>
+            <span class="dim block">${esc(e.created_by || "")}${e.note ? " · " + esc(e.note) : ""}</span></span>
           ${e.photo_url ? `<a class="inv-thumb" href="${esc(e.photo_url)}" target="_blank" rel="noopener"><img src="${esc(e.photo_url)}" alt="" loading="lazy" decoding="async" /></a>` : ""}
           <span class="inv-row-val">${inr(e.amount)}</span>
           ${!e.voided_at ? `<button class="inv-x" data-voidexp="${e.id}" title="Strike out">✕</button>` : ""}
-        </div>`).join("") : `<div class="empty">No expenses recorded in ${esc(monthLabel)}.</div>`}`;
+        </div>`) : `<div class="empty">No expenses recorded in ${esc(monthLabel)}.</div>`}`;
     const shiftMonth = (dir) => {
       const [y, m] = (d.month || new Date().toISOString().slice(0, 7)).split("-").map(Number);
       const nd = new Date(Date.UTC(y, m - 1 + dir, 1));
