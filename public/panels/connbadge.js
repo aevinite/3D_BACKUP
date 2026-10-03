@@ -27,8 +27,8 @@
     // a 12.5px label needs; green-800 takes it to 6.23:1 at the same hue. `color` (the dark-skin
     // ink and the bar colour) is untouched.
     if (ms <= 700)  return { color: "#22c55e", text: "#166534", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
-    if (ms <= 1500) return { color: "#eab308", text: "#a16207", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
-    if (ms <= 3000) return { color: "#f97316", text: "#c2410c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
+    if (ms <= 1500) return { color: "#eab308", text: "#854d0e", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
+    if (ms <= 3000) return { color: "#f97316", text: "#9a3412", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
     // 0 bars, not 1 — Slow and Poor used to show the same bars, so the two worst states differed
     // only by hue. Kept in step with latencyTier() in lib/connectionStatus.ts.
     return              { color: "#ef4444", text: "#b91c1c", tint: "rgba(239,68,68,.16)",  bars: 0, label: "Poor" };
@@ -49,7 +49,7 @@
       // "Reconnecting", which is reserved for a drop after we WERE connected).
       var ever = window.LFH_RT && window.LFH_RT.everConnected && window.LFH_RT.everConnected();
       if (!ever) return { level: level, connecting: true, color: "#94a3b8", text: "inherit", tint: "rgba(100,116,139,.14)", bars: 2, label: "Connecting…", ms: null, pulse: true };
-      return { level: level, color: "#f59e0b", text: "#b45309", tint: "rgba(245,158,11,.16)", bars: 1, label: "Reconnecting", ms: null, pulse: true };
+      return { level: level, color: "#f59e0b", text: "#92400e", tint: "rgba(245,158,11,.16)", bars: 1, label: "Reconnecting", ms: null, pulse: true };
     }
     var lat = (window.LFH_RT && window.LFH_RT.getLatency && window.LFH_RT.getLatency()) || { ms: null, at: 0 };
     var fresh = lat.at > 0 && (Date.now() - lat.at) < LATENCY_FRESH_MS;
@@ -60,7 +60,7 @@
     // stylesheet's [data-rest="1"] rule), but "Offline", "Reconnecting" and "Connecting…" are
     // warnings and must never be the thing that hides. Naming it HERE rather than letting each
     // panel test the label keeps that judgement in one place — and a CSS rule cannot read text.
-    return { level: level, rest: true, color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)", bars: 3, label: "Live", ms: null, pulse: false };
+    return { level: level, rest: true, color: "#22c55e", text: "#166534", tint: "rgba(34,197,94,.16)", bars: 3, label: "Live", ms: null, pulse: false };
   }
   function statusLine(v) {
     if (v.level === "offline") return "No internet connection";

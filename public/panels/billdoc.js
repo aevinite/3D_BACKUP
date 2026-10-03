@@ -756,7 +756,7 @@
 +   (d.note ? '<span class="note">' + esc(d.note) + "</span>" : "")
 +   '<button onclick="printAgain()">🖨 Print' + (d.autoPrint ? " again" : " this") + "</button>"
 +   '<button class="x" onclick="closeBill()">✕ Close</button></div>') + "\n"
-+ (d.logo ? '<img class="logo" src="' + esc(d.logo) + '" onerror="this.style.display=\'none\'"/>' : "")
++ (d.logo ? '<img class="logo" alt="" src="' + esc(d.logo) + '" onerror="this.style.display=\'none\'"/>' : "")
 + "\n<h2>" + name + "</h2>\n"
 + '<div class="sub">' + (addr ? addr + "<br/>" : "") + (phone ? "Ph " + phone : "") + (phone && gstin ? "<br/>" : "") + (gstin ? "GSTIN " + gstin : "") + "</div>\n"
 /* REJECTED (owner, 2026-08-19): the BILL never says it is a reprint. There was a

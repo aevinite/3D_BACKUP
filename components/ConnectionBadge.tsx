@@ -53,7 +53,7 @@ function computeView(
     // "Reconnecting", which is reserved for a drop after we WERE connected).
     if (!everConnected && !pollMode)
       return { kind: "connecting", color: "#94a3b8", text: "inherit", tint: "rgba(100,116,139,.14)", bars: 2, label: "Connecting…", ms: null, pulse: true };
-    return { kind: "weak", color: "#f59e0b", text: "#b45309", tint: "rgba(245,158,11,.16)", bars: 1, label: pollMode ? "Retrying" : "Reconnecting", ms: null, pulse: true };
+    return { kind: "weak", color: "#f59e0b", text: "#92400e", tint: "rgba(245,158,11,.16)", bars: 1, label: pollMode ? "Retrying" : "Reconnecting", ms: null, pulse: true };
   }
   // online — show a fresh ms number when we have one; otherwise a calm "Live" (a quiet
   // screen just hasn't measured lately — that's healthy, not a problem). The poll-only
@@ -64,7 +64,7 @@ function computeView(
   const tier = fresh ? latencyTier(latencyMs) : null;
   if (tier)
     return { kind: "live", color: tier.color, text: tier.text, tint: tier.tint, bars: tier.bars, label: tier.label, ms: latencyMs, pulse: false };
-  return { kind: "live", color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)", bars: 3, label: pollMode ? "Connected" : "Live", ms: null, pulse: false };
+  return { kind: "live", color: "#22c55e", text: "#166534", tint: "rgba(34,197,94,.16)", bars: 3, label: pollMode ? "Connected" : "Live", ms: null, pulse: false };
 }
 
 function statusLine(v: View, pollMode: boolean): string {

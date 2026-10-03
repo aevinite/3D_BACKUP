@@ -112,11 +112,31 @@ function onPop() {
   if (s.rootHandler) s.rootHandler();
 }
 
+// THE Esc KEY CLOSES THE TOP POPUP TOO (accessibility check, 2026-10-03). Every popup here
+// already closed on the phone's back button, but a keyboard user had no way out of the cart, the
+// table gate or the saved-orders chip — only a mouse could reach their ✕. Esc now does exactly
+// what that ✕ does: it calls the popup's own close(), and the popup's cleanup rewinds history the
+// usual way (the "closed via UI" branch of reconcile).
+//
+// Some popups (ChefPopup, OrderConfirmModal, the admin modals) ALREADY answer Esc themselves. So
+// we wait a beat and close only if the SAME popup is still on top — otherwise one key press would
+// close that popup AND the one beneath it.
+function onKey(e: KeyboardEvent) {
+  if (e.key !== "Escape" || e.isComposing) return;
+  const top = st().layers[st().layers.length - 1];
+  if (!top) return;
+  setTimeout(() => {
+    const s = st();
+    if (s.layers[s.layers.length - 1] === top) top.close();
+  }, 60);
+}
+
 function ensureStarted() {
   const s = st();
   if (s.started || typeof window === "undefined") return;
   s.started = true;
   window.addEventListener("popstate", onPop);
+  window.addEventListener("keydown", onKey);
 }
 
 // Register an open popup. Returns an unregister function — call it when the popup

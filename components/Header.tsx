@@ -240,6 +240,7 @@ export default function Header({ logoText }: { logoText?: string }) {
             Gone when the currency feature is off (₹-only menu). */}
         {showCurrency && <NavPicker
           buttonLabel="Currency"
+          buttonValue={currency.symbol}
           buttonContent={<span style={{ fontSize: 14 }}>{currency.symbol}</span>}
           options={currencyOptions.map((c) => ({
             key: c.code,
@@ -257,6 +258,7 @@ export default function Header({ logoText }: { logoText?: string }) {
             Gone when the languages feature is off (English-only menu). */}
         {showLanguage && <NavPicker
           buttonLabel="Language"
+          buttonValue={language.short}
           buttonContent={<span style={{ fontSize: 12 }}>{language.short}</span>}
           options={languageOptions.map((l) => ({
             key: l.code,

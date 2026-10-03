@@ -141,8 +141,11 @@ export function latencyTier(ms: number | null): Tier | null {
   // Each `text` darkened one step on 2026-08-05: "Live" measured 2.63:1 on its own tint over the
   // light page (T11 re-run) — the indicator staff are told to trust was the least readable thing
   // in the bar. public/panels/connbadge.js carries the same table for the panels; keep them level.
-  if (ms <= 700)  return { key: "good", color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
-  if (ms <= 1500) return { key: "okay", color: "#eab308", text: "#a16207", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
-  if (ms <= 3000) return { key: "slow", color: "#f97316", text: "#c2410c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
+  // And one more step on 2026-10-03: Lighthouse measured "Live" at 4.01:1 on the guest menu (needs
+  // 4.5:1 at that size), and the amber/yellow/orange inks were 4.2–4.4. Now green-800 / yellow-800 /
+  // orange-800 / amber-800, all ≈6:1. Red #b91c1c already passed (5.1) and is unchanged.
+  if (ms <= 700)  return { key: "good", color: "#22c55e", text: "#166534", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
+  if (ms <= 1500) return { key: "okay", color: "#eab308", text: "#854d0e", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
+  if (ms <= 3000) return { key: "slow", color: "#f97316", text: "#9a3412", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
   return              { key: "poor", color: "#ef4444", text: "#b91c1c", tint: "rgba(239,68,68,.16)",  bars: 0, label: "Poor" };
 }

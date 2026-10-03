@@ -2648,6 +2648,10 @@ body.ar-presenting .viewer-wrapper .hotspot{ display:none; }
   padding:0;margin:0;display:block;cursor:pointer;
   width:28px;height:28px;position:relative;
 }
+/* The rule above wipes the outline with !important, which also wiped the KEYBOARD focus ring —
+   a keyboard user could not see which star they were on. Mouse taps still show nothing
+   (:focus-visible only fires for keyboard focus). Accessibility check, 2026-10-03. */
+.rating-el li button:focus-visible{ outline:2px solid #FDCF10 !important; outline-offset:2px; }
 /* Dot */
 .rating-el li button::before{
   content:"";display:block;width:10px;height:10px;border-radius:50%;
@@ -3563,7 +3567,10 @@ a *:active,
 /* --- RATE TAB GLOW (pulses when user is on Reviews, prompting them to rate) --- */
 @keyframes rateTabGlow {
   0%, 100% { background: transparent; color: var(--muted); }
-  50% { background: rgba(212, 165, 116, 0.22); color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+  /* The WORDS use --accent-ink (the brand colour darkened until it reads at 5:1 on the light
+     skin — lib/accent.ts); the ring keeps the raw --accent. Raw accent as text measured 3.51:1 for
+     Aangan's #c16e3b at the peak of this pulse (Lighthouse, 2026-10-03). */
+  50% { background: rgba(212, 165, 116, 0.22); color: var(--accent-ink, var(--accent)); box-shadow: inset 0 0 0 1.5px var(--accent); }
 }
 .review-tab-btn.tab-glow { animation: rateTabGlow 1.4s ease-in-out infinite; }
 
