@@ -56,8 +56,9 @@
  *     onOpen:  function (table) {}, // take me to that table
  *   });
  *
- * 'kind' is one of "call" | "order" | "join" | "request" | "printer" — it picks the icon and the
- * wording. A "printer" row has no table and carries its whole sentence in `text`, and may carry
+ * 'kind' is one of "call" | "order" | "join" | "request" | "printer" | "stock" — it picks the icon
+ * and the wording. A "printer" or "stock" row has no table and carries its whole sentence in
+ * `title`/`text` (see SELF_TITLED below), and may carry
  * one `action` (see 3 above).
  */
 (function () {
@@ -137,7 +138,14 @@
     // table boxes." Two strips used to sit above the table grid on every manager screen: where the
     // paper comes out, and any printer problem. Neither is worth a permanent band across the floor.
     printer: { icon: "🖨", what: "" },
+    // ── LOW STOCK (owner, 2026-10-03: "the notification of this thing is less… should be coming
+    // on also, manager and owner panel"). Like a printer row it has NO table and carries its own
+    // whole sentence, so it joins the self-contained branch below rather than the "Table 4 …" one.
+    stock:   { icon: "📦", what: "" },
   };
+  // Rows that speak for themselves: no table number, no canned "what". Adding `stock` here is
+  // what stopped it rendering as "asked for something" — the fallback for an unknown kind.
+  var SELF_TITLED = { printer: 1, stock: 1 };
 
   function injectStyles() {
     if (document.getElementById("lfh-bell-style")) return;
@@ -276,10 +284,10 @@
     var tx = el("span", "lfh-bell-tx");
     // A PRINTER ROW HAS NO TABLE and its whole sentence is its own — "Table  " and a canned "what"
     // would read as nonsense on it.
-    tx.appendChild(el("b", null, r.kind === "printer"
-      ? String(r.title || r.text || "Printing")
+    tx.appendChild(el("b", null, SELF_TITLED[r.kind]
+      ? String(r.title || r.text || "Something needs you")
       : (r.table ? "Table " + r.table + " " : "") + k.what));
-    if (r.kind === "printer") {
+    if (SELF_TITLED[r.kind]) {
       if (r.title && r.text) tx.appendChild(el("small", null, r.text));
       node.appendChild(tx);
       node.appendChild(el("span", "lfh-bell-when", r.at ? fmtAgo(r.at) : ""));

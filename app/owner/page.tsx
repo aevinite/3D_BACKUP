@@ -933,6 +933,29 @@ export default function OwnerDashboard() {
   // "Loading…". Measured by aborting /api/owner/oplog: the card on the home screen an owner opens
   // every day sat on "Loading…" with no end and no way to retry. It is the identical fault the
   // 403 branch was fixed for, one branch over.
+  // ── STOCK ON THE OWNER'S OWN SCREEN (owner, 2026-10-03) ──────────────────────────────────────
+  // *"the notification of this thing is less and all that should be coming on also, manager and
+  //  owner panel."* The manager now gets a bell row. The OWNER had nothing at all: this dashboard
+  // never mentioned stock, so the only way to learn you had run out of something was to think to
+  // open the Inventory page. A count on the shortcut he already walks past is the smallest honest
+  // version of "tell me".
+  //
+  // `?only=counts` exists so this costs one aggregate rather than the whole month's report — the
+  // full payload carries hundreds of expense and purchase rows, and shipping those to render two
+  // numbers is the egress the playbook warns about. It is fetched ONCE per restaurant, not polled.
+  const [stockCounts, setStockCounts] = useState<{ low: number; neg: number } | null>(null);
+  const fetchStockCounts = useCallback(async (rid: string) => {
+    try {
+      const j = await fetch(`/api/owner/inventory?only=counts&rid=${rid}${scopePin ? `&scope=${scopePin}${asSuffix()}` : ""}`,
+        { cache: "no-store" }).then((r) => r.json());
+      // A refusal (module off, not your restaurant) answers with `error` and no counts — that is
+      // not zero stock problems, it is "no answer", so the badge stays away rather than claiming
+      // everything is fine.
+      if (typeof j.lowCount === "number") setStockCounts({ low: j.lowCount, neg: j.negativeCount || 0 });
+      else setStockCounts(null);
+    } catch { setStockCounts(null); }
+  }, [scopePin]);
+
   const [actsErr, setActsErr] = useState(false);
   const fetchActs = useCallback(async (rid: string) => {
     try {
@@ -978,6 +1001,9 @@ export default function OwnerDashboard() {
   }, [ov, scopeKey, neededRanges, globalRange]);
 
   useEffect(() => { if (activeRid) { setActs(null); setActsErr(false); fetchActs(activeRid); } }, [activeRid, fetchActs]);
+  // Same trigger as the activity log: when the chosen restaurant changes, ask again. Clearing it
+  // first matters — a stale count from the previous restaurant is worse than no count.
+  useEffect(() => { if (activeRid) { setStockCounts(null); fetchStockCounts(activeRid); } }, [activeRid, fetchStockCounts]);
 
   // Auto-refresh (activity-gated 60s): overview + the payloads in use. Group payloads
   // are compute-on-view cached server-side (mig 196), so this stays cheap.
@@ -2013,6 +2039,25 @@ export default function OwnerDashboard() {
                 screen two different things (T12 sweep, 2026-08-17, seen on both sizes). */}
             {ov.entitlements?.staff !== false && <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Team</Link>}
             {ov.entitlements?.issues !== false && <Link href={withPin("/owner/issues")} className="own-hero-link"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Feedback</Link>}
+            {/* The count is the whole point of the link being here (owner, 2026-10-03). Without a
+                number it is one more shortcut; with one it is the dashboard telling him something
+                needs doing. Nothing is shown while the answer is unknown or the module is off —
+                an absent badge must never be read as "all fine". */}
+            {stockCounts && (stockCounts.low > 0 || stockCounts.neg > 0) && (
+              <Link href={withPin("/owner/inventory")} className="own-hero-link">
+                <i className="fas fa-box" aria-hidden="true" /> Stock
+                {/* The badge is low_count ALONE, not low+negative. Checked against the function:
+                    lfh_inv_report_summary's low_count already counts the ones that have gone below
+                    zero, so adding negative_count to it reports one ingredient twice. The manager's
+                    bell splits them the other way (its "low" excludes negatives, so its two rows
+                    sum to the same total) — two surfaces, one number, which is the point. */}
+                <span className="own-hero-badge" title={
+                  stockCounts.neg > 0
+                    ? `${stockCounts.low} below par — ${stockCounts.neg} of them showing less than zero`
+                    : `${stockCounts.low} below par`
+                }>{stockCounts.low}</span>
+              </Link>
+            )}
           </div>
         </div>
       )}
@@ -2501,6 +2546,15 @@ export default function OwnerDashboard() {
         .own-hero-links { display: flex; gap: 8px; flex-wrap: wrap; }
         :global(.own-hero-link) { display: inline-flex; align-items: center; gap: 8px; border: var(--border); background: var(--card); border-radius: 9px; padding: 8px 13px; font-size: 12.5px; font-weight: 700; color: var(--text) !important; text-decoration: none; transition: border-color .15s; }
         :global(.own-hero-link:hover) { border-color: var(--rcol); }
+        /* The stock count (owner, 2026-10-03). Amber, not red: being below par is a thing to do
+           this week, not an emergency — the panel keeps red for money and for refusals, and a
+           dashboard where everything shouts teaches you to look at none of it. The title
+           attribute carries the breakdown so the number never has to be guessed at. */
+        :global(.own-hero-badge) { display: inline-flex; align-items: center; justify-content: center;
+          min-width: 19px; height: 19px; padding: 0 5px; margin-left: 2px; border-radius: 999px;
+          background: rgba(245,158,11,.18); color: #b45309; font-size: 11px; font-weight: 800;
+          font-variant-numeric: tabular-nums; }
+        :global([data-skin="dark"]) :global(.own-hero-badge) { color: #fbbf24; }
         :global(.own-hero-link i) { color: var(--rcol); font-size: 12px; }
         .own-pill { font-size: 10px; font-weight: 800; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; flex-shrink: 0; }
         .own-pill.on { background: color-mix(in srgb, var(--adm-ok) 18%, transparent); color: var(--adm-ok); }

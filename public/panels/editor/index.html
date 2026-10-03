@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=b6e55516" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=9746f754" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=1dfea866" />
   <!-- the "who is this bill for?" box — shared with the other panel that opens it -->
   <link rel="stylesheet" href="/panels/billcustomer.css?v=23b15d10" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
@@ -195,7 +195,7 @@
        been loaded for a long while by then. The waiter tablet loads the pair in this same
        order. A note that states a rule the file does not follow is how the next reader
        "fixes" a working order. -->
-  <script src="/panels/guestbell.js?v=aa4653da"></script>
+  <script src="/panels/guestbell.js?v=df6b7ef1"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
@@ -240,7 +240,7 @@
        comes back, the class goes back on the element AND back in this list, together. -->
   <script src="/panels/fitnums.js?v=0610dc4b" data-fit=".dash-card .kval,.tbox-n,.fstat-n,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
-  <script src="/panels/editor/inventory.js?v=e72d6e01"></script>
+  <script src="/panels/editor/inventory.js?v=d6e8cdec"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC) and shared with
        the kitchen panel and the admin's sample, so a document can never look different in two
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —
@@ -251,6 +251,6 @@
   <script src="/panels/auditsort.js?v=1da861b5"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=219d1956"></script>
+  <script src="/panels/editor/app.js?v=de1c7ea3"></script>
 </body>
 </html>

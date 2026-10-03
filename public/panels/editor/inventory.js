@@ -170,10 +170,16 @@
   }
 
   // Purchase-unit display: balances live in base units; people think in kg/L/pc.
-  const inBuy = (it, baseQty) => {
+  // ── "have 1.42 12 box  buy 3.6 12 box" (owner, 2026-10-03: it "look completely shit") ────────
+  // The count ran straight into the pack name with a single space, so "1.42 12 box" read as one
+  // number, and because both halves of a to-order row called this, the pack was printed TWICE on
+  // every line. Now the count carries the weight, the pack is a quieter unit beside it, and the
+  // caller can ask for the pack to be left off when it has already said it.
+  const inBuy = (it, baseQty, withUnit = true) => {
     const f = Number(it.purchase_factor) || 1;
-    const v = Number(baseQty || 0) / f;
-    return (Math.round(v * 100) / 100) + " " + esc(it.purchase_uom);
+    const v = Math.round((Number(baseQty || 0) / f) * 100) / 100;
+    const n = `<span class="inv-qnum">${v}</span>`;
+    return withUnit ? `${n}<span class="inv-qunit">${esc(it.purchase_uom)}</span>` : n;
   };
   const itemById = (id) => S.items.find((i) => i.id === id);
 
@@ -356,9 +362,15 @@
       const rows = active.filter((i) => i.category === c && match(i));
       if (!rows.length) return "";
       return `<div class="inv-cat">${esc(c)}</div>` + rows.map((i) => {
-        const lowBadge = i.par_qty != null && Number(i.qty_base) < Number(i.par_qty) ? `<span class="inv-badge low">low</span>` : "";
-        const negBadge = Number(i.qty_base) < 0 ? `<span class="inv-badge neg">−</span>` : "";
-        return `<button class="inv-row" data-item="${i.id}">
+        const isNeg = Number(i.qty_base) < 0;
+        const isLow = !isNeg && i.par_qty != null && Number(i.qty_base) < Number(i.par_qty);
+        const lowBadge = isLow ? `<span class="inv-badge low">low</span>` : "";
+        const negBadge = isNeg ? `<span class="inv-badge neg">owing</span>` : "";
+        // Three states that LOOK like three states. The left edge carries it, so the list can be
+        // read down without reading a word — a badge alone made "owing" and "low" identical at a
+        // glance, which is how an ingredient at −0.4 sat unnoticed beside one merely under par.
+        const sev = isNeg ? " sev-neg" : isLow ? " sev-low" : "";
+        return `<button class="inv-row${sev}" data-item="${i.id}">
           <span class="inv-row-name">${esc(i.name)} ${lowBadge}${negBadge}</span>
           <span class="inv-row-qty">${inBuy(i, i.qty_base)}</span>
           <span class="inv-row-val">${inr(Math.max(0, Number(i.qty_base)) * Number(i.avg_cost))}</span>
@@ -486,16 +498,34 @@
   // ═════════════════════════════ TO ORDER ═════════════════════════════
   function renderOrder(body) {
     const list = S.orderList;
+    // FAULT 7 (owner, 2026-10-03): sixteen things to buy and the screen never said what that
+    // would cost. avg_cost is per BASE unit and `suggest` is in purchase units, so the pack
+    // factor has to come back in — getting that wrong is the silent 10x error the unit research
+    // warns about (docs/research/pos-inventory/00-MASTER-SYNTHESIS.md §1.2).
+    // Rounded to whole rupees: the word beside it is "about", and paise on a ₹68,000 estimate is
+    // false precision. inr() keeps two decimals on purpose — a single spice is worth ₹13.95 — so
+    // the rounding belongs here, not in the shared formatter.
+    const orderCost = Math.round(list.reduce((sum, i) =>
+      sum + Number(i.suggest || 0) * (Number(i.purchase_factor) || 1) * Number(i.avg_cost || 0), 0));
     body.innerHTML = `
       <div class="inv-note soft">Everything under its par level, with how much to buy. Set par levels on each ingredient to grow this list.</div>
       ${list.length ? `
-        <div class="inv-toolbar"><span class="dim">${list.length} item${list.length > 1 ? "s" : ""} to buy</span><button class="btn" id="invCopyList">📋 Copy list</button></div>
-        ${list.map((i) => `
-          <div class="inv-row static">
-            <span class="inv-row-name">${i.urgent ? "🔴 " : ""}${esc(i.name)}</span>
-            <span class="inv-row-qty">have ${inBuy(i, i.qty_base)}</span>
-            <span class="inv-row-val"><b>buy ${i.suggest} ${esc(i.purchase_uom)}</b></span>
-          </div>`).join("")}` : `<div class="empty">🎉 Nothing to order — everything is at or above its par level.</div>`}`;
+        <div class="inv-toolbar">
+          <span class="dim">${list.length} item${list.length > 1 ? "s" : ""} to buy
+            ${orderCost > 0 ? `· about <span class="inv-buytotal">${inr(orderCost)}</span>` : ""}</span>
+          <button class="btn" id="invCopyList">📋 Copy list</button></div>
+        ${list.map((i) => {
+          // The pack is said ONCE at the end of the row, not after both numbers: this line used
+          // to read "have 1.42 12 box   buy 3.6 12 box". And the red dot is replaced by the same
+          // severity edge the stock list uses, so "owing" and "merely low" stop looking alike.
+          const owing = Number(i.qty_base) < 0;
+          return `
+          <div class="inv-row static ${owing ? "sev-neg" : "sev-low"}">
+            <span class="inv-row-name">${esc(i.name)}${owing ? ` <span class="inv-badge neg">owing</span>` : ""}</span>
+            <span class="inv-row-qty">have ${inBuy(i, i.qty_base, false)}</span>
+            <span class="inv-row-val">buy ${inBuy(i, Number(i.suggest) * (Number(i.purchase_factor) || 1))}</span>
+          </div>`;
+        }).join("")}` : `<div class="empty">🎉 Nothing to order — everything is at or above its par level.</div>`}`;
     const btn = $("#invCopyList");
     if (btn) btn.onclick = async () => {
       const text = list.map((i) => `${i.name} — ${i.suggest} ${i.purchase_uom}`).join("\n");
@@ -965,7 +995,20 @@
         : `<p class="dim">Ingredients for ONE plate. Stock deducts automatically when an order reaches the kitchen.</p>`}
       <div class="inv-lines" id="rpLines"></div>
       <div class="inv-addline">
-        <select id="rpItem"><option value="">+ ingredient…</option>${pickable.map((i) => `<option value="${i.id}">${esc(i.name)}</option>`).join("")}</select>
+        <!-- ── TYPE TO FIND AN INGREDIENT (owner, 2026-10-03) ─────────────────────────────
+             *"you can also search the ingredients from the drop down, you can search the
+              ingredients which are already you have available"*
+             This was a native <select>. With 26 ingredients that is merely slow; a real
+             kitchen carries hundreds, and a native select cannot be typed into beyond
+             first-letter jumping. It is now a combobox: type to filter, arrow keys to move,
+             Enter to take. The unit is shown ON each option, because "200" means nothing
+             until you know whether the answer is grams or litres. -->
+        <div class="inv-combo" id="rpCombo">
+          <input id="rpItemQ" type="text" autocomplete="off" placeholder="+ ingredient — type to search…"
+                 role="combobox" aria-expanded="false" aria-controls="rpItemList" />
+          <input type="hidden" id="rpItem" value="" />
+          <div class="inv-combo-list" id="rpItemList" role="listbox" hidden></div>
+        </div>
         <input id="rpQty" type="number" inputmode="decimal" min="0" step="any" placeholder="qty" />
         <span id="rpUom" class="dim"></span>
         <button class="btn" id="rpAdd">Add</button>
@@ -975,8 +1018,49 @@
         <button class="btn" id="rpCancel">Cancel</button><span style="flex:1"></span>
         <button class="btn primary" id="rpSave">Save recipe</button>
       </div>`, (pop) => {
-      const sel = $("#rpItem", pop);
-      sel.onchange = () => { const it = itemById(sel.value); $("#rpUom", pop).textContent = it ? it.base_uom : ""; };
+      const sel = $("#rpItem", pop);               // the hidden value the rest of this code reads
+      const q = $("#rpItemQ", pop);                // what the person types
+      const listEl = $("#rpItemList", pop);
+      let marked = -1;                             // which row the arrow keys are on
+      const matches = () => {
+        const s = q.value.trim().toLowerCase();
+        const pool = pickable.filter((i) => !lines.some((l) => l.item_id === i.id));
+        return (s ? pool.filter((i) => i.name.toLowerCase().includes(s)) : pool).slice(0, 60);
+      };
+      const paintList = () => {
+        const m = matches();
+        marked = m.length ? Math.min(Math.max(marked, 0), m.length - 1) : -1;
+        listEl.innerHTML = m.length
+          ? m.map((i, n) => `<button type="button" class="inv-combo-opt${n === marked ? " on" : ""}" data-id="${i.id}" role="option">
+               <span>${esc(i.name)}</span><span class="dim">${esc(i.base_uom)}</span></button>`).join("")
+          : `<div class="inv-combo-none">No ingredient matches “${esc(q.value.trim())}”. Add it in Stock first.</div>`;
+        listEl.querySelectorAll(".inv-combo-opt").forEach((b) => { b.onmousedown = (e) => { e.preventDefault(); take(b.dataset.id); }; });
+      };
+      const open = () => { listEl.hidden = false; q.setAttribute("aria-expanded", "true"); paintList(); };
+      const shut = () => { listEl.hidden = true; q.setAttribute("aria-expanded", "false"); };
+      const take = (id) => {
+        const it = itemById(id); if (!it) return;
+        sel.value = id; q.value = it.name;
+        $("#rpUom", pop).textContent = it.base_uom || "";
+        shut(); $("#rpQty", pop).focus();          // straight to the number — that is the next thing typed
+      };
+      q.onfocus = open;
+      q.oninput = () => { sel.value = ""; $("#rpUom", pop).textContent = ""; marked = 0; open(); };
+      q.onblur = () => setTimeout(shut, 120);      // after a click on an option has had its chance
+      q.onkeydown = (e) => {
+        const m = matches();
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault(); if (listEl.hidden) open();
+          marked = e.key === "ArrowDown" ? Math.min(marked + 1, m.length - 1) : Math.max(marked - 1, 0);
+          paintList(); listEl.querySelector(".inv-combo-opt.on")?.scrollIntoView({ block: "nearest" });
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          // Enter on a typed name that matches exactly one thing takes it, so a fast typist
+          // never has to reach for the arrow keys.
+          if (marked >= 0 && m[marked]) take(m[marked].id);
+          else if (m.length === 1) take(m[0].id);
+        } else if (e.key === "Escape") { shut(); }
+      };
       const redraw = () => {
         $("#rpLines", pop).innerHTML = lines.map((l, n) => {
           const it = itemById(l.item_id) || { name: "?", base_uom: "", avg_cost: 0 };
@@ -1062,7 +1146,10 @@
       ${rows.length ? rows.map((r) => `
         <div class="inv-row static">
           <span class="inv-row-name">${esc(r.it.name)}
-            <span class="dim block">bought ${inBuy(r.it, r.purchased_base)} · used ${inBuy(r.it, -r.consumed_base)} · wasted ${inBuy(r.it, -r.wasted_base)}</span></span>
+            <!-- The pack ONCE at the end, not after each of the three numbers. This line read
+                 "bought 4 1 kg bag · used 0 1 kg bag · wasted 0 1 kg bag" — the same unit printed
+                 three times in one sentence, which is what made these rows unreadable. -->
+            <span class="dim block">bought ${inBuy(r.it, r.purchased_base, false)} · used ${inBuy(r.it, -r.consumed_base, false)} · wasted ${inBuy(r.it, -r.wasted_base, false)}<span class="inv-qunit">${esc(r.it.purchase_uom)}</span></span></span>
           <span class="inv-row-val ${Number(r.adjusted_val) < -0.01 ? "out" : Number(r.adjusted_val) > 0.01 ? "in" : "dim"}">${Number(r.adjusted_base) ? (Number(r.adjusted_base) > 0 ? "+" : "") + inBuy(r.it, r.adjusted_base) + " · " + inr(r.adjusted_val) : "—"}</span>
         </div>`).join("") : `<div class="empty">No stock movement in the last ${days} days.</div>`}`;
     body.querySelectorAll("[data-days]").forEach((b) => {
@@ -1188,6 +1275,24 @@
   // Public surface for app.js
   window.LFH_INV = {
     render,
+    // ── WHAT THE BELL ASKS US (owner, 2026-10-03: low stock must notify) ──────────────────────
+    // app.js's bell calls this. It reports ONLY from data this tab has already loaded — it never
+    // triggers a fetch, because the bell runs on the floor's poll and a notification that costs a
+    // round trip every few seconds is a cost nobody agreed to. Before the tab has been opened it
+    // returns null and the bell simply says nothing, which is honest: we do not know yet.
+    stockAlert() {
+      if (!S.loaded || !Array.isArray(S.items)) return null;
+      const live = S.items.filter((i) => i.active !== false);
+      const negative = live.filter((i) => Number(i.qty_base) < 0).length;
+      const lowOnes = live.filter((i) => Number(i.qty_base) >= 0
+        && i.par_qty != null && Number(i.qty_base) < Number(i.par_qty));
+      if (!negative && !lowOnes.length) return null;
+      // Name the first few rather than only counting them: "3 ingredients are low" makes you open
+      // the tab to find out whether it matters; "Mozzarella, Basil, Rocket" often does not.
+      const names = lowOnes.slice(0, 3).map((i) => i.name).join(", ");
+      return { negative, low: lowOnes.length,
+               lowNames: names + (lowOnes.length > 3 ? ` and ${lowOnes.length - 3} more` : "") };
+    },
     // Called from app.js's realtime `ops` handler — see liveBump above.
     live: liveBump,
     // (reset() lived here — `S.loaded = false; S.count = null;`, commented "admin switches

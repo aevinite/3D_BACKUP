@@ -236,7 +236,7 @@ for (const r of perRest) {
   const wpick = (pairs) => { let s = pairs.reduce((a, [, w]) => a + w, 0), x = rand() * s; for (const [v, w] of pairs) if ((x -= w) <= 0) return v; return pairs[0][0]; };
   const gauss = (mean, sd, lo, hi) => { let u = 0, v = 0; while (!u) u = rand(); while (!v) v = rand(); const g = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); return Math.min(hi, Math.max(lo, mean + g * sd)); };
 
-  const { data: menu } = await db.from("menu_items").select("slug,title,price").eq("restaurant_id", r.id);
+  const { data: menu } = await db.from("menu_items").select("id,title,price").eq("restaurant_id", r.id);
   if (!menu?.length) { console.log(`  ⚠ ${r.slug}: no menu — skipped`); continue; }
   const menuW = menu.map((m) => ({ ...m, price: Number(m.price) || 250, w: Math.pow(rand(), 2) * 9 + 0.3 }));
   const rate = Number(r.rate) || 0.05;
@@ -261,7 +261,16 @@ for (const r of perRest) {
       const it = wpick(menuW.map((m) => [m, m.w]));
       const qty = wpick([[1, 0.68], [2, 0.24], [3, 0.08]]);
       subtotal += it.price * qty;
-      line.push({ slug: it.slug, title: it.title, qty, price: it.price });
+      // `id` IS THE KEY THE APP WRITES — and the only one anything joins on (2026-10-03).
+      // This seeder bypasses lfh_price_order and used to emit {slug,title,qty,price}. Nothing
+      // in the product writes a 'slug' onto an order line: lfh_price_order emits
+      // {id,title,price,qty,options,removed,note,tax_mode,is_mrp}. So every report that
+      // resolves a dish (owner categories, inventory dish-cost, recipe coverage, stock
+      // depletion) joins on `id`, and seeded demo data silently matched none of it — the
+      // restaurants with the most history were the ones whose food-cost read zero.
+      // A seeder that writes a shape the app cannot produce is worse than no seed data:
+      // it makes a dead join look like a working one.
+      line.push({ id: it.id, title: it.title, qty, price: it.price });
     }
     return { items: line, subtotal };
   }
