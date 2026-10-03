@@ -96,7 +96,20 @@ export async function GET(req: NextRequest) {
   // One row per (restaurant, transferred module) — generalised for every laddered
   // module (mig 166 table_tags, mig 167 banquet); add new modules to MODULE_DEFS.
   if (modIds.length) {
-    const modCols = MODULE_DEFS.flatMap((d) => [d.allowed, d.control, d.enabled]);
+    // ── A BAG MODULE HAS NO COLUMNS, AND ASKING FOR THEM BROKE THE WHOLE PAGE (2026-10-03) ──────
+    // Since mig 320 a module may live in the `settings.modules` JSONB instead of three columns of
+    // its own, and `MODULE_DEFS` gives such a module its own KEY in all three slots (loyalty,
+    // mig 401 / PR #1419). This line asked PostgREST for a column called `loyalty`, which does not
+    // exist, so the select failed — and because a failed chunk is (rightly) a retryable answer, the
+    // owner's whole Settings page became "Couldn't load your feature switches just now", with
+    // "What's enabled → Not available" under it. Every owner, every restaurant, from the day
+    // loyalty shipped; found by filming the page.
+    //
+    // `lib/tableTags.ts → allModuleLadders()` already had the right shape and the owner route never
+    // got it: columns for the modules that predate the bag, plus `modules` once, in the same single
+    // select. Its comment still says "no module declares the bag today" — that stopped being true
+    // and nothing re-read it, which is the whole fault in one line.
+    const modCols = [...MODULE_DEFS.filter((d) => !d.bag).flatMap((d) => [d.allowed, d.control, d.enabled]), "modules"];
     // ── PAGED, NOT A FLAT .limit(200) (T9 improvement 10, 2026-08-06) ────────────────────────────
     // This read used to end in `.limit(200)`. An owner past 200 restaurants would silently lose the
     // module toggles for the rest — the switches would simply not be on the page, with nothing
@@ -122,14 +135,20 @@ export async function GET(req: NextRequest) {
     }
     const nameOf = new Map(restaurants.map((r) => [r.id, r.name]));
     for (const s of rows as Record<string, unknown>[]) {
+      // An ABSENT bag entry reads exactly like absent columns would: not allowed, not transferred,
+      // enabled — i.e. a new module is OFF until the admin grants it (the house rule since mig 107).
+      const bag = (s.modules && typeof s.modules === "object" ? s.modules : {}) as Record<string, { allowed?: boolean; owner_control?: boolean; enabled?: boolean }>;
       for (const def of MODULE_DEFS) {
-        if (s[def.allowed] !== true || s[def.control] !== true) continue;
+        const e = def.bag ? bag[def.key] : undefined;
+        const allowed = def.bag ? e?.allowed === true : s[def.allowed] === true;
+        const control = def.bag ? e?.owner_control === true : s[def.control] === true;
+        if (!allowed || !control) continue;
         modules.push({
           restaurant_id: String(s.restaurant_id),
           name: nameOf.get(String(s.restaurant_id)) || "",
           key: def.key,
           label: def.label,
-          enabled: s[def.enabled] !== false,
+          enabled: def.bag ? e?.enabled !== false : s[def.enabled] !== false,
         });
       }
     }
@@ -247,12 +266,26 @@ export async function PATCH(req: NextRequest) {
   // restaurant's setup, for a switch the admin genuinely handed over. The owner's only move is to
   // contact us about a configuration that was never wrong. `dbFail` gives them a retry instead, which
   // is the same answer the GET's own module-switch chunks already give.
-  const sq = await sb.from("settings").select(`${def.allowed}, ${def.control}`).eq("restaurant_id", rid).maybeSingle();
+  // A BAG MODULE HAS NO COLUMNS — see the GET's own note. Asking for a column named after the
+  // module key is a PostgREST error, which `dbFail` would honestly report as "couldn't check that
+  // switch" for ever: the switch is not unreachable, it is in `settings.modules` (mig 320).
+  const sq = await sb.from("settings")
+    .select(def.bag ? "modules" : `${def.allowed}, ${def.control}`).eq("restaurant_id", rid).maybeSingle();
   if (sq.error) return dbFail("owner/settings.moduleGate", sq.error, { message: "Couldn't check that switch just now — please try again." });
-  const s = sq.data as Record<string, boolean> | null;
-  if (!s?.[def.allowed]) return NextResponse.json({ error: "This feature isn't enabled for that restaurant." }, { status: 403 });
-  if (!s[def.control]) return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
-  const { error } = await sb.from("settings").update({ [def.enabled]: enabled }).eq("restaurant_id", rid);
+  const s = sq.data as Record<string, unknown> | null;
+  const bagEntry = def.bag
+    ? ((s?.modules && typeof s.modules === "object" ? (s.modules as Record<string, { allowed?: boolean; owner_control?: boolean }>)[def.key] : undefined) || {})
+    : null;
+  const mayHave = def.bag ? bagEntry!.allowed === true : s?.[def.allowed] === true;
+  const handed  = def.bag ? bagEntry!.owner_control === true : s?.[def.control] === true;
+  if (!mayHave) return NextResponse.json({ error: "This feature isn't enabled for that restaurant." }, { status: 403 });
+  if (!handed) return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
+  // The bag is written back whole, with only this module's `enabled` moved, so a concurrent change
+  // to another module's entry is not what decides the result of this one.
+  const patch = def.bag
+    ? { modules: { ...((s?.modules as Record<string, unknown>) || {}), [def.key]: { ...bagEntry, enabled } } }
+    : { [def.enabled]: enabled };
+  const { error } = await sb.from("settings").update(patch).eq("restaurant_id", rid);
   if (error) return dbFail("owner/settings.module", error, { message: "Couldn't change that switch — please try again." });
   // A module turning itself off changes what a whole panel offers, and nothing recorded it — so with
   // two co-owners nobody could say who flipped it (sweep 2026-08-04). Unlike issues/ratings there is
