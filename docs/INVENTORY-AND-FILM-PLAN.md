@@ -295,10 +295,28 @@ that passed on 2026-09-29.
       code: with everything on the strip reads Dine-in · Zomato · Swiggy; with Zomato and Swiggy
       switched off in `settings.platform_channels` it reads Dine-in · Website · Parcel — both cards
       gone. Settings restored byte-for-byte afterwards. No change was needed or made.
-- [~] **C4 re-shoots — BLOCKED, not forgotten.** Another session is running `./run-queue.sh` over
-      five OWNER films (2.5 → 2.11). Both rigs export the SAME `RID`
-      (00000000-0000-0000-0000-0000000000a1) and both call `prep-all.mjs`, which rebuilds that
-      restaurant's world — so shooting now would rewrite the floor underneath their capture, and
-      theirs under mine, silently. Both busy sessions have been warned and asked for a window.
-      WHEN THE WORLD IS FREE: `./remake-chapter.sh 1.0-overview c7 c10 c12 c15`
-- [ ] D re-stitch + verify (needs C4)
+- [x] **C4 re-shoots — DONE, and the partial re-shoot earned its keep.** `./remake-chapter.sh
+      1.0-overview c7 c10 c12 c15` — four chapters, thirteen clips kept. First real use of the
+      one-chapter rebuild he asked for. Take 1 went red on two gates, both c10, both real:
+      the Collect press fired 0.2s into the sentence that NAMES the button, so the pay overlay
+      covered it while the voice still pointed at it (scene-truth) and buried the previous box
+      after 0.32s of 2.4s (box-still). Take 2 fixed scene-truth but the method-grid box still
+      held only 0.39s — the overlay animates for ~1.67s, more than double the 0.80s SETTLE, so
+      the box opened late and the Cash tap cut it. **No static gate can find that; only a take
+      measures an animation.** Take 3: all gates green. One box was dropped rather than squeezed.
+- [x] **D re-stitch + verify — DONE.** 35m11.3s, 11 chapters. Every join lands on its marker TO
+      THE FRAME, no click at any join, picture 2111.30s = the eleven parts summed. Delivery:
+      63,339 frames, audio 2111.31s, longest still 0.0s, longest silence 0.2s. Filed as
+      `manager-panel-manual/v3`, tour as `manager-1.0-overview/v2` with its 17 parts.
+      **Caught before it shipped:** `stitch.sh` reads `<film>/latest/`, `remake-chapter.sh`
+      writes the loose top-level file — the fresh tour was 23:40, the copy the stitcher would
+      have taken was 03:47. `organise-output.sh` between them is not optional.
+- [x] **B8 the demo world could never SHOW depletion** — found by screenshotting the Usage tab
+      instead of trusting the DB. It read "Used by orders ₹0" on a world that had just sold a
+      day of food. Not a product fault: `prep-all` ran `prep-floor` (places 22 real orders, which
+      now deduct) and THEN `prep-stock`, whose first act is to delete every `inv_movements`,
+      `inv_items` and `inv_recipe_lines` row before rebuilding. The trigger fired; the next step
+      erased it. Harmless for fifteen months precisely BECAUSE the feature never worked. Stock is
+      now seeded before the trade — which is also what a restaurant does. Verified on screen:
+      **Used by orders ₹3,250.38**, 54 consumption rows over 21 ingredients, all 28 world checks
+      still green.
