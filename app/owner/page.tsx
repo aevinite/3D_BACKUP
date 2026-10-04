@@ -622,15 +622,29 @@ export default function OwnerDashboard() {
   useBackClose("owner-drill-dish", view.level === "dish", () => setView((v) =>
     v.level === "dish" && !single ? { level: "restaurant", rid: v.rid } : { level: "home" }));
   // The MAIN range (top-right): the one dropdown the whole page follows — KPI boxes
-  // and graphs alike (owner round-2: "only the main one"). Default 30 days.
-  const [globalRange, setGlobalRange] = useState<Range>("30d");
+  // and graphs alike (owner round-2: "only the main one").
+  //
+  // ── THE DEFAULT IS THIS MONTH (owner, 2026-10-04) ───────────────────────────────────────
+  // *"instead of last 30 days make it this month — the default is last 30 day right, maybe
+  // make it of this month."* It is the window he actually thinks in: rent, pay and the GST
+  // return are all monthly, and "is this month going well?" is the first question an owner
+  // asks. A rolling 30 days answers a question nobody is asking.
+  //
+  // THE COST, PLAINLY: on the 1st to the 3rd of a month this window is two or three days, so
+  // every figure on the page is small and every chart is short. A rolling 30 days is never
+  // empty. The dropdown still holds "Last 30 days" one tap away and the choice is remembered,
+  // so a month-start that looks bare is one tap from the old view — but the first open of a
+  // new month WILL look quiet, and that is the trade he made.
+  const DEFAULT_RANGE: Range = "month";
+  const [globalRange, setGlobalRange] = useState<Range>(DEFAULT_RANGE);
   // Restore the last-used range once on mount (owner 2026-07-27: a refresh always
-  // bounced back to 30 days). Post-mount so SSR/hydration still render the default.
+  // bounced back to the default). Post-mount so SSR/hydration still render the default.
   useEffect(() => {
     try {
       const saved = localStorage.getItem(RANGE_LS_KEY) as Range | null;
-      if (saved && saved !== "30d" && RANGES.some((r) => r.k === saved)) setGlobalRange(saved);
+      if (saved && saved !== DEFAULT_RANGE && RANGES.some((r) => r.k === saved)) setGlobalRange(saved);
     } catch { /* storage unavailable */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const pickRange = useCallback((k: Range) => {
     setGlobalRange(k);
@@ -2397,8 +2411,14 @@ export default function OwnerDashboard() {
             hint: `${r.name} · ${inr(r.revenueToday)} from ${r.ordersToday} order${r.ordersToday === 1 ? "" : "s"}` })) };
           tileChartTitle = "Taken today, by restaurant";
         } else if (tileOpen === "expenses") {
+          // ── NO FUDGE FACTOR NOW THAT THE BAR MEANS A SHARE (2026-10-04) ──────────────
+          // `v` used to be Math.max(foodLost, staffOut * 0.004) — a floor so a tiny figure still
+          // drew a visible sliver when each bar was scaled against the biggest. The share bar
+          // measures each slice against the TOTAL, so that floor would now overstate the slice:
+          // the picture would say 0.4% where the truth is less. A sliver too thin to see is
+          // honest, and the figure beside it is always printed.
           tileSide = [{ k: "Staff pay out", v: staffOut, t: inr(staffOut) },
-                      { k: "Food made then binned", v: Math.max(foodLost, staffOut * 0.004), t: inr(foodLost), c: "#e8a0a0" }];
+                      { k: "Food made then binned", v: foodLost, t: inr(foodLost), c: "#b4553f" }];
           tileSideTitle = "What it was";
         } else if (tileOpen === "onhand") {
           tileChart = { kind: "waterfall", steps: [
@@ -2408,7 +2428,10 @@ export default function OwnerDashboard() {
             { k: `On hand · ${inr(onHand)}`, s: "On hand", v: onHand, total: true }] };
           tileChartTitle = "How it was reached";
           tileSide = (ov?.restaurants || []).filter((r) => r.revenueAll > 0)   // see the note above
-            .map((r) => ({ k: r.name, v: r.revenueAll, t: inr(r.revenueAll) }));
+            // ONE COLOUR PER RESTAURANT, here too — the share bar is the fourth surface that
+            // names these three, and it has to agree with the sidebar and the league table.
+            .map((r) => ({ k: r.name, v: r.revenueAll, t: inr(r.revenueAll),
+                           c: restaurantColor(r.id, (ov?.restaurants || []).map((x) => x.id)) }));
           tileSideTitle = "Earned where (all time)";
         }
         return (

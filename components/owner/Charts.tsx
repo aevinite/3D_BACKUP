@@ -928,6 +928,13 @@ export function Heatmap({ data, accent, rangeLabel }: { data: HeatCell[]; accent
   const hasRevenue = data.some((d) => (d.revenue ?? 0) > 0);
   const [metric, setMetric] = useState<"orders" | "revenue">("orders");
   const [sel, setSel] = useState<{ dow: number; hr: number } | null>(null);
+  // ── HOVER TELLS YOU, SO YOU NEVER HAVE TO JUDGE THE COLOUR (owner, 2026-10-04) ───────────
+  // "if you hover over any box it will tell how much percent it is darker, so you don't have to
+  // judge the colour." Every cell DID carry a `title`, which is the browser's own tooltip — a
+  // second's wait, an unstyled grey bubble, nothing at all on a touchscreen. The readout line
+  // that already exists for the TAPPED cell now answers the hovered one too, instantly, and it
+  // says the share of the busiest hour in words so the shade never has to be decoded by eye.
+  const [hov, setHov] = useState<{ dow: number; hr: number } | null>(null);
   const [big, setBig] = useState(false);
   useBackClose("owner-heatmap-zoom", big, () => setBig(false));
 
@@ -943,7 +950,10 @@ export function Heatmap({ data, accent, rangeLabel }: { data: HeatCell[]; accent
   }
   const grid = m === "revenue" ? gRev : gOrders;
   const max = Math.max(1, ...grid.flat());
-  const selVal = sel ? { orders: gOrders[sel.dow][sel.hr], revenue: gRev[sel.dow][sel.hr] } : null;
+  // Hover wins while the pointer is over the grid; the tap survives when it leaves, so a phone
+  // (which never hovers) and a mouse both end up reading the same line.
+  const show = hov || sel;
+  const selVal = show ? { orders: gOrders[show.dow][show.hr], revenue: gRev[show.dow][show.hr] } : null;
   const toggle = (dow: number, hr: number) => setSel((s) => (s && s.dow === dow && s.hr === hr ? null : { dow, hr }));
   const cellTip = (d: number, h: number) => `${DOW_LB[d]} ${hrRange(h)} · ${gOrders[d][h].toLocaleString("en-IN")} order${gOrders[d][h] === 1 ? "" : "s"}${hasRevenue ? ` · ${inr(gRev[d][h])}` : ""}`;
 
@@ -960,9 +970,13 @@ export function Heatmap({ data, accent, rangeLabel }: { data: HeatCell[]; accent
         </div>
       ) : <span />}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
-        {selVal
-          ? <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text)" }}>{DOW_LB[sel!.dow]} · {hrRange(sel!.hr)} · {selVal.orders.toLocaleString("en-IN")} order{selVal.orders === 1 ? "" : "s"}{hasRevenue ? ` · ${inr(selVal.revenue)}` : ""}</span>
-          : <span style={{ fontSize: 11, color: "var(--muted)" }}>Tap a cell for details</span>}
+        {selVal && show
+          ? <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text)" }}>{DOW_LB[show.dow]} · {hrRange(show.hr)} · {selVal.orders.toLocaleString("en-IN")} order{selVal.orders === 1 ? "" : "s"}{hasRevenue ? ` · ${inr(selVal.revenue)}` : ""}
+              {/* the share of the busiest hour, in words — this is the "how dark is it" the
+                  colour was being asked to carry on its own */}
+              <span style={{ fontWeight: 500, color: "var(--muted)" }}> · {Math.round((grid[show.dow][show.hr] / max) * 100)}% of the busiest hour</span>
+            </span>
+          : <span style={{ fontSize: 11, color: "var(--muted)" }}>Hover a cell — or tap it — for the exact figure</span>}
         {!large && <button onClick={() => setBig(true)} title="Enlarge" aria-label="Enlarge heatmap" style={hmBtn}><i className="fas fa-up-right-and-down-left-from-center" aria-hidden="true" /></button>}
       </div>
     </div>
@@ -973,7 +987,8 @@ export function Heatmap({ data, accent, rangeLabel }: { data: HeatCell[]; accent
     const labelFs = large ? 10 : 9, dayFs = large ? 12 : 10.5, colW = large ? 40 : 34;
     return (
       <div style={{ overflowX: "auto" }}>
-        <div style={{ display: "grid", gridTemplateColumns: `${colW}px repeat(24, 1fr)`, gap: large ? 4 : 3, minWidth: large ? minCell * 24 + colW : 430 }}>
+        <div onMouseLeave={() => setHov(null)}
+          style={{ display: "grid", gridTemplateColumns: `${colW}px repeat(24, 1fr)`, gap: large ? 4 : 3, minWidth: large ? minCell * 24 + colW : 430 }}>
           <div />
           {Array.from({ length: 24 }, (_, h) => (
             <div key={h} style={{ fontSize: labelFs, color: "var(--muted)", textAlign: "center", whiteSpace: "nowrap" }}>{h % labelEvery === 0 ? hr12(h) : ""}</div>
@@ -985,6 +1000,9 @@ export function Heatmap({ data, accent, rangeLabel }: { data: HeatCell[]; accent
                 const on = sel?.dow === d && sel?.hr === h;
                 return (
                   <div key={h} onClick={() => toggle(d, h)} title={cellTip(d, h)} role="button" tabIndex={large ? 0 : -1}
+                    onMouseEnter={() => setHov({ dow: d, hr: h })}
+                    onFocus={() => setHov({ dow: d, hr: h })}
+                    onBlur={() => setHov(null)}
                     aria-label={`${DOW_FULL[d]} ${hrRange(h)}, ${gOrders[d][h]} orders${hasRevenue ? `, ${inr(gRev[d][h])}` : ""}`}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(d, h); } }}
                     style={{
