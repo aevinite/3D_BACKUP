@@ -1140,7 +1140,7 @@ export default function OwnerDashboard() {
   // dropdown. Group scope sums across restaurants per day; single scope is per day.
   const monthCompare = useMemo(() => {
     const p = pl("month");
-    if (!p) return { rows: [] as Record<string, unknown>[], hasPrev: false };
+    if (!p) return { rows: [] as Record<string, unknown>[], hasPrev: false, days: 0 };
     const dom = (bucket: string) => new Date(Date.parse(bucket) + 5.5 * 3600_000).getUTCDate();
     const curBy = new Map<number, { rev: number; ord: number }>();
     for (const t of p.timeseries) {
@@ -1155,7 +1155,21 @@ export default function OwnerDashboard() {
     }
     const hasPrev = prevBy.size > 0;
     const todayDom = new Date(Date.now() + 5.5 * 3600_000).getUTCDate();
-    const maxDay = Math.max(todayDom, ...(hasPrev ? [...prevBy.keys()] : [0]));
+    // ── LIKE FOR LIKE: BOTH LINES STOP ON THE SAME DAY (owner, 2026-10-04) ────────────────
+    // He sent a screenshot of this card on the 4th: a green stub over days 1-3 and thirty
+    // days of grey stretching past it, and said "there is no data here". The data was there —
+    // October was three days old — but the card was drawing THREE days of this month against
+    // THIRTY of last, which is both two-thirds empty and a comparison that cannot be read.
+    // ₹8L of October next to ₹70L of September does not mean September was better; it means
+    // September had ten times as many days in it.
+    //
+    // So last month is clipped to the same days this month has finished. "1-3 October vs
+    // 1-3 September" is the comparison an owner can act on, and it fills the card. From about
+    // the 28th onward the two are the same thing, so nothing is lost late in the month; the
+    // whole of last month is still a dropdown away on "Revenue over time".
+    const lastComplete = todayDom - 1;      // today is still running — see `cur` below
+    const maxDay = lastComplete >= 1 ? lastComplete
+      : Math.max(1, ...(hasPrev ? [...prevBy.keys()] : [1]));   // the 1st: nothing of this month yet
     const rows: Record<string, unknown>[] = [];
     for (let d = 1; d <= maxDay; d++) {
       rows.push({
@@ -1165,21 +1179,24 @@ export default function OwnerDashboard() {
         // on the 4th of a month it read as revenue collapsing, not as "the day isn't over"
         // (owner-panel sweep 2026-08-04). Future days were already blank; today joins them,
         // and the caption under the chart says today is excluded.
-        cur: d < todayDom ? (curBy.get(d)?.rev ?? 0) : null,
+        cur: d <= lastComplete ? (curBy.get(d)?.rev ?? 0) : null,
         prev: hasPrev ? (prevBy.get(d) ?? 0) : null,
         __orders: curBy.get(d)?.ord ?? 0,
       });
     }
-    return { rows, hasPrev };
+    return { rows, hasPrev, days: lastComplete };
   }, [pl]);
   // This / last calendar-month names for the legend + card tag (IST).
   const monthName = (mi: number) => new Date(Date.UTC(2000, ((mi % 12) + 12) % 12, 1)).toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
   const istMonthIdx = new Date(Date.now() + 5.5 * 3600_000).getUTCMonth();
   const thisMonthName = monthName(istMonthIdx);
   const lastMonthName = monthName(istMonthIdx - 1);
-  // Names for the this-vs-last-month chart legend/tooltip.
-  const monthCurName = `This month · ${thisMonthName}`;
-  const monthPrevName = `Last month · ${lastMonthName}`;
+  // Names for the this-vs-last-month chart legend/tooltip. Both carry the day window, because
+  // the two lines are now clipped to the same days (see `monthCompare`) — a legend that still
+  // said plain "September" would be claiming a whole month the grey line no longer draws.
+  const monthDays = monthCompare.days;
+  const monthCurName = monthDays >= 1 ? `${thisMonthName} 1–${monthDays}` : `This month · ${thisMonthName}`;
+  const monthPrevName = monthDays >= 1 ? `${lastMonthName} 1–${monthDays}` : `Last month · ${lastMonthName}`;
 
   // THE LATEST-ACTIVE-WEEK FALLBACK IS GONE (2026-08-05) — it had become dead weight that still
   // cost a network request.
@@ -1985,12 +2002,12 @@ export default function OwnerDashboard() {
               heatmap below already covers hour-of-day) + category. Locked to whole months. */}
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · {restScopeText}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
+              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {monthCurName} vs {monthPrevName} · {restScopeText}</span></span><span className="ow2-tag" title={[monthDays >= 1 ? `${thisMonthName} 1–${monthDays} vs ${lastMonthName} 1–${monthDays}` : `All of ${lastMonthName}`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{monthDays >= 1 ? `1–${monthDays}` : thisMonthName}</span></div>
               {!pl("month") ? <div className="adm-empty ow2-chartslot">{loadNote}</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
                       looked like a crash (owner-panel sweep 2026-08-04). */}
-                  <div className="ow2-note">Today is still in progress, so it joins the line tomorrow.</div></>}
+                  <div className="ow2-note">{monthDays >= 1 ? `Both lines cover the same ${monthDays === 1 ? "single day" : `${monthDays} days`} of the month, so the two totals mean the same thing. Today is still in progress, so it joins tomorrow.` : `${thisMonthName} has not finished a day yet, so this is all of ${lastMonthName}. Your first full day joins the green line tomorrow.`}</div></>}
             </div>
             {/* flex column, so the donut card can TAKE the height the taller card beside it
                 sets (owner, 2026-08-19). CategoryDonut then fills it — see Charts.tsx. */}
@@ -2089,12 +2106,12 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
+              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {monthCurName} vs {monthPrevName}</span></span><span className="ow2-tag" title={[monthDays >= 1 ? `${thisMonthName} 1–${monthDays} vs ${lastMonthName} 1–${monthDays}` : `All of ${lastMonthName}`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{monthDays >= 1 ? `1–${monthDays}` : thisMonthName}</span></div>
               {!pl("month") ? <div className="adm-empty ow2-chartslot">{loadNote}</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
                       looked like a crash (owner-panel sweep 2026-08-04). */}
-                  <div className="ow2-note">Today is still in progress, so it joins the line tomorrow.</div></>}
+                  <div className="ow2-note">{monthDays >= 1 ? `Both lines cover the same ${monthDays === 1 ? "single day" : `${monthDays} days`} of the month, so the two totals mean the same thing. Today is still in progress, so it joins tomorrow.` : `${thisMonthName} has not finished a day yet, so this is all of ${lastMonthName}. Your first full day joins the green line tomorrow.`}</div></>}
             </div>
             {/* flex column, so the donut card can TAKE the height the taller card beside it
                 sets (owner, 2026-08-19). CategoryDonut then fills it — see Charts.tsx. */}
