@@ -28,7 +28,8 @@ import {
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { compactINR } from "@/lib/money";
-import { portfolioColor } from "@/lib/restaurantColor";
+import { restaurantColor } from "@/lib/restaurantColor";
+import TileDocket, { type DocketChart, type DocketBar } from "@/components/owner/TileDocket";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
@@ -180,7 +181,10 @@ type Act = { id: string; panel: string; action: string; actor: string | null; ta
 // 2–3 restaurants: the split daily bars stay in the THEME's green family — light +
 // dark green, a third non-brown colour only if needed (owner round-2: "only brown
 // doesn't make sense"). Identity accent colours are for the many-tier only.
-const GREEN_SHADES = ["#34d399", "#0f766e", "#a3e635"];
+// GREEN_SHADES and the tier rule moved to lib/restaurantColor on 2026-10-04. Keeping the
+// palette here is exactly what let the shell's sidebar draw a different colour from these
+// charts: it could not see this constant. `restaurantColor(id, ids)` is now the only way any
+// surface asks.
 // 4+ restaurants: each gets a DISTINCT, SOLID colour, because most restaurants default to the
 // same gold accent and several bars/lines came out the identical washed-out yellow (owner,
 // 2026-07-27). The palette moved to lib/restaurantColor so the SHELL's sidebar and switcher can
@@ -379,8 +383,9 @@ function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; valu
 // (that restaurant's full dashboard). It only DRIVES the existing view model
 // (goHome / viewTo restaurant) — no new fetch: every scope is already cached
 // per `${scopeKey}|${range}`, so switching costs nothing extra. The colour swatch
-// per restaurant matches its portfolioColor(id) in the charts, so a restaurant
-// keeps ONE identity colour across the selector and every graph.
+// per restaurant matches its restaurantColor(id, estate) in the charts, so a restaurant keeps
+// ONE identity colour across the selector and every graph — at every tier, which is the part
+// that was missing until 2026-10-04.
 function RestaurantDrop({ rests, activeRid, onPick }: {
   rests: { id: string; name: string; accentColor: string; revenueToday: number; reportsOff?: boolean }[];
   activeRid: string | null; // null = All restaurants
@@ -408,7 +413,7 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
     <span className="owd" data-restdrop>
       <button type="button" className="owd-btn" aria-haspopup="listbox" aria-expanded={open}
         onClick={() => setOpen((o) => !o)}>
-        {cur ? <span className="sw" style={{ background: portfolioColor(cur.id) }} aria-hidden="true" />
+        {cur ? <span className="sw" style={{ background: restaurantColor(cur.id, rests.map((x) => x.id)) }} aria-hidden="true" />
           : <i className="fas fa-store" aria-hidden="true" />}
         <span className="lbl">{cur ? cur.name : "All restaurants"}</span>
         <i className="fas fa-chevron-down" aria-hidden="true" />
@@ -426,7 +431,7 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
             <button key={r.id} type="button" role="option" aria-selected={activeRid === r.id}
               className={activeRid === r.id ? "on" : ""}
               onClick={() => { onPick(r.id); setOpen(false); }}>
-              <span className="sw" style={{ background: portfolioColor(r.id) }} aria-hidden="true" />
+              <span className="sw" style={{ background: restaurantColor(r.id, rests.map((x) => x.id)) }} aria-hidden="true" />
               <span className="nm">{r.name}</span>
               <small>{r.reportsOff ? "takings hidden" : `${money(r.revenueToday)} today`}</small>
             </button>
@@ -1098,9 +1103,12 @@ export default function OwnerDashboard() {
     const p = pl(globalRange);
     if (!p || p.scope !== "group") return { rows: [] as Record<string, unknown>[], lines: [] as { key: string; name: string; color: string }[], stacked: false };
     const stacked = p.restaurantRevenue.length >= 2 && p.restaurantRevenue.length <= 3;
-    const lines = p.restaurantRevenue.map((r, i) => ({
+    const ids = p.restaurantRevenue.map((x) => x.id);
+    const lines = p.restaurantRevenue.map((r) => ({
       key: r.id, name: r.name,
-      color: stacked ? GREEN_SHADES[i % GREEN_SHADES.length] : portfolioColor(r.id),
+      // NOT by position: `restaurantRevenue` arrives sorted by takings, so a quiet week used to
+      // swap two restaurants' colours in this chart while the table beside it kept the old ones.
+      color: restaurantColor(r.id, ids),
     }));
     const by = new Map<string, Record<string, number>>();
     for (const t of p.timeseries) {
@@ -1249,7 +1257,9 @@ export default function OwnerDashboard() {
     // on this page.
     return rows.map((r) => {
       const rk = rank.get(r.id)!;
-      return { ...r, rank: rk, accent: restCount <= 3 ? GREEN_SHADES[(rk - 1) % GREEN_SHADES.length] : portfolioColor(r.id) };
+      // NOT by rank. Sorting this table by orders instead of revenue used to re-colour every
+      // dot in it, while the chart above kept its own order. One id, one colour, every surface.
+      return { ...r, rank: rk, accent: restaurantColor(r.id, rows.map((x) => x.id)) };
     });
   }, [ov, single, pl, globalRange, tq, tSort]);
   const th = (k: typeof tSort.k, label: string, left?: boolean, extra?: string) => (
@@ -1883,7 +1893,7 @@ export default function OwnerDashboard() {
                 <div className="ow2-ct"><span>Who earns more <span className="mut">· tap a bar to open</span></span>
                   <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
                 {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">{loadNote}</div>
-                  : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: portfolioColor(r.id) }))}
+                  : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: restaurantColor(r.id, trendPayload.restaurantRevenue.map((x) => x.id)) }))}
                       onSelect={(id) => setDrawerRid(id)} />}
               </div>
               <div className="adm-card">
@@ -2311,58 +2321,87 @@ export default function OwnerDashboard() {
         const who = activeRid
           ? (ov?.restaurants.find((r) => r.id === activeRid)?.name ?? "this restaurant")
           : `all ${restCount} restaurant${restCount === 1 ? "" : "s"}`;
+
+        // ── WHAT EACH TILE DRAWS ────────────────────────────────────────────────────────────
+        // Built from `pl(globalRange)`, which is already in memory for this scope and range, and
+        // from the overview payload. No tile opens a request.
+        //
+        // Two tiles deliberately have NO chart. Expenses is two numbers — a line pretending to be
+        // a daily series would be invented, and an invented chart is worse than none. The Today
+        // tile gets per-restaurant bars only when there is more than one restaurant; one bar is
+        // not a chart.
+        // `timeseries` and `paymentMethods` are on BOTH payload shapes but the union cannot be
+        // intersected (`scope` differs), so the two fields this block needs are picked out.
+        const pay = pl(globalRange) as
+          | { timeseries: TsRow[]; paymentMethods: Pay[] } | undefined;
+        const dailyPts = (() => {
+          if (!pay) return [] as { x: string; v: number }[];
+          const by = new Map<string, number>();
+          for (const t of pay.timeseries) {
+            const k = istKey(new Date(t.bucket), globalRange);
+            by.set(k, (by.get(k) || 0) + t.revenue);
+          }
+          // `keyLabel` exists for exactly this: istKey() builds "2026-09-05", and an axis that
+          // reads "2026-09-05" is a key leaking onto the screen. It gives "5 Sept" / "3 PM".
+          return [...by.entries()].map(([x, v]) => ({ x: keyLabel(x), v, hint: `${keyLabel(x)} · ${inr(v)}` }));
+        })();
+        const avgTicket = kMain?.avg || 0;
+        const tileCap = tileOpen === "revenue" ? `collected across ${who}`
+          : tileOpen === "orders" ? `bills opened · ${RANGE_LABEL[globalRange]}`
+          : tileOpen === "today" ? `${todayOrd.toLocaleString("en-IN")} orders · ${(activeRid ? (todayRow?.openTables ?? 0) : (ov?.totals.openTables ?? 0)).toLocaleString("en-IN")} tables open`
+          : tileOpen === "expenses" ? "what the period cost, not what left the bank"
+          : "revenue minus what the period cost";
+        let tileChart: DocketChart | undefined;
+        let tileChartTitle: string | undefined;
+        let tileSide: DocketBar[] | undefined;
+        let tileSideTitle: string | undefined;
+        if (tileOpen === "revenue") {
+          tileChart = { kind: "area", pts: dailyPts }; tileChartTitle = `Revenue · ${RANGE_LABEL[globalRange]}`;
+          tileSide = (pay?.paymentMethods || []).map((m) => ({ k: m.method, v: m.revenue, t: inr(m.revenue) }));
+          tileSideTitle = "How the money arrived";
+        } else if (tileOpen === "orders") {
+          tileChart = { kind: "bars", pts: dailyPts.map((p) => ({ x: p.x, v: avgTicket ? Math.round(p.v / avgTicket) : 0,
+            hint: `${p.x} · about ${avgTicket ? Math.round(p.v / avgTicket) : 0} orders` })) };
+          tileChartTitle = `Orders a day · ${RANGE_LABEL[globalRange]}`;
+          tileSide = (pay?.paymentMethods || []).map((m) => ({ k: m.method, v: m.orders, t: m.orders.toLocaleString("en-IN") }));
+          tileSideTitle = "Orders by method";
+        } else if (tileOpen === "today" && restCount > 1) {
+          const rs = (ov?.restaurants || []).filter((r) => !r.reportsOff);
+          tileChart = { kind: "bars", pts: rs.map((r) => ({ x: r.name, v: r.revenueToday,
+            hint: `${r.name} · ${inr(r.revenueToday)} from ${r.ordersToday} order${r.ordersToday === 1 ? "" : "s"}` })) };
+          tileChartTitle = "Taken today, by restaurant";
+        } else if (tileOpen === "expenses") {
+          tileSide = [{ k: "Staff pay out", v: staffOut, t: inr(staffOut) },
+                      { k: "Food made then binned", v: Math.max(foodLost, staffOut * 0.004), t: inr(foodLost), c: "#e8a0a0" }];
+          tileSideTitle = "What it was";
+        } else if (tileOpen === "onhand") {
+          tileChart = { kind: "waterfall", steps: [
+            { k: `Revenue · ${inr(kMain?.revenue ?? 0)}`, s: "Revenue", v: kMain?.revenue ?? 0 },
+            { k: `Less staff pay · ${inr(staffOut)}`, s: "− Staff", v: -staffOut },
+            { k: `Less food binned · ${inr(foodLost)}`, s: "− Food", v: -foodLost },
+            { k: `On hand · ${inr(onHand)}`, s: "On hand", v: onHand, total: true }] };
+          tileChartTitle = "How it was reached";
+          tileSide = (ov?.restaurants || []).map((r) => ({ k: r.name, v: r.revenueAll, t: inr(r.revenueAll) }));
+          tileSideTitle = "Earned where (all time)";
+        }
         return (
-          <div className="ow2-tile-wrap" role="dialog" aria-label={`${d.title} detail`} aria-modal="true">
-            <div className="ow2-tile-back" onClick={() => setTileOpen(null)} aria-hidden="true" />
-            <div className="ow2-tile">
-              <header>
-                <span className="ti"><b>{d.title}</b><i>{d.sub}</i></span>
-                <button className="x" onClick={() => setTileOpen(null)} aria-label="Close">✕</button>
-              </header>
-              <div className="who"><i className="fas fa-store" aria-hidden="true" /> {who}</div>
-              <div className="rows">
-                {d.rows.map(([label, value, hint, isTotal]) => (
-                  <div className={`r${isTotal ? " last" : ""}`} key={label}>
-                    <span className="l">{label}{hint ? <i>{hint}</i> : null}</span>
-                    <span className="v">{value}</span>
-                  </div>
-                ))}
-              </div>
-              {d.note ? (
-                <p className="note">
-                  <i className="fas fa-circle-info" aria-hidden="true" />
-                  <span>
-                    {d.note}
-                    {/* Straight to the record, so "cancellations live in Audit & logs" is a door and
-                        not just a sentence. Gated on the SAME `logs` entitlement the sidebar and
-                        /api/owner/oplog use — if the admin has taken the log away there is nothing
-                        to send him to, and the sentence stands on its own. */}
-                    {d.audit && ov?.entitlements?.logs !== false ? (
-                      <>{" "}<Link className="nlink" href={withPin("/owner/activity")}>Open Audit &amp; logs <i className="fas fa-arrow-right" aria-hidden="true" /></Link></>
-                    ) : null}
-                  </span>
-                </p>
-              ) : null}
-              <footer>
-                {/* "at the below there will be a click for a seen proper detail, and that will take
-                    me to that particular page" — and it carries the scope and the range (detailHref). */}
-                {reportsOn ? (
-                  /* NO onClick THAT CLOSES THIS FIRST. Measured: closing the popup on the same tap
-                     sent us straight back to the dashboard instead of to the report. The popup owns
-                     a back-stack layer, and closing it makes backStack rewind that entry with
-                     history.go(-1) — which wins the race against the router and undoes the
-                     navigation. It is the identical trap components/owner/OwnerShell.tsx documents
-                     for its nav links ("pages that NAVIGATE leave it open and let the route change
-                     close it"), and the same cure: navigate, and let the unmount tidy up, where
-                     backStack's own "a real navigation pushed on top of our buffer" guard sees the
-                     new URL and leaves the buffer alone. */
-                  <Link className="full" href={detailHref(d.open)}>
-                    See the full detail <i className="fas fa-arrow-right" aria-hidden="true" />
-                  </Link>
-                ) : <span className="full off">Reports are switched off for this restaurant</span>}
-              </footer>
-            </div>
-          </div>
+          // ── THE DOCKET (owner, 2026-10-04; he picked it from five) ──────────────────────
+          // Wide on a screen, portrait under 860px. Every chart below is built from the payload
+          // this page ALREADY holds — opening a tile must not cost a read.
+          <TileDocket
+            title={d.title} sub={`${d.sub} · ${who}`}
+            // THE HEADLINE IS THE TILE'S OWN FIGURE. Taking row 0 put "₹71,75,669" — the revenue
+            // line — at the top of the ON HAND sheet, whose answer is ₹65,30,169 four rows below.
+            // Where a sheet has a total, the total IS the headline; the rows are the working.
+            big={(d.rows.find((r) => r[3])?.[1]) ?? d.rows[0]?.[1] ?? ""} cap={tileCap}
+            rows={d.rows}
+            note={d.note}
+            chart={tileChart} chartTitle={tileChartTitle}
+            side={tileSide} sideTitle={tileSideTitle}
+            auditHref={d.audit && ov?.entitlements?.logs !== false ? withPin("/owner/activity") : undefined}
+            detailHref={reportsOn ? detailHref(d.open) : undefined}
+            onClose={() => setTileOpen(null)}
+          />
         );
       })()}
 

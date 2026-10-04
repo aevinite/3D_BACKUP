@@ -6,13 +6,13 @@
 // link to /aevinite — admin is a higher, password-gated privilege.
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { useBackClose } from "@/lib/backStack";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { asSuffix } from "@/lib/ownerPin";
-import { portfolioColor } from "@/lib/restaurantColor";
+import { restaurantColor } from "@/lib/restaurantColor";
 import { byName } from "./ownerRestaurantSort";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean; ent?: string };
@@ -241,6 +241,9 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // which is the whole point of lib/restaurantColor. A field a component keeps but never reads is a
   // field the next reader trusts.
   const [myRests, setMyRests] = useState<{ id: string; name: string; revenueToday: number; reportsOff?: boolean }[]>([]);
+  // The palette depends on HOW MANY restaurants there are (2-3 = the theme's greens, 4+ = a hue
+  // each), so every dot needs the whole estate, not just its own id.
+  const restIds = useMemo(() => myRests.map((r) => r.id), [myRests]);
   const refreshMyRests = useCallback(() => {
     const scp = ridPin ? `&scope=${ridPin}${asSuffix()}` : "";
     return fetchOwnerOverview(scp)
@@ -439,8 +442,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                 <button key={r.id} className="rrow" onClick={() => openRestaurant(r.id)} title={`Open ${r.name}`}>
                   {/* the SAME colour the dashboard's charts, table and switcher use — keyed by id, not the
                       restaurant's brand accent, which made one restaurant orange here and blue three inches
-                      to the right (T5 sweep, 2026-08-07). lib/restaurantColor carries the reasoning. */}
-                  <span className="sw" style={{ background: portfolioColor(r.id) }} aria-hidden="true" />
+                      to the right (T5 sweep, 2026-08-07). The ESTATE is passed because the palette changes
+                      at 2-3 restaurants, and passing only the id is how this surface went on drawing orange
+                      while the charts went green (owner's screenshot, 2026-10-04). */}
+                  <span className="sw" style={{ background: restaurantColor(r.id, restIds) }} aria-hidden="true" />
                   <span className="nm">{r.name}</span>
                   <span className="rv">{r.reportsOff
                     ? <span title="Reports are switched off for this restaurant, so its takings aren't shown here." style={{ opacity: .6 }}>hidden</span>
@@ -561,8 +566,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                         onClick={() => openRestaurant(r.id)} title={`Open ${r.name}`}>
                         {/* the SAME colour the dashboard's charts, table and switcher use — keyed by id, not the
                       restaurant's brand accent, which made one restaurant orange here and blue three inches
-                      to the right (T5 sweep, 2026-08-07). lib/restaurantColor carries the reasoning. */}
-                  <span className="sw" style={{ background: portfolioColor(r.id) }} aria-hidden="true" />
+                      to the right (T5 sweep, 2026-08-07). The ESTATE is passed because the palette changes
+                      at 2-3 restaurants, and passing only the id is how this surface went on drawing orange
+                      while the charts went green (owner's screenshot, 2026-10-04). */}
+                  <span className="sw" style={{ background: restaurantColor(r.id, restIds) }} aria-hidden="true" />
                         <span className="nm">{r.name}</span>
                         <span className="rv">{r.reportsOff
                     ? <span title="Reports are switched off for this restaurant, so its takings aren't shown here." style={{ opacity: .6 }}>hidden</span>
