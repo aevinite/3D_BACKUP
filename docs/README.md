@@ -19,7 +19,7 @@ If you only read one thing: `CLAUDE.md` in the repo root is the rulebook, and
 |---|---|
 | **`RUNBOOK.md`** | the operational page: run it, check it, ship it, and what to do when a guard goes red. Written for somebody with no history here. Every command on it has been run — if one stops being true, that is a bug in that page. |
 | **`CLAUDE-DETAIL.md`** | the full text of every rule in `CLAUDE.md`, under the same heading. The one to open before acting. |
-| **`GUARD-MAP.md`** | "I changed this file — which of the 224 checks covers it?" Start here before running anything. |
+| **`GUARD-MAP.md`** | "I changed this file — which of the 225 checks covers it?" Start here before running anything. |
 | **`REJECTED-IDEAS.md`** | what the owner has already said NO to. **Read before suggesting any improvement.** |
 | `ACCESS-MODEL.md` | how permissions actually work now (the live model — replaces the retired ladder). |
 | `ACCESS-REDESIGN-SPEC.md` | the access work still owed. A live working list, not history. |
@@ -46,6 +46,7 @@ never treat it as a description of what exists.
 
 | document | what it is for |
 |---|---|
+| **`INVENTORY-AND-FILM-PLAN.md`** | The October plan from the owner's voice note (2026-10-03): inventory work, the film re-shoots, and the preferences he should never have to repeat. Partly executed — check `git log` before treating an item as open. |
 | **`HRMEX-INDEX.md`** | 🔑 the keyword. Say **HRMEX** and this file plus its three companions is the whole HR + payroll study. Start here. |
 | `HRMEX-HR-PAYROLL-STUDY.md` | the study itself — what HR and payroll would mean for a restaurant this size. |
 | `HRMEX-MAP-AND-FLOWCHART.md` | the same study as a map: who does what, in what order. |

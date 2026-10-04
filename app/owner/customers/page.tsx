@@ -629,8 +629,13 @@ export default function OwnerCustomers() {
                     </tr>
                   </thead>
                   <tbody>
+                    {/* tabIndex + Enter/Space on each row: the row opens the guest's detail, and without
+                        these only a mouse could do it (the admin console's twin row already had them).
+                        Accessibility check, 2026-10-04. */}
                     {rows.map((c) => (
                       <tr key={`${c.restaurant_id}:${c.phone}`} onClick={() => openDetail(c.phone)}
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key !== "Enter" && e.key !== " ") return; e.preventDefault(); openDetail(c.phone); }}
                         title="See this guest's visits and what they've spent"
                         style={{ borderTop: "1px solid var(--border-c,#e5e7eb)", opacity: c.blocked ? 0.65 : 1, cursor: "pointer" }}>
                         <td style={{ padding: "9px 10px", fontWeight: 700 }}>

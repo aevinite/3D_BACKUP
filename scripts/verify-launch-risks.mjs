@@ -11,8 +11,8 @@
 //        (The real cap is the PLAN: Vercel Hobby and Supabase Free cannot bill overage. That is a
 //        dashboard fact, not a code fact — the checklist row says so.)
 //   30 · A keyboard or screen-reader user can use the guest menu → every image says what it is
-//        (alt), every clickable box on a guest screen is a real button or says it is one, and the
-//        page declares its language.
+//        (alt), every clickable box on a guest, owner or admin screen is a real button or answers
+//        the keyboard, and the page declares its language.
 //   31 · The public key can't read anyone's table      → NOT here. It needs the database:
 //        `npm run verify:grants` (row security on every table, open reads on an allow-list).
 //   32 · Nobody is texted without their written consent → the app sends NO message to a guest
@@ -104,33 +104,42 @@ for (const f of [...TSX, ...PANEL_JS]) {
 if (noAlt.length) fail(`${noAlt.length} image(s) have no alt text (alt="" is right for decoration): ${noAlt.join(", ")}`);
 else pass(`every <img> says what it is (${TSX.length + PANEL_JS.length} files read)`);
 
-// The GUEST screens are the public face, and the ones the law reaches first. The staff panels are
-// tools used by people the restaurant trains; they are counted but do not fail this check.
-const GUEST = (f) => /^app\/(menu|r|q|item|view)\//.test(f) || /^components\/[^/]+\.tsx$/.test(f);
+// EVERY React screen — guest, owner and the admin console. It started guest-only (2026-10-03);
+// the next day the owner/admin screens were read too: 19 of their 20 hits were pop-up backdrops
+// styled inline (which the first version could not recognise) and ONE was real — the owner's
+// Customers rows opened a guest's detail on click only. Fixed, so the whole React app is now held
+// to it. The plain-JS panels (manager, kitchen, tablet) are NOT read here: they are touch-first
+// staff tools with ~600 click handlers, parked on purpose (docs/SECURITY-CHECKLIST.md §3.6).
+//
 // A tag that is clickable but is not a button is fine when it is one of:
-//   · it says it is a button (role=…) — and then it must also answer the keyboard;
-//   · a dimmed backdrop behind a pop-up (closing by tapping outside; the pop-up has its own ✕ and Esc);
+//   · it answers the keyboard itself — role="button" or tabIndex, AND an onKeyDown;
+//   · a dimmed backdrop behind a pop-up (closing by tapping outside; the pop-up has its own ✕ and
+//     Esc): a backdrop class, aria-hidden, or an inline full-screen `position:fixed/absolute; inset:0`;
 //   · a click-catcher that only stops a tap reaching what is underneath.
-const OK_BACKDROP = /className=["'{`][^"'}`]*\b(overlay|backdrop|lightbox|scrim)\b/;
+const OK_BACKDROP = /className=["'{`][^"'}`]*\b(overlay|backdrop|lightbox|scrim|tile-back|drawer-back|owrp-back)\b|aria-hidden=|position:\s*["'](fixed|absolute)["'],\s*inset:\s*0/;
 const OK_CATCHER = /onClick=\{\s*\(e\)\s*=>\s*\{?\s*(e\.preventDefault\(\);?\s*)?e\.stopPropagation\(\)/;
-const guestBad = [], staffCount = { n: 0 };
+const bad = [];
 for (const f of TSX) {
-  const s = read(f); const re = /<(div|span|li|section|article)\b[^>]*?\sonClick=/g; let m;
+  const s = read(f); const re = /<(div|span|li|section|article|tr|td)\b[^>]*?\sonClick=/g; let m;
   while ((m = re.exec(s))) {
     if (inComment(s, m.index)) continue;
     const opening = openingTag(s, m.index);
-    if (/\brole=/.test(opening)) {
-      if (GUEST(f) && /role=["']button/.test(opening) && !/onKeyDown=/.test(opening)) guestBad.push(`${f}:${lineOf(s, m.index)} (role="button" but no onKeyDown — Enter/Space do nothing)`);
+    const where = `${f}:${lineOf(s, m.index)}`;
+    // Reachable by Tab = any tabIndex that is not negative (tabIndex={-1} is focus-by-script only,
+    // and `tabIndex={open ? 0 : undefined}` counts as reachable). Reachable boxes must answer
+    // Enter/Space; a role="button" that Tab can't reach is still a dead end.
+    const reachable = /\btabIndex=/.test(opening) && !/\btabIndex=\{?\s*["']?-\d/.test(opening);
+    if (reachable) {
+      if (!/onKeyDown=/.test(opening)) bad.push(`${where} (focusable but no onKeyDown — Enter/Space do nothing)`);
       continue;
     }
+    if (/\brole=["'](dialog|alertdialog|presentation|none)/.test(opening)) continue; // a pop-up's own frame
     if (OK_BACKDROP.test(opening) || OK_CATCHER.test(opening)) continue;
-    if (GUEST(f)) guestBad.push(`${f}:${lineOf(s, m.index)}`);
-    else staffCount.n++;
+    bad.push(where);
   }
 }
-if (guestBad.length) fail(`a guest screen has a clickable box a keyboard can't reach — use a <button>, or add role="button" tabIndex={0} and an onKeyDown for Enter/Space: ${guestBad.join(", ")}`);
-else pass("every clickable box on a guest screen is a button, says it is one, or is a backdrop");
-if (!QUIET && staffCount.n) console.log(`    · ${staffCount.n} on owner/admin screens — counted, not failed (staff tools; see checklist row 30)`);
+if (bad.length) fail(`a screen has a clickable box a keyboard can't reach — use a <button>, or add role="button" tabIndex={0} and an onKeyDown for Enter/Space: ${bad.join(", ")}`);
+else pass(`every clickable box on a guest, owner or admin screen is a button, answers the keyboard, or is a backdrop (${TSX.length} files)`);
 
 const layout = read("app/layout.tsx");
 if (/<html[^>]*\blang=/.test(layout)) pass("the page declares its language (screen readers pick the right voice)");
