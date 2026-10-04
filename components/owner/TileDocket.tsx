@@ -232,12 +232,28 @@ export default function TileDocket({
         footer{border-top:1px dashed ${RULE};padding:15px 26px 18px;display:flex;gap:18px;
           align-items:center;flex-wrap:wrap}
         .note{flex:1 1 320px;font-size:11px;line-height:1.7;color:#6f6959;margin:0}
-        .full{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;padding:11px 18px;
-          border-radius:9px;background:${INK};color:${PAPER};font-size:12.5px;font-weight:700;
-          letter-spacing:.04em;text-decoration:none;min-height:44px;box-sizing:border-box;
-          justify-content:center;transition:transform 120ms ease-out,opacity 140ms}
-        .full:hover{opacity:.9} .full:active{transform:scale(.985)}
-        .full.off{background:none;color:${MUT};border:1px dashed ${RULE};font-weight:500}
+        /* ── :global() IS NOT OPTIONAL ON A <Link> (2026-10-04) ──────────────────────────
+           styled-jsx adds its scope class to the JSX elements it can SEE. A capitalised
+           component — next/link here — is opaque to it, so the scope class never reaches the
+           rendered <a> and a plain '.full' rule matches nothing. The button he asked for by
+           name shipped as 171x16 of unstyled text, with no background and no padding, and the
+           Audit link beside it the same; measured live on the deployed page. The retired popup
+           knew this and used :global for exactly these two. Scoping '.tdk' and leaving the
+           child global keeps the rule off every other screen. */
+        /* 'color' carries !important because app/globals.css sets
+           a, a:visited … to "color: inherit !important" for the guest menu's cards, and that
+           beats any component rule. Without it the button renders as an ink-on-ink rectangle
+           with the words invisible — which is how it shipped, and how the retired popup already
+           knew to write it. */
+        .tdk :global(.full){flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;
+          padding:11px 18px;border-radius:9px;background:${INK};color:${PAPER} !important;font-size:12.5px;
+          font-weight:700;letter-spacing:.04em;text-decoration:none;min-height:44px;
+          box-sizing:border-box;justify-content:center;
+          transition:transform 120ms ease-out,opacity 140ms}
+        .tdk :global(.full:hover){opacity:.9}
+        .tdk :global(.full:active){transform:scale(.985)}
+        .tdk :global(.full.off){background:none;color:${MUT} !important;border:1px dashed ${RULE};
+          font-weight:500}
 
         /* ── PORTRAIT IS FOR A PHONE AND NOWHERE ELSE ───────────────────────────────────── */
         @media (max-width:860px){
@@ -247,19 +263,20 @@ export default function TileDocket({
           .lcol{border-right:0;border-bottom:1px dashed ${RULE}}
           .big{font-size:38px}
           footer{flex-direction:column;align-items:stretch}
-          .full{width:100%}
+          .tdk :global(.full){width:100%}
         }
         @keyframes tdkfade{from{opacity:0}to{opacity:1}}
         @keyframes tdkpop{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
         @media (prefers-reduced-motion:reduce){
           .tdk,.tdk-back{animation:none}
-          .full,.x{transition:none}
+          .x{transition:none}
+          .tdk :global(.full){transition:none}
         }
       `}</style>
       <style jsx global>{`
         .tdk .chart{display:block;width:100%;overflow:visible}
         .tdk .chart text{font:500 9.5px ui-sans-serif,system-ui,sans-serif;fill:${MUT}}
-        .tdk .nlink{color:${INK};font-weight:700;text-decoration:underline;text-underline-offset:2px}
+        .tdk :global(.nlink){color:${INK} !important;font-weight:700;text-decoration:underline;text-underline-offset:2px}
       `}</style>
     </div>
   );

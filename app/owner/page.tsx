@@ -2648,41 +2648,17 @@ export default function OwnerDashboard() {
         .dhidden b { display: block; font-size: 13px; }
         .dhidden span i { display: block; font-style: normal; font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
         .dall i { opacity: .7; margin-right: 4px; }
-        /* ── the KPI tile popup (owner, 2026-08-18) ────────────────────────────────────────────
-           A centred sheet rather than the side drawer: this is a figure being explained, not a
-           restaurant being previewed, and the numbers read better centred over the tile they came
-           from. Same close contract as every other overlay here — backdrop, the X, Escape and the
-           phone's BACK. */
-        .ow2-tile-wrap { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; padding: 18px; }
-        .ow2-tile-back { position: absolute; inset: 0; background: rgba(5,8,14,.6); backdrop-filter: blur(2px); animation: ow2fade .18s ease-out; }
-        .ow2-tile { position: relative; width: min(430px, 100%); max-height: min(88vh, 720px); overflow-y: auto; background: var(--card); border: var(--border); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.45); animation: ow2pop .18s cubic-bezier(.4,0,.2,1); }
-        @keyframes ow2pop { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
-        .ow2-tile header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 16px 18px 10px; }
-        .ow2-tile header .ti { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-        .ow2-tile header .ti b { font-size: 17px; font-weight: 800; }
-        .ow2-tile header .ti i { font-style: normal; font-size: 11.5px; color: var(--muted); }
-        .ow2-tile .x { flex: none; background: var(--bg); border: var(--border); color: var(--text); width: 30px; height: 30px; border-radius: 9px; font-size: 13px; cursor: pointer; }
-        .ow2-tile .who { display: flex; align-items: center; gap: 7px; margin: 0 18px 12px; padding: 6px 10px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 9%, transparent); font-size: 11.5px; font-weight: 700; color: var(--text); }
-        .ow2-tile .who i { font-size: 10px; opacity: .7; }
-        .ow2-tile .rows { padding: 0 18px; display: flex; flex-direction: column; }
-        .ow2-tile .r { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--border-c, rgba(128,128,128,.16)); }
-        .ow2-tile .r:last-child { border-bottom: none; }
-        /* the total line reads as the answer, not as one more row */
-        .ow2-tile .r.last { margin-top: 4px; border-top: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); border-bottom: none; padding-top: 11px; }
-        .ow2-tile .r.last .l, .ow2-tile .r.last .v { font-weight: 800; }
-        .ow2-tile .r.last .v { color: color-mix(in srgb, var(--accent) 80%, var(--text)); font-size: 17px; }
-        .ow2-tile .r .l { display: flex; flex-direction: column; gap: 2px; font-size: 13px; font-weight: 600; min-width: 0; }
-        .ow2-tile .r .l i { font-style: normal; font-size: 10.5px; color: var(--muted); font-weight: 500; line-height: 1.35; }
-        .ow2-tile .r .v { flex: none; font-size: 14.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
-        .ow2-tile .note { display: flex; gap: 8px; margin: 12px 18px 0; padding: 10px 12px; border-radius: 10px; background: var(--bg); font-size: 11.5px; line-height: 1.45; color: var(--muted); }
-        .ow2-tile .note > i { margin-top: 2px; opacity: .8; flex: none; }
-        :global(.ow2-tile .note .nlink) { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; font-weight: 800; color: color-mix(in srgb, var(--accent) 80%, var(--text)) !important; text-decoration: none; white-space: nowrap; }
-        :global(.ow2-tile .note .nlink:hover) { text-decoration: underline; }
-        :global(.ow2-tile .note .nlink i) { font-size: 9px; }
-        .ow2-tile footer { padding: 14px 18px 16px; }
-        :global(.ow2-tile .full) { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: var(--accent); color: #06251a !important; border: none; border-radius: 11px; padding: 12px; font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer; text-decoration: none; }
-        :global(.ow2-tile .full:hover) { filter: brightness(1.08); }
-        :global(.ow2-tile .full.off) { background: var(--bg); border: var(--border); color: var(--muted) !important; cursor: default; font-weight: 600; }
+        /* ── THE KPI TILE POPUP WAS REPLACED BY THE DOCKET (owner, 2026-10-04) ────────────────
+           The 430px centred sheet that lived here is gone, and so is every rule that styled it
+           (.ow2-tile, .ow2-tile-wrap, .ow2-tile-back, @keyframes ow2pop, and the :global .full /
+           .nlink overrides). His words on the screenshot: "can't you make it big wider? this is
+           like kitchen bill size… for phone you can keep the portrait, but for the other thing."
+           Five directions were built; he chose the DOCKET, and it now lives in
+           components/owner/TileDocket.tsx with its own styled-jsx — wide on a desktop, folding
+           to the portrait sheet under 860px, and carrying a chart per tile.
+           A new way replaces the old one: nothing here renders .ow2-tile any more, so none of
+           those rules could ever match again. @keyframes ow2fade stays — the restaurant DRAWER
+           above still uses it. */
         .ow2-drawer footer { padding: 14px 18px; border-top: var(--border); }
         .ow2-drawer .full { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: var(--accent); color: #06251a; border: none; border-radius: 11px; padding: 12px; font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer; }
         .ow2-drawer .full:hover { filter: brightness(1.08); }
