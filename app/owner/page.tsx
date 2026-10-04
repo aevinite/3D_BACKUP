@@ -2374,13 +2374,22 @@ export default function OwnerDashboard() {
         let tileSideTitle: string | undefined;
         if (tileOpen === "revenue") {
           tileChart = { kind: "area", pts: dailyPts }; tileChartTitle = `Revenue · ${RANGE_LABEL[globalRange]}`;
-          tileSide = (pay?.paymentMethods || []).map((m) => ({ k: m.method, v: m.revenue, t: inr(m.revenue) }));
+          // ── A WAY NOBODY PAID IS NOT A WAY THEY PAID (owner, 2026-10-04) ──────────────
+          // "If Swiggy or Zomato is not integrated it should not be there." A channel that was
+          // never switched on takes no money, so it arrives here with ₹0 — and a list of how
+          // the money came in was printing "On the house · ₹0" and any dormant app beside the
+          // ones that actually paid. Dropping the empty lines answers it without hiding a sale:
+          // a channel that DID take money stays listed even if it has since been switched off,
+          // because these lines have to add up to the revenue above them.
+          tileSide = (pay?.paymentMethods || []).filter((m) => m.revenue > 0)
+            .map((m) => ({ k: m.method, v: m.revenue, t: inr(m.revenue) }));
           tileSideTitle = "How the money arrived";
         } else if (tileOpen === "orders") {
           tileChart = { kind: "bars", pts: dailyPts.map((p) => ({ x: p.x, v: avgTicket ? Math.round(p.v / avgTicket) : 0,
             hint: `${p.x} · about ${avgTicket ? Math.round(p.v / avgTicket) : 0} orders` })) };
           tileChartTitle = `Orders a day · ${RANGE_LABEL[globalRange]}`;
-          tileSide = (pay?.paymentMethods || []).map((m) => ({ k: m.method, v: m.orders, t: m.orders.toLocaleString("en-IN") }));
+          tileSide = (pay?.paymentMethods || []).filter((m) => m.orders > 0)   // see the note above
+            .map((m) => ({ k: m.method, v: m.orders, t: m.orders.toLocaleString("en-IN") }));
           tileSideTitle = "Orders by method";
         } else if (tileOpen === "today" && restCount > 1) {
           const rs = (ov?.restaurants || []).filter((r) => !r.reportsOff);
@@ -2398,7 +2407,8 @@ export default function OwnerDashboard() {
             { k: `Less food binned · ${inr(foodLost)}`, s: "− Food", v: -foodLost },
             { k: `On hand · ${inr(onHand)}`, s: "On hand", v: onHand, total: true }] };
           tileChartTitle = "How it was reached";
-          tileSide = (ov?.restaurants || []).map((r) => ({ k: r.name, v: r.revenueAll, t: inr(r.revenueAll) }));
+          tileSide = (ov?.restaurants || []).filter((r) => r.revenueAll > 0)   // see the note above
+            .map((r) => ({ k: r.name, v: r.revenueAll, t: inr(r.revenueAll) }));
           tileSideTitle = "Earned where (all time)";
         }
         return (
