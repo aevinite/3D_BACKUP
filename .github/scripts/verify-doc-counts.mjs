@@ -223,6 +223,7 @@ for (const [file, needle, what] of [
     ".claude/verify-everything.lock": "same: a pid lock that exists only while the suite is running",
     ".claude/sweep/shots/T23/":       "written BY the run that is being described — gitignored, so a fresh checkout never has it",
     ".claude/settings.local.json":  "gitignored on purpose — the owner's machine has it, a worktree and a fresh clone never do",
+    "docs/research/pos-inventory/": "gitignored on purpose (all of docs/research/ is local research) — the owner's Mac has the dossiers, a fresh clone never does",
     ".claude/work-checker-lessons.md":"the work-checker was retired 2026-08-13; the rule says never recreate it",
     "components/ui/":                 "never existed — the shadcn CLI is blocked on Tailwind 4 and the doc says so",
     "components/AdminSwitcher.tsx":   "deleted 2026-06-26 (commit 2b9d3933); the doc now says so in the same sentence",
