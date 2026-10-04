@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { attachSafeAreaBridge } from "@/lib/safeAreaBridge";
 import { useBackClose } from "@/lib/backStack";
 import { useOwnerSkin, pushSkinTo } from "./useOwnerSkin";
-import { portfolioColor } from "@/lib/restaurantColor";
+import { restaurantColor } from "@/lib/restaurantColor";
 
 // Owner panel → Manager mode (owner, 2026-08-02). Hosts the SAME live manager panel
 // (public/panels/editor, ?ownermode=1) inside the owner cockpit. One engine per
@@ -142,7 +142,7 @@ export default function OwnerManagerMode({
                   switcher and the charts on 2026-08-07 — lib/restaurantColor exists to hold the one
                   answer, and this launcher was simply never converted. Keyed by id, so it is stable
                   across sorts, reloads and pages. */}
-              <span className="sw" style={{ background: portfolioColor(r.id) }} aria-hidden="true" />
+              <span className="sw" style={{ background: restaurantColor(r.id, restaurants.map((x: { id: string }) => x.id)) }} aria-hidden="true" />
               <span className="nm">{r.name}</span>
               <span className="go">Open the live floor <i className="fas fa-arrow-right" aria-hidden="true" /></span>
             </button>
