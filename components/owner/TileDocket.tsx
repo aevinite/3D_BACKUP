@@ -136,12 +136,23 @@ export default function TileDocket({
           <div className="lcol">
             <div className="big">{big}</div>
             <div className="cap">{cap}</div>
-            <div className="rows">
+            {/* ── EVERY ROW IS THE SAME HEIGHT (owner, 2026-10-04) ──────────────────────────
+                "One of the things doesn't have a bottom written something, but it should have
+                that gap so that the gap looks even for all." Only some rows carry an
+                explanatory line, so "Average per paid order" sat in a block a line shorter
+                than its neighbours and the rhythm went ragged. When ANY row in a sheet has
+                one, the ones that do not reserve the same line — so the gaps are identical
+                down the column. When none has one, nothing is reserved and the sheet stays
+                tight. */}
+            <div className={`rows${rows.some((r) => r[2]) ? " hinted" : ""}`}>
               {rows.map(([l, v, hint, total]) => (
                 <div className={`r${total ? " total" : ""}`} key={l}>
-                  <span className="l">{l}{hint ? <small>{hint}</small> : null}</span>
-                  <span className="dots" aria-hidden="true" />
-                  <span className="v">{v}</span>
+                  <div className="rline">
+                    <span className="l">{l}</span>
+                    <span className="dots" aria-hidden="true" />
+                    <span className="v">{v}</span>
+                  </div>
+                  <small>{hint || " "}</small>
                 </div>
               ))}
             </div>
@@ -212,11 +223,16 @@ export default function TileDocket({
           font-variant-numeric:tabular-nums}
         .cap{font-size:11px;color:${MUT};margin-top:8px;letter-spacing:.04em}
         .rows{margin-top:20px;font-size:12.5px}
-        .r{display:flex;align-items:baseline;gap:6px;padding:6px 0}
+        .r{padding:6px 0}
+        .rline{display:flex;align-items:baseline;gap:6px}
         .r .l{white-space:nowrap}
         .r .dots{flex:1;border-bottom:1px dotted #bdb6a4;transform:translateY(-3px)}
         .r .v{font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
-        .r small{display:block;font-size:10px;color:#8a8373;padding-top:2px;white-space:normal}
+        /* A row with no explanation renders a blank one, so the gaps stay even — but only in a
+           sheet where something DOES explain itself. Empty by default, reserved under .hinted. */
+        .r small{display:none}
+        .rows.hinted .r small{display:block;font-size:10px;color:#8a8373;padding-top:2px;
+          white-space:normal;min-height:13px}
         .r.total{border-top:1px solid ${INK};border-bottom:3px double ${INK};margin-top:9px;
           padding:9px 0;font-size:14px}
         .rcol{padding:24px 26px;display:grid;align-content:start;gap:20px;min-width:0}
