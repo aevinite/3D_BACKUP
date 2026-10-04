@@ -348,8 +348,45 @@ for (const r of perRest) {
 
   console.log(`\n▶ ${r.slug} — ${orders.length} orders  paid=${paidN} cancelled=${cancelledN}  revenue ≈ ₹${Math.round(revenue).toLocaleString("en-IN")}`);
   const ORDER_COLS = ["restaurant_id", "table_number", "items", "subtotal", "tax", "total", "discount", "discount_note", "status", "payment_status", "archived", "payment_method", "paid_at", "created_at", "kot_no"];
+  // ── AN ARCHIVE IS MONEY HISTORY. IT MUST NOT EAT TODAY'S SHELF. (2026-10-03) ───────────────
+  // Every order below is `served`/`received`/`preparing` and back-dated over two months, and
+  // since mig 409 a kitchen-committed INSERT genuinely deducts its recipe from stock. So the
+  // moment this seeder started writing `id` on each line (same commit as 409 — before that it
+  // wrote a `slug` nothing joined on, which is exactly why this was never a problem), it armed
+  // thousands of depletions: green-bowl alone is ~4,350 orders over the window and it HAS
+  // recipes, as do burger-barn and taco-fiesta. A sibling rig hit the identical fault from the
+  // other direction and drove its shelf to minus ₹6.1 lakh across 23 ingredients.
+  //
+  // These bills are history for the MONEY; the shelf is a snapshot of RIGHT NOW. Seeding
+  // seventy-five days of deliveries to put back what seventy-five days of service took out
+  // would be inventing data. So: remember the shelf, insert the archive, put the shelf back and
+  // delete only the movements these very orders caused. A real sale placed through the app is
+  // untouched and still depletes exactly as it should.
+  const shelf = (await db.from("inv_items").select("id,qty_base").eq("restaurant_id", r.id)).data || [];
+
   const oids = await insertChunked("orders", orders, ORDER_COLS);
   orders.forEach((o, i) => { o.id = oids[i]; });
+
+  if (shelf.length) {
+    // `ref_id` is TEXT while `orders.id` is UUID — compare as strings, never join them raw.
+    // And the kind is `consumption`, not `consume`: a scoped delete that matches nothing looks
+    // exactly like one that worked, which is how this sort of purge passes while doing nothing.
+    let purged = 0;
+    for (let i = 0; i < oids.length; i += 400) {
+      const chunk = oids.slice(i, i + 400).map(String);
+      const { data, error } = await db.from("inv_movements").delete()
+        .eq("restaurant_id", r.id).eq("kind", "consumption").in("ref_id", chunk).select("id");
+      if (error) throw new Error(`purge consumption: ${error.message}`);
+      purged += (data || []).length;
+    }
+    for (const it of shelf) {
+      const { error } = await db.from("inv_items").update({ qty_base: it.qty_base }).eq("id", it.id);
+      if (error) throw new Error(`restore shelf: ${error.message}`);
+    }
+    // Loud on purpose: 0 purged on a restaurant WITH recipes means the trigger stopped firing,
+    // which is the fault mig 409 fixed coming back. Silence here would hide it again.
+    console.log(`     shelf: ${shelf.length} ingredient(s) restored · ${purged} archive consumption row(s) removed`);
+  }
 
   const feedback = [];
   for (const o of orders) {

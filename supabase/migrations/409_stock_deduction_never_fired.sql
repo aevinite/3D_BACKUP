@@ -2,9 +2,18 @@
 -- ═════════════════════════════════════════════════════════════════════════════
 -- THE FAULT (found 2026-10-03, by asking why selling a dish never moved its stock)
 --
--- mig 224 built automatic stock depletion and wired it to `orders`. It has never once fired.
--- `inv_movements` across the whole database holds count_adjust / opening / purchase / waste and
--- ZERO 'consumption' rows, on 300+ orders and 69 recipe lines.
+-- mig 224 built automatic stock depletion and wired it to `orders`. It has never fired for a
+-- single order THIS APP CREATED.
+--
+-- ⚠ CORRECTED 2026-10-04 — the first draft of this header overstated the fault, and a wrong
+-- comment outlives whoever wrote it. It said "never once fired" and "ZERO consumption rows
+-- across the whole database". That is false. There are ~23,000 consumption rows going back to
+-- August, and they all belong to restaurants whose SEEDED orders carry a `slug` — because
+-- scripts/reset-demo-history.mjs used to write `{slug,title,qty,price}`. For those rows the join
+-- DID match and DID deplete: green-bowl's demo shelf sits near minus 3.85 million base units
+-- because of it. The zero I first measured was real but scoped to one restaurant.
+-- The true statement is narrower and worse than the one I replaced: the trigger matched SEED
+-- DATA and never matched a real order — precisely backwards.
 --
 -- Its own header states the assumption that broke it:
 --     "owner_type 'dish': owner_key = the menu item's SLUG (orders.items[] carries slugs)"
@@ -13,9 +22,9 @@
 --     id, title, price, qty, options, removed, note, tax_mode, is_mrp
 -- There is no 'slug'. So the trigger's inner filter
 --     WHERE COALESCE(it->>'slug','') <> ''
--- discarded every line before the recipe join was even reached, the loop ran zero times, and
--- because the function is deliberately FAIL-OPEN (EXCEPTION WHEN OTHERS THEN RETURN NEW) nothing
--- ever errored, logged, or looked wrong. A silent no-op for as long as the feature has existed.
+-- discarded every line of every REAL order before the recipe join was even reached, and because
+-- the function is deliberately FAIL-OPEN (EXCEPTION WHEN OTHERS THEN RETURN NEW) nothing ever
+-- errored, logged, or looked wrong. A silent no-op on real trade, quietly busy on seed data.
 --
 -- Measured on the dev DB before this migration:
 --   · 134,773 order lines total — 74,228 carry 'id', and the 59,965 carrying 'slug' are all

@@ -12,8 +12,10 @@
 //              Found 2026-07-06 and fixed by mig 130, whose header spells the shape out.
 //   · mig 224  automatic stock depletion — the trigger's inner filter was
 //              `WHERE COALESCE(it->>'slug','') <> ''`, so it discarded every line before the
-//              recipe join. It never fired once, and being deliberately fail-open it never
-//              logged either. Selling a dish never moved its stock.
+//              recipe join. It never fired for one order THIS APP CREATED. (It DID fire for
+//              seeded rows carrying a stray `slug`, which is how ~23,000 consumption rows exist
+//              while real trade moved no stock at all — the fault matched test data and missed
+//              production, which is exactly backwards.) Fail-open, so it never logged either.
 //   · mig 227  lfh_inv_dish_cost + lfh_inv_coverage — "sold qty", "revenue", "covered revenue"
 //              and "total dishes" were hard zeros. lfh_inv_coverage is the function the UI
 //              divides by to print the food-cost %, and mig 227 calls it "the honesty gate on
