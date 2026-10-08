@@ -44,8 +44,9 @@ const bad = (m, extra) => { fail++; console.log(`  ❌ ${m}${extra ? ` — ${ext
 
 // Everything a browser hands a classic script. Kept as one flat list rather than pulled from a
 // dependency: this guard must keep working with no network and no extra package.
+// createImageBitmap: shrinkimg.js calls it behind `if (window.createImageBitmap)` (S10 T39 item 15).
 const BROWSER = new Set(`
-AbortController AbortSignal ArrayBuffer Array Audio Blob BroadcastChannel Boolean CSS CustomEvent
+AbortController AbortSignal ArrayBuffer Array Audio Blob BroadcastChannel Boolean CSS CustomEvent createImageBitmap
 DOMParser Date Element Error Event File FileReader FormData Function Headers HTMLElement Image
 Infinity Intl IntersectionObserver JSON Map Math MediaRecorder MutationObserver NaN Node Notification Number
 Object PerformanceObserver Promise Proxy Reflect RegExp Request ResizeObserver Response Set String
