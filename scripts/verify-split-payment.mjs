@@ -579,6 +579,30 @@ head("8 · an even split of any bill adds back up to that bill");
     want(r.ok === false && r.status === 409 && legsReversed(writes),
       "…and a tab that lost the race is refused the same way, its parts stamped reversed", r);
   }
+
+  // item 6 — a failed SAVE says what happened to the bill, never the database's own sentence
+  const PG_SENTENCE = { message: 'duplicate key value violates unique constraint "session_payments_pkey"', code: "23505" };
+  const PG_BROKE = { message: "internal error: could not extend file base/16384", code: "XX000" };
+  for (const [what, key, splits] of [
+    ["recording the parts", "insert:session_payments"],
+    ["stamping the bill", "update:orders"],
+    ["adding a new pay-later person", "insert:khata_customers", [{ amount: 525, method: "Cash" }, { amount: 525, method: "Pay later", khataName: "Ravi" }]],
+  ]) {
+    for (const [kind, e, status] of [["a refused value", PG_SENTENCE, 400], ["an unexplained failure", PG_BROKE, 500], ["no answer", DB_DOWN, 503]]) {
+      const { sb } = standIn({ fail: { [key]: e } });
+      const real = console.error; console.error = () => {};
+      let r; try { r = await settle(sb, splits); } finally { console.error = real; }
+      want(r.ok === false && r.status === status && !/violates|constraint|internal error|TimeoutError|extend file/i.test(r.message) && r.message.length > 20,
+        `${what}: ${kind} answers ${status} with a sentence about the bill, not the database's words`, r);
+    }
+  }
+  {
+    const { sb, writes } = standIn({ fail: { "update:orders": PG_BROKE } });
+    const real = console.error; console.error = () => {};
+    try { await settle(sb); } finally { console.error = real; }
+    want(legsReversed(writes), "…and a stamp that failed still stamps its own parts reversed (the trail never claims a settle that did not happen)");
+  }
+  want(!/message:\s*\w+\.error\.message/.test(PS), "the source hands no `x.error.message` to a person anywhere in lib/paySplit.ts");
 }
 
 console.log(failed

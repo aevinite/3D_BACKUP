@@ -21,7 +21,7 @@ import { effectiveTaxRate, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 // The rate ONE order was charged at is decided in the same file the printed bill uses, so this
 // path and the paper can never answer differently — see orderTaxRate's own note for why it moved.
 import BILLDOC from "@/public/panels/billdoc.js";
-import { BUSY_MESSAGE } from "@/lib/dbRefusal";
+import { BUSY_MESSAGE, refusalStatus } from "@/lib/dbRefusal";
 
 export type SplitLeg = {
   amount: number;
@@ -69,6 +69,18 @@ export const SPLIT_METHODS: readonly string[] = [...PAYMENT_METHODS, PAY_LATER];
 const busy = (step: string, error: unknown): SplitResult => {
   console.error(`[paySplit] ${step} read failed:`, (error as { message?: unknown })?.message ?? error);
   return { ok: false, status: 503, message: BUSY_MESSAGE };
+};
+
+// ── A FAILED SAVE SAYS WHAT HAPPENED, NOT WHAT POSTGRES SAID (sweep #10 T30, item 6) ───────────
+// The three writes below answered with the database's own sentence — "duplicate key value violates
+// unique constraint …" — straight to a waiter mid-service. The detail is logged here; the person
+// gets a sentence about their bill. The STATUS is the honest one too (lib/dbRefusal): a value the
+// database refuses is a 4xx the panel shows rather than a 500 its outbox would retry for ever, and
+// a database that did not answer is the busy reply.
+const saveFailed = (step: string, error: unknown, sentence: string): SplitResult => {
+  console.error(`[paySplit] ${step} failed:`, (error as { message?: unknown })?.message ?? error);
+  const status = refusalStatus(error, 500);
+  return { ok: false, status, message: status === 503 ? BUSY_MESSAGE : sentence };
 };
 
 /** Is this part a tab rather than money? */
@@ -261,7 +273,7 @@ export async function settleBillInParts(
       }
       if (!customer) {
         const made = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone }).select("id,name");
-        if (made.error) return { ok: false, message: made.error.message, status: 500 };
+        if (made.error) return saveFailed("adding the pay-later person", made.error, "Couldn't add that person to the pay-later book — nothing was settled. Try again.");
         customer = (made.data as { id: string; name: string }[])[0];
       }
     }
@@ -278,7 +290,7 @@ export async function settleBillInParts(
     khata_customer_id: isPayLater(s) ? customer!.id : null,
   }));
   const ins = await sb.from("session_payments").insert(legs).select("id");
-  if (ins.error) return { ok: false, message: ins.error.message, status: 500 };
+  if (ins.error) return saveFailed("recording the parts", ins.error, "Couldn't record the payment parts — nothing was settled. Try again.");
   const legIds = ((ins.data || []) as { id: string }[]).map((l) => l.id);
 
   const note = `${parts.length}-way split: ` + parts.map((s) => `₹${s.amount.toFixed(0)} ${s.method}`).join(" + ")
@@ -326,9 +338,9 @@ export async function settleBillInParts(
     // second, with no transaction across the two. Left alone, a failed stamp leaves the bill unpaid
     // while session_payments says the parts were collected on it — so "how did table 6 pay?"
     // answers for a settle that never happened. Stamp them reversed (mig 285's rule: a money record
-    // is corrected, never deleted), then still answer 500 so the person knows to retry.
+    // is corrected, never deleted), then still answer a failure so the person knows to retry.
     await reverseOurLegs("auto · the bill was not settled", "the settle failed after the parts were recorded");
-    return { ok: false, message: upd.error.message, status: 500 };
+    return saveFailed("stamping the bill", upd.error, "Couldn't mark the bill settled — the parts were not kept. Try again.");
   }
   const reached = ((upd.data || []) as { id: string }[]).map((o) => o.id);
   if (reached.length < ids.length) {

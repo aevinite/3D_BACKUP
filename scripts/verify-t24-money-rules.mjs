@@ -458,8 +458,10 @@ eq("orderTaxRate falls back to the settings rate when the order was never stampe
   check("…and it stamps them (mig 285) rather than deleting them",
     /\/\/ THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN/.test(src)
     && !/session_payments"\)\s*\n?\s*\.delete\(/.test(src));
+    // Since 2026-10-09 (sweep #10 T30, item 6) a failed save answers through saveFailed(): ok:false,
+    // a plain sentence instead of the database's, and 500 unless dbRefusal names a truer status.
   check("…and the person is still told the settle failed (500), not quietly told it worked",
-    /return \{ ok: false, message: upd\.error\.message, status: 500 \};/.test(src));
+    /return saveFailed\("stamping the bill", upd\.error,/.test(src) && /refusalStatus\(error, 500\)/.test(src) && /return \{ ok: false, status, message:/.test(src));
 
   // ── T24 fix 2: one rounding for the check AND the row ──────────────────────────────────
   // Again the behaviour: ONE rounding feeds both the gate and the stored row. The object literal
