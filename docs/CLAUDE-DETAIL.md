@@ -509,29 +509,27 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
   sha-256 hash (mig 341). Not a cookie and not a login: a printing machine that must survive a power
   cut cannot depend on somebody signing in afterwards. It is scoped to ONE restaurant and to three
   verbs, so it is a printing-only credential — see `docs/PRINT-HELPER.md`.
-  - **TWO verbs under it are deliberately unauthenticated, and grant nothing** (mig 368):
-    `pair/start` — a machine with no credential yet describes itself and is handed a public CODE plus
-    a private SECRET; the row it creates can do exactly one thing, be shown to a signed-in human for
-    approval. And `pair/poll` — answers `waiting`/`expired`, or hands over the token **once**, and
-    only to the process holding that secret. **A wrong secret is answered identically to a code that
-    does not exist**, so this cannot be used to discover codes. The restaurant is chosen by the
-    approver at `/api/pair`, never by the helper.
-- **`/api/pair`** — the print helper's ALLOW door (mig 368). It takes **either** credential and
-  checks them in this order: `tokenIsValid` (the admin), else the staff cookie + `managerCan(…,
-  "print_setup")`. Neither → `signedIn: false` on the GET and **401** on the POST, so a stranger
-  holding a pairing code can do nothing with it.
-  - **A staff member can only ever adopt a machine into their OWN restaurant** — the request's `rid`
-    is ignored for them and taken from their session. Trusting it would let any manager attach a
-    printer to somebody else's shop.
-  - Its two unauthenticated siblings live under `/api/print-agent/pair/*` below, not here.
+  - **ONE verb under it is deliberately unauthenticated: `pair/claim`** (mig 380, 2026-09-13). The
+    person at the printer types the six-character setup code the Printing screen showed a signed-in
+    person, and the helper trades it for its token. The restaurant was fixed when the code was made,
+    so nothing here can join a restaurant on its own. It has its own wall (`print_setup_code`, 20 tries
+    in 10 minutes per address), which is also the alarm.
+  - **`pair/start`, `pair/poll` and the `/api/pair` Allow page (mig 368) are DELETED, not disabled**
+    (mig 380, owner 2026-09-13: *"instead of login make something else otherwise the waiter will also
+    do that printing thing"*) — they asked for a staff login on the restaurant's own counter machine.
+    This section described them as live until sweep #10 T17 round 2 (2026-10-08) found the gap; a
+    removed gate must leave this list in the same commit that removes it.
 - **`/api/owner/**`** — `ownerScope()` (`lib/ownerScope.ts`); null → 401.
 - **Deliberately public** (the COMPLETE list — an API route absent from here must have a gate;
   re-checked route by route in the T9 sweep 2026-08-05, which found the last two missing):
   `/api/health`, `/api/blocked`, `/api/log/client-error`, `/api/guest/limit-hit`,
   `/api/guest/place-order`, `/api/guest/call-waiter`, `/api/r/<slug>/menu-data`, `/api/rt-config`,
-  `/api/aggregators/webhook/<source>`, and the guest menu itself.
+  `/api/aggregators/webhook/<source>`, `/api/guest/leave`, and the guest menu itself.
   - `/api/guest/place-order` is a diner's own order — identity is the session token / the table in
     the body, and both RPCs are SECURITY DEFINER, so there is no login to require.
+  - `/api/guest/leave` is a diner's own "I've left" (2026-09, `07eda8af`): identity is the session token
+    in the body, `lfh_leave_session` (mig 146) is SECURITY DEFINER with no refusing branch, so sending
+    it twice is harmless. It was missing from this list until sweep #10 T17 round 2 found it.
   - `/api/guest/call-waiter` is the same door for a raised hand: it exists ONLY so a call made with
     no signal can be delivered on reconnect (the online path still calls the anon RPC straight from
     the browser). Identity is the session token or the table, the RPC is SECURITY DEFINER, and it is
@@ -567,7 +565,8 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
     wrong password, so it never confirms which slugs exist.
   - `/api/panel-logout` / `/api/staff-logout` — clearing your own cookie needs no permission.
     `/api/staff-logout` is POST-only (2026-08-05: a GET that changes state fires from anything that
-    merely POINTS at it); `/api/panel-logout` still offers both shapes.
+    merely POINTS at it); `/api/panel-logout` has been POST-only too since 2026-08-06 (corrected
+    here by sweep #10 T17 round 2 — this line said it "still offers both shapes").
   - `/api/panel-profile` **GET** — deliberately answers `200 {staff:false}` with no cookie rather than
     401, because the admin's super-access view has no per-user profile and a 401 there filed a fake
     problem in the error log on all six panels (2026-07-28). Its **POST** does require a login.
