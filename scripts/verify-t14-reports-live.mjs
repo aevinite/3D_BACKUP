@@ -1177,7 +1177,10 @@ head("8 · the rest of the driven ledger");
     }));
     R("P05194", "'Discounts given' carries the period's discount", rupee(d.tiles.find((t) => /DISCOUNTS GIVEN/i.test(t.k))?.v) >= 0);
     R("P05195", "'Effective rate' is discount ÷ item sales", d.tiles.some((t) => /EFFECTIVE RATE/i.test(t.k)));
-    R("P05196", "the days table lists only days a discount was given",
+    // With no discount in the period the table holds ONE row — the honest sentence "No discounts were
+    // given in this period." — which this read as a ₹0 day (sweep #10 T39 item 39).
+    if (d.rows.length === 1 && /No discounts were given/.test(d.rows[0].join(" "))) S("P05196", "the days table lists only days a discount was given", "no discount in this period — the page says so in words instead of drawing an empty table");
+    else R("P05196", "the days table lists only days a discount was given",
       d.rows.every((r) => rupee(r[2]) > 0), d.rows.filter((r) => rupee(r[2]) <= 0).map((r) => r[0]).join(","));
     R("P05197", "the top-5 ranking labels its value 'Discount given', not 'Revenue'", true, "asserted from the source in verify:t14 (valueLabel)");
     R("P05198", "the ranking chart stays inside its own panel", !d.geometry || d.geometry.plot <= d.geometry.box + 2, JSON.stringify(d.geometry));
@@ -1815,8 +1818,17 @@ head("9 · Inventory & stock, and the composition sheet — forced in this brows
       "forced in this browser — a real admin flip is a shared-database write, see the note above");
     R("P48340", "…and the report itself opens once it is on", await p.locator(".rs-report").count() > 0);
     await p.close();
-    // …and off again, without the force.
+    // …and off again, without the force. ONLY if it really is off (sweep #10 T39 item 39): since the
+    // inventory work of 2026-10-03 French House has inventory switched ON (allowed, owner control and
+    // enabled), so "the card disappears when it is switched off" was being asked of a module that is on.
     const { p: off } = await openReports(ctx, "?open=inventory&range=30d");
+    const reallyOn = await off.evaluate(async (b) => (await fetch(b + "/api/owner/reports?type=invstock&range=30d", { cache: "no-store" })).status === 200, BASE).catch(() => false);
+    if (reallyOn) {
+      for (const [id, m] of [["P48341", "…and the card disappears again the moment it is switched off"], ["P48343", "…and the screen shows the reason, not a broken page"],
+        ["P48345", "…and ZERO money figures from a feature he does not have"], ["P48346", "…and ZERO table rows"], ["P48347", "…so no other restaurant's stock numbers can appear there"]])
+        S(id, m, "inventory is switched ON for this restaurant today, so there is no switched-off state to look at without changing a real setting");
+      await off.close(); await ctx.close();
+    } else {
     R("P48341", "…and the card disappears again the moment it is switched off", await off.locator(".rs-report").count() === 0);
     const offTxt = flat(await visibleText(off));
     R("P48343", "…and the screen shows the reason, not a broken page", offTxt.length > 100 && !LEAKS.test(offTxt));
@@ -1825,6 +1837,7 @@ head("9 · Inventory & stock, and the composition sheet — forced in this brows
     R("P48347", "…so no other restaurant's stock numbers can appear there", !/₹1,84,500/.test(offTxt));
     await off.close();
     await ctx.close();
+    }
   }
   {
     // With the module OFF the API itself refuses, in plain words — read directly.
@@ -1835,7 +1848,8 @@ head("9 · Inventory & stock, and the composition sheet — forced in this brows
       const r = await fetch(b + "/api/owner/reports?type=invstock&range=30d", { cache: "no-store" });
       return { status: r.status, body: await r.json() };
     }, BASE);
-    R("P48342", "with the module OFF the API refuses, in plain words",
+    if (res.status === 200) S("P48342", "with the module OFF the API refuses, in plain words", "inventory is ON for this restaurant today; the refusal is checked per restaurant by verify:t14's payload layer (on → 200, off → 403 'Inventory isn't enabled')");
+    else R("P48342", "with the module OFF the API refuses, in plain words",
       res.status >= 400 && typeof res.body.error === "string" && !/at .*\(|TypeError/.test(res.body.error), `${res.status} ${res.body.error}`);
     await p.close();
     await ctx.close();
