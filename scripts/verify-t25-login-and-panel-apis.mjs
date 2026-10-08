@@ -688,6 +688,48 @@ check("P186502", "…and still touches no database and signs no staff member out
   !rx(CODE.staffLogout, /supabaseAdmin|sb\.from\(|logAction|USER_COOKIE/));
 check("P186503", "the 'You're blocked' note box uses the card's own lettering, not the browser's typewriter default",
   /<textarea[\s\S]*?fontFamily: "inherit"/.test(CODE.blockedView));
+// SWEEP #10 T17, item 14 (owner picked 2026-10-08) — the handover passwords get the vault's OWN key, and a copy
+// sealed under the old key keeps opening, so changing keys never shows "not stored yet". Fake keys only.
+{
+  const PV = await import("@/lib/passwordVault.ts");
+  const keep = { svc: process.env.SUPABASE_SERVICE_ROLE_KEY, cvk: process.env.CREDENTIAL_VAULT_KEY };
+  const set = (svc, cvk) => { if (svc === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = svc;
+    if (cvk === undefined) delete process.env.CREDENTIAL_VAULT_KEY; else process.env.CREDENTIAL_VAULT_KEY = cvk; };
+  const SVC1 = "fake-service-key-one-0123456789", SVC2 = "fake-service-key-TWO-9876543210", CVK = "fake-vault-key-abcdefghijklmnop";
+  try {
+    set(SVC1, undefined);
+    const old = await PV.sealPassword("handover-1");
+    check("P186504", "a stack WITHOUT the vault key seals and opens exactly as before (v1)",
+      old?.startsWith("v1$") && (await PV.openPassword(old)) === "handover-1" && !PV.needsReseal(old));
+    set(SVC1, CVK);
+    const fresh = await PV.sealPassword("handover-2");
+    check("P186505", "with CREDENTIAL_VAULT_KEY set, new copies are sealed with the vault's own key (v2)",
+      fresh?.startsWith("v2$") && (await PV.openPassword(fresh)) === "handover-2");
+    check("P186506", "a copy sealed BEFORE the vault key existed still opens after it is set (nothing shows 'not stored yet')",
+      (await PV.openPassword(old)) === "handover-1");
+    check("P186507", "…and is the one the reseal script would move; a v2 copy is not",
+      PV.needsReseal(old) === true && PV.needsReseal(fresh) === false);
+    set(SVC2, CVK);
+    check("P186508", "THE POINT: after the database key is rotated, a v2 copy still opens",
+      (await PV.openPassword(fresh)) === "handover-2");
+    check("P186509", "…while an un-moved v1 copy cannot (why the reseal runs) — and it answers null, never throws",
+      (await PV.openPassword(old)) === null);
+    set(SVC2, "a-different-vault-key-zzzzzzzz");
+    check("P186510", "a v2 copy under the wrong vault key opens to null, never half a string",
+      (await PV.openPassword(fresh)) === null);
+    set(SVC1, undefined);
+    check("P186511", "a v2 copy on a stack with no vault key opens to null (backup-2 / AV live never guess)",
+      (await PV.openPassword(fresh)) === null && PV.needsReseal(old) === false);
+  } finally { set(keep.svc, keep.cvk); }
+  const RS = stripComments(read("scripts/reseal-handover-passwords.mjs"));
+  check("P186512", "the reseal script is a DRY RUN unless --write, and refuses to start without the vault key",
+    has(RS, 'const WRITE = process.argv.includes("--write");') && /CREDENTIAL_VAULT_KEY[\s\S]{0,200}process\.exit\(2\)/.test(RS));
+  check("P186513", "…moves a row only if it still holds the copy it read (first save wins), and re-opens the new copy before writing",
+    has(RS, '.eq("id", row.id).eq("password_shown", row.password_shown)') && has(RS, "(await V.openPassword(sealed)) !== plain"));
+  check("P186514", "…and never prints a password, a key or a sealed value",
+    !/console\.\w+\([^)]*(plain|sealed|password_shown|CREDENTIAL_VAULT_KEY\b[^"]*\))/.test(RS.replace(/"[^"]*"/g, '""')));
+  check("P186515", "sign-in still never reads the vault (password_hash alone decides)", !/passwordVault|password_shown/.test(CODE.userAuth));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
