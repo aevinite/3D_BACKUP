@@ -37,22 +37,22 @@ export async function throttleStatus(key: string): Promise<ThrottleStatus> {
 // the staff_users lockout. Returns how many tries remain before a lock (0 when this
 // miss triggered the lock) so the login screen can warn "N attempts left"; callers
 // that don't need it can ignore the value.
+//
+// COUNTED IN THE DATABASE, ONE BY ONE (sweep #10 T17 round 4, item 29 — migration 414). This used to read fail_count,
+// add one here and upsert it back, so ten wrong admin passwords sent at the same instant all wrote 1 (measured on the
+// dev stack: count 1 and no lock after 10 simultaneous tries) and neither the admin door's lock nor the manager PIN's
+// ever came. lfh_throttle_fail does the add-one inside one insert-or-update, so tries queue on the row and each counts.
+// A count that cannot be written still fails OPEN, as before — a throttle must never be what breaks a sign-in.
 export async function throttleFail(key: string, maxFails: number, lockMs: number): Promise<{ attemptsLeft: number; locked: boolean; failCount: number }> {
   try {
-    const { data } = await sb
-      .from("login_throttle")
-      .select("fail_count")
-      .eq("key", key)
-      .limit(1);
-    const next = (data?.[0]?.fail_count || 0) + 1;
-    const locked = next >= maxFails;
-    const row: { key: string; fail_count: number; locked_until: string | null; updated_at: string } =
-      locked
-        ? { key, fail_count: 0, locked_until: new Date(Date.now() + lockMs).toISOString(), updated_at: new Date().toISOString() }
-        : { key, fail_count: next, locked_until: null, updated_at: new Date().toISOString() };
-    await sb.from("login_throttle").upsert(row, { onConflict: "key" });
+    const { data, error } = await sb.rpc("lfh_throttle_fail", { p_key: key, p_max: maxFails, p_lock_ms: lockMs });
+    if (error) throw error;
+    const row = (Array.isArray(data) ? data[0] : data) as { fail_count?: number; locked?: boolean } | null;
+    const next = Number(row?.fail_count) || 0;
+    const locked = row?.locked === true;
     return { attemptsLeft: locked ? 0 : Math.max(0, maxFails - next), locked, failCount: next };
-  } catch {
+  } catch (e) {
+    console.error("[throttle] could not count a wrong try:", e instanceof Error ? e.message : (e as { message?: string })?.message ?? e);
     /* fail-open: never let a throttle write break the login flow */
     return { attemptsLeft: maxFails, locked: false, failCount: 0 };
   }
