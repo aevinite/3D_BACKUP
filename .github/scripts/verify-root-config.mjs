@@ -243,6 +243,22 @@ want(/turbopack:\s*\{[\s\S]{0,200}root:\s*path\.(join|resolve)\(/.test(NEXT),
     "GitHub stops at the first red step, so every check behind it goes silent and the page shows one failure where there are several.");
 }
 
+/* ── one Node version: the site, the checker and package.json (sweep #10 T39 item 52) ─────────── */
+// The backup site builds on Vercel's Node 24.x and CI checked on Node 24, but nothing in the repo
+// said so: the Vercel number lived only in its dashboard, and a change there would have made CI test
+// on a different engine from the one the site runs. package.json's "engines" is the one place Vercel
+// reads it from (it overrides the dashboard), so the repo now owns the number and CI must agree.
+{
+  const eng = (JSON.parse(read("package.json")).engines || {}).node || "";
+  const W = read(".github/workflows/checks.yml");
+  const ci = (W.match(/node-version:\s*["']?(\d+)/) || [])[1] || "";
+  const engMajor = (eng.match(/^(\d+)/) || [])[1] || "";
+  want(!!engMajor && engMajor === ci,
+    `package.json engines (${eng}) and CI (Node ${ci}) name the same Node major — the one the site builds on`,
+    `Node versions disagree: package.json engines "${eng || "(none)"}", CI node-version "${ci || "(none)"}"`,
+    "Vercel builds with package.json's engines.node; CI must test on that same major or a green check means nothing for the site.");
+}
+
 console.log(fails
   ? `\n❌ verify-root-config — ${fails} problem(s) in the files that decide what the browser is told.`
   : "\n✅ verify-root-config — the browser headers, the region, the upload list and the build settings all still say what they are supposed to say");
