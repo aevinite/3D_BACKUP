@@ -25,11 +25,18 @@
 //   3. Match prose FLAT. JSX wraps a sentence wherever the line ran out.
 //   4. Block the service worker. `public/sw.js` caches /api/owner/*, so the second page in a context
 //      is served by the worker: a forced answer never arrives and a request count means nothing.
-import { requireUp } from "./sweep/appUp.mjs";
+import { requireUp, isDevServer } from "./sweep/appUp.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "https://3-d-backup.vercel.app";
 await requireUp(BASE);
+// ON A DEV SERVER, "ONCE" IS TWO (sweep #10 T39 item 60). React StrictMode runs every mount effect
+// twice in development only, so the request-count checks below read 2 on `npm run dev` and 1 on the
+// deployed site — and the dev server sends none of the site's production cache headers. Detected,
+// not assumed (scripts/sweep/appUp.mjs → isDevServer); an unreadable page counts as NOT dev.
+const DEV = await isDevServer(BASE);
+const ONCE = DEV ? 2 : 1;
+const onceNote = DEV ? " (dev server: StrictMode mounts twice, so 2 here means once on the site)" : "";
 
 let pass = 0, fail = 0, skip = 0; const fails = [];
 // ONE ID, ONE CHECK, FOREVER — enforced, not hoped for (T13, 2026-09-01).
@@ -660,13 +667,13 @@ await band("L5", async () => {
     return { onLoad, after };
   };
   const roster = await count("/owner/staff", 25000, false, ".ost-row");
-  P(`P${id++}`, "opening the roster asks its own endpoint exactly once", (roster.onLoad["/api/owner/staff"] || 0) === 1, JSON.stringify(roster.onLoad));
+  P(`P${id++}`, "opening the roster asks its own endpoint exactly once", (roster.onLoad["/api/owner/staff"] || 0) === ONCE, JSON.stringify(roster.onLoad) + onceNote);
   P(`P${id++}`, "…and asks it no more while it just sits there", (roster.after["/api/owner/staff"] || 0) === 0, JSON.stringify(roster.after));
   P(`P${id++}`, "…and starts no other owner poll", Object.keys(roster.after).filter((k) => k.startsWith("/api/owner")).length === 0, JSON.stringify(roster.after));
   const menu = await count("/owner/menu", 25000, false, null);
   P(`P${id++}`, "the Menu page starts no poll of its own", Object.keys(menu.after).filter((k) => k.startsWith("/api/owner")).length === 0, JSON.stringify(menu.after));
   const setV = await count("/owner/settings", 35000, false, ".adm-chip");
-  P(`P${id++}`, "opening Settings asks for the page once", (setV.onLoad["/api/owner/settings"] || 0) === 1, JSON.stringify(setV.onLoad));
+  P(`P${id++}`, "opening Settings asks for the page once", (setV.onLoad["/api/owner/settings"] || 0) === ONCE, JSON.stringify(setV.onLoad) + onceNote);
   P(`P${id++}`, "…and never re-reads the page itself on a timer", (setV.after["/api/owner/settings"] || 0) === 0, JSON.stringify(setV.after));
   P(`P${id++}`, "…and the only thing that repeats is the printing card, if it is there",
     Object.keys(setV.after).filter((k) => k.startsWith("/api/owner") && k !== "/api/owner/printing").length === 0, JSON.stringify(setV.after));
@@ -704,7 +711,7 @@ await band("L5", async () => {
     await p.goto(BASE + "/owner/staff", { waitUntil: "domcontentloaded" });
     await p.waitForSelector(".ost-row", { timeout: 90000 }); await p.waitForTimeout(2000);
     const first = seen.filter((x) => x === "/api/owner/staff").length;
-    P(`P${id++}`, "the roster does not fetch itself twice on mount", first === 1, `${first}`);
+    P(`P${id++}`, "the roster does not fetch itself twice on mount", first === ONCE, `${first}${onceNote}`);
     seen.length = 0;
     await p.locator(".ost-find input").first().fill("x");
     await p.locator(".ost-find .ost-x").first().click();
@@ -713,7 +720,8 @@ await band("L5", async () => {
     // the API must not be cached by the browser, or a stale roster could be shown
     const r = await p.request.get(BASE + "/api/owner/staff", { headers: { cookie: (await ctx.cookies()).map((c) => `${c.name}=${c.value}`).join("; ") } });
     const cc = r.headers()["cache-control"] || "";
-    P(`P${id++}`, "the roster's own answer is not cacheable by a shared cache", /no-store|no-cache|private|max-age=0/.test(cc), cc || "(none)");
+    if (DEV) S(`P${id++}`, "the roster's own answer is not cacheable by a shared cache", "a dev server sends none of the site's production cache headers — this is judged on the deployed site");
+    else P(`P${id++}`, "the roster's own answer is not cacheable by a shared cache", /no-store|no-cache|private|max-age=0/.test(cc), cc || "(none)");
     await p.close(); await ctx.close();
   }
   {
@@ -738,8 +746,8 @@ await band("L5", async () => {
     await p.goto(BASE + "/owner/staff", { waitUntil: "domcontentloaded" }); await p.waitForSelector(".ost-row", { timeout: 90000 });
     await p.goto(BASE + "/owner/settings", { waitUntil: "domcontentloaded" }); await p.locator(".adm-chip").first().waitFor({ timeout: 90000 });
     await p.goto(BASE + "/owner/menu", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(4000);
-    P(`P${id++}`, "walking all three screens asks the roster endpoint once", (hits["/api/owner/staff"] || 0) === 1, JSON.stringify(hits));
-    P(`P${id++}`, "…and the settings endpoint once", (hits["/api/owner/settings"] || 0) === 1, JSON.stringify(hits));
+    P(`P${id++}`, "walking all three screens asks the roster endpoint once", (hits["/api/owner/staff"] || 0) === ONCE, JSON.stringify(hits) + onceNote);
+    P(`P${id++}`, "…and the settings endpoint once", (hits["/api/owner/settings"] || 0) === ONCE, JSON.stringify(hits) + onceNote);
     P(`P${id++}`, "…and the Menu page adds no owner call of its own", !Object.keys(hits).some((k) => /menu/.test(k)), JSON.stringify(hits));
     P(`P${id++}`, "…and nothing was asked more than a handful of times in total",
       Object.values(hits).every((n) => n <= 4), JSON.stringify(hits));

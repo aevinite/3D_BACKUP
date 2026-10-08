@@ -99,3 +99,21 @@ export async function requireUp(base, what = "this check drives the real app") {
   );
   process.exit(2);
 }
+
+/**
+ * Is `base` a DEVELOPMENT server (`next dev`) rather than a built site? (sweep #10 T39 item 60)
+ *
+ * It matters for any check that counts requests on mount: in development React StrictMode runs
+ * every mount effect TWICE on purpose, so "asked exactly once" honestly reads 2 there and 1 on the
+ * deployed site — and the dev server does not send the site's production cache headers either.
+ * verify:owner-live500 went red on :4439 for exactly those reasons while green on backup.
+ * The signal is the dev overlay the dev server injects into every page (`next-devtools`), which a
+ * production build never carries — measured on :4439 (present) and 3-d-backup.vercel.app (absent).
+ * Unknown (the page could not be read) is treated as NOT dev, so a check stays strict.
+ */
+export async function isDevServer(base) {
+  try {
+    const r = await fetch(new URL("/login", base), { signal: AbortSignal.timeout(20000) });
+    return /next-devtools/.test(await r.text());
+  } catch { return false; }
+}
