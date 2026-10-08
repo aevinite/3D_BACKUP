@@ -200,7 +200,11 @@ for (const f of ledgers) {
   const t = parentOf(f).replace(".md", "");
   const byName = new RegExp(`\\b${t}\\.md\\b`);
   const byRow = new RegExp(`^\\|\\s*${t.slice(1)}\\s*\\|`, "m");
-  if (!byName.test(index) && !byRow.test(index))
+  // …or the sweep-#10 table's own row, which names the terminal as "| T39 |". A terminal NUMBER that
+  // never had a ledger before (T36–T40 in sweep #10) has no T39.md to be named after, so the first
+  // two tests could only fail it, though its row and its file name were both written (S10 T39 item 42).
+  const bySweepRow = new RegExp(`^\\|\\s*${t}\\s*\\|[^\\n]*\\b${f.replace(".", "\\.")}\\b`, "m");
+  if (!byName.test(index) && !byRow.test(index) && !bySweepRow.test(index))
     fail(`${DIR}/${f} exists but INDEX.md has no row for it — add its territory and its ID block, ` +
          `or the next sweep will not know it is there.`);
 }
