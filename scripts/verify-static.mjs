@@ -124,6 +124,7 @@ const GUARDS = [
   ["verify-owner-team-and-logs.mjs", "the owner's Audit & logs and Team roster"],
   ["verify-session-gate-taps.mjs", "the guest's table sheet"],
   ["verify-guest-waits-for-its-restaurant.mjs", "every guest screen waits until it knows which restaurant it is on"],
+  ["verify-migration-numbers.mjs", "two sessions never give two database changes the same number, and no number goes missing"],
 ];
 
 // NOT HERE, AND WHY — the admission test is stricter than it first looks.
