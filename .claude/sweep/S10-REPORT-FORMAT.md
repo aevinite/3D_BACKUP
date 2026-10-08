@@ -1,4 +1,4 @@
-# THE REPORT FORMAT — the only shape a sweep-#9 terminal reports in
+# THE REPORT FORMAT — the only shape a sweep-#10 terminal reports in
 
 **Owner, 2026-08-13, STANDING, re-stated for every sweep since.** He was once given the same
 information twice: as a wall of prose, and as this. His reply to the second was *"i loved this
@@ -12,14 +12,14 @@ point of this run. Sweep #6 wrote ~178 ideas into files and he never saw one of 
 
 ---
 
-## What is different in sweep #9
+## What is different in sweep #10
 
 - **PART 2 IS EMPTY, AND THAT IS CORRECT.** His instruction for this run: *"They will do the fixes.
   They will not do the improvements. They will list that improvements."* You fixed problems; you
   built no improvements. Part 2 gets one line saying exactly that, and every idea you had lives in
   Part 4 instead.
-- **The counters at the top say 50, not 500** — 50 new checks each, on top of re-running the
-  existing ledger rows that cover your files.
+- **The counters at the top say 500** — 500 new checks each (the owner's number for sweep #10,
+  2026-10-08), on top of re-running EVERY existing ledger row that covers your files.
 - **NO QUOTA.** If your territory produced two items, print two. If it produced none, print none
   and say *"this part is clean"* with the row counts that prove it. Padding a report to look busy
   costs more than a clean one.
@@ -51,13 +51,13 @@ And around the items:
 
 ## The four parts, in this order
 
-Print a **running version every ~25 checks** so he can read you without waiting for the end, and a
+Print a **running version every ~100 checks** so he can read you without waiting for the end, and a
 **final version** when you finish.
 
 ```
 ════════════ TERMINAL <N> of 40 — <territory in four words> ════════════
 Ledger rows re-run: <x> of <y>   ·   REGRESSIONS found: <n>
-New checks written: <x> of 50    ·   problems found: <n>   ·   fixed: <n>
+New checks written: <x> of 500   ·   problems found: <n>   ·   fixed: <n>
 Improvements spotted (NOT built, by your instruction): <n>  → all in Part 4
 ──────────────────────────────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@ Improvements spotted (NOT built, by your instruction): <n>  → all in Part 4
 
 ### 2. …
 
-   If you found nothing: say "This part is clean — <x> ledger rows re-run, 50 new checks, no
+   If you found nothing: say "This part is clean — <x> ledger rows re-run, 500 new checks, no
    problems." and move on. That is a complete result, not a failure.
 
 

@@ -33,6 +33,67 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
+## 🔴 SWEEP #10 — A FRESH 40-TERRITORY CUT, 500 CHECKS EACH. **BLOCKS ARE PRE-ALLOCATED; NOBODY CLAIMS FROM THE MARK.**
+
+**Planned 2026-10-08 against `origin/main` `dda906a6`.** The owner asked for it as *"the last time"*,
+and mid-planning: *"create new, don't follow old data and also make sure everything should be
+covered"*. So sweep #10 does **not** inherit sweep #8/#9's territory split: its 40 territories were cut
+fresh from today's **1,658 tracked files** (excluding `.claude/sweep/` paperwork) and the cut was
+proven by a script — **every file owned exactly once, 0 unowned, 0 owned twice** (three oversized files
+are split by line range or sorted position, and say so in their prompts). Terminal numbers are
+per-sweep: **sweep-#10 T7 is not sweep-#9 T7.**
+
+Each terminal re-runs every existing row whose SUBJECT is a file it owns (old results are not trusted
+until re-proven), then files **500 new checks in a ledger of its own, `T<n>-S10.md`**, from the block
+below — 1,000 ids for 500 checks, so a generated band that comes out larger never needs a claim.
+**Runs two at a time.** Prompts: `.claude/sweep/S10-T<n>-PROMPT.md`; rules `S10-RULES.md`; state `STATE.md`.
+
+**Each terminal fills in ITS OWN row below and no other.** A merge conflict in this table is two
+terminals' rows — keep both sides.
+
+| T | ID block (1,000) | territory | filed? | rows | ok | prob | resv |
+|---|---|---|---|---|---|---|---|
+| T1 | `P170001`–`P171000` | The guest menu and its three doors | ⏳ not run yet | — | — | — | — |
+| T2 | `P171001`–`P172000` | The dish page and the 3D viewer | ⏳ not run yet | — | — | — | — |
+| T3 | `P172001`–`P173000` | Ordering — the basket, placing an order, calling staff, rating | ⏳ not run yet | — | — | — | — |
+| T4 | `P173001`–`P174000` | The table session — a table shows only its own party | ⏳ not run yet | — | — | — | — |
+| T5 | `P174001`–`P175000` | App shell, offline, realtime and the small shared components | ⏳ not run yet | — | — | — | — |
+| T6 | `P175001`–`P176000` | Manager panel — editor/app.js, part 1 of 3 | ⏳ not run yet | — | — | — | — |
+| T7 | `P176001`–`P177000` | Manager panel — editor/app.js, part 2 of 3 | ⏳ not run yet | — | — | — | — |
+| T8 | `P177001`–`P178000` | Manager panel — editor/app.js part 3 of 3, the host page and inventory | ⏳ not run yet | — | — | — | — |
+| T9 | `P178001`–`P179000` | The manager panel's server route, part 1 of 2 | ⏳ not run yet | — | — | — | — |
+| T10 | `P179001`–`P180000` | The manager panel's server route, part 2 of 2 | ⏳ not run yet | — | — | — | — |
+| T11 | `P180001`–`P181000` | The kitchen screen | ⏳ not run yet | — | — | — | — |
+| T12 | `P181001`–`P182000` | The waiter tablet screen | ⏳ not run yet | — | — | — | — |
+| T13 | `P182001`–`P183000` | The waiter tablet's server route, and the shared floor logic | ⏳ not run yet | — | — | — | — |
+| T14 | `P183001`–`P184000` | The bill and KOT document | ⏳ not run yet | — | — | — | — |
+| T15 | `P184001`–`P185000` | The print queue and the print helper | ⏳ not run yet | — | — | — | — |
+| T16 | `P185001`–`P186000` | Shared panel plumbing — the helpers every panel loads | ⏳ not run yet | — | — | — | — |
+| T17 | `P186001`–`P187000` | Logins, sign-outs and the gates every request passes | ⏳ not run yet | — | — | — | — |
+| T18 | `P187001`–`P188000` | The access and permission model | ⏳ not run yet | — | — | — | — |
+| T19 | `P188001`–`P189000` | The admin's Access screens and people | ⏳ not run yet | — | — | — | — |
+| T20 | `P189001`–`P190000` | The owner's home dashboard | ⏳ not run yet | — | — | — | — |
+| T21 | `P190001`–`P191000` | The owner's Reports, every chart, and the analytics behind them | ⏳ not run yet | — | — | — | — |
+| T22 | `P191001`–`P192000` | The owner's Audit & logs, and the Team | ⏳ not run yet | — | — | — | — |
+| T23 | `P192001`–`P193000` | The owner's Customers, Pay Later, Loyalty, Inventory, Complaints and Ratings | ⏳ not run yet | — | — | — | — |
+| T24 | `P193001`–`P194000` | The owner's Settings, Menu editor, Manager mode and the console shell | ⏳ not run yet | — | — | — | — |
+| T25 | `P194001`–`P195000` | The admin console's home, shell, Repair and System health | ⏳ not run yet | — | — | — | — |
+| T26 | `P195001`–`P196000` | The admin's Restaurants and Owners | ⏳ not run yet | — | — | — | — |
+| T27 | `P196001`–`P197000` | The admin's Recycle bin, Billing, Usage, Rate limits, Platform floor, Logs and Bill ledger | ⏳ not run yet | — | — | — | — |
+| T28 | `P197001`–`P198000` | The admin server routes, part 1 | ⏳ not run yet | — | — | — | — |
+| T29 | `P198001`–`P199000` | The admin server routes, part 2 | ⏳ not run yet | — | — | — | — |
+| T30 | `P199001`–`P200000` | The money and compliance libraries | ⏳ not run yet | — | — | — | — |
+| T31 | `P200001`–`P201000` | Every remaining shared library — the data-reading helpers | ⏳ not run yet | — | — | — | — |
+| T32 | `P201001`–`P202000` | The database — migrations at positions 1–105 | ⏳ not run yet | — | — | — | — |
+| T33 | `P202001`–`P203000` | The database — migrations at positions 106–210 | ⏳ not run yet | — | — | — | — |
+| T34 | `P203001`–`P204000` | The database — migrations at positions 211–315 | ⏳ not run yet | — | — | — | — |
+| T35 | `P204001`–`P205000` | The database — migrations at positions 316–END | ⏳ not run yet | — | — | — | — |
+| T36 | `P205001`–`P206000` | LOGIN AND DATA-SEPARATION CORRECTNESS, EVERYWHERE (one dimension only) | ⏳ not run yet | — | — | — | — |
+| T37 | `P206001`–`P207000` | THE LOOK — layout, colour, size, fit (one dimension only) | ⏳ not run yet | — | — | — | — |
+| T38 | `P207001`–`P208000` | EVERY WORD ON EVERY SCREEN (one dimension only) | ⏳ not run yet | — | — | — | — |
+| T39 | `P208001`–`P209000` | THE REPO'S OWN GUARDS, CI, AND THE DEPENDENCIES | ⏳ not run yet | — | — | — | — |
+| T40 | `P209001`–`P210000` | Docs, root config, the odd folders, and THE REMAINDER | ⏳ not run yet | — | — | — | — |
+
 ## 🔴 SWEEP #9 ROUND-2 BLOCKS ARE PRE-ALLOCATED. **DO NOT CLAIM FROM THE LINE BELOW.**
 
 **Added 2026-09-15 by sweep #9's planning session, after `verify:ledger-index` went RED on `main`
@@ -111,7 +172,7 @@ both the registry-correct and the cheaper side to move. T1 had no live worktree 
 
 ---
 
-**Next free ID (SWEEP #9: DO NOT CLAIM FROM THIS LINE — see the round-2 table above): `P160959`.** *(**T27 of sweep #9 took EIGHT more ids, `P160951`–`P160958`, on 2026-09-16** — the overrun on its round-2 band, claimed before a single row was written, exactly like the band itself.
+**Next free ID (SWEEP #10: DO NOT CLAIM FROM THIS LINE — every terminal's block is in the sweep-#10 table above): `P210001`.** *(Moved 2026-10-08 from `P160959` by sweep #10's planning session, which pre-allocated `P170001`–`P210000` — forty blocks of 1,000 — before a single terminal started. The gap `P160959`–`P170000` is deliberate and free. Highest id on disk at the moment of moving: `P160958`.)* *(Previous mark: `P160959`.)* *(**T27 of sweep #9 took EIGHT more ids, `P160951`–`P160958`, on 2026-09-16** — the overrun on its round-2 band, claimed before a single row was written, exactly like the band itself.
 
 **Why there is an overrun at all, and why it is not trimmed.** The round was planned at 500 and the checks came out at **552**. Three of its nine sections are GENERATED from the source rather than typed — one phase per territory file for the sign-in-order rule, one per clamp in the settings sanitizer, one per refusal shape — so the count is whatever the territory actually has, not a number chosen in advance. **The honest fix is to widen the claim, not to trim 52 real checks to hit a round number**, which is the reasoning T17 wrote on this line on 2026-09-02 and T13 repeated on 2026-09-05 for the same shape.
 
