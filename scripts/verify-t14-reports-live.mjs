@@ -1216,8 +1216,28 @@ head("8 · the rest of the driven ledger");
       rows: [...document.querySelectorAll("#rs-hourly-table tbody tr")].map((tr) => ({ cells: [...tr.querySelectorAll("td")].map((c) => c.innerText.trim()), fire: !!tr.querySelector(".fa-fire") })),
       charts: document.querySelectorAll("svg.recharts-surface").length,
       bars: [...document.querySelectorAll("svg.recharts-surface")].map((s) => s.querySelectorAll(".recharts-bar-rectangle").length),
+      // WHERE each drawn bar sits, and how wide the drawing area is — see P05222 below.
+      grids: [...document.querySelectorAll("svg.recharts-surface")].map((s) => ({
+        xs: [...s.querySelectorAll(".recharts-bar-rectangle")].map((g) => g.getBoundingClientRect().x).sort((a, b) => a - b),
+        w: Number(s.querySelector("defs clipPath rect")?.getAttribute("width") || 0) })),
       text: (document.querySelector(".rs-root")?.innerText || "").replace(/\s+/g, " "),
     }));
+    // A 24-HOUR SCALE IS JUDGED BY WHERE THE BARS SIT, NOT BY HOW MANY ARE DRAWN (sweep #10 T39 item
+    // 55, 2026-10-09). The series is built as 24 buckets (Array.from({ length: 24 }) in
+    // app/owner/reports/page.tsx), but Recharts draws NO rectangle for a bucket whose value is 0 — so
+    // "24 rectangles" was true only for a restaurant open every hour of the day, and this went red on
+    // a correct chart ([8,20], measured on :4439). An hour missing from the SCALE shows instead as a
+    // spacing that does not fit 24 even slots across the drawing area, which is what is checked.
+    const on24 = (g) => {
+      if (g.xs.length < 2 || !g.w) return g.xs.length < 2;    // nothing to measure a spacing from
+      // One hour's width, from the bars themselves: the closest pair, refined across the whole span
+      // (the chart pads its edges, so width ÷ 24 is not quite one slot).
+      const gaps = g.xs.slice(1).map((x, i) => x - g.xs[i]).filter((d) => d > 1);
+      const span = g.xs[g.xs.length - 1] - g.xs[0];
+      const slot = span / Math.round(span / Math.min(...gaps));
+      const slots = g.w / slot;                               // how many hours the drawing area holds
+      return slots >= 23.5 && slots <= 25 && g.xs.every((x) => { const k = (x - g.xs[0]) / slot; return Math.abs(k - Math.round(k)) < 0.2; });
+    };
     R("P05216", "'Peak hour' agrees with the hour table's fire marker",
       (d.rows.find((r) => r.fire)?.cells[0] || "") === (d.tiles.find((t) => /PEAK HOUR/i.test(t.k))?.v || ""),
       `${d.rows.find((r) => r.fire)?.cells[0]} vs ${d.tiles.find((t) => /PEAK HOUR/i.test(t.k))?.v}`);
@@ -1229,8 +1249,9 @@ head("8 · the rest of the driven ledger");
       !!d.tiles.find((t) => /PER ORDER/i.test(t.k)) && !d.tiles.some((t) => /AVG BILL/i.test(t.k)));
     R("P05221", "the hour table's '% of revenue' sums to 100%",
       Math.abs(d.rows.reduce((a, r) => a + rupee(r.cells[3]), 0) - 100) < 1.5, `${d.rows.reduce((a, r) => a + rupee(r.cells[3]), 0).toFixed(1)}%`);
-    R("P05222", "both hourly charts cover all 24 hours", d.charts >= 2 && d.bars.every((n) => n === 0 || n === 24), JSON.stringify(d.bars));
-    R("P05046", "…re-stated: a full 24-bucket series, so the chart has no gaps", d.bars.every((n) => n === 0 || n === 24));
+    R("P05222", "both hourly charts cover all 24 hours", d.charts >= 2 && d.grids.every(on24),
+      JSON.stringify(d.grids.map((g) => ({ bars: g.xs.length, width: g.w }))));
+    R("P05046", "…re-stated: a full 24-bucket series, so the chart has no gaps", d.grids.every(on24));
     R("P49404", "a 24-bucket chart lives in a sideways scroller", await p.locator(".owx-scrollx").count() > 0);
     const sx = await p.evaluate(() => { const e = document.querySelector(".owx-scrollx"); return e ? getComputedStyle(e).overflowY : ""; });
     R("P49405", "…which never scrolls vertically", sx === "hidden", sx);
