@@ -224,6 +224,25 @@ want(/turbopack:\s*\{[\s\S]{0,200}root:\s*path\.(join|resolve)\(/.test(NEXT),
     "That folder is a snapshot of the old app. Type-checking it fails loudly and means nothing.");
 }
 
+/* ── .github/workflows/checks.yml — one red step must not hide the rest ──────────────────── */
+// From 2026-10-04 main was red on `static guards`, and GitHub stops a job at its first red step —
+// so `dependency advisories` never ran and two new high-rated advisories sat unreported behind it
+// (sweep #10 T39 item 3). Every step after the install must carry the run-anyway condition.
+{
+  const W = read(".github/workflows/checks.yml");
+  const steps = W.split(/\n      - /).slice(1).map((b) => "- " + b);
+  const at = steps.findIndex((b) => /\bid:\s*install\b/.test(b) && /npm ci\b/.test(b));
+  const after = at < 0 ? [] : steps.slice(at + 1).filter((b) => /\n\s+run:/.test(b));
+  const COND = /\n\s+if:\s*\$\{\{\s*!cancelled\(\)\s*&&\s*steps\.install\.outcome\s*==\s*'success'\s*\}\}/;
+  const missing = after.filter((b) => !COND.test(b)).map((b) => (b.match(/name:\s*([^\n]+)/) || [, b.slice(0, 40)])[1]);
+  want(at >= 0 && after.length >= 8 && missing.length === 0,
+    `every one of CI's ${after.length} checks still runs when an earlier check fails`,
+    at < 0 ? "checks.yml has no `id: install` npm ci step to key the run-anyway condition on"
+      : after.length < 8 ? `only ${after.length} check step(s) found after the install — the scan found nothing to judge`
+      : `checks.yml step(s) without the run-anyway condition: ${missing.join(", ")}`,
+    "GitHub stops at the first red step, so every check behind it goes silent and the page shows one failure where there are several.");
+}
+
 console.log(fails
   ? `\n❌ verify-root-config — ${fails} problem(s) in the files that decide what the browser is told.`
   : "\n✅ verify-root-config — the browser headers, the region, the upload list and the build settings all still say what they are supposed to say");

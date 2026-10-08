@@ -43,19 +43,34 @@ jobs:
           node-version: 24
           cache: npm
 
-      - run: npm ci --no-audit --no-fund
+      - name: install
+        id: install
+        run: npm ci --no-audit --no-fund
+
+      # ── EVERY CHECK BELOW RUNS, EVEN AFTER AN EARLIER ONE FAILS (sweep #10 T39 item 3) ──────
+      # GitHub stops a job at its first red step. From 2026-10-04 main was red on `static guards`
+      # and the run ended there — so `dependency advisories` never ran, and two new high-rated
+      # package advisories (sharp, source-map-js) sat unreported behind it. That is the same "a
+      # chain stops at its first failure" fault verify:static was rebuilt to end, one level up.
+      # So each check carries the same `if:` line: run unless the run
+      # was cancelled or the install itself failed, because with no node_modules every later step
+      # would only fail for that one reason. The job is still red if any step is.
+      # Guarded by .github/scripts/verify-root-config.mjs.
 
       # tsc --noEmit. CLAUDE.md's definition of done asks for a type-check and, until now, no
       # command provided one: `npm run lint` is bare eslint and does not type-check.
       - name: typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run -s typecheck
 
       - name: lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run -s lint
 
       # money rounding, error classification, and the brandText/brandTheme/starterMenu units.
       # Not the e2e (test:totals) — that one reads the real database.
       - name: unit tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run -s test:money && npm run -s test:errors && npm run -s test:units
 
       # The static, read-only guards. Each one is a bug that actually reached someone's screen.
@@ -84,12 +99,14 @@ jobs:
       # the product was fine and the guard was asserting the spelling of code that had legitimately
       # changed shape. The false alarm was not the damage; the muted checks were.
       - name: static guards
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run -s verify:static
 
       # Separate because its npm alias bundles lib/accessTree.ts + lib/staffCaps.ts with esbuild
       # first — running scripts/verify-access-model.mjs bare reads whatever stale bundle is in
       # node_modules/.cache and reports on code that is no longer there.
       - name: access model
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run -s verify:access
 
       # The NUMBERS in the rulebooks. Cheap, repo-only, and here rather than in verify:static
@@ -102,6 +119,7 @@ jobs:
       # drifted, each copied into three or four documents. verify:pointers already checks that every
       # PATH and every `npm run` in CLAUDE.md resolves; nothing checked the numbers.
       - name: doc counts
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: node .github/scripts/verify-doc-counts.mjs
 
       # A panel exists at TWO addresses — /manager and /r/<slug>/manager — and they drift, because a
@@ -109,6 +127,7 @@ jobs:
       # /kitchen and /tablet so a manager with three open could tell them apart mid-service; the
       # three twins never got the line, so the tabs a restaurant's OWN staff use were all identical.
       - name: twin route parity
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: node .github/scripts/verify-twin-route-parity.mjs
 
       # next.config.ts decides the response headers every visitor gets, whether the content policy
@@ -119,6 +138,7 @@ jobs:
       # holds vercel.json's Mumbai region, the must-revalidate on /sw.js, the anchored /editor line
       # that once 404'd the manager panel, and tsconfig's strict.
       - name: root config
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: node .github/scripts/verify-root-config.mjs
 
       # The pages the sweep's own territory map never gave to anybody — /pair and /api/pair (the
@@ -127,6 +147,7 @@ jobs:
       # rather than on purpose, and the Allow page's "where next" button pointed a MANAGER at the
       # admin console, which answers them with a password prompt.
       - name: unowned routes
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: node .github/scripts/verify-unowned-routes.mjs
 
       # The packages we install. NOT in verify:static because it is the one check here that needs
@@ -136,4 +157,5 @@ jobs:
       # scripts/verify-deps.mjs for why a bare `npm audit --audit-level=high` was rejected.
       # `continue-on-error` is deliberately NOT set: a new high/critical should stop a merge.
       - name: dependency advisories
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run -s verify:deps
