@@ -233,7 +233,9 @@ t6("P17889", "there are exactly two setInterval timers plus the blocked wall's o
 t6("P17890", "no setTimeout re-arms itself into a disguised poll", "A", (a) => {
   // the two legitimate self-arming timers are the serialized printers (step) and backoffPoll (tick)
   const arms = [...a.matchAll(/setTimeout\((\w+),/g)].map((m) => m[1]);
-  const bad = arms.filter((f) => !["step", "tick", "cleanup", "closeMore", "updateSoundNudge"].includes(f));
+  // renderDishes: the 86 drawer's 120 ms search DEBOUNCE (2026-09-17) — clearTimeout on every key,
+  // armed by the input handler, never by itself. Not a poll (sweep #10 T39 item 22).
+  const bad = arms.filter((f) => !["step", "tick", "cleanup", "closeMore", "updateSoundNudge", "renderDishes"].includes(f));
   return bad.length === 0 || `self-arming timers: ${bad.join(", ")}`;
 });
 t6("P17891", "the panel never uses eval or the Function constructor", "A", (a) => !/\beval\(|new Function\(/.test(a) || "eval or Function() is used");
