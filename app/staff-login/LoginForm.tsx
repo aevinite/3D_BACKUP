@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import BotTrap, { botFields } from "@/components/BotTrap";
 import { BOT_TRAP_FIELD, BOT_ELAPSED_FIELD } from "@/lib/botCheck";
 
-type Err = { kind: "wrong" | "locked" | "network"; attemptsLeft?: number } | null;
+type Err = { kind: "wrong" | "locked" | "network" | "server"; attemptsLeft?: number } | null;
 
 export default function LoginForm({ next, initialError }: { next: string; initialError: Err }) {
   const [password, setPassword] = useState("");
@@ -37,8 +37,19 @@ export default function LoginForm({ next, initialError }: { next: string; initia
         // exactly what the no-JS <form> POST would have sent. One shape for the route to read.
         body: new URLSearchParams({ password, next, [BOT_TRAP_FIELD]: bot.trap, [BOT_ELAPSED_FIELD]: bot.elapsed }),
       });
-      const data = (await r.json().catch(() => ({}))) as { ok?: boolean; next?: string; locked?: boolean; attemptsLeft?: number };
+      const data = (await r.json().catch(() => ({}))) as { ok?: boolean; next?: string; locked?: boolean; blocked?: boolean; attemptsLeft?: number };
       if (data.ok) { window.location.assign(data.next || next); return; }
+      // READ EVERY ANSWER THE DOOR CAN GIVE, NOT JUST TWO (sweep #10 T17, item 6). /api/staff-login
+      // answers exactly five shapes: ok, locked, blocked, attemptsLeft, and a bare {ok:false}. This
+      // card knew two, so the other cases all fell into "Wrong password — try again":
+      //   · BLOCKED (the admin barred this device while the card was open) read as a typo, for ever —
+      //     the person kept retyping a correct password at a door that will never open. The page
+      //     itself shows the "You're blocked" screen; send them there.
+      //   · A reply that is not ours at all (a platform timeout page — no `ok` key) is the SERVER
+      //     failing, not the password being wrong. Saying "wrong password" makes the admin doubt the
+      //     one thing that was right.
+      if (data.blocked) { window.location.assign(`/staff-login?blocked=1&next=${encodeURIComponent(next)}`); return; }
+      if (data.ok !== false) { setErr({ kind: "server" }); return; }
       // Keep the typed password so they can just fix a typo — don't wipe the field.
       setErr(data.locked ? { kind: "locked" } : { kind: "wrong", attemptsLeft: data.attemptsLeft });
       inputRef.current?.focus();
@@ -53,6 +64,7 @@ export default function LoginForm({ next, initialError }: { next: string; initia
   const msg =
     err?.kind === "locked" ? "Too many wrong tries — wait a few minutes and try again."
     : err?.kind === "network" ? "Couldn't reach the server — check your connection and try again."
+    : err?.kind === "server" ? "The server didn\u2019t answer properly — try again in a moment."
     : err?.kind === "wrong" ? "Wrong password — try again."
     : null;
 

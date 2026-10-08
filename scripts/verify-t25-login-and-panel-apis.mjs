@@ -606,6 +606,22 @@ for (const [cid, idPart, why] of [
   check("P186018", "…and the try-again page names no restaurant (it could not read one)",
     !/\$\{(r|restaurant)\b/.test(ow.slice(tryAt, ow.indexOf("{ status: 503", tryAt))));
 }
+// SWEEP #10 T17, item 6 — the admin console's card must read EVERY answer /api/staff-login gives.
+// It knew two (ok, locked); a BLOCKED device and a platform error page both read "Wrong password".
+{
+  const route = CODE.staffLogin, form = CODE.staffLoginForm;
+  const keys = [...new Set([...route.matchAll(/bad\(\{\s*([a-zA-Z]+)\s*:/g)].map((m) => m[1]).concat(
+    [...route.matchAll(/bad\([a-zA-Z.]+ \? \{ ([a-zA-Z]+): true \} : \{ ([a-zA-Z]+)/g)].flatMap((m) => [m[1], m[2]])))];
+  check("P186019", "every refusal key /api/staff-login can send is one the card reads (blocked, locked, attemptsLeft)",
+    keys.length >= 3 && keys.every((k) => new RegExp(`data\\.${k}\\b`).test(form)), keys);
+  check("P186020", "a BLOCKED answer takes the person to the blocked screen instead of saying 'wrong password'",
+    /if \(data\.blocked\) \{ window\.location\.assign\(`\/staff-login\?blocked=1/.test(form));
+  check("P186021", "a reply that is not the door's own JSON (no `ok` key) is the SERVER failing, not a wrong password",
+    has(form, `if (data.ok !== false) { setErr({ kind: "server" }); return; }`) && has(form, `err?.kind === "server" ? "The server didn\\u2019t answer properly`));
+  check("P186022", "…and the blocked/server branches run BEFORE the wrong-password one",
+    form.indexOf("if (data.blocked)") > 0 && form.indexOf("if (data.ok !== false)") > form.indexOf("if (data.blocked)") &&
+    form.indexOf(`setErr(data.locked ?`) > form.indexOf("if (data.ok !== false)"));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
