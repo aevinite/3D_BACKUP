@@ -721,6 +721,24 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     hardDelete.join("\n    ") + "\n    On a refused delete: update { status: 'cancelled', archived: true, archived_at, cancelled_at, deleted_at }.");
 }
 
+// ── 15. NO SCRIPT CARRIES ITS OWN COPY OF THE PASSWORD VAULT (sweep #10 T39 item 34) ───────────
+// scripts/backfill-readable-passwords.mjs re-implemented lib/passwordVault.ts "byte for byte". On
+// 2026-10-08 the vault gained v2 copies (T17 item 14); the copy only opened v1, so to it all 74 v2
+// copies were "unreadable" — and that script gives an unreadable row a NEW password. A script that
+// opens or seals a stored password must import lib/passwordVault.ts, never restate its salt or key.
+{
+  const copies = [];
+  for (const f of files) {
+    const src = read(f);
+    // An IMPORT, not a mention: the old copy named lib/passwordVault.ts in a comment explaining itself.
+    const imports = /import\([^)]*passwordVault\.ts|from\s+["'][^"']*passwordVault["']/.test(src);
+    if (/aevidine\.credential\.vault\.v[0-9]/.test(src) && !imports) copies.push(f);
+  }
+  check("no script carries its own copy of the password vault's key or salt — it imports lib/passwordVault.ts",
+    copies.length === 0,
+    copies.join("\n    ") + "\n    Import the real module: const V = await import(pathToFileURL(join(ROOT, \"lib/passwordVault.ts\")).href).");
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

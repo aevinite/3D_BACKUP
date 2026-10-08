@@ -29,13 +29,15 @@
 // Only rows whose `password_shown` is empty or unreadable are touched, so a second run reports zero
 // and changes nothing (the standing "bulk rewrite scripts MUST be idempotent" rule).
 //
-//   node scripts/backfill-readable-passwords.mjs --dry     ← count only, writes nothing
-//   node scripts/backfill-readable-passwords.mjs
+//   node --experimental-strip-types --no-warnings scripts/backfill-readable-passwords.mjs --dry   ← count only
+//   node --experimental-strip-types --no-warnings scripts/backfill-readable-passwords.mjs
 //
 // IT ONLY RUNS AGAINST THE DEV DATABASE. The dev project ref is an allow-list below; this is a dev
 // tool, and pointing it anywhere else would give somebody else's staff a new password.
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { webcrypto as crypto } from "node:crypto";
 
 // ── env ─────────────────────────────────────────────────────────────────────────────────────────
@@ -83,33 +85,20 @@ async function verifySecret(plain, stored) {
   catch { return false; }
 }
 
-// The vault — lib/passwordVault.ts. Same key derivation, same AES-GCM envelope, same "v1$iv$ct".
-const KEY_SALT = "aevidine.credential.vault.v1";
-const VAULT_SECRET = process.env.CREDENTIAL_VAULT_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-let vaultKey = null;
-async function getVaultKey() {
-  if (vaultKey) return vaultKey;
-  const base = await crypto.subtle.importKey("raw", enc(VAULT_SECRET), "PBKDF2", false, ["deriveKey"]);
-  vaultKey = await crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: enc(KEY_SALT), iterations: 100_000, hash: "SHA-256" },
-    base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-  return vaultKey;
-}
-const vb64 = (b) => Buffer.from(b).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const vunb64 = (s) => new Uint8Array(Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64"));
-async function sealPassword(plain) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await getVaultKey(), enc(plain));
-  return `v1$${vb64(iv)}$${vb64(new Uint8Array(ct))}`;
-}
-async function openPassword(sealed) {
-  try {
-    const p = String(sealed || "").split("$");
-    if (p.length !== 3 || p[0] !== "v1") return null;
-    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: vunb64(p[1]) }, await getVaultKey(), vunb64(p[2]));
-    return new TextDecoder().decode(pt);
-  } catch { return null; }
-}
+// THE VAULT IS THE APP'S OWN, IMPORTED — NOT A COPY (sweep #10 T39 item 34). This file used to carry a
+// byte-for-byte re-implementation of lib/passwordVault.ts, and that is exactly how it broke: on
+// 2026-10-08 the vault gained a v2 format sealed with CREDENTIAL_VAULT_KEY alone (sweep #10 T17 item
+// 14). The copy only knew v1, so on a stack with that key every v2 copy would have read as
+// "unreadable" — and this script gives an unreadable row a BRAND-NEW random password. Importing the
+// real module (as scripts/reseal-handover-passwords.mjs does) means v1 and v2 open exactly as the app
+// opens them and a new copy is sealed exactly as the app seals it, today and after the next change.
+const V = await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "lib/passwordVault.ts")).href);
+const sealPassword = async (plain) => {
+  const sealed = await V.sealPassword(plain);
+  if (!sealed) throw new Error("the vault has no key on this stack — nothing can be sealed (set CREDENTIAL_VAULT_KEY or the service key)");
+  return sealed;
+};
+const openPassword = (sealed) => V.openPassword(sealed);
 
 // Same alphabet as the app's own generator: no l/o/0/1, so nothing printed can be read two ways.
 function genPassword() {
@@ -137,6 +126,20 @@ const rests = Object.fromEntries(((await sb.from("restaurants").select("id, name
 
 let sealedKnown = 0, minted = 0, alreadyFine = 0, failed = 0;
 const report = [];
+
+// ── "I CANNOT OPEN IT" IS NOT "THERE IS NONE" (sweep #10 T39 item 34) ──────────────────────────────
+// A copy that exists but will not open means THIS PROCESS has the wrong key (measured 2026-10-08: a
+// worktree whose .env.local predated CREDENTIAL_VAULT_KEY saw all 74 v2 copies as unreadable, and a
+// dry run proposed 78 brand-new passwords). Only an EMPTY copy may be filled in; if any non-empty copy
+// will not open, nothing is written at all, because the fault is the key and not the staff.
+const unreadable = [];
+for (const u of rows) if (u.password_shown && !(await openPassword(u.password_shown))) unreadable.push(u.username);
+if (unreadable.length) {
+  console.error(`REFUSED: ${unreadable.length} stored cop${unreadable.length === 1 ? "y" : "ies"} exist but will not open with the keys this process has.`);
+  console.error("  That is a missing or wrong vault key (CREDENTIAL_VAULT_KEY / the service key), not staff without a password.");
+  console.error("  Fix the environment and run again. Nothing was written, and nobody was given a new password.");
+  process.exit(2);
+}
 
 for (const u of rows) {
   // Already readable? Leave it completely alone — that is what makes a second run a no-op.
