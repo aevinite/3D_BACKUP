@@ -1140,6 +1140,74 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   check("P162248", "…and '+2 more accounts use this name'", /\(\+2 more accounts use this name\)$/.test(two || ""), two);
   G.FAIL = {}; G.FAIL_NTH = {};
 }
+// ── SWEEP #10 T17 ROUND 5 — RULES A DELIBERATE BREAK SURVIVED (mutation testing, 291 breaks) ─────────────────────────
+// Round 5 broke T17's files automatically; these rules had no check that would notice. ids P162249–P162262.
+{
+  const SA = await import("@/lib/staffAuth.ts");
+  const RG = await import("@/lib/revealGate.ts");
+  const RL = await import("@/lib/rateLimit.ts");
+  const PS = await import("@/lib/panelSettings.ts");
+  const SPv = await import("@/lib/sentryPrivacy.ts");
+  const PGv = await import("@/lib/panelGate.ts");
+  const OSv = await import("@/lib/ownerScope.ts");
+  const PLv = await import("@/app/api/panel-login/route.ts");
+  const ORv = await import("@/app/r/[restaurant]/owner/route.ts");
+  const SLv = await import("@/app/api/staff-login/route.ts");
+  const { NextRequest } = await import("next/server.js");
+  const RA = "00000000-0000-4000-8000-0000000000a1";
+  const fresh = () => { resetWorld(); G.FAIL = {}; G.FAIL_NTH = {}; G.CALLS = {}; };
+  const nreq = (path, init = {}) => { const h = new Headers(init.headers || {}); let b; if (init.json !== undefined) { h.set("content-type", "application/json"); b = JSON.stringify(init.json); } if (init.form) b = new URLSearchParams(init.form); if (init.cookie) h.set("cookie", init.cookie); return new NextRequest(new URL(path, "http://guard.local"), { method: init.method || "GET", headers: h, body: b }); };
+  const keepEnv = { ...process.env };
+  delete process.env.ADMIN_PASSWORD; delete process.env.STAFF_PASSWORD; delete process.env.EDITOR_PASSWORD; delete process.env.REVEAL_PASSWORD;
+  check("P162249", "with no admin password of any kind, adminPassword is the EMPTY TEXT and the uncover door says it is not set up", SA.adminPassword() === "" && RG.revealConfigured() === false);
+  process.env.ADMIN_PASSWORD = "guard5b-admin-pw";
+  check("P162250", "the RIGHT uncover password opens, and the same with one letter more does not", (await RG.revealPasswordMatches("guard5b-admin-pw")) === true && (await RG.revealPasswordMatches("guard5b-admin-pwx")) === false);
+  fresh();
+  check("P162251", "a blank subject is allowed and never sent to the limiter", (await RL.rateAllowed("staff_login", "  ")) === true && !G.RPCS.length);
+  fresh(); G.FAIL["rpc:lfh_rate_check"] = "throw";
+  check("P162252", "a limiter that THROWS lets the person through (it fails open)", (await RL.rateAllowed("staff_login", "x")) === true);
+  check("P162253", "a settings row of null is handed straight back (never a crash)", (() => { try { return PS.panelSafeSettings(null) === null; } catch { return false; } })());
+  const ev = { data: null, contexts: { trace: { data: { cookie: "c" } } }, spans: [{ data: { token: "t" } }] }; SPv.scrubSentryEvent(ev);
+  check("P162254", "an error report whose extra data is null still has its trace and span secrets blanked", ev.contexts.trace.data.cookie === SPv.REDACTED && ev.spans[0].data.token === SPv.REDACTED);
+  check("P162255", "the admin panel's frame never carries an ?as= that is not a real id", PGv.panelIframeSrc("/p/", RA, { as: "x&rid=y" }) === `/p/?rid=${RA}`);
+  check("P162256", "the 'couldn't read every restaurant' reply is a 503 (retryable)", OSv.incompleteListResponse().status === 503);
+  const H = await UA.hashSecret("guard5b-pass");
+  const u = { id: "00000000-0000-4000-8000-00000000e001", username: "g5b", role: "manager", restaurant_id: RA, name: "G5B", active: true, deleted_at: null, token_version: 0, failed_count: 0, locked_until: null, password_hash: H, profile_confirmed: true };
+  fresh(); G.FIX.staff_users = [JSON.parse(JSON.stringify(u))];
+  const e0 = console.error; console.error = () => {};
+  const bt = await PLv.POST(nreq("/api/panel-login", { method: "POST", json: { username: "g5b", password: "guard5b-pass", trap: "bot" } }));
+  console.error = e0;
+  check("P162257", "a filled bot trap is refused EVEN WITH THE RIGHT PASSWORD (and no pass is handed out)", bt.status === 401 && !(bt.headers.getSetCookie?.() || []).some((c) => c.startsWith("lfh_user=")));
+  fresh(); G.FIX.staff_users = [JSON.parse(JSON.stringify(u))];
+  const ep = await UA.loginUser("g5b", "");
+  check("P162258", "a name with an EMPTY password is refused as empty — never looked up, never counted as a wrong try", ep.reason === "empty" && G.READS.length === 0 && G.RPCS.length === 0);
+  const tok = await SA.sha256hex("guard5b-admin-pw");
+  fresh(); G.FIX.restaurants = [{ id: RA, slug: "g5b-o", name: "A", active: true, deleted_at: null }];
+  G.RPC_IMPL = { ...(G.RPC_IMPL || {}), lfh_guest_restaurant: ({ p_slug }) => (G.FIX.restaurants || []).find((x) => x.slug === p_slug) || null };
+  const orr = await ORv.GET(nreq("/r/g5b-o/owner", { cookie: `lfh_staff_auth=${tok}` }), { params: Promise.resolve({ restaurant: "g5b-o" }) });
+  const act = (orr.headers.getSetCookie?.() || []).find((c) => c.startsWith("aevidine_admin_rid=")) || "";
+  check("P162259", "the admin's act-as cookie is HttpOnly and lasts exactly 6 hours", /HttpOnly/i.test(act) && /Max-Age=21600/.test(act), act);
+  process.env.ADMIN_PASSWORD = "b".repeat(200);
+  fresh(); G.RPC_IMPL = { ...(G.RPC_IMPL || {}), lfh_throttle_fail: () => [{ fail_count: 1, locked: false }] };
+  const okLong = await (await SLv.POST(nreq("/api/staff-login", { method: "POST", form: { password: "b".repeat(200) }, headers: { accept: "application/json", "x-forwarded-for": "7.7.7.77" } }))).json();
+  process.env.ADMIN_PASSWORD = "b".repeat(201);
+  fresh(); G.RPC_IMPL = { ...(G.RPC_IMPL || {}), lfh_throttle_fail: () => [{ fail_count: 1, locked: false }] };
+  const noLong = await (await SLv.POST(nreq("/api/staff-login", { method: "POST", form: { password: "b".repeat(201) }, headers: { accept: "application/json", "x-forwarded-for": "7.7.7.78" } }))).json();
+  check("P162260", "an admin password of exactly 200 characters is accepted; 201 is refused without being hashed", okLong.ok === true && noLong.ok === false);
+  process.env.ADMIN_PASSWORD = "guard5b-admin-pw";
+  fresh(); const mm = { ...u, sw_version: "v5", last_seen_at: new Date().toISOString() }; G.FIX.staff_users = [mm]; G.FIX.restaurants = [{ id: RA, deleted_at: null, active: true }];
+  const pass = (await (async () => { const r = await UA.loginUser("g5b", "guard5b-pass"); return r.cookie; })());
+  G.FIX.staff_users[0].last_seen_at = new Date().toISOString(); G.WRITES.length = 0;
+  const PAx = await import("@/lib/panelAccess.ts"); PAx.forgetRestaurant(RA);
+  await UA.requireRole({ cookies: { get: (n) => (n === "lfh_user" ? { value: pass } : undefined) }, headers: { get: () => null } }, "manager"); await new Promise((r) => setTimeout(r, 5));
+  check("P162261", "a panel call with NO app-version header never writes (or clears) the stored version", !G.WRITES.some((w) => w.table === "staff_users"));
+  G.FIX.staff_users[0].last_seen_at = new Date(Date.now() - 50000).toISOString(); G.WRITES.length = 0; PAx.forgetRestaurant(RA);
+  await UA.requireRole({ cookies: { get: (n) => (n === "lfh_user" ? { value: pass } : undefined) }, headers: { get: () => null } }, "manager"); await new Promise((r) => setTimeout(r, 5));
+  check("P162262", "…while a 'last seen' 50 seconds old IS refreshed", G.WRITES.some((w) => w.table === "staff_users" && w.patch?.last_seen_at));
+  PAx.forgetRestaurant(RA);
+  for (const k of ["ADMIN_PASSWORD", "STAFF_PASSWORD", "EDITOR_PASSWORD", "REVEAL_PASSWORD"]) if (keepEnv[k] === undefined) delete process.env[k]; else process.env[k] = keepEnv[k];
+  G.FAIL = {}; G.FAIL_NTH = {};
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
