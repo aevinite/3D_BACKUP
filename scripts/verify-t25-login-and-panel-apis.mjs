@@ -680,6 +680,9 @@ for (const [cid, key, max] of [["P186189", "loginForm", "380px"], ["P186190", "s
   check(cid, `${F[key]}: the card is min(100%, ${max}) — never a vw width that overhangs the page's gutter`,
     has(CODE[key], `width: "min(100%, ${max})"`) && !/width: "min\(\d+vw/.test(CODE[key]));
 }
+// SWEEP #10 T17, item 11 (owner picked, 2026-10-08).
+check("P186503", "the 'You're blocked' note box uses the card's own lettering, not the browser's typewriter default",
+  /<textarea[\s\S]*?fontFamily: "inherit"/.test(CODE.blockedView));
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());

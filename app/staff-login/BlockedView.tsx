@@ -106,13 +106,15 @@ export default function BlockedView() {
       <div style={{ height: 1, background: "#1f2c49", margin: "18px 0 14px" }} />
 
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Request to be unblocked</div>
+      {/* fontFamily inherit (owner picked sweep #10 T17 item 11, 2026-10-08): a textarea does NOT inherit the
+          page's font by default, so this one drew its placeholder in a typewriter (monospace) face. */}
       <textarea
         value={message}
         onChange={(e) => setMessage(e.target.value.slice(0, 200))}
         placeholder="Optional: a short note for the admin (e.g. who you are)"
         rows={3}
         disabled={outOfTries}
-        style={{ width: "100%", boxSizing: "border-box", padding: 10, borderRadius: 10, border: "1px solid #2a3a5f", background: "#0b1220", color: "#dbe7ff", fontSize: 14, resize: "vertical", opacity: outOfTries ? 0.5 : 1 }}
+        style={{ width: "100%", boxSizing: "border-box", padding: 10, borderRadius: 10, border: "1px solid #2a3a5f", background: "#0b1220", color: "#dbe7ff", fontSize: 14, fontFamily: "inherit", resize: "vertical", opacity: outOfTries ? 0.5 : 1 }}
       />
       <button onClick={requestUnblock} disabled={busy === "request" || outOfTries}
         style={{ marginTop: 10, width: "100%", padding: 12, borderRadius: 10, border: 0, background: outOfTries ? "#334155" : busy === "request" ? "#2f5fb0" : "#2563eb", color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: busy || outOfTries ? "default" : "pointer" }}>
