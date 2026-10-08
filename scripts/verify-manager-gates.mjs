@@ -211,6 +211,34 @@ await call("POST", "orders/o1/tip", { body: { amount: 500000 } });
   w && w.patch.tip === 100000 ? ok("a mis-typed tip is CAPPED before it reaches the database", "₹100000") : bad("the cap did not reach the write", JSON.stringify(w && w.patch));
 }
 
+// ── S10-T9 item 1 · the "Sections" Settings switch is refused, not only hidden ───────────────
+// Access → Manager settings → "Sections — who serves which table" promises that switching it off
+// makes its endpoints refuse. Until 2026-10-09 neither table-sections endpoint read it. Both doors
+// are driven, for the person the switch is about (a manager) and the two it is not (owner, admin).
+console.log("\nS10-T9 item 1 · GET/POST /table-sections and the Sections switch");
+const SECTIONS_OFF = { menus: { mgrset: { access: false } } };
+const SECTION_BODY = { body: { user_id: "w1", tables: [1, 2] } };
+world({}, { accessConfig: SECTIONS_OFF });
+await refused("a manager whose Sections section is switched off — reading the rota", "GET", "table-sections", {}, /waiter sections aren't part of this restaurant's manager panel/i);
+world({}, { accessConfig: SECTIONS_OFF });
+await refused("…and saving one waiter's tables", "POST", "table-sections", SECTION_BODY, /waiter sections aren't part of this restaurant's manager panel/i);
+{
+  const w = G.WRITES.filter((x) => x.table === "staff_users");
+  w.length === 0 ? ok("…and nothing was written to the waiter's row") : bad("the refused save still wrote staff_users", JSON.stringify(w));
+}
+world({}, { accessConfig: { menus: { mgrset: { access: true, tables: false } } } });
+G.FIX.staff_users = [{ id: "w1", restaurant_id: RID, role: "tablet", name: "Waiter One", username: "w1" }];
+await allowed("a manager who HAS the section (another section off) still reads the rota", "GET", "table-sections", {});
+world({}, { accessConfig: { menus: { mgrset: { access: true } } } });
+G.FIX.staff_users = [{ id: "w1", restaurant_id: RID, role: "tablet", name: "Waiter One", username: "w1" }];
+await allowed("…and saves it", "POST", "table-sections", SECTION_BODY);
+world({}, { accessConfig: SECTIONS_OFF });
+actAs("owner");
+await allowed("the OWNER is not who the switch describes", "GET", "table-sections", {});
+world({}, { accessConfig: SECTIONS_OFF });
+actAs("admin");
+await allowed("…and neither is the admin console", "GET", "table-sections", {});
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });

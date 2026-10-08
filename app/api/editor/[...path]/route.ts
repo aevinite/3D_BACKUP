@@ -299,6 +299,26 @@ async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[
   return err(`${LABEL[hit.tab]} isn't part of this restaurant's manager panel.`, 403);
 }
 
+// ── A SWITCHED-OFF SETTINGS SECTION IS REFUSED, NOT ONLY HIDDEN (sweep #10 T9, 2026-10-09) ────
+// Access → Manager settings lists three sections a manager can be given — Tables, Users and
+// Sections ("who serves which table") — and the screen promises, for each: *"Switch one off and it
+// is gone from their sidebar — and its endpoints refuse, so it is not reachable by typing a URL
+// either."* Tables is refused at the settings save (below) and Users in /api/owner/staff. Sections
+// was refused NOWHERE: its two endpoints (GET and POST `table-sections`) asked only the
+// table_assign power, so a manager whose Sections section the admin had switched off still read
+// every waiter's tables and could rewrite them, from a stale tab or a typed URL — the hidden card
+// was the only guard, which is the one shape this access model exists to remove.
+//
+// A real MANAGER only, exactly like the Tables refusal: the owner and the admin console are not
+// whom these switches describe. A failed read of the restaurant row leaves the section ON, also
+// like Tables — a hide switch is never the thing that stops a working floor on a database blip.
+async function managerSectionOff(g: { user: StaffUser | null }, rid: string, key: "access"): Promise<boolean> {
+  if (!g.user || g.user.role !== "manager") return false;
+  const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config;
+  return managerSettingsOff(cfg).includes(key);
+}
+const SECTIONS_OFF_MSG = "Waiter sections aren't part of this restaurant's manager panel.";
+
 // ── The nine parts of "Edit the menu" ─────────────────────────────────────────────
 // Access → Manager's menu → Edit menu (Editor) lists nine sub-options, and the owner's
 // rule for every one of them (2026-08-03) is the same three things: OFF means the control
@@ -841,6 +861,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // module effective AND — for a manager — the granted power.
     if (p === "table-sections") {
       if (!(await managerCan(g, rid, "table_assign"))) return permDenied("give waiters their own tables");
+      if (await managerSectionOff(g, rid, "access")) return err(SECTIONS_OFF_MSG, 403);
       const [staff, settings] = await Promise.all([
         sb.from("staff_users").select("id, username, name, role, active, assigned_tables")
           .eq("restaurant_id", rid).eq("role", "tablet").is("deleted_at", null)
@@ -3313,6 +3334,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // stable, and an empty list is a legitimate "this waiter serves nothing yet".
     if (a === "table-sections") {
       if (!(await managerCan(g, rid, "table_assign"))) return permDenied("give waiters their own tables");
+      if (await managerSectionOff(g, rid, "access")) return err(SECTIONS_OFF_MSG, 403);
       const uid = String(body?.user_id || "").trim();
       if (!uid) return err("Which person? — user_id is required.");
       const cnt = Number((await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle()).data?.table_count) || 12;
