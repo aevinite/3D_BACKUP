@@ -136,7 +136,8 @@ check("P04632", "an empty ADMIN_PASSWORD can never match",
 check("P04633", "a deliberate block and a wrong-tries lockout are different answers",
   has(CODE.staffLogin, "bad(blocked ? { blocked: true } : { locked: true })"));
 check("P04634", "the redirect target only accepts a same-site relative path",
-  has(CODE.staffLogin, 'rawNext.startsWith("/") && !rawNext.startsWith("//")'));
+  // (sweep #10 T17 item 9: the prefix test let "/\\other.site" through; the target now goes through sameSitePath.)
+  has(CODE.staffLogin, 'const next = sameSitePath(form?.get("next") || "/aevinite", "/aevinite");'));
 check("P04635", "both cookies are secure in production",
   has(CODE.staffLogin, 'const secure = process.env.NODE_ENV === "production"')
   && count(CODE.staffLogin, /secure \}\)/g) >= 2);
@@ -647,6 +648,30 @@ for (const [cid, idPart, why] of [
     has(CODE.userAuth, "actor: u.name || u.username, id: u.id,") && !rx(CODE.panelLogin, /json\(\{[^}]*attempted/));
   check("P186180", "no owner sign-in, sign-out or failed sign-in is filed under u.restaurant_id unchecked",
     !/logAction\(u\.role, "(login|logout)", \{[^}]*restaurant_id: u\.restaurant_id \?\? null/s.test(CODE.panelLogin) && !/restaurant_id: u\.restaurant_id,\s*\n\s*actor: u\.name/.test(CODE.panelLogout));
+}
+// SWEEP #10 T17, item 9 — "where to go after signing in" on the admin console's door must be one of
+// OUR pages. The old test (starts with "/" but not "//") let "/\\example.com" through, which a browser and
+// Next's redirect both read as https://example.com/.
+{
+  const SA = await import("@/lib/staffAuth.ts");
+  const P = SA.sameSitePath, F = "/aevinite";
+  const OFF = ["/\\example.com", "/\\/example.com", "//example.com", "https://example.com", "javascript:alert(1)", "\\\\example.com", "/\texample.com", "/\nexample.com", "", "aevinite", null, undefined, 42];
+  check("P186181", "a backslash address that browsers read as another website is refused",
+    P("/\\example.com", F) === F && P("/\\/example.com", F) === F, [P("/\\example.com", F), P("/\\/example.com", F)]);
+  check("P186182", "every off-site, scheme, relative, control-character or non-text target falls back to the console",
+    OFF.every((v) => P(v, F) === F), OFF.map((v) => P(v, F)).filter((x) => x !== F));
+  check("P186183", "our own pages pass through unchanged, query and hash included",
+    P("/aevinite", F) === "/aevinite" && P("/aevinite/printing?x=1#a", F) === "/aevinite/printing?x=1#a" && P("/owner?rid=00000000-0000-0000-0000-000000000001", F) === "/owner?rid=00000000-0000-0000-0000-000000000001");
+  check("P186184", "a percent-encoded backslash stays a harmless path on our own site",
+    P("/%5Cexample.com", F) === "/%5Cexample.com");
+  check("P186185", "/api/staff-login decides `next` through sameSitePath, not a hand-rolled prefix test",
+    has(CODE.staffLogin, 'const next = sameSitePath(form?.get("next") || "/aevinite", "/aevinite");') && !/startsWith\("\/\/"\)/.test(CODE.staffLogin));
+  check("P186186", "the admin card follows only the SERVER's checked `next`, never the raw ?next it was opened with",
+    has(CODE.staffLoginForm, 'window.location.assign(data.next || "/aevinite")') && !/assign\(data\.next \|\| next\)/.test(CODE.staffLoginForm));
+  check("P186187", "the failed-password redirect carries `next` only as an ENCODED query value",
+    has(CODE.staffLogin, "&next=${encodeURIComponent(next)}"));
+  check("P186188", "the staff door's card honours ?next only when it equals the person's own panel (unchanged)",
+    has(CODE.loginForm, "const dest = next && next === home ? next : home;"));
 }
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
@@ -1250,9 +1275,11 @@ check("P79023", "the blocked page and the locked message are different answers w
 check("P79024", "the no-JS redirect carries the original destination through",
   has(SL, "next=${encodeURIComponent(next)}"));
 check("P79025", "…and that destination has already been sanitised",
-  before(SL, "const next = rawNext.startsWith", "encodeURIComponent(next)"));
+  // (sweep #10 T17 item 9: the prefix test let "/\\other.site" through; the target now goes through sameSitePath.)
+  before(SL, "const next = sameSitePath(", "encodeURIComponent(next)"));
 check("P79026", "a protocol-relative //evil.example is refused as a destination",
-  has(SL, '!rawNext.startsWith("//")'));
+  // (sweep #10 T17 item 9: the prefix test let "/\\other.site" through; the target now goes through sameSitePath.)
+  (await import("@/lib/staffAuth.ts")).sameSitePath("//evil.example", "/aevinite") === "/aevinite");
 check("P79027", "an absent destination falls back to the console's own home",
   has(SL, '|| "/aevinite"'));
 check("P79028", "the JSON reply hands back the sanitised destination, so the client cannot pick its own",

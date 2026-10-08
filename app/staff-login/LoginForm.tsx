@@ -38,7 +38,9 @@ export default function LoginForm({ next, initialError }: { next: string; initia
         body: new URLSearchParams({ password, next, [BOT_TRAP_FIELD]: bot.trap, [BOT_ELAPSED_FIELD]: bot.elapsed }),
       });
       const data = (await r.json().catch(() => ({}))) as { ok?: boolean; next?: string; locked?: boolean; blocked?: boolean; attemptsLeft?: number };
-      if (data.ok) { window.location.assign(data.next || next); return; }
+      // Only the SERVER's checked answer is followed (lib/staffAuth → sameSitePath) — never the raw
+      // ?next this page was opened with (sweep #10 T17, item 9).
+      if (data.ok) { window.location.assign(data.next || "/aevinite"); return; }
       // READ EVERY ANSWER THE DOOR CAN GIVE, NOT JUST TWO (sweep #10 T17, item 6). /api/staff-login
       // answers exactly five shapes: ok, locked, blocked, attemptsLeft, and a bare {ok:false}. This
       // card knew two, so the other cases all fell into "Wrong password — try again":
