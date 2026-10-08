@@ -298,11 +298,24 @@ process.env.NEXT_PUBLIC_SUPABASE_URL ||= BASE;
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= "not-a-real-key";
 const { createOrder, isServerBusy } = await import(pathToFileURL(OUT).href);
 
-const call = async (fetchImpl) => {
+// A RESTAURANT ID SHAPED LIKE ONE (sweep #10 T39 item 14). This passed the literal "rid", and since
+// lib/menu.ts's requireRestaurant() — a page that has not resolved its restaurant refuses rather
+// than guessing restaurant #1 — every call below was refused on the phone before any fetch, so all
+// four checks went red without ever testing a busy server. The id is fake; the stub answers it.
+const STUB_RID = "00000000-0000-4000-8000-0000000b0539";
+const call = async (fetchImpl, rid = STUB_RID) => {
   globalThis.fetch = fetchImpl;
-  try { await createOrder({ tableNumber: "5", items: [{ id: "x", qty: 1 }], allergies: [] }, "rid", "act-1"); return null; }
+  try { await createOrder({ tableNumber: "5", items: [{ id: "x", qty: 1 }], allergies: [] }, rid, "act-1"); return null; }
   catch (e) { return e; }
 };
+// …and the rule that tripped it is worth holding on its own: no restaurant, no request.
+{
+  let sent = 0;
+  const eNoRid = await call(async () => { sent++; return new Response("{}", { status: 200 }); }, "rid");
+  eNoRid && sent === 0 && !isServerBusy(eNoRid)
+    ? ok("an order from a page with no real restaurant is refused on the phone — nothing is sent, nothing is queued")
+    : bad("an order with no real restaurant id left the phone, or was queued as 'busy'", `sent ${sent}, ${eNoRid && eNoRid.message}`);
+}
 let sawSignal = false;
 const e503 = await call(async (_u, init) => { sawSignal = !!(init && init.signal); return new Response('{"error":"busy"}', { status: 503 }); });
 isServerBusy(e503) ? ok("a 5xx means 'save it and send it', not 'order failed'") : bad("a busy server told the diner their order failed");
