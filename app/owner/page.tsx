@@ -2407,7 +2407,9 @@ export default function OwnerDashboard() {
           tileSideTitle = "Orders by method";
         } else if (tileOpen === "today" && restCount > 1) {
           const rs = (ov?.restaurants || []).filter((r) => !r.reportsOff);
-          tileChart = { kind: "bars", pts: rs.map((r) => ({ x: r.name, v: r.revenueToday,
+          // `compare`: restaurants side by side, not a trend — one trading beside two at ₹0 is a
+          // fair picture, so the docket's two-real-days gate does not apply here.
+          tileChart = { kind: "bars", compare: true, pts: rs.map((r) => ({ x: r.name, v: r.revenueToday,
             hint: `${r.name} · ${inr(r.revenueToday)} from ${r.ordersToday} order${r.ordersToday === 1 ? "" : "s"}` })) };
           tileChartTitle = "Taken today, by restaurant";
         } else if (tileOpen === "expenses") {
