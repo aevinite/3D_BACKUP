@@ -197,7 +197,15 @@ async function postImpl(req: NextRequest) {
     }))) {
       return NextResponse.json({ error: "Too many tries. Please wait a few minutes and try again." }, { status: 429 });
     }
-    const row = (await sb.from("staff_users").select("password_hash").eq("id", u.id).limit(1)).data?.[0];
+    // A READ THAT FAILED IS NOT A WRONG PASSWORD (sweep #10 T17 round 4, item 27, 2026-10-08). `.data?.[0]` of a failed
+    // read is undefined, so a database blip here told the person their RIGHT current password was wrong (measured in
+    // the harness: 403 "Current password is wrong."), and the try still counted against their 5-per-window limit.
+    const pwRead = await sb.from("staff_users").select("password_hash").eq("id", u.id).limit(1);
+    if (pwRead.error) {
+      console.error("[panel-profile] stored password read failed:", pwRead.error.message);
+      return busyReply();
+    }
+    const row = pwRead.data?.[0];
     // Re-authenticate with the current password so a hijacked open session can't
     // silently lock the real owner out.
     if (!(await verifySecret(current, row?.password_hash ?? null))) {
