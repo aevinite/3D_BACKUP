@@ -594,6 +594,18 @@ for (const [cid, idPart, why] of [
   check(cid, `a fresh cookie whose id is ${why} is "not signed in" — no throw, and no database read`,
     !threw && r === null && !G.READS.some((x) => x.table === "staff_users"), { threw, reads: G.READS.length });
 }
+// SWEEP #10 T17, item 5 — /r/<slug>/owner is a ROUTE HANDLER, so a throw there has no error page to
+// land on: a database blip on the slug lookup answered the platform's bare "Internal Server Error".
+{
+  const ow = stripComments(read("app/r/[restaurant]/owner/route.ts"));
+  const tryAt = ow.indexOf("try {\n    r = await getRestaurantBySlug(restaurant);");
+  check("P186016", "/r/<slug>/owner looks the restaurant up inside a try (getRestaurantBySlug THROWS on a failed read)",
+    tryAt > 0 && count(ow, /await getRestaurantBySlug\(/g) === 1);
+  check("P186017", "…and its catch answers 503 with a retry-after, in words, never a bare 500",
+    /status: 503/.test(ow.slice(tryAt, tryAt + 1600)) && /retry-after/.test(ow.slice(tryAt, tryAt + 1600)) && /Can't reach the server/.test(ow.slice(tryAt, tryAt + 1600)));
+  check("P186018", "…and the try-again page names no restaurant (it could not read one)",
+    !/\$\{(r|restaurant)\b/.test(ow.slice(tryAt, ow.indexOf("{ status: 503", tryAt))));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
