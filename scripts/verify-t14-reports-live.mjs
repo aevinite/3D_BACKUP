@@ -1714,8 +1714,12 @@ head("8f · the last of the recorded rows");
     // hovering a bar shows its value
     const { p: hp } = await openReports(ctx, "?open=sales&range=30d");
     const bar = hp.locator("svg.recharts-surface .recharts-bar-rectangle").first();
+    // A CONDITION, NOT A CLOCK (sweep #10 T39 item 59's twin, 2026-10-09): wait for a bar to be
+    // drawn, hover it, then wait up to 3s for the tooltip to hold a value. A fixed 700ms passed on
+    // one run and failed the next on the same code while the machine was busy.
+    await bar.waitFor({ timeout: 30000 }).catch(() => {});
     await bar.hover().catch(() => {});
-    await hp.waitForTimeout(700);
+    await hp.waitForFunction(() => /₹[\d,]+/.test(document.querySelector(".recharts-tooltip-wrapper")?.textContent || ""), null, { timeout: 3000 }).catch(() => {});
     const tip = flat(await hp.locator(".recharts-tooltip-wrapper").first().innerText().catch(() => ""));
     R("P49403", "hovering a bar can show its value", /₹[\d,]+/.test(tip), tip.slice(0, 60));
     R("P49417", "the page shows how old the figures are", await hp.locator(".rs-fresh-t").count() > 0);
