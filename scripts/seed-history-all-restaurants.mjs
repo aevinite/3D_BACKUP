@@ -81,7 +81,7 @@ async function seedRestaurant(rest, tableCount, isLive) {
   const wpick = (pairs) => { let s = pairs.reduce((a, [, w]) => a + w, 0), r = rand() * s; for (const [v, w] of pairs) { if ((r -= w) <= 0) return v; } return pairs[0][0]; };
   function gauss(mean, sd, lo, hi) { let u = 0, v = 0; while (!u) u = rand(); while (!v) v = rand(); const g = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); return Math.min(hi, Math.max(lo, mean + g * sd)); }
 
-  const { data: menu, error: mErr } = await db.from("menu_items").select("slug,title,price,category").eq("restaurant_id", rest.id);
+  const { data: menu, error: mErr } = await db.from("menu_items").select("id,slug,title,price,category").eq("restaurant_id", rest.id);
   if (mErr) throw new Error(`${rest.slug} menu_items: ${mErr.message}`);
   if (!menu?.length) { console.log(`  ⚠ ${rest.slug}: no menu items — skipping`); return null; }
   const menuW = menu.map((m) => ({ ...m, price: Number(m.price) || 250, w: Math.pow(rand(), 2) * 9 + 0.3 }));
@@ -104,7 +104,10 @@ async function seedRestaurant(rest, tableCount, isLive) {
       const it = wpick(menuW.map((m) => [m, m.w]));
       const qty = wpick([[1, 0.68], [2, 0.24], [3, 0.08]]);
       subtotal += it.price * qty;
-      line.push({ slug: it.slug, title: it.title, qty, price: it.price });
+      // `id` IS THE KEY THE APP WRITES (sweep #10 T39 item 7) — an order line names its dish by
+      // menu_items.id (lfh_price_order), and since mig 409 stock depletion joins on exactly that. A
+      // slug-only line is a shape no real order has, so it matched nothing — see reset-demo-history.mjs.
+      line.push({ id: it.id, title: it.title, qty, price: it.price });
     }
     return { items: line, subtotal };
   }

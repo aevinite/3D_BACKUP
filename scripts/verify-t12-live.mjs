@@ -302,7 +302,7 @@ try {
   // ═══ E · the cancellation feature, end to end, on this site ═══
   if (want("CANCEL")) {
     group("E · was the food made? — end to end");
-    const dish = await sb.from("menu_items").select("slug,title").eq("restaurant_id", RID_FH).limit(1).single();
+    const dish = await sb.from("menu_items").select("id,slug,title").eq("restaurant_id", RID_FH).limit(1).single();
     if (dish.error) { skip("P05990", "the cancellation chain", "no menu item to build an order from: " + dish.error.message); }
     else {
       const nm = `T12LIVE ${Date.now()}`;
@@ -319,14 +319,22 @@ try {
       await sb.rpc("lfh_inv_post_movement", { p_restaurant: RID_FH, p_item: itemId, p_qty_base: 6000, p_kind: "purchase",
         p_dedupe: k, p_unit_cost: 4, p_reason: "T12 live test", p_ref_type: "purchase", p_ref_id: k, p_created_by: "T12" });
       const o = await sb.from("orders").insert({ restaurant_id: RID_FH, table_number: "T12-LIVE", status: "received",
-        payment_status: "unpaid", items: [{ slug: dish.data.slug, qty: 3, title: dish.data.title, price: 250 }], total: 750, subtotal: 750 }).select("id").single();
+        payment_status: "unpaid", items: [{ id: dish.data.id, qty: 3, title: dish.data.title, price: 250 }], total: 750, subtotal: 750 }).select("id").single();
       if (o.error) throw new Error("order: " + o.error.message);
       const orderId = o.data.id;
       cleanup.push(async () => {
         await sb.from("deletion_audit").delete().eq("order_id", orderId);
         await sb.from("expenses").delete().eq("note", `order:${orderId}`);
         await sb.from("inv_movements").delete().eq("ref_id", orderId);
-        await sb.from("orders").delete().eq("id", orderId);
+        // RETIRED, NOT DELETED (sweep #10 T39 item 7). A hard delete is refused for any order
+        // carrying a KOT number — every order, from the moment it exists (mig 036 / mig 190) — so
+        // this line silently did nothing and each run left a live T12-LIVE order on French House.
+        // Cancel + archive is what the app itself does, and what every sibling guard now does.
+        const now = new Date().toISOString();
+        const r = await sb.from("orders")
+          .update({ status: "cancelled", archived: true, archived_at: now, cancelled_at: now, deleted_at: now })
+          .eq("restaurant_id", RID_FH).eq("id", orderId);
+        if (r.error) console.log("   the test order would not retire:", r.error.message);
       });
       await new Promise((r) => setTimeout(r, 1200));
       const cons = (await sb.from("inv_movements").select("qty_base,unit_cost").eq("ref_id", orderId).eq("kind", "consumption")).data || [];

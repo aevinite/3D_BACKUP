@@ -31,7 +31,11 @@ async function run() {
   const slug = rl.data?.[0]?.owner_key as string | undefined;
   const itemId = rl.data?.[0]?.item_id as string | undefined;
   if (!slug || !itemId) { console.log("SKIP — this restaurant has no dish recipes, so no ingredient cost exists to price"); return; }
-  console.log(`      using dish slug "${slug}" -> ingredient ${itemId}`);
+  // An order line names its dish by menu_items.id, never by slug (lfh_price_order; mig 409 joins on it).
+  const mi = await sb.from("menu_items").select("id").eq("restaurant_id", RID).eq("slug", slug).limit(1).maybeSingle();
+  const dishId = mi.data?.id as string | undefined;
+  if (!dishId) { console.log(`SKIP — the recipe names dish "${slug}", which is not on this restaurant's menu, so no order can carry it`); return; }
+  console.log(`      using dish slug "${slug}" (menu id ${dishId}) -> ingredient ${itemId}`);
 
   // Make sure the ingredient has stock at a KNOWN price, so the loss has a real cost to find.
   // Posted as a purchase, removed by id at the end like everything else this run creates.
@@ -51,7 +55,10 @@ async function run() {
   // ── 1. an order that FIRES to the kitchen, so mig 224 posts its consumption
   const ins = await sb.from("orders").insert({
     restaurant_id: RID, table_number: "T12-TEST", status: "received", payment_status: "unpaid",
-    items: [{ slug, qty: 2, title: "T12 test dish", price: 100 }], total: 200, subtotal: 200,
+    // THE LINE IN THE SHAPE THE APP WRITES IT (sweep #10 T39 item 7): `id`, not the seed-data `slug`
+    // no real order ever carried. Since mig 409 a slug-only line depletes nothing, so this check went
+    // red on "0 movement(s)" while real orders were depleting correctly.
+    items: [{ id: dishId, qty: 2, title: "T12 test dish", price: 100 }], total: 200, subtotal: 200,
   }).select("id").single();
   if (ins.error) { console.log("could not create the test order:", ins.error.message); fails++; return; }
   const orderId = ins.data.id as string;

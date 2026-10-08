@@ -156,8 +156,21 @@ if (!LIVE) {
 
   const tidy = async () => {
     // Always, on every path. Order matters: the order references the session.
-    if (orderId) await sb.from("orders").delete().eq("id", orderId);
-    if (sessionId) await sb.from("sessions").delete().eq("id", sessionId);
+    // A hard delete is REFUSED for an order carrying a KOT number and a session carrying a bill
+    // number (mig 036 / mig 190) — and this used to ignore the refusal, so every run left its test
+    // order and session live. Retire them the way the app does when the delete is refused
+    // (sweep #10 T39 item 7; verify:test-safety §14 now fails a hard delete with no fallback).
+    if (orderId) {
+      const { error } = await sb.from("orders").delete().eq("id", orderId);
+      if (error) {
+        const now = new Date().toISOString();
+        await sb.from("orders").update({ status: "cancelled", archived: true, archived_at: now, cancelled_at: now, deleted_at: now }).eq("id", orderId);
+      }
+    }
+    if (sessionId) {
+      const { error } = await sb.from("sessions").delete().eq("id", sessionId);
+      if (error) await sb.from("sessions").update({ status: "closed", closed_at: new Date().toISOString() }).eq("id", sessionId);
+    }
     if (rid) {
       await sb.from("customer_visits").delete().eq("restaurant_id", rid).eq("phone", PHONE);
       await sb.from("customer_devices").delete().eq("restaurant_id", rid).eq("phone", PHONE);

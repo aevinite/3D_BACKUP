@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const HOOK = process.argv.includes("--hook");
-const TEST_FILE = /[/\\](scripts|tests)[/\\].*\.mjs$/;
+const TEST_FILE = /[/\\](scripts|tests)[/\\].*\.(mjs|ts)$/;   // .ts too: §14 reads the TypeScript guards (sweep #10 T39)
 
 // The first POSITIONAL argument is the repo root to scan. A FLAG is not a root — this used to take
 // any argv[2], so `npm run verify:test-safety -- --base http://localhost:4228` (which every sweep
@@ -385,6 +385,11 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
       if (bare && !/restaurant_id/.test(arg)) {
         const def = src.match(new RegExp(`\\b(?:const|let|var)\\s+${bare[1]}\\s*=`));
         if (def) arg += " " + argOf(src, src.indexOf("(", def.index) >= 0 ? def.index : def.index) + src.slice(def.index, def.index + 900);
+        // …or built by `rows.push({ … })` in a loop. The 900-character window above stops wherever
+        // the loop body happens to end, so two added lines in scripts/seed-today.mjs (sweep #10 T39)
+        // pushed its `restaurant_id` out of view and this reported a write the database accepts.
+        // Read each push's own argument instead of a fixed distance.
+        for (const p of src.matchAll(new RegExp(`\\b${bare[1]}\\.push\\(`, "g"))) arg += " " + argOf(src, p.index + p[0].length - 1);
       }
       if (!/restaurant_id/.test(arg)) {
         bad.push(`${f}:${lineOf(src, m.index)} — ${m[2]}s into ${m[1]} without restaurant_id (a NOT NULL column: the write is REFUSED, and the refusal is easy to miss)`);
@@ -639,6 +644,66 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     bad.length === 0,
     bad.join("\n    ") + "\n    Add:  paid_at: new Date().toISOString()  — or the order's own created_at for a back-dated fixture.",
   );
+}
+
+// ── 14. AN ORDER LINE NAMES ITS DISH BY ID, AND A TEST ORDER IS RETIRED, NEVER "DELETED" ────────
+//
+// Two shapes the product cannot produce, both found by sweep #10 T39 (item 7) on 2026-10-08:
+//
+//   a. `{ slug, title, qty, price }` as an order line. Every line the app writes comes out of
+//      lfh_price_order() as {id, title, price, qty, …} — no slug, ever. Since mig 409 stock depletion
+//      joins on that `id`, so a slug-only fixture now depletes nothing: verify:cancel-loss went red
+//      on "0 movement(s)" and verify:cancel-made quit with "nothing was checked" while real orders
+//      depleted correctly. Two seeders wrote the same shape into demo history.
+//   b. `.from("orders").delete()` with nothing to fall back on. The database refuses a hard delete
+//      of any order carrying a KOT number — every order (mig 036 / mig 190) — and supabase-js does
+//      not throw, so the teardown "succeeds" and leaves the test order live on the floor.
+//      verify-t12-live and verify-customer-erase both did this on every run.
+//
+// This section reads .ts as well as .mjs: the two cancel guards are TypeScript, and the walk above
+// only ever collected .mjs, so neither was being looked at by anything in this file.
+{
+  const all = [];
+  (function walk(rel) {
+    const d = path.join(ROOT, rel);
+    if (!fs.existsSync(d)) return;
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = `${rel}/${e.name}`;
+      if (e.isDirectory()) { if (e.name !== "node_modules") walk(p); continue; }
+      if (/\.(mjs|ts)$/.test(e.name) && e.name !== "verify-test-safety.mjs") all.push(p);
+    }
+  })("scripts");
+  for (const n of fs.existsSync(path.join(ROOT, "tests")) ? fs.readdirSync(path.join(ROOT, "tests")) : []) {
+    if (/\.(mjs|ts)$/.test(n)) all.push(`tests/${n}`);
+  }
+  const slugOnly = [], hardDelete = [];
+  for (const f of all) {
+    const src = read(f);
+    if (!src || !/\.from\(\s*["'`]orders["'`]\s*\)/.test(src)) continue;   // never writes an order
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // (a) an object literal with a `slug` key, a qty and a price, and no `id` key — an order line.
+    for (const m of code.matchAll(/\{[^{}]*\bslug\s*[:,}][^{}]*\}/g)) {
+      const o = m[0];
+      if (!/\bqty\b/.test(o) || !/\bprice\b/.test(o)) continue;
+      if (/(^|[{,\s])id\s*:/.test(o)) continue;
+      slugOnly.push(`${f} — an order line keyed by slug: ${o.replace(/\s+/g, " ").slice(0, 90)}`);
+      break;
+    }
+    // (b) a hard delete of an order with no cancel/archive fallback near it.
+    for (const m of code.matchAll(/\.from\(\s*["'`]orders["'`]\s*\)\s*\.\s*delete\(\)/g)) {
+      const after = code.slice(m.index, m.index + 600);
+      if (/status\s*:\s*["']cancelled["']/.test(after) || /deleted_at\s*:/.test(after)) continue;
+      hardDelete.push(`${f} — deletes an order with no fallback; the database refuses it and nothing notices`);
+      break;
+    }
+  }
+  check("no test or seeder writes an order line keyed by slug — the app names the dish by id",
+    all.length > 100 && slugOnly.length === 0,
+    all.length <= 100 ? `only ${all.length} file(s) scanned — the walk found nothing to judge`
+      : slugOnly.join("\n    ") + "\n    Select `id` from menu_items and write { id, title, qty, price } (see scripts/reset-demo-history.mjs).");
+  check("no teardown hard-deletes an order without retiring it when the delete is refused",
+    all.length > 100 && hardDelete.length === 0,
+    hardDelete.join("\n    ") + "\n    On a refused delete: update { status: 'cancelled', archived: true, archived_at, cancelled_at, deleted_at }.");
 }
 
 // ── report ──────────────────────────────────────────────────────────────────────────────────
