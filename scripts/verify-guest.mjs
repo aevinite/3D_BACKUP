@@ -351,15 +351,21 @@ check("P00165", "a not-serving menu previews neutrally on BOTH menu doors — cl
 // went red while naming nothing: the block it read no longer exists, and "the fallback is intact"
 // is not a question you can ask about a fallback that has no forward path left.
 // What R29 means now is simply: none of the three ways of moving the bell may come back.
-check("R29", "the call-waiter bell is never hidden, faded, moved or made untappable", () => {
+check("R29", "the call-waiter bell keeps its float, and is never hidden, faded, made to dodge or untappable", () => {
   // The obituaries left behind in globals.css NAME every banned thing, so the stylesheet has to be
   // read with its /* */ comments stripped — exactly as F.menuView already is.
   const css = (read("app/globals.css") || "").replace(/\/\*[\s\S]*?\*\//g, "");
   const noLift = !/settleBell|--bell-lift/.test(F.menuView);
   const noScrollDodge = !/menu-scrolling/.test(F.menuView) && !/\.menu-scrolling\s+\.chef-call/.test(css);
-  const noFloat = !/@keyframes\s+chefFloat/.test(css) && !/animation:\s*chefFloat/.test(css);
-  return { ok: noLift && noScrollDodge && noFloat,
-    note: `lift machinery gone=${noLift} scroll step-aside gone=${noScrollDodge} float gone=${noFloat}` };
+  // THE FLOAT IS THE DESIGN AND MUST STAY (owner, 2026-09-21 — R29 CORRECTED): "why does the bell
+  // has no animation, i want waiter call it how it was, just that due to plus button it goes up and
+  // down — due to plus I don't want that." #1434 put the 12px idle bob back the same day. This
+  // check was rewritten on 2026-09-20 to ban the float too, so for 17 days it was red on the exact
+  // thing he asked for (sweep #10 T39 item 17). Now: no lift, no scroll step-aside — and the float
+  // is REQUIRED, so removing it a second time fails here instead of reaching his screen.
+  const floatKept = /@keyframes\s+chefFloat/.test(css) && /\.chef-call[^{]*\{[^}]*animation:\s*chefFloat/.test(css);
+  return { ok: noLift && noScrollDodge && floatKept,
+    note: `lift machinery gone=${noLift} scroll step-aside gone=${noScrollDodge} float kept=${floatKept}` };
 });
 
 // Two guest surfaces that describe themselves to a screen reader as something they are not. The
