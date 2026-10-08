@@ -392,11 +392,13 @@ check("P11676", "an owner can sign in at a restaurant they OWN via restaurant_ow
   has(CODE.userAuth, 'sb.from("restaurant_owners").select("user_id")'));
 check("P11677", "a lockout on any matching live row is honoured",
   has(CODE.userAuth, "live.find((u) => u.locked_until && new Date(u.locked_until) > now)"));
+// (sweep #10 T17 round 3, item 23: the count is now added INSIDE the database — mig 411 — so simultaneous wrong
+//  tries each count. The two checks below assert the same rule on the new code.)
 check("P11678", "a wrong password bumps failed_count on every live match",
-  has(CODE.userAuth, "for (const u of live) {") && has(CODE.userAuth, "failed_count: fc"));
+  has(CODE.userAuth, 'sb.rpc("lfh_staff_login_failed", { p_ids: live.map((u) => u.id)'));
 check("P11679", "five wrong tries lock the account for 60 seconds and reset the counter",
   has(CODE.userAuth, "MAX_FAILS = 5") && has(CODE.userAuth, "LOCK_MS = 60 * 1000")
-  && has(CODE.userAuth, "fc >= MAX_FAILS"));
+  && has(CODE.userAuth, "p_max: MAX_FAILS, p_lock_seconds: Math.round(LOCK_MS / 1000)"));
 check("P11680", "a correct password clears failed_count and locked_until",
   has(CODE.userAuth, "failed_count: 0, locked_until: null, last_seen_at:"));
 check("P11681", "a disabled person is told so ONLY on a verified password",
@@ -458,6 +460,12 @@ registerHooks({
 });
 const UA = await import("@/lib/userAuth.ts");
 const { G, resetWorld } = await import(pathToFileURL(join(root, "scripts/panel-stubs/state.mjs")).href);
+// Stand-in for mig 411's lfh_staff_login_failed — the SAME rule as its SQL (P161229 below pins the SQL itself).
+G.RPC_IMPL = { lfh_staff_login_failed: ({ p_ids, p_max = 5, p_lock_seconds = 60 }) => (G.FIX.staff_users || []).filter((u) => (p_ids || []).includes(u.id)).map((u) => {
+  const next = (u.failed_count || 0) + 1;
+  if (next >= p_max) { u.failed_count = 0; u.locked_until = new Date(Date.now() + p_lock_seconds * 1000).toISOString(); } else u.failed_count = next;
+  return { id: u.id, failed_count: u.failed_count, locked_until: u.locked_until ?? null };
+}) };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 head("1. lib/userAuth.ts — the RUNNING functions (P78701–P78800)");
@@ -904,6 +912,17 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   check("P161127", "the ?as= pin is encoded, so it can never smuggle a second parameter", OP.asSuffix() === "&as=a%26rid%3Db");
   delete globalThis.window;
   check("P161128", "server errors are still handed to the error reporter (instrumentation onRequestError)", /export const onRequestError = Sentry\.captureRequestError;/.test(src("instrumentation.ts")));
+}
+// SWEEP #10 T17 ROUND 3, item 23 — the wrong-password count is added INSIDE the database (mig 411).
+{
+  const sql = read("supabase/migrations/411_a_wrong_password_is_counted_once_each.sql");
+  check("P161230", "migration 411 adds one INSIDE the update, so simultaneous wrong tries each count",
+    /SET failed_count = CASE WHEN s\.failed_count \+ 1 >= p_max THEN 0 ELSE s\.failed_count \+ 1 END/.test(sql) && /WHERE s\.id = ANY \(p_ids\)/.test(sql));
+  check("P161231", "…locks for p_lock_seconds on the try that reaches the limit", /locked_until = CASE WHEN s\.failed_count \+ 1 >= p_max THEN now\(\) \+ make_interval\(secs => p_lock_seconds\)/.test(sql));
+  check("P161232", "…and is staff-only: REVOKE from PUBLIC/anon/authenticated, GRANT to service_role",
+    /REVOKE ALL ON FUNCTION public\.lfh_staff_login_failed\(uuid\[\], integer, integer\) FROM PUBLIC, anon, authenticated;/.test(sql) && /GRANT EXECUTE ON FUNCTION public\.lfh_staff_login_failed\(uuid\[\], integer, integer\) TO service_role;/.test(sql));
+  check("P161233", "loginUser no longer counts with a read-add-write in the app", !/const fc = \(u\.failed_count \|\| 0\) \+ 1;/.test(CODE.userAuth));
+  check("P161234", "…and a count that could not be written is said in the server log", has(CODE.userAuth, 'if (counted.error) console.error("[auth] could not count a wrong password:"'));
 }
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');

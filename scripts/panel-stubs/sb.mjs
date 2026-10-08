@@ -63,5 +63,7 @@ function builder(table) {
 }
 export const supabaseAdmin = {
   from: (t) => builder(t),
-  rpc: (name, args) => { G.RPCS.push({ name, args: clone(args || {}) }); return Promise.resolve({ data: name in G.RPC_ANSWERS ? G.RPC_ANSWERS[name] : { ok: true }, error: null }); },
+  // A guard may hand the stub a stand-in for a real database function (G.RPC_IMPL[name] = (args) => data), so a
+  // function that WRITES — like lfh_staff_login_failed (mig 411) — changes the fixture world the way the SQL does.
+  rpc: (name, args) => { G.RPCS.push({ name, args: clone(args || {}) }); if (G.RPC_IMPL && G.RPC_IMPL[name]) return Promise.resolve({ data: G.RPC_IMPL[name](clone(args || {})), error: null }); return Promise.resolve({ data: name in G.RPC_ANSWERS ? G.RPC_ANSWERS[name] : { ok: true }, error: null }); },
 };
