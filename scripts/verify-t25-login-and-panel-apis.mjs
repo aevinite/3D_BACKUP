@@ -924,6 +924,73 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   check("P161233", "loginUser no longer counts with a read-add-write in the app", !/const fc = \(u\.failed_count \|\| 0\) \+ 1;/.test(CODE.userAuth));
   check("P161234", "…and a count that could not be written is said in the server log", has(CODE.userAuth, 'if (counted.error) console.error("[auth] could not count a wrong password:"'));
 }
+// ── SWEEP #10 T17 ROUND 3, item 24 — 17 MORE RULES NO GUARD WATCHED (the second break-it pass) ─────────────
+// After item 22 the second break-it pass broke 42 further rules, items 13–23's own included; 17 stayed GREEN. Each one is
+// pinned here: run for real where the file loads in this harness, else its exact rule read. ids P161522–P161538.
+{
+  const src = (f) => stripComments(read(f));
+  const PV = await import("@/lib/passwordVault.ts");
+  const PC = await import("@/lib/publicCap.ts");
+  const AF = await import("@/lib/adminFetch.ts");
+  const OP = await import("@/lib/ownerPin.ts");
+  const LT = await import("@/lib/loginThrottle.ts");
+  const RL = await import("@/lib/rateLimit.ts");
+  const MP = await import("@/lib/managerPin.ts");
+  const PA = await import("@/lib/panelAccess.ts");
+  const { TOOK_TOO_LONG } = await import("@/lib/partialRead.ts");
+  // a bare ?rid= with NO admin cookie is ignored — only the admin cookie turns a pinned request into the admin's
+  resetWorld();
+  const pinned = await UA.requireRole({ cookies: { get: () => undefined }, nextUrl: { searchParams: new URLSearchParams("rid=00000000-0000-0000-0000-000000000001") } }, "manager");
+  check("P161522", "a signed-out visitor adding ?rid= to a panel call is NOT treated as the admin", pinned.ok === false);
+  check("P161523", "a stored password copy from an unknown version (v3…) is refused, never guessed at",
+    /if \(parts\.length !== 3 \|\| \(parts\[0\] !== "v1" && parts\[0\] !== "v2"\)\) return null;/.test(src("lib/passwordVault.ts")) && (await PV.openPassword("v3$abc$def")) === null);
+  check("P161524", "the uncover password is hashed on both sides and compared by safeEqual — never with ===",
+    /return safeEqual\(await sha256hex\(typed\), await sha256hex\(real\)\);/.test(src("lib/revealGate.ts")) && !/typed\s*===|===\s*real/.test(src("lib/revealGate.ts")));
+  check("P161525", "a restaurant's owner entrance opens /owner only for an owner of THAT restaurant",
+    /if \(member\) return NextResponse\.redirect\(new URL\("\/owner", req\.url\)\);/.test(src("app/r/[restaurant]/owner/route.ts")) &&
+    /u\.restaurant_id === r\.id \|\|/.test(src("app/r/[restaurant]/owner/route.ts")) && /\.eq\("user_id", u\.id\)\.eq\("restaurant_id", r\.id\)/.test(src("app/r/[restaurant]/owner/route.ts")));
+  check("P161526", "a restaurant's panel address lets in only that restaurant's own staff",
+    /u\.role === role && u\.restaurant_id === r\.id && r\.active/.test(src("lib/panelGate.ts")));
+  check("P161527", "a real owner's cockpit covers only the restaurants they own (and that are switched on)",
+    /const ids = await enabledOwnedRestaurantIds\(owner\.id\);/.test(src("lib/ownerScope.ts")));
+  resetWorld();
+  const pinHash = await UA.hashSecret("4321");
+  G.FIX.staff_users = [
+    { id: "m1", name: "Asha", username: "asha", role: "manager", restaurant_id: "r1", active: true, pin_hash: pinHash },
+    { id: "m2", name: "Bina", username: "bina", role: "manager", restaurant_id: "r1", active: true, pin_hash: pinHash },
+  ];
+  const shared = await MP.verifyManagerPin("4321", "r1");
+  check("P161528", "a PIN two managers share credits BOTH of them (not whichever row came first)",
+    shared.ok === true && shared.sharedPin === true && JSON.stringify(shared.managerIds) === '["m1","m2"]');
+  resetWorld();
+  G.FIX.login_throttle = [{ key: "admin:two-days", locked_until: new Date(Date.now() + 2 * 864e5).toISOString() }, { key: "admin:two-years", locked_until: new Date(Date.now() + 730 * 864e5).toISOString() }];
+  check("P161529", "a lockout of days is a lockout, not a deliberate block — only one over a year is a block",
+    (await LT.throttleIsBlocked("admin:two-days")) === false && (await LT.throttleIsBlocked("admin:two-years")) === true);
+  resetWorld();
+  await RL.rateAllowed("staff_login", "x".repeat(500));
+  const rc = G.RPCS.find((c) => c.name === "lfh_rate_check");
+  check("P161530", "a subject is cut to 200 characters before it reaches the limiter", !!rc && rc.args.p_subject.length === 200, rc?.args?.p_subject?.length);
+  check("P161531", "the blocked screen remembers a request already sent (after a reload too)",
+    /const alreadyAsked = sent \|\| status\?\.pending === true;/.test(src("app/staff-login/BlockedView.tsx")));
+  const SLF = src("app/staff-login/LoginForm.tsx");
+  check("P161532", "the admin card ignores a second tap while the first sign-in is still going",
+    /if \(busy\) return;\s*setBusy\(true\);/.test(SLF));
+  let pinOk = false; try { delete globalThis.window; pinOk = OP.asValue() === null && OP.asSuffix() === ""; } catch { pinOk = false; }
+  check("P161533", "the owner pin helper answers 'none' on the server instead of crashing", pinOk);
+  const realFetch2 = globalThis.fetch;
+  globalThis.fetch = async () => { const e = new Error("slow"); e.name = "TimeoutError"; throw e; };
+  const slow = await AF.adminFetch("/x"); globalThis.fetch = realFetch2;
+  check("P161534", "a slow admin read says it took too long — not 'network fault'", slow.ok === false && slow.error === TOOK_TOO_LONG, slow.error);
+  const dev = PC.capKeyFor({ cookies: { get: (n) => (n === "lfh_panel_device" ? { value: "dev-1" } : undefined) }, headers: { get: () => "1.2.3.4" } });
+  const ip = PC.capKeyFor({ cookies: { get: () => undefined }, headers: { get: () => "1.2.3.4" } });
+  check("P161535", "each panel device is counted on its own; only a device with no cookie falls back to its address", dev === "dev-1" && ip.startsWith("ip:"), `${dev} / ${ip}`);
+  check("P161536", "every database read is given the 8-second deadline (the deadline fetch is what the client uses)",
+    /fetch\(input, \{ \.\.\.init, signal: init\?\.signal \?\? AbortSignal\.timeout\(DB_TIMEOUT_MS\) \}\)/.test(src("lib/supabaseAdmin.ts")) && /global: \{ fetch: withDeadline \}/.test(src("lib/supabaseAdmin.ts")));
+  const panels = await PA.getEnabledPanels("r1");
+  check("P161537", "the retired per-panel switch stays retired — every panel, the owner's included, is on", PA.PANEL_KEYS.every((k) => panels[k] === true));
+  check("P161538", "the 'no secret on this site' message is words a waiter can read, not a setting name",
+    / /.test(UA.NOT_SET_UP) && UA.NOT_SET_UP.length > 30 && !/[A-Z]{2,}_[A-Z]{2,}/.test(UA.NOT_SET_UP), UA.NOT_SET_UP);
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
