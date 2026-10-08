@@ -780,6 +780,29 @@ check("P186503", "the 'You're blocked' note box uses the card's own lettering, n
   check("P186640", "…a copy it cannot open is left alone, and nothing is written without --write",
     has(RS2, "if (plain === null) { unreadable++; continue; }") && has(RS2, "if (!WRITE) continue;"));
 }
+// SWEEP #10 T17 ROUND 2, problem 16 — the gate rulebook (docs/CLAUDE-DETAIL.md → Security gate) must match the
+// routes. It calls its public list COMPLETE, so a public route missing from it points the next audit at a
+// fine route, and a deleted route still described points it at nothing. Found: /api/guest/leave missing,
+// /api/pair (deleted by mig 380) still described as live, panel-logout described as answering GET.
+{
+  const { execFileSync } = await import("node:child_process");
+  const detail = read("docs/CLAUDE-DETAIL.md");
+  const gateSec = detail.slice(detail.indexOf("## Security gate"), detail.indexOf("### The one middleware"));
+  const live = gateSec.split("\n").filter((l) => !/DELETED|REMOVED|removed|deleted/.test(l)).join("\n");
+  const routes = execFileSync("git", ["ls-files", "app/api"], { cwd: root, encoding: "utf8" }).trim().split("\n").filter((f) => f.endsWith("/route.ts"));
+  const urlOf = (f) => "/" + f.replace(/^app\//, "").replace(/\/route\.ts$/, "").replace(/\/\[\.\.\.path\]$/, "").replace(/\[([a-z]+)\]/g, "<slug>");
+  const GATE = /tokenIsValid\(|requireRole\(|ownerScope(Or503)?\(|agentFrom|agentToken|x-lfh-agent|WEBHOOK_SECRET|x-webhook-secret/;
+  const ungated = routes.filter((f) => !GATE.test(stripComments(read(f)))).map(urlOf);
+  const named = (u) => gateSec.includes("`" + u + "`") || gateSec.includes("`" + u.replace("<slug>", "<source>") + "`");
+  const missing = ungated.filter((u) => !named(u));
+  check("P186905", "every API route with no login gate is named on the rulebook's public or door list", missing.length === 0, missing);
+  const urls = routes.map(urlOf);
+  const claimed = [...new Set([...live.matchAll(/`(\/api\/[a-z0-9/_<>-]+)(\/\*\*)?`/g)].map((m) => m[1]))];
+  const gone = claimed.filter((n) => !urls.some((u) => u === n || u.startsWith(n + "/") || n.startsWith(u + "/") || u.replace(/<[a-z]+>/g, "<>") === n.replace(/<[a-z]+>/g, "<>")));
+  check("P186906", "every route the rulebook describes as a LIVE gate still exists", gone.length === 0, gone);
+  check("P186907", "the rulebook describes panel-logout as POST-only, as its code is", !/panel-logout`\s*still offers both shapes/.test(gateSec) && /panel-logout` has been POST-only/.test(gateSec));
+  check("P186908", "…and names /api/guest/leave on the public list with its reason", gateSec.includes("`/api/guest/leave`") && /lfh_leave_session/.test(gateSec));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
