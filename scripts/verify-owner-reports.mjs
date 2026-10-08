@@ -219,8 +219,16 @@ check("a tiny-but-real share reads '<1%', not '0%'",
 check("a capped list says it is capped",
   /expensesMore/.test(reportsRoute) && /MoreThanCap/.test(invReports),
   "a list that quietly stops no longer adds up to the total printed above it");
+// The RULE is "this month's line stops before today". It has been written two ways: the original
+// `cur: d < todayDom`, and since the like-for-like change of 2026-10-04 (13fb7865) as
+// `lastComplete = todayDom - 1` + `cur: d <= lastComplete`, so both lines can stop on the same
+// day. This check knew only the first spelling and kept main's CI red for four days while the
+// chart was right (sweep #10 T39 item 1). Accept either spelling; reject `<=` today itself.
+const excludesToday =
+  /cur: d < todayDom\b/.test(dashPage) ||
+  (/\blastComplete = todayDom - 1\b/.test(dashPage) && /cur: d <= lastComplete\b/.test(dashPage));
 check("the month-compare chart excludes today's part-day",
-  /cur: d < todayDom/.test(dashPage) && /Today is still in progress/.test(dashPage),
+  excludesToday && /Today is still in progress/.test(dashPage),
   "a part-day plotted against full days read as a crash to zero");
 
 console.log("\n── 8b. THE OWNER'S PHONE IS 360px WIDE ──");
