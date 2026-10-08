@@ -36,7 +36,14 @@ export default function LoginForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password, ...bot, ...(restaurantSlug ? { restaurant: restaurantSlug } : {}) }),
       });
-      const data = await r.json();
+      // A reply that is not JSON came FROM the server (a platform timeout page, a crash) — the
+      // device's internet is fine, so it must not be called a network error (sweep #10 T17, item 3).
+      const data = await r.json().catch(() => null);
+      if (!data) {
+        setErr("The server didn\u2019t answer properly \u2014 try again in a moment.");
+        setBusy(false);
+        return;
+      }
       if (!r.ok || !data.ok) {
         setErr(data.error || "That username and password don\u2019t match \u2014 check both and try again.");
         setBusy(false);

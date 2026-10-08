@@ -1575,6 +1575,37 @@ check("P79192", "…and only on a channel this restaurant actually has switched 
 // `--ids` walks this block too, so the printed id list is COMPLETE whether or not a server is up —
 // otherwise the ledger would be written from a list that silently dropped fifty rows. No request
 // is made in that mode.
+// ── SWEEP #10, T17 — the staff door under a database blip (ids from T17's block P186001–P187000) ──
+// Item 3 (2026-10-08): two reads at the staff door THREW instead of answering — the restaurant lookup
+// on /r/<slug>/login and the owner's "which restaurants do I have" — so a blip came back as a bare 500
+// and the card said "Network error". Every throwing read at this door must now sit inside a try that
+// answers 503 + transient, and the card must tell "the server answered badly" from "no network".
+head("S10-T17. a database blip at the staff door says 'try again', never 'network error'");
+{
+  const pl = CODE.panelLogin;
+  const lineOf = (src, needle) => src.split("\n").find((l) => l.includes(needle)) || "";
+  check("P186001", "/api/panel-login looks the restaurant up inside a try (it THROWS on a failed read)",
+    /try\s*\{[^}]*await getRestaurantBySlug\(/.test(lineOf(pl, "getRestaurantBySlug(")), lineOf(pl, "getRestaurantBySlug("));
+  check("P186002", "/api/panel-login asks which restaurants an owner has inside a try (OwnedLookupFailed)",
+    /try\s*\{[^}]*await ownerPanelEnabled\(/.test(lineOf(pl, "ownerPanelEnabled(u.id")), lineOf(pl, "ownerPanelEnabled(u.id"));
+  check("P186003", "…and both catches answer through the one tryAgain() helper",
+    count(pl, /catch \(e\) \{ return tryAgain\(/g) === 2, count(pl, /catch \(e\) \{ return tryAgain\(/g));
+  check("P186004", "tryAgain() answers 503 with transient:true — retryable, never a 4xx and never a bare 500",
+    /status:\s*503/.test(lineOf(pl, "transient: true }, { status:")) && has(pl, "transient: true"));
+  check("P186005", "…in the SAME words loginUser uses for its own failed lookup",
+    has(pl, `"Can't reach the server — try again in a moment."`) && has(CODE.userAuth, `"Can't reach the server — try again in a moment."`));
+  check("P186006", "no other awaited read in /api/panel-login can throw bare (each remaining helper swallows its own errors)",
+    ["isRestaurantDeleted(", "isPanelEnabled(", "rateAllowed(", "rateResetOnSuccess(", "logAction(", "loginUser("].every((n) => has(pl, n)) &&
+    !/await (getRestaurantBySlug|ownerPanelEnabled|enabledOwnedRestaurantIds)\(/.test(pl.split("\n").filter((l) => !/try\s*\{/.test(l)).join("\n")));
+  const lf = CODE.loginForm;
+  check("P186007", "the staff card reads the reply with r.json().catch(), so a non-JSON server answer is not a thrown 'network error'",
+    has(lf, "await r.json().catch(() => null)"));
+  check("P186008", "…and says the SERVER didn't answer properly, not the network",
+    has(lf, "The server didn\\u2019t answer properly"));
+  check("P186009", "'Network error' is now only what a fetch that never arrived says",
+    count(lf, /Network error/g) === 1 && /catch \{\s*setErr\("Network error/.test(lf));
+}
+
 if (LIVE || IDS_ONLY) {
   head(`8. Watched running against ${BASE} (P79371–P79420)`);
   // A guard that cannot reach the app must say so in one sentence and stop, never hand back a

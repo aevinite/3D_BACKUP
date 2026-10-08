@@ -12,6 +12,20 @@ import { clientIp } from "@/lib/loginThrottle";
 
 export const dynamic = "force-dynamic";
 
+// THE SAME "TRY AGAIN" A DATABASE BLIP GETS EVERYWHERE ELSE AT THIS DOOR (sweep #10 T17, item 3).
+// loginUser already answers a failed lookup with 503 + this sentence. Two reads ABOVE and BELOW it
+// did not: `getRestaurantBySlug` (the restaurant's own door, /r/<slug>/login) THROWS when it cannot
+// read the restaurant, and `ownerPanelEnabled` THROWS `OwnedLookupFailed` when it cannot read what an
+// owner owns. Either throw escaped this handler as a bare 500 with no JSON body, so the card's
+// `r.json()` failed and the person was told "Network error" about a network that was fine — the exact
+// "a blip is reported as your internet" mistake fixed elsewhere on 2026-09-12. A 503 also tells the
+// panel's offline layer this is retryable (a 5xx is queued, a 4xx is told).
+const TRY_AGAIN = "Can't reach the server — try again in a moment.";
+const tryAgain = (where: string, e: unknown) => {
+  console.error(`[panel-login] ${where}:`, e instanceof Error ? e.message : e);
+  return NextResponse.json({ ok: false, error: TRY_AGAIN, transient: true }, { status: 503 });
+};
+
 export async function POST(req: NextRequest) {
   let body: any = {};
   try { body = await req.json(); } catch {}
@@ -20,7 +34,9 @@ export async function POST(req: NextRequest) {
   // credentials — never confirm which slugs exist.
   let restaurantId: string | undefined;
   if (body?.restaurant) {
-    const rest = await getRestaurantBySlug(String(body.restaurant));
+    let rest: Awaited<ReturnType<typeof getRestaurantBySlug>>;
+    try { rest = await getRestaurantBySlug(String(body.restaurant)); }
+    catch (e) { return tryAgain("couldn't look the restaurant up", e); }
     if (!rest) return NextResponse.json({ ok: false, error: "Wrong name or password." }, { status: 401 });
     restaurantId = rest.id;
   }
@@ -99,7 +115,10 @@ export async function POST(req: NextRequest) {
     // ownership — deleted/entitlement checks must run against what they actually OWN.
     // ownerPanelEnabled = "at least one live owned restaurant has the owner panel on";
     // uncached at the door (login is rare + must reflect an admin flip immediately).
-    if (!(await ownerPanelEnabled(u.id, false))) {
+    let ownerOn: boolean;
+    try { ownerOn = await ownerPanelEnabled(u.id, false); }
+    catch (e) { return tryAgain("couldn't read which restaurants this owner has", e); }
+    if (!ownerOn) {
       await logAction("owner", "login_denied", { actor: uWho, device_id: dev, detail: `"${uWho}" signed in but the owner panel is not enabled on any owned restaurant` });
       return NextResponse.json({ ok: false, error: "The owner panel isn't enabled for any of your restaurants. Ask your admin to turn it on." }, { status: 403 });
     }
