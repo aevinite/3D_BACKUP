@@ -95,6 +95,19 @@ export const PERSONAL_DATA: PersonalDataPlace[] = [
     scopeBy: "restaurant",
   },
   {
+    // LOYALTY POINTS (migs 401/403, 2026-09-19) — sweep #10 T39 item 25. Every earn, spend and
+    // correction, keyed on the guest's phone exactly as `customers` is (restaurant_id, phone). It
+    // exists only to remember this person's balance: what a redemption took off a bill is written on
+    // the bill itself (sessions), which this does not touch. Missed for three weeks, so an erased
+    // guest kept their phone number in the points book; verify:personal-data named it.
+    table: "loyalty_ledger",
+    phoneColumn: "phone",
+    personColumns: ["phone"],
+    policy: "erase",
+    what: "their loyalty points history",
+    scopeBy: "restaurant",
+  },
+  {
     table: "khata_customers",
     phoneColumn: "phone",
     personColumns: ["name", "phone", "note"],
