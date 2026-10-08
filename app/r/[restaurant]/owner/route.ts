@@ -27,6 +27,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ restaurant:
   // boundary, so an owner opening their bookmark during a blip got the platform's plain
   // "Internal Server Error". Answer the same thing every other door does for a failed read: 503,
   // in words, with a way to try again — and nothing about the restaurant, since we could not read it.
+  // box-sizing:border-box (round 2, item 17): without it the 16px padding sat ON TOP of 100vh and the page
+  // scrolled by 32px on a phone, for no content.
   let r: Awaited<ReturnType<typeof getRestaurantBySlug>>;
   try {
     r = await getRestaurantBySlug(restaurant);
@@ -34,7 +36,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ restaurant:
     console.error("[r/owner] couldn't look the restaurant up:", e instanceof Error ? e.message : e);
     return new NextResponse(
       `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try again in a moment</title>` +
-      `<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1220;color:#dbe7ff;font-family:system-ui,sans-serif;padding:16px">` +
+      `<body style="margin:0;box-sizing:border-box;min-height:100vh;display:grid;place-items:center;background:#0b1220;color:#dbe7ff;font-family:system-ui,sans-serif;padding:16px">` +
       `<div style="max-width:360px;text-align:center"><h1 style="font-size:20px;margin:0 0 8px">Can't reach the server</h1>` +
       `<p style="margin:0 0 16px;color:#8aa0c9;font-size:14px;line-height:1.5">This page couldn't load just now. It usually comes back by itself in a moment.</p>` +
       `<a href="" style="display:inline-block;padding:11px 18px;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;text-decoration:none">Try again</a></div></body>`,

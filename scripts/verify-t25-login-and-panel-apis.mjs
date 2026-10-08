@@ -803,6 +803,10 @@ check("P186503", "the 'You're blocked' note box uses the card's own lettering, n
   check("P186907", "the rulebook describes panel-logout as POST-only, as its code is", !/panel-logout`\s*still offers both shapes/.test(gateSec) && /panel-logout` has been POST-only/.test(gateSec));
   check("P186908", "…and names /api/guest/leave on the public list with its reason", gateSec.includes("`/api/guest/leave`") && /lfh_leave_session/.test(gateSec));
 }
+// SWEEP #10 T17 ROUND 2, item 17 — the owner entrance's try-again page (item 5) scrolled by 32px on a phone:
+// min-height:100vh plus 16px padding with content-box sizing. Measured in Chrome at 360×780: 812 vs 780.
+check("P186909", "the owner entrance's try-again page sizes its padding INSIDE the screen height (no 32px scroll)",
+  /<body style="margin:0;box-sizing:border-box;min-height:100vh;/.test(read("app/r/[restaurant]/owner/route.ts")));
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
