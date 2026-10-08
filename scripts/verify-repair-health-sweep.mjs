@@ -176,7 +176,11 @@ await phase("the admin-login wall is the real case — it has no rule row to rea
 
 // item 2 · the failure banner
 await phase("the run-failure banner counts the failures that actually saved a report", () => /withReport = failedRuns\.filter\(\(r\) => r\.report\)\.length/.test(C.repair) || "it points at reports it has not checked exist");
-await phase("it has wording for 'none of them saved one'", () => /None of them saved a report/.test(C.repair) || "with no reports it would still say 'open any red row'");
+// Re-pinned 2026-10-08 (sweep #10 T39 item 29) — the same deliberate changes as verify:admin-health's item 8:
+// the report is lazy since 2026-09-16 (`hasReport` in the list), the no-report banner splits by run length
+// since 2026-09-19, repeats collapse into one row via when()/worth(), and the staff tile shows a capped '+'.
+await phase("it has wording for 'none of them saved one'", () => /None of them saved a report/.test(C.repair)
+  || (/stopped without saving anything/.test(C.repair) && /None of them got going at all/.test(C.repair)) || "with no reports it would still say 'open any red row'");
 await phase("it has wording for 'some of them saved one'", () => /saved a report — open/.test(C.repair) || "the partial case is missing");
 await phase("it keeps the original wording when EVERY failure is readable", () => /Open any red row below and read what it did/.test(C.repair) || "the all-readable case lost its instruction");
 await phase("the banner is still drawn only when failure is a PATTERN, not for one bad night", () => /recent\.length < 4 \|\| failed \* 2 < recent\.length/.test(C.repair) || "one failure would now raise a warning — that is how a warning stops being read");
@@ -185,9 +189,9 @@ await phase("it still says what a failed night COST him, not just that it failed
 
 // item 3 · a row with nothing to open is not a button
 await phase("the run row's body is shared by both branches", () => /const rowBody = \(/.test(C.repair) || "the button and non-button rows can now drift apart");
-await phase("only a run WITH a report is a button", () => /\{s\.report \? \(/.test(C.repair) || "every row is pressable again");
+await phase("only a run WITH a report is a button", () => /\{s\.(?:report|hasReport) \? \(/.test(C.repair) || "every row is pressable again");
 await phase("a run with no report says so", () => /No report was saved/.test(C.repair) || "the row is silent about it again");
-await phase("…and only once the run has ENDED", () => /!s\.report && s\.ended_at/.test(C.repair) || "a run still working would be accused of losing a report");
+await phase("…and only once the run has ENDED", () => /!s\.(?:report|hasReport) && s\.ended_at/.test(C.repair) || "a run still working would be accused of losing a report");
 await phase("a FAILED run with no report says why there is nothing to read", () => /it stopped before it could write one/.test(C.repair) || "the reason is gone");
 await phase("the chevron is drawn only where there is something to expand", () => /\{rowBody\}\s*\n\s*<i className=\{`fas fa-chevron/.test(C.repair) || "a chevron on an unopenable row promises an expansion");
 await phase("aria-expanded is only announced on a row that can expand", () => (C.repair.match(/aria-expanded=\{isOpen\}/g) || []).length === 1 || "more than one row shape announces an expanded state");
@@ -306,7 +310,8 @@ for (const id of SECTION_IDS) {
 
 // ── grouping, and the ×N tile ─────────────────────────────────────────────────────────────────
 await phase("tiles are grouped by the SHARED signature function, never by raw text", () => /errorGroupKey\(a\)/.test(C.repair) && /from "@\/lib\/errorSignature"/.test(C.repair) || "a local copy of the grouping rule would drift from the server's");
-await phase("a group's timestamp is the NEWEST occurrence", () => /if \(a\.created_at > ex\.latest\) ex\.latest = a\.created_at/.test(C.repair) || "an old repeat would date the tile");
+await phase("a group's timestamp is the NEWEST occurrence", () => /if \(a\.created_at > ex\.latest\) ex\.latest = a\.created_at/.test(C.repair)
+  || /if \(when\(a\) > ex\.latest\) ex\.latest = when\(a\)/.test(C.repair) || "an old repeat would date the tile");
 await phase("groups are sorted newest-first", () => /y\.latest\.localeCompare\(x\.latest\)/.test(C.repair) || "the board is not in time order");
 await phase("the ×N chip is drawn only for a real repeat", () => /g\.count > 1 \?/.test(C.repair) || "'×1' on every tile");
 await phase("'came back after the fix' needs the latest occurrence to be NEWER than the record", () => /new Date\(g\.latest\) > new Date\(mem!?\.fixed_at\)/.test(C.repair) || "an old report under a new fix would be called a recurrence");
@@ -471,7 +476,7 @@ await phase("a failed health read shows 'Couldn\\'t check', not an eternal 'Chec
 await phase("…and says in words that this is unknown, not healthy", () => /This is <b>unknown<\/b>, not healthy\./.test(C.health) || "a failed check reads as a pass");
 await phase("a failed restaurants read says 'unknown', never a reassuring 0", () => /Couldn't read the restaurant list, so this is unknown — not zero\./.test(C.health) || "'0 live restaurants' over a dead read");
 await phase("a failed staff read says 'unknown', never 'nobody'", () => /so this is unknown — not nobody\./.test(C.health) || "'nobody is signed in' over a dead read");
-await phase("zero staff online is NOT drawn as a warning", () => /key: "staff", label: "Staff signed in", value: `\$\{h\.staffOnlineNow\} of \$\{h\.staffTotal\}`, tone: "plain"/.test(C.health) || "amber every night, which is how amber stops being read");
+await phase("zero staff online is NOT drawn as a warning", () => /key: "staff", label: "Staff signed in", value: `\$\{h\.staffOnlineNow\} of \$\{h\.staffTotal\}[^`]*`, tone: "plain"/.test(C.health) || "amber every night, which is how amber stops being read");
 await phase("…and says so in words", () => /normal when the restaurants are closed/.test(C.health) || "the reason is missing");
 await phase("a failed complaints read says 'unknown', never 'clear'", () => /so this is unknown — not clear\./.test(C.health) || "'nothing waiting' over a dead read");
 await phase("a failed 3D check says 'unknown, not zero'", () => /unknown, not zero/.test(C.health) || "'all fine' over a dead read");
@@ -607,7 +612,7 @@ await phase("TAPS · every busy button says what it is doing", () => (C.repair.m
 await phase("TAPS · a tile mid-resolve cannot be resolved twice", () => /disabled=\{resolving\.has\(g\.key\)\}/.test(C.repair) || "a double tap files two resolves");
 await phase("TAPS · a queued problem does not re-offer 'Fix now' after a reload", () => /alreadyQueued = \(g: ErrGroup\)/.test(C.repair) || "a reload would file a second ticket for the same error");
 await phase("TAPS · the fold on System health is a real button", () => /<button className="hx-fold"/.test(C.health) || "a clickable div");
-await phase("TAPS · every run row that can open IS a button", () => /\{s\.report \? \(\s*\n?\s*<button/.test(C.repair) || "a clickable div, or an unopenable button");
+await phase("TAPS · every run row that can open IS a button", () => /\{s\.(?:report|hasReport) \? \(\s*\n?\s*<button/.test(C.repair) || "a clickable div, or an unopenable button");
 
 // BACK BUTTON
 await phase("BACK · the one modal in this territory registers a back-stack layer", () => /useAdminModal\(/.test(C.repair) || "the phone back button would leave the page");
@@ -756,13 +761,15 @@ await drove(R, "opening a tile reveals the captured text, in a code face, unalte
   const mono = await p.page.locator(".rp-detail div").first().evaluate((e) => getComputedStyle(e).fontFamily).catch(() => "");
   return /mono/i.test(mono) || `the captured text is not in a code face (${mono})`;
 });
-await drove(R, "…and 'more' becomes 'less', so the tap changed something", async (p) => { const t = await p.page.locator(".rp-link", { hasText: /less/ }).count(); return t > 0 || "the tile opened but the control still says 'more'"; });
+// "?" when no tile on the board is long enough to need a 'more' (sweep #10 T39 item 29: an empty or short
+// board is not a control that failed to change).
+await drove(R, "…and 'more' becomes 'less', so the tap changed something", async (p) => { const t = await p.page.locator(".rp-link", { hasText: /less/ }).count(); if (!t && !(await p.page.locator(".rp-link", { hasText: /^more$/ }).count())) return "?"; return t > 0 || "the tile opened but the control still says 'more'"; });
 await drove(R, "every section the strip links to is really on the page", async (p) => { const ids = await p.page.locator(".rp-sec-h[id]").evaluateAll((els) => els.map((e) => e.id)); const links = await p.page.locator(".rp-pill[href^='#']").evaluateAll((els) => els.map((e) => e.getAttribute("href").slice(1))); const dead = links.filter((l) => !ids.includes(l)); return dead.length === 0 || `dead anchor(s): ${dead.join(", ")}`; });
 await drove(R, "the 'Choose a restaurant' sentence appears once, not twice", async (p) => { const t = await p.page.locator("main").innerText(); const c = (t.match(/unlock (the|its) table & order tools/g) || []).length; return c === 1 || `printed ${c} times`; });
 await drove(R, "the hands-on tools are locked with no restaurant chosen, and say so", async (p) => { const t = await p.page.locator("main").innerText(); return /Choose a restaurant at the top of this page to unlock/.test(t) || "the tools render with no target, or say nothing"; });
 await drove(R, "the run-history list is painted", async (p) => (await p.page.locator("h2", { hasText: "Claude session history" }).count()) > 0 || "no history section");
 await drove(R, "…and only the rows with a report are buttons", async (p) => {
-  const r = await p.page.evaluate(() => { const card = [...document.querySelectorAll(".adm-card")].find((c) => /nightly (repair|audit)/i.test(c.innerText)); if (!card) return null; return { rows: card.children.length, btns: card.querySelectorAll("button").length, readable: (card.innerText.match(/read what it did/g) || []).length }; });
+  const r = await p.page.evaluate(() => { const card = [...document.querySelectorAll(".adm-card")].find((c) => /nightly (repair|audit)/i.test(c.innerText)); if (!card) return null; return { rows: card.children.length, btns: card.querySelectorAll("button[aria-expanded]").length, readable: (card.innerText.match(/read what it did/g) || []).length }; });   // only ROW buttons: the card also carries the way-back button (2026-09-16), which is not a row (S10 T39 item 29)
   if (!r) return "?";
   return r.btns === r.readable || `${r.btns} buttons for ${r.readable} openable rows (of ${r.rows})`;
 });
@@ -878,7 +885,10 @@ await drove(H, "'Never seen' IS the alarm colour, and is the only red in the gri
   return (r.red === 0 || r.allNever) || `${r.red} red cells and not all of them are "Never seen"`;
 });
 await drove(H, "every dot in the grid is FILLED — the hollow state is retired", async (p) => { const bad = await p.page.evaluate(() => [...document.querySelectorAll(".adm-logwrap span[aria-hidden]")].filter((d) => { const cs = getComputedStyle(d); return cs.borderTopWidth !== "0px" || cs.backgroundColor === "rgba(0, 0, 0, 0)"; }).length); return bad === 0 || `${bad} hollow dot(s)`; });
-await drove(H, "the 'never signed into' card names each screen and its restaurant", async (p) => { const t = await p.page.locator("main").innerText(); if (!/Staff screens nobody has signed into/.test(t)) return "?"; return /Manager[\s\S]{0,40}Demo Bistro|Kitchen[\s\S]{0,40}Demo Bistro/.test(t) || "the card is drawn but names no restaurant"; });
+await drove(H, "the 'never signed into' card names each screen and its restaurant", async (p) => { const t = await p.page.locator("main").innerText(); if (!/Staff screens nobody has signed into/.test(t)) return "?"; // Any restaurant, not one named in the code: which restaurants have unclaimed screens changes with
+// the data (it was Demo Bistro; on 2026-10-08 Copper Kettle and Saffron Street). S10 T39 item 29.
+const sec = t.slice(t.indexOf("Staff screens nobody has signed into")); const rows = [...sec.matchAll(/\n(Manager|Kitchen|Tablet)\n([^\n]+)\nSign-in details/g)];
+return (rows.length > 0 && rows.every((m) => m[2].trim().length > 1 && !/^Sign-in details$/.test(m[2].trim()))) || "the card is drawn but names no restaurant"; });
 await drove(H, "…and each row offers the sign-in-details door", async (p) => { if (!(await p.page.locator("h2", { hasText: "nobody has signed into" }).count())) return "?"; return (await p.page.locator("a", { hasText: "Sign-in details" }).count()) > 0 || "named, with nowhere to go"; });
 await drove(H, "…and that door carries the restaurant AND the section to ring", async (p) => { const l = p.page.locator("a", { hasText: "Sign-in details" }).first(); if (!(await l.count())) return "?"; const h = await l.getAttribute("href"); return /focus=|restaurant=|slug=/.test(h) && /credentials/.test(h) || `the link is ${h}`; });
 await drove(H, "the technical detail is shut on arrival", async (p) => (await p.page.locator(".hx-fold").getAttribute("aria-expanded")) === "false" || "it is open, and it is not what the page is for");
