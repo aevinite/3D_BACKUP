@@ -82,6 +82,48 @@ const GUARDS = [
   ["verify-print-queue.mjs", "auto-print is a ROW, and prints on a window another window covers"],
   ["verify-print-helper.mjs", "a COMPUTER can own the paper: one basket, many printers, no screen fighting it"],
   ["verify-launch-risks.mjs", "no surprise bill, no keyboard dead-end on the guest menu, no message without consent"],
+
+  // ── THIRTY-THREE MORE THAT RAN NOWHERE (sweep #10 T39, 2026-10-09) ─────────────────────────
+  // Measured: 33 guards that read repo files only and need nothing beyond `npm ci` were run by no
+  // automatic step at all — and on 2026-10-08 seven of that day's reds were among them, some red for
+  // weeks (verify:admin-health, owner-shell, panel-dialogs, panel-scope, panel-names, kitchen,
+  // owner-s7). Each was run here with an EMPTY environment (no .env.local, no keys) and passed.
+  // verify-panel-scope is the slow one (~85s); every other one is about a second.
+  // verify:inventory-window is NOT here only because it is TypeScript that must be bundled first —
+  // it has its own step in .github/workflows/checks.yml.
+  ["verify-plain-logs.mjs", "an activity-log line or alert button reads as plain English"],
+  ["verify-admin-health-logs.mjs", "an admin diagnostics page that could not ask never says 'all clear'"],
+  ["verify-owner-panel.mjs", "the owner's Menu, Team and Settings screens say what really happened"],
+  ["verify-owner-money-screens.mjs", "the owner's Customers / Pay Later / Inventory / Complaints screens"],
+  ["verify-owner-shell.mjs", "the owner console's frame and its Settings screen"],
+  ["verify-panel-canvas.mjs", "no see-through band past the fold on a phone"],
+  ["verify-panel-dialogs.mjs", "a staff panel never uses the browser's own alert/confirm/prompt"],
+  ["verify-panel-scope.mjs", "every panel helper exists where its caller can see it (no blank panel)"],
+  ["verify-panel-names.mjs", "every name a panel reads exists where it is read"],
+  ["verify-panel-secrets.mjs", "a panel never receives the delivery apps' connection keys"],
+  ["verify-one-bill-delete.mjs", "never more than one bill per request"],
+  ["verify-plain-refusals.mjs", "a database error never lands raw in front of a manager"],
+  ["verify-log-visibility.mjs", "what an owner may see in the activity log, read safely"],
+  ["verify-bills-screen.mjs", "the Bills record screen keeps the layout the owner picked"],
+  ["verify-money-boxes.mjs", "a box a person types money into accepts its own numbers"],
+  ["verify-ledger-index.mjs", "one sweep ID means one check, forever"],
+  ["verify-3d-viewer.mjs", "the dish page and 3D viewer's badges, fallbacks and messages"],
+  ["verify-kitchen-screen.mjs", "the kitchen screen's 1,660 numbered checks"],
+  ["verify-parcel-home.mjs", "a parcel has one home; the floor never grows a parcel strip"],
+  ["verify-floor-per-row.mjs", "tables per row and the floor's sideways scrolling"],
+  ["verify-read-guards.mjs", "a route that must require a login does"],
+  ["verify-panel-api-guards.mjs", "guest and staff-panel routes keep their scoping and gating"],
+  ["verify-bill-reprint-is-silent.mjs", "a reprint is a print, not a new bill"],
+  ["verify-owner-scope-503.mjs", "an owner route that cannot read its scope answers a retryable 503"],
+  ["verify-admin-refusals.mjs", "an admin refusal fails closed and reports back"],
+  ["verify-retention-lock.mjs", "the admin's log-retention lock is visible and enforced"],
+  ["verify-t28-picked.mjs", "the four owner-route properties picked on 2026-09-15"],
+  ["verify-owner-territory-s7.mjs", "the owner's Kitchen printing card and sweep #7's owner screens"],
+  ["verify-shared-panel-styles.mjs", "a box two panels both load is styled on both"],
+  ["verify-t12-plumbing.mjs", "the shared panel files, judged against the ledger"],
+  ["verify-owner-team-and-logs.mjs", "the owner's Audit & logs and Team roster"],
+  ["verify-session-gate-taps.mjs", "the guest's table sheet"],
+  ["verify-guest-waits-for-its-restaurant.mjs", "every guest screen waits until it knows which restaurant it is on"],
 ];
 
 // NOT HERE, AND WHY — the admission test is stricter than it first looks.

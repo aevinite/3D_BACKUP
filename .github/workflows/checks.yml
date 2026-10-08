@@ -159,3 +159,10 @@ jobs:
       - name: dependency advisories
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run -s verify:deps
+
+      # verify:inventory-window reads repo files only, but it is TypeScript that has to be bundled
+      # before Node can run it, so it cannot sit in verify:static's plain-node list (sweep #10 T39,
+      # 2026-10-09). Its npm entry reads .env.local only if one exists — a runner has none.
+      - name: inventory window
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run -s verify:inventory-window
