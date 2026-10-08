@@ -520,8 +520,8 @@ addLive("Live · 'cooking now' can never exceed 'orders today' at a restaurant",
 addLive("Live · a restaurant with no tables still renders as a block, not as a gap", "assert the tile arrays are arrays even when empty", () => (live.floorJson?.restaurants || []).every((r) => Array.isArray(r.tables)));
 addLive("Live · the platform total the screen prints is the sum of the blocks it draws", "add the tiles up and compare with the rendered 'Tables busy' figure", () => live.probe.tablesBusyMatches === true);
 addLive("Live · 'Restaurants live' counts the restaurants that have a table in use", "compare the rendered figure with the payload", () => live.probe.restsLiveMatches === true);
-addLive("Live · every restaurant in the payload has a block on screen", "count the rendered blocks", () => live.probe.blockCount === (live.floorJson?.restaurants || []).length);
-addLive("Live · every tile in the payload is drawn", "count the rendered tiles", () => live.probe.tileCount === (live.floorJson?.restaurants || []).reduce((s, r) => s + r.tables.length, 0));
+addLive("Live · every restaurant in the payload has a block on screen", "count the rendered blocks", () => live.probe.judgedAgainstPageRead === true && live.probe.blockCount === live.probe.pageRests);
+addLive("Live · every tile in the payload is drawn", "count the rendered tiles", () => live.probe.judgedAgainstPageRead === true && live.probe.tileCount === live.probe.pageTiles);
 addLive("Live · item 5 — a small restaurant's block is not stretched to a big one's height", "measure every block; the shortest must be far shorter than the tallest", () => live.probe.shortestBlock != null && live.probe.shortestBlock < 200);
 addLive("Live · item 5 — a block's height tracks its own number of tables", "measure the block heights against the tile counts", () => live.probe.heightTracksTiles === true);
 addLive("Live · item 4 — the permanent 'Manual' pill is not painted in the warning colour", "read the computed colour of .adm-snapchip", () => live.probe.snapchipNeutral === true);
@@ -576,8 +576,8 @@ addLive("Live · everyone on it was seen inside the three-minute window", "walk 
   const at = Date.parse(live.soJson?.generatedAt || "") || Date.now();
   return (live.soJson?.staff || []).every((s) => !s.last_seen_at || at - Date.parse(s.last_seen_at) <= 185_000);
 });
-addLive("Live · the count line on screen matches the roster the server sent", "read the count line", () => live.probe.soCountMatches === true);
-addLive("Live · one card is drawn per person", "count the cards", () => live.probe.soCards === (live.soJson?.staff || []).length);
+addLive("Live · the count line on screen matches the roster the server sent", "read the count line", () => live.probe.soJudgedAgainstPageRead === true && live.probe.soCountMatches === true);
+addLive("Live · one card is drawn per person", "count the cards", () => live.probe.soJudgedAgainstPageRead === true && live.probe.soCards === live.probe.soPageN);
 addLive("Live · item 3 — a filter whose restaurant leaves the roster is dropped", "pick one, refresh onto a roster from elsewhere, read the picker and the count", () => live.probe.staleFilterDropped === true);
 addLive("Live · item 3 — …and the picker then agrees with the list it is filtering", "read both", () => live.probe.pickerAgreesWithList === true);
 addLive("Live · the role chips narrow the visible cards", "click a chip and count", () => live.probe.roleChipFilters === true);
@@ -752,10 +752,22 @@ async function collectLive() {
     const p = await ctx.newPage();
     let calls = 0;
     p.on("request", (r) => { if (r.url().includes("/api/admin/floor")) calls++; });
+    // JUDGE THE PAGE AGAINST WHAT THE PAGE WAS SENT (sweep #10 T39 item 11). The five drawing checks
+    // below used to compare the screen with `live.floorJson`, a separate read taken minutes earlier
+    // at the top of the run. On a shared database another lane writes in between — on 2026-10-08 a
+    // `zz-scen-…` restaurant appeared and three tables got busy — and the guard reported the screen
+    // as wrong ("Tables busy 37" vs 34) when it had drawn its own data perfectly. The floor's whole
+    // job is to show the moment it loaded, so that moment is the one to check it against.
+    let pageFloor = null;
     await p.goto(BASE + "/aevinite/floor", { waitUntil: "networkidle" });
     await p.waitForTimeout(400);
     live.probe.floorCallsBeforeGate = calls;
+    // Awaited, not listened for: a listener's `await r.json()` can still be pending when the
+    // measurement below runs, which reads as "judged against nothing".
+    const pageFloorP = p.waitForResponse((r) => new URL(r.url()).pathname === "/api/admin/floor" && r.status() === 200, { timeout: 30000 })
+      .then((r) => r.json()).catch(() => null);
     await p.getByRole("button", { name: "Load live floor" }).click({ timeout: 20000 });
+    pageFloor = await pageFloorP;
     await p.waitForLoadState("networkidle"); await p.waitForTimeout(1200);
     live.probe.floorCallsAfterGate = calls;
     const m = await p.evaluate(() => {
@@ -775,6 +787,10 @@ async function collectLive() {
         firstBlockName: blocks[0]?.querySelector(".adm-floormonth-name")?.textContent?.trim(),
       };
     });
+    const F = pageFloor || live.floorJson;            // the snapshot this page drew
+    live.probe.judgedAgainstPageRead = !!pageFloor;
+    live.probe.pageRests = (F.restaurants || []).length;
+    live.probe.pageTiles = (F.restaurants || []).reduce((s, r) => s + r.tables.length, 0);
     live.probe.blockCount = m.blockCount;
     live.probe.tileCount = m.tileCount;
     live.probe.tileOverflow = m.tileOverflow;
@@ -785,9 +801,9 @@ async function collectLive() {
       return small.length === 0 || big.length === 0 || Math.max(...small.map((x) => x.h)) < Math.min(...big.map((x) => x.h));
     })();
     live.probe.snapchipNeutral = !!m.snapColor && !/217|119|6\)/.test(m.snapColor.replace(/\s/g, ""));
-    const busyTotal = (live.floorJson.restaurants || []).reduce((s, r) => s + r.tables.filter((t) => t.s !== "free").length, 0);
+    const busyTotal = (F.restaurants || []).reduce((s, r) => s + r.tables.filter((t) => t.s !== "free").length, 0);
     live.probe.tablesBusyMatches = m.tablesBusy.startsWith(String(busyTotal));
-    live.probe.restsLiveMatches = m.restsLive.startsWith(String((live.floorJson.restaurants || []).filter((r) => r.tables.some((t) => t.s !== "free")).length));
+    live.probe.restsLiveMatches = m.restsLive.startsWith(String((F.restaurants || []).filter((r) => r.tables.some((t) => t.s !== "free")).length));
     // The Open-tables box must follow the Sort control
     await p.getByRole("button", { name: /Open tables/ }).click({ timeout: 10000 }).catch(() => {});
     await p.waitForTimeout(200);
@@ -898,9 +914,16 @@ async function collectLive() {
     const p = await ctx.newPage();
     let calls = 0;
     p.on("request", (r) => { if (r.url().includes("/api/admin/staff-online")) calls++; });
+    // Against the roster THIS page was sent, not the one read at the top of the run (sweep #10 T39
+    // item 11 — the same race as the Live floor: a sign-in or sign-out in between is not a fault).
+    const pageRosterP = p.waitForResponse((r) => new URL(r.url()).pathname === "/api/admin/staff-online" && r.status() === 200, { timeout: 30000 })
+      .then((r) => r.json()).catch(() => null);
     await p.goto(BASE + "/aevinite/staff-online", { waitUntil: "networkidle" });
+    const pageRoster = await pageRosterP;
     await p.waitForTimeout(600);
-    const n = (live.soJson?.staff || []).length;
+    live.probe.soJudgedAgainstPageRead = !!pageRoster;
+    const n = ((pageRoster || live.soJson)?.staff || []).length;
+    live.probe.soPageN = n;
     const m = await p.evaluate(() => ({ count: document.querySelector(".cmd-sec")?.textContent?.trim() || "", cards: document.querySelectorAll(".so-card").length }));
     live.probe.soCountMatches = m.count === `${n} online`;
     live.probe.soCards = m.cards;
