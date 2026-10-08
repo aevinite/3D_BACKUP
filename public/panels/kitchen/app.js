@@ -1861,6 +1861,11 @@ function printerStatusHtml() {
   const refused = state.printRefused || null;
   const where = hlp ? (esc(hlp.printer) + " — from " + esc(hlp.agent))
     : refused === "off" ? "nobody — kitchen slips are switched off for this restaurant"
+    // PAUSED = THE QUEUE IS STOPPED (sweep #10 T39 item 21). lib/printHelpers.ts gained `why: "paused"` on
+    // 2026-09-14 — the one master stop — and this sheet never learned it, so it fell through to
+    // "this screen" and told a cook at a silent printer that their screen was the one printing.
+    // Same meaning as the admin console's "The queue is stopped — tickets will wait."
+    : refused === "paused" ? "nobody right now — printing is stopped for this restaurant, and tickets wait until it starts again"
     : refused === "other_panel" ? "another screen — not this one"
     : refused === "other_person" ? "one named person's screen — not this one"
     : refused === "other_device" ? "one named computer — not this one"
