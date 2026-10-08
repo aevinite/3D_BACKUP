@@ -643,7 +643,12 @@ head("8. the two docs I own tell the truth about the code they name");
       offenders.length === 0, offenders);
     check("…and it is a LATER definition than the ones that used to delete bills (309 closed that)",
       parseInt(live, 10) > 309, live);
-    check("§3 names the live purge rather than a single migration", /rewritten six times/.test(c));
+    // It used to look for the words "rewritten six times" — which made the guard REQUIRE a count
+    // that was already stale (twelve files defined the purge by 2026-10-09). The property it stood
+    // for is that §3 sends the reader to the LIVE purge, so that is what it reads now: the heading
+    // and the command that lists every definition (sweep #10 T30, item 3).
+    check("§3 names the live purge rather than a single migration",
+      /Check the LIVE purge, not one migration/.test(c) && /grep -liE "FUNCTION\\s\+\(public\\\.\)\?admin_purge_restaurant"/.test(c));
   }
   const playbook = read("docs/SAAS-EFFICIENCY-PLAYBOOK.md");
   // §3a promises to list EVERY live expire:0 call site. A fourth one that never got listed is
