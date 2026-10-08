@@ -30,8 +30,14 @@ export default async function StaffLogin({
   // (RECONSTRUCTED 2026-08-13 from the doc row after a parallel session's uncommitted edit
   // here was destroyed by a `git reset --hard` in this shared folder — the decision and the
   // quote are the owner's; the wording is not the original.)
+  // THE PAGE SCROLLS BY ITSELF (owner, 2026-10-08, sweep #10 T17 item 18: "do all"). The app-wide stylesheet
+  // locks html/body (`overflow: hidden`, app/globals.css) for the guest menu's own inner scrolling, so on a phone
+  // held SIDEWAYS (780×360) the admin card / the blocked card — taller than the screen — had its Sign in half off-screen with no way to
+  // reach it. <main> is now its own scroll box (height 100% + overflowY auto) and the card centres with
+  // `margin: auto`, which can never push the card's top out of reach the way a centred overflow can.
+  // This is NOT R19's change: minHeight stays 100vh exactly as the owner ruled; only scrolling was added.
   return (
-    <main style={{ margin: 0, minHeight: "100vh", display: "grid", placeItems: "center", background: "#0b1220", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", padding: 16 }}>
+    <main style={{ margin: 0, minHeight: "100vh", height: "100%", overflowY: "auto", display: "grid", placeItems: "center", background: "#0b1220", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", padding: 16 }}>
       {isBlocked ? (
         <BlockedView />
       ) : (
