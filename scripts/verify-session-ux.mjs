@@ -26,6 +26,7 @@ import { createHash } from "node:crypto";
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
 import { requireUp } from "./sweep/appUp.mjs";
+import { restoreOnExit, restoreNow } from "./sweep/restore.mjs";
 
 // A guard that can only run when port 4000 happens to be up is a guard that gets skipped — and
 // 4000 belongs to the human, so a parallel session or CI could never run this at all. Accept a
@@ -88,18 +89,27 @@ const cleanup = async () => {
 };
 await cleanup(); // clear any leftovers from an earlier crashed run
 
-// GUEST SESSIONS MUST BE ON, OR THIS CANNOT RUN (sweep #10 T39 item 40). On 2026-10-08 French House
-// had settings.sessions_enabled = false (written by nobody the audit records), so the guest table
-// widget never appeared and the manager's party chip was never drawn — and this guard reported two
-// product faults (or crashed on a 20-second wait) about a feature that was simply switched off.
-// Say so and stop before writing anything; the switch is a restaurant setting, not this guard's to flip.
+// GUEST SESSIONS ARE SWITCHED ON FOR THIS RUN, AND BACK OFF AFTER (sweep #10 T39 item 40, then the
+// follow-up of 2026-10-09). Dining sessions are OFF at every restaurant by default — Aangan, the
+// untouched control, has them off too — so "off" is the normal state, not a fault. This guard tests
+// the sessions feature itself, so it switches it ON for French House for the length of the run and
+// puts back exactly what it found: in the `finally` below, AND on Ctrl-C / a crash (restoreOnExit).
+// It used to stop with exit 2 instead, which left it unable to run on the normal setting.
+let SESSIONS_WERE = null;
 {
   const [st] = await sb("GET", `settings?restaurant_id=eq.${RID}&select=sessions_enabled`);
-  if (!st || st.sessions_enabled !== true) {
-    console.error(`\n⏭ could not run: guest table sessions are switched OFF on this restaurant (settings.sessions_enabled = ${st ? st.sessions_enabled : "unreadable"}).`);
-    console.error("Nothing is wrong with this guard — switch sessions back on for French House, then run it again.");
-    process.exit(2);
+  if (!st) { console.error("could not read French House's settings row"); process.exit(1); }
+  SESSIONS_WERE = st.sessions_enabled === true;
+  if (!SESSIONS_WERE) {
+    restoreOnExit("French House · dining sessions back OFF", putSessionsBack);
+    await sb("PATCH", `settings?restaurant_id=eq.${RID}`, { sessions_enabled: true });
+    const [now] = await sb("GET", `settings?restaurant_id=eq.${RID}&select=sessions_enabled`);
+    if (!now || now.sessions_enabled !== true) { await restoreNow(); console.error("could not switch dining sessions on for the run"); process.exit(1); }
+    console.log("  dining sessions switched ON for this run (they were off — the normal setting); they go back off at the end");
   }
+}
+async function putSessionsBack() {
+  if (SESSIONS_WERE === false) await sb("PATCH", `settings?restaurant_id=eq.${RID}`, { sessions_enabled: false });
 }
 
 const [sess] = await sb("POST", "sessions", { restaurant_id: RID, table_number: TABLE, status: "open", auto_approve: false, opened_by: "guest", opened_at: new Date().toISOString() });
@@ -257,4 +267,5 @@ try {
 }
 
 console.log(failures ? `\n${failures} CHECK(S) FAILED` : "\nALL CHECKS PASSED");
+await restoreNow(); // dining sessions back to what they were (no-op when they were already on)
 process.exit(failures ? 1 : 0);
