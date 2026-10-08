@@ -739,6 +739,22 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     copies.join("\n    ") + "\n    Import the real module: const V = await import(pathToFileURL(join(ROOT, \"lib/passwordVault.ts\")).href).");
 }
 
+// ── 16. EVERY LOAD-TEST SCRIPT REFUSES ANY DATABASE BUT DEV (sweep #10 T39 item 48) ─────────────
+// stress-tenant.mjs places a dinner rush of real orders. Its parent (stress-fleet) refused the
+// client database, but the file runs on its own too, and then nothing checked. A load script is the
+// one place a wrong .env line becomes thousands of orders, so each one must CALL the shared lock.
+{
+  const open = [];
+  for (const f of files) {
+    if (!/^scripts\/(stress[\w-]*|load-[\w-]+)\.mjs$/.test(f)) continue;
+    const src = read(f).replace(/\/\/.*$/gm, "");
+    if (!/refuseUnlessDevTestDb\(/.test(src)) open.push(f);
+  }
+  check("every load-test script refuses any database but the dev one (refuseUnlessDevTestDb)",
+    open.length === 0,
+    open.join("\n    ") + "\n    import { refuseUnlessDevTestDb } from \"./sweep/devStacks.mjs\" and call it with the database URL before the first request.");
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
