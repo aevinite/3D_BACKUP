@@ -673,6 +673,13 @@ for (const [cid, idPart, why] of [
   check("P186188", "the staff door's card honours ?next only when it equals the person's own panel (unchanged)",
     has(CODE.loginForm, "const dest = next && next === home ? next : home;"));
 }
+// SWEEP #10 T17, item 10 — the three sign-in cards fit the room they sit in. The page keeps a 16px gutter,
+// so a viewport-based width (92vw / 94vw) came out WIDER than that room at phone width: measured at 360px,
+// right-hand gaps of 13px and 6px against 16px on the left. 100% of the page's own box is exactly the room.
+for (const [cid, key, max] of [["P186189", "loginForm", "380px"], ["P186190", "staffLoginForm", "360px"], ["P186191", "blockedView", "380px"]]) {
+  check(cid, `${F[key]}: the card is min(100%, ${max}) — never a vw width that overhangs the page's gutter`,
+    has(CODE[key], `width: "min(100%, ${max})"`) && !/width: "min\(\d+vw/.test(CODE[key]));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
@@ -1426,11 +1433,13 @@ check("P79094", "the trap is invisible to a person but present in the form",
 check("P79095", "the staff card's own field style sets box-sizing, so a 360px phone does not overflow",
   has(LF, 'boxSizing: "border-box"'));
 check("P79096", "…and the card itself is capped at the viewport width",
-  has(LF, 'width: "min(92vw, 380px)"'));
+  // (sweep #10 T17 item 10: capped at the page's own box, min(100%, …) — a vw width overhung the 16px gutter.)
+  has(LF, 'width: "min(100%, 380px)"'));
 check("P79097", "the admin card is capped the same way",
-  has(CODE.staffLoginForm, 'width: "min(92vw, 360px)"'));
+  // (sweep #10 T17 item 10: capped at the page's own box, min(100%, …) — a vw width overhung the 16px gutter.)
+  has(CODE.staffLoginForm, 'width: "min(100%, 360px)"'));
 check("P79098", "the blocked card is capped AND scrolls, so its longer text still fits a phone",
-  has(CODE.blockedView, 'width: "min(94vw, 380px)"') && has(CODE.blockedView, 'overflowY: "auto"'));
+  has(CODE.blockedView, 'width: "min(100%, 380px)"') && has(CODE.blockedView, 'overflowY: "auto"'));
 check("P79099", "every input on the staff card is 16px, so iOS does not zoom the page on focus",
   has(LF, "fontSize: 16,"));
 check("P79100", "…and so is the admin card's password box", has(CODE.staffLoginForm, "fontSize: 16"));

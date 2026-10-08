@@ -71,6 +71,8 @@ export default function LoginForm({
   }
 
   // — styling: a warm, calm card on a dark backdrop; matches the app's tone —
+  // The card is min(100%, 380px), not 92vw (sweep #10 T17, item 10): <main> keeps a 16px gutter, so 92vw came
+  // out wider than the room at phone width and the card sat off-centre (13px gap on the right, 16 on the left).
   const field: React.CSSProperties = {
     width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: 12,
     border: "1px solid #2a3a5f", background: "#0b1220", color: "#eaf1ff", fontSize: 16, outline: "none",
@@ -85,7 +87,7 @@ export default function LoginForm({
   // quote are the owner's; the wording is not the original.)
   return (
     <main style={{ margin: 0, minHeight: "100vh", display: "grid", placeItems: "center", background: "radial-gradient(1200px 600px at 50% -10%, #16223e 0%, #0b1220 60%)", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", padding: 16 }}>
-      <form onSubmit={submit} style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 18, padding: 28, width: "min(92vw, 380px)", boxShadow: "0 20px 60px rgba(0,0,0,.45)" }}>
+      <form onSubmit={submit} style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 18, padding: 28, width: "min(100%, 380px)", boxShadow: "0 20px 60px rgba(0,0,0,.45)" }}>
         <div style={{ textAlign: "center", marginBottom: 18 }}>
           {/* REJECTED (owner, 2026-08-14): making this match /staff-login's SVG brand mark.
               The T11 visual sweep offered it as a "one product" consistency fix; he said

@@ -63,6 +63,8 @@ export default function LoginForm({ next, initialError }: { next: string; initia
     }
   };
 
+  // The card is min(100%, 360px), not 92vw (sweep #10 T17, item 10): the page keeps a 16px gutter, so 92vw
+  // came out wider than the room at phone width and the card sat off-centre.
   const msg =
     err?.kind === "locked" ? "Too many wrong tries — wait a few minutes and try again."
     : err?.kind === "network" ? "Couldn't reach the server — check your connection and try again."
@@ -72,7 +74,7 @@ export default function LoginForm({ next, initialError }: { next: string; initia
 
   return (
     <form onSubmit={submit} method="POST" action="/api/staff-login"
-      style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 28, width: "min(92vw, 360px)" }}>
+      style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 28, width: "min(100%, 360px)" }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginBottom: 18 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {/* REJECTED (owner, 2026-08-14): unifying this with the text ✦ that /login draws.

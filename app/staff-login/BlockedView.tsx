@@ -79,9 +79,11 @@ export default function BlockedView() {
   // re-read. `pendingUnknown` deliberately shows nothing — a card that says "you may or may not have
   // already asked" is worse than one that says nothing, and the person can simply press it.
   const alreadyAsked = sent || status?.pending === true;
+  // Card width is min(100%, 380px), not 94vw (sweep #10 T17, item 10): <main> already keeps a 16px gutter, so
+  // 94vw came out WIDER than the room — at 360px the card overhung the right gutter by 10px, off-centre.
 
   return (
-    <div style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 26, width: "min(94vw, 380px)", maxHeight: "92vh", overflowY: "auto" }}>
+    <div style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 26, width: "min(100%, 380px)", maxHeight: "92vh", overflowY: "auto" }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginBottom: 14, textAlign: "center" }}>
         <div style={{ width: 56, height: 56, borderRadius: 999, background: "rgba(248,113,113,0.14)", display: "grid", placeItems: "center" }}>
           <i className="fas fa-ban" aria-hidden="true" style={{ color: "#f87171", fontSize: 26 }} />
