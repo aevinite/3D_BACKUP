@@ -114,5 +114,25 @@ console.log("\nMONEY POINTERS · every pointer in the money and compliance files
     "docs/COMPLIANCE-GUARDRAILS.md says verify:admin-restaurants reads migration 342 only, but that guard follows the newest purge (purgeMigs)");
 }
 
+// ── 5. The playbook finds code by a sentence in it, never by a line number ───────────────────────
+// (item 8.) Its N+1 entry pointed at "around line 3440" of the editor route, and before that at
+// "~505-511"; both went stale as the route grew. A line number in a 6,000-line file is a pointer
+// that is wrong by next week. The entry now quotes the refusal the loop sits under, and this checks
+// that the sentence is still in the route and that the loop still follows it — so the day someone
+// batches the loop, this goes red and the entry can be ticked off.
+{
+  const pb = read("docs/SAAS-EFFICIENCY-PLAYBOOK.md");
+  check(!/around line \*\*\d+\*\*/.test(pb),
+    "the playbook points at no code by line number",
+    "docs/SAAS-EFFICIENCY-PLAYBOOK.md points at code with \"around line **N**\" — quote a sentence from the code instead");
+  const anchor = "Say why the allergy is changing";
+  const route = read("app/api/editor/[...path]/route.ts");
+  const at = route.indexOf(anchor);
+  const after = at >= 0 ? route.slice(at, at + 1800) : "";
+  check(pb.includes(anchor) && at >= 0 && /for \(const it of items\)[\s\S]{0,500}from\("order_items"\)\.update\(/.test(after),
+    "the playbook's N+1 entry quotes a sentence still in the editor route, with the per-item update loop right after it",
+    "the playbook's N+1 anchor no longer leads to the per-item update loop — either the loop was batched (tick the entry) or the sentence moved");
+}
+
 console.log(`\n${failed ? "✗ FAIL" : "✓ PASS"} — ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -181,9 +181,11 @@ readable; blocking devtools only annoys real users. Real protection:
   that ceiling. Every live match costs one PBKDF2 verify at 120,000 iterations, so this was CPU per
   login attempt as well as egress.
 - [ ] **N+1: batch the allergen per-item UPDATE loop.** Still one `order_items` UPDATE per item,
-  inside a `for` loop — `app/api/editor/[...path]/route.ts` around line **3440** (the old "~505-511"
-  in this file pointed at nothing after the route grew). The manager-PIN loop beside it is
-  restaurant-scoped now, so it is much smaller.
+  inside a `for` loop — `app/api/editor/[...path]/route.ts`, in the order-allergies handler, the loop
+  that runs right after the refusal *"Say why the allergy is changing"*. Found by that sentence, not
+  by a line number: this entry named line ~505, then ~3440, and both went stale as the route grew
+  (the loop was at line 4277 on 2026-10-09). The manager-PIN loop is restaurant-scoped now, so it
+  is much smaller.
 - [ ] **Trim `orders.select("*")` (editor `/orders`) to rendered columns.** Still `select(billsMode
   ? BILLS_COLS : "*")` — the Bills view already names its columns; the floor/board view does not.
   Plus `s-maxage` on the menu reads.
