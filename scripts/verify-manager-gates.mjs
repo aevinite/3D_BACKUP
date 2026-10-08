@@ -239,6 +239,45 @@ world({}, { accessConfig: SECTIONS_OFF });
 actAs("admin");
 await allowed("…and neither is the admin console", "GET", "table-sections", {});
 
+// ── S10-T9 item 2 · the On-the-house report reaches only as far as the dashboard does ────────
+// It sits behind view_dashboard, and the owner's 2026-09-23 rule is that this permission reaches
+// exactly as far as Access → Dashboard → "How far back it reaches" says. One no-charge bill from
+// this morning and one from ten days ago; the panel asks for ?days=30, as it always has.
+console.log("\nS10-T9 item 2 · GET /onhouse and the dashboard reach");
+{
+  const fresh = new Date().toISOString();
+  const old = new Date(Date.now() - 10 * 864e5).toISOString();
+  const COMPED = [
+    { id: "oh1", restaurant_id: RID, session_id: "s-today", table_number: "4", subtotal: 400, tax: 20, total: 420, items: [{ qty: 2 }], paid_at: fresh, payment_method: "On the house", payment_status: "paid", payment_note: "" },
+    { id: "oh2", restaurant_id: RID, session_id: "s-old", table_number: "9", subtotal: 900, tax: 45, total: 945, items: [{ qty: 1 }], paid_at: old, payment_method: "On the house", payment_status: "paid", payment_note: "" },
+  ];
+  const reachWorld = (range) => world({ view_dashboard: true }, { orders: COMPED, accessConfig: range ? { view_dashboard: { manager_opts: { range } } } : {} });
+  const asked = async () => { const r = await call("GET", "onhouse", { query: "?days=30" }); return r; };
+
+  reachWorld("today");
+  let r = await asked();
+  r.status === 200 && r.count === 1 && r.bills?.[0]?.table_number === "4" && r.days === 1 && r.windowLabel === "today"
+    ? ok("a today-only reach is answered with TODAY's no-charge bills, however many days are asked for", `${r.count} bill · ${r.windowLabel}`)
+    : bad("a today-only reach still lists older no-charge bills", JSON.stringify({ status: r.status, count: r.count, days: r.days, label: r.windowLabel }));
+  reachWorld(null);
+  r = await asked();
+  r.count === 1 && r.days === 1 ? ok("…and an UNSET reach means today, the same default /stats uses") : bad("an unset reach reached further than today", JSON.stringify({ count: r.count, days: r.days }));
+  reachWorld("last30");
+  r = await asked();
+  r.count === 2 && r.days === 30 && r.windowLabel === "the last 30 days"
+    ? ok("a 30-day reach still gets the whole thirty days", `${r.count} bills`)
+    : bad("a 30-day reach lost bills it is entitled to", JSON.stringify({ count: r.count, days: r.days, label: r.windowLabel }));
+  reachWorld("today");
+  actAs("admin");
+  r = await asked();
+  r.count === 1 ? ok("…and the clamp is for everyone, the admin console included — like /stats") : bad("the admin was handed a wider window than the screen offers", `${r.count}`);
+  // The card must print the server's window, not a constant of its own.
+  const panelSrc = (await import("node:fs")).readFileSync(join(ROOT, "public/panels/editor/app.js"), "utf8");
+  /oh\.windowLabel/.test(panelSrc) && !/Last 30 days: <b>/.test(panelSrc)
+    ? ok("the Pay later card prints the window the server answered, not a hard-coded \"Last 30 days\"")
+    : bad("the On-the-house card still hard-codes its window");
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });

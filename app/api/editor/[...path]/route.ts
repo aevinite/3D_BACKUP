@@ -1232,8 +1232,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "onhouse") {
       if (g.user && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
-      const days = Math.min(Math.max(Math.round(Number(new URL(req.url).searchParams.get("days"))) || 30, 1), 365);
-      const since = new Date(Date.now() - days * 86400000).toISOString();
+      // ── IT REACHES AS FAR AS THE DASHBOARD DOES, AND NO FURTHER (sweep #10 T9, 2026-10-09) ──────
+      // This report sits behind the dashboard's own permission, and on 2026-09-23 the owner ruled
+      // what that permission reaches: *"why does it take the GST report of the month? The manager
+      // has only access today."* /stats, /staff-risk and /gst-report were clamped to the Access
+      // screen's "How far back it reaches" that day. This one was missed — it kept answering the
+      // panel's `?days=30` (and up to 365), so a manager whose dashboard reaches TODAY was still
+      // shown thirty days of no-charge bills: when, which table, how much, on the Pay later screen.
+      //
+      // Clamped HERE, for everyone, exactly as /stats is — a wider number in the URL is answered
+      // with the reach, never with an error. The window is whole 05:00-IST business days, the same
+      // boundary the dashboard and the day-close sheet draw, and its plain name rides back so the
+      // card says what it is showing instead of a hard-coded "30 days".
+      const ohReach = dashboardReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+      const asked = Math.min(Math.max(Math.round(Number(new URL(req.url).searchParams.get("days"))) || 30, 1), 365);
+      const days = Math.min(asked, reachDays(ohReach));
+      const since = new Date(new Date(businessDayStartIso()).getTime() - (days - 1) * 864e5).toISOString();
+      const windowLabel = days === 1 ? "today" : days === 2 ? "today and yesterday" : `the last ${days} days`;
       const rows = must(await sb.from("orders")
         .select("id,session_id,table_number,subtotal,tax,total,items,paid_at,payment_note")
         .eq("restaurant_id", rid).eq("payment_method", ON_THE_HOUSE_METHOD).eq("payment_status", "paid")
@@ -1249,7 +1264,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         bills.set(key, bl);
       }
       const list = [...bills.values()];
-      return ok({ bills: list, count: list.length, total: Math.round(list.reduce((s, bl) => s + bl.would_be, 0) * 100) / 100 });
+      return ok({ bills: list, count: list.length, total: Math.round(list.reduce((s, bl) => s + bl.would_be, 0) * 100) / 100, days, windowLabel, reach: ohReach });
     }
 
     if (p === "all") {
