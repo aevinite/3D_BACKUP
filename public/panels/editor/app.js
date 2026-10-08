@@ -4650,8 +4650,14 @@ async function renderLoyalty(root, t, phone) {
       // leave the guest short of points with no discount to show for it.
       const r = await api("POST", "/loyalty-redeem", { table: String(t), phone, points: bal });
       if (r && r.ok) {
-        toast(`⭐ ₹${Math.round(Number(r.rupees) || 0)} off — ${r.spent} points used`, "ok");
-        renderLoyalty(root, t, phone);
+        // OFFLINE, api() saves this and answers { ok: true, queued: true } with no `spent` or
+        // `rupees` — so this said "⭐ ₹0 off — undefined points used" and redrew the strip as if the
+        // points had gone (sweep #10 T39 item 16, caught by verify:queued-truth). okToast says the
+        // honest "saved on this device" line instead, and the strip waits for the server. A second
+        // tap cannot double-spend: the ledger allows ONE redeem per bill (mig 401).
+        okToast(r, `⭐ ₹${Math.round(Number(r.rupees) || 0)} off — ${r.spent} points used`);
+        if (wasQueued(r)) btn.textContent = "Saved — sends when back online";
+        else renderLoyalty(root, t, phone);
       } else { btn.disabled = false; btn.textContent = `Use ₹${worth} off`; }
     } catch {
       // The route sends a sentence a cashier can read out loud; api() surfaces it.

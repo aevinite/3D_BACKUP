@@ -61,6 +61,18 @@ const notControl = SKIP_CONTROL
 const notControlS = SKIP_CONTROL
   ? `and s.restaurant_id <> (select id from restaurants where slug = '${CONTROL}')`
   : "";
+// ── --rid <uuid>: ONE restaurant only (sweep #10 T39 item 9) ──────────────────────────────────
+// Without it this sweeps every restaurant but the control — including "Aevidine", whose floor the
+// product films are composed on (brag-output/managerfilm/prep-floor.mjs). Clearing the test
+// restaurant's leftovers must not be able to take a film set with it. The value is checked to be a
+// UUID before it goes near the query text.
+const RID_ARG = argv.includes("--rid") ? String(argv[argv.indexOf("--rid") + 1] || "") : "";
+if (RID_ARG && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(RID_ARG)) {
+  console.error(`--rid needs a restaurant id (a UUID); got "${RID_ARG}"`); process.exit(2);
+}
+const onlyO = RID_ARG ? `and o.restaurant_id = '${RID_ARG}'` : "";
+const onlyS = RID_ARG ? `and s.restaurant_id = '${RID_ARG}'` : "";
+const onlyA = RID_ARG ? `and a.restaurant_id = '${RID_ARG}'` : "";
 
 const env = {};
 for (const line of readFileSync(join(root, ".env.local"), "utf8").split(/\r?\n/)) {
@@ -94,7 +106,8 @@ const orphans = await q(`
     from orders o
    where o.archived = false and o.deleted_at is null
      and o.created_at < now() - interval '${DAYS} days'
-     ${notControl}
+     ${notControl} ${onlyO}
+     and not exists (select 1 from sessions si where si.id = o.session_id and si.invoice_no is not null)   -- S10 T39 item 30
      and not exists (
        select 1 from sessions s
         where s.restaurant_id = o.restaurant_id      -- the fix: a table belongs to a RESTAURANT
@@ -112,12 +125,49 @@ const abandoned = await q(`
     left join orders o on o.session_id = s.id
    where s.status = 'open'
      and coalesce(s.last_activity_at, s.opened_at, s.created_at) < now() - interval '${DAYS} days'
-     ${notControlS}
+     ${notControlS} ${onlyS}
+     and s.invoice_no is null   -- an INVOICED bill is never closed here (S10 T39 item 30)
    group by s.id
    having count(o.id) filter (where not o.archived and o.deleted_at is null) > 0
    order by s.last_activity_at`, true);
 console.log(`\n2 · sessions left open and untouched, still carrying live orders: ${abandoned.length}`);
 for (const s of abandoned) console.log(`     table ${s.table_number} · ${s.live_orders} order(s) · last active ${String(s.last_activity_at).slice(0, 16)}`);
+
+// ── 4 · a session open and untouched for longer than the threshold, with NOTHING on it ──────────
+// (sweep #10 T39 item 9.) Shape 2 only ever saw a session still carrying orders, so a party seated
+// by a test and never ordered for sat open for weeks — on French House on 2026-10-08, 25 of them,
+// mostly on made-up table numbers (9zz1probe, PRB1, S05584a…). The manager's floor shows an
+// off-plan table on purpose, so each one was a phantom tile after table 30; and an open session is
+// what the floor guards count as "busy", so verify:live-rush, verify:two-parties, verify:lifecycle
+// and verify:write-paths all refused to run for want of a free table. Closing an empty session has
+// nothing for migration 020's trigger to cancel; it only frees the table.
+const idle = await q(`
+  select s.id, s.table_number, coalesce(s.last_activity_at, s.opened_at, s.created_at) as last_at
+    from sessions s
+   where s.status = 'open'
+     and coalesce(s.last_activity_at, s.opened_at, s.created_at) < now() - interval '${DAYS} days'
+     ${notControlS} ${onlyS}
+     and s.invoice_no is null   -- an INVOICED bill is never closed here (S10 T39 item 30)
+     and not exists (select 1 from orders o where o.session_id = s.id and not o.archived and o.deleted_at is null)
+   order by 3`, true);
+console.log(`\n4 · sessions left open and untouched, with nothing on them: ${idle.length}`);
+for (const s of idle.slice(0, 40)) console.log(`     table ${s.table_number} · last active ${String(s.last_at).slice(0, 16)}`);
+
+// ── AN INVOICED BILL IS LEFT ALONE, AND SAID OUT LOUD (sweep #10 T39 item 30) ──────────────────────
+// Closing a session cancels its unpaid food (migration 020's trigger). On 2026-10-08 this closed four
+// stale French House test bills that already carried invoice numbers 311–314, which left four ISSUED
+// tax invoices fully cancelled with no credit note — the one state docs/COMPLIANCE-GUARDRAILS.md says
+// a bill can never reach (verify:invoice-is-final went red; the four were credited the product's way,
+// with lfh_issue_credit_note). An invoiced bill is ended only through the app's own cancel, which
+// writes the credit note. So every shape above now skips one, and this lists them for a person.
+const invoicedStale = await q(`
+  select s.table_number, s.invoice_no
+    from sessions s
+   where s.status = 'open' and s.invoice_no is not null and not s.invoice_voided
+     and coalesce(s.last_activity_at, s.opened_at, s.created_at) < now() - interval '${DAYS} days'
+     ${notControlS} ${onlyS}
+   order by s.invoice_no limit 50`, true);
+if (invoicedStale.length) console.log(`\n· left alone — open for days but already INVOICED (end them in the app, which issues the credit note): ${invoicedStale.map((x) => `T${x.table_number} inv #${x.invoice_no}`).join(", ")}`);
 
 // ── 3 · a platform or parcel order stuck part-way, in a table neither query above can reach ───
 const parcels = await q(`
@@ -125,7 +175,7 @@ const parcels = await q(`
     from aggregator_orders a
    where a.status not in ('handed_over', 'cancelled')
      and a.created_at < now() - interval '${DAYS} days'
-     ${SKIP_CONTROL ? `and a.restaurant_id <> (select id from restaurants where slug = '${CONTROL}')` : ""}
+     ${SKIP_CONTROL ? `and a.restaurant_id <> (select id from restaurants where slug = '${CONTROL}')` : ""} ${onlyA}
    order by a.created_at`, true);
 console.log(`\n3 · platform/parcel orders stuck part-way: ${parcels.length}`);
 for (const a of parcels) console.log(`     #${a.kot_no} ${a.source} "${a.customer_name}" (${a.status}) from ${String(a.created_at).slice(0, 10)}`);
@@ -141,6 +191,12 @@ else {
                              where id in (${ids}) and status = 'open' returning id, table_number`);
     console.log(`\n   closed ${closed.length} abandoned session(s) — migration 020's trigger retired what was on them`);
   }
+  if (idle.length) {
+    const ids = idle.map((s) => `'${s.id}'`).join(",");
+    const closed = await q(`update sessions set status = 'closed', closed_at = now()
+                             where id in (${ids}) and status = 'open' returning id`);
+    console.log(`   closed ${closed.length} empty session(s) left open — nothing was on them`);
+  }
   // Then shape 1, which by definition has no session to close.
   const swept = await q(`
     update orders o
@@ -150,7 +206,9 @@ else {
            cancelled_at = case when o.status in ('received','preparing') then coalesce(o.cancelled_at, now()) else o.cancelled_at end
      where o.archived = false and o.deleted_at is null
        and o.created_at < now() - interval '${DAYS} days'
-       ${notControl}
+       ${notControl} ${onlyO}
+       and not exists (select 1 from sessions si where si.id = o.session_id and si.invoice_no is not null)   -- S10 T39 item 30
+     and not exists (select 1 from sessions si where si.id = o.session_id and si.invoice_no is not null)   -- S10 T39 item 30
        and not exists (
          select 1 from sessions s
           where s.restaurant_id = o.restaurant_id

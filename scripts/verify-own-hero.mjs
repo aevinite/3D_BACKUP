@@ -49,8 +49,12 @@ head("A · the hero reads the restaurant's own stored words first");
   ok(!!line, `found the <HeroTitle> in the hero block`);
   if (line) {
     // The stored value must come BEFORE any i18n key or literal in each of the two expressions.
-    const greetOk = /greeting=\{\s*tagline\s*\|\|/.test(line);
-    const titleOk = /title=\{\s*heroTitle\s*\|\|/.test(line);
+    // The restaurant's OWN words may come first in the guest's language (taglineI18n / heroI18n, the
+    // translations the restaurant enters itself — #1431, 2026-09-21), then its own default, and only
+    // then a key or literal. Still "the stored value wins"; the check knew only the old first word
+    // and was red for 17 days (sweep #10 T39 item 32).
+    const greetOk = /greeting=\{\s*(?:localized\(\s*taglineI18n\s*\|\|\s*\{\}\s*,\s*lang\s*\)\s*\|\|\s*)?tagline\s*\|\|/.test(line);
+    const titleOk = /title=\{\s*(?:localized\(\s*heroI18n\s*\|\|\s*\{\}\s*,\s*lang\s*\)\s*\|\|\s*)?heroTitle\s*\|\|/.test(line);
     ok(greetOk, `the greeting takes \`tagline\` first`
       + (greetOk ? "" : ` — it does not. A restaurant that sets a tagline must see it, #1 included.`));
     ok(titleOk, `the title takes \`heroTitle\` first`

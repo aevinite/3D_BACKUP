@@ -112,7 +112,9 @@ for (const { file, extra } of DOCS) {
 // that was never meant for it.
 const PAIRS = [
   { file: "public/panels/kitchen/style.css", dark: ":root", light: 'html[data-theme="light"]', tokens: ["--skel-hi"] },
-  { file: "public/panels/tablet/style.css", dark: ":root", light: 'html[data-theme="light"]', tokens: ["--skel-hi", "--gold-ink", "--merge-ink"] },
+  // --skel-hi left the TABLET with its skeleton on 2026-09-22 (the OBITUARY in its stylesheet); the
+  // kitchen keeps its own copy, listed above (sweep #10 T39 item 41).
+  { file: "public/panels/tablet/style.css", dark: ":root", light: 'html[data-theme="light"]', tokens: ["--gold-ink", "--merge-ink"] },
   // --brand-grad paints the word "Manager" itself (background-clip:text), so it is INK and needs a
   // per-skin value like every other gold that carries words. Missing from the light block, the
   // panel's own name read 2.64:1 on its own bar (T26, sweep #7).
@@ -185,7 +187,16 @@ for (const file of ["app/login/LoginForm.tsx", "app/staff-login/LoginForm.tsx", 
 }
 
 // The first-paint skeleton must not carry a literal colour: it can only be right in one skin.
-for (const file of ["public/panels/kitchen/style.css", "public/panels/tablet/style.css"]) {
+// The TABLET's skeleton was replaced on 2026-09-22 by .floor-booting's bars (stylesheet OBITUARY):
+// hold the replacement to the same rule — its sheen is mixed from a token, never a literal.
+{
+  const css = readFileSync("public/panels/tablet/style.css", "utf8");
+  const bars = (css.match(/\.floor-booting \.fb-bars i \{[\s\S]*?\}/) || [""])[0];
+  if (!bars) fail("public/panels/tablet/style.css — no .floor-booting bar rule found; this guard needs updating");
+  else if (/#[0-9a-fA-F]{3,8}\b|\brgba?\(/.test(bars)) fail("public/panels/tablet/style.css — the first-paint bars carry a literal colour; it can only be right in one skin");
+  else ok("public/panels/tablet/style.css — the first-paint bars' sheen comes from a token");
+}
+for (const file of ["public/panels/kitchen/style.css"]) {
   const rule = readFileSync(file, "utf8").split("\n").find((l) => l.startsWith(".skel-line {"));
   if (!rule) { fail(`${file} — no .skel-line rule found; this guard needs updating`); continue; }
   if (/#[0-9a-fA-F]{3,8}\b|\brgba?\(/.test(rule)) fail(`${file} — .skel-line still carries a literal colour; on the LIGHT skin (the default) that is a near-black bar across a white placeholder`);

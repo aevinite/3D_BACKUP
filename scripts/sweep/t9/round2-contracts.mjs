@@ -89,8 +89,13 @@ row(next(), "every err() on this route carries a plain sentence, never a bare co
 });
 row(next(), "every refusal that is the person's fault carries a 4xx, never a 5xx", () => {
   const codes = [...ROUTEC().matchAll(/return err\("[^"]+", (\d{3})\)/g)].map((m) => Number(m[1]));
-  const bad = codes.filter((c) => c >= 500);
-  return bad.length === 0 || `a person-facing refusal answers ${bad.join(", ")}`;
+  // A 5xx is right when the failure is OURS — "Could not send that to the printer." is the insert
+  // itself failing, and a 5xx is what makes the panel save the tap and retry (busy = offline). Only
+  // a refusal that is the person's fault must be a 4xx. (sweep #10 T39 item 22: this counted the two
+  // "Could not …" answers, which have been 500 on purpose since the print queue landed.)
+  const all = [...ROUTEC().matchAll(/return err\("([^"]+)", (\d{3})\)/g)].map((m) => [m[1], Number(m[2])]);
+  const bad = all.filter(([msg, c]) => c >= 500 && !/^(Could not|Couldn't)\b/.test(msg)).map(([, c]) => c);
+  return codes.length > 0 && (bad.length === 0 || `a person-facing refusal answers ${bad.join(", ")}`);
 });
 row(next(), "the two 409s are the two 'the ground moved' cases, not ordinary refusals", () => {
   const r = ROUTEC();
@@ -104,7 +109,8 @@ row(next(), "the 403s are the blocked device and the platform-accept gate, and n
 });
 row(next(), "the 404s all name what was not found, in words", () => {
   const c404 = [...ROUTEC().matchAll(/return err\("([^"]+)", 404\)/g)].map((m) => m[1]);
-  const vague = c404.filter((s) => !/order|dish|platform order|print job|endpoint/i.test(s));
+  // "That KOT isn't on this restaurant's board any more." names exactly what is missing (S10 T39 item 22).
+  const vague = c404.filter((s) => !/order|dish|platform order|print job|endpoint|KOT|ticket/i.test(s));
   return vague.length === 0 || `a vague 404: ${vague.join(" | ")}`;
 });
 // D5 · the panel only ever sends shapes the route accepts

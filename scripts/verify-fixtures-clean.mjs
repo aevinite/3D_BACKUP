@@ -98,6 +98,36 @@ for (const t of names) {
     + (hit.sessions.length ? "The guard that owns it cannot start again: one open session per table is a unique index. " : ""));
 }
 
+// ── AND EVERY OTHER MADE-UP TABLE, NOT ONLY THE NAMES ON THE LIST (sweep #10 T39 item 9) ─────────
+// The list above is the registry in scripts/sweep/fixtureTables.mjs, and the leftovers that mattered
+// were NOT on it. On 2026-10-08 French House carried 44 open parties from 22 Aug – 26 Sep: 23 on
+// table numbers nobody laid out (ZZ-t30-bills, 9zz1probe, 9621541, PRB1, L42524, S05584a, …) — every
+// one a phantom tile after table 30 on the manager's floor, because the floor shows an off-plan table
+// on purpose — and 21 on the real tables 1–30. With them, verify:live-rush found 0 free tables and
+// verify:two-parties, verify:lifecycle and verify:write-paths refused to run, while this file said
+// "clear" because it only asked about the names it knew.
+// An off-plan number on the TEST restaurant can only come from a test, so any of them open for more
+// than a day is a leftover: FAIL. A stale party on a REAL table is only noted — the owner may be
+// trying something on his own floor, and that is not ours to call litter.
+{
+  const plan = (await svc.from("settings").select("table_count").eq("restaurant_id", RID).limit(1)).data?.[0]?.table_count || 0;
+  const dayAgo = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const weekAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const openOld = await svc.from("sessions").select("table_number, created_at")
+    .eq("restaurant_id", RID).eq("status", "open").lt("created_at", dayAgo).limit(500);
+  if (openOld.error) { console.error("could not read open sessions: " + openOld.error.message); process.exit(2); }
+  const onPlan = (t) => /^\d+$/.test(String(t)) && Number(t) >= 1 && Number(t) <= plan;
+  const offPlan = (openOld.data || []).filter((s) => !onPlan(s.table_number) && !names.includes(String(s.table_number)));
+  const staleReal = (openOld.data || []).filter((s) => onPlan(s.table_number) && s.created_at < weekAgo);
+  say(plan > 0 && offPlan.length === 0, offPlan.length
+    ? `${offPlan.length} party(ies) open for over a day on table numbers French House never laid out (plan 1–${plan}): `
+      + `${offPlan.slice(0, 12).map((s) => s.table_number).join(", ")}${offPlan.length > 12 ? ", …" : ""} — each is a phantom tile on the manager's floor. `
+      + `Retire them: node scripts/cleanup-stale-orders.mjs --rid ${RID} --days 1 --apply`
+    : plan > 0 ? `no made-up table number is left open on French House (plan 1–${plan})` : "could not read French House's table plan — nothing was judged");
+  if (staleReal.length) console.log(`  note  ${staleReal.length} party(ies) on real tables have sat open over a week (${staleReal.slice(0, 10).map((s) => "T" + s.table_number).join(" ")}). `
+    + `They take tables the floor guards need; if they are test leftovers: node scripts/cleanup-stale-orders.mjs --rid ${RID} --days 7 --apply`);
+}
+
 // ── AND THE KITCHEN TICKET IT QUEUED ────────────────────────────────────────────────────────────
 // Every order queues one print job (mig 335). lib/printQueue.ts dismisses a job whose order is gone or
 // cancelled — but only when SOMETHING READS THE QUEUE. On a stack with no kitchen screen and no print

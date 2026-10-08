@@ -48,7 +48,9 @@ async function run() {
   const cookie = await managerCookies();
 
   // a dish this restaurant really sells
-  const dish = await sb.from("menu_items").select("slug, title").eq("restaurant_id", RID).limit(1).single();
+  // `id` too: an order line names its dish by menu_items.id (lfh_price_order), and since mig 409 the
+  // depletion trigger joins on exactly that. See the order insert below (sweep #10 T39 item 7).
+  const dish = await sb.from("menu_items").select("id, slug, title").eq("restaurant_id", RID).limit(1).single();
   if (dish.error) throw new Error("no menu item: " + dish.error.message);
   const slug = dish.data.slug as string;
 
@@ -85,7 +87,11 @@ async function run() {
   // an order that fires to the kitchen → consumption posts (3 × 100g @ ₹2 = ₹600)
   const o = await sb.from("orders").insert({
     restaurant_id: RID, table_number: "T12-P2", status: "received", payment_status: "unpaid",
-    items: [{ slug, qty: 3, title: dish.data.title, price: 200 }], total: 600, subtotal: 600,
+    // THE LINE IN THE SHAPE THE APP WRITES IT (sweep #10 T39 item 7). This was `{ slug, … }` — the
+    // seed-data shape no real order has ever had (mig 409's header). Since mig 409 the trigger
+    // resolves the dish through menu_items.id, so a slug-only line now (correctly) depletes nothing,
+    // and this guard reported "nothing was checked" while stock deduction was working.
+    items: [{ id: dish.data.id, qty: 3, title: dish.data.title, price: 200 }], total: 600, subtotal: 600,
   }).select("id").single();
   if (o.error) throw new Error("order: " + o.error.message);
   const orderId = o.data.id as string;

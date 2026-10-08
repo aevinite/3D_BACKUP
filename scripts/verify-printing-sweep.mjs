@@ -3321,8 +3321,12 @@ if (!browser) {
   await phase("…and printing speaks through the notification bell instead", () =>
     /kind: "printer"/.test(code) && /LFH_BELL\.sync/.test(code)
     || "printing has no way to tell anybody: taken off the floor and not put anywhere");
+  // Re-pinned 2026-10-08 (sweep #10 T39 item 18): on 2026-10-03 (d012eb43) low stock became the
+  // second row with no table, so `r.kind === "printer"` became the shared SELF_TITLED lookup. A
+  // printer row still draws its own sentence instead of "Table  asked for something".
   await phase("…and the bell knows how to draw a printer row", () =>
-    /printer: \{ icon: "🖨"/.test(bell) && /r\.kind === "printer"/.test(bell)
+    /printer: \{ icon: "🖨"/.test(bell)
+      && (/r\.kind === "printer"/.test(bell) || (/SELF_TITLED = \{[^}]*\bprinter: 1/.test(bell) && /SELF_TITLED\[r\.kind\]/.test(bell)))
     || "a printer row would render as 'Table  asked for something', which is nonsense");
   // ⚠️ THIS ASSERTED THE SPELLING OF A KEY, AND THE KEY LEGITIMATELY CHANGED (2026-09-03).
   // It required the literal `printer-problem:` — the bell-row key I hand-built when the strips came

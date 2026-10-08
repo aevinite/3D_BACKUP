@@ -415,6 +415,30 @@ function quotedStrings(src) {
     `${offenders.join("\n      ")}\n      process.exit() throws away buffered stdout when piped — measured at 3,162 of 5,000 long rows.\n      End with:  process.stdout.write("", () => process.exit(code));`);
 }
 
+// ── A GUARD THAT FINDS A MIGRATION BY ITS NUMBER MUST FIND EXACTLY ONE (sweep #10 T39 item 24) ────
+// Migration numbers are reused when parallel branches merge, and a migration is renumbered when it
+// lands. verify-merge-keeps-mark found "migration 369" by /^369_/ after the file it meant had landed
+// as 374 — and 369 had become a different migration — so six checks read the wrong file and went
+// red. A number lookup is only safe while that number names one file; the moment a second file
+// takes it (or the first moves away), this says which guard has started reading the wrong thing.
+{
+  const migs = existsSync(join(ROOT, "supabase/migrations")) ? readdirSync(join(ROOT, "supabase/migrations")).filter((f) => /^\d+_.*\.sql$/.test(f)) : [];
+  const bad = [];
+  let lookups = 0;
+  for (const f of scriptFiles) {
+    const src = read(f);
+    for (const m of src.matchAll(/\.find\(\(\w+\)\s*=>\s*\/\^(\d{3})_\/\.test\(\w+\)\)/g)) {
+      lookups++;
+      const n = migs.filter((x) => x.startsWith(m[1] + "_")).length;
+      if (n !== 1) bad.push(`${f} finds a migration by /^${m[1]}_/ and ${n === 0 ? "no file has that number any more" : `${n} files share it`}`);
+    }
+  }
+  check("every guard that finds a migration by its number finds exactly one file", migs.length > 100 && bad.length === 0,
+    (migs.length <= 100 ? `only ${migs.length} migration file(s) seen — the walk found nothing to judge\n      ` : "")
+    + bad.join("\n      ") + "\n      Find it by CONTENT instead (a key or a function name it alone contains), as verify-owner-reports does.");
+  if (!HOOK) console.log(`  (number lookups judged: ${lookups})`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) {
   console.log(`\nARE THE GUARDS ALIVE? — ${scriptFiles.length} script(s) under scripts/ and tests/\n`);

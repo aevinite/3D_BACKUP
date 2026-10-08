@@ -151,6 +151,24 @@ for (const t of tenant) {
   if (new RegExp(`delete\\s+from\\s+(public\\.)?${t}\\b`, "i").test(def)) purged.add(t);
 }
 
+// ── EVERY TABLE THE PURGE DELETES FROM MUST EXIST (sweep #10 T39, 2026-10-08) ──────────────────
+// The check above asks "is every tenant table named?" — never the other way round. On 2026-10-08 a
+// new migration was built on an older copy of this function and put back `delete from
+// verification_codes`, a table migration 384 had dropped. A plpgsql body is not checked against the
+// schema until it runs, so CREATE OR REPLACE succeeded, this guard stayed green, and "Remove
+// permanently" answered `relation "verification_codes" does not exist` until verify:recycle-bin —
+// which actually presses the button — went red. Read every name the body deletes from and ask the
+// catalog for it.
+{
+  const named = [...new Set([...def.matchAll(/delete\s+from\s+(?:public\.)?([a-z_][a-z0-9_]*)/gi)].map((m) => m[1].toLowerCase()))];
+  const real = new Set((await q(`SELECT c.relname AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                                 AND n.nspname = 'public' WHERE c.relkind IN ('r','p')`)).map((r) => r.t));
+  const ghosts = named.filter((t) => !real.has(t));
+  if (named.length < 20) fail(`read only ${named.length} delete target(s) out of the purge's body — the parse found nothing to judge`);
+  else if (ghosts.length) fail(`the purge deletes from ${ghosts.length} table(s) the database does not have — it fails the moment it is pressed: ${ghosts.join(", ")}`);
+  else pass(`all ${named.length} tables the purge deletes from exist, so pressing it cannot fail on a missing one`);
+}
+
 const unclassified = tenant.filter((t) => !purged.has(t) && !KEEP.has(t) && !UNDECIDED.has(t) && !SELF_CLEARING.has(t));
 
 pass(`${tenant.length} tables carry a restaurant_id`);

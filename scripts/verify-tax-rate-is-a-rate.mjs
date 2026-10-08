@@ -141,7 +141,10 @@ head("C · no SHIPPED call site writes a whole number into tax_rate");
   })();
   const offenders = [];
   for (const f of files) {
-    const src = readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+    // LINE comments FIRST, then block comments (sweep #10 T39 item 20; verify:kitchen P99916). The
+    // other order lets a `/*` sitting inside a `//` line open a block comment that never closes, and
+    // every line up to the next `*/` disappears from this scan — a tax_rate typed there is unseen.
+    const src = readFileSync(f, "utf8").replace(/(^|[^:])\/\/[^\n]*/g, "$1").replace(/\/\*[\s\S]*?\*\//g, " ");
     for (const m of src.matchAll(/tax_rate\s*:\s*([0-9]+(?:\.[0-9]+)?)/g))
       if (Number(m[1]) > 0.5) offenders.push(`${f.replace(root + "/", "")}: tax_rate: ${m[1]}`);
   }

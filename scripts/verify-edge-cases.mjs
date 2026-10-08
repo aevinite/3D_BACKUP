@@ -90,7 +90,10 @@ const anonRpc = async (fn, args) => {
     method: "POST", headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
     body: JSON.stringify(args),
   });
-  return r.json();
+  // A refused CALL (no such function, no grant) is not a refused JOIN: say which, so a signature
+  // drift reads as itself instead of "both joins failed (ok/ok)" (sweep #10 T39 item 40).
+  const j = await r.json().catch(() => ({}));
+  return r.ok ? j : { ok: false, reason: `the call itself was refused: ${r.status} ${j.message || j.code || ""}`.trim() };
 };
 
 const cleanup = async () => {
@@ -104,6 +107,20 @@ const cleanup = async () => {
   await sb("DELETE", `requests?restaurant_id=eq.${RID}&table_number=eq.${TABLE}`);
 };
 await cleanup();
+
+// GUEST SESSIONS MUST BE ON, OR THIS CANNOT RUN (sweep #10 T39 item 40). On 2026-10-08 French House
+// had settings.sessions_enabled = false (written by nobody the audit records), so the guest table
+// widget never appeared and the manager's party chip was never drawn — and this guard reported two
+// product faults (or crashed on a 20-second wait) about a feature that was simply switched off.
+// Say so and stop before writing anything; the switch is a restaurant setting, not this guard's to flip.
+{
+  const [st] = await sb("GET", `settings?restaurant_id=eq.${RID}&select=sessions_enabled`);
+  if (!st || st.sessions_enabled !== true) {
+    console.error(`\n⏭ could not run: guest table sessions are switched OFF on this restaurant (settings.sessions_enabled = ${st ? st.sessions_enabled : "unreadable"}).`);
+    console.error("Nothing is wrong with this guard — switch sessions back on for French House, then run it again.");
+    process.exit(2);
+  }
+}
 
 const tok = (p) => p + Math.random().toString(36).slice(2) + Date.now().toString(36);
 const newSession = async () => (await sb("POST", "sessions", { restaurant_id: RID, table_number: TABLE, status: "open", auto_approve: false, opened_by: "waiter", opened_at: new Date().toISOString() }))[0];
@@ -192,8 +209,9 @@ try {
   // ── 3. the two-heads race: simultaneous joins on an empty open table ───────
   sess = await newSession();
   const [a, b] = await Promise.all([
-    anonRpc("lfh_join_session", { p_table: TABLE, p_name: "Race A", p_lat: null, p_lng: null, p_restaurant_id: RID }),
-    anonRpc("lfh_join_session", { p_table: TABLE, p_name: "Race B", p_lat: null, p_lng: null, p_restaurant_id: RID }),
+    // p_device is part of the signature (lib/session.ts sends getGuestDeviceId()); two phones, two ids.
+    anonRpc("lfh_join_session", { p_table: TABLE, p_name: "Race A", p_lat: null, p_lng: null, p_device: "t39-race-a", p_restaurant_id: RID }),
+    anonRpc("lfh_join_session", { p_table: TABLE, p_name: "Race B", p_lat: null, p_lng: null, p_device: "t39-race-b", p_restaurant_id: RID }),
   ]);
   const owners = await sb("GET", `session_members?session_id=eq.${sess.id}&role=eq.owner&removed=eq.false&select=id`);
   check(a.ok && b.ok, `both simultaneous joins succeed (${a.reason || "ok"}/${b.reason || "ok"})`);

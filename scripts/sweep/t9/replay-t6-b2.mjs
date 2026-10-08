@@ -54,7 +54,10 @@ t6("P17678", "a computer that owns the paper is named on this screen", "A", (a) 
 t6("P17679", "…with its printer AND the machine it runs on", "A", /esc\(hlp\.printer\) \+ " — from " \+ esc\(hlp\.agent\)/);
 t6("P17680", "a helper that has gone quiet says how long, and that tickets are waiting", "A", /It has not been heard from for \$\{hlp\.secondsAgo == null \? "a while" : Math\.round\(hlp\.secondsAgo \/ 60\) \+ " min"\}/);
 t6("P17681", "…in minutes a person reads, not raw seconds", "A", /Math\.round\(hlp\.secondsAgo \/ 60\) \+ " min"/);
-t6("P17682", "…and it says which printer takes over if there is a backup", "A", /hlp\.backup \? ` If it prints nothing for a minute, \$\{esc\(hlp\.backup\.printer\)\} takes over\.`/);
+// THE BACKUP PRINTER WAS REMOVED ENTIRELY (2026-08-31, 053347c0 — "remove the backup printer
+// entirely"). A sheet that still promised "X takes over" would be promising a printer that does not
+// exist, so the row now holds the opposite: no backup takeover is offered (sweep #10 T39 item 22).
+t6("P17682", "…and it promises no backup printer — that was removed on 2026-08-31", "A", (a) => !/hlp\.backup/.test(a) || "the sheet offers a backup printer that no longer exists");
 t6("P17683", "an unknown 'how long ago' says 'a while' rather than NaN", "A", /hlp\.secondsAgo == null \? "a while"/);
 t6("P17684", "with nothing printing yet, the sheet says who turns it on", "A", /Nothing prints by itself yet — the manager or your admin turns it on\./);
 t6("P17685", "every helper value the sheet prints is escaped", "A", (a) => {

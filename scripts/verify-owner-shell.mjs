@@ -72,12 +72,17 @@ console.log("\nThe owner console's frame, its Settings screen and its two embeds
 
 // ── §2 · ONE colour per restaurant, keyed by id ─────────────────────────────────────────────────
 {
-  chk(/portfolioColor\(r\.id\)/.test(CODE.mmode || ""), "§2 the Manager-mode launcher colours its dot by restaurant ID");
+  // Re-pinned 2026-10-08 (sweep #10 T39 item 12). "A restaurant is one colour everywhere" (6e9637bb,
+  // 2026-10-04) moved every dot from portfolioColor(r.id) to restaurantColor(r.id, <the estate's ids>)
+  // — still keyed by the restaurant's ID, now with the estate so 2-3 restaurants get their own tier.
+  // Either spelling satisfies the rule; a dot keyed by the brand accent still fails below.
+  const BY_ID = /(?:portfolioColor\(r\.id\)|restaurantColor\(r\.id,)/g;
+  chk(BY_ID.test(CODE.mmode || ""), "§2 the Manager-mode launcher colours its dot by restaurant ID");
   chk(!/accentColor/.test(CODE.mmode || ""), "§2 …and never by the restaurant's brand accent");
   chk(!/accent_color/.test(CODE.pManager || ""), "§2 the Manager-mode page reads no brand-accent column it does not use");
-  chk((CODE.shell || "").match(/portfolioColor\(r\.id\)/g)?.length === 2,
+  chk((CODE.shell || "").match(BY_ID)?.length === 2,
     "§2 both of the shell's restaurant dots (sidebar + top switcher) are keyed by ID",
-    `found ${(CODE.shell || "").match(/portfolioColor\(r\.id\)/g)?.length ?? 0}, expected 2`);
+    `found ${(CODE.shell || "").match(BY_ID)?.length ?? 0}, expected 2`);
   chk(!/className="sw" style=\{\{ background: "#/.test(CODE.shell || "") && !/className="sw" style=\{\{ background: "#/.test(CODE.mmode || ""),
     "§2 …and no restaurant dot anywhere here is painted a fixed colour instead");
   chk(!/accentColor/.test(CODE.shell || ""), "§2 …and the shell keeps no brand-accent field it never reads");

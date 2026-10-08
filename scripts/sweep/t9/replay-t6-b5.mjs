@@ -4,7 +4,8 @@
 // three sweep fixes, and the guard/live block.
 import { t6, t6skip } from "./replay-t6-harness.mjs";
 import { row, P } from "./lib.mjs";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 
 const sha8 = (f) => createHash("sha1").update(readFileSync(P(f))).digest("hex").slice(0, 8);
@@ -208,8 +209,13 @@ row("P32373", "every route that answers with board orders goes through the proje
     .filter((f) => /liveOrdersAndItems\(/.test(readFileSync(P(f), "utf8")) && !/stripPlacedBy\(/.test(readFileSync(P(f), "utf8")));
   return bad.length === 0 || `these answer with board orders un-projected: ${bad.join(", ")}`;
 });
-row("P32374", "the manager route stamps who punched an order", () => /placed_by/.test(readFileSync(P("app/api/editor/[...path]/route.ts"), "utf8")) || "the manager route no longer stamps");
-row("P32375", "the tablet route stamps it too", () => /placed_by/.test(readFileSync(P("app/api/tablet/[...path]/route.ts"), "utf8")) || "the tablet route no longer stamps");
+// Since mig 394 (2026-09-17) the stamp is written by lfh_staff_mark_placed(p_by_id, p_by) in ONE call,
+// not by the route touching `placed_by` itself — so assert the route passes WHO, and the function
+// writes it (sweep #10 T39 item 22).
+const stampsWho = (route) => /placed_by/.test(route) || /lfh_staff_mark_placed",\s*\{[^}]*p_by_id:[^}]*p_by:/.test(route);
+const mig394 = () => { const d = P("supabase/migrations"); const f = readdirSync(d).find((x) => /^394_/.test(x)); return f ? readFileSync(join(d, f), "utf8") : ""; };
+row("P32374", "the manager route stamps who punched an order", () => (stampsWho(readFileSync(P("app/api/editor/[...path]/route.ts"), "utf8")) && /placed_by = p_by/.test(mig394())) || "the manager route no longer stamps");
+row("P32375", "the tablet route stamps it too", () => (stampsWho(readFileSync(P("app/api/tablet/[...path]/route.ts"), "utf8")) && /placed_by = p_by/.test(mig394())) || "the tablet route no longer stamps");
 row("P32376", "the guest paths never stamp it — that is what makes NULL mean 'the guest'", () => {
   const g = P("app/api/guest");
   return !existsSync(g) ? "⏭ app/api/guest does not exist under that name" : true;

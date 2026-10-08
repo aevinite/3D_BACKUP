@@ -351,15 +351,21 @@ check("P00165", "a not-serving menu previews neutrally on BOTH menu doors — cl
 // went red while naming nothing: the block it read no longer exists, and "the fallback is intact"
 // is not a question you can ask about a fallback that has no forward path left.
 // What R29 means now is simply: none of the three ways of moving the bell may come back.
-check("R29", "the call-waiter bell is never hidden, faded, moved or made untappable", () => {
+check("R29", "the call-waiter bell keeps its float, and is never hidden, faded, made to dodge or untappable", () => {
   // The obituaries left behind in globals.css NAME every banned thing, so the stylesheet has to be
   // read with its /* */ comments stripped — exactly as F.menuView already is.
   const css = (read("app/globals.css") || "").replace(/\/\*[\s\S]*?\*\//g, "");
   const noLift = !/settleBell|--bell-lift/.test(F.menuView);
   const noScrollDodge = !/menu-scrolling/.test(F.menuView) && !/\.menu-scrolling\s+\.chef-call/.test(css);
-  const noFloat = !/@keyframes\s+chefFloat/.test(css) && !/animation:\s*chefFloat/.test(css);
-  return { ok: noLift && noScrollDodge && noFloat,
-    note: `lift machinery gone=${noLift} scroll step-aside gone=${noScrollDodge} float gone=${noFloat}` };
+  // THE FLOAT IS THE DESIGN AND MUST STAY (owner, 2026-09-21 — R29 CORRECTED): "why does the bell
+  // has no animation, i want waiter call it how it was, just that due to plus button it goes up and
+  // down — due to plus I don't want that." #1434 put the 12px idle bob back the same day. This
+  // check was rewritten on 2026-09-20 to ban the float too, so for 17 days it was red on the exact
+  // thing he asked for (sweep #10 T39 item 17). Now: no lift, no scroll step-aside — and the float
+  // is REQUIRED, so removing it a second time fails here instead of reaching his screen.
+  const floatKept = /@keyframes\s+chefFloat/.test(css) && /\.chef-call[^{]*\{[^}]*animation:\s*chefFloat/.test(css);
+  return { ok: noLift && noScrollDodge && floatKept,
+    note: `lift machinery gone=${noLift} scroll step-aside gone=${noScrollDodge} float kept=${floatKept}` };
 });
 
 // Two guest surfaces that describe themselves to a screen reader as something they are not. The
@@ -757,7 +763,11 @@ async function live(base) {
 
     // LIVE: no suggestion name is cut, on the restaurant that HAS the long ones, at phone and
     // desktop width — and the rows stay the height they always were.
-    for (const [slug, qq, wdt] of [["demo-bistro", "cho", 360], ["aangan-garden-restaurant", "pa", 360], ["demo-bistro", "cho", 1280]]) {
+    // Demo Bistro was put in the Recycle bin on 2026-09-20, so its menu says "isn't available" and has
+    // no search box — this loop then tested nothing on two of its three rows (sweep #10 T39 item 36).
+    // The live restaurants with the long names: Aangan (46 names ≥ 22 letters, 7 matching "cho") and
+    // French House (30, e.g. "Pink Pineapple Smoothie"). Read-only on both — typing in a search box.
+    for (const [slug, qq, wdt] of [["aangan-garden-restaurant", "cho", 360], ["aangan-garden-restaurant", "pa", 360], ["french-house", "smoo", 1280]]) {
       const cc = await b.newContext({ viewport: { width: wdt, height: 820 }, isMobile: wdt < 700, hasTouch: wdt < 700 });
       const pg2 = await cc.newPage();
       await pg2.goto(`${base}/r/${slug}/menu`, { waitUntil: "domcontentloaded", timeout: 60000 });
@@ -773,7 +783,7 @@ async function live(base) {
       // so say WHICH it is, and carry on with the rest.
       const boxThere = (await pg2.locator("#search-input").count()) > 0;
       if (!boxThere) {
-        const closed = await pg2.evaluate(() => /UNDER MAINTENANCE|right back/i.test(document.body.innerText));
+        const closed = await pg2.evaluate(() => /UNDER MAINTENANCE|right back|isn[’']t available right now/i.test(document.body.innerText));
         check("P15607", `LIVE: ${slug} "${qq}" @${wdt}px — every suggestion name is whole`, () =>
           ({ ok: closed, note: closed ? `⏭ ${slug} is showing its own maintenance sign, so it has no search box to type in — not a fault, and not a pass either` : "no search box, and the restaurant is NOT closed" }));
         await cc.close();

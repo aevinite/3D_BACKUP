@@ -36,7 +36,7 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
     const existing = (await sb.from("orders").select("id").eq("restaurant_id", r.id).eq("discount_note", "today-seed").gte("created_at", start.toISOString()).limit(1)).data || [];
     if (existing.length) { console.log("  – skip", r.slug, "(already has today-seed)"); continue; }
 
-    const menu = (await sb.from("menu_items").select("slug, title, price").eq("restaurant_id", r.id).limit(60)).data || [];
+    const menu = (await sb.from("menu_items").select("id, slug, title, price").eq("restaurant_id", r.id).limit(60)).data || [];
     if (!menu.length) { console.log("  ✗", r.slug, "no menu items"); continue; }
     const n = rnd(7, 12);
     const rows = [];
@@ -48,18 +48,21 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
         const m = pick(menu);
         const qty = rnd(1, 3);
         const price = Number(String(m.price).replace(/[^0-9.]/g, "")) || rnd(120, 600);
-        items.push({ qty, slug: m.slug, price, title: m.title });
+        items.push({ qty, id: m.id, price, title: m.title });   // by id, as the app writes it (S10 T39 item 7)
         subtotal += price * qty;
       }
       // Mostly served+paid; a couple live/unpaid; one cancelled.
       let status = "served", payment_status = "paid";
       if (i === 0) { status = "cancelled"; payment_status = "unpaid"; }
       else if (i <= 2) { status = pick(["received", "preparing"]); payment_status = "unpaid"; } // "received" = a new dine-in order awaiting Accept (NOT "new" — that's aggregator-only)
+      const at = randToday();   // each stamp travels with its flag, as every product path writes it (S10 T39 item 7)
       rows.push({
         restaurant_id: r.id, table_number: rnd(1, 14), items,
         subtotal, tax: Math.round(subtotal * 0.05 * 100) / 100, total: subtotal,
         allergies: [], status, payment_status, archived: status === "served",
-        discount: 0, discount_note: "today-seed", kot_no: rnd(1, 200), created_at: randToday(),
+        discount: 0, discount_note: "today-seed", kot_no: rnd(1, 200), created_at: at,
+        paid_at: payment_status === "paid" ? at : null, archived_at: status === "served" ? at : null,
+        cancelled_at: status === "cancelled" ? at : null,
       });
     }
     const ins = await sb.from("orders").insert(rows);

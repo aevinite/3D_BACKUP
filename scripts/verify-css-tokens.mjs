@@ -78,4 +78,22 @@ if (files.length < 50) {
   console.error(`✗ verify:css-tokens walked only ${files.length} file(s) — it should see hundreds. Nothing was checked.`);
   process.exit(1);
 }
+// ── A FILLED ADMIN BUTTON UNDER WHITE INK USES A FILL TOKEN, NEVER A TEXT TOKEN (sweep #10 T39 item 28)
+// --adm-ok / --adm-danger are TEXT colours, bright in the dark skin so a word reads on near-black. As a
+// fill under white they fail: the red "danger" button was 2.77:1 (fixed 2026-08-29 with
+// --adm-danger-fill) and the green "ok" button 1.92:1 on Repair's Resolve buttons (fixed with
+// --adm-ok-fill). A button rule that paints white text over a bare tone token is that fault again.
+{
+  const g = readFileSync("app/globals.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...g.matchAll(/\.adm-btn\.(\w+)\s*\{([^}]*)\}/g)];
+  const bad = rules.filter(([, , body]) => /color:\s*#fff\b/i.test(body) && /background:\s*var\(--adm-(ok|danger|warn|accent)\)/.test(body)).map(([, tone]) => `.adm-btn.${tone}`);
+  // …and the admin toast, which paints its own background inline (components/admin/toast.tsx).
+  const toastSrc = readFileSync("components/admin/toast.tsx", "utf8");
+  if (toastSrc.split("\n").some((l) => /background:/.test(l) && /var\(--adm-(ok|danger)(?!-fill)[,)]/.test(l))) bad.push("components/admin/toast.tsx");
+  if (rules.length < 2 || bad.length) {
+    console.error(rules.length < 2 ? "✗ verify:css-tokens found no .adm-btn tone rules — nothing was checked."
+      : `✗ white ink on a bare tone token (use --adm-<tone>-fill): ${bad.join(", ")}`);
+    process.exit(1);
+  }
+}
 console.log(`OK — every --adm-*/--ow-* token that is read is declared (${used.size} read${KNOWN_UNDECLARED.size ? `, ${KNOWN_UNDECLARED.size} parked` : ""}).`);

@@ -235,11 +235,18 @@ console.log("\nEVERY NAME A PANEL READS IS ACTUALLY THERE\n");
     "XMLHttpRequest","WebSocket","EventSource","Worker","Range","TextEncoder","TextDecoder","btoa","atob","scrollTo",
     "scrollBy","getSelection","top","parent","self","frames","name","innerWidth","innerHeight","devicePixelRatio",
     "visualViewport","caches","indexedDB","BroadcastChannel","MediaRecorder","MediaStream","OffscreenCanvas","Path2D",
-    "ClipboardItem"];
+    "ClipboardItem",
+    // createImageBitmap: public/panels/shrinkimg.js (2026-09-17) calls it only behind
+    // `if (window.createImageBitmap)`, with an <img> fallback (sweep #10 T39 item 15).
+    "createImageBitmap"];
   const VENDOR = ["Chart", "QRCode", "html2canvas"];
   const LFH = ["LFH_ASK","LFH_AUDITSORT","LFH_BACK","LFH_BELL","LFH_BILLCUST","LFH_BILLDOC","LFH_INV","LFH_ISSUE",
     "LFH_OFF","LFH_OUTBOX","LFH_RT","LFH_UNDO","LFH_WARM","LFH_TAPS","LFH_PRINT","LFH_KOT","LFH_SW","LFH_DEV",
-    "XRAY_WHO","XRAY_CONTROLS"];
+    "XRAY_WHO","XRAY_CONTROLS",
+    // LFH_IMG: published by public/panels/shrinkimg.js (2026-09-17), loaded on the manager, kitchen
+    // and tablet pages, and read only behind `window.LFH_IMG` (editor/app.js, issue-raise.js).
+    // Sat outside this list for three weeks, so this check was red on a name that is there.
+    "LFH_IMG"];
   // Names that are DELIBERATELY feature-detected, so a bare mention is not a fault:
   // `module`/`exports` — billdoc.js and auditsort.js each end with
   //   `if (typeof module !== "undefined" && module.exports) module.exports = API;`

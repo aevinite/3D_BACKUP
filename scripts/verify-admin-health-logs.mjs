@@ -382,7 +382,15 @@ ok(/\(\$\{rlChip\(h\)\}\)\. Is this real abuse/.test(REPAIR), "P71704",
 // run with nothing to read, so the emptiest rows were the ones it pointed at.
 ok(/const withReport = failedRuns\.filter\(\(r\) => r\.report\)\.length/.test(REPAIR), "P71705",
   "repair: the run-failure banner no longer counts how many of the failures actually saved a report");
-ok(/None of them saved a report/.test(REPAIR), "P71706",
+// Re-pinned 2026-10-08 (sweep #10 T39 item 8). On 2026-09-19 (af11dd94/d2db74c1) the no-report
+// wording split in two by how long the run lasted — "they ran N minutes and then stopped" (the usage
+// limit) vs "none of them got going at all" (a broken job) — so the old sentence went away while
+// the rule held. Pin the rule: a `withReport === 0` branch exists, it has its own words, and those
+// words never send him to "open any red row" when no row can be opened.
+const noReportBranch = (REPAIR.match(/\{withReport === 0\s*([\s\S]{0,2400}?)\n\s*: withReport === failed/) || [])[1] || "";
+ok(/None of them saved a report/.test(REPAIR)
+    || (/stopped without saving anything/.test(noReportBranch) && /None of them got going at all/.test(noReportBranch)
+        && !/Open any red row/.test(noReportBranch)), "P71706",
   "repair: the banner has no wording for the case where NO failed run left a report — it would name a control that does not exist");
 ok(/saved a report — open/.test(REPAIR), "P71707",
   "repair: the banner no longer says which of the failures can be opened");
@@ -395,9 +403,12 @@ ok(/const rowBody = \(/.test(REPAIR), "P71708",
   "repair: the run row's body is no longer shared, so the button and non-button branches can drift");
 ok(/No report was saved/.test(REPAIR), "P71709",
   "repair: a run that ended with no report no longer says so — the row is silent again");
-ok(/\{!s\.report && s\.ended_at \?/.test(REPAIR), "P71710",
+// Re-pinned 2026-10-08 (S10 T39 item 8): the report is fetched lazily since 2026-09-16 (T26 item
+// 15), so the list carries `hasReport` and `report` is empty until the row is opened. Same rule.
+ok(/\{!s\.(?:report|hasReport) && s\.ended_at \?/.test(REPAIR), "P71710",
   "repair: the 'no report' line is not gated on the run having ENDED — a run still working would be accused of losing one");
-ok(/\{s\.report \? \(\s*\n\s*<button onClick=\{\(\) => setOpenRun\(isOpen \? "" : s\.id\)\}/.test(REPAIR), "P71711",
+ok(/\{s\.report \? \(\s*\n\s*<button onClick=\{\(\) => setOpenRun\(isOpen \? "" : s\.id\)\}/.test(REPAIR)
+    || /\{s\.hasReport \? \(\s*\n\s*<button onClick=\{\(\) => void openRunRow\(s\.id\)\}[\s\S]{0,600}?<\/button>\s*\n\s*\) : \(\s*\n\s*<div /.test(REPAIR), "P71711",
   "repair: the run row is a <button> again whether or not it has a report — pressing 22 of the 30 rows changes nothing on screen and lies to a screen reader");
 
 // ── item 4 · the plain-English problem line must not wear a code face ───────────────────────

@@ -65,8 +65,13 @@ check("clear_table_tag_on_close still exists", /CREATE TRIGGER clear_table_tag_o
 // kitchen ticket, so the NEXT party at that table got someone else's VIP printed on their food,
 // and an 🏠/🤝 mark is what the on-the-house settle looks for. Migration 369 mirrors the clear
 // into lfh_session_delete_cleanup, beside migration 249's table_merges mirror.
-const migDel = readdirSync(migDir).find((f) => /^369_/.test(f));
-check("migration 369 exists — the delete path clears the mark too", !!migDel,
+// FOUND BY CONTENT, NOT BY NUMBER (sweep #10 T39 item 24). This was written as migration 369 and
+// landed as 374 when parallel branches merged — while 369 became the purge's printer handshakes —
+// so `/^369_/` read the wrong file and six checks went red over a function that is right there. The
+// one-time repair's own ledger key still says 369, and that key is what identifies it.
+const migDel = readdirSync(migDir).sort().find((f) => /^\d+_.*\.sql$/.test(f)
+  && /369_orphan_table_tags_cleared/.test(readFileSync(`${migDir}/${f}`, "utf8")));
+check(`the delete-path mark migration exists (${migDel || "not found"}) — the delete path clears the mark too`, !!migDel,
   "a party whose row is DELETED rather than closed keeps its table's mark for ever");
 const del = migDel ? readFileSync(`${migDir}/${migDel}`, "utf8") : "";
 // Read the ENFORCEMENT, not the header: a comment saying it clears the mark is not a clear.

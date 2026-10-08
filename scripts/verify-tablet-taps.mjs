@@ -1372,7 +1372,12 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   for (const [verb, needle] of [["print/send", 'a === "print" && b === "send"'], ["print-jobs", 'a === "print-jobs" && path.length === 1']]) {
     const at = route.indexOf(needle);
     const known = new RegExp(`a === "${verb.split("/")[0].replace("-", "\\-")}"`).test(toa);
-    const body = at < 0 ? "" : route.slice(at, at + 3000);
+    // THE WHOLE BRANCH, not a fixed 3,000 characters (sweep #10 T39 item 23). The print/send branch's
+    // comments grew and its section check moved to character 3,108, so this read stopped short of the
+    // very lines it looks for and reported a missing permission check that is there twice (the KOT
+    // path and the bill path both call waiterTables + notYoursMessage). Read up to the next branch.
+    const next = at < 0 ? -1 : route.indexOf("\n    if (a === ", at + needle.length);
+    const body = at < 0 ? "" : route.slice(at, next > at ? next : at + 12000);
     check(
       `tablet route: ${verb} — a verb lib/tableOfAction cannot resolve sits ABOVE the shared section gate`,
       at >= 0 && gateAt >= 0 && at < gateAt,

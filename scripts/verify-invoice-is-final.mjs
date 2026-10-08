@@ -225,6 +225,22 @@ ROLLBACK;`, false)[0];
   else throw e;
 }
 
+// ── THE STALE CLEAN-UP NEVER ENDS AN INVOICED BILL (sweep #10 T39 item 30) ─────────────────────────
+// scripts/cleanup-stale-orders.mjs closes abandoned sessions, and closing one cancels its unpaid food.
+// On 2026-10-08 it closed four test bills already carrying invoices 311–314 and left four issued
+// invoices cancelled with no credit note. Every query that feeds a close or a cancel there must
+// exclude a bill with an invoice number. Read statically, so this holds without a database.
+{
+  const t = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "cleanup-stale-orders.mjs"), "utf8");
+  const blocks = t.split(/await q\(`/).slice(1).map((b) => b.slice(0, b.indexOf("`")));
+  const feeders = blocks.filter((b) => /from sessions s[\s\S]*status = 'open'/.test(b) && !/invoice_no is not null and not s\.invoice_voided/.test(b));
+  const orderFeeders = blocks.filter((b) => /update orders o|from orders o/.test(b) && /archived = false/.test(b));
+  const bareS = feeders.filter((b) => !/s\.invoice_no is null/.test(b));
+  const bareO = orderFeeders.filter((b) => !/si\.invoice_no is not null/.test(b));
+  ok(feeders.length >= 2 && orderFeeders.length >= 2 && bareS.length === 0 && bareO.length === 0,
+    `the stale clean-up never closes or cancels an INVOICED bill (${feeders.length} session queries, ${orderFeeders.length} order queries read${bareS.length + bareO.length ? `; ${bareS.length + bareO.length} without the invoice exclusion` : ""})`);
+}
+
 console.log(bad === 0
   ? "\n✅ an issued invoice cannot be deleted, edited or renumbered, and every cancelled one carries its correction."
   : `\n❌ ${bad} problem(s) — an issued tax invoice is not final.`);

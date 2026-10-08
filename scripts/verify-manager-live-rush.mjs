@@ -196,6 +196,7 @@ async function placeOrder(rid, table, dish, qty = 1) {
 }
 
 const browser = await chromium.launch();
+let couldNotRun = "";
 try {
   head(`RUSH HOUR against ${BASE} — SLA ${SLA_MS / 1000}s per change, ${ROUNDS} orders per restaurant`);
   const crews = [];
@@ -217,8 +218,16 @@ try {
     crew.tables = freeList;
     crews.push(crew);
     info(`${crew.label}: panel open on Tables, ${crew.dishes.length} dishes, free tables ${crew.tables.join(",")}`);
-    if (crew.tables.length < 3) fail(`${crew.label}: fewer than 3 free tables — rush test needs room`);
   }
+  // NO ROOM IS "COULD NOT RUN", NOT A FAULT (sweep #10 T39 item 9). This used to fail() and carry
+  // on: it placed the rush on whatever tables it had, then advanced `crew.tables[0]` — undefined —
+  // and reported "T undefined: no open session to advance". Two red lines about the app, when the
+  // truth was that the shared dev floor was full of other lanes' parties (French House: 44 open).
+  // Same answer as verify:two-parties and verify:lifecycle: say so, exit 2, touch nothing.
+  const cramped = crews.filter((c) => c.tables.length < 3);
+  if (cramped.length) couldNotRun = cramped.map((c) => `${c.label} has ${c.tables.length} free table(s), the rush needs 3`).join("; ");
+  phases: {
+  if (couldNotRun) { info(`could not run — ${couldNotRun}`); break phases; }
 
   // ── 1) THE RUSH: orders landing on both floors at once, panels untouched ────
   head("1) Orders flooding in while both Table views sit open");
@@ -346,6 +355,7 @@ try {
     const real = crew.errs.filter((e) => !/favicon|model-viewer|Failed to load resource: the server responded with a status of 40[34]/.test(e));
     real.length ? fail(`${crew.label}: ${real.length} console error(s): ${real.slice(0, 2).join(" | ")}`) : pass(`${crew.label}: no console errors through the whole rush`);
   }
+  } // phases
 } finally {
   await browser.close();
   // Take every test row off the floor the way the app does — archived + soft-deleted, so the
@@ -371,6 +381,11 @@ try {
     await dismissTicketsFor(sb, rid, created.orders, info);
   }
   console.log(`\n· cleaned up ${created.orders.length} test orders and closed the ${closed} table(s) they opened`);
+}
+if (couldNotRun && !failed) {
+  console.error(`\n⏭ could not run: ${couldNotRun}.`);
+  console.error("Nothing is wrong with the app — close the stale parties, or run this when the other lanes are idle.");
+  process.exit(2);
 }
 console.log(failed ? `\n✗ ${failed} check(s) failed — the manager's live Table view is not trustworthy yet` : "\n✓ the manager's Table view kept up with the rush, on both restaurants");
 process.exit(failed ? 1 : 0);

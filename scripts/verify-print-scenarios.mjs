@@ -34,7 +34,11 @@ try {
 writeFileSync(LOCK, String(process.pid));
 const dropLock = () => { try { if (Number(readFileSync(LOCK, "utf8")) === process.pid) unlinkSync(LOCK); } catch {} };
 process.on("exit", dropLock);
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { dropLock(); process.exit(130); });
+// The lock is dropped by the shared put-back helper, NOT by a signal handler of our own: one here
+// called process.exit(130) the instant Ctrl-C arrived, which killed the run before any cleanup could
+// start (sweep #10 T39 item 19). restoreOnExit owns SIGINT/SIGTERM/a crash, and exits for us.
+const { restoreOnExit, restoreNow } = await import("./sweep/restore.mjs");
+restoreOnExit("print-scenarios · its run lock", async () => dropLock());
 
 const env = Object.fromEntries(readFileSync(new URL("../.env.local", import.meta.url), "utf8")
   .split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#"))
@@ -85,6 +89,19 @@ RID = rest.id; made.restaurants.push(RID);
 const existing = await db(`settings?restaurant_id=eq.${RID}&select=restaurant_id`);
 if (!existing.length) await db("settings", { method: "POST", body: JSON.stringify({ restaurant_id: RID }) });
 
+// A RESTAURANT WITH BILLS CANNOT BE DELETED — so end it the way the admin does (sweep #10 T39 item
+// 19). This tried `DELETE restaurants?id=…` and swallowed the refusal: once its orders exist the row
+// is what the kept bills hang off (mig 309), so the delete never succeeds, and every run left a live
+// `zz-scen-…` restaurant on Admin console → Restaurants and the Live floor — two from one run on
+// 2026-10-08, beside 40 older ones somebody had binned by hand. Now: try the delete; if refused,
+// switch it off, bin it, and call admin_purge_restaurant — Recycle bin → "Remove permanently" —
+// which clears everything operational and keeps the bills, exactly as for a real restaurant.
+const retireRestaurant = async (id) => {
+  try { await db(`restaurants?id=eq.${id}`, { method: "DELETE" }); return; } catch { /* has bills: purge it */ }
+  try { await db(`restaurants?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ active: false, deleted_at: new Date().toISOString() }) }); } catch {}
+  try { await db("rpc/admin_purge_restaurant", { method: "POST", body: JSON.stringify({ p_rid: id }) }); }
+  catch (e) { if (!/already been purged/.test(String(e.message))) throw e; }
+};
 const cleanup = async () => {
   for (const id of made.jobs) { try { await db(`print_jobs?id=eq.${id}`, { method: "DELETE" }); } catch {} }
   try { await db(`print_jobs?restaurant_id=eq.${RID}`, { method: "DELETE" }); } catch {}
@@ -96,8 +113,9 @@ const cleanup = async () => {
   for (const id of made.agents) { try { await db(`print_agents?id=eq.${id}`, { method: "DELETE" }); } catch {} }
   try { await db(`print_agents?restaurant_id=eq.${RID}`, { method: "DELETE" }); } catch {}
   try { await db(`settings?restaurant_id=eq.${RID}`, { method: "DELETE" }); } catch {}
-  try { await db(`restaurants?id=eq.${RID}`, { method: "DELETE" }); } catch {}
+  for (const id of made.restaurants) await retireRestaurant(id);
 };
+restoreOnExit("print-scenarios · its test restaurants and every row on them", cleanup);
 process.on("exit", () => { /* best effort; the real clean-up is awaited at the end */ });
 
 // ── the knobs each shape turns ────────────────────────────────────────────────────────────────
@@ -778,13 +796,13 @@ if (!ONLY || ONLY === "12") {
   try { await db(`print_jobs?restaurant_id=eq.${other.id}`, { method: "DELETE" }); } catch {}
   try { await db(`orders?restaurant_id=eq.${other.id}`, { method: "DELETE" }); } catch {}
   try { await db(`settings?restaurant_id=eq.${other.id}`, { method: "DELETE" }); } catch {}
-  try { await db(`restaurants?id=eq.${other.id}`, { method: "DELETE" }); } catch {}
+  await retireRestaurant(other.id);
 
   await invariants("two restaurants");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-await cleanup();
+await restoreNow();   // the cleanup and the lock, once — the same path an interruption takes
 console.log("\n" + "─".repeat(78));
 console.log(`${n} phases · ${pass} passed · ${fail} failed`);
 if (fails.length) {

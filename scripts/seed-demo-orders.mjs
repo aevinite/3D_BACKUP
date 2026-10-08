@@ -67,7 +67,7 @@ if (rErr) throw new Error("restaurants: " + rErr.message);
 if (!restaurants?.length) throw new Error("No restaurants found — run seed-demo-restaurants.mjs first.");
 
 const { data: items, error: iErr } = await db
-  .from("menu_items").select("restaurant_id,slug,title,price");
+  .from("menu_items").select("id,restaurant_id,slug,title,price");
 if (iErr) throw new Error("menu_items: " + iErr.message);
 const itemsByRest = {};
 for (const it of items || []) (itemsByRest[it.restaurant_id] ||= []).push(it);
@@ -121,11 +121,14 @@ function randomItemsLine(rest) {
   const line = [];
   let total = 0;
   for (let k = 0; k < n; k++) {
-    const it = menu.length ? pick(menu) : { slug: "item", title: "Item", price: "150" };
+    const it = menu.length ? pick(menu) : { id: "item", slug: "item", title: "Item", price: "150" };
     const qty = randInt(1, 3);
     const price = Number(it.price) || 150;
     total += price * qty;
-    line.push({ slug: it.slug, title: it.title, qty, price });
+    // `id` IS THE KEY THE APP WRITES (sweep #10 T39 item 7) — an order line names its dish by
+    // menu_items.id (lfh_price_order), and since mig 409 stock depletion joins on exactly that. A
+    // slug-only line is a shape no real order has, so it matched nothing — see reset-demo-history.mjs.
+    line.push({ id: it.id, title: it.title, qty, price });
   }
   return { items: line, total };
 }

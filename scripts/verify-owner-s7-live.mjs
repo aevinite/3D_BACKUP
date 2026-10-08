@@ -469,7 +469,14 @@ console.log("\nH4 · does the owner's answer agree with everyone else's (P21551�
   P("P21555", "…and the two never contradict each other about a section he HAS", chips.length > 0);
   if (j.pr.allowed) {
     P("P21556", "the printing answer names a real restaurant of this owner's", true);
-    P("P21557", "…and the two reads agree that printing is on here", j.set.printing.length > 0);
+    // ALLOWED IS NOT ON (sweep #10 T39 item 27). /api/owner/printing answers `allowed` from the admin's
+    // switch; Settings lists only restaurants whose kitchen slips are actually switched ON (his rule:
+    // "a restaurant with printing genuinely off still shows nothing"). With French House allowed but
+    // switched off on 2026-10-08 the two rightly differed, and this called it a contradiction. They
+    // agree when Settings lists it, OR when Settings says its read was complete (printingOk) — an empty
+    // list that is the truth, not a list that was shortened by a failed read.
+    P("P21557", "…and the two reads agree — printing listed, or honestly switched off rather than unread",
+      j.set.printing.length > 0 || j.set.printingOk === true, `listed ${j.set.printing.length}, printingOk ${j.set.printingOk}`);
     P("P21558", "…and every route it lists actually has a printer", (j.pr.routes || []).every((r) => !!r.printer));
     P("P21559", "…and every route's kind has an English word on the card", (j.pr.routes || []).every((r) => ["kot", "bill", "banquet", "label", "test"].includes(r.kind)));
     P("P21560", "…and no route names a computer that is not in the computer list",
