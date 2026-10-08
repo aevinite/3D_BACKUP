@@ -293,13 +293,16 @@ export async function loginUser(
       return { ok: false, error: "Wrong name or password.", reason: "no_such_name", attempted: { username: uname, restaurant_id: restaurantId } };
     }
     // Wrong password → bump the fail counter (and lock past the limit) on each live match.
-    for (const u of live) {
-      const fc = (u.failed_count || 0) + 1;
-      const patch = fc >= MAX_FAILS
-        ? { failed_count: 0, locked_until: new Date(Date.now() + LOCK_MS).toISOString() }
-        : { failed_count: fc };
-      await sb.from("staff_users").update(patch).eq("id", u.id);
-    }
+    //
+    // COUNTED IN THE DATABASE, ONE BY ONE (sweep #10 T17 round 3, item 23 — migration 411). This used to read
+    // failed_count, add one here and write it back, so four wrong passwords sent at the same instant all wrote 1
+    // (measured: count 1 after 4 simultaneous tries) and the lockout below never came. lfh_staff_login_failed does
+    // the add-one inside the UPDATE, so tries queue on the row lock and each counts. Same rule: the try that
+    // reaches MAX_FAILS locks for LOCK_MS and resets the count.
+    const counted = await sb.rpc("lfh_staff_login_failed", { p_ids: live.map((u) => u.id), p_max: MAX_FAILS, p_lock_seconds: Math.round(LOCK_MS / 1000) });
+    // The refusal stands either way; a count that could not be written is said out loud (the per-name sign-in
+    // limit still caps guessing meanwhile).
+    if (counted.error) console.error("[auth] could not count a wrong password:", counted.error.message);
     return { ok: false, error: "Wrong name or password.", reason: "wrong_password", attempted: attemptOf(live[0]) };
   }
   await sb.from("staff_users")

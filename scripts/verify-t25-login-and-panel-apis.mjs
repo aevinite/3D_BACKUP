@@ -392,11 +392,13 @@ check("P11676", "an owner can sign in at a restaurant they OWN via restaurant_ow
   has(CODE.userAuth, 'sb.from("restaurant_owners").select("user_id")'));
 check("P11677", "a lockout on any matching live row is honoured",
   has(CODE.userAuth, "live.find((u) => u.locked_until && new Date(u.locked_until) > now)"));
+// (sweep #10 T17 round 3, item 23: the count is now added INSIDE the database — mig 411 — so simultaneous wrong
+//  tries each count. The two checks below assert the same rule on the new code.)
 check("P11678", "a wrong password bumps failed_count on every live match",
-  has(CODE.userAuth, "for (const u of live) {") && has(CODE.userAuth, "failed_count: fc"));
+  has(CODE.userAuth, 'sb.rpc("lfh_staff_login_failed", { p_ids: live.map((u) => u.id)'));
 check("P11679", "five wrong tries lock the account for 60 seconds and reset the counter",
   has(CODE.userAuth, "MAX_FAILS = 5") && has(CODE.userAuth, "LOCK_MS = 60 * 1000")
-  && has(CODE.userAuth, "fc >= MAX_FAILS"));
+  && has(CODE.userAuth, "p_max: MAX_FAILS, p_lock_seconds: Math.round(LOCK_MS / 1000)"));
 check("P11680", "a correct password clears failed_count and locked_until",
   has(CODE.userAuth, "failed_count: 0, locked_until: null, last_seen_at:"));
 check("P11681", "a disabled person is told so ONLY on a verified password",
@@ -458,6 +460,12 @@ registerHooks({
 });
 const UA = await import("@/lib/userAuth.ts");
 const { G, resetWorld } = await import(pathToFileURL(join(root, "scripts/panel-stubs/state.mjs")).href);
+// Stand-in for mig 411's lfh_staff_login_failed — the SAME rule as its SQL (P161229 below pins the SQL itself).
+G.RPC_IMPL = { lfh_staff_login_failed: ({ p_ids, p_max = 5, p_lock_seconds = 60 }) => (G.FIX.staff_users || []).filter((u) => (p_ids || []).includes(u.id)).map((u) => {
+  const next = (u.failed_count || 0) + 1;
+  if (next >= p_max) { u.failed_count = 0; u.locked_until = new Date(Date.now() + p_lock_seconds * 1000).toISOString(); } else u.failed_count = next;
+  return { id: u.id, failed_count: u.failed_count, locked_until: u.locked_until ?? null };
+}) };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 head("1. lib/userAuth.ts — the RUNNING functions (P78701–P78800)");
@@ -821,6 +829,167 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
     /\.lfh-signin input:focus-visible\{box-shadow:0 0 0 3px/.test(lf));
   check("P161006", "item 20: 'Username' and 'Password' are tied to their boxes (htmlFor = id)",
     has(lf, 'htmlFor="lfh-login-username"') && has(lf, 'id="lfh-login-username"') && has(lf, 'htmlFor="lfh-login-password"') && has(lf, 'id="lfh-login-password"'));
+}
+// ── SWEEP #10 T17 ROUND 3, item 22 — 32 SAFETY RULES THAT NO GUARD WATCHED (found by breaking each one) ────────
+// Round 3 broke every key rule in T17's files one at a time and ran the guards: 32 breaks stayed GREEN. Rounds 1–2
+// had checked those rules once, by running them — but a one-off check is not a guard, so any of them could have been
+// undone tomorrow in silence. This block runs each rule for real (or, where a file cannot be loaded here, reads the
+// exact rule) so the break turns this guard red. One check per rule; ids P161095–P161128.
+{
+  const SA = await import("@/lib/staffAuth.ts");
+  const RG = await import("@/lib/revealGate.ts");
+  const PV = await import("@/lib/passwordVault.ts");
+  const PC = await import("@/lib/publicCap.ts");
+  const AF = await import("@/lib/adminFetch.ts");
+  const OP = await import("@/lib/ownerPin.ts");
+  const LT = await import("@/lib/loginThrottle.ts");
+  const src = (f) => stripComments(read(f));
+  const fnFrom = (f, name, params) => { const s = read(f); const i = s.indexOf(`export function ${name}(`); const body = s.slice(s.indexOf("{", s.indexOf(")", i)) , s.indexOf("\n}\n", i) + 2); return new Function(...params, body); };
+  const keepEnv = { ...process.env };
+  // staffAuth
+  check("P161095", "safeEqual refuses a string that is only a PREFIX of the other (its length check)", SA.safeEqual("abc", "abcd") === false && SA.safeEqual("abcd", "abc") === false && SA.safeEqual("a", "abcdef") === false);
+  process.env.ADMIN_PASSWORD = ""; process.env.STAFF_PASSWORD = ""; process.env.EDITOR_PASSWORD = "";
+  const emptyHash = await SA.sha256hex("");
+  check("P161096", "with NO admin password configured, even the hash of an empty password is refused", (await SA.tokenIsValid(emptyHash)) === false);
+  Object.assign(process.env, keepEnv); for (const k of ["ADMIN_PASSWORD", "STAFF_PASSWORD", "EDITOR_PASSWORD"]) if (!(k in keepEnv)) delete process.env[k];
+  check("P161097", "sameSitePath keeps its SECOND layer (the parser's own same-site test) even though the first refuses every known trick", /u\.origin === base \? u\.pathname \+ u\.search \+ u\.hash : fallback/.test(src("lib/staffAuth.ts")));
+  // the admin door
+  const SL = CODE.staffLogin;
+  check("P161098", "the admin door locks one address after 10 wrong tries for 5 minutes", /const ADMIN_MAX_FAILS = 10;/.test(SL) && /const ADMIN_LOCK_MS = 5 \* 60 \* 1000;/.test(SL) && /throttleFail\(throttleKey, ADMIN_MAX_FAILS, ADMIN_LOCK_MS\)/.test(SL));
+  check("P161099", "the admin door refuses an automated submission before anything else", /if \(!verdict\.ok \|\| !\(await verifyTurnstile\(/.test(SL) && SL.indexOf("botVerdict(") < SL.indexOf("throttleStatus("));
+  check("P161100", "a correct admin password clears that address's counter", /\n\s*await throttleReset\(throttleKey\);/.test(SL) && SL.indexOf("throttleReset(throttleKey)") > SL.indexOf("if (!matches) {"));
+  // the staff door + own password
+  const PL = CODE.panelLogin, PP = CODE.panelProfile;
+  check("P161101", "the staff door refuses with 429 once the per-name limit is reached", /if \(!okRate\) \{[\s\S]{0,400}status: 429/.test(PL));
+  check("P161102", "…and a correct sign-in clears that person's counter", /if \(uname\) await rateResetOnSuccess\("staff_login"/.test(PL));
+  check("P161103", "the own-password box is counted per account before the current password is checked", /if \(!\(await rateAllowed\("password_change", u\.id/.test(PP) && PP.indexOf('rateAllowed("password_change"') < PP.indexOf("verifySecret(current"));
+  check("P161104", "…and a person whose password the admin manages is refused there", /if \(!u\.can_self_reset\) \{\s*return NextResponse\.json\(\{ error: "Your admin manages your password/.test(PP));
+  // the owner entrance + panel gates
+  const OW = src("app/r/[restaurant]/owner/route.ts"), PG = src("lib/panelGate.ts");
+  check("P161105", "the admin's act-as cookie from the owner entrance is HttpOnly", /res\.cookies\.set\(ADMIN_ACT_COOKIE, r\.id, \{ path: "\/", httpOnly: true/.test(OW));
+  check("P161106", "an old owner address forwards with a TEMPORARY 307, never a cached-for-ever 308", /new URL\(`\/r\/\$\{moved\}\/owner`, req\.url\), 307\)/.test(OW) && !/, 308\)/.test(OW));
+  check("P161107", "an admin panel pin (?rid) must be a full restaurant id", PG.includes("const RID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;") && /rid && RID_RE\.test\(rid\)/.test(PG));
+  check("P161108", "the admin enters a bare panel only after picking a restaurant (else back to the console)", /if \(store\.get\(ADMIN_ACT_COOKIE\)\?\.value\) return;\s*redirect\("\/aevinite"\);/.test(PG));
+  const iframe = fnFrom("lib/panelGate.ts", "panelIframeSrc", ["base", "adminRid", "pins"]);
+  check("P161109", "the paint hint is forwarded only when it is a 36-character id", iframe("/p", null, { skelRid: "x&rid=evil" }) === "/p" && iframe("/p", null, { skelRid: "00000000-0000-4000-8000-000000000001" }) === "/p?skel=00000000-0000-4000-8000-000000000001");
+  const PSs = src("lib/panelScope.ts"); const prBody = PSs.slice(PSs.indexOf("export function panelRestaurantId("), PSs.indexOf("export type ScopeReq"));
+  check("P161110", "a STAFF member always acts on their own restaurant — the FIRST thing panelRestaurantId does, before any ?rid= is read",
+    /\{\s*if \(g\.user\) return g\.user\.restaurant_id \|\| DEFAULT_RESTAURANT_ID;/.test(prBody.slice(prBody.indexOf("): string | null {"))) && prBody.indexOf("if (g.user) return g.user.restaurant_id") < prBody.indexOf('searchParams?.get("rid")'));
+  const ei = fnFrom("lib/panelScope.ts", "emptyIdSegment", ["v"]);
+  check("P161111", "'undefined', 'null' and 'NaN' path segments are all refused before the database", ei("undefined") && ei("null") && ei("NaN") && !ei("0"));
+  const PA = src("lib/panelAccess.ts");
+  check("P161112", "a panel switched off cuts open tabs within 30 seconds", PA.includes("const PANEL_TTL_MS = 30_000;"));
+  check("P161113", "a binned restaurant drops out of its owner's list", /\.in\("id", chunk\)\.is\("deleted_at", null\)/.test(PA));
+  // ownerScope
+  const OSs = src("lib/ownerScope.ts");
+  check("P161114", "an owner-cockpit pin (?scope/?rid/?as) counts only WITH a valid admin cookie", /pinSp\?\.get\("as"\)\) &&\s*\(await tokenIsValid\(req\.cookies\.get\(AUTH_COOKIE\)\?\.value\)\);/.test(OSs));
+  check("P161115", "?as= is honoured only for somebody who co-owns the pinned restaurant", OSs.includes("(asOwner && members.includes(asOwner))"));
+  const dfBody = OSs.slice(OSs.indexOf("export function dbFail("), OSs.indexOf("export { type PartialKey"));
+  check("P161116", "dbFail never hands the database's own sentence to an owner (it goes to the server log only)",
+    dfBody.includes('(opts?.message ?? "Couldn\'t load that just now — please try again.")') && /console\.error\(`\[\$\{where\}\] read failed[^;]*raw\);/.test(dfBody) && !/\{ error: raw|error: raw/.test(dfBody));
+  check("P161117", "a restaurant id must be a full uuid — nothing else is asked about", OSs.includes("const RESTAURANT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;"));
+  // passwordVault
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||= "guard-only-service-key-0123456789";
+  const a1 = await PV.sealPassword("same-pw"), a2 = await PV.sealPassword("same-pw");
+  check("P161118", "two copies of the SAME password are sealed differently (a fresh nonce each time)", !!a1 && !!a2 && a1.split("$")[1] !== a2.split("$")[1]);
+  // revealGate
+  check("P161119", "one uncover lasts five minutes", RG.REVEAL_TTL_MS === 5 * 60 * 1000);
+  process.env.ADMIN_PASSWORD ||= "guard-only-admin-password";
+  const m = await RG.mintRevealToken();
+  check("P161120", "an unlock cookie with a FORGED signature is locked", (await RG.revealUnlocked(`${m.expiresAt}.not-the-signature`)) === false && (await RG.revealUnlocked(m.value)) === true);
+  const old = await RG.mintRevealToken(-1000);
+  check("P161121", "an EXPIRED unlock is locked", (await RG.revealUnlocked(old.value)) === false);
+  Object.assign(process.env, keepEnv); for (const k of Object.keys(process.env)) if (!(k in keepEnv)) delete process.env[k];
+  // publicCap / loginThrottle / managerPin / supabaseAdmin / adminFetch / ownerPin / instrumentation
+  check("P161122", "the in-memory cap map is bounded at 5,000 entries", /const MAX_TRACKED = 5000;/.test(src("lib/publicCap.ts")) && /if \(windows\.size > MAX_TRACKED\) windows\.clear\(\);/.test(src("lib/publicCap.ts")));
+  check("P161123", "a throttle that cannot be read lets people in (it never locks the admin out by itself)", /catch \{\s*return \{ locked: false, retryMs: 0 \}; \/\/ fail-open/.test(read("lib/loginThrottle.ts")));
+  check("P161124", "a manager PIN is checked only against THIS restaurant's managers", /select\("id,name,username,pin_hash"\)\s*\.eq\("restaurant_id", restaurantId\)/.test(src("lib/managerPin.ts")));
+  check("P161125", "every database read has an 8-second deadline", /export const DB_TIMEOUT_MS = 8000;/.test(src("lib/supabaseAdmin.ts")));
+  const realFetch = globalThis.fetch; globalThis.fetch = async () => new Response(JSON.stringify({ error: "nope" }), { status: 200 });
+  const af = await AF.adminFetch("/x"); globalThis.fetch = realFetch;
+  check("P161126", "an admin screen treats a 200 that carries {error} as a FAILURE", af.ok === false && af.error === "nope");
+  globalThis.window = { location: { search: "?as=a%26rid%3Db" } };
+  check("P161127", "the ?as= pin is encoded, so it can never smuggle a second parameter", OP.asSuffix() === "&as=a%26rid%3Db");
+  delete globalThis.window;
+  check("P161128", "server errors are still handed to the error reporter (instrumentation onRequestError)", /export const onRequestError = Sentry\.captureRequestError;/.test(src("instrumentation.ts")));
+}
+// SWEEP #10 T17 ROUND 3, item 23 — the wrong-password count is added INSIDE the database (mig 411).
+{
+  const sql = read("supabase/migrations/411_a_wrong_password_is_counted_once_each.sql");
+  check("P161230", "migration 411 adds one INSIDE the update, so simultaneous wrong tries each count",
+    /SET failed_count = CASE WHEN s\.failed_count \+ 1 >= p_max THEN 0 ELSE s\.failed_count \+ 1 END/.test(sql) && /WHERE s\.id = ANY \(p_ids\)/.test(sql));
+  check("P161231", "…locks for p_lock_seconds on the try that reaches the limit", /locked_until = CASE WHEN s\.failed_count \+ 1 >= p_max THEN now\(\) \+ make_interval\(secs => p_lock_seconds\)/.test(sql));
+  check("P161232", "…and is staff-only: REVOKE from PUBLIC/anon/authenticated, GRANT to service_role",
+    /REVOKE ALL ON FUNCTION public\.lfh_staff_login_failed\(uuid\[\], integer, integer\) FROM PUBLIC, anon, authenticated;/.test(sql) && /GRANT EXECUTE ON FUNCTION public\.lfh_staff_login_failed\(uuid\[\], integer, integer\) TO service_role;/.test(sql));
+  check("P161233", "loginUser no longer counts with a read-add-write in the app", !/const fc = \(u\.failed_count \|\| 0\) \+ 1;/.test(CODE.userAuth));
+  check("P161234", "…and a count that could not be written is said in the server log", has(CODE.userAuth, 'if (counted.error) console.error("[auth] could not count a wrong password:"'));
+}
+// ── SWEEP #10 T17 ROUND 3, item 24 — 17 MORE RULES NO GUARD WATCHED (the second break-it pass) ─────────────
+// After item 22 the second break-it pass broke 42 further rules, items 13–23's own included; 17 stayed GREEN. Each one is
+// pinned here: run for real where the file loads in this harness, else its exact rule read. ids P161522–P161538.
+{
+  const src = (f) => stripComments(read(f));
+  const PV = await import("@/lib/passwordVault.ts");
+  const PC = await import("@/lib/publicCap.ts");
+  const AF = await import("@/lib/adminFetch.ts");
+  const OP = await import("@/lib/ownerPin.ts");
+  const LT = await import("@/lib/loginThrottle.ts");
+  const RL = await import("@/lib/rateLimit.ts");
+  const MP = await import("@/lib/managerPin.ts");
+  const PA = await import("@/lib/panelAccess.ts");
+  const { TOOK_TOO_LONG } = await import("@/lib/partialRead.ts");
+  // a bare ?rid= with NO admin cookie is ignored — only the admin cookie turns a pinned request into the admin's
+  resetWorld();
+  const pinned = await UA.requireRole({ cookies: { get: () => undefined }, nextUrl: { searchParams: new URLSearchParams("rid=00000000-0000-0000-0000-000000000001") } }, "manager");
+  check("P161522", "a signed-out visitor adding ?rid= to a panel call is NOT treated as the admin", pinned.ok === false);
+  check("P161523", "a stored password copy from an unknown version (v3…) is refused, never guessed at",
+    /if \(parts\.length !== 3 \|\| \(parts\[0\] !== "v1" && parts\[0\] !== "v2"\)\) return null;/.test(src("lib/passwordVault.ts")) && (await PV.openPassword("v3$abc$def")) === null);
+  check("P161524", "the uncover password is hashed on both sides and compared by safeEqual — never with ===",
+    /return safeEqual\(await sha256hex\(typed\), await sha256hex\(real\)\);/.test(src("lib/revealGate.ts")) && !/typed\s*===|===\s*real/.test(src("lib/revealGate.ts")));
+  check("P161525", "a restaurant's owner entrance opens /owner only for an owner of THAT restaurant",
+    /if \(member\) return NextResponse\.redirect\(new URL\("\/owner", req\.url\)\);/.test(src("app/r/[restaurant]/owner/route.ts")) &&
+    /u\.restaurant_id === r\.id \|\|/.test(src("app/r/[restaurant]/owner/route.ts")) && /\.eq\("user_id", u\.id\)\.eq\("restaurant_id", r\.id\)/.test(src("app/r/[restaurant]/owner/route.ts")));
+  check("P161526", "a restaurant's panel address lets in only that restaurant's own staff",
+    /u\.role === role && u\.restaurant_id === r\.id && r\.active/.test(src("lib/panelGate.ts")));
+  check("P161527", "a real owner's cockpit covers only the restaurants they own (and that are switched on)",
+    /const ids = await enabledOwnedRestaurantIds\(owner\.id\);/.test(src("lib/ownerScope.ts")));
+  resetWorld();
+  const pinHash = await UA.hashSecret("4321");
+  G.FIX.staff_users = [
+    { id: "m1", name: "Asha", username: "asha", role: "manager", restaurant_id: "r1", active: true, pin_hash: pinHash },
+    { id: "m2", name: "Bina", username: "bina", role: "manager", restaurant_id: "r1", active: true, pin_hash: pinHash },
+  ];
+  const shared = await MP.verifyManagerPin("4321", "r1");
+  check("P161528", "a PIN two managers share credits BOTH of them (not whichever row came first)",
+    shared.ok === true && shared.sharedPin === true && JSON.stringify(shared.managerIds) === '["m1","m2"]');
+  resetWorld();
+  G.FIX.login_throttle = [{ key: "admin:two-days", locked_until: new Date(Date.now() + 2 * 864e5).toISOString() }, { key: "admin:two-years", locked_until: new Date(Date.now() + 730 * 864e5).toISOString() }];
+  check("P161529", "a lockout of days is a lockout, not a deliberate block — only one over a year is a block",
+    (await LT.throttleIsBlocked("admin:two-days")) === false && (await LT.throttleIsBlocked("admin:two-years")) === true);
+  resetWorld();
+  await RL.rateAllowed("staff_login", "x".repeat(500));
+  const rc = G.RPCS.find((c) => c.name === "lfh_rate_check");
+  check("P161530", "a subject is cut to 200 characters before it reaches the limiter", !!rc && rc.args.p_subject.length === 200, rc?.args?.p_subject?.length);
+  check("P161531", "the blocked screen remembers a request already sent (after a reload too)",
+    /const alreadyAsked = sent \|\| status\?\.pending === true;/.test(src("app/staff-login/BlockedView.tsx")));
+  const SLF = src("app/staff-login/LoginForm.tsx");
+  check("P161532", "the admin card ignores a second tap while the first sign-in is still going",
+    /if \(busy\) return;\s*setBusy\(true\);/.test(SLF));
+  let pinOk = false; try { delete globalThis.window; pinOk = OP.asValue() === null && OP.asSuffix() === ""; } catch { pinOk = false; }
+  check("P161533", "the owner pin helper answers 'none' on the server instead of crashing", pinOk);
+  const realFetch2 = globalThis.fetch;
+  globalThis.fetch = async () => { const e = new Error("slow"); e.name = "TimeoutError"; throw e; };
+  const slow = await AF.adminFetch("/x"); globalThis.fetch = realFetch2;
+  check("P161534", "a slow admin read says it took too long — not 'network fault'", slow.ok === false && slow.error === TOOK_TOO_LONG, slow.error);
+  const dev = PC.capKeyFor({ cookies: { get: (n) => (n === "lfh_panel_device" ? { value: "dev-1" } : undefined) }, headers: { get: () => "1.2.3.4" } });
+  const ip = PC.capKeyFor({ cookies: { get: () => undefined }, headers: { get: () => "1.2.3.4" } });
+  check("P161535", "each panel device is counted on its own; only a device with no cookie falls back to its address", dev === "dev-1" && ip.startsWith("ip:"), `${dev} / ${ip}`);
+  check("P161536", "every database read is given the 8-second deadline (the deadline fetch is what the client uses)",
+    /fetch\(input, \{ \.\.\.init, signal: init\?\.signal \?\? AbortSignal\.timeout\(DB_TIMEOUT_MS\) \}\)/.test(src("lib/supabaseAdmin.ts")) && /global: \{ fetch: withDeadline \}/.test(src("lib/supabaseAdmin.ts")));
+  const panels = await PA.getEnabledPanels("r1");
+  check("P161537", "the retired per-panel switch stays retired — every panel, the owner's included, is on", PA.PANEL_KEYS.every((k) => panels[k] === true));
+  check("P161538", "the 'no secret on this site' message is words a waiter can read, not a setting name",
+    / /.test(UA.NOT_SET_UP) && UA.NOT_SET_UP.length > 30 && !/[A-Z]{2,}_[A-Z]{2,}/.test(UA.NOT_SET_UP), UA.NOT_SET_UP);
 }
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');

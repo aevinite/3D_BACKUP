@@ -38,3 +38,21 @@ password-change line under `owner.restaurant_id` — the same filing-home patter
 Outside T17's boundary, noticed and left for their owners: `app/owner/{inventory,manager,menu}/page.tsx` call
 `userFromCookie` without handling AuthDbError (a database blip shows the crash page, not "try again"); 27 admin
 screens call `/api/admin` with a plain fetch rather than `lib/adminFetch.ts`.
+
+## Round 3 (2026-10-08, owner: "do all and … plan whole new 500 phases test … every part within your boundary")
+
+Owner-picked items built first: 18 (the sign-in cards could lose their top on a sideways phone), 19 (a visible focus ring on
+the sign-in boxes), 20 (Username / Password tied to their boxes), 21 (more ids: P161001–P162000 taken from the planning
+session's deliberately free gap, after checking it was empty on main and in every open PR). PR #1449.
+
+500 new checks (P161001–P161500) + the 21 round 2 lacked (P161501–P161521) + item 24's 17 guard checks (P161522–P161538):
+538, all ✅ after the fixes below. Families: two break-it passes (130 rules broken one at a time), a throwaway French House
+login driven through lockout / disable / password change and deleted, simultaneous wrong tries, Lighthouse on the live
+doors (100 in every category), ~70,000 randomised inputs, every live restaurant's own doors, every panel read scanned for
+other restaurants' ids and for credentials, items 18–20 at every size on the live site.
+
+| # | problem | fix | guard |
+|---|---|---|---|
+| 22 | 32 safety rules in the sign-in area had no guard: breaking any one of them (the admin door's 10-try lock, the act-as cookie being HttpOnly, the reveal signature, the DB deadline …) left every guard green. | Each pinned in verify:t25-doors, run for real where the file loads. | P161095–P161128 |
+| 23 | Wrong passwords sent at the same instant were counted as ONE (read-add-write in the app), so ten simultaneous tries never reached the 5-try lockout. | Migration 411 `lfh_staff_login_failed(p_ids, p_max, p_lock_seconds)` adds one inside a single UPDATE; staff-only grants. loginUser calls it. | P161230–P161234 |
+| 24 | The second break-it pass found 17 more unwatched rules (a bare `?rid=` without the admin cookie, a restaurant's owner entrance / panel address membership, a shared manager PIN crediting both, the block-vs-lockout cutoff, the limiter's 200-char subject, the admin card's double tap …). | Each pinned in verify:t25-doors; all 17 breaks re-run and now turn it red. | P161522–P161538 |
