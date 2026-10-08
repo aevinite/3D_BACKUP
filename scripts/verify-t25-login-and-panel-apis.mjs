@@ -817,6 +817,8 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   check("P161003", "…R19 still holds: the screen height is 100vh, never 100dvh", !/100dvh/.test(lf + sp) && (lf + sp).split('minHeight: "100vh"').length === 3);
   check("P161004", "…every sign-in card centres with margin:auto, which cannot push its top out of reach",
     has(lf, 'className="lfh-signin" style={{ margin: "auto"') && has(CODE.staffLoginForm, 'style={{ margin: "auto"') && has(CODE.blockedView, '<div style={{ margin: "auto"'));
+  check("P161005", "item 19: the box the keyboard is in gets a visible ring (:focus-visible), not only the caret",
+    /\.lfh-signin input:focus-visible\{box-shadow:0 0 0 3px/.test(lf));
 }
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
