@@ -111,6 +111,10 @@ const ownerCtx = async (skin = "dark", w = 1440, h = 950) => {
   p.on("requestfailed", (r) => {
     const why = r.failure()?.errorText || "";
     if (NOISE(r.url(), why)) return;
+    // A CANCELLED request is not a failed one (sweep #10 T39 item 35): the dev server mounts every
+    // component twice (React StrictMode), so the owner Menu page's embedded editor frame is started,
+    // cancelled (net::ERR_ABORTED) and started again — P05962 read that as the page erroring.
+    if (/ERR_ABORTED/.test(String(why))) return;
     errs.push(`request failed ${r.url().replace(BASE, "")} :: ${why}`);
   });
   return { c, p, errs };
@@ -179,8 +183,11 @@ try {
         ok("P05595", "every tile is a button, none a bare link", t.buttons && t.anchors === 0, `buttons=${t.buttons} leftover anchors=${t.anchors}`);
         ok("P05598", "the hero shortcut says Team", t.hero.includes("Team") && !t.hero.some((x) => /powers/i.test(x)), t.hero.join(" · "));
         ok("P05816", "every home card renders", t.cards.length >= 7, `${t.cards.length}: ${t.cards.join(" | ")}`);
+        // The RULE is "a figure of ₹1,000 or more is printed short" — not "three tiles are big". With
+        // ₹399 and ₹0 on two tiles (true today on the pinned restaurant), counting short forms said a
+        // correct face was wrong. A long-form ₹ figure (₹10,234) is the fault (S10 T39 item 35).
         ok("P05814", "the short money form is on the tile face",
-          t.values.filter((v) => /[LkCr]$/.test(v.replace("₹", ""))).length >= 3, t.values.join(" · "));
+          t.values.some((v) => /^₹/.test(v)) && t.values.filter((v) => /^₹/.test(v)).every((v) => /[LkCr]$/.test(v) || !/,/.test(v)), t.values.join(" · "));
       }
       ok(tag === "a35" ? "P05859" : "P05990", `${px} · no cancellation presented as money`,
         t.cancelMoney.length === 0 && !t.lostTo && t.cancelWords.length === 0,
@@ -215,20 +222,34 @@ try {
     for (const w of ["Revenue","Orders","Today so far","Expenses","On hand"]) {
       await p.evaluate((x) => { const e = [...document.querySelectorAll(".ow2-kpi")].find((y) => y.querySelector(".k")?.textContent === x); e?.click(); }, w);
       await p.waitForTimeout(1000);
-      seen.push(await p.evaluate(() => { const d = document.querySelector(".ow2-tile"); return d ? {
-        title: d.querySelector("header .ti b")?.textContent, sub: d.querySelector("header .ti i")?.textContent,
-        who: d.querySelector(".who")?.textContent.trim(), link: d.querySelector(".full")?.getAttribute("href"),
+      // THE DOCKET (components/owner/TileDocket.tsx, 2026-10-04) replaced the old pop-up: the container is
+      // .tdk, the header is <b>title</b><i>sub · who</i>, and the total row is .r.total. Same facts, new
+      // places — the old selectors read null and crashed the whole run here (sweep #10 T39 item 35).
+      seen.push(await p.evaluate(() => { const d = document.querySelector(".tdk") || document.querySelector(".ow2-tile"); return d ? {
+        title: (d.querySelector("header b") || d.querySelector("header .ti b"))?.textContent, sub: (d.querySelector("header i") || d.querySelector("header .ti i"))?.textContent,
+        who: ((d.querySelector(".who") || d.querySelector("header i"))?.textContent || "").trim(), link: d.querySelector(".full")?.getAttribute("href"),
         rows: [...d.querySelectorAll(".rows .r")].map((r) => `${r.querySelector(".l").childNodes[0].textContent.trim()}=${r.querySelector(".v").textContent.trim()}`),
-        total: d.querySelector(".r.last .v")?.textContent.trim(), note: (d.querySelector(".note")?.innerText || "").replace(/\s+/g," ").slice(0,70),
+        total: (d.querySelector(".r.total .v") || d.querySelector(".r.last .v"))?.textContent.trim(), note: (d.querySelector(".note")?.innerText || "").replace(/\s+/g," ").slice(0,70),
         door: d.querySelector(".note .nlink")?.getAttribute("href") } : null; }));
       await p.keyboard.press("Escape"); await p.waitForTimeout(400);
     }
     ok("P05815", "every popup opens and names its scope", seen.every((x) => x && /restaurant/i.test(x.who || "")), seen.map((x) => x && x.who).join(" | "));
-    ok("P05666", "every popup's link carries the VIEWED scope and the chosen period",
-      seen.every((x) => /view=all/.test(x.link || "") && /range=month/.test(x.link || "")), (seen[1] && seen[1].link || "").replace(/^.*\?/, ""));
+    // A pop-up that did not open has already failed P05815; it must not also crash every check below
+    // (it did: "Cannot read properties of null (reading 'link')" ended the run before section D).
+    for (let i = 0; i < seen.length; i++) if (!seen[i]) seen[i] = {};
+    // "Today so far" opens the DAY SUMMARY for today on purpose (detailHref: daysummary → range=today) —
+    // the tile is about today whatever period is chosen. Every other tile carries the chosen period.
+    // seen[] is in tile order: Revenue, Orders, Today so far, Expenses, On hand. (S10 T39 item 35)
+    ok("P05666", "every popup's link carries the VIEWED scope and the chosen period (Today: today)",
+      seen.every((x, i) => /view=all/.test(x.link || "") && (i === 2 ? /range=today/.test(x.link || "") : /range=month/.test(x.link || ""))),
+      seen.map((x) => (x.link || "∅").replace(/^.*\?/, "")).join(" | "));
     ok("P05591", "the Orders popup carries the average order", (seen[1].rows || []).some((r) => /Average per paid order/.test(r)), (seen[1].rows || []).join(" | "));
     ok("P05592", "the Revenue popup shows the discount as money given away, and no cancellation figure",
-      (seen[0].rows || []).some((r) => /Discounts given/.test(r)) && !(seen[0].rows || []).some((r) => /[Cc]ancel/.test(r)), (seen[0].rows || []).join(" | "));
+      // The discount line is drawn only when the period HAD a discount (page.tsx: mt.discount > 0 —
+      // no ₹0 lines), so the rule is: never a cancellation figure, and any discount line is worded
+      // as money given away (S10 T39 item 35).
+      (seen[0].rows || []).length > 0 && !(seen[0].rows || []).some((r) => /[Cc]ancel/.test(r))
+        && (seen[0].rows || []).filter((r) => /[Dd]iscount/.test(r)).every((r) => /^Discounts given=/.test(r)), (seen[0].rows || []).join(" | "));
     ok("P05834", "…and explains cancellations with a door to the record",
       /not money you lost/.test(seen[0].note || "") && /\/owner\/activity/.test(seen[0].door || ""), `${seen[0].note} → ${seen[0].door}`);
     // the arithmetic must reconcile ON SCREEN
@@ -243,7 +264,7 @@ try {
     // follow one through
     await p.evaluate(() => { const e = [...document.querySelectorAll(".ow2-kpi")].find((y) => y.querySelector(".k")?.textContent === "Orders"); e?.click(); });
     await p.waitForTimeout(900);
-    await p.evaluate(() => document.querySelector(".ow2-tile .full")?.click());
+    await p.evaluate(() => (document.querySelector(".tdk .full") || document.querySelector(".ow2-tile .full"))?.click());   // the docket (S10 T39 item 35)
     await p.waitForTimeout(20000);
     const landed = await p.evaluate(() => { const m = document.querySelector(".adm-main");
       const s = m ? [...m.querySelectorAll("select")].find((x) => (x.getAttribute("aria-label") || "") === "Restaurant") : null;
@@ -446,7 +467,10 @@ try {
 } finally {
   let n = 0;
   for (const f of cleanup.reverse()) { try { await f(); n++; } catch (e) { console.log("   cleanup step failed:", e.message); } }
-  const left = (await sb.from("orders").select("id").eq("restaurant_id", RID_FH).eq("table_number", "T12-LIVE")).data || [];
+  // LIVE leftovers only: a retired test order (cancelled + archived + soft-deleted) is kept for ever by
+  // design — an order with a KOT number can never be hard-deleted — so counting those reported a clean
+  // run as "test orders left: 2" for ever (sweep #10 T39 item 35).
+  const left = (await sb.from("orders").select("id").eq("restaurant_id", RID_FH).eq("table_number", "T12-LIVE").eq("archived", false).is("deleted_at", null)).data || [];
   const leftI = (await sb.from("inv_items").select("id").eq("restaurant_id", RID_FH).like("name", "T12LIVE%")).data || [];
   console.log(`\ncleaned up ${n} row group(s) by id · test orders left: ${left.length} · test ingredients left: ${leftI.length}`);
   await br.close();
