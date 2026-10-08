@@ -50,6 +50,8 @@ const SERVER_ONLY = [
   "orders", "sessions", "session_members", "order_items", "customers", "payments",
   "waiter_calls", "requests", "blocklist", "otp_codes", "daily_counters", "seq_counters",
   "staff_actions", "feedback", "aggregator_orders",
+  // migration 412 — the loyalty points tables (migs 401/403), which arrived with the default grant
+  "loyalty_config", "loyalty_ledger",
 ];
 // Every table that had a leftover grant, now revoked. Kept as one list because the distinction
 // between "server-only" and "guest" stopped mattering the moment 393 proved the guest journey does
@@ -109,6 +111,6 @@ ok(risky.length === 0, `the realtime publication holds: ${pub.join(", ") || "(no
   + (risky.length ? ` — ${risky.join(", ")} is BOTH published and revoked, so every subscriber to it will silently stop receiving updates.` : ""));
 
 console.log(bad === 0
-  ? "\n✅ all 25 tables are out of the public key's reach, the server still reaches them, and no revoked table is published to realtime."
+  ? `\n✅ all ${SERVER_ONLY.length} tables are out of the public key's reach, the server still reaches them, and no revoked table is published to realtime.`
   : `\n❌ ${bad} problem(s).`);
 process.exit(bad === 0 ? 0 : 1);
