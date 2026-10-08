@@ -1,4 +1,4 @@
--- 411_a_purge_clears_the_loyalty_points.sql — a permanent removal no longer leaves a restaurant's
+-- 412_a_purge_clears_the_loyalty_points.sql — a permanent removal no longer leaves a restaurant's
 -- loyalty points behind (sweep #10 T39 item 6).
 --
 -- WHERE: Admin console → Restaurants → Recycle bin → "Remove permanently". Backend only — nothing on
@@ -118,7 +118,7 @@ begin
   delete from rate_limit_events   where restaurant_id = p_rid;
   delete from customer_visits     where restaurant_id = p_rid;   -- guest phones: `customers` is
   delete from customer_devices    where restaurant_id = p_rid;   -- already purged, these are copies
-  -- ── LOYALTY POINTS (mig 401/403), added by migration 411 ─────────────────────────────────────
+  -- ── LOYALTY POINTS (mig 401/403), added by migration 412 ─────────────────────────────────────
   -- The ledger is keyed on a guest's PHONE, like customer_visits above, and `customers` (whose
   -- `points` column is only a cache of it) is already purged. A redemption's money effect is the
   -- discount written on the kept bill itself, so nothing financial is lost. Ledger first: it is

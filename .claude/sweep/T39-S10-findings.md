@@ -10,11 +10,11 @@ message. Improvements were not built; they are in the chat report only. Ledger: 
 | 3 | backend (packages) | two new high-rated advisories: sharp <0.35.5, source-map-js <1.2.2 | verify:deps (green) |
 | 4 | CI | a red step hid every later step, so item 3 never showed | verify-root-config: every step runs after an earlier failure |
 | 5 | (guard) | verify:owner-screen red on a sentence that moved into TileDocket | re-pinned to the rule, sabotaged |
-| 6 | Admin → Recycle bin → Remove permanently | loyalty_config / loyalty_ledger were left behind by a purge | verify:purge (migration 411) |
+| 6 | Admin → Recycle bin → Remove permanently | loyalty_config / loyalty_ledger were left behind by a purge | verify:purge (migration 412) |
 | 7 | (tests, seeders) | fixtures wrote order lines by `slug` (a shape no real order has); two teardowns hard-deleted orders and left them live; seed-today wrote stamps without times | verify:test-safety §14 (reads .ts too) |
 | 8 | (guard) | verify:admin-health: 3 "regressions" on Repair that were deliberate changes | re-pinned, each sabotaged |
 | 9 | Manager → Tables (French House) | 44 weeks-old test parties: 23 phantom tiles, 4 guards blind, "44 tables open" | verify:fixtures widened; cleanup tool --rid + empty sessions; live-rush says "could not run" |
-| 10 | Admin → Recycle bin → Remove permanently | REGRESSION I introduced in item 6 (built 411 on mig 380, not 384) — broke Remove permanently on dev for ~40 min | verify:purge now checks every table it deletes from exists |
+| 10 | Admin → Recycle bin → Remove permanently | REGRESSION I introduced in item 6 (built it on mig 380, not 384) — broke Remove permanently on dev for ~40 min | verify:purge now checks every table it deletes from exists |
 | 11 | (guard) | verify:floor-limits compared the Live floor with a read taken minutes earlier — a race on a shared DB | judges the page against the data the page was sent |
 | 12 | (guard) | verify:owner-shell: dots keyed by restaurantColor(r.id, ids) since 2026-10-04 | accepts both, sabotaged |
 | 13 | (guard) | verify:panel-dialogs demanded two buttons retired on 2026-09-14 | passes while retired, fails if one returns as a browser dialog |
@@ -35,7 +35,7 @@ message. Improvements were not built; they are in the chat report only. Ledger: 
 | 28 | Admin → Repair & support → Resolve | the green Resolve buttons were white on light green, 1.92:1 | verify:css-tokens (fill tokens) |
 | 29 | (guard) | verify:repair-sweep: nine checks behind deliberate Repair changes | re-pinned; regenerated T18-S8 result |
 | 30 | (billing, dev data) | MY clean-up closed four invoiced test bills → issued invoices cancelled with no credit note | 4 credit notes issued; tool skips invoiced bills; verify:invoice-is-final static check |
-| 31 | backend | loyalty tables kept Supabase's default public grant | migration 412; verify:server-only-tables 27/27 |
+| 31 | backend | loyalty tables kept Supabase's default public grant | migration 413; verify:server-only-tables 27/27 |
 | 32 | (guard) | verify:own-hero did not know the restaurant's own translated hero words | re-pinned, sabotaged |
 | 33 | (guard) | verify:t5s9: the guest 404's "no restaurant" decision now shares a line | re-pinned, sabotaged |
 | 34 | (tool) | password backfill would have reset 78 passwords after the v2 vault change | imports the real vault; refuses on unreadable; verify:test-safety §15 |

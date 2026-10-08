@@ -1,4 +1,4 @@
--- 412_the_loyalty_tables_lose_their_leftover_public_grant.sql — sweep #10 T39 item 31.
+-- 413_the_loyalty_tables_lose_their_leftover_public_grant.sql — sweep #10 T39 item 31.
 --
 -- WHERE: backend only, nothing on screen changes.
 --

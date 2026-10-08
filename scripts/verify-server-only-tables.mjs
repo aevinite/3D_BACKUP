@@ -50,7 +50,7 @@ const SERVER_ONLY = [
   "orders", "sessions", "session_members", "order_items", "customers", "payments",
   "waiter_calls", "requests", "blocklist", "otp_codes", "daily_counters", "seq_counters",
   "staff_actions", "feedback", "aggregator_orders",
-  // migration 412 — the loyalty points tables (migs 401/403), which arrived with the default grant
+  // migration 413 — the loyalty points tables (migs 401/403), which arrived with the default grant
   "loyalty_config", "loyalty_ledger",
 ];
 // Every table that had a leftover grant, now revoked. Kept as one list because the distinction
