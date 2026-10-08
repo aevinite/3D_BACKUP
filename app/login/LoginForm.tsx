@@ -109,8 +109,9 @@ export default function LoginForm({
             cannot express :focus, hence this one small rule). Item 20: each word is tied to its box
             (htmlFor/id), so tapping "Username" selects the box and screen readers read "Username". */}
         <style>{`.lfh-signin input:focus-visible{box-shadow:0 0 0 3px rgba(91,140,255,.55);border-color:#5b8cff!important}`}</style>
-        <label style={{ fontSize: 12, color: "#8aa0c9" }}>Username</label>
+        <label htmlFor="lfh-login-username" style={{ fontSize: 12, color: "#8aa0c9" }}>Username</label>
         <input
+          id="lfh-login-username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="your username"
@@ -121,9 +122,10 @@ export default function LoginForm({
           style={{ ...field, margin: "4px 0 12px" }}
         />
 
-        <label style={{ fontSize: 12, color: "#8aa0c9" }}>Password</label>
+        <label htmlFor="lfh-login-password" style={{ fontSize: 12, color: "#8aa0c9" }}>Password</label>
         <div style={{ position: "relative", margin: "4px 0 4px" }}>
           <input
+            id="lfh-login-password"
             type={show ? "text" : "password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}

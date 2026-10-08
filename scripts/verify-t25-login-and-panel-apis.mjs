@@ -819,6 +819,8 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
     has(lf, 'className="lfh-signin" style={{ margin: "auto"') && has(CODE.staffLoginForm, 'style={{ margin: "auto"') && has(CODE.blockedView, '<div style={{ margin: "auto"'));
   check("P161005", "item 19: the box the keyboard is in gets a visible ring (:focus-visible), not only the caret",
     /\.lfh-signin input:focus-visible\{box-shadow:0 0 0 3px/.test(lf));
+  check("P161006", "item 20: 'Username' and 'Password' are tied to their boxes (htmlFor = id)",
+    has(lf, 'htmlFor="lfh-login-username"') && has(lf, 'id="lfh-login-username"') && has(lf, 'htmlFor="lfh-login-password"') && has(lf, 'id="lfh-login-password"'));
 }
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
