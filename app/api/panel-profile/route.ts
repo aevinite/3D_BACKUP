@@ -34,18 +34,19 @@ export const dynamic = "force-dynamic";
 // instead of saying the system is busy, and the device's offline layer can't fall back to the copy
 // it already has (that needs the 503 + `busy` marker every other panel route gives —
 // lib/panelFailure.ts). Answering `busy` here puts this route back in step with the rest.
+// The one "busy, try again" answer this route gives — the same shape the panels' queue already treats as "keep the
+// write and send it again shortly" (X-LFH-Busy), so a blip never loses what the person typed.
+function busyReply(): NextResponse {
+  return NextResponse.json({ error: BUSY_MESSAGE, busy: true }, { status: 503, headers: { "X-LFH-Busy": "1" } });
+}
+
 async function whoIsAsking(req: NextRequest): Promise<{ user: Awaited<ReturnType<typeof userFromCookie>> } | { busy: NextResponse }> {
   try {
     return { user: await userFromCookie(req.cookies.get(USER_COOKIE)?.value) };
   } catch (e) {
     if (e instanceof AuthDbError) {
       console.error("[panel-profile] auth lookup failed:", e.message);
-      return {
-        busy: NextResponse.json(
-          { error: BUSY_MESSAGE, busy: true },
-          { status: 503, headers: { "X-LFH-Busy": "1" } },
-        ),
-      };
+      return { busy: busyReply() };
     }
     throw e;
   }
@@ -250,7 +251,17 @@ async function postImpl(req: NextRequest) {
       return NextResponse.json({ error: "Staff profiles aren't enabled for this restaurant." }, { status: 403 });
     const p = body.profile;
     if (!p || typeof p !== "object" || Array.isArray(p)) return NextResponse.json({ error: "Missing profile fields." }, { status: 400 });
-    const cur = (await sb.from("staff_users").select("profile").eq("id", u.id).maybeSingle()).data?.profile as Record<string, unknown> | null;
+    // A READ THAT FAILED IS NOT AN EMPTY PROFILE (sweep #10 T17 round 4, item 26, 2026-10-08). The save below MERGES
+    // onto what is stored, and a failed read's `.data` is null — so a blip made the merge start from nothing and the
+    // write replaced the whole profile with just the person's own fields. Measured in the harness: the owner's ID
+    // type, last-4, "verified" tick and private note were erased, and the reply still said ok. Now nothing is written
+    // and the person is told to try again (a 503, which the panel's queue retries by itself).
+    const curRead = await sb.from("staff_users").select("profile").eq("id", u.id).maybeSingle();
+    if (curRead.error) {
+      console.error("[panel-profile] saved details read failed:", curRead.error.message);
+      return busyReply();
+    }
+    const cur = curRead.data?.profile as Record<string, unknown> | null;
     const merged = mergeProfilePatch(cur, p as Record<string, unknown>, SELF_PROFILE_FIELDS);
     const { error } = await sb.from("staff_users").update({ profile: merged }).eq("id", u.id);
     if (error) return NextResponse.json({ error: "Couldn't save that — please try again." }, { status: 500 });
