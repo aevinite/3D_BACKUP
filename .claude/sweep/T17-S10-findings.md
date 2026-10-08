@@ -56,3 +56,21 @@ other restaurants' ids and for credentials, items 18–20 at every size on the l
 | 22 | 32 safety rules in the sign-in area had no guard: breaking any one of them (the admin door's 10-try lock, the act-as cookie being HttpOnly, the reveal signature, the DB deadline …) left every guard green. | Each pinned in verify:t25-doors, run for real where the file loads. | P161095–P161128 |
 | 23 | Wrong passwords sent at the same instant were counted as ONE (read-add-write in the app), so ten simultaneous tries never reached the 5-try lockout. | Migration 411 `lfh_staff_login_failed(p_ids, p_max, p_lock_seconds)` adds one inside a single UPDATE; staff-only grants. loginUser calls it. | P161230–P161234 |
 | 24 | The second break-it pass found 17 more unwatched rules (a bare `?rid=` without the admin cookie, a restaurant's owner entrance / panel address membership, a shared manager PIN crediting both, the block-vs-lockout cutoff, the limiter's 200-char subject, the admin card's double tap …). | Each pinned in verify:t25-doors; all 17 breaks re-run and now turn it red. | P161522–P161538 |
+
+## Round 4 (2026-10-09, owner: "one latest time … 600 phases … every single bit of thing should be covered")
+
+694 new checks (P161539–P162232), all ✅ after the fixes. Every branch of the 23 library/route files was measured with Node's code
+coverage and driven in a hermetic harness (line 96.7–100%, branch 86–100% — the unrun lines are named in the ledger); the 5 screens in a
+real browser with faked server replies; the database-side counter on the dev DB with throwaway keys; the deploy on the live backup.
+
+| # | problem | fix | guard |
+|---|---|---|---|
+| 25 | `lib/panelAccess.ts` still read the RETIRED owner-panel switch (settings.enabled_panels.owner, removed 2026-07-31) — it could refuse an owner "ask your admin to turn it on" with no switch left to turn. Two dev restaurants still carry it (both in the bin). | Read removed (one settings query fewer per owner sign-in). | P162135–P162137 |
+| 26 | A failed read of a person's saved details made their own-details save start from nothing: the owner's ID type, last 4, verified tick and private note were erased, reply "ok". | 503 busy, nothing written (the panel queue retries). | P162141–P162142 |
+| 27 | A failed read of the stored password answered "Current password is wrong." to the right password. | 503 busy. | P162143–P162144 |
+| 28 | A database blip escaped `ownerScope` as a 500 on every `/api/owner/*` call (AuthDbError / OwnedLookupFailed were never caught). | Both → OwnerScopeUnavailable → the existing 503 "try again"; any other error still surfaces. | P162138–P162140 |
+| 29 | The admin door's and manager PIN's wrong tries were read-add-write: 10 sent at once counted 1 and never locked (measured on dev). | Migration 414 `lfh_throttle_fail` counts inside one insert-or-update; never shortens a lock or clears a block. Applied to dev; re-measured 1…10, one lock. | P162145–P162150 |
+
+Left for the owner (not changed): a SUSPENDED restaurant's staff are refused at `/r/<slug>/<panel>` but let in at the plain `/<panel>`
+and by every panel API — the two doors disagree. Improvement ideas (not built): honour a sign-in `?next=` deep link inside the person's own
+panel; stop a developer machine sending every page load to the error reporter.
