@@ -433,7 +433,9 @@ await phase("…the open-complaints pill counts it", async () => {
 });
 await phase("…resolving it writes the change to the database", async () => {
   if (!E.p) return "?";
-  const btn = E.p.page.locator("button", { hasText: /Resolve|Mark resolved/ }).last();
+  // THIS complaint's own button, not "the last Resolve on the page" — since 2026-08-20 every section
+  // also has a "Resolve all", and .last() pressed one of those instead (sweep #10 T39 item 37).
+  const btn = E.p.page.locator(".adm-card", { hasText: "walk-in cooler is warm again" }).locator("button", { hasText: /^Resolve$/ }).first();
   if (!(await btn.count())) return "?";
   await btn.click(); await settle(E.p, 3000);
   const row = await FX.readIssue(E.id);
@@ -842,7 +844,10 @@ console.log("\n── C · empty, capped, enormous, and awkward text ───�
 
 // ── the run history in every shape it can take ─────────────────────────────────────────────────
 {
-  const mkRun = (o) => ({ id: o.id || "00000000-0000-4000-8000-00000000000a", kind: "audit", title: "Owner panel nightly audit", status: "done", report: null, started_at: new Date().toISOString(), ended_at: new Date().toISOString(), ...o });
+  const mkRun = (o) => ({ id: o.id || "00000000-0000-4000-8000-00000000000a", kind: "audit", title: "Owner panel nightly audit", status: "done", report: null, started_at: new Date().toISOString(), ended_at: new Date().toISOString(), ...o, hasReport: o.hasReport ?? !!o.report })
+  // hasReport: the run list has carried a FLAG since the report went lazy (T26 item 15, 2026-09-16) —
+  // the body is fetched when the row is opened. A fixture with only `report` was, to the page, a run
+  // with nothing to read (sweep #10 T39 item 37).;
   const RUNS = [
     ["a run still working", [mkRun({ status: "running", ended_at: null })], /working…/],
     ["a run whose window was closed", [mkRun({ status: "closed" })], /window closed/],
@@ -1048,9 +1053,12 @@ console.log("\n── E · a busy server, and two tabs that disagree ───�
       if (!p) return "?";
       const did = await act(p);
       if (!did) return "?";
-      await settle(p, 3000);
-      const t = await p.page.locator("body").innerText();
-      return /busy|Couldn|couldn|wouldn/.test(t) || "the tap vanished in silence while the server was refusing";
+      // WATCH for the answer during the 3 seconds, do not read once after them: an admin toast stays up
+      // for 2.6s (components/admin/toast.tsx), so reading at 3s found it already gone and called a
+      // reported refusal "silent" (sweep #10 T39 item 37).
+      let said = false;
+      for (let i = 0; i < 15 && !said; i++) { said = /busy|Couldn|couldn|wouldn/.test(await p.page.locator("body").innerText()); if (!said) await p.page.waitForTimeout(200); }
+      return said || "the tap vanished in silence while the server was refusing";
     });
     await phase(`…and "${label}" does not leave the board claiming something that did not happen`, async () => {
       if (!p) return "?";
