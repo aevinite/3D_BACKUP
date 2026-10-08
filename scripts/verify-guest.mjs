@@ -520,8 +520,12 @@ check("P15602", "an open search is a back-step, so back does not offer to leave 
 // the lazy photos above it arrive; the pixel stays as the fallback for when that dish is no longer
 // there. A bare number written by an older build is still read correctly.
 check("P15611", "the menu remembers WHICH DISH the diner was at, not only how far down", () => {
-  const saves = rx(F.menuView, /JSON\.stringify\(\{ y: Math\.round\(el\.scrollTop\), id \}\)/);
-  const reads = has(F.menuView, "let y = 0, wantId = \"\";") && rx(F.menuView, /y = parseInt\(raw, 10\) \|\| 0;/);
+  // …and WHERE that dish sat against the header (`off`), so Back restores the exact view rather
+  // than one row lower (sweep #10 T39 item 54). The anchor is the first card with ANY of it showing.
+  const saves = rx(F.menuView, /JSON\.stringify\(\{ y: Math\.round\(el\.scrollTop\), id, off \}\)/)
+    && rx(F.menuView, /\.find\(\(c\) => c\.getBoundingClientRect\(\)\.bottom > head \+ 8\)/);
+  const reads = has(F.menuView, "let y = 0, wantId = \"\", off = 12;") && rx(F.menuView, /y = parseInt\(raw, 10\) \|\| 0;/)
+    && rx(F.menuView, /card\.getBoundingClientRect\(\)\.top - head - off\)/);
   const aims = has(F.menuView, "const targetTop = () => {", "CSS.escape(wantId)") &&
                rx(F.menuView, /const want = targetTop\(\);/);
   const grace = rx(F.menuView, /Date\.now\(\) - started > 700 && lastSet >= 0/);
@@ -894,8 +898,16 @@ async function live(base) {
       const { c, pg } = await open(`/r/${slug}/menu`, 1500);
       await pg.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
       await pg.waitForTimeout(2500);
-      const topDish = () => pg.evaluate(() => [...document.querySelectorAll(".item-card")]
-        .find((x) => x.getBoundingClientRect().top > 150)?.querySelector(".dish-name")?.textContent.trim() || "");
+      // JUDGED ON THE HEADER LINE, the way the diner sees it (sweep #10 T39 item 54). The old reading
+      // took "the first card below 150px" — a line of its own, 19px above the real header — so it
+      // passed when the view moved a row at Aangan and blamed French House for its own line. Now:
+      // the first dish with any of it showing under the header, and how far it sat from that line.
+      const topDish = () => pg.evaluate(() => {
+        const head = document.getElementById("menu-sticky")?.getBoundingClientRect().bottom ?? 0;
+        const c = [...document.querySelectorAll(".item-card")].find((x) => x.getBoundingClientRect().bottom > head + 8);
+        return c ? `${c.querySelector(".dish-name")?.textContent.trim() || ""}@${Math.round(c.getBoundingClientRect().top - head)}` : "";
+      });
+      const sameView = (a, b) => { const [na, oa] = a.split("@"), [nb, ob] = b.split("@"); return !!na && na === nb && Math.abs(Number(oa) - Number(ob)) <= 24; };
       await pg.evaluate(() => document.getElementById("main-scroll").scrollTo({ top: 1500, behavior: "instant" }));
       await pg.waitForTimeout(1600);
       const before = await topDish();
@@ -912,7 +924,7 @@ async function live(base) {
       await pg.waitForTimeout(4500);
       const after = await topDish();
       check("P15332", `LIVE: ${slug} Back returns to the same dish`, () =>
-        ({ ok: !!before && before === after, note: `left at "${before}", came back to "${after}"` }));
+        ({ ok: sameView(before, after), note: `left at "${before}", came back to "${after}" (dish@px from the header)` }));
       await c.close(); }
     // LIVE: the memory's fallbacks. A dish that has gone, and a value written by an older build,
     // must both still land the diner in the right place — and a corrupt one must not break the menu.
