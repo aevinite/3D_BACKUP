@@ -87,6 +87,9 @@ if (files.length < 50) {
   const g = readFileSync("app/globals.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   const rules = [...g.matchAll(/\.adm-btn\.(\w+)\s*\{([^}]*)\}/g)];
   const bad = rules.filter(([, , body]) => /color:\s*#fff\b/i.test(body) && /background:\s*var\(--adm-(ok|danger|warn|accent)\)/.test(body)).map(([, tone]) => `.adm-btn.${tone}`);
+  // …and the admin toast, which paints its own background inline (components/admin/toast.tsx).
+  const toastSrc = readFileSync("components/admin/toast.tsx", "utf8");
+  if (toastSrc.split("\n").some((l) => /background:/.test(l) && /var\(--adm-(ok|danger)(?!-fill)[,)]/.test(l))) bad.push("components/admin/toast.tsx");
   if (rules.length < 2 || bad.length) {
     console.error(rules.length < 2 ? "✗ verify:css-tokens found no .adm-btn tone rules — nothing was checked."
       : `✗ white ink on a bare tone token (use --adm-<tone>-fill): ${bad.join(", ")}`);
