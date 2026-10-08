@@ -12,9 +12,9 @@
 import type { NextRequest } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
+import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
-import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
+import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 
 // `admin: true` marks the ADMIN's session (all-view OR act-as pin) — set on every
 // admin branch below. Gates that restrict a REAL owner (e.g. the mig 132 owner
@@ -107,14 +107,32 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
   // (which renders the OWNER shell when the owner cookie is valid) — before, layout
   // picked owner chrome while this scoped to the admin's act-as restaurant: owner
   // header, someone else's numbers (surfaced 2026-07-04 on a shared browser profile).
-  const owner = adminPinned ? null : await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  //
+  // A DATABASE BLIP HERE IS "TRY AGAIN", NEVER A CRASH (sweep #10 T17 round 4, item 28, 2026-10-08). Both reads below
+  // already refuse to guess when the database cannot answer — userFromCookie throws AuthDbError, and
+  // enabledOwnedRestaurantIds throws OwnedLookupFailed rather than say "owns nothing". But nothing here caught either,
+  // and ownerScopeOr503 only turns OwnerScopeUnavailable into its 503, so the owner's cockpit answered every
+  // /api/owner/* call with a bare 500 crash during a blip (measured in the harness: OwnedLookupFailed escaped). Both
+  // are now the one "couldn't load your restaurants just now — please try again" every owner route already shows.
+  let owner: Awaited<ReturnType<typeof userFromCookie>> = null;
+  if (!adminPinned) {
+    try { owner = await userFromCookie(req.cookies.get(USER_COOKIE)?.value); }
+    catch (e) {
+      if (e instanceof AuthDbError) { console.error("[ownerScope] could not check who is signed in:", e.message); throw new OwnerScopeUnavailable(); }
+      throw e;
+    }
+  }
   if (owner && owner.role === "owner") {
     // Multi-owner: resolve every restaurant this owner is a member of (restaurant_owners,
-    // mig 097) — but ONLY the ones that are LIVE and still have the owner panel switched on.
-    // enabledOwnedRestaurantIds drops a binned or admin-disabled restaurant, so revoking the
-    // owner panel (or binning the restaurant) cuts off an already-open owner tab within the
-    // 30s cache TTL instead of the 7-day cookie life (audit 2026-07-07). Empty set → no access.
-    const ids = await enabledOwnedRestaurantIds(owner.id);
+    // mig 097) — but ONLY the ones that are LIVE. enabledOwnedRestaurantIds drops a binned
+    // restaurant, so binning it cuts off an already-open owner tab within the 30s cache TTL
+    // instead of the 7-day cookie life (audit 2026-07-07). Empty set → no access.
+    let ids: string[];
+    try { ids = await enabledOwnedRestaurantIds(owner.id); }
+    catch (e) {
+      if (e instanceof OwnedLookupFailed) { console.error("[ownerScope] could not read which restaurants this owner has:", e.message); throw new OwnerScopeUnavailable(); }
+      throw e;
+    }
     if (!ids.length) return null;
     // The login name rides along free — `userFromCookie` already read the whole row. See
     // ownerActorName below for why it is needed.
