@@ -1492,7 +1492,6 @@ const MONEY_GATES = [
   ["P79173", "take_orders", "punching an order from the manager panel"],
   ["P79174", "parcel", "a counter parcel"],
   ["P79176", "edit_menu", "changing the menu"],
-  ["P79177", "print_setup", "setting the printers up"],
   ["P79178", "print_here", "making this screen the printer"],
   ["P79179", "view_ratings", "handling a guest rating"],
   ["P79180", "banquet", "banquet billing"],
@@ -1500,6 +1499,14 @@ const MONEY_GATES = [
 for (const [id, flag, what] of MONEY_GATES) {
   check(id, `${what} asks managerCan("${flag}")`, has(W, `managerCan(g, rid, "${flag}")`));
 }
+// P79177 ASSERTED THE OPPOSITE UNTIL 2026-10-08, and was red on main for 24 days. It expected
+// "setting the printers up" to ask managerCan("print_setup") — the permission the owner REMOVED on
+// 2026-09-14 (ecec794e): asked whether a manager may set printers up, he ruled "That setup will be done
+// by me only", and printer setup became Aevidine's, from the admin console. The subject moved on
+// purpose; the check now says what is true today, so it goes red if the old door comes back.
+// (Sweep #10, T17, item 2. docs/REJECTED-IDEAS.md → Reversed, the `print_setup` row.)
+check("P79177", "setting the printers up is NOT offered from the manager panel any more (owner, 2026-09-14)",
+  !has(W, `managerCan(g, rid, "print_setup")`) && !/["']print_setup["']/.test(W));
 check("P79175", "a delivery-app order and a counter parcel are told apart, and each asks its OWN rung",
   has(CODE.editor, "async function platformOrParcelCan(") && has(CODE.editor, 'const flag = isParcel ? "parcel" : "platform";')
   && count(W, /platformOrParcelCan\(g, rid, owns\.source\)/g) >= 3);
