@@ -43,7 +43,7 @@ const MAX_LOGIN_CANDIDATES = 50;
 // see the generic "Wrong name or password."); it's returned so the route can record
 // it in the ADMIN operation log ("who tried what was lacking"). "transient" is a
 // server/DB blip, not a real failure, and must not be logged as one.
-export type LoginFailReason = "empty" | "too_long" | "transient" | "no_such_name" | "locked" | "wrong_password" | "disabled";
+export type LoginFailReason = "empty" | "too_long" | "transient" | "no_such_name" | "locked" | "wrong_password" | "disabled" | "not_configured";
 // Who/where an attempt was aimed at, for the audit log. For an unknown name we only
 // know what was typed; for a wrong password we know the real account it targeted.
 // `id` (the targeted account, when one was matched) lets the route file an OWNER's failed attempt under
@@ -72,8 +72,27 @@ const SECRET = () => {
       "Set SESSION_SECRET in this deployment's env to keep the two independent.",
     );
   }
-  return dedicated || process.env.ADMIN_PASSWORD || process.env.STAFF_PASSWORD || "lfh-dev-secret";
+  const s = dedicated || process.env.ADMIN_PASSWORD || process.env.STAFF_PASSWORD;
+  if (s) return s;
+  // NO SECRET AT ALL → IN PRODUCTION, NO STAFF SIGN-IN (owner picked sweep #10 T17 item 13, 2026-10-08).
+  // This used to fall back to the literal "lfh-dev-secret" everywhere. That word is in the code, so on a
+  // deployment missing all three settings anybody who has read the code could seal a valid staff pass —
+  // and nothing would say so. Production now refuses (loginUser answers NOT_SET_UP, userFromCookie trusts
+  // nobody) so a mis-set-up site is noticed on day one. Local development keeps the fallback, so a fresh
+  // checkout still runs. Backup has SESSION_SECRET and ADMIN_PASSWORD set (checked by name, 2026-10-08).
+  if (process.env.NODE_ENV === "production") {
+    if (!warnedNoSecretAtAll) {
+      warnedNoSecretAtAll = true;
+      console.error("[auth] no SESSION_SECRET, ADMIN_PASSWORD or STAFF_PASSWORD on this deployment — staff sign-in is OFF until one is set.");
+    }
+    return null;
+  }
+  return "lfh-dev-secret";
 };
+let warnedNoSecretAtAll = false;
+/** What a person reads when this deployment has no signing secret at all (item 13). */
+export const NOT_SET_UP = "This site isn't set up for staff sign-in yet — tell Aevidine (its sign-in secret is missing).";
+class SigningUnavailable extends Error {}
 
 export type StaffUser = {
   id: string; username: string; role: Role; restaurant_id: string;
@@ -161,7 +180,9 @@ export async function verifySecret(plain: string, stored: string | null): Promis
 
 // ── cookie sign / verify (HMAC-SHA256 over id:role:token_version:iat) ─────────
 async function hmac(msg: string): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", enc(SECRET()), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const secret = SECRET();
+  if (!secret) throw new SigningUnavailable("no signing secret");   // item 13 — callers check SECRET() first
+  const key = await crypto.subtle.importKey("raw", enc(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", key, enc(msg));
   return b64url(new Uint8Array(sig));
 }
@@ -182,10 +203,12 @@ export async function loginUser(
   username: string, password: string, restaurantId?: string,
 ): Promise<
   | { ok: true; user: StaffUser; cookie: string }
-  | { ok: false; error: string; transient?: boolean; reason?: LoginFailReason; attempted?: LoginAttempt }
+  | { ok: false; error: string; transient?: boolean; unavailable?: boolean; reason?: LoginFailReason; attempted?: LoginAttempt }
 > {
   const uname = normalizeLoginName(username);
   if (!uname || !password) return { ok: false, error: "Enter your username and password.", reason: "empty" };
+  // Item 13: with no signing secret no pass can be sealed, so nobody is checked, counted or locked out.
+  if (!SECRET()) return { ok: false, error: NOT_SET_UP, unavailable: true, reason: "not_configured" };
   // Length cap BEFORE the (slow) PBKDF2 verify: a huge password would otherwise burn
   // CPU per attempt. Same generic message so it reveals nothing.
   if (uname.length > MAX_USERNAME_LEN || password.length > MAX_PASSWORD_LEN) {
@@ -307,6 +330,7 @@ export async function userFromCookie(value: string | undefined | null): Promise<
   const iat = Number(iatStr);
   if (!id || !Number.isFinite(iat)) return null;
   if (Date.now() - iat > TOKEN_TTL_MS) return null; // expired
+  if (!SECRET()) return null; // item 13: no secret on this deployment → no pass can be trusted
   // A COOKIE WHOSE ID CANNOT BE A STAFF ID IS "NOT SIGNED IN", NOT "THE DATABASE IS DOWN" (sweep #10
   // T17, item 4). `staff_users.id` is a uuid, so a damaged value ("abc.<recent time>.<sig>") reached
   // Postgres, which REFUSES it (22P02, invalid input syntax for type uuid). That refusal arrives as

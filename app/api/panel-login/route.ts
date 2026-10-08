@@ -94,6 +94,8 @@ export async function POST(req: NextRequest) {
         // A disabled person typed their RIGHT password — recorded so the owner can see the
         // person tried, and the person themselves was told plainly (owner, 2026-08-02).
         : r.reason === "disabled" ? `login refused · "${who}" is disabled`
+        // Item 13: this deployment has no signing secret, so staff sign-in is switched off until one is set.
+        : r.reason === "not_configured" ? "login refused · this deployment has no SESSION_SECRET / ADMIN_PASSWORD — staff sign-in is off"
         : "login failed";
       // An OWNER's row carries a filing home, not proof of ownership — see ownerLogRestaurant (item 7).
       const failRid = a?.role === "owner" && r.reason !== "no_such_name"
@@ -103,7 +105,7 @@ export async function POST(req: NextRequest) {
         actor: who, device_id: dev, detail, restaurant_id: failRid,
       });
     }
-    return NextResponse.json({ ok: false, error: r.error }, { status: r.transient ? 503 : 401 });
+    return NextResponse.json({ ok: false, error: r.error }, { status: r.transient || r.unavailable ? 503 : 401 });
   }
   const u = r.user;
   const uWho = u.name || u.username;

@@ -199,7 +199,8 @@ check("P04658", "the rate limit is counted per username (+ restaurant when the d
 check("P04659", "describe only runs when the wall is actually hit",
   has(CODE.panelLogin, "describe: () => describeLoginTarget("));
 check("P04660", "a DB blip on the credential lookup answers 503, never 401",
-  has(CODE.panelLogin, "status: r.transient ? 503 : 401"));
+  // (sweep #10 T17 item 13: a deployment with no signing secret is 503 too.)
+  has(CODE.panelLogin, "status: r.transient || r.unavailable ? 503 : 401"));
 check("P04661", "the real refusal reason goes to the ADMIN log, never to the person",
   has(CODE.panelLogin, "error: r.error") && has(CODE.panelLogin, 'logAction((a?.role ?? "admin"), "login_failed"'));
 check("P04662", "a transient blip writes NO login-failed row",
@@ -729,6 +730,38 @@ check("P186503", "the 'You're blocked' note box uses the card's own lettering, n
   check("P186514", "…and never prints a password, a key or a sealed value",
     !/console\.\w+\([^)]*(plain|sealed|password_shown|CREDENTIAL_VAULT_KEY\b[^"]*\))/.test(RS.replace(/"[^"]*"/g, '""')));
   check("P186515", "sign-in still never reads the vault (password_hash alone decides)", !/passwordVault|password_shown/.test(CODE.userAuth));
+}
+// SWEEP #10 T17, item 13 (owner picked 2026-10-08) — a PRODUCTION deployment with no signing secret at all
+// refuses staff sign-in instead of sealing passes with the fallback word that is written in the code.
+{
+  const { createHmac } = await import("node:crypto");
+  const NAMES = ["NODE_ENV", "SESSION_SECRET", "ADMIN_PASSWORD", "STAFF_PASSWORD"];
+  const keep = Object.fromEntries(NAMES.map((k) => [k, process.env[k]]));
+  const env = (o) => { for (const k of NAMES) { if (o[k] === undefined) delete process.env[k]; else process.env[k] = o[k]; } };
+  const sid = "00000000-0000-4000-8000-0000000000aa";
+  const b64u = (b) => b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const passWith = (secret) => { const iat = Date.now(); return `${sid}.${iat}.${b64u(createHmac("sha256", secret).update(`${sid}:manager:0:${iat}`).digest())}`; };
+  const quiet = console.error; console.error = () => {};
+  try {
+    await world([{ id: sid, username: "item13", password_hash: await UA.hashSecret("pw-13"), role: "manager", restaurant_id: "r1", active: true, deleted_at: null, token_version: 0 }]);
+    env({ NODE_ENV: "production" });
+    resetWorld(); G.FIX.staff_users = [{ id: sid, username: "item13", password_hash: await UA.hashSecret("pw-13"), role: "manager", restaurant_id: "r1", active: true, deleted_at: null, token_version: 0 }];
+    const r = await UA.loginUser("item13", "pw-13");
+    check("P186516", "production with NO signing secret: sign-in is refused in words, as 'not set up', not as a wrong password",
+      r.ok === false && r.reason === "not_configured" && r.unavailable === true && r.error === UA.NOT_SET_UP, r);
+    check("P186517", "…and nobody was looked up, counted or locked (no database read at all)", G.READS.length === 0 && G.WRITES.length === 0, { reads: G.READS.length, writes: G.WRITES.length });
+    check("P186518", "…and a pass sealed with the built-in fallback word is trusted by nobody",
+      (await UA.userFromCookie(passWith("lfh-dev-secret"))) === null);
+    env({ NODE_ENV: "development" });
+    check("P186519", "local development keeps the fallback, so a fresh checkout still signs in",
+      (await UA.userFromCookie(passWith("lfh-dev-secret")))?.id === sid);
+    env({ NODE_ENV: "production", SESSION_SECRET: "a-real-session-secret-for-the-guard" });
+    const ok = await UA.loginUser("item13", "pw-13");
+    check("P186520", "production WITH a secret signs in exactly as before, and that pass is trusted",
+      ok.ok === true && (await UA.userFromCookie(ok.cookie))?.id === sid);
+  } finally { env(keep); console.error = quiet; }
+  check("P186521", "/api/panel-login answers the 'not set up' refusal with 503 and records why for the admin",
+    has(CODE.panelLogin, "{ status: r.transient || r.unavailable ? 503 : 401 }") && has(CODE.panelLogin, 'r.reason === "not_configured"'));
 }
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
