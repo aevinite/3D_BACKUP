@@ -68,14 +68,25 @@ async function ctx(role){
 // ── 5461-5464 · HOVER / TOOLTIP on the owner dashboard ───────────────────────
 {
   const c = await ctx("owner"); const p = await c.newPage();
-  await p.goto(B+"/owner",{waitUntil:"domcontentloaded",timeout:90000}); await p.waitForTimeout(11000);
+  // WAIT FOR THE CHART, NOT FOR A CLOCK (sweep #10 T39 item 59, 2026-10-09). This waited a fixed 11s
+  // and then hovered whatever chart shape existed. On a loaded machine (the 224-guard run of
+  // 2026-10-08) the dashboard had not finished drawing, so the hover landed on a chart still being
+  // built and 5462 read "no visible tooltip"; run on its own the same tooltip appears every time
+  // (measured twice on :4439). Now: wait until a chart that HAS a tooltip has drawn its shapes.
+  await p.goto(B+"/owner",{waitUntil:"domcontentloaded",timeout:90000});
+  await p.waitForFunction(() => [...document.querySelectorAll(".recharts-wrapper")].some((w) => w.querySelector(".recharts-tooltip-wrapper")
+    && w.querySelector(".recharts-bar-rectangle, .recharts-rectangle, .recharts-dot, .recharts-area-area")), null, { timeout: 90000 }).catch(() => {});
+  await p.waitForTimeout(800);
   const bars = p.locator(".recharts-bar-rectangle, .recharts-rectangle, .recharts-dot, .recharts-area-area");
   const n = await bars.count();
   if (!n) no("5461","owner chart offers something to hover","no recharts geometry on the dashboard");
   else {
     ok("5461","owner chart offers something to hover",`${n} shapes`);
     await bars.first().hover({force:true}).catch(()=>{});
-    await p.waitForTimeout(1200);
+    // …and wait for the tooltip to show, up to 3s — a condition, not a clock. One that never
+    // appears still fails below.
+    await p.waitForFunction(() => { const t = document.querySelector(".recharts-tooltip-wrapper, .recharts-default-tooltip");
+      return !!t && getComputedStyle(t).visibility !== "hidden" && t.getBoundingClientRect().width > 0; }, null, { timeout: 3000 }).catch(() => {});
     const tip = await p.evaluate(()=>{
       const t=document.querySelector(".recharts-tooltip-wrapper, .recharts-default-tooltip");
       if(!t) return null;
