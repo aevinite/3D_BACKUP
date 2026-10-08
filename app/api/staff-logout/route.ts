@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, FLAG_COOKIE } from "@/lib/staffAuth";
+import { REVEAL_COOKIE } from "@/lib/revealGate";
 
 export async function POST(req: NextRequest) {
   // 303 so the browser follows with a GET — a form POST must not re-post to /menu.
@@ -20,5 +21,10 @@ export async function POST(req: NextRequest) {
   res.cookies.set(AUTH_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(FLAG_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set("aevidine_admin_rid", "", { path: "/", maxAge: 0 }); // drop any "view as restaurant" context
+  // …and RE-COVER any uncovered passwords (owner picked sweep #10 T17 item 12, 2026-10-08). The 5-minute
+  // "passwords uncovered" unlock (lib/revealGate.ts) used to outlive the sign-out. Harmless — every route that
+  // shows a password also needs the admin cookie cleared above — but signing out should leave nothing open.
+  // Re-covering on its own (DELETE /api/admin/reveal) still does NOT sign anyone out; only this direction is new.
+  res.cookies.set(REVEAL_COOKIE, "", { path: "/", maxAge: 0 });
   return res;
 }

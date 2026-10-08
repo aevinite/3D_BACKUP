@@ -199,7 +199,8 @@ check("P04658", "the rate limit is counted per username (+ restaurant when the d
 check("P04659", "describe only runs when the wall is actually hit",
   has(CODE.panelLogin, "describe: () => describeLoginTarget("));
 check("P04660", "a DB blip on the credential lookup answers 503, never 401",
-  has(CODE.panelLogin, "status: r.transient ? 503 : 401"));
+  // (sweep #10 T17 item 13: a deployment with no signing secret is 503 too.)
+  has(CODE.panelLogin, "status: r.transient || r.unavailable ? 503 : 401"));
 check("P04661", "the real refusal reason goes to the ADMIN log, never to the person",
   has(CODE.panelLogin, "error: r.error") && has(CODE.panelLogin, 'logAction((a?.role ?? "admin"), "login_failed"'));
 check("P04662", "a transient blip writes NO login-failed row",
@@ -278,7 +279,8 @@ check("P04694", "the logout redirects 303 so the browser follows with a GET",
 check("P04695", "staff-logout is POST-only",
   !rx(CODE.staffLogout, /export async function (GET|PUT|PATCH|DELETE)\b/));
 check("P04696", "staff-logout clears AUTH, FLAG and the act-as restaurant cookie",
-  count(CODE.staffLogout, /maxAge: 0/g) === 3 && has(CODE.staffLogout, "aevidine_admin_rid"));
+  // 4 since sweep #10 T17 item 12: the passwords-uncovered unlock is cleared too.
+  count(CODE.staffLogout, /maxAge: 0/g) === 4 && has(CODE.staffLogout, "aevidine_admin_rid"));
 check("P04697", "staff-logout lands on the open guest menu, not a password screen",
   has(CODE.staffLogout, 'new URL("/menu", req.url), 303'));
 check("P04698", "neither logout route touches data",
@@ -680,6 +682,87 @@ for (const [cid, key, max] of [["P186189", "loginForm", "380px"], ["P186190", "s
   check(cid, `${F[key]}: the card is min(100%, ${max}) — never a vw width that overhangs the page's gutter`,
     has(CODE[key], `width: "min(100%, ${max})"`) && !/width: "min\(\d+vw/.test(CODE[key]));
 }
+// SWEEP #10 T17, items 11 + 12 (owner picked both, 2026-10-08).
+check("P186501", "signing out of the admin console re-covers the passwords (clears the reveal unlock cookie)",
+  has(CODE.staffLogout, 'res.cookies.set(REVEAL_COOKIE, "", { path: "/", maxAge: 0 });') && has(CODE.staffLogout, 'import { REVEAL_COOKIE } from "@/lib/revealGate";'));
+check("P186502", "…and still touches no database and signs no staff member out",
+  !rx(CODE.staffLogout, /supabaseAdmin|sb\.from\(|logAction|USER_COOKIE/));
+check("P186503", "the 'You're blocked' note box uses the card's own lettering, not the browser's typewriter default",
+  /<textarea[\s\S]*?fontFamily: "inherit"/.test(CODE.blockedView));
+// SWEEP #10 T17, item 14 (owner picked 2026-10-08) — the handover passwords get the vault's OWN key, and a copy
+// sealed under the old key keeps opening, so changing keys never shows "not stored yet". Fake keys only.
+{
+  const PV = await import("@/lib/passwordVault.ts");
+  const keep = { svc: process.env.SUPABASE_SERVICE_ROLE_KEY, cvk: process.env.CREDENTIAL_VAULT_KEY };
+  const set = (svc, cvk) => { if (svc === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = svc;
+    if (cvk === undefined) delete process.env.CREDENTIAL_VAULT_KEY; else process.env.CREDENTIAL_VAULT_KEY = cvk; };
+  const SVC1 = "fake-service-key-one-0123456789", SVC2 = "fake-service-key-TWO-9876543210", CVK = "fake-vault-key-abcdefghijklmnop";
+  try {
+    set(SVC1, undefined);
+    const old = await PV.sealPassword("handover-1");
+    check("P186504", "a stack WITHOUT the vault key seals and opens exactly as before (v1)",
+      old?.startsWith("v1$") && (await PV.openPassword(old)) === "handover-1" && !PV.needsReseal(old));
+    set(SVC1, CVK);
+    const fresh = await PV.sealPassword("handover-2");
+    check("P186505", "with CREDENTIAL_VAULT_KEY set, new copies are sealed with the vault's own key (v2)",
+      fresh?.startsWith("v2$") && (await PV.openPassword(fresh)) === "handover-2");
+    check("P186506", "a copy sealed BEFORE the vault key existed still opens after it is set (nothing shows 'not stored yet')",
+      (await PV.openPassword(old)) === "handover-1");
+    check("P186507", "…and is the one the reseal script would move; a v2 copy is not",
+      PV.needsReseal(old) === true && PV.needsReseal(fresh) === false);
+    set(SVC2, CVK);
+    check("P186508", "THE POINT: after the database key is rotated, a v2 copy still opens",
+      (await PV.openPassword(fresh)) === "handover-2");
+    check("P186509", "…while an un-moved v1 copy cannot (why the reseal runs) — and it answers null, never throws",
+      (await PV.openPassword(old)) === null);
+    set(SVC2, "a-different-vault-key-zzzzzzzz");
+    check("P186510", "a v2 copy under the wrong vault key opens to null, never half a string",
+      (await PV.openPassword(fresh)) === null);
+    set(SVC1, undefined);
+    check("P186511", "a v2 copy on a stack with no vault key opens to null (backup-2 / AV live never guess)",
+      (await PV.openPassword(fresh)) === null && PV.needsReseal(old) === false);
+  } finally { set(keep.svc, keep.cvk); }
+  const RS = stripComments(read("scripts/reseal-handover-passwords.mjs"));
+  check("P186512", "the reseal script is a DRY RUN unless --write, and refuses to start without the vault key",
+    has(RS, 'const WRITE = process.argv.includes("--write");') && /CREDENTIAL_VAULT_KEY[\s\S]{0,200}process\.exit\(2\)/.test(RS));
+  check("P186513", "…moves a row only if it still holds the copy it read (first save wins), and re-opens the new copy before writing",
+    has(RS, '.eq("id", row.id).eq("password_shown", row.password_shown)') && has(RS, "(await V.openPassword(sealed)) !== plain"));
+  check("P186514", "…and never prints a password, a key or a sealed value",
+    !/console\.\w+\([^)]*(plain|sealed|password_shown|CREDENTIAL_VAULT_KEY\b[^"]*\))/.test(RS.replace(/"[^"]*"/g, '""')));
+  check("P186515", "sign-in still never reads the vault (password_hash alone decides)", !/passwordVault|password_shown/.test(CODE.userAuth));
+}
+// SWEEP #10 T17, item 13 (owner picked 2026-10-08) — a PRODUCTION deployment with no signing secret at all
+// refuses staff sign-in instead of sealing passes with the fallback word that is written in the code.
+{
+  const { createHmac } = await import("node:crypto");
+  const NAMES = ["NODE_ENV", "SESSION_SECRET", "ADMIN_PASSWORD", "STAFF_PASSWORD"];
+  const keep = Object.fromEntries(NAMES.map((k) => [k, process.env[k]]));
+  const env = (o) => { for (const k of NAMES) { if (o[k] === undefined) delete process.env[k]; else process.env[k] = o[k]; } };
+  const sid = "00000000-0000-4000-8000-0000000000aa";
+  const b64u = (b) => b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const passWith = (secret) => { const iat = Date.now(); return `${sid}.${iat}.${b64u(createHmac("sha256", secret).update(`${sid}:manager:0:${iat}`).digest())}`; };
+  const quiet = console.error; console.error = () => {};
+  try {
+    await world([{ id: sid, username: "item13", password_hash: await UA.hashSecret("pw-13"), role: "manager", restaurant_id: "r1", active: true, deleted_at: null, token_version: 0 }]);
+    env({ NODE_ENV: "production" });
+    resetWorld(); G.FIX.staff_users = [{ id: sid, username: "item13", password_hash: await UA.hashSecret("pw-13"), role: "manager", restaurant_id: "r1", active: true, deleted_at: null, token_version: 0 }];
+    const r = await UA.loginUser("item13", "pw-13");
+    check("P186516", "production with NO signing secret: sign-in is refused in words, as 'not set up', not as a wrong password",
+      r.ok === false && r.reason === "not_configured" && r.unavailable === true && r.error === UA.NOT_SET_UP, r);
+    check("P186517", "…and nobody was looked up, counted or locked (no database read at all)", G.READS.length === 0 && G.WRITES.length === 0, { reads: G.READS.length, writes: G.WRITES.length });
+    check("P186518", "…and a pass sealed with the built-in fallback word is trusted by nobody",
+      (await UA.userFromCookie(passWith("lfh-dev-secret"))) === null);
+    env({ NODE_ENV: "development" });
+    check("P186519", "local development keeps the fallback, so a fresh checkout still signs in",
+      (await UA.userFromCookie(passWith("lfh-dev-secret")))?.id === sid);
+    env({ NODE_ENV: "production", SESSION_SECRET: "a-real-session-secret-for-the-guard" });
+    const ok = await UA.loginUser("item13", "pw-13");
+    check("P186520", "production WITH a secret signs in exactly as before, and that pass is trusted",
+      ok.ok === true && (await UA.userFromCookie(ok.cookie))?.id === sid);
+  } finally { env(keep); console.error = quiet; }
+  check("P186521", "/api/panel-login answers the 'not set up' refusal with 503 and records why for the admin",
+    has(CODE.panelLogin, "{ status: r.transient || r.unavailable ? 503 : 401 }") && has(CODE.panelLogin, 'r.reason === "not_configured"'));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
@@ -1020,7 +1103,8 @@ check("P78894", "…the readable flag cookie the switcher reads",
 check("P78895", "…and the 'view as restaurant' cookie, so the next visitor starts clean",
   has(SLO, 'res.cookies.set("aevidine_admin_rid", ""'));
 check("P78896", "all three are cleared on the whole site",
-  count(SLO, /path: "\/", maxAge: 0/g) === 3);
+  // 4 since sweep #10 T17 item 12 (the reveal unlock joins the admin cookie, the flag and the act-as pin).
+  count(SLO, /path: "\/", maxAge: 0/g) === 4);
 check("P78897", "staff-logout reads no body either",
   !rx(SLO, /req\.json\(\)|formData\(\)/));
 check("P78898", "…and writes no diary line, because ending admin super-access touches no restaurant's data",
