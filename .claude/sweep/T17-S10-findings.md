@@ -23,3 +23,18 @@ Every fix: its own commit with its number, typecheck green, sabotage-tested.
 
 Outside T17's boundary, noticed and left for its owner: `app/api/owner/settings/route.ts` files an owner's own
 password-change line under `owner.restaurant_id` — the same filing-home pattern fix 7 corrected at the sign-in door.
+
+## Round 2 (2026-10-08, owner: "plan whole new 500 phases test … every part within your boundary")
+
+479 new checks (P186522–P187000, the rest of the block — 500 would have needed ids from outside it): 473 ✅, 6 ❌
+(two decisions offered to the owner, two outside T17's files). Problems found and fixed:
+
+| # | problem | fix | guard |
+|---|---|---|---|
+| 15 | 3 of 77 stored handover-sheet copies no longer matched their account's real password (asha, diagop2, diagop7 — reset by scripts writing the hash alone): the sheet would have printed passwords that sign nobody in. | `scripts/reseal-handover-passwords.mjs --stale [--write]` clears copies that do not verify, first-save-wins; run on dev: 3 cleared, 0 left. `scripts/lib/storedPasswordCheck.mjs`, pinned to verifySecret. | P186637–P186640 |
+| 16 | The gate rulebook (docs/CLAUDE-DETAIL.md → Security gate) missed `/api/guest/leave` on its "complete" public list, still described the `/api/pair` handshake deleted by mig 380 as live, and said panel-logout answers GET. | Corrected. | P186905–P186908 (all 87 routes classified by their gate) |
+| 17 | The owner entrance's try-again page (item 5) scrolled 32px on a phone (100vh + padding, content-box). | `box-sizing: border-box`. | P186909 |
+
+Outside T17's boundary, noticed and left for their owners: `app/owner/{inventory,manager,menu}/page.tsx` call
+`userFromCookie` without handling AuthDbError (a database blip shows the crash page, not "try again"); 27 admin
+screens call `/api/admin` with a plain fetch rather than `lib/adminFetch.ts`.
