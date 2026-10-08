@@ -87,9 +87,11 @@ check("P54842", "every renderer hands FoodCard the same whole-menu opinion about
 check("P97230", "GuestNotFound does not offer a menu it cannot promise", () => need("components/GuestNotFound.tsx", /catch\(\(\) => \{ if \(alive\) setMenuLive\(false\); \}\)/));
 check("P97267", "GuestNotFound has 3 decisions, and each is still named", () => {
   const s = code("components/GuestNotFound.tsx");
-  return /if \(!slug\)/.test(s) && /setMenuLive\(r\.ok\)/.test(s) && /setMenuLive\(false\)/.test(s) || "one of the three decisions is gone";
+  // `!slug` now shares its line with the dead-QR case — `if (variant === "qr" || !slug)` (#1351,
+  // 2026-09-14); same decision, same answer (sweep #10 T39 item 33).
+  return /if \((?:variant === "qr" \|\| )?!slug\)/.test(s) && /setMenuLive\(r\.ok\)/.test(s) && /setMenuLive\(false\)/.test(s) || "one of the three decisions is gone";
 });
-check("P97268", "GuestNotFound decision 1: !slug", () => need("components/GuestNotFound.tsx", /if \(!slug\) \{ setMenuLive\(false\); return; \}/));
+check("P97268", "GuestNotFound decision 1: !slug", () => need("components/GuestNotFound.tsx", /if \((?:variant === "qr" \|\| )?!slug\) \{ setMenuLive\(false\); return; \}/));
 check("P97269", "GuestNotFound decision 2: alive → setMenuLive(r.ok)", () => need("components/GuestNotFound.tsx", /if \(alive\) setMenuLive\(r\.ok\)/));
 check("P97270", "GuestNotFound decision 3: alive → setMenuLive(false)", () => need("components/GuestNotFound.tsx", /if \(alive\) setMenuLive\(false\)/));
 
