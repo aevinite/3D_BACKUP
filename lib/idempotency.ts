@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 // The "was anything actually changed?" rule lives in its own import-free file so the guard
 // (scripts/verify-order-retry.mjs) can execute the REAL rule instead of a copy. See it for why.
-import { didSomething, storedIsRefusal } from "@/lib/idempotencyRule";
+import { didSomething, storedIsRefusal, withoutSecrets } from "@/lib/idempotencyRule";
 
 // A claimed-but-not-completed row older than this is treated as a crashed attempt
 // and allowed to run again (otherwise a server crash mid-write would wedge that
@@ -113,7 +113,10 @@ export function withIdempotency<C>(
     if (claim.state === "done") {
       // Echo the original result (order_id etc.) alongside the duplicate flag so the
       // client can still track an order whose first reply was lost.
-      const stored = (claim.result && typeof claim.result === "object") ? claim.result as Record<string, unknown> : {};
+      // withoutSecrets() again on the way OUT: a row stored before the rule existed may still hold
+      // a password, and a duplicate must never be the thing that hands it back.
+      const kept = withoutSecrets(claim.result);
+      const stored = (kept && typeof kept === "object" && !Array.isArray(kept)) ? kept as Record<string, unknown> : {};
       return NextResponse.json({ ok: true, ...stored, duplicate: true });
     }
     if (claim.state === "processing") return NextResponse.json({ error: "sync_in_progress", retry: true }, { status: 409 });
@@ -129,7 +132,9 @@ export function withIdempotency<C>(
     // caller) to store for future duplicates.
     let body: unknown = null;
     try { body = await res.clone().json(); } catch { /* non-JSON response → store nothing */ }
-    await finish(actionId, didSomething(res.status, body), body);
+    // The reply is KEPT without its secrets (idempotencyRule.withoutSecrets): the caller still gets
+    // the full original response below — only the copy stored for a duplicate loses them.
+    await finish(actionId, didSomething(res.status, body), withoutSecrets(body));
     return res;
   };
 }
