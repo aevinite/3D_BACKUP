@@ -13,7 +13,14 @@
 //   · A copy that cannot be opened is LEFT ALONE and counted — never blanked, never guessed.
 //   · Never prints a password, a key or a sealed value. Counts only.
 //
-// Usage:  node --experimental-strip-types --no-warnings scripts/reseal-handover-passwords.mjs [--write]
+// STALE COPIES (sweep #10 T17 round 2, problem 15, 2026-10-08). `--stale` checks every stored copy against the
+// account's REAL password (verifySecret against password_hash) and, with --write, CLEARS a copy that no longer
+// matches — so the handover sheet says "not stored yet — Reveal sets a new one" instead of printing a password
+// that will not sign anybody in. Measured on the dev stack: 3 of 77 copies were stale. Every app screen writes
+// the hash and the copy together (passwordFields); these came from dev/sweep scripts that reset a password by
+// writing password_hash alone. Clearing is first-save-wins too: only a row still holding BOTH values it read.
+//
+// Usage:  node --experimental-strip-types --no-warnings scripts/reseal-handover-passwords.mjs [--write] [--stale]
 // Reads NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and CREDENTIAL_VAULT_KEY from the environment,
 // else from ./.env.local. It refuses to start without CREDENTIAL_VAULT_KEY (there would be nothing to move to).
 import { readFileSync } from "node:fs";
@@ -30,13 +37,39 @@ try {
 } catch { /* the environment may already carry everything */ }
 
 const WRITE = process.argv.includes("--write");
-if (!process.env.CREDENTIAL_VAULT_KEY || process.env.CREDENTIAL_VAULT_KEY.length < 16) {
+const STALE = process.argv.includes("--stale");
+if (!STALE && (!process.env.CREDENTIAL_VAULT_KEY || process.env.CREDENTIAL_VAULT_KEY.length < 16)) {
   console.error("✗ CREDENTIAL_VAULT_KEY is not set (or shorter than 16 characters) — there is no new key to move the copies to.");
   process.exit(2);
 }
 const { createClient } = createRequire(join(ROOT, "package.json"))("@supabase/supabase-js");
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const V = await import(pathToFileURL(join(ROOT, "lib/passwordVault.ts")).href);
+
+if (STALE) {
+  const { verifySecret } = await import(pathToFileURL(join(ROOT, "scripts/lib/storedPasswordCheck.mjs")).href);
+  let checked = 0, stale = 0, cleared = 0, skipped = 0, unreadable = 0;
+  let after = "00000000-0000-0000-0000-000000000000";
+  for (;;) {
+    const { data, error } = await sb.from("staff_users").select("id, password_hash, password_shown")
+      .not("password_shown", "is", null).gt("id", after).order("id").limit(500);
+    if (error) { console.error("✗ could not read the stored copies:", error.message); process.exit(1); }
+    for (const row of data || []) {
+      after = row.id; checked++;
+      const plain = await V.openPassword(row.password_shown);
+      if (plain === null) { unreadable++; continue; }            // not ours to judge — left alone
+      if (await verifySecret(plain, row.password_hash)) continue; // a true copy
+      stale++;
+      if (!WRITE) continue;
+      const up = await sb.from("staff_users").update({ password_shown: null })
+        .eq("id", row.id).eq("password_shown", row.password_shown).eq("password_hash", row.password_hash).select("id");
+      if (!up.error && up.data?.length) cleared++; else skipped++;
+    }
+    if (!data || data.length < 500) break;
+  }
+  console.log(`${WRITE ? "✓ cleared" : "dry run — would clear"}: ${WRITE ? cleared : stale} of ${checked} stored copies no longer match their password · changed meanwhile (skipped): ${skipped} · unreadable (left alone): ${unreadable}`);
+  process.exit(0);
+}
 
 let seen = 0, moved = 0, unreadable = 0, changedMeanwhile = 0, failed = 0;
 const PAGE = 500;

@@ -763,6 +763,23 @@ check("P186503", "the 'You're blocked' note box uses the card's own lettering, n
   check("P186521", "/api/panel-login answers the 'not set up' refusal with 503 and records why for the admin",
     has(CODE.panelLogin, "{ status: r.transient || r.unavailable ? 503 : 401 }") && has(CODE.panelLogin, 'r.reason === "not_configured"'));
 }
+// SWEEP #10 T17 ROUND 2, problem 15 — a handover-sheet copy that no longer matches the account's real password
+// is cleared (the sheet then says "not stored yet") instead of printed. 3 of 77 dev copies were stale.
+{
+  const SPC = await import(pathToFileURL(join(root, "scripts/lib/storedPasswordCheck.mjs")).href);
+  const h1 = await UA.hashSecret("same-pass"), legacy = await (await import("@/lib/staffAuth.ts")).sha256hex("legacy-pass");
+  const cases = [["same-pass", h1], ["other-pass", h1], ["", h1], ["legacy-pass", legacy], ["nope", legacy], ["x", "pbkdf2$120000$@@@@$abc"], ["x", null], ["x", "pbkdf2$abc"]];
+  let agree = true; const diffs = [];
+  for (const [pw, h] of cases) { const a = await UA.verifySecret(pw, h), b = await SPC.verifySecret(pw, h); if (a !== b) { agree = false; diffs.push([pw, String(h).slice(0, 12), a, b]); } }
+  check("P186637", "the script-side password check gives the SAME answer as the app's verifySecret on 8 kinds of input", agree, diffs);
+  const RS2 = stripComments(read("scripts/reseal-handover-passwords.mjs"));
+  check("P186638", "--stale compares each copy with the REAL password hash and clears only one that does not match",
+    has(RS2, "if (await verifySecret(plain, row.password_hash)) continue;") && has(RS2, ".update({ password_shown: null })"));
+  check("P186639", "…first save wins: a row is cleared only if it still holds BOTH the copy and the hash it read",
+    has(RS2, '.eq("id", row.id).eq("password_shown", row.password_shown).eq("password_hash", row.password_hash)'));
+  check("P186640", "…a copy it cannot open is left alone, and nothing is written without --write",
+    has(RS2, "if (plain === null) { unreadable++; continue; }") && has(RS2, "if (!WRITE) continue;"));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
