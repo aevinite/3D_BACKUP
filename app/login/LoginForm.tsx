@@ -122,7 +122,8 @@ export default function LoginForm({
         </div>
 
         {/* Item 19 (owner, 2026-10-08): a visible ring on the box the cursor is in. The boxes keep
-            outline:none for the mouse; :focus-visible draws the ring for the keyboard (inline styles
+            outline:none and :focus-visible draws the ring instead — for a TEXT box browsers treat every focus,
+            mouse or keyboard, as focus-visible, so the ring shows either way (corrected in round 5; inline styles
             cannot express :focus, hence this one small rule). Item 20: each word is tied to its box
             (htmlFor/id), so tapping "Username" selects the box and screen readers read "Username". */}
         <style>{`.lfh-signin input:focus-visible{box-shadow:0 0 0 3px rgba(91,140,255,.55);border-color:#5b8cff!important}`}</style>
