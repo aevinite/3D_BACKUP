@@ -88,6 +88,20 @@ const cleanup = async () => {
 };
 await cleanup(); // clear any leftovers from an earlier crashed run
 
+// GUEST SESSIONS MUST BE ON, OR THIS CANNOT RUN (sweep #10 T39 item 40). On 2026-10-08 French House
+// had settings.sessions_enabled = false (written by nobody the audit records), so the guest table
+// widget never appeared and the manager's party chip was never drawn — and this guard reported two
+// product faults (or crashed on a 20-second wait) about a feature that was simply switched off.
+// Say so and stop before writing anything; the switch is a restaurant setting, not this guard's to flip.
+{
+  const [st] = await sb("GET", `settings?restaurant_id=eq.${RID}&select=sessions_enabled`);
+  if (!st || st.sessions_enabled !== true) {
+    console.error(`\n⏭ could not run: guest table sessions are switched OFF on this restaurant (settings.sessions_enabled = ${st ? st.sessions_enabled : "unreadable"}).`);
+    console.error("Nothing is wrong with this guard — switch sessions back on for French House, then run it again.");
+    process.exit(2);
+  }
+}
+
 const [sess] = await sb("POST", "sessions", { restaurant_id: RID, table_number: TABLE, status: "open", auto_approve: false, opened_by: "guest", opened_at: new Date().toISOString() });
 const tok = (p) => p + Math.random().toString(36).slice(2) + Date.now().toString(36);
 const headTok = tok("vh_"), guestTok = tok("vg_");
@@ -219,6 +233,11 @@ try {
   // docked ".tbl-modal" panel this section used to look for belongs to the other dialogs now.
   await fr.locator(".tp-detail").first().waitFor({ timeout: 25000 });
   await ep.waitForTimeout(1500); // the detail re-renders off the live board poll
+  // THE PARTY LIVES IN THE HEAD (owner, 2026-09-17: "party line should be … beside the family thing"):
+  // the guest rows with Approve / Deny / Transfer / Ban appear when the 👥 chip is tapped — still one
+  // tap away, no longer always drawn. Tap it first (sweep #10 T39 item 40).
+  await fr.locator(`.tp-detail [data-sp-guests="${TABLE}"]`).first().click({ timeout: 10000 }).catch(() => {});
+  await ep.waitForTimeout(800);
   const waitingRow = fr.locator(".tp-detail .sx-mem").filter({ hasText: "waiting" }).first();
   const acts = await waitingRow.evaluate((row) => ({
     approve: !!row.querySelector("[data-mem-approve]"),
