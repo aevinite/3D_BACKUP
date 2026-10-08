@@ -676,9 +676,21 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   for (const n of fs.existsSync(path.join(ROOT, "tests")) ? fs.readdirSync(path.join(ROOT, "tests")) : []) {
     if (/\.(mjs|ts)$/.test(n)) all.push(`tests/${n}`);
   }
-  const slugOnly = [], hardDelete = [];
+  const slugOnly = [], hardDelete = [], restDelete = [];
   for (const f of all) {
     const src = read(f);
+    // (c) a restaurant "deleted" with nothing to fall back on (sweep #10 T39 item 19). Once a test
+    // restaurant has an order, its row is what the kept bills hang off (mig 309) and the delete is
+    // refused — verify-print-scenarios swallowed that and left a live zz-scen-… restaurant on the
+    // admin console every run. The fallback is the admin's own: bin it, then admin_purge_restaurant.
+    if (src) {
+      const c0 = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+      for (const m of c0.matchAll(/restaurants\?id=eq\.[^`]*`\s*,\s*\{\s*method:\s*"DELETE"|\.from\(\s*["'`]restaurants["'`]\s*\)\s*\.\s*delete\(\)/g)) {
+        if (/admin_purge_restaurant|purge_restaurant/.test(c0.slice(m.index, m.index + 700))) continue;
+        restDelete.push(`${f} — deletes a restaurant with no purge fallback; once it has a bill the delete is refused and it stays live`);
+        break;
+      }
+    }
     if (!src || !/\.from\(\s*["'`]orders["'`]\s*\)/.test(src)) continue;   // never writes an order
     const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
     // (a) an object literal with a `slug` key, a qty and a price, and no `id` key — an order line.
@@ -701,6 +713,9 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     all.length > 100 && slugOnly.length === 0,
     all.length <= 100 ? `only ${all.length} file(s) scanned — the walk found nothing to judge`
       : slugOnly.join("\n    ") + "\n    Select `id` from menu_items and write { id, title, qty, price } (see scripts/reset-demo-history.mjs).");
+  check("no teardown deletes a test restaurant without falling back to the admin's purge",
+    all.length > 100 && restDelete.length === 0,
+    restDelete.join("\n    ") + "\n    On a refused delete: PATCH { active: false, deleted_at } then rpc admin_purge_restaurant { p_rid } (scripts/verify-print-scenarios.mjs).");
   check("no teardown hard-deletes an order without retiring it when the delete is refused",
     all.length > 100 && hardDelete.length === 0,
     hardDelete.join("\n    ") + "\n    On a refused delete: update { status: 'cancelled', archived: true, archived_at, cancelled_at, deleted_at }.");
