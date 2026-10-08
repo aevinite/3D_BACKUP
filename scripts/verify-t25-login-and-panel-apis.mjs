@@ -278,7 +278,8 @@ check("P04694", "the logout redirects 303 so the browser follows with a GET",
 check("P04695", "staff-logout is POST-only",
   !rx(CODE.staffLogout, /export async function (GET|PUT|PATCH|DELETE)\b/));
 check("P04696", "staff-logout clears AUTH, FLAG and the act-as restaurant cookie",
-  count(CODE.staffLogout, /maxAge: 0/g) === 3 && has(CODE.staffLogout, "aevidine_admin_rid"));
+  // 4 since sweep #10 T17 item 12: the passwords-uncovered unlock is cleared too.
+  count(CODE.staffLogout, /maxAge: 0/g) === 4 && has(CODE.staffLogout, "aevidine_admin_rid"));
 check("P04697", "staff-logout lands on the open guest menu, not a password screen",
   has(CODE.staffLogout, 'new URL("/menu", req.url), 303'));
 check("P04698", "neither logout route touches data",
@@ -680,7 +681,11 @@ for (const [cid, key, max] of [["P186189", "loginForm", "380px"], ["P186190", "s
   check(cid, `${F[key]}: the card is min(100%, ${max}) — never a vw width that overhangs the page's gutter`,
     has(CODE[key], `width: "min(100%, ${max})"`) && !/width: "min\(\d+vw/.test(CODE[key]));
 }
-// SWEEP #10 T17, item 11 (owner picked, 2026-10-08).
+// SWEEP #10 T17, items 11 + 12 (owner picked both, 2026-10-08).
+check("P186501", "signing out of the admin console re-covers the passwords (clears the reveal unlock cookie)",
+  has(CODE.staffLogout, 'res.cookies.set(REVEAL_COOKIE, "", { path: "/", maxAge: 0 });') && has(CODE.staffLogout, 'import { REVEAL_COOKIE } from "@/lib/revealGate";'));
+check("P186502", "…and still touches no database and signs no staff member out",
+  !rx(CODE.staffLogout, /supabaseAdmin|sb\.from\(|logAction|USER_COOKIE/));
 check("P186503", "the 'You're blocked' note box uses the card's own lettering, not the browser's typewriter default",
   /<textarea[\s\S]*?fontFamily: "inherit"/.test(CODE.blockedView));
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
@@ -1023,7 +1028,8 @@ check("P78894", "…the readable flag cookie the switcher reads",
 check("P78895", "…and the 'view as restaurant' cookie, so the next visitor starts clean",
   has(SLO, 'res.cookies.set("aevidine_admin_rid", ""'));
 check("P78896", "all three are cleared on the whole site",
-  count(SLO, /path: "\/", maxAge: 0/g) === 3);
+  // 4 since sweep #10 T17 item 12 (the reveal unlock joins the admin cookie, the flag and the act-as pin).
+  count(SLO, /path: "\/", maxAge: 0/g) === 4);
 check("P78897", "staff-logout reads no body either",
   !rx(SLO, /req\.json\(\)|formData\(\)/));
 check("P78898", "…and writes no diary line, because ending admin super-access touches no restaurant's data",
