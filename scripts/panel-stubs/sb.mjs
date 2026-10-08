@@ -37,6 +37,17 @@ function builder(table) {
     then(res, rej) { return settle(false).then(res, rej); },
   };
   function settle(one) {
+    // OPT-IN FAILURES (sweep #10 T17 round 4). A guard may set G.FAIL["table:op"] (or G.FAIL["table"]) to "error" or
+    // "throw", or G.FAIL_NTH["table:op"] = { at: n, mode } to fail only the n-th such call — so "the database blipped
+    // on THIS read" can be proved instead of assumed. Nothing changes for a guard that sets neither.
+    const ck = st.table + ":" + st.op;
+    if (G.FAIL || G.FAIL_NTH) {
+      G.CALLS ||= {}; G.CALLS[ck] = (G.CALLS[ck] || 0) + 1;
+      const nth = G.FAIL_NTH && G.FAIL_NTH[ck];
+      const mode = nth && nth.at === G.CALLS[ck] ? nth.mode : G.FAIL && (G.FAIL[ck] || G.FAIL[st.table]);
+      if (mode === "throw") return Promise.reject(new Error("stub: " + st.table + " unreachable"));
+      if (mode === "error") return Promise.resolve({ data: null, error: { message: "stub: " + st.table + " failed" }, count: null });
+    }
     const found = rows();
     // Every trip is recorded, reads included — see the note on G.READS in state.mjs.
     if (st.op === "select") (G.READS ||= []).push({ table: st.table, op: "select", matched: found.length, at: (G.READS || []).length });
@@ -65,5 +76,5 @@ export const supabaseAdmin = {
   from: (t) => builder(t),
   // A guard may hand the stub a stand-in for a real database function (G.RPC_IMPL[name] = (args) => data), so a
   // function that WRITES — like lfh_staff_login_failed (mig 411) — changes the fixture world the way the SQL does.
-  rpc: (name, args) => { G.RPCS.push({ name, args: clone(args || {}) }); if (G.RPC_IMPL && G.RPC_IMPL[name]) return Promise.resolve({ data: G.RPC_IMPL[name](clone(args || {})), error: null }); return Promise.resolve({ data: name in G.RPC_ANSWERS ? G.RPC_ANSWERS[name] : { ok: true }, error: null }); },
+  rpc: (name, args) => { G.RPCS.push({ name, args: clone(args || {}) }); const fm = G.FAIL && G.FAIL["rpc:" + name]; if (fm === "throw") return Promise.reject(new Error("stub: rpc " + name + " unreachable")); if (fm === "error") return Promise.resolve({ data: null, error: { message: "stub: rpc " + name + " failed" } }); if (G.RPC_IMPL && G.RPC_IMPL[name]) return Promise.resolve({ data: G.RPC_IMPL[name](clone(args || {})), error: null }); return Promise.resolve({ data: name in G.RPC_ANSWERS ? G.RPC_ANSWERS[name] : { ok: true }, error: null }); },
 };
