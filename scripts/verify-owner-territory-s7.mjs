@@ -59,8 +59,12 @@ const words = code(read("lib/printBoardWords.ts") || "");
 // Start at the GATE that decides whether the card renders, not at its heading text — the heading
 // sits inside the card shell, so slicing from the words left `className="adm-card"` outside the
 // slice and two checks reported the card was not built like its neighbours when it is.
-const cardStart = st.indexOf("data?.printing && data.printing.length") > -1
-  ? st.lastIndexOf("{", st.indexOf("data?.printing && data.printing.length"))
+// The card's own JSX condition — `!!(data?.printing && data.printing.length) && (` — not the bare
+// phrase: the refresh switch (`const showsPrinting = …`) uses the same phrase earlier in the file
+// since sweep #10 T39 item 43, and the first match then made the "card" start at the hooks.
+const CARD_OPEN = "!!(data?.printing && data.printing.length) && (";
+const cardStart = st.indexOf(CARD_OPEN) > -1
+  ? st.lastIndexOf("{", st.indexOf(CARD_OPEN))
   : st.indexOf("Kitchen printing");
 // The boundary must be CODE, not a comment: `code()` has already stripped every comment, so
 // looking for `{/* Change password */}` found nothing and the "card" silently swallowed the rest
@@ -263,6 +267,11 @@ P("P21200", "…so it needs no clash expectation and no idempotency key", !/X-LF
 console.log("\nG2 · what these three screens cost while they sit open (P21201–P21240)");
 const pollBlk = st.slice(st.indexOf("const showsPrinting"), st.indexOf("const showsPrinting") + 900);
 P("P21201", "the printing refresh only runs while its card is on screen", /if \(!showsPrinting\) return;/.test(pollBlk));
+// …and "on screen" is the card's OWN render condition (a row in data.printing), not "the route said
+// allowed": an allowed restaurant with no paper line drew no card and still asked every 15s
+// (sweep #10 T39 item 43, measured on backup 2026-10-08).
+P("P21201b", "…where \"its card is on screen\" means the card's own condition — a row in data.printing",
+  /const showsPrinting = [^;\n]*data\?\.printing && data\.printing\.length/.test(st));
 P("P21202", "…it skips the tick while the tab is hidden", /if \(!document\.hidden\)/.test(pollBlk));
 P("P21203", "…it stops entirely on visibilitychange rather than just skipping", /const stop = \(\)/.test(pollBlk) && /if \(document\.hidden\) stop\(\)/.test(pollBlk));
 P("P21204", "…and refreshes once on the way back, so the first thing seen is current", /else \{ loadPrinting\(\); start\(\); \}/.test(pollBlk));
