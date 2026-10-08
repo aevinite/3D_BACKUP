@@ -447,15 +447,22 @@ check("P28334", "the logout log line reads as English once its id tail is trimme
 // SWEEP #8 · TERMINAL 25 · THE 500 NEW CHECKS — P78701 … P79380
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 
+// Round 4 (sweep #10 T17): extensionless imports (`./supabase`, `next/server`) now resolve, and the public database
+// client goes to the same in-memory stub — so lib/ownerScope.ts and the sign-in routes can be RUN here, not just read.
+const ANON_STUB = pathToFileURL(join(root, "scripts/panel-stubs/anon.mjs")).href;
+const toStub = (r) => (/\/lib\/supabase\.ts$/.test(r.url) ? { url: ANON_STUB, shortCircuit: true } : r);
 registerHooks({
   resolve(spec, ctx, next) {
     if (spec === "@/lib/supabaseAdmin") return next(pathToFileURL(join(root, "scripts/panel-stubs/sb.mjs")).href, ctx);
     if (spec.startsWith("@/")) {
       let q = join(root, spec.slice(2));
       if (!existsSync(q)) for (const e of [".ts", ".tsx", ".js", ".mjs"]) if (existsSync(q + e)) { q += e; break; }
-      return next(pathToFileURL(q).href, ctx);
+      return toStub(next(pathToFileURL(q).href, ctx));
     }
-    return next(spec, ctx);
+    try { return toStub(next(spec, ctx)); } catch (e) {
+      for (const suf of [".js", ".ts"]) { try { return toStub(next(spec + suf, ctx)); } catch { /* try the next */ } }
+      throw e;
+    }
   },
 });
 const UA = await import("@/lib/userAuth.ts");
@@ -951,8 +958,9 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
     /u\.restaurant_id === r\.id \|\|/.test(src("app/r/[restaurant]/owner/route.ts")) && /\.eq\("user_id", u\.id\)\.eq\("restaurant_id", r\.id\)/.test(src("app/r/[restaurant]/owner/route.ts")));
   check("P161526", "a restaurant's panel address lets in only that restaurant's own staff",
     /u\.role === role && u\.restaurant_id === r\.id && r\.active/.test(src("lib/panelGate.ts")));
-  check("P161527", "a real owner's cockpit covers only the restaurants they own (and that are switched on)",
-    /const ids = await enabledOwnedRestaurantIds\(owner\.id\);/.test(src("lib/ownerScope.ts")));
+  // Round 4 (items 25 + 28) moved this line inside a try, and the retired owner switch is no longer part of the rule.
+  check("P161527", "a real owner's cockpit covers only the live restaurants they own",
+    /try \{ ids = await enabledOwnedRestaurantIds\(owner\.id\); \}/.test(src("lib/ownerScope.ts")));
   resetWorld();
   const pinHash = await UA.hashSecret("4321");
   G.FIX.staff_users = [
@@ -990,6 +998,79 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   check("P161537", "the retired per-panel switch stays retired — every panel, the owner's included, is on", PA.PANEL_KEYS.every((k) => panels[k] === true));
   check("P161538", "the 'no secret on this site' message is words a waiter can read, not a setting name",
     / /.test(UA.NOT_SET_UP) && UA.NOT_SET_UP.length > 30 && !/[A-Z]{2,}_[A-Z]{2,}/.test(UA.NOT_SET_UP), UA.NOT_SET_UP);
+}
+// ── SWEEP #10 T17 ROUND 4 — FIVE THINGS A DATABASE BLIP OR A RETIRED SWITCH COULD STILL DO (items 25–29) ──────────
+// Round 4 measured every branch of T17's files with code coverage and drove each one. Five were wrong; each is pinned
+// here by RUNNING the real file against the in-memory stub (round 4 taught the stub to fail on purpose — G.FAIL /
+// G.FAIL_NTH — and this loader to resolve the files the routes import). ids P162135–P162150.
+{
+  const PA = await import("@/lib/panelAccess.ts");
+  const OS = await import("@/lib/ownerScope.ts");
+  const LT = await import("@/lib/loginThrottle.ts");
+  const PP = await import("@/app/api/panel-profile/route.ts");
+  const { NextRequest } = await import("next/server.js");
+  const RA = "00000000-0000-4000-8000-0000000000a1";
+  const fresh = () => { resetWorld(); G.FAIL = {}; G.FAIL_NTH = {}; G.CALLS = {}; };
+  const passFor = async (u, pw) => { fresh(); G.FIX.staff_users = [u]; const r = await UA.loginUser(u.username, pw); return r.ok ? r.cookie : null; };
+  const rq = (path, cookie, init = {}) => { const h = new Headers(init.headers || {}); if (cookie) h.set("cookie", `lfh_user=${cookie}`); if (init.json !== undefined) h.set("content-type", "application/json"); return new NextRequest(new URL(path, "http://guard.local"), { method: init.method || "GET", headers: h, body: init.json !== undefined ? JSON.stringify(init.json) : undefined }); };
+  const base = (o) => ({ id: "00000000-0000-4000-8000-00000000c0" + o.n, username: o.username, role: o.role, restaurant_id: RA, name: o.username, phone: null, active: true, deleted_at: null, pin_hash: null, token_version: 0, can_self_reset: true, can_self_set_pin: false, profile_confirmed: true, permissions: null, assigned_tables: null, failed_count: 0, locked_until: null, last_seen_at: new Date().toISOString(), password_hash: o.hash, ...o.extra });
+  const H = await UA.hashSecret("guard-pass-1");
+  // item 25 — the retired owner switch
+  const own = base({ n: "01", username: "g4owner", role: "owner", hash: H });
+  fresh(); G.FIX.restaurant_owners = [{ user_id: own.id, restaurant_id: RA }]; G.FIX.restaurants = [{ id: RA, deleted_at: null }]; G.FIX.settings = [{ restaurant_id: RA, enabled_panels: { owner: false } }];
+  const kept = await PA.enabledOwnedRestaurantIds(own.id, false);
+  check("P162135", "item 25: a restaurant still carrying the RETIRED owner switch OFF does not lock its owner out", kept.length === 1 && kept[0] === RA);
+  check("P162136", "…and working out an owner's restaurants reads no settings at all (one query fewer per sign-in)", !G.READS.some((r) => r.table === "settings"));
+  check("P162137", "…and lib/panelAccess.ts no longer reads settings.enabled_panels anywhere", !/enabled_panels/.test(stripComments(read("lib/panelAccess.ts"))));
+  // item 28 — the owner cockpit on a blip
+  const oc = await passFor(own, "guard-pass-1");
+  fresh(); G.FIX.staff_users = [own]; G.FIX.restaurant_owners = [{ user_id: own.id, restaurant_id: RA }]; G.FAIL["restaurant_owners"] = "error"; PA.forgetRestaurant("x", [own.id]);
+  const e0 = console.error; console.error = () => {};
+  let r28; try { r28 = await OS.ownerScopeOr503(rq("/api/owner/overview", oc)); } catch (e) { r28 = { threw: e?.name }; }
+  check("P162138", "item 28: a blip while working out a signed-in owner's restaurants answers 503 'try again', not a crash", r28?.resp?.status === 503, JSON.stringify(r28?.threw || r28?.resp?.status));
+  fresh(); G.FIX.staff_users = [own]; G.FAIL["staff_users"] = "error";
+  let r28b; try { r28b = await OS.ownerScopeOr503(rq("/api/owner/overview", oc)); } catch (e) { r28b = { threw: e?.name }; }
+  console.error = e0;
+  check("P162139", "…and the same when the database cannot say who the owner is", r28b?.resp?.status === 503, JSON.stringify(r28b?.threw || r28b?.resp?.status));
+  const OSsrc = stripComments(read("lib/ownerScope.ts"));
+  check("P162140", "…while any OTHER error still surfaces (a real bug is never dressed up as 'try again')",
+    /if \(e instanceof AuthDbError\) \{[^}]*throw new OwnerScopeUnavailable\(\); \}\s*throw e;/.test(OSsrc) && /if \(e instanceof OwnedLookupFailed\) \{[^}]*throw new OwnerScopeUnavailable\(\); \}\s*throw e;/.test(OSsrc));
+  // items 26 + 27 — the profile route on a blip
+  const mgr = base({ n: "02", username: "g4mgr", role: "manager", hash: H, extra: { profile: { address: "12 MG Road", id_type: "Aadhaar", id_last4: "1234", id_verified: true, notes: "owner's note" } } });
+  const mc = await passFor(mgr, "guard-pass-1");
+  fresh(); G.FIX.staff_users = [JSON.parse(JSON.stringify(mgr))]; G.FIX.settings = [{ restaurant_id: RA, payroll_allowed: true }]; G.FAIL_NTH["staff_users:select"] = { at: 2, mode: "error" };
+  console.error = () => {};
+  const r26 = await PP.POST(rq("/api/panel-profile", mc, { method: "POST", json: { profile: { blood_group: "O+" } } }));
+  console.error = e0;
+  const after = G.FIX.staff_users[0].profile;
+  check("P162141", "item 26: a blip reading a person's saved details never wipes the owner's ID record and private note", after.id_type === "Aadhaar" && after.id_verified === true && after.notes === "owner's note" && after.address === "12 MG Road" && !("blood_group" in after), JSON.stringify(after));
+  check("P162142", "…the person is told to try again (503 busy), which the panel's queue retries by itself", r26.status === 503 && r26.headers.get("X-LFH-Busy") === "1");
+  fresh(); G.FIX.staff_users = [JSON.parse(JSON.stringify(mgr))]; G.FAIL_NTH["staff_users:select"] = { at: 2, mode: "error" };
+  console.error = () => {};
+  const r27 = await PP.POST(rq("/api/panel-profile", mc, { method: "POST", json: { currentPassword: "guard-pass-1", newPassword: "guard-pass-2" } }));
+  console.error = e0;
+  check("P162143", "item 27: a blip during a password change says 'try again' — never 'your current password is wrong'", r27.status === 503 && !/wrong/i.test((await r27.json()).error || ""));
+  check("P162144", "…and the password is left exactly as it was", G.FIX.staff_users[0].password_hash === H && !G.WRITES.some((w) => w.table === "staff_users"));
+  // item 29 — the admin door and the manager PIN, counted in the database
+  const sql = read("supabase/migrations/414_admin_and_pin_wrong_tries_are_counted_once_each.sql");
+  check("P162145", "item 29: migration 414 adds one INSIDE one insert-or-update, so simultaneous wrong tries each count",
+    /ON CONFLICT \(key\) DO UPDATE\s+SET fail_count\s+= t\.fail_count \+ 1/.test(sql) && /RETURNING t\.fail_count INTO n;/.test(sql));
+  check("P162146", "…locks on the try that reaches the limit, and never SHORTENS a lock already running",
+    /IF n >= p_max THEN/.test(sql) && /locked_until = GREATEST\(COALESCE\(t\.locked_until, now\(\)\), now\(\) \+ make_interval\(secs => p_lock_ms \/ 1000\.0\)\)/.test(sql));
+  check("P162147", "…and a wrong try never clears a lock (or a deliberate block) that is still running",
+    /locked_until = CASE WHEN t\.locked_until > now\(\) THEN t\.locked_until ELSE NULL END/.test(sql));
+  check("P162148", "…and is staff-only: REVOKE from PUBLIC/anon/authenticated, GRANT to service_role",
+    /REVOKE ALL ON FUNCTION public\.lfh_throttle_fail\(text, integer, integer\) FROM PUBLIC, anon, authenticated;/.test(sql) && /GRANT EXECUTE ON FUNCTION public\.lfh_throttle_fail\(text, integer, integer\) TO service_role;/.test(sql));
+  fresh(); G.RPC_ANSWERS.lfh_throttle_fail = [{ fail_count: 3, locked: false }];
+  const t29 = await LT.throttleFail("admin:9.9.9.9", 10, 300000);
+  const call = G.RPCS.find((r) => r.name === "lfh_throttle_fail")?.args;
+  check("P162149", "throttleFail counts with ONE database call (key, limit, lock length) and no read-then-write here",
+    call?.p_key === "admin:9.9.9.9" && call?.p_max === 10 && call?.p_lock_ms === 300000 && !G.READS.some((r) => r.table === "login_throttle") && t29.failCount === 3 && t29.attemptsLeft === 7);
+  fresh(); G.FAIL["rpc:lfh_throttle_fail"] = "error"; const logged = []; console.error = (...a) => logged.push(a.join(" "));
+  const t29b = await LT.throttleFail("admin:9.9.9.9", 10, 300000); console.error = e0;
+  check("P162150", "…and a count that cannot be written still fails OPEN (never breaks a sign-in) and says so in the server log",
+    t29b.locked === false && t29b.failCount === 0 && t29b.attemptsLeft === 10 && logged.some((l) => /could not count a wrong try/.test(l)));
+  delete G.RPC_ANSWERS.lfh_throttle_fail; G.FAIL = {}; G.FAIL_NTH = {};
 }
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');

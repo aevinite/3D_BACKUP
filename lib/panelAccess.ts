@@ -1,9 +1,9 @@
 // lib/panelAccess.ts — per-restaurant PANEL entitlements (owner 2026-06-29).
 //
-// Which operational panels a restaurant has: manager / kitchen / tablet / owner. The
-// ADMIN turns these on/off per restaurant (settings.enabled_panels, mig 106). A panel that
-// is OFF blocks that role's login and hides it. This is the panel-axis sibling of
-// settings.features (guest switches) — stored the same way, scoped by restaurant_id.
+// Which operational panels a restaurant has: manager / kitchen / tablet / owner. SINCE 2026-07-31 THE ANSWER IS
+// ALWAYS "ALL FOUR" — the per-restaurant switches (settings.enabled_panels, mig 106) were removed by the owner, and
+// nothing in this file reads that column any more (the last reader, in enabledOwnedRestaurantIds, went in round 4 of
+// sweep #10, item 25). What still decides access here is ownership and the recycle bin, never a stored switch.
 //
 // SERVER-ONLY: the gate runs server-side (panel-login route + panelGate), so this reads via
 // supabaseAdmin and pulls in NO React (unlike lib/features.ts) so route handlers can import
@@ -136,32 +136,29 @@ export async function enabledOwnedRestaurantIds(userId: string, cached = true): 
   const owned = links.ids || [];
   let ids: string[] = [];
   if (owned.length) {
-    // Two scoped reads: live restaurants ∩ owned ids, joined against their settings.
+    // ONE scoped read: live restaurants ∩ owned ids.
     //
-    // BOTH GO THROUGH readInChunks, and that is the SECOND half of the T19 fix (T25 sweep,
-    // 2026-08-21). The paging above stopped the ownership LINKS being cut short at 50; these two
-    // reads FILTER that list, and they were still inlining every id in one URL with no `.limit()`.
-    // Measured on this stack: an `.in()` list of 800 uuids (29.6 KB) comes back "Bad Request", and
-    // a select with no limit is silently capped at 1,000 rows. Either way the estate comes back
-    // SHORT — and because this helper is the single source of truth for owner-panel access, a
-    // missing restaurant vanishes from the sidebar, the Menu picker, Manager mode and every
-    // /api/owner/* call at once, with nothing on any screen to say so. Same fault, one level down.
-    const [restQ, setQ] = await Promise.all([
-      readInChunks<{ id: string }>(owned, (chunk) =>
-        sb.from("restaurants").select("id").in("id", chunk).is("deleted_at", null).limit(chunk.length)),
-      readInChunks<{ restaurant_id: string; enabled_panels: unknown }>(owned, (chunk) =>
-        sb.from("settings").select("restaurant_id, enabled_panels").in("restaurant_id", chunk).limit(chunk.length)),
-    ]);
+    // IT GOES THROUGH readInChunks, and that is the SECOND half of the T19 fix (T25 sweep,
+    // 2026-08-21). The paging above stopped the ownership LINKS being cut short at 50; this read
+    // FILTERS that list, and it was inlining every id in one URL with no `.limit()`. Measured on
+    // this stack: an `.in()` list of 800 uuids (29.6 KB) comes back "Bad Request", and a select
+    // with no limit is silently capped at 1,000 rows. Either way the estate comes back SHORT —
+    // and because this helper is the single source of truth for owner-panel access, a missing
+    // restaurant vanishes from the sidebar, the Menu picker, Manager mode and every /api/owner/*
+    // call at once, with nothing on any screen to say so. Same fault, one level down.
+    //
+    // THE RETIRED OWNER SWITCH IS NO LONGER READ (sweep #10 T17 round 4, item 25, 2026-10-08). A second read here
+    // fetched settings.enabled_panels and dropped any restaurant whose stored `owner` was false — the very switch the
+    // owner removed on 2026-07-31 ("remove it completely, all panels always on"; see getEnabledPanels above, which
+    // already answers ON for exactly this reason). Nothing can set it or show it any more, so honouring it could only
+    // ever lock an owner out with "Ask your admin to turn it on" and no switch for the admin to turn. Measured on the
+    // dev stack: two restaurants still carry owner=false (both in the recycle bin today) — restoring either would have
+    // locked its owner out. Removing the read also saves one settings query on every owner sign-in and cockpit load.
+    const restQ = await readInChunks<{ id: string }>(owned, (chunk) =>
+      sb.from("restaurants").select("id").in("id", chunk).is("deleted_at", null).limit(chunk.length));
     if (restQ.error) return staleOrThrow(userId, restQ.error);
-    if (setQ.error) return staleOrThrow(userId, setQ.error);
     const live = new Set((restQ.rows || []).map((r) => r.id));
-    const panelsByRid = new Map((setQ.rows || []).map((r) => [r.restaurant_id, r.enabled_panels as Record<string, unknown> | null]));
-    ids = owned.filter((rid) => {
-      if (!live.has(rid)) return false;
-      const p = panelsByRid.get(rid);
-      // Missing row / key defaults ON (same backward-compat rule as getEnabledPanels).
-      return !(p && typeof p === "object" && (p as Record<string, unknown>).owner === false);
-    });
+    ids = owned.filter((rid) => live.has(rid));
   }
   _ownerCache.set(userId, { at: Date.now(), ids });
   return ids;
