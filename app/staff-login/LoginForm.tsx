@@ -74,7 +74,7 @@ export default function LoginForm({ next, initialError }: { next: string; initia
 
   return (
     <form onSubmit={submit} method="POST" action="/api/staff-login"
-      style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 28, width: "min(100%, 360px)" }}>
+      style={{ margin: "auto", background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 28, width: "min(100%, 360px)" }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginBottom: 18 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {/* REJECTED (owner, 2026-08-14): unifying this with the text ✦ that /login draws.

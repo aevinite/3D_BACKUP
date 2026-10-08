@@ -85,9 +85,15 @@ export default function LoginForm({
   // (RECONSTRUCTED 2026-08-13 from the doc row after a parallel session's uncommitted edit
   // here was destroyed by a `git reset --hard` in this shared folder — the decision and the
   // quote are the owner's; the wording is not the original.)
+  // THE PAGE SCROLLS BY ITSELF (owner, 2026-10-08, sweep #10 T17 item 18: "do all"). The app-wide stylesheet
+  // locks html/body (`overflow: hidden`, app/globals.css) for the guest menu's own inner scrolling, so on a phone
+  // held SIDEWAYS (780×360) this card — taller than the screen — had its Sign in half off-screen with no way to
+  // reach it. <main> is now its own scroll box (height 100% + overflowY auto) and the card centres with
+  // `margin: auto`, which can never push the card's top out of reach the way a centred overflow can.
+  // This is NOT R19's change: minHeight stays 100vh exactly as the owner ruled; only scrolling was added.
   return (
-    <main style={{ margin: 0, minHeight: "100vh", display: "grid", placeItems: "center", background: "radial-gradient(1200px 600px at 50% -10%, #16223e 0%, #0b1220 60%)", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", padding: 16 }}>
-      <form onSubmit={submit} style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 18, padding: 28, width: "min(100%, 380px)", boxShadow: "0 20px 60px rgba(0,0,0,.45)" }}>
+    <main style={{ margin: 0, minHeight: "100vh", height: "100%", overflowY: "auto", display: "grid", placeItems: "center", background: "radial-gradient(1200px 600px at 50% -10%, #16223e 0%, #0b1220 60%)", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", padding: 16 }}>
+      <form onSubmit={submit} className="lfh-signin" style={{ margin: "auto", background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 18, padding: 28, width: "min(100%, 380px)", boxShadow: "0 20px 60px rgba(0,0,0,.45)" }}>
         <div style={{ textAlign: "center", marginBottom: 18 }}>
           {/* REJECTED (owner, 2026-08-14): making this match /staff-login's SVG brand mark.
               The T11 visual sweep offered it as a "one product" consistency fix; he said
@@ -98,8 +104,14 @@ export default function LoginForm({
           <p style={{ margin: 0, fontSize: 13, color: "#8aa0c9" }}>{restaurantName ? "Staff sign in" : "Restaurant OS · staff sign in"}</p>
         </div>
 
-        <label style={{ fontSize: 12, color: "#8aa0c9" }}>Username</label>
+        {/* Item 19 (owner, 2026-10-08): a visible ring on the box the cursor is in. The boxes keep
+            outline:none for the mouse; :focus-visible draws the ring for the keyboard (inline styles
+            cannot express :focus, hence this one small rule). Item 20: each word is tied to its box
+            (htmlFor/id), so tapping "Username" selects the box and screen readers read "Username". */}
+        <style>{`.lfh-signin input:focus-visible{box-shadow:0 0 0 3px rgba(91,140,255,.55);border-color:#5b8cff!important}`}</style>
+        <label htmlFor="lfh-login-username" style={{ fontSize: 12, color: "#8aa0c9" }}>Username</label>
         <input
+          id="lfh-login-username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="your username"
@@ -110,9 +122,10 @@ export default function LoginForm({
           style={{ ...field, margin: "4px 0 12px" }}
         />
 
-        <label style={{ fontSize: 12, color: "#8aa0c9" }}>Password</label>
+        <label htmlFor="lfh-login-password" style={{ fontSize: 12, color: "#8aa0c9" }}>Password</label>
         <div style={{ position: "relative", margin: "4px 0 4px" }}>
           <input
+            id="lfh-login-password"
             type={show ? "text" : "password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
