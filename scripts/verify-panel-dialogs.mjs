@@ -197,12 +197,19 @@ for (const [needle, what] of [
       else bad(`editor/app.js: ${what} — not found`, String(re).slice(0, 70));
     }
     // The two that were fixed on 2026-09-03, named so a revert is visible rather than inferred.
-    for (const [re, what] of [
-      [/await promptDialog\("What should this computer be called\?"/, "renaming the printing computer asks in the panel"],
-      [/await confirmDialog\(\s*\n?\s*`Unlink /, "…and unlinking it does too"],
+    // RETIRED 2026-09-14 (ecec794e — owner: "that setup will be done by me only"): the manager's
+    // Settings → Printing became a status screen and both actions were deleted with the print_setup
+    // permission. This kept demanding them and sat red for three weeks (sweep #10 T39 item 13). The
+    // rule it protects still stands: if either question ever comes back, it must be the panel's own
+    // card, never the browser's — so the question's TEXT is what is looked for, not the call.
+    for (const [ask, inPanel, what] of [
+      [/What should this computer be called\?/, /await promptDialog\("What should this computer be called\?"/, "renaming the printing computer"],
+      [/`Unlink /, /await confirmDialog\(\s*\n?\s*`Unlink /, "unlinking the printing computer"],
     ]) {
-      if (re.test(app)) ok(`editor/app.js: ${what}`);
-      else bad(`editor/app.js: ${what} — not found`, "Settings → Printing went back to a browser dialog");
+      const code = app.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+      if (!ask.test(code)) ok(`editor/app.js: ${what} is retired (2026-09-14) — no browser dialog can ask it`);
+      else if (inPanel.test(code)) ok(`editor/app.js: ${what} asks in the panel`);
+      else bad(`editor/app.js: ${what} is back and does not ask in the panel`, "Settings → Printing went back to a browser dialog");
     }
   }
 }
