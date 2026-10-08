@@ -505,6 +505,21 @@ console.log("\n── 22. EVERY CHART GOES THROUGH THE 'IS THERE ENOUGH DATA' GA
       "Charts.tsx (where populated()/NotEnough/ScrollX live and are private), or export the gate and use it. " +
       "A brand-new restaurant with one day of trade must get an honest 'not enough yet' card, never a single bar.",
   );
+  // The scan above only asks whether a file NAMES the gate. The tile pop-up (TileDocket.tsx,
+  // 2026-10-04) draws its own trend charts, so pin each one: the area line and the bar chart
+  // must each refuse to draw with fewer than two days of real activity, and only a bar chart
+  // flagged `compare` (restaurants side by side, not a trend) may skip it. Sweep #10 T39 item 2.
+  const docket = read("components/owner/TileDocket.tsx");
+  const fnBody = (name) => { const i = docket.indexOf(`function ${name}(`); return i < 0 ? "" : docket.slice(i, docket.indexOf("const svg", i)); };
+  check("the tile pop-up's revenue line needs two days with real activity",
+    /populated\(pts\) < MIN_POINTS\) return <Empty/.test(fnBody("Area")) && /const MIN_POINTS = 2\b/.test(docket),
+    "TileDocket's Area draws 29 flat days and one spike for a restaurant with one day of trade");
+  check("the tile pop-up's bar chart needs two days with real activity, unless it compares restaurants",
+    /!compare && populated\(pts\) < MIN_POINTS\) \) return <Empty|\(!compare && populated\(pts\) < MIN_POINTS\)\) return <Empty/.test(fnBody("Bars")),
+    "TileDocket's Bars draws one lonely full-width bar for a restaurant with one day of trade");
+  check("…and only the restaurants-side-by-side chart is flagged as a comparison",
+    (dashPage.match(/kind: "bars", compare: true/g) || []).length === 1 && !/kind: "bars", compare: true, pts: dailyPts/.test(dashPage),
+    "a trend flagged `compare` skips the not-enough gate — only 'Taken today, by restaurant' is a comparison");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════

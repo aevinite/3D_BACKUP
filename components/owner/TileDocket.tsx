@@ -27,18 +27,29 @@ export type DocketPoint = { x: string; v: number; hint?: string };
 export type DocketStep = { k: string; s: string; v: number; total?: boolean };
 export type DocketChart =
   | { kind: "area"; pts: DocketPoint[] }
-  | { kind: "bars"; pts: DocketPoint[] }
+  // `compare`: the bars are restaurants side by side, not days in a row — a comparison, so
+  // one restaurant trading beside two at ₹0 is a fair picture and the trend gate below is off.
+  | { kind: "bars"; pts: DocketPoint[]; compare?: boolean }
   | { kind: "waterfall"; steps: DocketStep[] };
 export type DocketBar = { k: string; v: number; t: string; c?: string };
 
 const INK = "#1b1a16", PAPER = "#fffdf7", RULE = "#cdc6b4", MUT = "#7a7465";
 const GREEN = "#0d9b63", SOFT = "#cfe6da", RED = "#e8a0a0";
 
+// ── A TREND NEEDS TWO DAYS THAT HAPPENED (the rule components/owner/Charts.tsx keeps) ──────────
+// Charts.tsx: "< 2 points with real activity → DON'T draw a chart". A zero bucket is not a data
+// point. This sheet was built on 2026-10-04 with its own hand-rolled SVG and only asked "is the
+// array empty?", so a restaurant with one day of trade in the period got a single full-width bar
+// on "Orders a day", and a line lying flat on the floor with one spike — the shape that reads as
+// broken, which is why the rule exists (sweep #10 T39 item 2; verify:owner-reports names it).
+const MIN_POINTS = 2;
+const populated = (pts: DocketPoint[]) => pts.filter((p) => (Number(p.v) || 0) > 0).length;
+
 /** smooth area with a soft fill — the shape of a period */
 function Area({ pts, h = 118 }: { pts: DocketPoint[]; h?: number }) {
   const gid = useId().replace(/:/g, "");
   const { on, off, line } = useReadout("Hover the line for a day");
-  if (pts.length < 2) return <Empty />;
+  if (pts.length < 2 || populated(pts) < MIN_POINTS) return <Empty />;
   const w = 600, max = Math.max(...pts.map((p) => p.v), 1);
   const X = (i: number) => i * (w / (pts.length - 1)), Y = (v: number) => h - 6 - (v / max) * (h - 18);
   let d = "", a = "";
@@ -69,9 +80,9 @@ function Area({ pts, h = 118 }: { pts: DocketPoint[]; h?: number }) {
   return <div {...off}>{svg}{line}</div>;
 }
 
-function Bars({ pts, h = 118 }: { pts: DocketPoint[]; h?: number }) {
+function Bars({ pts, compare, h = 118 }: { pts: DocketPoint[]; compare?: boolean; h?: number }) {
   const { on, off, line } = useReadout("Hover a bar for its day");
-  if (!pts.length) return <Empty />;
+  if (!pts.length || (!compare && populated(pts) < MIN_POINTS)) return <Empty />;
   const w = 600, max = Math.max(...pts.map((p) => p.v), 1), bw = w / pts.length;
   const svg = (
     <svg viewBox={`0 0 ${w} ${h + 16}`} preserveAspectRatio="none" className="chart" role="img"
@@ -271,7 +282,7 @@ export default function TileDocket({
               <div>
                 <div className="ttl">{chartTitle}</div>
                 {chart.kind === "area" ? <Area pts={chart.pts} />
-                  : chart.kind === "bars" ? <Bars pts={chart.pts} />
+                  : chart.kind === "bars" ? <Bars pts={chart.pts} compare={chart.compare} />
                   : <Waterfall steps={chart.steps} />}
               </div>
             ) : null}
