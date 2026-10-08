@@ -1074,6 +1074,72 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
     t29b.locked === false && t29b.failCount === 0 && t29b.attemptsLeft === 10 && logged.some((l) => /could not count a wrong try/.test(l)));
   delete G.RPC_ANSWERS.lfh_throttle_fail; G.FAIL = {}; G.FAIL_NTH = {};
 }
+// ── SWEEP #10 T17 ROUND 5 — SUSPENDED STOPS THE STAFF APPS, NO SIGN-IN LOOP, DEEP LINKS, ALERT ENGLISH (items 30, 31, 33, 34) ──
+// ids P162233–P162248. Run for real where the file loads here; the page files (JSX) are read.
+{
+  const PA = await import("@/lib/panelAccess.ts");
+  const PG = await import("@/lib/panelGate.ts");
+  const PL = await import("@/app/api/panel-login/route.ts");
+  const { NextRequest } = await import("next/server.js");
+  const RA = "00000000-0000-4000-8000-0000000000a1", RB = "00000000-0000-4000-8000-0000000000b2";
+  const fresh = () => { resetWorld(); G.FAIL = {}; G.FAIL_NTH = {}; G.CALLS = {}; };
+  const H5 = await UA.hashSecret("guard5-pass");
+  const mk = (n, role, extra = {}) => ({ id: "00000000-0000-4000-8000-00000000d0" + n, username: "g5" + n, role, restaurant_id: RA, name: "G5 " + n, phone: null, active: true, deleted_at: null, pin_hash: null, token_version: 0, can_self_reset: true, can_self_set_pin: false, profile_confirmed: true, permissions: null, assigned_tables: null, failed_count: 0, locked_until: null, last_seen_at: new Date().toISOString(), password_hash: H5, ...extra });
+  const passOf = async (u) => { fresh(); G.FIX.staff_users = [u]; const r = await UA.loginUser(u.username, "guard5-pass"); return r.cookie; };
+  const rr = (cookie, q = "") => ({ cookies: { get: (n) => (n === "lfh_user" && cookie ? { value: cookie } : undefined) }, nextUrl: { searchParams: new URLSearchParams(q) }, headers: { get: () => null } });
+  const m5 = mk("01", "manager"); const mc = await passOf(m5);
+  fresh(); G.FIX.staff_users = [m5]; G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; PA.forgetRestaurant(RA);
+  check("P162233", "item 30: a SUSPENDED restaurant's manager is refused on every panel call (requireRole)", (await UA.requireRole(rr(mc), "manager")).ok === false);
+  const reads = G.READS.filter((r) => r.table === "restaurants").length; await UA.requireRole(rr(mc), "manager");
+  check("P162234", "…and the bin + suspension answers share ONE cached read (no extra trip per call)", reads === 1 && G.READS.filter((r) => r.table === "restaurants").length === 1);
+  const o5 = mk("02", "owner"); const oc = await passOf(o5);
+  fresh(); G.FIX.staff_users = [o5]; G.FIX.restaurant_owners = [{ user_id: o5.id, restaurant_id: RA }]; G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; PA.forgetRestaurant(RA, [o5.id]);
+  check("P162235", "…while the OWNER of a suspended restaurant still gets into the owner panel", (await UA.requireRole(rr(oc), "owner")).ok === true);
+  fresh(); G.FIX.restaurants = [{ id: RA, deleted_at: "2026-10-01T00:00:00Z", active: false }]; PA.forgetRestaurant(RA);
+  const binWins = (await PA.isRestaurantDeleted(RA)) === true && (await PA.isRestaurantSuspended(RA)) === false;
+  fresh(); G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; G.FAIL["restaurants"] = "error"; PA.forgetRestaurant(RA);
+  const failOpen = (await PA.isRestaurantSuspended(RA)) === false; G.FAIL = {};
+  check("P162236", "isRestaurantSuspended: a binned restaurant counts as binned (not suspended); a failed read lets people in and is NOT remembered",
+    binWins && failOpen && (await PA.isRestaurantSuspended(RA)) === true);
+  PA.forgetRestaurant(RA);
+  fresh(); G.FIX.staff_users = [m5]; G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; PA.forgetRestaurant(RA);
+  const e0 = console.error; console.error = () => {};
+  const sres = await PL.POST(new NextRequest(new URL("/api/panel-login", "http://guard.local"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: m5.username, password: "guard5-pass" }) }));
+  console.error = e0; const sbody = await sres.json();
+  check("P162237", "item 30: signing in to a suspended restaurant with the RIGHT password: 403, the 'switched off' sentence, and no pass cookie",
+    sres.status === 403 && sbody.error === PG.DOOR_OFF && !(sres.headers.getSetCookie?.() || []).some((c) => c.startsWith("lfh_user=")));
+  check("P162238", "…logged as login_denied naming the suspension", (G.FIX.staff_actions || []).some((r) => r.action === "login_denied" && /switched off \(suspended\)/.test(r.detail || "")));
+  PA.forgetRestaurant(RA);
+  fresh(); G.FIX.restaurant_owners = []; G.FIX.restaurants = []; PA.forgetRestaurant("x", [o5.id]);
+  const nd = await PG.panelDoor(o5);
+  fresh(); G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; PA.forgetRestaurant(RA);
+  const sd = await PG.panelDoor(m5); PA.forgetRestaurant(RA);
+  check("P162239", "item 33: panelDoor refuses an owner with no live restaurant (owner sentence) and staff of a suspended one ('switched off')",
+    nd.ok === false && nd.message === PG.DOOR_NO_OWNED && sd.ok === false && sd.why === "off" && sd.message === PG.DOOR_OFF);
+  const G5 = stripComments(read("lib/panelGate.ts"));
+  check("P162240", "item 33: requirePanel sends a refused person to the card WITH the reason (?why=), not back round the loop",
+    /if \(door && !door\.ok\) redirect\(`\/login\?why=\$\{door\.why\}`\);/.test(G5) && G5.indexOf("if (door && !door.ok)") < G5.lastIndexOf("redirect(`/login?next="));
+  check("P162241", "item 30: a suspended restaurant's own address sends its staff to its card with ?why=off",
+    /if \(u && u\.role === role && u\.restaurant_id === r\.id && !r\.active\) redirect\(`\/r\/\$\{slug\}\/login\?why=off`\);/.test(G5));
+  const LPg = stripComments(read("app/login/page.tsx"));
+  check("P162242", "item 33: /login redirects a signed-in person ONLY when panelDoor says they may enter; otherwise it shows why",
+    /const door = await panelDoor\(u\);\s*if \(door\.ok\) redirect\(ROLE_HOME\[u\.role\] \|\| "\/menu"\);\s*notice = door\.message;/.test(LPg) && !/if \(u\) redirect\(/.test(LPg));
+  check("P162243", "…and ?why= can only pick one of two FIXED sentences (nothing from the address is shown)",
+    /let notice = why === "off" \? DOOR_OFF : why === "gone" \? DOOR_GONE : "";/.test(LPg));
+  check("P162244", "item 30: a switched-off restaurant's door shows the sentence before anyone types", /notice=\{r\.active \? "" : DOOR_OFF\}/.test(stripComments(read("app/r/[restaurant]/login/page.tsx"))));
+  const LFg = stripComments(read("app/login/LoginForm.tsx"));
+  check("P162245", "the card draws the notice as plain text in a status box (never as HTML)",
+    /\{notice \? <div role="status"[^>]*>\{notice\}<\/div> : null\}/.test(LFg) && !/dangerouslySetInnerHTML/.test(LFg));
+  check("P162246", "item 31: a deep ?next inside the person's own panel is kept, with its query and #part",
+    /return u\.pathname \+ u\.search \+ u\.hash;/.test(LFg) && /const u = new URL\(next, window\.location\.origin\);/.test(LFg));
+  fresh(); G.FIX.staff_users = [{ id: "a", role: "tablet", name: "x", username: "x", restaurant_id: RA, active: true, deleted_at: null }, { id: "b", role: "tablet", name: "x", username: "x", restaurant_id: RB, active: true, deleted_at: null }]; G.FIX.restaurants = [{ id: RA, name: "A" }, { id: RB, name: "B" }];
+  const one = await UA.describeLoginTarget("x");
+  G.FIX.staff_users.push({ id: "c", role: "tablet", name: "x", username: "x", restaurant_id: RB, active: true, deleted_at: null });
+  const two = await UA.describeLoginTarget("x");
+  check("P162247", "item 34: the limit alert reads '+1 more account uses this name'", /\(\+1 more account uses this name\)$/.test(one || ""), one);
+  check("P162248", "…and '+2 more accounts use this name'", /\(\+2 more accounts use this name\)$/.test(two || ""), two);
+  G.FAIL = {}; G.FAIL_NTH = {};
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
