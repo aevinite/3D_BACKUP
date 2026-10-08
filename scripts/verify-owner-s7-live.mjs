@@ -16,11 +16,25 @@
 //     our own screen against a server answer we control, the way the existing live guard already
 //     forces a 403 or a tableCount of 0. Nothing is written to the database by this file at all.
 //   · Every colour is COMPUTED against what is actually painted behind it, never eyeballed.
-import { requireUp } from "./sweep/appUp.mjs";
+import { requireUp, isDevServer } from "./sweep/appUp.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4000";
 await requireUp(BASE);
+// ON A DEV SERVER, "ONCE" IS TWO (sweep #10 T39 item 60) — React StrictMode runs mount effects twice
+// in development only. Detected, not assumed (scripts/sweep/appUp.mjs → isDevServer).
+const DEV = await isDevServer(BASE);
+const ONCE = DEV ? 2 : 1;
+const onceNote = DEV ? " (dev server: StrictMode mounts twice, so 2 here means once on the site)" : "";
+// IS THE KITCHEN PRINTING CARD DRAWN? (sweep #10 T39 item 61.) Since item 43 (2026-10-08) the
+// printing refresh runs ONLY while the card is on screen — a restaurant allowed printing but with no
+// printer line draws no card, and must then ask nothing. These checks used to demand the refresh
+// unconditionally, so item 43's fix turned them red on backup. Each one now asks the question of the
+// screen it actually got: card drawn → it refreshes, and comes back after a hidden tab; no card →
+// not one printing request.
+const printingCardDrawn = (p) => p.evaluate(() =>
+  [...document.querySelectorAll(".adm-section-h")].some((e) => /Kitchen printing/.test(e.textContent || ""))
+  && !/Couldn.t load this just now/.test(document.body.innerText || ""));
 
 let pass = 0, fail = 0, skip = 0; const fails = [];
 const P = (id, m, c, n = "") => {
@@ -303,6 +317,7 @@ console.log("\nH3 · what each screen costs while it sits open (P21521–P21550)
     await p.goto(BASE + path, { waitUntil: "networkidle" });
     await p.waitForTimeout(1200);
     const onLoad = JSON.parse(JSON.stringify(hits));
+    const card = await printingCardDrawn(p);
     if (hide) await p.evaluate(() => {
       Object.defineProperty(document, "hidden", { get: () => true, configurable: true });
       Object.defineProperty(document, "visibilityState", { get: () => "hidden", configurable: true });
@@ -312,19 +327,20 @@ console.log("\nH3 · what each screen costs while it sits open (P21521–P21550)
     await p.waitForTimeout(ms);
     const after = JSON.parse(JSON.stringify(hits));
     await ctx.close();
-    return { onLoad, after };
+    return { onLoad, after, card };
   };
   const staff = await count("/owner/staff", 20000, false);
-  P("P21521", "opening the Team roster costs ONE call to its own endpoint", (staff.onLoad["/api/owner/staff"] || 0) === 1, JSON.stringify(staff.onLoad));
+  P("P21521", "opening the Team roster costs ONE call to its own endpoint", (staff.onLoad["/api/owner/staff"] || 0) === ONCE, JSON.stringify(staff.onLoad) + onceNote);
   P("P21522", "…and it asks for nothing again while it just sits there", (staff.after["/api/owner/staff"] || 0) === 0, JSON.stringify(staff.after));
   P("P21523", "…and starts no other data poll either", Object.keys(staff.after).filter((k) => k.startsWith("/api/owner")).length === 0, JSON.stringify(staff.after));
   const menu = await count("/owner/menu", 20000, false);
   P("P21524", "the Menu page starts no poll of its own", Object.keys(menu.after).filter((k) => k.startsWith("/api/owner")).length === 0, JSON.stringify(menu.after));
   const setV = await count("/owner/settings", 40000, false);
-  P("P21525", "opening Settings costs ONE call for the page itself", (setV.onLoad["/api/owner/settings"] || 0) === 1, JSON.stringify(setV.onLoad));
+  P("P21525", "opening Settings costs ONE call for the page itself", (setV.onLoad["/api/owner/settings"] || 0) === ONCE, JSON.stringify(setV.onLoad) + onceNote);
   P("P21526", "…and the page itself is not re-read on a timer", (setV.after["/api/owner/settings"] || 0) === 0, JSON.stringify(setV.after));
   const printVisible = setV.after["/api/owner/printing"] || 0;
-  P("P21527", "the printing card does keep itself current while you are looking at it", printVisible > 0, `${printVisible} in 40s`);
+  if (setV.card) P("P21527", "the printing card does keep itself current while you are looking at it", printVisible > 0, `${printVisible} in 40s`);
+  else P("P21527", "with NO printing card on screen, nothing refreshes printing at all (item 43)", printVisible === 0, `${printVisible} in 40s with no card drawn`);
   P("P21528", "…but not faster than its own truth window (under 30s of staleness)", printVisible <= 4, `${printVisible} in 40s`);
   const setH = await count("/owner/settings", 40000, true);
   P("P21529", "…and it STOPS the moment the tab is hidden", (setH.after["/api/owner/printing"] || 0) === 0, `${setH.after["/api/owner/printing"] || 0} in 40s hidden`);
@@ -346,12 +362,13 @@ console.log("\nH3 · what each screen costs while it sits open (P21521–P21550)
   // endpoint instead, and that the shell asks for its overview exactly once too.
   const person = await count("/owner/staff", 3000, false);
   P("P21532", "the roster's first paint asks its own endpoint once and no more",
-    (person.onLoad["/api/owner/staff"] || 0) === 1 && (person.onLoad["/api/owner/overview"] || 0) <= 1, JSON.stringify(person.onLoad));
+    (person.onLoad["/api/owner/staff"] || 0) === ONCE && (person.onLoad["/api/owner/overview"] || 0) <= ONCE, JSON.stringify(person.onLoad) + onceNote);
   // ── the printing refresh must COME BACK when the owner comes back ──────────────────────────
   {
     const ctx = await mk(DESK, "dark"); const p = await ctx.newPage();
     await p.goto(`${BASE}/owner/settings`, { waitUntil: "networkidle" });
     await p.waitForTimeout(1500);
+    const card = await printingCardDrawn(p);
     const hidden = [];
     p.on("request", (rq) => { if (rq.url().includes("/api/owner/printing")) hidden.push(Date.now()); });
     await p.evaluate(() => {
@@ -369,9 +386,12 @@ console.log("\nH3 · what each screen costs while it sits open (P21521–P21550)
     await p.waitForTimeout(2500);
     const afterReturn = hidden.length - whileHidden;
     P("P21533", "hiding the tab stops the printing refresh", whileHidden === 0, `${whileHidden} while hidden`);
-    P("P21534", "…and coming back refreshes it at once, so the first thing seen is current", afterReturn >= 1, `${afterReturn} on return`);
+    if (card) P("P21534", "…and coming back refreshes it at once, so the first thing seen is current", afterReturn >= 1, `${afterReturn} on return`);
+    else P("P21534", "…and with no printing card, coming back asks for nothing either (item 43)", afterReturn === 0, `${afterReturn} on return, no card drawn`);
     await p.waitForTimeout(18000);
-    P("P21535", "…and the repeat is running again, not left stopped", hidden.length - whileHidden - afterReturn >= 1);
+    const repeat = hidden.length - whileHidden - afterReturn;
+    if (card) P("P21535", "…and the repeat is running again, not left stopped", repeat >= 1);
+    else P("P21535", "…and no repeat starts for a card that is not drawn (item 43)", repeat === 0, `${repeat} repeat(s), no card drawn`);
     await ctx.close();
   }
   // ── the roster only asks again when it is TOLD to ────────────────────────────────────────
