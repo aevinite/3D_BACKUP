@@ -167,6 +167,27 @@ export async function enabledOwnedRestaurantIds(userId: string, cached = true): 
   return ids;
 }
 
+// WHICH RESTAURANT'S LOG AN OWNER'S SIGN-IN BELONGS IN (sweep #10 T17, item 7, 2026-10-08).
+//
+// An owner's staff_users.restaurant_id is a filing "home", NOT proof of ownership — the comments
+// above call it the #1 namespace. Today most owners' home is a restaurant they own, but not all:
+// measured on the dev stack, 1 of 19 live owners (owns Aangan + Burger Barn) is filed under French
+// House. /api/panel-login and /api/panel-logout wrote `restaurant_id: u.restaurant_id`, so that
+// owner's "Signed in", "Signed out" and "wrong password" lines landed in FRENCH HOUSE's Activity log —
+// one restaurant reading another restaurant's owner. The rule here: the restaurant the person used
+// the door of, if they own it; else their home, if they own it; else the first they own; and when
+// nothing can be read, null — a platform-level row (mig 358), which only Aevidine's own log shows.
+// Never a restaurant they do not own. `owned` lets a caller that already read the list skip a read.
+export async function ownerLogRestaurant(
+  userId: string, prefer: ReadonlyArray<string | null | undefined>, owned?: readonly string[],
+): Promise<string | null> {
+  let ids: readonly string[];
+  try { ids = owned ?? await enabledOwnedRestaurantIds(userId); }
+  catch { return null; }   // a log line must never be the thing that fails a sign-in or a sign-out
+  for (const p of prefer) if (p && ids.includes(p)) return p;
+  return ids[0] ?? null;
+}
+
 // OWNER-panel entitlement for a specific OWNER USER — true if ANY live (non-binned)
 // restaurant they own still has the owner panel on. Derived from the id list above.
 export async function ownerPanelEnabled(userId: string, cached = true): Promise<boolean> {

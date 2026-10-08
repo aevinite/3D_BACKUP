@@ -46,7 +46,9 @@ const MAX_LOGIN_CANDIDATES = 50;
 export type LoginFailReason = "empty" | "too_long" | "transient" | "no_such_name" | "locked" | "wrong_password" | "disabled";
 // Who/where an attempt was aimed at, for the audit log. For an unknown name we only
 // know what was typed; for a wrong password we know the real account it targeted.
-export type LoginAttempt = { username: string; role?: Role; restaurant_id?: string; actor?: string | null };
+// `id` (the targeted account, when one was matched) lets the route file an OWNER's failed attempt under
+// a restaurant they own rather than their filing home (panelAccess.ownerLogRestaurant). Never shown.
+export type LoginAttempt = { username: string; role?: Role; restaurant_id?: string; actor?: string | null; id?: string };
 
 // The HMAC signing key for cookies. Prefer a dedicated SESSION_SECRET; fall back
 // to the admin password so the gate still works if it isn't set separately.
@@ -233,7 +235,7 @@ export async function loginUser(
   // Build the audit-log "who was targeted" from a candidate row (the real account a
   // wrong password / lockout was aimed at). Used only for the admin log, never shown.
   const attemptOf = (u: any): LoginAttempt => ({
-    username: uname, role: u.role, restaurant_id: u.restaurant_id, actor: u.name || u.username,
+    username: uname, role: u.role, restaurant_id: u.restaurant_id, actor: u.name || u.username, id: u.id,
   });
   // Same generic message whether the name is missing or the password is wrong —
   // never reveal which names exist.

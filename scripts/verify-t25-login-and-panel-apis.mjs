@@ -208,13 +208,15 @@ check("P04663", "a successful login clears the login counter",
 check("P04664", "an owner with no owner-panel-enabled restaurant is refused with a reason",
   has(CODE.panelLogin, "The owner panel isn't enabled for any of your restaurants."));
 check("P04665", "the owner's entitlement is read UNCACHED at the door",
-  has(CODE.panelLogin, "ownerPanelEnabled(u.id, false)"));
+  // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
+  has(CODE.panelLogin, "enabledOwnedRestaurantIds(u.id, false)"));
 check("P04666", "a binned restaurant blocks every non-owner role, before the panel check",
   CODE.panelLogin.indexOf("isRestaurantDeleted(u.restaurant_id)") < CODE.panelLogin.indexOf("isPanelEnabled(u.role"));
 check("P04667", "a disabled panel refuses the login with an actionable sentence",
   has(CODE.panelLogin, "This panel isn't enabled for your restaurant. Ask your admin to turn it on."));
 check("P04668", "the login log row carries the person's OWN restaurant_id",
-  has(CODE.panelLogin, "restaurant_id: u.restaurant_id ?? null"));
+  // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
+  has(CODE.panelLogin, ": (u.restaurant_id ?? null),") && has(CODE.panelLogin, "await ownerLogRestaurant(u.id, [restaurantId, u.restaurant_id], ownedIds)"));
 check("P04669", "the login log row carries the stable actor_id",
   has(CODE.panelLogin, "actor_id: u.id"));
 check("P04670", "the login log detail does not repeat the name three times",
@@ -622,6 +624,30 @@ for (const [cid, idPart, why] of [
     form.indexOf("if (data.blocked)") > 0 && form.indexOf("if (data.ok !== false)") > form.indexOf("if (data.blocked)") &&
     form.indexOf(`setErr(data.locked ?`) > form.indexOf("if (data.ok !== false)"));
 }
+// SWEEP #10 T17, item 7 — an owner's sign-in, sign-out and failed sign-in are filed under a restaurant
+// they OWN. Their staff_users.restaurant_id is a filing home, not ownership: measured 2026-10-08, 1 of
+// 19 live dev owners (owns Aangan + Burger Barn) was filed under French House, so French House's
+// Activity log would have read another restaurant's owner signing in.
+{
+  const PA = await import("@/lib/panelAccess.ts");
+  const R = PA.ownerLogRestaurant;
+  check("P186173", "an owner signing in at a restaurant's own door is filed under THAT restaurant",
+    (await R("u", ["rB", "rH"], ["rA", "rB"])) === "rB");
+  check("P186174", "on the plain door, their home is used only when they own it",
+    (await R("u", [undefined, "rA"], ["rA", "rB"])) === "rA");
+  check("P186175", "a home they do NOT own is never used — the first restaurant they own is",
+    (await R("u", [undefined, "rHOME"], ["rA", "rB"])) === "rA");
+  check("P186176", "a restaurant door they do not own is never used either",
+    (await R("u", ["rX", "rHOME"], ["rA"])) === "rA");
+  check("P186177", "an owner who owns nothing readable is a platform-level row (null), never a guess",
+    (await R("u", ["rX", "rHOME"], [])) === null);
+  check("P186178", "/api/panel-login files a failed OWNER attempt through ownerLogRestaurant, everyone else as before",
+    has(CODE.panelLogin, 'const failRid = a?.role === "owner" && r.reason !== "no_such_name"') && has(CODE.panelLogin, "await ownerLogRestaurant(a?.id || \"\", [restaurantId, a?.restaurant_id])"));
+  check("P186179", "loginUser hands the targeted account's id to the route (for the log only; the person never sees it)",
+    has(CODE.userAuth, "actor: u.name || u.username, id: u.id,") && !rx(CODE.panelLogin, /json\(\{[^}]*attempted/));
+  check("P186180", "no owner sign-in, sign-out or failed sign-in is filed under u.restaurant_id unchecked",
+    !/logAction\(u\.role, "(login|logout)", \{[^}]*restaurant_id: u\.restaurant_id \?\? null/s.test(CODE.panelLogin) && !/restaurant_id: u\.restaurant_id,\s*\n\s*actor: u\.name/.test(CODE.panelLogout));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
@@ -788,11 +814,12 @@ check("P78819", "every non-transient refusal reason has its own admin-log senten
 check("P78820", "the refusal row is filed under the TARGETED account's panel, not always 'admin'",
   has(PL, 'logAction((a?.role ?? "admin"), "login_failed"'));
 check("P78821", "…and under the targeted account's restaurant",
-  has(PL, "restaurant_id: a?.restaurant_id ?? null"));
+  // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
+  has(PL, ": (a?.restaurant_id ?? null);") && has(PL, "restaurant_id: failRid,"));
 check("P78822", "the person only ever sees r.error, never r.reason",
   !rx(PL, /json\(\{[^}]*reason/));
 check("P78823", "an owner is checked against what they OWN, never against their home namespace",
-  before(PL, 'if (u.role === "owner")', "ownerPanelEnabled(u.id, false)"));
+  before(PL, 'if (u.role === "owner")', "enabledOwnedRestaurantIds(u.id, false)"));
 check("P78824", "a refused owner login is recorded as login_denied, a different event from login_failed",
   count(PL, /"login_denied"/g) === 3);
 check("P78825", "the binned-restaurant refusal names the recycle bin in the log",
@@ -822,7 +849,7 @@ check("P78836", "the not-a-person check and the turnstile check share ONE refusa
 check("P78837", "the turnstile answer is AWAITED (an un-awaited promise is always truthy)",
   has(PL, "await verifyTurnstile("));
 check("P78838", "…and so is every ladder/entitlement read on the success path",
-  count(PL, /await (ownerPanelEnabled|isRestaurantDeleted|isPanelEnabled)\(/g) === 3);
+  count(PL, /await (enabledOwnedRestaurantIds|isRestaurantDeleted|isPanelEnabled)\(/g) === 3);
 check("P78839", "the sign-in log carries the device, so 'which tablet was this' has an answer",
   has(PL, "device_id: deviceIdFrom(req)"));
 check("P78840", "nothing in this file writes the typed password anywhere",
@@ -940,7 +967,8 @@ check("P78884", "a DB failure while reading who it was is caught and printed, no
 check("P78885", "the logout still happens when nobody could be identified",
   has(PLO, "if (u) {"));
 check("P78886", "the logout row names the restaurant, so it files under the right tenant",
-  has(PLO, "restaurant_id: u.restaurant_id"));
+  // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
+  has(PLO, 'restaurant_id: u.role === "owner" ? await ownerLogRestaurant(u.id, [u.restaurant_id]) : u.restaurant_id,'));
 check("P78887", "…and the device, so a shared tablet's sign-outs are distinguishable",
   has(PLO, "device_id: deviceIdFrom(req)"));
 check("P78888", "the redirect is 303, so the browser follows with a GET and cannot re-post",
@@ -1637,7 +1665,7 @@ head("S10-T17. a database blip at the staff door says 'try again', never 'networ
   check("P186001", "/api/panel-login looks the restaurant up inside a try (it THROWS on a failed read)",
     /try\s*\{[^}]*await getRestaurantBySlug\(/.test(lineOf(pl, "getRestaurantBySlug(")), lineOf(pl, "getRestaurantBySlug("));
   check("P186002", "/api/panel-login asks which restaurants an owner has inside a try (OwnedLookupFailed)",
-    /try\s*\{[^}]*await ownerPanelEnabled\(/.test(lineOf(pl, "ownerPanelEnabled(u.id")), lineOf(pl, "ownerPanelEnabled(u.id"));
+    /try\s*\{[^}]*await enabledOwnedRestaurantIds\(/.test(lineOf(pl, "enabledOwnedRestaurantIds(u.id")), lineOf(pl, "enabledOwnedRestaurantIds(u.id"));
   check("P186003", "…and both catches answer through the one tryAgain() helper",
     count(pl, /catch \(e\) \{ return tryAgain\(/g) === 2, count(pl, /catch \(e\) \{ return tryAgain\(/g));
   check("P186004", "tryAgain() answers 503 with transient:true — retryable, never a 4xx and never a bare 500",
