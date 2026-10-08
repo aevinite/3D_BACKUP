@@ -1540,9 +1540,15 @@ head("8d · the skin, the redirects and the shell");
   await p.reload({ waitUntil: "domcontentloaded" });
   await p.waitForSelector(".rs-root");
   R("P05469", "the light skin survives a reload", await p.evaluate(() => document.querySelector(".adm")?.getAttribute("data-skin")) === "light");
-  const crumb = flat(await p.evaluate(() => document.querySelector(".owx-crumb, .owx-path, .owx-top")?.innerText || ""));
+  // THE PATH ITSELF, `.owx-path`, ONCE THE REPORT HAS SAID WHERE IT IS (sweep #10 T39 item 57,
+  // 2026-10-09). The old selector list matched `.owx-top` first — the whole strip, "Owner overview
+  // … Connected" — and read it the instant .rs-root existed, before the report had announced its
+  // tail to the shell. Measured on :4439: after the report settles, a refreshed deep link reads
+  // "Owner › Reports › My Little French House › Sales › Revenue" (and did before this change too).
+  await p.waitForFunction(() => /Sales/.test(document.querySelector(".owx-path")?.textContent || ""), null, { timeout: 15000 }).catch(() => {});
+  const crumb = flat(await p.evaluate(() => document.querySelector(".owx-path")?.innerText || ""));
   R("P05484", "the breadcrumb the shell renders matches what this page is showing",
-    !crumb || (/Reports/.test(crumb) && /Sales/.test(crumb)), crumb.slice(0, 120));
+    /Reports/.test(crumb) && /Sales/.test(crumb), crumb.slice(0, 120));
   R("P05123", "…and it names the scope, the report and the sub-tab in that order",
     !crumb || crumb.indexOf("Reports") < crumb.indexOf("Sales") || !/Sales/.test(crumb), crumb.slice(0, 120));
   await p.close();
