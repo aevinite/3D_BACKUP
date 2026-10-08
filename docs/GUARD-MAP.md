@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **223** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **224** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 197 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -294,6 +294,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | a WRITE in a staff panel that shows a success message, or anything that PRINTS a bill / invoice / banquet sheet / credit note | `verify:queued-truth` ← with no signal `api()` hands the write to the offline outbox, which resolves `{ ok:true, queued:true }` instead of throwing, so a plain try/catch sees a SUCCESS. Two sites once printed on the strength of it — a bill with no invoice number, and a banquet sheet numbered `undefined` at ₹0. Also holds the four "Reopen puts the TABLE back" rules (mig 365) | nothing | no |
 | a `background` on `html` or `body` in a panel stylesheet | `verify:panel-canvas` ← `background: <image>` resets background-color to TRANSPARENT, so past the fold on a phone the page BEHIND the frame shows through — the dark band under the tiles the owner photographed on 2026-08-26 | nothing | no |
 | a payload that hands a `settings` row to a panel, or `lib/panelSettings.ts` | `verify:panel-secrets` ← the row carries the delivery apps' connection keys; a panel must never receive them (T17 finding F1) | nothing | no |
+| `sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation-client.ts`, `lib/sentryPrivacy.ts` — or anything that adds a `Sentry.init` | `verify:sentry-privacy` ← an error report sent to Sentry never carries a sign-in cookie, a typed password or a credential header (sweep #10 T17 item 1: `sendDefaultPii: true` used to ship all three). Runs the SDK's OWN `requestDataIntegration` over a signed-in request — first under the old settings, to prove it can see a secret | nothing | no |
 | an HTML comment, a `<style>` block, a CSS comment | `verify:ui` | nothing | no |
 
 ## 11 · Tooling, docs and the rules themselves

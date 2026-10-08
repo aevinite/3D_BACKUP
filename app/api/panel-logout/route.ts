@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
+import { ownerLogRestaurant } from "@/lib/panelAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,10 @@ export async function POST(req: NextRequest) {
   }
   if (u) {
     await logAction(u.role, "logout", {
-      restaurant_id: u.restaurant_id,
+      // An OWNER's row carries a filing home, not proof of ownership: file their sign-out under a
+      // restaurant they own (sweep #10 T17, item 7 — lib/panelAccess.ts → ownerLogRestaurant).
+      // That helper never throws, so this still cannot cost anyone their logout.
+      restaurant_id: u.role === "owner" ? await ownerLogRestaurant(u.id, [u.restaurant_id]) : u.restaurant_id,
       actor: u.name || u.username,
       device_id: deviceIdFrom(req),
       detail: `${u.name || "(no name)"} logged out · user "${u.username}" · id ${u.id}`,

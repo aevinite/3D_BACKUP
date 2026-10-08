@@ -69,7 +69,7 @@ terminals' rows — keep both sides.
 | T14 | `P183001`–`P184000` | The bill and KOT document | ⏳ not run yet | — | — | — | — |
 | T15 | `P184001`–`P185000` | The print queue and the print helper | ⏳ not run yet | — | — | — | — |
 | T16 | `P185001`–`P186000` | Shared panel plumbing — the helpers every panel loads | ⏳ not run yet | — | — | — | — |
-| T17 | `P186001`–`P187000` | Logins, sign-outs and the gates every request passes | ⏳ not run yet | — | — | — | — |
+| T17 | `P186001`–`P187000` | Logins, sign-outs and the gates every request passes | `T17-S10.md` | 500 | 499 | 10 | 10 |
 | T18 | `P187001`–`P188000` | The access and permission model | ⏳ not run yet | — | — | — | — |
 | T19 | `P188001`–`P189000` | The admin's Access screens and people | ⏳ not run yet | — | — | — | — |
 | T20 | `P189001`–`P190000` | The owner's home dashboard | ⏳ not run yet | — | — | — | — |

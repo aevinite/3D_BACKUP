@@ -3,7 +3,7 @@
 // client which panel to go to (+ whether first-login profile capture is needed).
 import { NextRequest, NextResponse } from "next/server";
 import { loginUser, USER_COOKIE, describeLoginTarget } from "@/lib/userAuth";
-import { isPanelEnabled, isRestaurantDeleted, ownerPanelEnabled } from "@/lib/panelAccess";
+import { isPanelEnabled, isRestaurantDeleted, enabledOwnedRestaurantIds, ownerLogRestaurant } from "@/lib/panelAccess";
 import { getRestaurantBySlug } from "@/lib/tenant";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { rateAllowed, subjectFor, rateResetOnSuccess } from "@/lib/rateLimit";
@@ -11,6 +11,20 @@ import { botVerdict, verifyTurnstile } from "@/lib/botCheck";
 import { clientIp } from "@/lib/loginThrottle";
 
 export const dynamic = "force-dynamic";
+
+// THE SAME "TRY AGAIN" A DATABASE BLIP GETS EVERYWHERE ELSE AT THIS DOOR (sweep #10 T17, item 3).
+// loginUser already answers a failed lookup with 503 + this sentence. Two reads ABOVE and BELOW it
+// did not: `getRestaurantBySlug` (the restaurant's own door, /r/<slug>/login) THROWS when it cannot
+// read the restaurant, and `ownerPanelEnabled` THROWS `OwnedLookupFailed` when it cannot read what an
+// owner owns. Either throw escaped this handler as a bare 500 with no JSON body, so the card's
+// `r.json()` failed and the person was told "Network error" about a network that was fine — the exact
+// "a blip is reported as your internet" mistake fixed elsewhere on 2026-09-12. A 503 also tells the
+// panel's offline layer this is retryable (a 5xx is queued, a 4xx is told).
+const TRY_AGAIN = "Can't reach the server — try again in a moment.";
+const tryAgain = (where: string, e: unknown) => {
+  console.error(`[panel-login] ${where}:`, e instanceof Error ? e.message : e);
+  return NextResponse.json({ ok: false, error: TRY_AGAIN, transient: true }, { status: 503 });
+};
 
 export async function POST(req: NextRequest) {
   let body: any = {};
@@ -20,7 +34,9 @@ export async function POST(req: NextRequest) {
   // credentials — never confirm which slugs exist.
   let restaurantId: string | undefined;
   if (body?.restaurant) {
-    const rest = await getRestaurantBySlug(String(body.restaurant));
+    let rest: Awaited<ReturnType<typeof getRestaurantBySlug>>;
+    try { rest = await getRestaurantBySlug(String(body.restaurant)); }
+    catch (e) { return tryAgain("couldn't look the restaurant up", e); }
     if (!rest) return NextResponse.json({ ok: false, error: "Wrong name or password." }, { status: 401 });
     restaurantId = rest.id;
   }
@@ -79,14 +95,19 @@ export async function POST(req: NextRequest) {
         // person tried, and the person themselves was told plainly (owner, 2026-08-02).
         : r.reason === "disabled" ? `login refused · "${who}" is disabled`
         : "login failed";
+      // An OWNER's row carries a filing home, not proof of ownership — see ownerLogRestaurant (item 7).
+      const failRid = a?.role === "owner" && r.reason !== "no_such_name"
+        ? await ownerLogRestaurant(a?.id || "", [restaurantId, a?.restaurant_id])
+        : (a?.restaurant_id ?? null);
       await logAction((a?.role ?? "admin"), "login_failed", {
-        actor: who, device_id: dev, detail, restaurant_id: a?.restaurant_id ?? null,
+        actor: who, device_id: dev, detail, restaurant_id: failRid,
       });
     }
     return NextResponse.json({ ok: false, error: r.error }, { status: r.transient ? 503 : 401 });
   }
   const u = r.user;
   const uWho = u.name || u.username;
+  let ownedIds: string[] = [];
   // They knew the password → clear the login counter, so ordinary repeat sign-ins (a shared waiter
   // tablet, a staff member switching users) can never build up to a wall or an alert.
   // Scoped to the restaurant the wall was counted under (rateAllowed above passes the same
@@ -99,7 +120,12 @@ export async function POST(req: NextRequest) {
     // ownership — deleted/entitlement checks must run against what they actually OWN.
     // ownerPanelEnabled = "at least one live owned restaurant has the owner panel on";
     // uncached at the door (login is rare + must reflect an admin flip immediately).
-    if (!(await ownerPanelEnabled(u.id, false))) {
+    // The same answer ownerPanelEnabled gives (>= 1 live owned restaurant with the owner panel on),
+    // read as the LIST so the sign-in line below can be filed under one of them (item 7).
+    let ownerOn: boolean;
+    try { ownedIds = await enabledOwnedRestaurantIds(u.id, false); ownerOn = ownedIds.length > 0; }
+    catch (e) { return tryAgain("couldn't read which restaurants this owner has", e); }
+    if (!ownerOn) {
       await logAction("owner", "login_denied", { actor: uWho, device_id: dev, detail: `"${uWho}" signed in but the owner panel is not enabled on any owned restaurant` });
       return NextResponse.json({ ok: false, error: "The owner panel isn't enabled for any of your restaurants. Ask your admin to turn it on." }, { status: 403 });
     }
@@ -130,7 +156,10 @@ export async function POST(req: NextRequest) {
     // …and the row belongs to THEIR restaurant. Omitting this fell back to the column default
     // (#1), so every tenant's sign-ins were filed under restaurant #1: #1's Log showed other
     // restaurants' logins and a non-#1 restaurant's Log showed none of its own.
-    restaurant_id: u.restaurant_id ?? null,
+    // An OWNER's is a restaurant they own — never their filing home when they do not own it (item 7).
+    restaurant_id: u.role === "owner"
+      ? await ownerLogRestaurant(u.id, [restaurantId, u.restaurant_id], ownedIds)
+      : (u.restaurant_id ?? null),
     device_id: deviceIdFrom(req),
     // The row already carries `actor` (the name) and `actor_id` (the uuid), and the log line
     // renders as "Signed in · <actor> · <detail>". Repeating both here made every sign-in read

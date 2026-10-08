@@ -250,7 +250,8 @@
     "verify:bill-number-on-order": "node scripts/verify-bill-number-on-order.mjs",
     "verify:server-only-tables": "node scripts/verify-server-only-tables.mjs",
     "verify:tax-rate-is-a-rate": "node scripts/verify-tax-rate-is-a-rate.mjs",
-    "verify:invoice-is-final": "node scripts/verify-invoice-is-final.mjs"
+    "verify:invoice-is-final": "node scripts/verify-invoice-is-final.mjs",
+    "verify:sentry-privacy": "node --experimental-strip-types --no-warnings scripts/verify-sentry-privacy.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"

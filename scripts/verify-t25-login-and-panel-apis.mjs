@@ -136,7 +136,8 @@ check("P04632", "an empty ADMIN_PASSWORD can never match",
 check("P04633", "a deliberate block and a wrong-tries lockout are different answers",
   has(CODE.staffLogin, "bad(blocked ? { blocked: true } : { locked: true })"));
 check("P04634", "the redirect target only accepts a same-site relative path",
-  has(CODE.staffLogin, 'rawNext.startsWith("/") && !rawNext.startsWith("//")'));
+  // (sweep #10 T17 item 9: the prefix test let "/\\other.site" through; the target now goes through sameSitePath.)
+  has(CODE.staffLogin, 'const next = sameSitePath(form?.get("next") || "/aevinite", "/aevinite");'));
 check("P04635", "both cookies are secure in production",
   has(CODE.staffLogin, 'const secure = process.env.NODE_ENV === "production"')
   && count(CODE.staffLogin, /secure \}\)/g) >= 2);
@@ -208,13 +209,15 @@ check("P04663", "a successful login clears the login counter",
 check("P04664", "an owner with no owner-panel-enabled restaurant is refused with a reason",
   has(CODE.panelLogin, "The owner panel isn't enabled for any of your restaurants."));
 check("P04665", "the owner's entitlement is read UNCACHED at the door",
-  has(CODE.panelLogin, "ownerPanelEnabled(u.id, false)"));
+  // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
+  has(CODE.panelLogin, "enabledOwnedRestaurantIds(u.id, false)"));
 check("P04666", "a binned restaurant blocks every non-owner role, before the panel check",
   CODE.panelLogin.indexOf("isRestaurantDeleted(u.restaurant_id)") < CODE.panelLogin.indexOf("isPanelEnabled(u.role"));
 check("P04667", "a disabled panel refuses the login with an actionable sentence",
   has(CODE.panelLogin, "This panel isn't enabled for your restaurant. Ask your admin to turn it on."));
 check("P04668", "the login log row carries the person's OWN restaurant_id",
-  has(CODE.panelLogin, "restaurant_id: u.restaurant_id ?? null"));
+  // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
+  has(CODE.panelLogin, ": (u.restaurant_id ?? null),") && has(CODE.panelLogin, "await ownerLogRestaurant(u.id, [restaurantId, u.restaurant_id], ownedIds)"));
 check("P04669", "the login log row carries the stable actor_id",
   has(CODE.panelLogin, "actor_id: u.id"));
 check("P04670", "the login log detail does not repeat the name three times",
@@ -573,8 +576,113 @@ for (const [id, value, why] of COOKIE_JUNK) {
 }
 check("P78766", "a cookie whose issued-at is older than 7 days is refused without a database read",
   (await UA.userFromCookie(`someid.${Date.now() - 8 * 24 * 3600_000}.sig`)) === null);
+// P78767 used the id "no-such-user" until 2026-10-08. Against this stub that reached the lookup and
+// came back empty — but against the REAL database a non-uuid id is a refusal (22P02), which the code
+// read as an outage. The id is uuid-shaped now, so this row still proves what it says; item 4 below
+// proves the non-uuid case never reaches the database at all.
 check("P78767", "…and one inside the window gets as far as the lookup (it then fails on the signature)",
-  (await UA.userFromCookie(`no-such-user.${Date.now()}.sig`)) === null);
+  await (async () => { resetWorld(); const r = await UA.userFromCookie(`00000000-0000-4000-8000-00000000abcd.${Date.now()}.sig`);
+    return r === null && G.READS.some((x) => x.table === "staff_users"); })());
+// SWEEP #10 T17, item 4 — a cookie whose id cannot be a staff id is "not signed in", decided BEFORE
+// the database. A refused non-uuid used to be thrown as AuthDbError → 503 "busy" for a week.
+for (const [cid, idPart, why] of [
+  ["P186010", "abc", "a short word"], ["P186011", "no-such-user", "a hyphenated word"],
+  ["P186012", "00000000-0000-0000-0000-00000000000", "a uuid one character short"],
+  ["P186013", "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz", "uuid-shaped but not hex"],
+  ["P186014", "undefined", "the word undefined"],
+]) {
+  resetWorld();
+  let threw = false, r;
+  try { r = await UA.userFromCookie(`${idPart}.${Date.now()}.sig`); } catch { threw = true; }
+  check(cid, `a fresh cookie whose id is ${why} is "not signed in" — no throw, and no database read`,
+    !threw && r === null && !G.READS.some((x) => x.table === "staff_users"), { threw, reads: G.READS.length });
+}
+// SWEEP #10 T17, item 5 — /r/<slug>/owner is a ROUTE HANDLER, so a throw there has no error page to
+// land on: a database blip on the slug lookup answered the platform's bare "Internal Server Error".
+{
+  const ow = stripComments(read("app/r/[restaurant]/owner/route.ts"));
+  const tryAt = ow.indexOf("try {\n    r = await getRestaurantBySlug(restaurant);");
+  check("P186016", "/r/<slug>/owner looks the restaurant up inside a try (getRestaurantBySlug THROWS on a failed read)",
+    tryAt > 0 && count(ow, /await getRestaurantBySlug\(/g) === 1);
+  check("P186017", "…and its catch answers 503 with a retry-after, in words, never a bare 500",
+    /status: 503/.test(ow.slice(tryAt, tryAt + 1600)) && /retry-after/.test(ow.slice(tryAt, tryAt + 1600)) && /Can't reach the server/.test(ow.slice(tryAt, tryAt + 1600)));
+  check("P186018", "…and the try-again page names no restaurant (it could not read one)",
+    !/\$\{(r|restaurant)\b/.test(ow.slice(tryAt, ow.indexOf("{ status: 503", tryAt))));
+}
+// SWEEP #10 T17, item 6 — the admin console's card must read EVERY answer /api/staff-login gives.
+// It knew two (ok, locked); a BLOCKED device and a platform error page both read "Wrong password".
+{
+  const route = CODE.staffLogin, form = CODE.staffLoginForm;
+  const keys = [...new Set([...route.matchAll(/bad\(\{\s*([a-zA-Z]+)\s*:/g)].map((m) => m[1]).concat(
+    [...route.matchAll(/bad\([a-zA-Z.]+ \? \{ ([a-zA-Z]+): true \} : \{ ([a-zA-Z]+)/g)].flatMap((m) => [m[1], m[2]])))];
+  check("P186019", "every refusal key /api/staff-login can send is one the card reads (blocked, locked, attemptsLeft)",
+    keys.length >= 3 && keys.every((k) => new RegExp(`data\\.${k}\\b`).test(form)), keys);
+  check("P186020", "a BLOCKED answer takes the person to the blocked screen instead of saying 'wrong password'",
+    /if \(data\.blocked\) \{ window\.location\.assign\(`\/staff-login\?blocked=1/.test(form));
+  check("P186021", "a reply that is not the door's own JSON (no `ok` key) is the SERVER failing, not a wrong password",
+    has(form, `if (data.ok !== false) { setErr({ kind: "server" }); return; }`) && has(form, `err?.kind === "server" ? "The server didn\\u2019t answer properly`));
+  check("P186022", "…and the blocked/server branches run BEFORE the wrong-password one",
+    form.indexOf("if (data.blocked)") > 0 && form.indexOf("if (data.ok !== false)") > form.indexOf("if (data.blocked)") &&
+    form.indexOf(`setErr(data.locked ?`) > form.indexOf("if (data.ok !== false)"));
+}
+// SWEEP #10 T17, item 7 — an owner's sign-in, sign-out and failed sign-in are filed under a restaurant
+// they OWN. Their staff_users.restaurant_id is a filing home, not ownership: measured 2026-10-08, 1 of
+// 19 live dev owners (owns Aangan + Burger Barn) was filed under French House, so French House's
+// Activity log would have read another restaurant's owner signing in.
+{
+  const PA = await import("@/lib/panelAccess.ts");
+  const R = PA.ownerLogRestaurant;
+  check("P186173", "an owner signing in at a restaurant's own door is filed under THAT restaurant",
+    (await R("u", ["rB", "rH"], ["rA", "rB"])) === "rB");
+  check("P186174", "on the plain door, their home is used only when they own it",
+    (await R("u", [undefined, "rA"], ["rA", "rB"])) === "rA");
+  check("P186175", "a home they do NOT own is never used — the first restaurant they own is",
+    (await R("u", [undefined, "rHOME"], ["rA", "rB"])) === "rA");
+  check("P186176", "a restaurant door they do not own is never used either",
+    (await R("u", ["rX", "rHOME"], ["rA"])) === "rA");
+  check("P186177", "an owner who owns nothing readable is a platform-level row (null), never a guess",
+    (await R("u", ["rX", "rHOME"], [])) === null);
+  check("P186178", "/api/panel-login files a failed OWNER attempt through ownerLogRestaurant, everyone else as before",
+    has(CODE.panelLogin, 'const failRid = a?.role === "owner" && r.reason !== "no_such_name"') && has(CODE.panelLogin, "await ownerLogRestaurant(a?.id || \"\", [restaurantId, a?.restaurant_id])"));
+  check("P186179", "loginUser hands the targeted account's id to the route (for the log only; the person never sees it)",
+    has(CODE.userAuth, "actor: u.name || u.username, id: u.id,") && !rx(CODE.panelLogin, /json\(\{[^}]*attempted/));
+  check("P186180", "no owner sign-in, sign-out or failed sign-in is filed under u.restaurant_id unchecked",
+    !/logAction\(u\.role, "(login|logout)", \{[^}]*restaurant_id: u\.restaurant_id \?\? null/s.test(CODE.panelLogin) && !/restaurant_id: u\.restaurant_id,\s*\n\s*actor: u\.name/.test(CODE.panelLogout));
+}
+// SWEEP #10 T17, item 9 — "where to go after signing in" on the admin console's door must be one of
+// OUR pages. The old test (starts with "/" but not "//") let "/\\example.com" through, which a browser and
+// Next's redirect both read as https://example.com/.
+{
+  const SA = await import("@/lib/staffAuth.ts");
+  const P = SA.sameSitePath, F = "/aevinite";
+  const OFF = ["/\\example.com", "/\\/example.com", "//example.com", "https://example.com", "javascript:alert(1)", "\\\\example.com", "/\texample.com", "/\nexample.com", "", "aevinite", null, undefined, 42];
+  check("P186181", "a backslash address that browsers read as another website is refused",
+    P("/\\example.com", F) === F && P("/\\/example.com", F) === F, [P("/\\example.com", F), P("/\\/example.com", F)]);
+  check("P186182", "every off-site, scheme, relative, control-character or non-text target falls back to the console",
+    OFF.every((v) => P(v, F) === F), OFF.map((v) => P(v, F)).filter((x) => x !== F));
+  check("P186183", "our own pages pass through unchanged, query and hash included",
+    P("/aevinite", F) === "/aevinite" && P("/aevinite/printing?x=1#a", F) === "/aevinite/printing?x=1#a" && P("/owner?rid=00000000-0000-0000-0000-000000000001", F) === "/owner?rid=00000000-0000-0000-0000-000000000001");
+  check("P186184", "a percent-encoded backslash stays a harmless path on our own site",
+    P("/%5Cexample.com", F) === "/%5Cexample.com");
+  check("P186185", "/api/staff-login decides `next` through sameSitePath, not a hand-rolled prefix test",
+    has(CODE.staffLogin, 'const next = sameSitePath(form?.get("next") || "/aevinite", "/aevinite");') && !/startsWith\("\/\/"\)/.test(CODE.staffLogin));
+  check("P186186", "the admin card follows only the SERVER's checked `next`, never the raw ?next it was opened with",
+    has(CODE.staffLoginForm, 'window.location.assign(data.next || "/aevinite")') && !/assign\(data\.next \|\| next\)/.test(CODE.staffLoginForm));
+  check("P186187", "the failed-password redirect carries `next` only as an ENCODED query value",
+    has(CODE.staffLogin, "&next=${encodeURIComponent(next)}"));
+  check("P186188", "the staff door's card honours ?next only when it equals the person's own panel (unchanged)",
+    has(CODE.loginForm, "const dest = next && next === home ? next : home;"));
+}
+// SWEEP #10 T17, item 10 — the three sign-in cards fit the room they sit in. The page keeps a 16px gutter,
+// so a viewport-based width (92vw / 94vw) came out WIDER than that room at phone width: measured at 360px,
+// right-hand gaps of 13px and 6px against 16px on the left. 100% of the page's own box is exactly the room.
+for (const [cid, key, max] of [["P186189", "loginForm", "380px"], ["P186190", "staffLoginForm", "360px"], ["P186191", "blockedView", "380px"]]) {
+  check(cid, `${F[key]}: the card is min(100%, ${max}) — never a vw width that overhangs the page's gutter`,
+    has(CODE[key], `width: "min(100%, ${max})"`) && !/width: "min\(\d+vw/.test(CODE[key]));
+}
+check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
+  (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
+    return a > 0 && b > a; })());
 
 // ── loginUser: the real function, driven against fixtures ──
 async function world(rows, owners = []) {
@@ -738,11 +846,12 @@ check("P78819", "every non-transient refusal reason has its own admin-log senten
 check("P78820", "the refusal row is filed under the TARGETED account's panel, not always 'admin'",
   has(PL, 'logAction((a?.role ?? "admin"), "login_failed"'));
 check("P78821", "…and under the targeted account's restaurant",
-  has(PL, "restaurant_id: a?.restaurant_id ?? null"));
+  // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
+  has(PL, ": (a?.restaurant_id ?? null);") && has(PL, "restaurant_id: failRid,"));
 check("P78822", "the person only ever sees r.error, never r.reason",
   !rx(PL, /json\(\{[^}]*reason/));
 check("P78823", "an owner is checked against what they OWN, never against their home namespace",
-  before(PL, 'if (u.role === "owner")', "ownerPanelEnabled(u.id, false)"));
+  before(PL, 'if (u.role === "owner")', "enabledOwnedRestaurantIds(u.id, false)"));
 check("P78824", "a refused owner login is recorded as login_denied, a different event from login_failed",
   count(PL, /"login_denied"/g) === 3);
 check("P78825", "the binned-restaurant refusal names the recycle bin in the log",
@@ -772,7 +881,7 @@ check("P78836", "the not-a-person check and the turnstile check share ONE refusa
 check("P78837", "the turnstile answer is AWAITED (an un-awaited promise is always truthy)",
   has(PL, "await verifyTurnstile("));
 check("P78838", "…and so is every ladder/entitlement read on the success path",
-  count(PL, /await (ownerPanelEnabled|isRestaurantDeleted|isPanelEnabled)\(/g) === 3);
+  count(PL, /await (enabledOwnedRestaurantIds|isRestaurantDeleted|isPanelEnabled)\(/g) === 3);
 check("P78839", "the sign-in log carries the device, so 'which tablet was this' has an answer",
   has(PL, "device_id: deviceIdFrom(req)"));
 check("P78840", "nothing in this file writes the typed password anywhere",
@@ -890,7 +999,8 @@ check("P78884", "a DB failure while reading who it was is caught and printed, no
 check("P78885", "the logout still happens when nobody could be identified",
   has(PLO, "if (u) {"));
 check("P78886", "the logout row names the restaurant, so it files under the right tenant",
-  has(PLO, "restaurant_id: u.restaurant_id"));
+  // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
+  has(PLO, 'restaurant_id: u.role === "owner" ? await ownerLogRestaurant(u.id, [u.restaurant_id]) : u.restaurant_id,'));
 check("P78887", "…and the device, so a shared tablet's sign-outs are distinguishable",
   has(PLO, "device_id: deviceIdFrom(req)"));
 check("P78888", "the redirect is 303, so the browser follows with a GET and cannot re-post",
@@ -1172,9 +1282,11 @@ check("P79023", "the blocked page and the locked message are different answers w
 check("P79024", "the no-JS redirect carries the original destination through",
   has(SL, "next=${encodeURIComponent(next)}"));
 check("P79025", "…and that destination has already been sanitised",
-  before(SL, "const next = rawNext.startsWith", "encodeURIComponent(next)"));
+  // (sweep #10 T17 item 9: the prefix test let "/\\other.site" through; the target now goes through sameSitePath.)
+  before(SL, "const next = sameSitePath(", "encodeURIComponent(next)"));
 check("P79026", "a protocol-relative //evil.example is refused as a destination",
-  has(SL, '!rawNext.startsWith("//")'));
+  // (sweep #10 T17 item 9: the prefix test let "/\\other.site" through; the target now goes through sameSitePath.)
+  (await import("@/lib/staffAuth.ts")).sameSitePath("//evil.example", "/aevinite") === "/aevinite");
 check("P79027", "an absent destination falls back to the console's own home",
   has(SL, '|| "/aevinite"'));
 check("P79028", "the JSON reply hands back the sanitised destination, so the client cannot pick its own",
@@ -1321,11 +1433,13 @@ check("P79094", "the trap is invisible to a person but present in the form",
 check("P79095", "the staff card's own field style sets box-sizing, so a 360px phone does not overflow",
   has(LF, 'boxSizing: "border-box"'));
 check("P79096", "…and the card itself is capped at the viewport width",
-  has(LF, 'width: "min(92vw, 380px)"'));
+  // (sweep #10 T17 item 10: capped at the page's own box, min(100%, …) — a vw width overhung the 16px gutter.)
+  has(LF, 'width: "min(100%, 380px)"'));
 check("P79097", "the admin card is capped the same way",
-  has(CODE.staffLoginForm, 'width: "min(92vw, 360px)"'));
+  // (sweep #10 T17 item 10: capped at the page's own box, min(100%, …) — a vw width overhung the 16px gutter.)
+  has(CODE.staffLoginForm, 'width: "min(100%, 360px)"'));
 check("P79098", "the blocked card is capped AND scrolls, so its longer text still fits a phone",
-  has(CODE.blockedView, 'width: "min(94vw, 380px)"') && has(CODE.blockedView, 'overflowY: "auto"'));
+  has(CODE.blockedView, 'width: "min(100%, 380px)"') && has(CODE.blockedView, 'overflowY: "auto"'));
 check("P79099", "every input on the staff card is 16px, so iOS does not zoom the page on focus",
   has(LF, "fontSize: 16,"));
 check("P79100", "…and so is the admin card's password box", has(CODE.staffLoginForm, "fontSize: 16"));
@@ -1492,7 +1606,6 @@ const MONEY_GATES = [
   ["P79173", "take_orders", "punching an order from the manager panel"],
   ["P79174", "parcel", "a counter parcel"],
   ["P79176", "edit_menu", "changing the menu"],
-  ["P79177", "print_setup", "setting the printers up"],
   ["P79178", "print_here", "making this screen the printer"],
   ["P79179", "view_ratings", "handling a guest rating"],
   ["P79180", "banquet", "banquet billing"],
@@ -1500,6 +1613,14 @@ const MONEY_GATES = [
 for (const [id, flag, what] of MONEY_GATES) {
   check(id, `${what} asks managerCan("${flag}")`, has(W, `managerCan(g, rid, "${flag}")`));
 }
+// P79177 ASSERTED THE OPPOSITE UNTIL 2026-10-08, and was red on main for 24 days. It expected
+// "setting the printers up" to ask managerCan("print_setup") — the permission the owner REMOVED on
+// 2026-09-14 (ecec794e): asked whether a manager may set printers up, he ruled "That setup will be done
+// by me only", and printer setup became Aevidine's, from the admin console. The subject moved on
+// purpose; the check now says what is true today, so it goes red if the old door comes back.
+// (Sweep #10, T17, item 2. docs/REJECTED-IDEAS.md → Reversed, the `print_setup` row.)
+check("P79177", "setting the printers up is NOT offered from the manager panel any more (owner, 2026-09-14)",
+  !has(W, `managerCan(g, rid, "print_setup")`) && !/["']print_setup["']/.test(W));
 check("P79175", "a delivery-app order and a counter parcel are told apart, and each asks its OWN rung",
   has(CODE.editor, "async function platformOrParcelCan(") && has(CODE.editor, 'const flag = isParcel ? "parcel" : "platform";')
   && count(W, /platformOrParcelCan\(g, rid, owns\.source\)/g) >= 3);
@@ -1568,6 +1689,37 @@ check("P79192", "…and only on a channel this restaurant actually has switched 
 // `--ids` walks this block too, so the printed id list is COMPLETE whether or not a server is up —
 // otherwise the ledger would be written from a list that silently dropped fifty rows. No request
 // is made in that mode.
+// ── SWEEP #10, T17 — the staff door under a database blip (ids from T17's block P186001–P187000) ──
+// Item 3 (2026-10-08): two reads at the staff door THREW instead of answering — the restaurant lookup
+// on /r/<slug>/login and the owner's "which restaurants do I have" — so a blip came back as a bare 500
+// and the card said "Network error". Every throwing read at this door must now sit inside a try that
+// answers 503 + transient, and the card must tell "the server answered badly" from "no network".
+head("S10-T17. a database blip at the staff door says 'try again', never 'network error'");
+{
+  const pl = CODE.panelLogin;
+  const lineOf = (src, needle) => src.split("\n").find((l) => l.includes(needle)) || "";
+  check("P186001", "/api/panel-login looks the restaurant up inside a try (it THROWS on a failed read)",
+    /try\s*\{[^}]*await getRestaurantBySlug\(/.test(lineOf(pl, "getRestaurantBySlug(")), lineOf(pl, "getRestaurantBySlug("));
+  check("P186002", "/api/panel-login asks which restaurants an owner has inside a try (OwnedLookupFailed)",
+    /try\s*\{[^}]*await enabledOwnedRestaurantIds\(/.test(lineOf(pl, "enabledOwnedRestaurantIds(u.id")), lineOf(pl, "enabledOwnedRestaurantIds(u.id"));
+  check("P186003", "…and both catches answer through the one tryAgain() helper",
+    count(pl, /catch \(e\) \{ return tryAgain\(/g) === 2, count(pl, /catch \(e\) \{ return tryAgain\(/g));
+  check("P186004", "tryAgain() answers 503 with transient:true — retryable, never a 4xx and never a bare 500",
+    /status:\s*503/.test(lineOf(pl, "transient: true }, { status:")) && has(pl, "transient: true"));
+  check("P186005", "…in the SAME words loginUser uses for its own failed lookup",
+    has(pl, `"Can't reach the server — try again in a moment."`) && has(CODE.userAuth, `"Can't reach the server — try again in a moment."`));
+  check("P186006", "no other awaited read in /api/panel-login can throw bare (each remaining helper swallows its own errors)",
+    ["isRestaurantDeleted(", "isPanelEnabled(", "rateAllowed(", "rateResetOnSuccess(", "logAction(", "loginUser("].every((n) => has(pl, n)) &&
+    !/await (getRestaurantBySlug|ownerPanelEnabled|enabledOwnedRestaurantIds)\(/.test(pl.split("\n").filter((l) => !/try\s*\{/.test(l)).join("\n")));
+  const lf = CODE.loginForm;
+  check("P186007", "the staff card reads the reply with r.json().catch(), so a non-JSON server answer is not a thrown 'network error'",
+    has(lf, "await r.json().catch(() => null)"));
+  check("P186008", "…and says the SERVER didn't answer properly, not the network",
+    has(lf, "The server didn\\u2019t answer properly"));
+  check("P186009", "'Network error' is now only what a fetch that never arrived says",
+    count(lf, /Network error/g) === 1 && /catch \{\s*setErr\("Network error/.test(lf));
+}
+
 if (LIVE || IDS_ONLY) {
   head(`8. Watched running against ${BASE} (P79371–P79420)`);
   // A guard that cannot reach the app must say so in one sentence and stop, never hand back a

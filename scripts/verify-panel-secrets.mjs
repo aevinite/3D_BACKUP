@@ -19,7 +19,7 @@
 //
 // Run: node scripts/verify-panel-secrets.mjs   (or npm run verify:panel-secrets)
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, relative } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,6 +57,27 @@ if (!existsSync(libPath)) {
   }
   if (!/export function panelSafeSettings/.test(lib)) fail("panelSafeSettings() is gone from lib/panelSettings.ts");
   else ok("panelSafeSettings() is exported");
+
+  // THE TWO CHECKS ABOVE COULD ONLY PASS (sweep #10 T17, item 8, 2026-10-08). `/platform_channels/`
+  // matched the file's own COMMENTS, so deleting the column from the list stayed green; and nothing
+  // ever RAN panelSafeSettings, so switching the strip off stayed green too — both sabotages were
+  // tried and both passed. So: read the list from the CODE (comments stripped), then call the real
+  // function on a row that carries every private column, and look at what comes out.
+  const code = lib.replace(/^[ \t]*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const listSrc = (code.match(/PRIVATE_SETTINGS_COLUMNS = \[([\s\S]*?)\]/) || [])[1] || "";
+  if (!/"platform_channels"/.test(listSrc)) fail("PRIVATE_SETTINGS_COLUMNS (the code, not a comment) no longer lists \"platform_channels\"");
+  else ok("PRIVATE_SETTINGS_COLUMNS lists platform_channels in the code itself");
+  const { panelSafeSettings, PRIVATE_SETTINGS_COLUMNS } = await import(pathToFileURL(libPath).href);
+  const row = { restaurant_id: "r1", tax_rate: 5 };
+  for (const c of PRIVATE_SETTINGS_COLUMNS) row[c] = { zomato: { on: true, key: "SECRET-KEY-t17" } };
+  const outRow = panelSafeSettings(row);
+  const kept = PRIVATE_SETTINGS_COLUMNS.filter((c) => c in outRow);
+  if (kept.length || JSON.stringify(outRow).includes("SECRET-KEY-t17")) fail(`panelSafeSettings() RAN and still handed back ${kept.join(", ") || "the key"} — a panel would receive it`);
+  else ok("panelSafeSettings() RUN on a row with every private column hands none of them back");
+  if (outRow.tax_rate !== 5 || outRow.restaurant_id !== "r1") fail("panelSafeSettings() dropped an ordinary setting — panels would lose real settings");
+  else ok("…and keeps the ordinary settings");
+  if (!PRIVATE_SETTINGS_COLUMNS.every((c) => c in row)) fail("panelSafeSettings() edited the row in place — the floor cache is shared");
+  else ok("…and copies rather than deleting from the shared row");
 }
 
 // 2 ── every settings-row payload strips, or says why it isn't one

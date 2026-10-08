@@ -46,7 +46,9 @@ const MAX_LOGIN_CANDIDATES = 50;
 export type LoginFailReason = "empty" | "too_long" | "transient" | "no_such_name" | "locked" | "wrong_password" | "disabled";
 // Who/where an attempt was aimed at, for the audit log. For an unknown name we only
 // know what was typed; for a wrong password we know the real account it targeted.
-export type LoginAttempt = { username: string; role?: Role; restaurant_id?: string; actor?: string | null };
+// `id` (the targeted account, when one was matched) lets the route file an OWNER's failed attempt under
+// a restaurant they own rather than their filing home (panelAccess.ownerLogRestaurant). Never shown.
+export type LoginAttempt = { username: string; role?: Role; restaurant_id?: string; actor?: string | null; id?: string };
 
 // The HMAC signing key for cookies. Prefer a dedicated SESSION_SECRET; fall back
 // to the admin password so the gate still works if it isn't set separately.
@@ -233,7 +235,7 @@ export async function loginUser(
   // Build the audit-log "who was targeted" from a candidate row (the real account a
   // wrong password / lockout was aimed at). Used only for the admin log, never shown.
   const attemptOf = (u: any): LoginAttempt => ({
-    username: uname, role: u.role, restaurant_id: u.restaurant_id, actor: u.name || u.username,
+    username: uname, role: u.role, restaurant_id: u.restaurant_id, actor: u.name || u.username, id: u.id,
   });
   // Same generic message whether the name is missing or the password is wrong —
   // never reveal which names exist.
@@ -290,6 +292,9 @@ export async function loginUser(
 // A transient outage must surface as 503 ("try again"), never as "please log in".
 export class AuthDbError extends Error {}
 
+// A staff id is a uuid (migration 054: `id uuid PRIMARY KEY`). See the note in userFromCookie.
+const STAFF_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Resolve a USER_COOKIE value to its (active) user: verify the HMAC signature
 // against the user's CURRENT role + token_version, and reject if older than the
 // max age. Any mismatch (tampered, role changed, token bumped, expired) → null.
@@ -302,6 +307,17 @@ export async function userFromCookie(value: string | undefined | null): Promise<
   const iat = Number(iatStr);
   if (!id || !Number.isFinite(iat)) return null;
   if (Date.now() - iat > TOKEN_TTL_MS) return null; // expired
+  // A COOKIE WHOSE ID CANNOT BE A STAFF ID IS "NOT SIGNED IN", NOT "THE DATABASE IS DOWN" (sweep #10
+  // T17, item 4). `staff_users.id` is a uuid, so a damaged value ("abc.<recent time>.<sig>") reached
+  // Postgres, which REFUSES it (22P02, invalid input syntax for type uuid). That refusal arrives as
+  // `res.error` — the same shape as a real outage — so after the retry below it was thrown as
+  // AuthDbError: requireRole answered every panel call 503 "busy, try again" for the cookie's whole
+  // remaining week (the panel can never reach the sign-in screen from there), and the panel LAYOUTS,
+  // which do not catch it, rendered the crash page. Same fault, and same fix, as ownerScope's
+  // isRestaurantId (T28, 2026-09-16): a value that cannot be an id is never asked about. This also
+  // saves the database trip and the 120ms retry for every such request. Not a permission change —
+  // a uuid-shaped id still has to match a live row AND the HMAC signature below.
+  if (!STAFF_ID.test(id)) return null;
   // Retry the lookup once on a hard error before giving up (bug #9, 2026-07-06): a
   // brief DB/DNS flap otherwise threw AuthDbError, which the page/layout gates surface
   // as a raw 500. A single ~120ms retry clears most transient flaps so the gate never

@@ -10,7 +10,7 @@
 // operation log so the admin can see who tried what on the most-targeted screen.
 
 import { NextRequest, NextResponse } from "next/server";
-import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, safeEqual, adminPassword } from "@/lib/staffAuth";
+import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, safeEqual, adminPassword, sameSitePath } from "@/lib/staffAuth";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { throttleStatus, throttleFail, throttleReset, throttleIsBlocked, clientIp } from "@/lib/loginThrottle";
 import { recordAlert } from "@/lib/rateLimit";
@@ -28,9 +28,9 @@ export async function POST(req: NextRequest) {
 
   const form = await req.formData().catch(() => null);
   const password = String(form?.get("password") || "");
-  const rawNext = String(form?.get("next") || "/aevinite");
-  // Only allow same-site relative paths as the redirect target (no open redirect).
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/aevinite";
+  // Only one of OUR pages may be the target — sameSitePath asks the URL parser, so "/\\other.site"
+  // (which a browser reads as "//other.site") is refused too (sweep #10 T17, item 9).
+  const next = sameSitePath(form?.get("next") || "/aevinite", "/aevinite");
 
   // The client form fetches with Accept: application/json so it can keep the typed password,
   // show "N attempts left" and auto-clear the error — without a full page reload. A no-JS

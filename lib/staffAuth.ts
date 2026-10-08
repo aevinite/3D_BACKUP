@@ -37,3 +37,24 @@ export async function tokenIsValid(token?: string | null): Promise<boolean> {
   if (!p || !token) return false;
   return safeEqual(token, await sha256hex(p));
 }
+
+// "WHERE TO GO AFTER SIGNING IN" MUST BE ONE OF OUR OWN PAGES (sweep #10 T17, item 9, 2026-10-08).
+//
+// /api/staff-login accepted any `next` that started with "/" but not "//". Browsers — and the URL
+// parser Next uses for the redirect — read a BACKSLASH as a slash, so "/\\example.com" passed that test
+// and resolved to https://example.com/: a link to the admin console's sign-in page could hand the
+// admin, password just typed, to a different website. This asks the parser itself instead of guessing
+// at its rules: resolve against a placeholder origin and keep the result only if it is still on it.
+// Backslashes and control characters are refused outright, since nothing of ours needs them.
+// Returns the path + query + hash to use, or `fallback`.
+export function sameSitePath(raw: unknown, fallback: string): string {
+  const s = typeof raw === "string" ? raw : "";
+  if (!s.startsWith("/") || s.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(s)) return fallback;
+  try {
+    const base = "http://same-site.invalid";
+    const u = new URL(s, base);
+    return u.origin === base ? u.pathname + u.search + u.hash : fallback;
+  } catch {
+    return fallback;
+  }
+}

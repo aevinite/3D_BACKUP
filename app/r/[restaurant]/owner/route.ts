@@ -21,7 +21,26 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ restaurant: string }> }) {
   const { restaurant } = await ctx.params;
-  const r = await getRestaurantBySlug(restaurant);
+  // A DATABASE BLIP HERE IS "TRY AGAIN", NOT A BARE SERVER ERROR (sweep #10 T17, item 5).
+  // getRestaurantBySlug THROWS when it cannot read the restaurant (and has no recent answer cached).
+  // In a page that throw reaches app/error.tsx; in a route handler like this one there is no error
+  // boundary, so an owner opening their bookmark during a blip got the platform's plain
+  // "Internal Server Error". Answer the same thing every other door does for a failed read: 503,
+  // in words, with a way to try again — and nothing about the restaurant, since we could not read it.
+  let r: Awaited<ReturnType<typeof getRestaurantBySlug>>;
+  try {
+    r = await getRestaurantBySlug(restaurant);
+  } catch (e) {
+    console.error("[r/owner] couldn't look the restaurant up:", e instanceof Error ? e.message : e);
+    return new NextResponse(
+      `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try again in a moment</title>` +
+      `<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1220;color:#dbe7ff;font-family:system-ui,sans-serif;padding:16px">` +
+      `<div style="max-width:360px;text-align:center"><h1 style="font-size:20px;margin:0 0 8px">Can't reach the server</h1>` +
+      `<p style="margin:0 0 16px;color:#8aa0c9;font-size:14px;line-height:1.5">This page couldn't load just now. It usually comes back by itself in a moment.</p>` +
+      `<a href="" style="display:inline-block;padding:11px 18px;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;text-decoration:none">Try again</a></div></body>`,
+      { status: 503, headers: { "content-type": "text/html; charset=utf-8", "retry-after": "5", "cache-control": "no-store" } },
+    );
+  }
   // An owner's bookmark of the old address still gets them in (mig 350).
   //
   // TEMPORARY (307), NOT PERMANENT (308) — and on this platform that is the important choice. A
