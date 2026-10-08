@@ -47,6 +47,7 @@ message. Improvements were not built; they are in the chat report only. Ledger: 
 | 40 | (guards) | session-ux / edge-cases blind: French House sessions are OFF; party chip; p_device | precondition exit 2; fixed; proved with sessions on, restored |
 | 41 | Manager → Settings → Printing → Show the code | the code box drew with no frame (undeclared --accent) | verify:look-ink re-pinned to the tablet's replacement bars |
 | 42 | (guard) | verify:ledger-index refused a first-time terminal number's ledger | accepts the sweep-10 row that names the file |
+| 43 | Owner → Settings (backup) | printing ALLOWED but no paper line listed → no card drawn, yet the page asked /api/owner/printing every 15s (~1,200 reads an hour per open tab); verify:owner-live500 P52830 caught it on backup after the merge | refresh gated on the card's own condition; verify:owner-s7 P21201b, sabotaged |
 
 Not fixed, with the reason (in the chat report): `verify:db-parity` (reads the client stack; its repo-only
 red is migration 388's same-number pair, T35's), the six `verify:t14-live` Reports reds (T21), the

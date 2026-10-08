@@ -172,7 +172,11 @@ export default function OwnerSettings() {
   // a 30s truth window (HELPER_STALE_MS), so a slower tick would let this card say "ready" about a
   // computer that had already gone to sleep. The fix is not a slower clock, it is not running the
   // clock when there is no card and no one watching.
-  const showsPrinting = !!printing;
+  // "The card is on screen" is the card's OWN render condition — a row in `data.printing` — not
+  // "/api/owner/printing said allowed". The two disagree for a restaurant that is allowed printing but
+  // lists no paper line, and the clock then ran every 15s for a card that was never drawn (sweep #10
+  // T39 item 43 — measured on backup 2026-10-08; verify:owner-live500 P52830 caught it).
+  const showsPrinting = !!printing && !!(data?.printing && data.printing.length);
   useEffect(() => {
     if (!showsPrinting) return;
     let t: ReturnType<typeof setInterval> | null = null;
