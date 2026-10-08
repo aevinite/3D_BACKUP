@@ -21,6 +21,7 @@ import { effectiveTaxRate, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 // The rate ONE order was charged at is decided in the same file the printed bill uses, so this
 // path and the paper can never answer differently — see orderTaxRate's own note for why it moved.
 import BILLDOC from "@/public/panels/billdoc.js";
+import { BUSY_MESSAGE } from "@/lib/dbRefusal";
 
 export type SplitLeg = {
   amount: number;
@@ -56,6 +57,19 @@ export type SplitResult =
  *  becoming a whole-bill payment method that records money nobody collected. */
 export const PAY_LATER = "Pay later";
 export const SPLIT_METHODS: readonly string[] = [...PAYMENT_METHODS, PAY_LATER];
+
+// ── A READ THAT FAILED IS NOT AN ANSWER (sweep #10 T30, item 4, 2026-10-09) ──────────────────────
+// Every read below used to keep only `.data` and never look at `.error`. So when the database did
+// not answer, the order read came back null and the waiter was told "Nothing to settle — already
+// paid" (a 409 the panel shows and never retries) for a bill nobody had paid; a failed settings
+// read quietly priced the due at the 5% default; and a failed pay-later lookup either said the
+// person "isn't in this restaurant's pay-later book" or ADDED them a second time. A failed read now
+// answers the busy reply — 503, which the panel's outbox keeps and sends again, the same as no
+// internet — and the detail is logged here, never shown. readGuard.ts states the same rule.
+const busy = (step: string, error: unknown): SplitResult => {
+  console.error(`[paySplit] ${step} read failed:`, (error as { message?: unknown })?.message ?? error);
+  return { ok: false, status: 503, message: BUSY_MESSAGE };
+};
 
 /** Is this part a tab rather than money? */
 const isPayLater = (s: SplitLeg) => String(s?.method) === PAY_LATER;
@@ -100,9 +114,11 @@ export async function settleBillInParts(
 
   // Same scoping as a normal settle: the table's OPEN session's orders (fallback:
   // its active un-archived orders), only accepted + unpaid + non-cancelled ones.
-  const openSess = (await sb.from("sessions").select("id")
+  const sessQ = await sb.from("sessions").select("id")
     .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
-    .order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
+    .order("last_activity_at", { ascending: false }).limit(1);
+  if (sessQ.error) return busy("open session", sessQ.error);
+  const openSess = sessQ.data?.[0] as { id: string } | undefined;
   // A SOFT-DELETED ORDER IS NOT PART OF THE BILL (2026-08-05) — it was neither excluded from the
   // due nor from the rows marked paid, so a split settle collected for a tombstoned line. The
   // printed bill and lib/billLedger.ts both drop it now; this is the third door onto the same rule.
@@ -113,7 +129,9 @@ export async function settleBillInParts(
   // 400, not 200: the cap silently CHANGES the answer rather than refusing — the due would be
   // summed over a partial set and only those rows marked paid. 200 KOTs on one open table is
   // implausible, but a cap that quietly under-collects is the wrong failure mode for money.
-  const rows = (await oq.limit(400)).data as { id: string; subtotal: number; discount: number; session_id: string | null }[] | null;
+  const ordQ = await oq.limit(400);
+  if (ordQ.error) return busy("orders", ordQ.error);
+  const rows = ordQ.data as { id: string; subtotal: number; discount: number; session_id: string | null }[] | null;
   if (rows && rows.length >= 400) {
     return { ok: false, status: 409, message: "This bill has too many orders to split in one go — settle it in parts from the table instead." };
   }
@@ -136,7 +154,9 @@ export async function settleBillInParts(
   // own 18% — is not asked for at the dine-in 5%, and a rate corrected today cannot re-price a bill
   // taken this morning. `> 0` on purpose: a genuine 0 (composition) falls through to the settings,
   // which also return 0, rather than being read as "not stamped".
-  const set = (await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle()).data || {};
+  const setQ = await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle();
+  if (setQ.error) return busy("settings", setQ.error);
+  const set = setQ.data || {};
   const settingsRate = effectiveTaxRate(set);
   const r2 = (n: number) => Math.round(n * 100) / 100;
   type MoneyRow = { taxable_base?: number | null; nontax_amount?: number | null; mrp_amount?: number | null; subtotal?: number; discount?: number; tax_rate?: number | null };
@@ -223,8 +243,10 @@ export async function settleBillInParts(
   if (laterPart) {
     const wantId = String(laterPart.khataCustomerId || "").trim();
     if (wantId) {
-      const got = (await sb.from("khata_customers").select("id,name")
-        .eq("restaurant_id", rid).eq("id", wantId).maybeSingle()).data as { id: string; name: string } | null;
+      const gotQ = await sb.from("khata_customers").select("id,name")
+        .eq("restaurant_id", rid).eq("id", wantId).maybeSingle();
+      if (gotQ.error) return busy("pay-later person", gotQ.error);
+      const got = gotQ.data as { id: string; name: string } | null;
       if (!got) return { ok: false, status: 404, message: "That person isn't in this restaurant's pay-later book." };
       customer = got;
     } else {
@@ -232,8 +254,10 @@ export async function settleBillInParts(
       if (!name) return { ok: false, status: 400, message: "A pay-later part needs a person — pick who owes it." };
       const phone = String(laterPart.khataPhone || "").trim().slice(0, 20) || null;
       if (phone) {
-        customer = (await sb.from("khata_customers").select("id,name")
-          .eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data as { id: string; name: string } | null;
+        const byPhone = await sb.from("khata_customers").select("id,name")
+          .eq("restaurant_id", rid).eq("phone", phone).maybeSingle();
+        if (byPhone.error) return busy("pay-later phone", byPhone.error);
+        customer = byPhone.data as { id: string; name: string } | null;
       }
       if (!customer) {
         const made = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone }).select("id,name");

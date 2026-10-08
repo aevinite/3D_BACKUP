@@ -453,6 +453,90 @@ head("8 · an even split of any bill adds back up to that bill");
   }
 }
 
+// ── 9 · what a failed read, a failed save and a second device do to a settle ────────────────
+// (sweep #10 T30, items 4–6, 2026-10-09.) The settle is driven here against a RECORDING stand-in
+// for the supabase client: every read can be made to fail by name, every write is written down,
+// and the orders update can be told that another device already marked some rows paid. Nothing
+// touches a database. The real exported settleBillInParts runs, so these are its own answers.
+{
+  head("9. a failed read, a failed save and a second device (the real settle, against a stand-in)");
+  const { BUSY_MESSAGE } = await import("@/lib/dbRefusal.ts");
+  const ROWS = [
+    { id: "o1", subtotal: 500, total: 525, discount: 0, status: "served", payment_status: "pending", session_id: "s1", taxable_base: 500, nontax_amount: 0, mrp_amount: 0, tax_rate: 0.05 },
+    { id: "o2", subtotal: 500, total: 525, discount: 0, status: "served", payment_status: "pending", session_id: "s1", taxable_base: 500, nontax_amount: 0, mrp_amount: 0, tax_rate: 0.05 },
+  ];
+  // `fail` maps "<op>:<table>" → an error object to answer with. `settledElsewhere` = how many of
+  // the rows the orders UPDATE finds already settled by somebody else (0 = none, 2 = all of them).
+  function standIn({ fail = {}, settledElsewhere = 0 } = {}) {
+    const writes = [];
+    const from = (table) => {
+      const st = { op: "select", payload: null, filters: [] };
+      const resolve = async (single) => {
+        if (st.op !== "select") writes.push({ table, op: st.op, payload: st.payload, filters: st.filters });
+        const e = fail[`${st.op}:${table}`];
+        if (e) return { data: null, error: e };
+        if (st.op === "select") {
+          if (table === "sessions") return { data: [{ id: "s1" }], error: null };
+          if (table === "orders") return { data: ROWS, error: null };
+          if (table === "settings") return { data: { tax_rate: 0.05 }, error: null };
+          return { data: single ? null : [], error: null };
+        }
+        if (st.op === "insert" && table === "session_payments") return { data: st.payload.map((_, i) => ({ id: `leg${i}` })), error: null };
+        if (st.op === "insert" && table === "khata_customers") return { data: [{ id: "k1", name: st.payload.name }], error: null };
+        if (st.op === "update" && table === "orders") {
+          const inF = st.filters.find((f) => f[0] === "in");
+          const ids = inF ? inF[2] : [];
+          // The conditional update only touches rows that are still unsettled.
+          const conditional = st.filters.some((f) => f[0] === "neq" && f[1] === "payment_status");
+          const left = conditional ? ids.slice(settledElsewhere) : ids;
+          return { data: left.map((id) => ({ id })), error: null };
+        }
+        return { data: null, error: null };
+      };
+      const q = {
+        select: () => q, order: () => q, limit: () => q,
+        eq: (c, v) => (st.filters.push(["eq", c, v]), q), neq: (c, v) => (st.filters.push(["neq", c, v]), q),
+        is: (c, v) => (st.filters.push(["is", c, v]), q), in: (c, v) => (st.filters.push(["in", c, v]), q),
+        insert: (p) => ((st.op = "insert"), (st.payload = p), q), update: (p) => ((st.op = "update"), (st.payload = p), q),
+        delete: () => ((st.op = "delete"), q),
+        maybeSingle: () => resolve(true),
+        then: (res, rej) => resolve(false).then(res, rej),
+      };
+      return q;
+    };
+    return { sb: { from }, writes };
+  }
+  const settle = (sb, splits = [{ amount: 525, method: "Cash" }, { amount: 525, method: "UPI" }]) =>
+    ps.settleBillInParts(sb, { rid: "00000000-0000-0000-0000-000000000001", table: "5", splits });
+  const DB_DOWN = { message: "TimeoutError: The operation was aborted due to timeout", code: "57014" };
+
+  // the happy path first — the stand-in must be able to say yes, or every "no" below proves nothing
+  {
+    const { sb, writes } = standIn();
+    const r = await settle(sb);
+    want(r.ok === true && r.due === 1050, "the stand-in settles an ordinary ₹1,050 bill in two parts (so a refusal below is the code's, not the stand-in's)", r);
+    want(writes.filter((w) => w.op === "insert" && w.table === "session_payments").length === 1, "…recording the parts once", writes.map((w) => `${w.op}:${w.table}`));
+  }
+
+  // item 4 — a failed READ is the busy reply, never an answer
+  for (const [what, key, splits] of [
+    ["the open-session read", "select:sessions"],
+    ["the orders read", "select:orders"],
+    ["the tax-settings read", "select:settings"],
+    ["the pay-later person read (by id)", "select:khata_customers", [{ amount: 525, method: "Cash" }, { amount: 525, method: "Pay later", khataCustomerId: "k-known" }]],
+    ["the pay-later person read (by phone)", "select:khata_customers", [{ amount: 525, method: "Cash" }, { amount: 525, method: "Pay later", khataName: "Ravi", khataPhone: "9000000001" }]],
+  ]) {
+    const { sb, writes } = standIn({ fail: { [key]: DB_DOWN } });
+    const real = console.error; console.error = () => {};
+    let r; try { r = await settle(sb, splits); } finally { console.error = real; }
+    want(r.ok === false && r.status === 503 && r.message === BUSY_MESSAGE,
+      `when ${what} fails, the waiter gets the busy reply (503, kept and sent again) — not "already paid", not a guessed 5%, not "not in the book"`, r);
+    want(writes.length === 0, `…and nothing at all was written — no parts, no stamp, no new pay-later person`, writes.map((w) => `${w.op}:${w.table}`));
+  }
+  want(/if \(ordQ\.error\) return busy\("orders"/.test(PS) && /if \(setQ\.error\) return busy\("settings"/.test(PS),
+    "the source says so where it reads: an errored orders or settings read returns the busy reply");
+}
+
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — split payment does not hold its rules\n`
   : "\n✓ split payment is still mark-paid, and a tab is still a tab\n");
