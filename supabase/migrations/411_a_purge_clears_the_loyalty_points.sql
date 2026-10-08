@@ -18,10 +18,18 @@
 -- forever, purge only the rest" (2026-08-11, mig 309). Points are not a sale. A redemption's effect
 -- on money is the discount stored on the kept bill (sessions), which this does not touch.
 --
--- This is a CREATE OR REPLACE of migration 380's function with exactly two delete lines added. Safe
--- to re-run: it only redefines a function. No data is rewritten when it runs.
+-- This is a CREATE OR REPLACE of the NEWEST definition, migration 384's (which had already removed
+-- `verification_codes` and dropped that table), with exactly two delete lines added. Safe to re-run:
+-- it only redefines a function. No data is rewritten when it runs.
+--
+-- ⚠ THE FIRST DRAFT OF THIS FILE WAS BUILT ON MIGRATION 380, NOT 384 (sweep #10 T39, 2026-10-08).
+-- 384 writes `create or replace function` in lower case and a case-sensitive search for the newest
+-- definition skipped it — so that draft put `delete from verification_codes` back into the purge,
+-- a table 384 drops, and "Remove permanently" failed with `relation "verification_codes" does not
+-- exist` for the ~40 minutes it was live on the dev database. verify:recycle-bin caught it.
+-- verify:purge now also fails if the purge names a table the database does not have.
 
-CREATE OR REPLACE FUNCTION public.admin_purge_restaurant(p_rid uuid)
+create or replace function public.admin_purge_restaurant(p_rid uuid)
  RETURNS void
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -61,7 +69,6 @@ begin
   delete from customers        where restaurant_id = p_rid;
   delete from blocklist        where restaurant_id = p_rid;
   delete from otp_codes        where restaurant_id = p_rid;
-  delete from verification_codes where restaurant_id = p_rid;
   delete from staff_actions    where restaurant_id = p_rid;   -- the working log; the AUDIT stays
   delete from realtime_events  where restaurant_id = p_rid;
   delete from restaurant_owners   where restaurant_id = p_rid;
