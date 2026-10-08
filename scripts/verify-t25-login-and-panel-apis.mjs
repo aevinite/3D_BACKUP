@@ -241,8 +241,9 @@ check("P04677", "a new sign-in clears the previous account's owner snapshots",
   has(CODE.loginForm, "clearOwnerSnaps();"));
 check("P04678", "a new sign-in tells the service worker to wipe saved screens",
   has(CODE.loginForm, 'postMessage({ type: "LFH_CLEAR_DATA" })'));
-check("P04679", "?next is honoured only when it equals this user's own panel home",
-  has(CODE.loginForm, "next && next === home ? next : home"));
+// Round 5, item 31 (owner 2026-10-09) moved this rule: a ?next INSIDE the person's own panel is now kept (deep link).
+check("P04679", "?next is honoured only on this site and only inside this user's own panel home",
+  has(CODE.loginForm, "if (u.origin !== window.location.origin) return home;") && has(CODE.loginForm, 'if (u.pathname !== home && !u.pathname.startsWith(home + "/")) return home;'));
 check("P04680", "the scoped door lands on the scoped panel URL",
   has(CODE.loginForm, "restaurantSlug ? `/r/${restaurantSlug}${base}` : base"));
 check("P04681", "ROLE_HOME here matches lib/panelGate.ts ROLE_HOME", (() => {
@@ -687,8 +688,9 @@ for (const [cid, idPart, why] of [
     has(CODE.staffLoginForm, 'window.location.assign(data.next || "/aevinite")') && !/assign\(data\.next \|\| next\)/.test(CODE.staffLoginForm));
   check("P186187", "the failed-password redirect carries `next` only as an ENCODED query value",
     has(CODE.staffLogin, "&next=${encodeURIComponent(next)}"));
-  check("P186188", "the staff door's card honours ?next only when it equals the person's own panel (unchanged)",
-    has(CODE.loginForm, "const dest = next && next === home ? next : home;"));
+  // Round 5, item 31 moved this rule (see P04679): the landing is decided in ONE function, landingFor.
+  check("P186188", "the staff door's card decides where to land in one place (landingFor), never from a raw ?next",
+    has(CODE.loginForm, "const dest = landingFor(next, home);") && !rx(CODE.loginForm, /router\.push\(next\)/));
 }
 // SWEEP #10 T17, item 10 — the three sign-in cards fit the room they sit in. The page keeps a 16px gutter,
 // so a viewport-based width (92vw / 94vw) came out WIDER than that room at phone width: measured at 360px,
@@ -1879,8 +1881,9 @@ check("P79119", "the panel gate sends a signed-out person to the SCOPED door, wh
   has(read("lib/panelGate.ts"), "redirect(`/r/${slug}/login?next="));
 check("P79120", "…and it names the panel they were heading for, so the sign-in lands them back there",
   has(read("lib/panelGate.ts"), "`/r/${slug}${ROLE_HOME[role]}`"));
-check("P79121", "the card honours that ?next only when it equals this person's own panel",
-  has(LF, "next && next === home ? next : home"));
+// Round 5, item 31: inside this person's own panel (same site), not only equal to its home — see P04679.
+check("P79121", "the card honours that ?next only inside this person's own panel",
+  has(LF, 'if (u.pathname !== home && !u.pathname.startsWith(home + "/")) return home;'));
 check("P79122", "…so a ?next pointing at another site is dropped, not followed",
   !rx(LF, /router\.push\(next\)/));
 check("P79123", "the three doors between them import no analytics, no third-party script and no tracker",

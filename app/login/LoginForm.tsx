@@ -12,6 +12,19 @@ const ROLE_HOME: Record<string, string> = { owner: "/owner", manager: "/manager"
 // restaurantSlug/restaurantName come from the tenant-scoped door (/r/<slug>/login):
 // the slug is posted so only THAT restaurant's staff can match, and the card shows
 // the restaurant's own name instead of the platform brand.
+// The only place a sign-in's ?next is trusted: same site, and inside the signed-in person's own panel.
+function landingFor(next: string, home: string): string {
+  if (!next || !home.startsWith("/") || typeof window === "undefined") return home;
+  try {
+    const u = new URL(next, window.location.origin);
+    if (u.origin !== window.location.origin) return home;
+    if (u.pathname !== home && !u.pathname.startsWith(home + "/")) return home;
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return home;
+  }
+}
+
 export default function LoginForm({
   next, restaurantSlug, restaurantName, notice,
 }: { next: string; restaurantSlug?: string; restaurantName?: string; notice?: string }) {
@@ -61,8 +74,12 @@ export default function LoginForm({
       // keeps saying which restaurant this is.
       const base = ROLE_HOME[data.role];
       const home = base ? (restaurantSlug ? `/r/${restaurantSlug}${base}` : base) : "/menu";
-      // Open-redirect guard: only honour ?next if it points to THIS user's panel.
-      const dest = next && next === home ? next : home;
+      // Open-redirect guard: a ?next is honoured only inside THIS user's own panel (see landingFor).
+      // WHERE TO LAND (sweep #10 T17 round 5, item 31, owner 2026-10-09). The old rule honoured ?next only when it was
+      // EXACTLY the panel's home, so a deep link (an owner's bookmark to /owner/reports) always landed on the home page.
+      // Now a ?next INSIDE this person's own panel is kept — resolved by the browser against this site, so only a path
+      // on this site, under their own home, ever survives (never another site, never someone else's panel).
+      const dest = landingFor(next, home);
       router.push(dest);
     } catch {
       setErr("Network error — please try again.");
