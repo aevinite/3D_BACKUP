@@ -107,6 +107,7 @@ const orphans = await q(`
    where o.archived = false and o.deleted_at is null
      and o.created_at < now() - interval '${DAYS} days'
      ${notControl} ${onlyO}
+     and not exists (select 1 from sessions si where si.id = o.session_id and si.invoice_no is not null)   -- S10 T39 item 30
      and not exists (
        select 1 from sessions s
         where s.restaurant_id = o.restaurant_id      -- the fix: a table belongs to a RESTAURANT
@@ -125,6 +126,7 @@ const abandoned = await q(`
    where s.status = 'open'
      and coalesce(s.last_activity_at, s.opened_at, s.created_at) < now() - interval '${DAYS} days'
      ${notControlS} ${onlyS}
+     and s.invoice_no is null   -- an INVOICED bill is never closed here (S10 T39 item 30)
    group by s.id
    having count(o.id) filter (where not o.archived and o.deleted_at is null) > 0
    order by s.last_activity_at`, true);
@@ -145,10 +147,27 @@ const idle = await q(`
    where s.status = 'open'
      and coalesce(s.last_activity_at, s.opened_at, s.created_at) < now() - interval '${DAYS} days'
      ${notControlS} ${onlyS}
+     and s.invoice_no is null   -- an INVOICED bill is never closed here (S10 T39 item 30)
      and not exists (select 1 from orders o where o.session_id = s.id and not o.archived and o.deleted_at is null)
    order by 3`, true);
 console.log(`\n4 · sessions left open and untouched, with nothing on them: ${idle.length}`);
 for (const s of idle.slice(0, 40)) console.log(`     table ${s.table_number} · last active ${String(s.last_at).slice(0, 16)}`);
+
+// ── AN INVOICED BILL IS LEFT ALONE, AND SAID OUT LOUD (sweep #10 T39 item 30) ──────────────────────
+// Closing a session cancels its unpaid food (migration 020's trigger). On 2026-10-08 this closed four
+// stale French House test bills that already carried invoice numbers 311–314, which left four ISSUED
+// tax invoices fully cancelled with no credit note — the one state docs/COMPLIANCE-GUARDRAILS.md says
+// a bill can never reach (verify:invoice-is-final went red; the four were credited the product's way,
+// with lfh_issue_credit_note). An invoiced bill is ended only through the app's own cancel, which
+// writes the credit note. So every shape above now skips one, and this lists them for a person.
+const invoicedStale = await q(`
+  select s.table_number, s.invoice_no
+    from sessions s
+   where s.status = 'open' and s.invoice_no is not null and not s.invoice_voided
+     and coalesce(s.last_activity_at, s.opened_at, s.created_at) < now() - interval '${DAYS} days'
+     ${notControlS} ${onlyS}
+   order by s.invoice_no limit 50`, true);
+if (invoicedStale.length) console.log(`\n· left alone — open for days but already INVOICED (end them in the app, which issues the credit note): ${invoicedStale.map((x) => `T${x.table_number} inv #${x.invoice_no}`).join(", ")}`);
 
 // ── 3 · a platform or parcel order stuck part-way, in a table neither query above can reach ───
 const parcels = await q(`
@@ -188,6 +207,8 @@ else {
      where o.archived = false and o.deleted_at is null
        and o.created_at < now() - interval '${DAYS} days'
        ${notControl} ${onlyO}
+       and not exists (select 1 from sessions si where si.id = o.session_id and si.invoice_no is not null)   -- S10 T39 item 30
+     and not exists (select 1 from sessions si where si.id = o.session_id and si.invoice_no is not null)   -- S10 T39 item 30
        and not exists (
          select 1 from sessions s
           where s.restaurant_id = o.restaurant_id
