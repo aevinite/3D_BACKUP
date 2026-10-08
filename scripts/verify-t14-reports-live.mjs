@@ -738,8 +738,19 @@ const rupee = (s) => Number(String(s).replace(/[^\d.-]/g, "")) || 0;
     const attn = (d.boxes.find((b) => /puzzle/.test(b.k))?.n ?? 0) + (d.boxes.find((b) => /dog/.test(b.k))?.n ?? 0);
     const attnTile = Number(String(d.tiles.find((t) => /NEEDS ATTENTION/i.test(t.k))?.v || "").replace(/[^\d]/g, ""));
     R("P49327", "the NEEDS ATTENTION tile equals Puzzles + Dogs", attn === attnTile, `${attn} vs ${attnTile}`);
-    R("P49328", "the % units column sums to 100", Math.abs(d.body.reduce((a, r) => a + rupee(r[3]), 0) - 100) < 1.5);
-    R("P49329", "the % sales column sums to 100", Math.abs(d.body.reduce((a, r) => a + rupee(r[5]), 0) - 100) < 1.5);
+    // EACH ROW'S % IS ITS OWN SHARE, ROUNDED — NOT "THE COLUMN ADDS TO 100" (sweep #10 T39 item 56,
+    // 2026-10-09). Every cell is rounded to one decimal, so a column of n rows can drift up to
+    // n × 0.05 from 100 with every cell correct: French House's Menu report had 477 rows on :4439 and
+    // its % units column summed to 98.0. The 1.5 tolerance only ever held for a short menu. Now: each
+    // row's shown % equals its own Sold (or Sales) over the column total, to the shown precision.
+    const share = (col, pc) => {
+      const tot = d.body.reduce((a, r) => a + rupee(r[col]), 0);
+      const bad = tot > 0 ? d.body.filter((r) => Math.abs(rupee(r[pc]) - Math.round(rupee(r[col]) / tot * 1000) / 10) > 0.11) : [];
+      return { ok: d.body.length > 0 && tot > 0 && bad.length === 0, note: bad.slice(0, 2).map((r) => `${r[0]}: ${r[pc]} of ${r[col]}/${tot}`).join(" ; ") };
+    };
+    const su = share(2, 3), ss = share(4, 5);
+    R("P49328", "every % units cell is that dish's own share of units sold", su.ok, su.note);
+    R("P49329", "every % sales cell is that dish's own share of sales", ss.ok, ss.note);
     R("P49330", "it names a biggest opportunity, or says there is none", d.callout.length > 20 || d.body.length === 0, d.callout.slice(0, 60));
     await p.close();
   }
