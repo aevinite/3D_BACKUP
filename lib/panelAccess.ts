@@ -197,19 +197,39 @@ export async function ownerPanelEnabled(userId: string, cached = true): Promise<
 // this runs on the hot panel-gate path without a read per request; a fresh
 // delete/restore takes effect within TTL. Fail-OPEN on error (a DB blip must not
 // lock every restaurant out) — the guest resolver is the authoritative hide.
-const _deletedCache = new Map<string, { at: number; deleted: boolean }>();
-export async function isRestaurantDeleted(restaurantId: string): Promise<boolean> {
-  if (!restaurantId) return false;
+// ONE READ ANSWERS BOTH "IN THE BIN?" AND "SUSPENDED?" (sweep #10 T17 round 5, item 30, 2026-10-09). The owner chose:
+// a SUSPENDED restaurant's staff apps stop working, on every door — the restaurant's own address already refused them
+// while the plain /manager, /kitchen, /tablet and every panel API let them straight in. Both answers come from the same
+// row, so they share one cached read: no extra trip on the hot path. A read that FAILS is not cached and answers
+// "neither" (fail-open, as before — a blip must never lock every restaurant out); a restaurant row that is missing
+// answers "neither" too. The owner panel is not affected by a suspension (owners keep seeing their numbers), and the
+// admin still enters any panel through act-as.
+type RestaurantState = { deleted: boolean; suspended: boolean };
+const NEITHER: RestaurantState = { deleted: false, suspended: false };
+// Named for its first job (the recycle bin) and kept so: verify:t28-picked pins `_deletedCache.delete` in forgetRestaurant.
+// It now holds BOTH answers for a restaurant.
+const _deletedCache = new Map<string, { at: number; state: RestaurantState }>();
+async function restaurantState(restaurantId: string): Promise<RestaurantState> {
+  if (!restaurantId) return NEITHER;
   const hit = _deletedCache.get(restaurantId);
-  if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.deleted;
+  if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.state;
   try {
-    const row = await sb.from("restaurants").select("deleted_at").eq("id", restaurantId).maybeSingle();
-    const deleted = !!row.data?.deleted_at;
-    _deletedCache.set(restaurantId, { at: Date.now(), deleted });
-    return deleted;
+    const row = await sb.from("restaurants").select("deleted_at, active").eq("id", restaurantId).maybeSingle();
+    if (row.error) return NEITHER;
+    const state: RestaurantState = { deleted: !!row.data?.deleted_at, suspended: !!row.data && row.data.active === false };
+    _deletedCache.set(restaurantId, { at: Date.now(), state });
+    return state;
   } catch {
-    return false;
+    return NEITHER;
   }
+}
+export async function isRestaurantDeleted(restaurantId: string): Promise<boolean> {
+  return (await restaurantState(restaurantId)).deleted;
+}
+/** Is this restaurant switched OFF by the admin (Restaurants → Suspend)? Binned counts as deleted, not suspended. */
+export async function isRestaurantSuspended(restaurantId: string): Promise<boolean> {
+  const st = await restaurantState(restaurantId);
+  return !st.deleted && st.suspended;
 }
 
 // ── A BINNED RESTAURANT SHOULD LEAVE EVERY SCREEN AT ONCE, NOT WITHIN 30 SECONDS ─────────────────

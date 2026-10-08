@@ -13,8 +13,8 @@ const ROLE_HOME: Record<string, string> = { owner: "/owner", manager: "/manager"
 // the slug is posted so only THAT restaurant's staff can match, and the card shows
 // the restaurant's own name instead of the platform brand.
 export default function LoginForm({
-  next, restaurantSlug, restaurantName,
-}: { next: string; restaurantSlug?: string; restaurantName?: string }) {
+  next, restaurantSlug, restaurantName, notice,
+}: { next: string; restaurantSlug?: string; restaurantName?: string; notice?: string }) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -109,6 +109,9 @@ export default function LoginForm({
             cannot express :focus, hence this one small rule). Item 20: each word is tied to its box
             (htmlFor/id), so tapping "Username" selects the box and screen readers read "Username". */}
         <style>{`.lfh-signin input:focus-visible{box-shadow:0 0 0 3px rgba(91,140,255,.55);border-color:#5b8cff!important}`}</style>
+        {/* Item 30/33: why this person cannot go in right now (switched off / no longer available). One of a few fixed
+            sentences chosen by the server — never text from the address bar. */}
+        {notice ? <div role="status" style={{ margin: "0 0 14px", padding: "10px 12px", borderRadius: 10, background: "rgba(251,191,36,.12)", border: "1px solid rgba(251,191,36,.35)", color: "#fbbf24", fontSize: 13, lineHeight: 1.45 }}>{notice}</div> : null}
         <label htmlFor="lfh-login-username" style={{ fontSize: 12, color: "#8aa0c9" }}>Username</label>
         <input
           id="lfh-login-username"

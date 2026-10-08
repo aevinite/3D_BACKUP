@@ -7,7 +7,7 @@
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
-import { ROLE_HOME } from "@/lib/panelGate";
+import { ROLE_HOME, DOOR_OFF } from "@/lib/panelGate";
 import { isPanelEnabled } from "@/lib/panelAccess";
 import { getRestaurantBySlug, slugMovedTo } from "@/lib/tenant";
 import LoginForm from "@/app/login/LoginForm";
@@ -58,11 +58,14 @@ export default async function ScopedLoginPage({
   if (u && u.restaurant_id === r.id && r.active && (await isPanelEnabled(u.role, r.id))) {
     redirect(`/r/${restaurant}${ROLE_HOME[u.role] || "/menu"}`);
   }
+  // A SWITCHED-OFF restaurant's door says so before anyone types (item 30). Signing in is refused by /api/panel-login
+  // with the same sentence, so the card and the answer can never disagree.
   return (
     <LoginForm
       next={typeof next === "string" ? next : ""}
       restaurantSlug={restaurant}
       restaurantName={r.name}
+      notice={r.active ? "" : DOOR_OFF}
     />
   );
 }

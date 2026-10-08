@@ -1244,14 +1244,16 @@ check("P78822", "the person only ever sees r.error, never r.reason",
   !rx(PL, /json\(\{[^}]*reason/));
 check("P78823", "an owner is checked against what they OWN, never against their home namespace",
   before(PL, 'if (u.role === "owner")', "enabledOwnedRestaurantIds(u.id, false)"));
+// Round 5, item 30 added the fourth refusal (a switched-off restaurant).
 check("P78824", "a refused owner login is recorded as login_denied, a different event from login_failed",
-  count(PL, /"login_denied"/g) === 3);
+  count(PL, /"login_denied"/g) === 4);
 check("P78825", "the binned-restaurant refusal names the recycle bin in the log",
   has(PL, "the restaurant is in the recycle bin"));
 check("P78826", "the disabled-panel refusal names the role in the log",
   has(PL, "the ${u.role} panel is not enabled for this restaurant"));
-check("P78827", "all three refusals answer 403, not 401 — the password was RIGHT",
-  count(PL, /\}, \{ status: 403 \}\)/g) === 3);
+// Round 5, item 30 added the fourth (switched-off restaurant).
+check("P78827", "all four refusals answer 403, not 401 — the password was RIGHT",
+  count(PL, /\}, \{ status: 403 \}\)/g) === 4);
 check("P78828", "the successful sign-in is logged under the person's own role",
   has(PL, "await logAction(u.role, \"login\", {"));
 check("P78829", "the cookie's max age matches the signature's max age (7 days), so neither outlives the other",
