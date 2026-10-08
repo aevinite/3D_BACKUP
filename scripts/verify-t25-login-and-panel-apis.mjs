@@ -573,8 +573,30 @@ for (const [id, value, why] of COOKIE_JUNK) {
 }
 check("P78766", "a cookie whose issued-at is older than 7 days is refused without a database read",
   (await UA.userFromCookie(`someid.${Date.now() - 8 * 24 * 3600_000}.sig`)) === null);
+// P78767 used the id "no-such-user" until 2026-10-08. Against this stub that reached the lookup and
+// came back empty — but against the REAL database a non-uuid id is a refusal (22P02), which the code
+// read as an outage. The id is uuid-shaped now, so this row still proves what it says; item 4 below
+// proves the non-uuid case never reaches the database at all.
 check("P78767", "…and one inside the window gets as far as the lookup (it then fails on the signature)",
-  (await UA.userFromCookie(`no-such-user.${Date.now()}.sig`)) === null);
+  await (async () => { resetWorld(); const r = await UA.userFromCookie(`00000000-0000-4000-8000-00000000abcd.${Date.now()}.sig`);
+    return r === null && G.READS.some((x) => x.table === "staff_users"); })());
+// SWEEP #10 T17, item 4 — a cookie whose id cannot be a staff id is "not signed in", decided BEFORE
+// the database. A refused non-uuid used to be thrown as AuthDbError → 503 "busy" for a week.
+for (const [cid, idPart, why] of [
+  ["P186010", "abc", "a short word"], ["P186011", "no-such-user", "a hyphenated word"],
+  ["P186012", "00000000-0000-0000-0000-00000000000", "a uuid one character short"],
+  ["P186013", "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz", "uuid-shaped but not hex"],
+  ["P186014", "undefined", "the word undefined"],
+]) {
+  resetWorld();
+  let threw = false, r;
+  try { r = await UA.userFromCookie(`${idPart}.${Date.now()}.sig`); } catch { threw = true; }
+  check(cid, `a fresh cookie whose id is ${why} is "not signed in" — no throw, and no database read`,
+    !threw && r === null && !G.READS.some((x) => x.table === "staff_users"), { threw, reads: G.READS.length });
+}
+check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
+  (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
+    return a > 0 && b > a; })());
 
 // ── loginUser: the real function, driven against fixtures ──
 async function world(rows, owners = []) {
