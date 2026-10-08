@@ -183,8 +183,12 @@ check("the group exists so an earlier settle on the same bill is not subtracted 
   // straight into the else-arm's `payment_status: "paid"` and prove the opposite of what it says.
   const armStart = srcPaySplit.indexOf("const upd = laterPart");
   const arm = srcPaySplit.slice(armStart, srcPaySplit.indexOf("    : await sb.from(\"orders\")", armStart));
+  // The WRITE is the update's payload, not the whole arm: since 2026-10-09 (sweep #10 T30, item 5)
+  // the arm also FILTERS on payment_status — `.neq("payment_status", "paid")`, so a tab never parks a
+  // row someone else just settled — and a filter is the opposite of stamping it.
+  const payload = (/\.update\((\{[^}]*\})\)/.exec(arm) || [])[1] || "";
   check("a parked bill is NOT stamped paid — the money was not collected",
-    arm.includes("khata_at: stamp") && !arm.includes("payment_status") && !arm.includes("paid_at"), arm.slice(0, 300));
+    payload.includes("khata_at: stamp") && !payload.includes("payment_status") && !payload.includes("paid_at"), payload || arm.slice(0, 300));
 }
 check("a parked bill goes into the book with khata_at and the person", /khata_at: stamp, khata_customer_id: customer!\.id/.test(srcPaySplit));
 check("a parked bill is taken off the live floor", /khata_at: stamp[\s\S]{0,120}?archived: true, archived_at: stamp/.test(srcPaySplit));

@@ -452,7 +452,9 @@ eq("orderTaxRate falls back to the settings rate when the order was never stampe
   // split part became allowed to be a tab (mig 352), and a guard pinned to the old literal would
   // have gone red on code that still does exactly the right thing.
   check("a failed paid-stamp REVERSES the parts it just recorded rather than leaving them standing",
-    /if \(upd\.error\) \{[\s\S]{0,1200}?reversed_at:/.test(src));
+    // Since 2026-10-09 the reversal is one helper (`reverseOurLegs`) that the failed stamp AND the
+    // second-device refusal both call (sweep #10 T30, item 5), so this reads the two halves.
+    /if \(upd\.error\) \{[\s\S]{0,1200}?reverseOurLegs\(/.test(src) && /const reverseOurLegs = [\s\S]{0,300}?reversed_at:/.test(src));
   check("…and it stamps them (mig 285) rather than deleting them",
     /\/\/ THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN/.test(src)
     && !/session_payments"\)\s*\n?\s*\.delete\(/.test(src));

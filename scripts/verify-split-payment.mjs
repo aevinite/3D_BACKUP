@@ -110,7 +110,9 @@ want(/payment_status: "paid", paid_at: stamp, payment_method: "Split"/.test(PS),
   "…and with no tab it still stamps the bill paid, exactly as before");
 want(!/payment_status: "paid"[\s\S]{0,200}khata_at: stamp/.test(PS),
   "a bill is never both paid AND on a tab — money that never arrived is never claimed");
-want(/if \(upd\.error\) \{[\s\S]{0,900}?reversed_at: stamp/.test(PS),
+// The reversal moved into one helper on 2026-10-09 (item 5 reuses it for the second-device case),
+// so the property is read in two halves: the failed stamp calls it, and it stamps reversed_at.
+want(/if \(upd\.error\) \{[\s\S]{0,900}?reverseOurLegs\(/.test(PS) && /const reverseOurLegs = [\s\S]{0,300}?reversed_at: stamp/.test(PS),
   "a failed stamp REVERSES the parts it just recorded, so the trail never claims a settle that did not happen");
 want(!/session_payments"\)\s*\n?\s*\.delete\(/.test(PS),
   "…by stamping them (mig 285), never by deleting a money record");
@@ -535,6 +537,48 @@ head("8 · an even split of any bill adds back up to that bill");
   }
   want(/if \(ordQ\.error\) return busy\("orders"/.test(PS) && /if \(setQ\.error\) return busy\("settings"/.test(PS),
     "the source says so where it reads: an errored orders or settings read returns the busy reply");
+
+  // item 5 — two devices settle the same bill at the same moment: first save wins, the loser is told
+  const legsReversed = (writes) => writes.some((w) => w.table === "session_payments" && w.op === "update" && w.payload && w.payload.reversed_at);
+  {
+    const { sb, writes } = standIn();
+    await settle(sb);
+    const stamp = writes.find((w) => w.op === "update" && w.table === "orders");
+    want(!!stamp && stamp.filters.some((f) => f[0] === "neq" && f[1] === "payment_status" && f[2] === "paid"),
+      "the paid stamp only matches rows that are STILL unsettled — a row someone else just settled is not stamped again", stamp && stamp.filters);
+  }
+  {
+    const { sb, writes } = standIn({ settledElsewhere: 2 });
+    const r = await settle(sb);
+    want(r.ok === false && r.status === 409 && /Someone else settled this bill/.test(r.message),
+      "when the other device already settled the whole bill, the second settle is REFUSED and says so (409) — it no longer \"succeeds\" too", r);
+    want(legsReversed(writes), "…and the parts it had just recorded are stamped reversed, so the drawer is not asked for the money twice", writes.map((w) => `${w.op}:${w.table}`));
+    want(!writes.some((w) => w.op === "delete"), "…corrected, never deleted — no money record is removed (mig 285)");
+  }
+  {
+    const { sb, writes } = standIn({ settledElsewhere: 1 });
+    const r = await settle(sb);
+    const undo = writes.filter((w) => w.op === "update" && w.table === "orders")[1];
+    want(r.ok === false && r.status === 409 && /settled part of this bill/.test(r.message),
+      "when the other device settled PART of the bill, the second settle is refused with a sentence that says part", r);
+    want(!!undo && undo.payload.payment_status === "pending" && JSON.stringify(undo.filters.find((f) => f[0] === "in")[2]) === JSON.stringify(["o2"]),
+      "…and only the row IT reached goes back to unsettled — the row the other device settled is left alone", undo);
+    want(legsReversed(writes), "…and its parts are stamped reversed");
+  }
+  {
+    const { sb, writes } = standIn();
+    await settle(sb, [{ amount: 525, method: "Cash" }, { amount: 525, method: "Pay later", khataName: "Ravi" }]);
+    const park = writes.find((w) => w.op === "update" && w.table === "orders");
+    want(!!park && park.filters.some((f) => f[0] === "is" && f[1] === "khata_at" && f[2] === null)
+      && park.filters.some((f) => f[0] === "neq" && f[1] === "payment_status"),
+      "a tab parks only rows that are not already paid and not already on a tab", park && park.filters);
+  }
+  {
+    const { sb, writes } = standIn({ settledElsewhere: 2 });
+    const r = await settle(sb, [{ amount: 525, method: "Cash" }, { amount: 525, method: "Pay later", khataName: "Ravi" }]);
+    want(r.ok === false && r.status === 409 && legsReversed(writes),
+      "…and a tab that lost the race is refused the same way, its parts stamped reversed", r);
+  }
 }
 
 console.log(failed

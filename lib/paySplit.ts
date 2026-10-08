@@ -290,29 +290,64 @@ export async function settleBillInParts(
   // payment_status stays 'pending' so the money is not claimed, khata_at / khata_customer_id put it
   // in the book, and `archived` takes it off the live floor. The CALLER closes the session — that is
   // where the close reason, the ladder and the log line already live.
+  // Stamp the parts reversed — corrected, never deleted (mig 285) — so the trail never claims money
+  // for a settle that did not happen. Best-effort: the reply below is what tells the person.
+  const reverseOurLegs = async (by: string, why: string) => {
+    if (!legIds.length) return;
+    try {
+      await sb.from("session_payments").update({ reversed_at: stamp, reversed_by: by, reversed_reason: why })
+        .in("id", legIds).eq("restaurant_id", rid);
+    } catch { /* nothing is deleted either way */ }
+  };
+
+  // ── FIRST SAVE WINS (sweep #10 T30, item 5, 2026-10-09) ────────────────────────────────────
+  // Two people can settle the same table at the same moment — the waiter on the tablet and the
+  // manager at the till, both tapping Pay in parts. Both read the bill unpaid, both record their
+  // parts, and the stamp used to match the rows however they stood by then, so BOTH settles
+  // "succeeded" and session_payments held the bill's money twice. The day-close "how the money came
+  // in" lines sum those parts, so the cash drawer was asked for double.
+  //
+  // So the stamp only matches rows that are STILL unsettled, and says which rows it reached. If it
+  // reached fewer than it read, someone else got there first: our parts are stamped reversed, any
+  // row we did reach goes back to exactly how it was a moment ago (unsettled — that is all the
+  // update could match), and the second person is told plainly. The project's one rule for this
+  // (CLAUDE.md, checklist item 11): first save wins, the loser is told.
   const upd = laterPart
     ? await sb.from("orders")
         .update({ khata_at: stamp, khata_customer_id: customer!.id, archived: true, archived_at: stamp })
-        .in("id", ids).eq("restaurant_id", rid)
+        .in("id", ids).eq("restaurant_id", rid).neq("payment_status", "paid").is("khata_at", null)
+        .select("id")
     : await sb.from("orders")
         .update({ payment_status: "paid", paid_at: stamp, payment_method: "Split", payment_note: note.slice(0, 200) })
-        .in("id", ids).eq("restaurant_id", rid);
+        .in("id", ids).eq("restaurant_id", rid).neq("payment_status", "paid")
+        .select("id");
   if (upd.error) {
     // THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN. The parts land first and the stamp
     // second, with no transaction across the two. Left alone, a failed stamp leaves the bill unpaid
     // while session_payments says the parts were collected on it — so "how did table 6 pay?"
     // answers for a settle that never happened. Stamp them reversed (mig 285's rule: a money record
     // is corrected, never deleted), then still answer 500 so the person knows to retry.
-    if (legIds.length) {
-      try {
-        await sb.from("session_payments").update({
-          reversed_at: stamp,
-          reversed_by: "auto · the bill was not settled",
-          reversed_reason: "the settle failed after the parts were recorded",
-        }).in("id", legIds).eq("restaurant_id", rid);
-      } catch { /* best-effort: the 500 below is what tells the person, and nothing is deleted */ }
-    }
+    await reverseOurLegs("auto · the bill was not settled", "the settle failed after the parts were recorded");
     return { ok: false, message: upd.error.message, status: 500 };
+  }
+  const reached = ((upd.data || []) as { id: string }[]).map((o) => o.id);
+  if (reached.length < ids.length) {
+    if (reached.length) {
+      try {
+        await sb.from("orders")
+          .update(laterPart
+            ? { khata_at: null, khata_customer_id: null, archived: false, archived_at: null }
+            : { payment_status: "pending", paid_at: null, payment_method: null, payment_note: null })
+          .in("id", reached).eq("restaurant_id", rid);
+      } catch { /* the 409 below still tells them to look at the bill */ }
+    }
+    await reverseOurLegs("auto · someone else settled this bill first", "another device settled the bill while these parts were being recorded");
+    return {
+      ok: false, status: 409,
+      message: reached.length
+        ? "Someone else settled part of this bill while you were splitting it — nothing of yours was recorded. Refresh the bill and split what is left."
+        : "Someone else settled this bill a moment ago — your parts were not recorded. Refresh the bill before taking any money.",
+    };
   }
 
   return {
