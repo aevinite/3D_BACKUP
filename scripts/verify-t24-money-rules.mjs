@@ -682,8 +682,12 @@ head("8. the two docs I own tell the truth about the code they name");
   check("the playbook's own 'not in this file yet' banner is gone, because the three lessons are in it",
     !/THREE LATER LESSONS ARE NOT IN THIS FILE YET/.test(playbook)
     && /## 0\. The three rules learned AFTER the June incident/.test(playbook));
+  // It used to REQUIRE "around line **3440**" — a line number that had itself gone stale (the loop
+  // was at 4277 by 2026-10-09). The entry now quotes the refusal the loop sits under, and
+  // scripts/verify-money-pointers.mjs check 5 proves that sentence still leads to the loop.
   check("the playbook's stale line reference for the allergen loop was corrected",
-    !/editor route ~505-511/.test(playbook) && /around line \*\*3440\*\*/.test(playbook));
+    !/editor route ~505-511/.test(playbook) && !/around line \*\*\d+\*\*/.test(playbook)
+    && /Say why the allergy is changing/.test(playbook));
   check("the playbook points at the security checklist rather than only saying the sweep is owed",
     /docs\/SECURITY-CHECKLIST\.md/.test(playbook));
 }
