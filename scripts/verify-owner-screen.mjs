@@ -150,8 +150,16 @@ check("no tile opens its popup when Reports are off",
   // state. `dashed` is asserted to contain offNote alongside, so the original rule still holds.
   /onOpen=\{dashed \? undefined :/.test(homeC) && /const dashed = !!offNote \|\| ovFailed;/.test(homeC),
   "app/owner/page.tsx: a KPI tile opens its popup unconditionally again. With Reports switched off\n       there is nothing to show and nowhere to send him — the tile must not be a button.");
+// Re-pinned 2026-10-08 (sweep #10 T39 item 5). The pop-up became components/owner/TileDocket.tsx
+// on 2026-10-04 (6e9637bb): the page now hands it NO link when Reports are off, and the docket
+// prints the refusal itself. The rule is unchanged; it simply lives across two files now, and this
+// check was red for four days looking for the old `reportsOn ? (` JSX in the old file.
+const docketC = code(read("components/owner/TileDocket.tsx"));
 check("the popup's footer refuses instead of linking when Reports are off",
-  /reportsOn \? \(/.test(homeC) && /Reports are switched off for this restaurant/.test(home),
+  ((/reportsOn \? \(/.test(homeC) && /Reports are switched off for this restaurant/.test(home))
+    || (/detailHref=\{reportsOn \? detailHref\(/.test(homeC)
+      && /\{detailHref\s*\?\s*<Link[^}]*href=\{detailHref\}/.test(docketC)
+      && /Reports are switched off for this restaurant/.test(read("components/owner/TileDocket.tsx")))),
   "app/owner/page.tsx: the tile popup's bottom button links into Reports even when the section is\n       switched off. Say so in the footer instead.");
 
 // ── 6. the removals money line names its own slice ──────────────────────────────────────────────
