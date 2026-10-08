@@ -694,8 +694,18 @@ try {
     // PostgREST answers an offset beyond the last row with 416/PGRST103, which reached the screen as
     // "Couldn't load the guest list" — the same words a real outage gets. 87 guests, ?page=2 was a
     // 500 (T18 second 500, 2026-08-31).
-    for (const [q, what] of [["page=2", "one page past the end"], ["page=199", "far past the end"],
-                             ["page=2&seg=blocked", "past the end of a filtered group"]]) {
+    // "Past the end" is measured, not assumed (sweep #10 T39 item 26). `page=2` was past the end when
+    // this was written (87 guests, 50 a page, pages counted from 0) and the dev database has grown
+    // since, so page 2 now legitimately holds 50 rows and this reported a correct answer as a fault.
+    // Ask the server how many match, and request the first page after the last.
+    const pastEnd = async (seg) => {
+      const j0 = await (await fetch(`${BASE}/api/admin/customers${seg ? "?seg=" + seg : ""}`, { headers: H, cache: "no-store" })).json();
+      const size = Number(j0.summary?.pageSize) || 50, n = Number(j0.summary?.matched) || 0;
+      return Math.min(200, Math.ceil(n / size));          // 0-based: pages 0…ceil(n/size)-1 hold rows
+    };
+    const onePast = await pastEnd(""), onePastBlocked = await pastEnd("blocked");
+    for (const [q, what] of [[`page=${onePast}`, "one page past the end"], ["page=199", "far past the end"],
+                             [`page=${onePastBlocked}&seg=blocked`, "past the end of a filtered group"]]) {
       const r = await fetch(`${BASE}/api/admin/customers?${q}`, { headers: H, cache: "no-store" });
       const j = await r.json();
       ok(r.status === 200 && Array.isArray(j.customers) && j.customers.length === 0 && !j.error && j.summary,
