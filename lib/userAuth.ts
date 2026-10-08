@@ -531,7 +531,8 @@ export async function describeLoginTarget(username: string, restaurantId?: strin
     // The same name can exist at several restaurants (mig 091), and the plain /login door can't
     // tell them apart — so name the first and say how many others share it.
     const first = describe(rows[0]);
-    return rows.length > 1 ? `${first} (+${rows.length - 1} more account${rows.length > 2 ? "s" : ""} use this name)` : first;
+    // "+1 more account USES", "+2 more accounts USE" (sweep #10 T17 round 5, item 34 — it read "+1 more account use").
+    return rows.length > 1 ? `${first} (+${rows.length - 1} more ${rows.length > 2 ? "accounts use" : "account uses"} this name)` : first;
   } catch {
     return null; // wording help only — never let it break a login or an alert
   }
