@@ -1,0 +1,31 @@
+// lib/idempotencyRule.ts — every branch.
+import { suite } from "./lib.mjs";
+const t = suite("lib/idempotencyRule.ts", 168521, 40);
+const R = await import("@/lib/idempotencyRule.ts");
+t("didSomething: 200 with {ok:true} → true", R.didSomething(200, { ok: true }) === true);
+t("didSomething: 400 / 409 / 500 → false whatever the body", [400, 409, 500].every((s) => R.didSomething(s, { ok: true }) === false));
+t("didSomething: 200 with {ok:false} → false (a refusal inside a 200 is not remembered)", R.didSomething(200, { ok: false, reason: "sold_out" }) === false);
+t("didSomething: 200 with no body / a string / an array → true", R.didSomething(200, null) && R.didSomething(200, "fine") && R.didSomething(200, [{ ok: false }]));
+t("didSomething: 399 is still success, 400 is not", R.didSomething(399, {}) === true && R.didSomething(400, {}) === false);
+t("storedIsRefusal: only an object with ok === false", R.storedIsRefusal({ ok: false }) && !R.storedIsRefusal({ ok: true }) && !R.storedIsRefusal(null) && !R.storedIsRefusal("x") && !R.storedIsRefusal({}));
+t("withoutSecrets: plain values pass through", R.withoutSecrets(null) === null && R.withoutSecrets(5) === 5 && R.withoutSecrets("x") === "x");
+t("withoutSecrets: drops password / new_password / passcode / pass at the top", JSON.stringify(R.withoutSecrets({ password: 1, new_password: 1, passcode: 1, pass: 1, passport: "keep?" })) === '{"passport":"keep?"}');
+t("withoutSecrets: drops secret / token / api_key / apiKey / private_key / setup_code / setupCode", Object.keys(R.withoutSecrets({ secret: 1, client_secret: 1, token: 1, refresh_token: 1, api_key: 1, apiKey: 1, private_key: 1, setup_code: 1, setupCode: 1, ok: 1 })).join() === "ok");
+t("withoutSecrets: drops pin / pins / staff_pin / pin_hash / otp / otp_code, keeps pinned / spinner / options", Object.keys(R.withoutSecrets({ pin: 1, pins: 1, staff_pin: 1, pin_hash: 1, otp: 1, otp_code: 1, pinned: 1, spinner: 1, options: 1 })).join() === "pinned,spinner,options");
+t("withoutSecrets: works inside lists and nested objects", JSON.stringify(R.withoutSecrets({ a: [{ password: 1, u: "x" }], b: { c: { token: 1, d: 2 } } })) === '{"a":[{"u":"x"}],"b":{"c":{"d":2}}}');
+t("withoutSecrets: a reply nested past depth 8 is replaced by null at that depth", (() => { let o = { v: 1 }; for (let i = 0; i < 10; i++) o = { o }; return JSON.stringify(R.withoutSecrets(o)).includes("null"); })());
+t("withoutSecrets: a list at the top level is cleaned item by item", JSON.stringify(R.withoutSecrets([{ token: 1, a: 1 }])) === '[{"a":1}]');
+t("keptReply: an object reply is kept without secrets and stamped with who made it", JSON.stringify(R.keptReply({ ok: true, password: "p", id: 1 }, "me")) === '{"ok":true,"id":1,"__by":"me"}');
+t("keptReply: a non-object reply (null / string / list) keeps only the stamp", JSON.stringify(R.keptReply(null, "me")) === '{"__by":"me"}' && JSON.stringify(R.keptReply("x", "me")) === '{"__by":"me"}' && JSON.stringify(R.keptReply([1], "me")) === '{"__by":"me"}');
+t("replyFor: the caller who made it gets the reply back, without the stamp", JSON.stringify(R.replyFor({ ok: true, id: 1, __by: "me" }, "me")) === '{"ok":true,"id":1}');
+t("replyFor: anyone else gets nothing back", JSON.stringify(R.replyFor({ ok: true, id: 1, __by: "me" }, "you")) === "{}");
+t("replyFor: a row stored before the stamp existed still echoes, minus any secret", JSON.stringify(R.replyFor({ ok: true, id: 1, password: "p" }, "you")) === '{"ok":true,"id":1}');
+t("replyFor: a stamp that is not text is ignored (the reply echoes)", JSON.stringify(R.replyFor({ id: 1, __by: 5 }, "you")) === '{"id":1}');
+t("replyFor: null / a list / a string stored → {}", ["{}", "{}", "{}"].join() === [R.replyFor(null, "me"), R.replyFor([1], "me"), R.replyFor("x", "me")].map((x) => JSON.stringify(x)).join());
+t("CALLER_KEY is '__by'", R.CALLER_KEY === "__by");
+// round-2 mutation survivors, closed — the depth limit is exactly 8
+const nest = (leaf, n) => { let v = leaf; for (let i = 0; i < n; i++) v = { k: v }; return v; };
+const deepest = (v) => { let d = 0; while (v && typeof v === "object" && "k" in v) { v = v.k; d++; } return [d, v]; };
+t("withoutSecrets keeps an object 8 levels down intact", JSON.stringify(deepest(R.withoutSecrets(nest({ x: 1 }, 8)))[1]) === '{"x":1}');
+t("withoutSecrets cuts at the 9th level (null), not before", (() => { const [d, v] = deepest(R.withoutSecrets(nest({ x: 1 }, 9))); return d === 9 && v === null; })());
+t("withoutSecrets deepens through LISTS too (a list 12 deep is cut, not kept whole)", (() => { let v = { x: 1 }; for (let i = 0; i < 12; i++) v = [v]; return JSON.stringify(R.withoutSecrets(v)).includes("null"); })());
