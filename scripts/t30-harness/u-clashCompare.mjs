@@ -2,10 +2,10 @@
 import { suite } from "./lib.mjs";
 const t = suite("lib/clashCompare.ts", 168421, 40);
 const C = await import("@/lib/clashCompare.ts");
-t("stableJson(null) and stableJson(undefined) are the empty string", C.stableJson(null) === "" && C.stableJson(undefined) === "");
-t("stableJson of a number / boolean / padded string is its trimmed text", C.stableJson(5) === "5" && C.stableJson(true) === "true" && C.stableJson("  a ") === "a");
-t("stableJson of an array keeps ORDER (a list inside an object is not a set)", C.stableJson([2, 1]) === "[2,1]");
-t("stableJson of an object sorts its keys", C.stableJson({ b: 1, a: 2 }) === '{"a":2,"b":1}');
+t("stableJson(null) and stableJson(undefined) are the same nothing as a blank (re-stated round 3, item 25: quoted)", C.stableJson(null) === '""' && C.stableJson(undefined) === '""' && C.stableJson("  ") === '""');
+t("stableJson of a number / boolean / padded string is its trimmed text, quoted (re-stated round 3, item 25)", C.stableJson(5) === '"5"' && C.stableJson(true) === '"true"' && C.stableJson("  a ") === '"a"' && C.stableJson(5) === C.stableJson("5"));
+t("stableJson of an array keeps ORDER (a list inside an object is not a set)", C.stableJson([2, 1]) === '["2","1"]' && C.stableJson([2, 1]) !== C.stableJson([1, 2]));
+t("stableJson of an object sorts its keys", C.stableJson({ b: 1, a: 2 }) === '{"a":"2","b":"1"}');
 t("stableJson of an array nested 8 deep stops with […] (a cycle can never hang a write)", (() => { let a = [1]; for (let i = 0; i < 8; i++) a = [a]; return C.stableJson(a).includes("[…]"); })());
 t("stableJson of an object nested 8 deep stops with {…}", (() => { let o = { v: 1 }; for (let i = 0; i < 8; i++) o = { o }; return C.stableJson(o).includes("{…}"); })());
 t("stableJson of a self-referencing object returns (depth limit)", (() => { const o = { a: 1 }; o.me = o; return typeof C.stableJson(o) === "string"; })());

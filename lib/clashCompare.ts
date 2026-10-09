@@ -21,15 +21,22 @@
  * write. Past the limit we stop descending, which makes deep values compare EQUAL: that fails
  * OPEN (allow the write), the same direction every other decision in the clash check takes.
  */
+// TEXT IS QUOTED (sweep #10 T30 round 3, item 25, 2026-10-09). A leaf used to be written bare, so the
+// commas and quotes INSIDE a value read as structure: ["a,b"] and ["a","b"] both came out "[a,b]",
+// and {k:'x,"j":1'} came out the same as {k:"x",j:1}. Two different values compared EQUAL, and this
+// comparison is what decides "nobody else changed it — save". Each leaf is now JSON-quoted, so a
+// value can only ever match a value. Everything that was MEANT to compare equal still does: a number
+// and its text (1 / "1"), spaces round a word, key order — and a missing value, null and a blank
+// all still read as the same nothing ('""'), because a form saves "" where the database holds null.
 export function stableJson(v: unknown, depth = 0): string {
-  if (v === null || v === undefined) return "";
+  if (v === null || v === undefined) return '""';
   if (Array.isArray(v)) return depth > 6 ? "[…]" : "[" + v.map((x) => stableJson(x, depth + 1)).join(",") + "]";
   if (typeof v === "object") {
     if (depth > 6) return "{…}";
     const o = v as Record<string, unknown>;
     return "{" + Object.keys(o).sort().map((k) => JSON.stringify(k) + ":" + stableJson(o[k], depth + 1)).join(",") + "}";
   }
-  return String(v).trim();
+  return JSON.stringify(String(v).trim());
 }
 
 export const isPlainObject = (v: unknown): boolean => !!v && typeof v === "object" && !Array.isArray(v);
