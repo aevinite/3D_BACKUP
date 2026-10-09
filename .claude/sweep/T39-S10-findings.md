@@ -68,6 +68,7 @@ message. Improvements were not built; they are in the chat report only. Ledger: 
 | 62 | (ledger) | 780 T28 rows labelled "names no guard" | 159 claimed by verify:split-payment, 132 split rows honestly unclaimed, 489 one-time judgments |
 | 63 | (guard) | Reports bar-hover check read after a fixed 700ms | waits for the tooltip |
 | 64 | (tests) | printing-sweep (1,478) and stuck-test (43) leftovers also counted as French House sales | cancelled (owner's rule); every order-inserting test must cancel — verify:test-safety §17; sabotaged |
+| 65 | (lint) | 1,101 ESLint warnings had piled up with nothing stopping the next | --max-warnings=1101 (can only go down) + verify-root-config guards the cap; sabotaged |
 
 Not fixed, with the reason: `verify:db-parity` (reads the client stack — not run; its folder half now runs
 as verify:migration-numbers, where 388 is a listed, explained pair). Payments vs Sales: both use the same
