@@ -103,3 +103,17 @@ await prop("ANY failed write, then a retry, ends with every dish's marks exactly
     const lineSave = s.indexOf('must(await sb.from("orders").update({ allergies, edited_at: nowIso() })', reason);
     t(`${who}: the reason is demanded FIRST, then the dishes are marked, then the order's line is saved (item 24 — a retry can finish the job)`, at > 0 && reason > 0 && reason < at && lineSave > at && lineSave - at < 400, `${reason} < ${at} < ${lineSave}`);
   } }
+
+// ── appended after the round-3 mutation run: two breaks on the paged read survived ──────────────────
+// (`from + PAGE - 1` → `+ 1` read 502 dishes a page with two overlapping; the check above SAID "no
+// bigger than one page" but never measured one.)
+for (const n of [499, 500, 501, 1234]) {
+  world({ order_items: Array.from({ length: n }, (_, i) => ({ id: `d${String(i).padStart(5, "0")}`, order_id: "o", restaurant_id: "R", added_allergens: [] })) });
+  await A.spreadOrderAllergies(sb, "R", "o", ["nuts"], []);
+  const ids = W.WRITES.flatMap((w) => (w.filters.find((f) => f[0] === "in") || [, , []])[2]);
+  t(`paging (${n} dishes): every page asks for EXACTLY ${A.PAGE} rows, pages meet end to end with no overlap, and no dish is written twice`,
+    W.READS.every((r, i) => r.range && r.range[1] - r.range[0] + 1 === A.PAGE && r.range[0] === i * A.PAGE) && new Set(ids).size === ids.length && ids.length === n,
+    JSON.stringify(W.READS.map((r) => r.range)) + ` · ${ids.length} ids, ${new Set(ids).size} distinct`);
+}
+t("paging: the pages are read in ONE fixed order (by id), so a page boundary can never skip or repeat a dish", (() => { world({ order_items: [] }); return true; })() &&
+  /\.order\("id", \{ ascending: (true|false) \}\)\.range\(from, from \+ PAGE - 1\)/.test(src("lib/orderAllergies.ts")));

@@ -49,7 +49,7 @@ function builder(table) {
     if (st.order) found = [...found].sort((a, b) => (String(a[st.order.col]) < String(b[st.order.col]) ? -1 : 1) * (st.order.asc ? 1 : -1));
     if (st.lim != null) found = found.slice(0, st.lim);
     if (st.rng) found = found.slice(st.rng[0], st.rng[1] + 1);
-    if (st.op === "select") { W.READS.push({ table, cols: st.cols, filters: clone(st.filters) }); return { data: one ? (found.length === 1 ? clone(found[0]) : found.length ? clone(found[0]) : null) : clone(found), error: null, count: found.length }; }
+    if (st.op === "select") { W.READS.push({ table, cols: st.cols, filters: clone(st.filters), range: st.rng ? [...st.rng] : null, order: st.order ? { ...st.order } : null }); return { data: one ? (found.length === 1 ? clone(found[0]) : found.length ? clone(found[0]) : null) : clone(found), error: null, count: found.length }; }
     W.WRITES.push({ table, op: st.op, patch: clone(st.patch), filters: clone(st.filters), matched: found.length });
     if (st.op === "update") { const before = clone(found); for (const r of found) Object.assign(r, clone(st.patch)); return { data: one ? before[0] ?? null : before, error: null }; }
     if (st.op === "insert") {

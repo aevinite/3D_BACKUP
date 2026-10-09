@@ -15,6 +15,7 @@
 //   G. every guard the four territory docs name is real and green today.
 //
 // READ-ONLY: SELECTs on the dev project only (refused on any other). Nothing is written anywhere.
+//   H. every saved order re-computed from its own dishes; I. every bill settled in parts vs its paper.
 // Ids P167501–P167700 (claimed on main, 2026-10-09). APPEND ONLY; never renumber.
 import { readFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -242,6 +243,52 @@ for (const g of named) {
     const r = spawnSync("npm", ["run", "-s", g, ...(APP_GUARDS.has(g) ? ["--", "--base", process.env.T30_BASE] : [])], { cwd: root, encoding: "utf8", timeout: 600000 });
     return r.status === 0 || `exit ${r.status}: ${((r.stdout || "") + (r.stderr || "")).trim().split("\n").slice(-2).join(" ").slice(0, 160)}`;
   });
+}
+
+// ═══ H · every saved order, re-computed from its own dishes ════════════════════════════════════════
+// The strongest real-data question: take the dishes an order SAVED, run them through splitBill with
+// that restaurant's settings, and compare with the four figures the order carries. A mismatch means the
+// screen and the stored bill disagree about the same dishes.
+const SAVED = await sql(`select o.id, r.slug, o.items, o.subtotal, o.taxable_base, o.nontax_amount, o.mrp_amount, s.tax_rate s_rate, s.tax_components, s.price_tax_mode, s.item_tax_modes_allowed, s.mrp_tax_treatment
+  from orders o join restaurants r on r.id = o.restaurant_id left join settings s on s.restaurant_id = o.restaurant_id
+  where o.status <> 'cancelled' and not ${SEEDED} and o.taxable_base is not null and o.items::text like '%tax_mode%' order by o.created_at desc limit 8000`);
+const HBY = new Map();
+for (const o of SAVED) {
+  const st = { tax_rate: o.s_rate == null ? null : Number(o.s_rate), tax_components: o.tax_components, price_tax_mode: o.price_tax_mode, item_tax_modes_allowed: o.item_tax_modes_allowed, mrp_tax_treatment: o.mrp_tax_treatment };
+  const b = T.splitBill(o.items, st, 0); const k = /^zz/.test(o.slug) ? "(the zz… test restaurants)" : o.slug;
+  const x = HBY.get(k) || HBY.set(k, { n: 0, sub: [], base: [], nt: [], mrp: [] }).get(k); x.n++;
+  if (P(b.subtotal) !== P(o.subtotal)) x.sub.push(o.id); if (P(b.taxableBase) !== P(o.taxable_base)) x.base.push(o.id);
+  if (P(b.nontaxAmount) !== P(o.nontax_amount)) x.nt.push(o.id); if (P(b.mrpAmount) !== P(o.mrp_amount)) x.mrp.push(o.id);
+}
+await check("lib/tax.ts", `${SAVED.length.toLocaleString("en-IN")} saved orders whose dishes carry their tax mode were re-computed (enough to mean something)`, () => SAVED.length >= 1000 || `only ${SAVED.length}`);
+for (const [k, x] of HBY) {
+  if (x.n < 3) continue;
+  await check("lib/tax.ts", `${k}: all ${x.n.toLocaleString("en-IN")} saved orders — subtotal, taxable base, untaxed and MRP figures are exactly what the screen computes from the same dishes`, () => (!x.sub.length && !x.base.length && !x.nt.length && !x.mrp.length) || `subtotal ${x.sub.length} · base ${x.base.length} · untaxed ${x.nt.length} · MRP ${x.mrp.length} differ, e.g. ${[...x.sub, ...x.base, ...x.nt, ...x.mrp][0]}`);
+}
+for (const [f, label] of [["sub", "subtotal"], ["base", "taxable base"], ["nt", "untaxed amount"], ["mrp", "locked MRP amount"]]) {
+  const off = [...HBY.values()].reduce((a, x) => a + x[f].length, 0);
+  await check("lib/tax.ts", `across every restaurant: the saved ${label} equals the screen's on all ${SAVED.length.toLocaleString("en-IN")} orders`, () => off === 0 || `${off} orders differ`);
+}
+
+// ═══ I · every bill ever settled in parts, against what its paper says now ═════════════════════════
+const BILLDOC = (await imp("public/panels/billdoc.js")).default;
+const GROUPS = await sql(`select g.settle_group, g.session_id, g.restaurant_id, g.legs, g.amount, coalesce((select json_agg(o) from (select id, status, deleted_at, subtotal, taxable_base, nontax_amount, mrp_amount, discount, tax_rate, items, payment_method, payment_status from orders where session_id = g.session_id and restaurant_id = g.restaurant_id) o), '[]') orders,
+  (select row_to_json(s) from (select tax_rate, tax_components, price_tax_mode, item_tax_modes_allowed, mrp_tax_treatment from settings where restaurant_id = g.restaurant_id) s) st
+  from (select settle_group, session_id, restaurant_id, count(*) legs, sum(amount) amount from session_payments where settle_group is not null and reversed_at is null group by 1, 2, 3) g`);
+const ACTS = await sql(`select distinct order_id from staff_actions where order_id in (select o.id from orders o where o.session_id in (select session_id from session_payments where settle_group is not null)) and action ilike '%cancel%'`);
+const EDITOR_REFUSES = /if \(patch\.status === "cancelled" && cur\.payment_status === "paid"\)\s*\n\s*return err\("Can't cancel a paid order/.test(read("app/api/editor/[...path]/route.ts"));
+for (const g of GROUPS) {
+  const all = typeof g.orders === "string" ? JSON.parse(g.orders) : g.orders; const st = typeof g.st === "string" ? JSON.parse(g.st) : g.st;
+  const live = all.filter((o) => o.status !== "cancelled" && !o.deleted_at); const m = BILLDOC.billMoney(all, st || {});
+  if (live.length) {
+    await check("lib/paySplit.ts", `settled-in-parts bill ${String(g.settle_group).slice(0, 8)}… (${g.legs} parts${all.some((o) => o.payment_status !== "paid") ? ", one parked on a tab" : ""}): the parts stored add up to exactly what its printed bill says (₹${Number(g.amount).toFixed(2)})`, () => Math.abs(P(g.amount) - P(m.total)) <= 2 || `parts ₹${g.amount} vs paper ₹${m.total}`);
+  } else {
+    // Its order was cancelled AFTER it was paid. The app cannot do that ("Can't cancel a paid order —
+    // mark it unpaid (refund) first.", and no database function cancels a paid order), so this must be
+    // a test rig's clean-up — proven by the cancel having no Activity line, which every app path writes.
+    await check("lib/paySplit.ts", `settled-in-parts bill ${String(g.settle_group).slice(0, 8)}…: its order was cancelled after payment — by a test rig's clean-up, NOT the app (no Activity line for the cancel, and the app refuses to cancel a paid order)`, () =>
+      (EDITOR_REFUSES && all.every((o) => !ACTS.some((x) => x.order_id === o.id))) || "an app path cancelled a paid, settled-in-parts bill");
+  }
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
