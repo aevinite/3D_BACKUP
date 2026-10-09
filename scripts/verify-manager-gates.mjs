@@ -278,6 +278,37 @@ console.log("\nS10-T9 item 2 · GET /onhouse and the dashboard reach");
     : bad("the On-the-house card still hard-codes its window");
 }
 
+// ── S10-T9 item 3 · the dish-photo door obeys the Edit-menu switch like every editor door ────
+// Switched off, the menu editor is a read-only Viewer for everyone below the admin (owner,
+// 2026-08-02). The dish SAVE was refused; the photo UPLOAD was not, and stored the file anyway.
+console.log("\nS10-T9 item 3 · POST /dish-photo and the Edit-menu switch");
+{
+  const photoReq = () => {
+    const fd = new FormData();
+    fd.append("file", new File([new Uint8Array(8)], "dish.png", { type: "image/png" }));
+    return new NextRequest("http://localhost/api/editor/dish-photo", { method: "POST", headers: { cookie: "aevidine_admin_rid=" + RID }, body: fd });
+  };
+  const send = async () => { const r = await route.POST(photoReq(), ctx("dish-photo")); let j = {}; try { j = await r.clone().json(); } catch {} return { status: r.status, ...j }; };
+  const EDITOR_OFF = { menus: { manager: { editor: false } } };
+  for (const who of ["manager", "owner"]) {
+    world({}, { accessConfig: EDITOR_OFF });
+    actAs(who);
+    let r;
+    try { r = await send(); } catch (e) { r = { status: 0, error: `the upload went ahead and reached storage (${e.message})` }; }
+    r.status === 403 && /menu editor isn't part of this restaurant's manager panel/.test(String(r.error || ""))
+      ? ok(`${who === "owner" ? "an" : "a"} ${who} with Edit menu switched off cannot upload a dish photo`, `403 "${r.error}"`)
+      : bad(`${who === "owner" ? "an" : "a"} ${who} with Edit menu switched off still reached the photo upload`, `${r.status} ${r.error || ""}`);
+  }
+  // …and with the switch ON the door is not refused by the tab (it reaches its own checks).
+  world({}, {});
+  const fd = new FormData();
+  const r = await route.POST(new NextRequest("http://localhost/api/editor/dish-photo", { method: "POST", headers: { cookie: "aevidine_admin_rid=" + RID }, body: fd }), ctx("dish-photo"));
+  const j = await r.json().catch(() => ({}));
+  r.status === 400 && /No photo was attached/.test(String(j.error || ""))
+    ? ok("with Edit menu ON the photo door is reached (and asks for a file)", `400 "${j.error}"`)
+    : bad("with Edit menu ON the photo door was refused", `${r.status} ${j.error}`);
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });

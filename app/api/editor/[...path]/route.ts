@@ -275,7 +275,12 @@ const TAB_PATHS: { tab: ManagerTabKey; test: (p: string, method: string) => bool
   // SERVED, removing a dish a guest cancelled, and fixing a quantity — the floor, refused with
   // "the menu editor isn't part of this restaurant's manager panel". Nothing about the guest's food
   // belongs to the menu-editor switch, so the order-item actions are excluded by name.
-  { tab: "editor", test: (p) => /^(categories|filters)(\/|$)/.test(p) || (/^items(\/|$)/.test(p) && !ORDER_ITEM_ACTION.test(p)) },
+  // `dish-photo` JOINED THIS ROW on 2026-10-09 (sweep #10 T9, item 3). It is the menu editor's own
+  // door — the Image card of the dish form — but it was missing here, so with Edit menu switched off
+  // (the read-only Viewer for everyone below the admin, owner 2026-08-02) the dish SAVE was refused
+  // while the photo upload still accepted the file and wrote it into the restaurant's public
+  // storage folder. tabGate runs before the upload is dispatched, so naming it here is the whole fix.
+  { tab: "editor", test: (p) => /^(categories|filters|dish-photo)(\/|$)/.test(p) || (/^items(\/|$)/.test(p) && !ORDER_ITEM_ACTION.test(p)) },
 ];
 async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[], method = "GET"): Promise<NextResponse | null> {
   if (!g.user) return null;                         // admin super-user keeps every tab
