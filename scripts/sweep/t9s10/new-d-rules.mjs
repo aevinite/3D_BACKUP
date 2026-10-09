@@ -1,6 +1,6 @@
 // scripts/sweep/t9s10/new-d-rules.mjs — block D of sweep #10 T9's 500 (P178601–P178700).
 // The project's own rules, applied to my half: every database function it calls is callable by
-// the server only, every rejected idea still carries its marker, every new read since the last
+// the server only, every rejected idea still carries its marker (the list is docs/REJECTED-IDEAS.md), every new read since the last
 // sweep is scoped and bounded, and the guards that name this file are green.
 import { execFileSync } from "node:child_process";
 import { check, sql, SUBJECT, ROOT, HC, GC, PC, MC, MINE, chains, endpoint, helper, rd } from "./lib.mjs";
