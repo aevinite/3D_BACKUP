@@ -6,7 +6,7 @@
 //   node scripts/sweep/t10s10/rerun.mjs            # run, print
 //   node scripts/sweep/t10s10/rerun.mjs --ledger   # one table row per check, for the write-back
 import { execFileSync } from "node:child_process";
-import { check, runAll, src, MC, PBC, PAC, branch, rd, world, call, ROOT } from "./lib.mjs";
+import { check, runAll, src, branch, rd, world, call, ROOT } from "./lib.mjs";
 
 const guard = (args) => {
   try { const out = execFileSync("npm", ["run", "--silent", ...args], { cwd: ROOT, stdio: "pipe", timeout: 400000 }).toString(); return { ok: true, out }; }

@@ -3,7 +3,7 @@
 // audited. docs/COMPLIANCE-GUARDRAILS.md: a sale can be cancelled, never disappear; every money
 // change is audited; an issued invoice is corrected by a credit note, never edited.
 import { check, call } from "./lib.mjs";
-import { fullWorld, ALL_PERMS, ID } from "./endpoints.mjs";
+import { fullWorld, ID } from "./endpoints.mjs";
 
 const ago = (min) => new Date(Date.now() - min * 60_000).toISOString();
 const audits = (G, kind) => G.RPCS.filter((c) => c.name === "lfh_record_removal" && (!kind || c.args.p_kind === kind));
