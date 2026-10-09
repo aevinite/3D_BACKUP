@@ -52,6 +52,8 @@ function builder(table) {
       const mode = nth && nth.at === G.CALLS[ck] ? nth.mode : G.FAIL && (G.FAIL[ck] || G.FAIL[st.table]);
       if (mode === "throw") return Promise.reject(new Error("stub: " + st.table + " unreachable"));
       if (mode === "error") return Promise.resolve({ data: null, error: { message: "stub: " + st.table + " failed" }, count: null });
+      // "refuse" = the database refusing the VALUE (22P02, e.g. a non-id in a uuid column) — a 4xx, never a retry.
+      if (mode === "refuse") return Promise.resolve({ data: null, error: { message: 'invalid input syntax for type uuid: "x"', code: "22P02" }, count: null });
     }
     const found = rows();
     // Every trip is recorded, reads included — see the note on G.READS in state.mjs.

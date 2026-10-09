@@ -392,6 +392,22 @@ console.log("\nS10-T9 item 8 · GET /platform with nothing switched on");
   else bad("the Platform board refused or answered oddly with nothing switched on", JSON.stringify({ status: r.status, error: r.error }));
 }
 
+// ── S10-T9 item 10 · a waiter id the database refuses is a 4xx, never "server busy" ─────────
+console.log("\nS10-T9 item 10 · POST /table-sections with an id the database refuses");
+{
+  world({});
+  G.FAIL = { "staff_users:update": "refuse" };
+  let r = await call("POST", "table-sections", { body: { user_id: "not-an-id", tables: [1] } });
+  if (r.status === 404 && /no longer on this restaurant's team/.test(String(r.error || ""))) ok("a refused id is answered 404 in plain words, so the offline queue does not retry it", `${r.status}`);
+  else bad("a refused id was answered as server trouble", `${r.status} ${r.error}`);
+  world({});
+  G.FAIL = { "staff_users:update": "error" };
+  r = await call("POST", "table-sections", { body: { user_id: "w1", tables: [1] } });
+  if (r.status === 500) ok("…while real database trouble is still a 500 (kept and retried)", `${r.status}`);
+  else bad("real database trouble stopped being a 500", `${r.status}`);
+  delete G.FAIL;
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });

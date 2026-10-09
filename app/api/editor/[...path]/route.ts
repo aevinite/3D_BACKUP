@@ -137,7 +137,7 @@ async function counterPrintTarget(
 
 import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
-import { worthLogging, pgError } from "@/lib/dbRefusal";
+import { worthLogging, pgError, isDataRefusal } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
@@ -3403,6 +3403,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Same rule as everywhere else: the database's own words go to the server log, never to the
       // person standing at the section editor. (T24 sweep #8, 2026-09-06)
       if (upd.error) {
+        // A value the database REFUSES (a user_id that is not an id at all — 22P02) is a request
+        // that will be refused identically forever, so it is a 4xx, never the 500 the offline queue
+        // reads as "server busy, keep retrying" (sweep #10 T9, item 10). Only real trouble is a 500.
+        if (isDataRefusal(upd.error)) return err("That waiter is no longer on this restaurant's team.", 404);
         console.error("[editor/table-sections] save failed:", upd.error.message);
         return err("Couldn't save that waiter's tables — please try again.", 500);
       }
