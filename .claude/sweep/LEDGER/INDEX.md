@@ -82,7 +82,7 @@ terminals' rows — keep both sides.
 | T27 | `P196001`–`P197000` | The admin's Recycle bin, Billing, Usage, Rate limits, Platform floor, Logs and Bill ledger | ⏳ not run yet | — | — | — | — |
 | T28 | `P197001`–`P198000` | The admin server routes, part 1 | ⏳ not run yet | — | — | — | — |
 | T29 | `P198001`–`P199000` | The admin server routes, part 2 | ⏳ not run yet | — | — | — | — |
-| T30 | `P199001`–`P200000` + `P168001`–`P168999` (round 2; top of the planning gap, owner asked 2026-10-09 for 500–1000 more) | The money and compliance libraries | `T30-S10.md` | 1135 | 1135 | 12 | 12 |
+| T30 | `P199001`–`P200000` + `P168001`–`P168999` (round 2; top of the planning gap, owner asked 2026-10-09 for 500–1000 more) + `P167001`–`P167999` (round 3, claimed on `main` before a row was written) | The money and compliance libraries | `T30-S10.md` | 1135 | 1135 | 12 | 12 |
 | T31 | `P200001`–`P201000` | Every remaining shared library — the data-reading helpers | ⏳ not run yet | — | — | — | — |
 | T32 | `P201001`–`P202000` | The database — migrations at positions 1–105 | ⏳ not run yet | — | — | — | — |
 | T33 | `P202001`–`P203000` | The database — migrations at positions 106–210 | ⏳ not run yet | — | — | — | — |
