@@ -238,6 +238,9 @@ export async function GET(req: NextRequest) {
         if (usageRows.length) {
           const nm = await sb.from("inv_items").select("id, name").eq("restaurant_id", rid)
             .in("id", usageRows.map((u) => u.item_id)).limit(10);
+          // A failed names read leaves the "?" labels below (honest: unknown), and is now LOGGED rather
+          // than passing for "no names" (sweep #10 T30 item 15).
+          if (nm.error) console.error("[owner/inventory] ingredient names read failed:", nm.error.message);
           const byId = new Map((nm.data || []).map((n) => [n.id as string, n.name as string]));
           usageNamed = usageRows.map((u) => ({ name: byId.get(u.item_id) || "?", consumedVal: u.consumedVal, adjustedVal: u.adjustedVal }));
         }

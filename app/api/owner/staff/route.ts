@@ -27,6 +27,7 @@ import { logAction } from "@/lib/oplog";
 // "Unknown permission" here (fixed 2026-08-04).
 import { mergeOwnerEntitlements, entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { isRestaurantId } from "@/lib/ownerScope";
+import { BUSY_MESSAGE } from "@/lib/dbRefusal";
 import { managerSettingsOff, type MgrStaffPower } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
@@ -748,8 +749,11 @@ const logPanel = (s: Extract<Scope, { ok: true }>): "owner" | "admin" => (s.acto
 // it lands in the pay ledger's "recorded by" and must be trustworthy.
 async function actorLabel(s: Extract<Scope, { ok: true }>): Promise<string> {
   if (!s.actorId) return "Aevidine admin";
-  const a = (await sb.from("staff_users").select("name, username, role").eq("id", s.actorId).maybeSingle()).data as
-    { name?: string | null; username?: string; role?: string } | null;
+  // On a failed read the scope's own actor name is used — still the right person, just without the
+  // "(manager)" suffix — and the failure is logged rather than passing for "no such person" (item 15).
+  const aQ = await sb.from("staff_users").select("name, username, role").eq("id", s.actorId).maybeSingle();
+  if (aQ.error) console.error("[owner/staff] actor label read failed:", aQ.error.message);
+  const a = aQ.data as { name?: string | null; username?: string; role?: string } | null;
   if (!a) return s.actor;
   const nm = a.name || a.username || s.actor;
   return a.role === "manager" ? `${nm} (manager)` : nm;
@@ -876,7 +880,10 @@ async function postImpl(req: NextRequest): Promise<Response> {
   if (!s.restaurants.some((r) => r.id === rid)) return bad("That restaurant isn't yours to staff.", 403);
   // Names are unique PER restaurant (mig 091) — only clash-check within this one.
   // Binned rows don't count: since mig 245 a recycle-bin name is free to re-use.
-  const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", rid).is("deleted_at", null).limit(1)).data?.[0];
+  // Checked (sweep #10 T30 item 15): a failed read used to look like "the name is free".
+  const dupQ = await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", rid).is("deleted_at", null).limit(1);
+  if (dupQ.error) return bad(BUSY_MESSAGE, 503);
+  const dup = dupQ.data?.[0];
   if (dup) return bad("That username is taken at this restaurant — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
@@ -1027,8 +1034,11 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     // ledger is designed not to have.
     if (!payId) return bad("Missing payment id.");
     if (reason.length < 3) return bad("Say why you're cancelling this entry (a few words is enough).");
-    const existing = (await sb.from("staff_payments").select("id, amount, kind, voided_at")
-      .eq("id", payId).eq("staff_id", t.u.id).eq("restaurant_id", t.u.restaurant_id).limit(1)).data?.[0] as any;
+    // Checked (sweep #10 T30 item 15): a failed read used to answer "That payment entry doesn't exist."
+    const existingQ = await sb.from("staff_payments").select("id, amount, kind, voided_at")
+      .eq("id", payId).eq("staff_id", t.u.id).eq("restaurant_id", t.u.restaurant_id).limit(1);
+    if (existingQ.error) return bad(BUSY_MESSAGE, 503);
+    const existing = existingQ.data?.[0] as any;
     if (!existing) return bad("That payment entry doesn't exist.", 404);
     if (existing.voided_at) return bad("That entry is already cancelled.");
     const { error } = await sb.from("staff_payments").update({
@@ -1233,7 +1243,10 @@ async function patchImpl(req: NextRequest): Promise<Response> {
       const display = String(body.name || "").trim().slice(0, 80);
       const nkey = normalizeLoginName(display);
       if (realCharCount(nkey) < 2) return bad("Username must be at least 2 characters.");
-      const clash = (await sb.from("staff_users").select("id").eq("username", nkey).eq("restaurant_id", u.restaurant_id).neq("id", id).is("deleted_at", null).limit(1)).data?.[0];
+      // Checked (sweep #10 T30 item 15): a failed read used to look like "the new name is free".
+      const clashQ = await sb.from("staff_users").select("id").eq("username", nkey).eq("restaurant_id", u.restaurant_id).neq("id", id).is("deleted_at", null).limit(1);
+      if (clashQ.error) return bad(BUSY_MESSAGE, 503);
+      const clash = clashQ.data?.[0];
       if (clash) return bad("That username is taken at this restaurant.", 409);
       patch.name = display; patch.username = nkey;
     }
