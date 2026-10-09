@@ -134,7 +134,7 @@ check(id(), `${SUBJECT} — the ADMIN console with neither ?rid nor the act-as c
 // ── A5 · the menu tabs a restaurant switched off refuse their endpoints (tabGate) ───────────────
 const TAB_OFF = (k) => ({ menus: { manager: { [k]: false } } });
 const tabCase = (what, verb, path, ac, expectRefused, opts = {}) => check(id(), `${SUBJECT} — ${what}`, "STUB · tabGate driven with access_config.menus.manager",
-  async () => { const G = await world({ accessConfig: ac, who: opts.who || "manager", perms: opts.perms || {}, fix: opts.fix, rpc: opts.rpc });
+  async () => { await world({ accessConfig: ac, who: opts.who || "manager", perms: opts.perms || {}, fix: opts.fix, rpc: opts.rpc });
     const r = await call(verb, path, { body: opts.body, query: opts.query });
     const refusedByTab = r.status === 403 && /isn't part of this restaurant's manager panel/.test(r.json?.error || "");
     return { ok: expectRefused ? refusedByTab : !refusedByTab, note: `${r.status} ${String(r.json?.error || "").slice(0, 70)}` }; });
