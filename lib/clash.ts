@@ -84,8 +84,13 @@ const COMPARABLE_TABLES: Record<string, string> = {
   orders: "id",
   sessions: "id",
   menu_items: "id",
-  categories: "id",
-  filters: "id",
+  // A CATEGORY AND A FILTER ARE KEYED BY THEIR SLUG — they have NO `id` column (primary key
+  // restaurant_id + slug). Both were listed as "id" here, so the lookup asked for a column that does
+  // not exist, errored, and failed open: two managers editing the same category had no gate at all,
+  // while verify:clash-coverage counted the call site as protected (sweep #10 T30, item 9,
+  // 2026-10-09). The restaurant scope below still applies, which is what makes a slug unique.
+  categories: "slug",
+  filters: "slug",
   settings: "restaurant_id",   // one row per restaurant
   // The restaurant row itself — where a permission LIVES (manager_permissions, owner_entitlements,
   // access_config). Added 2026-08-10 so /aevinite → Access & permissions can be protected like
@@ -94,7 +99,10 @@ const COMPARABLE_TABLES: Record<string, string> = {
   // see TENANT_ROW_TABLES below.
   restaurants: "id",
   staff_users: "id",
-  table_tags: "id",
+  // `table_tags` USED TO BE LISTED HERE as "id" — a column it does not have (its key is restaurant +
+  // table + tag). Nothing ever sent an expectation for it (a tag is a toggle chip, exempt in
+  // verify:clash-coverage), so the entry protected nothing and could only ever fail open. Removed
+  // 2026-10-09 rather than left looking like protection.
   // Inventory. Two people stock-taking at once is the commonest real collision in the whole
   // product (the count sheet is deliberately shared), and until these were listed the gate
   // could not answer for them even if a screen sent an expectation — an unknown table returns

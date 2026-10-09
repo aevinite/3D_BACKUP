@@ -8112,7 +8112,10 @@ function updateMembCount(filterSlug) {
 const EXPECT_TABLE = { items: "menu_items", categories: "categories", filters: "filters", settings: "settings" };
 // Which column identifies the row. `settings` is keyed by restaurant_id, not by an `id` (it is one
 // row per restaurant) — see COMPARABLE_TABLES in lib/clash.ts, which scopes the lookup the same way.
-const EXPECT_ID_FIELD = { settings: "restaurant_id" };
+// Categories and filters are keyed by their SLUG — they have no `id` column at all, so with no entry
+// here `before.id` was undefined and no expectation was ever sent for them (lib/clash.ts names the
+// same columns in COMPARABLE_TABLES; sweep #10 T30, item 9).
+const EXPECT_ID_FIELD = { settings: "restaurant_id", categories: "slug", filters: "slug" };
 // The MONEY fields go first, so the 8-field cap below can never be the reason one of them
 // travels unprotected. `tax_mode` (mig 270) belongs here with `price`: it decides whether the
 // guest is charged ₹280, ₹294 or exactly ₹20 for the same typed number, so two managers

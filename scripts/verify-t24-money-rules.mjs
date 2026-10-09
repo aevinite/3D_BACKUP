@@ -692,6 +692,28 @@ head("8. the two docs I own tell the truth about the code they name");
     /docs\/SECURITY-CHECKLIST\.md/.test(playbook));
 }
 
+
+// ── the clash gate looks rows up by a column that EXISTS (sweep #10 T30, item 9, 2026-10-09) ──
+// categories and filters have no `id` (their key is restaurant + slug) and table_tags has none
+// either, yet all three were listed as "id": the lookup errored and failed open, and the editor sent
+// no expectation for a category because `before.id` was undefined. Static half: the two sides name
+// the same key. The database half (every listed column really exists) is in the --db block.
+{
+  const clashSrc = read("lib/clash.ts");
+  const appSrc = read("public/panels/editor/app.js");
+  const block = (/const COMPARABLE_TABLES: Record<string, string> = \{([\s\S]*?)\n\};/.exec(clashSrc) || [])[1] || "";
+  const comparable = Object.fromEntries([...block.matchAll(/^\s{2}(\w+): "(\w+)",/gm)].map((m) => [m[1], m[2]]));
+  check("lib/clash.ts looks a category and a filter up by its slug — they have no id column",
+    comparable.categories === "slug" && comparable.filters === "slug", comparable);
+  check("…and table_tags, which has no id either and was never sent an expectation, is not listed",
+    !("table_tags" in comparable), Object.keys(comparable));
+  const expectTable = Object.fromEntries([...((/const EXPECT_TABLE = \{([^}]*)\}/.exec(appSrc) || [])[1] || "").matchAll(/(\w+): "(\w+)"/g)].map((m) => [m[1], m[2]]));
+  const expectId = Object.fromEntries([...((/const EXPECT_ID_FIELD = \{([^}]*)\}/.exec(appSrc) || [])[1] || "").matchAll(/(\w+): "(\w+)"/g)].map((m) => [m[1], m[2]]));
+  const drift = Object.values(expectTable).filter((t) => comparable[t] && (expectId[t] || "id") !== comparable[t]);
+  check("the manager panel's menu-edit expectation names the same key column the gate looks up, for every table it edits",
+    Object.keys(expectTable).length >= 3 && !drift.length, { drift, expectId });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 // --db: the TypeScript rule against the SQL function, on the dev database only.
 // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -779,6 +801,20 @@ if (process.argv.includes("--db")) {
       offenders.length === 0, offenders);
     check("…and the installed purge still keeps the restaurants row, marked purged_at, so bills have a parent",
       /purged_at/.test(body));
+  }
+  {
+    // item 9's database half: every column the clash gate looks a row up by really exists, and every
+    // table it scopes by restaurant really has the column.
+    const clashSrc = read("lib/clash.ts");
+    const block = (/const COMPARABLE_TABLES: Record<string, string> = \{([\s\S]*?)\n\};/.exec(clashSrc) || [])[1] || "";
+    const comparable = Object.fromEntries([...block.matchAll(/^\s{2}(\w+): "(\w+)",/gm)].map((m) => [m[1], m[2]]));
+    const tenantRows = (((/TENANT_ROW_TABLES = new Set\(\[([^\]]+)\]\)/.exec(clashSrc) || [])[1]) || "").match(/"(\w+)"/g)?.map((x) => x.slice(1, -1)) || [];
+    const cols = await sql(`select table_name t, column_name c from information_schema.columns where table_schema='public' and table_name in (${Object.keys(comparable).map((t) => `'${t}'`).join(",")})`);
+    const has = new Set(cols.map((x) => `${x.t}.${x.c}`));
+    const missing = Object.entries(comparable).filter(([t, c]) => !has.has(`${t}.${c}`)).map(([t, c]) => `${t}.${c}`);
+    check(`every key column the clash gate looks up exists on the database (${Object.keys(comparable).length} tables)`, !missing.length, missing);
+    const unscoped = Object.keys(comparable).filter((t) => !tenantRows.includes(t) && !has.has(`${t}.restaurant_id`));
+    check("…and every table it scopes by restaurant has a restaurant_id column", !unscoped.length, unscoped);
   }
 }
 
