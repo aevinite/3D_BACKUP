@@ -355,7 +355,7 @@ export async function run(x) {
     const app = src("public/panels/tablet/app.js"); const used = [...new Set([...app.matchAll(/tperm\(["'](tablet_\w+)["']\)/g)].map((m) => m[1]))];
     const unknown = used.filter((k) => !T.TABLET_COLS.includes(k) && !T.WAITER_NEVER.includes(k)); eq(unknown, []); return `tablet tperm keys: ${used.join(", ")}`;
   });
-  await R("P22556", "lib/accessTree.ts", "every grant flag is read in real code", () => { const corpus = ["app/api/editor/[...path]/route.ts", "lib/managerCan.ts", "lib/dashRange.ts", "lib/discountCap.ts", "app/api/print/[...path]/route.ts"].filter((f) => existsSync(join(ROOT, f))).map(src).join("\n"); eq(T.GRANT_FLAGS.filter((f) => !corpus.includes(f)), []); });
+  await R("P22556", "lib/accessTree.ts", "every grant flag is read in real code", () => { const corpus = ["app/api/editor/[...path]/route.ts", "lib/managerCan.ts", "lib/dashRange.ts", "lib/discountCap.ts"].filter((f) => existsSync(join(ROOT, f))).map(src).join("\n"); eq(T.GRANT_FLAGS.filter((f) => !corpus.includes(f)), []); });
   await R("P22557", "lib/accessTree.ts", "every owner section entitlement is read", () => { const files = grep("owner_entitlements|entitledSubset|OWNER_SECTION_KEYS", "app lib components"); const corpus = files.map(src).join("\n"); eq(T.SECTION_ENTITLEMENTS.filter((k) => !new RegExp(`["'\`]${k}["'\`]`).test(corpus.replace(treeSrc, ""))), []); });
   await R("P22558", "lib/features.ts", "every feature key defaulted", () => eq(T.FEATURE_KEYS.filter((k) => !(k in F.FEATURE_DEFAULTS)), []));
   const clone = src("lib/settingsClone.ts");
