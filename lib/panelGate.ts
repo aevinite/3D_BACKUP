@@ -10,25 +10,56 @@
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { USER_COOKIE, userFromCookie, type Role } from "@/lib/userAuth";
+import { USER_COOKIE, userFromCookie, type Role, type StaffUser } from "@/lib/userAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
-import { isPanelEnabled, isRestaurantDeleted } from "@/lib/panelAccess";
+import { isPanelEnabled, isRestaurantDeleted, isRestaurantSuspended, ownerPanelEnabled } from "@/lib/panelAccess";
 import { getRestaurantBySlug, slugMovedTo } from "@/lib/tenant";
 
 // Where each role lands after login. The canonical copy — LoginForm keeps a
 // client-side duplicate (it can't import this server module).
 export const ROLE_HOME: Record<Role, string> = { owner: "/owner", manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
 
+// ── MAY THIS SIGNED-IN PERSON STILL ENTER THEIR PANEL? ONE ANSWER FOR EVERY DOOR ─────────────────────────────────
+// (sweep #10 T17 round 5, items 30 + 33, 2026-10-09.)
+//
+// 33 — A LOOP. Binning a restaurant leaves its staff accounts (and their 7-day passes) alone. requirePanel then refused
+// them and sent them to /login, and /login sends anyone it recognises straight back to their panel — so a still-signed-in
+// waiter of a binned restaurant bounced between the two until the browser gave up ("too many redirects"). The same for
+// an owner whose last restaurant was binned (/owner ↔ /login). Now /login asks THIS function first and, when the answer
+// is no, stays put and says why.
+// 30 — SUSPENDED = THE STAFF APPS STOP (owner, 2026-10-09: "do everything else", on the recommendation "stop working").
+// The restaurant's own address already refused a suspended restaurant's staff, silently; the plain panel addresses and
+// the panel APIs let them in. Every door now gives the same answer, in words. The owner panel is NOT stopped by a
+// suspension (owners keep seeing their numbers); only a binned estate stops it. The admin still enters through act-as.
+export type PanelDoor = { ok: true } | { ok: false; why: "gone" | "off"; message: string };
+export const DOOR_GONE = "This restaurant is no longer available. Contact your admin.";
+export const DOOR_OFF = "This restaurant is switched off right now. Ask Aevidine to turn it back on.";
+export const DOOR_NO_OWNED = "The owner panel isn't enabled for any of your restaurants. Ask your admin to turn it on.";
+export async function panelDoor(u: StaffUser): Promise<PanelDoor> {
+  if (u.role === "owner") {
+    let owns = true;
+    try { owns = await ownerPanelEnabled(u.id); }
+    catch { owns = true; }   // can't tell right now → let the owner panel say "try again"; never invent "you own nothing"
+    return owns ? { ok: true } : { ok: false, why: "gone", message: DOOR_NO_OWNED };
+  }
+  if (await isRestaurantDeleted(u.restaurant_id)) return { ok: false, why: "gone", message: DOOR_GONE };
+  if (await isRestaurantSuspended(u.restaurant_id)) return { ok: false, why: "off", message: DOOR_OFF };
+  return { ok: true };
+}
+
 export async function requirePanel(role: Role, next: string): Promise<void> {
   const store = await cookies();
-  // A logged-in user whose role matches this exact panel AND whose restaurant has
-  // this panel ENABLED (mig 106) AND isn't in the recycle bin (mig 128) — any of
-  // those failing bounces to login, so an already-signed-in user is locked out the
-  // moment the admin disables their panel or bins their restaurant.
+  // A logged-in user whose role matches this exact panel AND whose restaurant is neither
+  // in the recycle bin (mig 128) nor switched off (item 30) — see panelDoor above. Either
+  // failing sends them to the sign-in card with the reason.
   // Staff is checked FIRST (mirrors requireRole's order, QA sweep 2026-07-03): on a
   // device holding both cookies, the person who explicitly signed in wins.
   const u = await userFromCookie(store.get(USER_COOKIE)?.value);
-  if (u && u.role === role && !(await isRestaurantDeleted(u.restaurant_id)) && (await isPanelEnabled(role, u.restaurant_id))) return;
+  let door: PanelDoor | null = null;
+  if (u && u.role === role) {
+    door = await panelDoor(u);
+    if (door.ok && (await isPanelEnabled(role, u.restaurant_id))) return;
+  }
   // Admin super-access: may hop into any panel — even one turned OFF for the
   // restaurant (admin sets up / inspects everything) — but only via the admin
   // console's act-as flow, which names WHICH restaurant. No scope → back to /aevinite.
@@ -38,6 +69,9 @@ export async function requirePanel(role: Role, next: string): Promise<void> {
     if (store.get(ADMIN_ACT_COOKIE)?.value) return;
     redirect("/aevinite");
   }
+  // A person whose restaurant is binned or switched off goes to the sign-in card WITH the reason — and /login, getting
+  // the same answer from panelDoor, shows it instead of sending them straight back here (item 33).
+  if (door && !door.ok) redirect(`/login?why=${door.why}`);
   redirect(`/login?next=${encodeURIComponent(next)}`);
 }
 
@@ -165,5 +199,8 @@ export async function requirePanelAt(
   // Admin super-access: any slug, even an inactive restaurant or a disabled panel
   // (admin sets up / inspects everything) — same bypass as the bare-route gate.
   if (await tokenIsValid(store.get(AUTH_COOKIE)?.value)) return { restaurantId: r.id, admin: true };
+  // This restaurant's own staff, refused only because it is SWITCHED OFF, are told so (item 30) — the card used to come
+  // back with no word of why, after the right password.
+  if (u && u.role === role && u.restaurant_id === r.id && !r.active) redirect(`/r/${slug}/login?why=off`);
   redirect(`/r/${slug}/login?next=${encodeURIComponent(`/r/${slug}${ROLE_HOME[role]}`)}`);
 }

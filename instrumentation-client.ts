@@ -14,6 +14,7 @@ Sentry.init({
   beforeSendTransaction: scrubSentryEvent,
   beforeSendSpan: scrubSentryEvent,
   // Trace 100% in development, 10% in production.
+  // REJECTED (owner, 2026-10-09): lowering the developer-machine rate below 1.0 — "don't do 32". docs/REJECTED-IDEAS.md R61.
   tracesSampleRate: process.env.NODE_ENV === "development" ? 1.0 : 0.1,
   // Forward structured logs to Sentry.
   enableLogs: true,

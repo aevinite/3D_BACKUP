@@ -14,7 +14,7 @@
 //   • Login is rate-limited: 5 wrong tries locks the account for 60 seconds.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sha256hex, safeEqual, AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { isPanelEnabledCached, ownerPanelEnabled, isRestaurantDeleted } from "@/lib/panelAccess";
+import { isPanelEnabledCached, ownerPanelEnabled, isRestaurantDeleted, isRestaurantSuspended } from "@/lib/panelAccess";
 
 export const USER_COOKIE = "lfh_user";
 export type Role = "owner" | "manager" | "tablet" | "kitchen";
@@ -436,6 +436,8 @@ export async function requireRole(
       // fresh delete takes effect within TTL. Owners are exempt here — their restaurant_id is
       // the #1 home namespace, and ownerPanelEnabled already excludes binned restaurants.
       if (await isRestaurantDeleted(u.restaurant_id)) return { ok: false };
+      // A SWITCHED-OFF restaurant's staff apps stop on every call too (item 30) — same cached read as the bin check above.
+      if (await isRestaurantSuspended(u.restaurant_id)) return { ok: false };
     }
     // Presence heartbeat (throttled ~45s): mark this user active now so admin/owner
     // see who's working / which panel is open. Fire-and-forget; never blocks the call.
@@ -529,7 +531,8 @@ export async function describeLoginTarget(username: string, restaurantId?: strin
     // The same name can exist at several restaurants (mig 091), and the plain /login door can't
     // tell them apart — so name the first and say how many others share it.
     const first = describe(rows[0]);
-    return rows.length > 1 ? `${first} (+${rows.length - 1} more account${rows.length > 2 ? "s" : ""} use this name)` : first;
+    // "+1 more account USES", "+2 more accounts USE" (sweep #10 T17 round 5, item 34 — it read "+1 more account use").
+    return rows.length > 1 ? `${first} (+${rows.length - 1} more ${rows.length > 2 ? "accounts use" : "account uses"} this name)` : first;
   } catch {
     return null; // wording help only — never let it break a login or an alert
   }

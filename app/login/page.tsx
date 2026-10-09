@@ -7,15 +7,15 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
-import { ROLE_HOME } from "@/lib/panelGate";
+import { ROLE_HOME, panelDoor, DOOR_GONE, DOOR_OFF } from "@/lib/panelGate";
 import LoginForm from "./LoginForm";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; why?: string }>;
 }) {
-  const { next } = await searchParams;
+  const { next, why } = await searchParams;
   const store = await cookies();
   // THE SIGN-IN DOOR MUST NOT BREAK WHEN THE DATABASE IS SLOW (T10 sweep, finding F1).
   //
@@ -41,6 +41,14 @@ export default async function LoginPage({
     if (!(e instanceof AuthDbError)) throw e;   // a real bug still surfaces
     console.error("[login] couldn't check for an existing session:", e.message);
   }
-  if (u) redirect(ROLE_HOME[u.role] || "/menu"); // already signed in → your panel
-  return <LoginForm next={typeof next === "string" ? next : ""} />;
+  // ?why= only ever picks one of two FIXED sentences — nothing from the address is ever shown as text.
+  let notice = why === "off" ? DOOR_OFF : why === "gone" ? DOOR_GONE : "";
+  if (u) {
+    // Already signed in → your panel, but ONLY if that panel will let you in. Sending a person whose restaurant is
+    // binned or switched off back to a panel that refuses them was a redirect loop (item 33); they stay here and read why.
+    const door = await panelDoor(u);
+    if (door.ok) redirect(ROLE_HOME[u.role] || "/menu");
+    notice = door.message;
+  }
+  return <LoginForm next={typeof next === "string" ? next : ""} notice={notice} />;
 }

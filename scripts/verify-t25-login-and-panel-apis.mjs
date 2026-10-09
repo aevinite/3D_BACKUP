@@ -241,8 +241,9 @@ check("P04677", "a new sign-in clears the previous account's owner snapshots",
   has(CODE.loginForm, "clearOwnerSnaps();"));
 check("P04678", "a new sign-in tells the service worker to wipe saved screens",
   has(CODE.loginForm, 'postMessage({ type: "LFH_CLEAR_DATA" })'));
-check("P04679", "?next is honoured only when it equals this user's own panel home",
-  has(CODE.loginForm, "next && next === home ? next : home"));
+// Round 5, item 31 (owner 2026-10-09) moved this rule: a ?next INSIDE the person's own panel is now kept (deep link).
+check("P04679", "?next is honoured only on this site and only inside this user's own panel home",
+  has(CODE.loginForm, "if (u.origin !== window.location.origin) return home;") && has(CODE.loginForm, 'if (u.pathname !== home && !u.pathname.startsWith(home + "/")) return home;'));
 check("P04680", "the scoped door lands on the scoped panel URL",
   has(CODE.loginForm, "restaurantSlug ? `/r/${restaurantSlug}${base}` : base"));
 check("P04681", "ROLE_HOME here matches lib/panelGate.ts ROLE_HOME", (() => {
@@ -687,8 +688,9 @@ for (const [cid, idPart, why] of [
     has(CODE.staffLoginForm, 'window.location.assign(data.next || "/aevinite")') && !/assign\(data\.next \|\| next\)/.test(CODE.staffLoginForm));
   check("P186187", "the failed-password redirect carries `next` only as an ENCODED query value",
     has(CODE.staffLogin, "&next=${encodeURIComponent(next)}"));
-  check("P186188", "the staff door's card honours ?next only when it equals the person's own panel (unchanged)",
-    has(CODE.loginForm, "const dest = next && next === home ? next : home;"));
+  // Round 5, item 31 moved this rule (see P04679): the landing is decided in ONE function, landingFor.
+  check("P186188", "the staff door's card decides where to land in one place (landingFor), never from a raw ?next",
+    has(CODE.loginForm, "const dest = landingFor(next, home);") && !rx(CODE.loginForm, /router\.push\(next\)/));
 }
 // SWEEP #10 T17, item 10 — the three sign-in cards fit the room they sit in. The page keeps a 16px gutter,
 // so a viewport-based width (92vw / 94vw) came out WIDER than that room at phone width: measured at 360px,
@@ -1072,6 +1074,140 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
     t29b.locked === false && t29b.failCount === 0 && t29b.attemptsLeft === 10 && logged.some((l) => /could not count a wrong try/.test(l)));
   delete G.RPC_ANSWERS.lfh_throttle_fail; G.FAIL = {}; G.FAIL_NTH = {};
 }
+// ── SWEEP #10 T17 ROUND 5 — SUSPENDED STOPS THE STAFF APPS, NO SIGN-IN LOOP, DEEP LINKS, ALERT ENGLISH (items 30, 31, 33, 34) ──
+// ids P162233–P162248. Run for real where the file loads here; the page files (JSX) are read.
+{
+  const PA = await import("@/lib/panelAccess.ts");
+  const PG = await import("@/lib/panelGate.ts");
+  const PL = await import("@/app/api/panel-login/route.ts");
+  const { NextRequest } = await import("next/server.js");
+  const RA = "00000000-0000-4000-8000-0000000000a1", RB = "00000000-0000-4000-8000-0000000000b2";
+  const fresh = () => { resetWorld(); G.FAIL = {}; G.FAIL_NTH = {}; G.CALLS = {}; };
+  const H5 = await UA.hashSecret("guard5-pass");
+  const mk = (n, role, extra = {}) => ({ id: "00000000-0000-4000-8000-00000000d0" + n, username: "g5" + n, role, restaurant_id: RA, name: "G5 " + n, phone: null, active: true, deleted_at: null, pin_hash: null, token_version: 0, can_self_reset: true, can_self_set_pin: false, profile_confirmed: true, permissions: null, assigned_tables: null, failed_count: 0, locked_until: null, last_seen_at: new Date().toISOString(), password_hash: H5, ...extra });
+  const passOf = async (u) => { fresh(); G.FIX.staff_users = [u]; const r = await UA.loginUser(u.username, "guard5-pass"); return r.cookie; };
+  const rr = (cookie, q = "") => ({ cookies: { get: (n) => (n === "lfh_user" && cookie ? { value: cookie } : undefined) }, nextUrl: { searchParams: new URLSearchParams(q) }, headers: { get: () => null } });
+  const m5 = mk("01", "manager"); const mc = await passOf(m5);
+  fresh(); G.FIX.staff_users = [m5]; G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; PA.forgetRestaurant(RA);
+  check("P162233", "item 30: a SUSPENDED restaurant's manager is refused on every panel call (requireRole)", (await UA.requireRole(rr(mc), "manager")).ok === false);
+  const reads = G.READS.filter((r) => r.table === "restaurants").length; await UA.requireRole(rr(mc), "manager");
+  check("P162234", "…and the bin + suspension answers share ONE cached read (no extra trip per call)", reads === 1 && G.READS.filter((r) => r.table === "restaurants").length === 1);
+  const o5 = mk("02", "owner"); const oc = await passOf(o5);
+  fresh(); G.FIX.staff_users = [o5]; G.FIX.restaurant_owners = [{ user_id: o5.id, restaurant_id: RA }]; G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; PA.forgetRestaurant(RA, [o5.id]);
+  check("P162235", "…while the OWNER of a suspended restaurant still gets into the owner panel", (await UA.requireRole(rr(oc), "owner")).ok === true);
+  fresh(); G.FIX.restaurants = [{ id: RA, deleted_at: "2026-10-01T00:00:00Z", active: false }]; PA.forgetRestaurant(RA);
+  const binWins = (await PA.isRestaurantDeleted(RA)) === true && (await PA.isRestaurantSuspended(RA)) === false;
+  fresh(); G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; G.FAIL["restaurants"] = "error"; PA.forgetRestaurant(RA);
+  const failOpen = (await PA.isRestaurantSuspended(RA)) === false; G.FAIL = {};
+  check("P162236", "isRestaurantSuspended: a binned restaurant counts as binned (not suspended); a failed read lets people in and is NOT remembered",
+    binWins && failOpen && (await PA.isRestaurantSuspended(RA)) === true);
+  PA.forgetRestaurant(RA);
+  fresh(); G.FIX.staff_users = [m5]; G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; PA.forgetRestaurant(RA);
+  const e0 = console.error; console.error = () => {};
+  const sres = await PL.POST(new NextRequest(new URL("/api/panel-login", "http://guard.local"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: m5.username, password: "guard5-pass" }) }));
+  console.error = e0; const sbody = await sres.json();
+  check("P162237", "item 30: signing in to a suspended restaurant with the RIGHT password: 403, the 'switched off' sentence, and no pass cookie",
+    sres.status === 403 && sbody.error === PG.DOOR_OFF && !(sres.headers.getSetCookie?.() || []).some((c) => c.startsWith("lfh_user=")));
+  check("P162238", "…logged as login_denied naming the suspension", (G.FIX.staff_actions || []).some((r) => r.action === "login_denied" && /switched off \(suspended\)/.test(r.detail || "")));
+  PA.forgetRestaurant(RA);
+  fresh(); G.FIX.restaurant_owners = []; G.FIX.restaurants = []; PA.forgetRestaurant("x", [o5.id]);
+  const nd = await PG.panelDoor(o5);
+  fresh(); G.FIX.restaurants = [{ id: RA, deleted_at: null, active: false }]; PA.forgetRestaurant(RA);
+  const sd = await PG.panelDoor(m5); PA.forgetRestaurant(RA);
+  check("P162239", "item 33: panelDoor refuses an owner with no live restaurant (owner sentence) and staff of a suspended one ('switched off')",
+    nd.ok === false && nd.message === PG.DOOR_NO_OWNED && sd.ok === false && sd.why === "off" && sd.message === PG.DOOR_OFF);
+  const G5 = stripComments(read("lib/panelGate.ts"));
+  check("P162240", "item 33: requirePanel sends a refused person to the card WITH the reason (?why=), not back round the loop",
+    /if \(door && !door\.ok\) redirect\(`\/login\?why=\$\{door\.why\}`\);/.test(G5) && G5.indexOf("if (door && !door.ok)") < G5.lastIndexOf("redirect(`/login?next="));
+  check("P162241", "item 30: a suspended restaurant's own address sends its staff to its card with ?why=off",
+    /if \(u && u\.role === role && u\.restaurant_id === r\.id && !r\.active\) redirect\(`\/r\/\$\{slug\}\/login\?why=off`\);/.test(G5));
+  const LPg = stripComments(read("app/login/page.tsx"));
+  check("P162242", "item 33: /login redirects a signed-in person ONLY when panelDoor says they may enter; otherwise it shows why",
+    /const door = await panelDoor\(u\);\s*if \(door\.ok\) redirect\(ROLE_HOME\[u\.role\] \|\| "\/menu"\);\s*notice = door\.message;/.test(LPg) && !/if \(u\) redirect\(/.test(LPg));
+  check("P162243", "…and ?why= can only pick one of two FIXED sentences (nothing from the address is shown)",
+    /let notice = why === "off" \? DOOR_OFF : why === "gone" \? DOOR_GONE : "";/.test(LPg));
+  check("P162244", "item 30: a switched-off restaurant's door shows the sentence before anyone types", /notice=\{r\.active \? "" : DOOR_OFF\}/.test(stripComments(read("app/r/[restaurant]/login/page.tsx"))));
+  const LFg = stripComments(read("app/login/LoginForm.tsx"));
+  check("P162245", "the card draws the notice as plain text in a status box (never as HTML)",
+    /\{notice \? <div role="status"[^>]*>\{notice\}<\/div> : null\}/.test(LFg) && !/dangerouslySetInnerHTML/.test(LFg));
+  check("P162246", "item 31: a deep ?next inside the person's own panel is kept, with its query and #part",
+    /return u\.pathname \+ u\.search \+ u\.hash;/.test(LFg) && /const u = new URL\(next, window\.location\.origin\);/.test(LFg));
+  fresh(); G.FIX.staff_users = [{ id: "a", role: "tablet", name: "x", username: "x", restaurant_id: RA, active: true, deleted_at: null }, { id: "b", role: "tablet", name: "x", username: "x", restaurant_id: RB, active: true, deleted_at: null }]; G.FIX.restaurants = [{ id: RA, name: "A" }, { id: RB, name: "B" }];
+  const one = await UA.describeLoginTarget("x");
+  G.FIX.staff_users.push({ id: "c", role: "tablet", name: "x", username: "x", restaurant_id: RB, active: true, deleted_at: null });
+  const two = await UA.describeLoginTarget("x");
+  check("P162247", "item 34: the limit alert reads '+1 more account uses this name'", /\(\+1 more account uses this name\)$/.test(one || ""), one);
+  check("P162248", "…and '+2 more accounts use this name'", /\(\+2 more accounts use this name\)$/.test(two || ""), two);
+  G.FAIL = {}; G.FAIL_NTH = {};
+}
+// ── SWEEP #10 T17 ROUND 5 — RULES A DELIBERATE BREAK SURVIVED (mutation testing, 291 breaks) ─────────────────────────
+// Round 5 broke T17's files automatically; these rules had no check that would notice. ids P162249–P162262.
+{
+  const SA = await import("@/lib/staffAuth.ts");
+  const RG = await import("@/lib/revealGate.ts");
+  const RL = await import("@/lib/rateLimit.ts");
+  const PS = await import("@/lib/panelSettings.ts");
+  const SPv = await import("@/lib/sentryPrivacy.ts");
+  const PGv = await import("@/lib/panelGate.ts");
+  const OSv = await import("@/lib/ownerScope.ts");
+  const PLv = await import("@/app/api/panel-login/route.ts");
+  const ORv = await import("@/app/r/[restaurant]/owner/route.ts");
+  const SLv = await import("@/app/api/staff-login/route.ts");
+  const { NextRequest } = await import("next/server.js");
+  const RA = "00000000-0000-4000-8000-0000000000a1";
+  const fresh = () => { resetWorld(); G.FAIL = {}; G.FAIL_NTH = {}; G.CALLS = {}; };
+  const nreq = (path, init = {}) => { const h = new Headers(init.headers || {}); let b; if (init.json !== undefined) { h.set("content-type", "application/json"); b = JSON.stringify(init.json); } if (init.form) b = new URLSearchParams(init.form); if (init.cookie) h.set("cookie", init.cookie); return new NextRequest(new URL(path, "http://guard.local"), { method: init.method || "GET", headers: h, body: b }); };
+  const keepEnv = { ...process.env };
+  delete process.env.ADMIN_PASSWORD; delete process.env.STAFF_PASSWORD; delete process.env.EDITOR_PASSWORD; delete process.env.REVEAL_PASSWORD;
+  check("P162249", "with no admin password of any kind, adminPassword is the EMPTY TEXT and the uncover door says it is not set up", SA.adminPassword() === "" && RG.revealConfigured() === false);
+  process.env.ADMIN_PASSWORD = "guard5b-admin-pw";
+  check("P162250", "the RIGHT uncover password opens, and the same with one letter more does not", (await RG.revealPasswordMatches("guard5b-admin-pw")) === true && (await RG.revealPasswordMatches("guard5b-admin-pwx")) === false);
+  fresh();
+  check("P162251", "a blank subject is allowed and never sent to the limiter", (await RL.rateAllowed("staff_login", "  ")) === true && !G.RPCS.length);
+  fresh(); G.FAIL["rpc:lfh_rate_check"] = "throw";
+  check("P162252", "a limiter that THROWS lets the person through (it fails open)", (await RL.rateAllowed("staff_login", "x")) === true);
+  check("P162253", "a settings row of null is handed straight back (never a crash)", (() => { try { return PS.panelSafeSettings(null) === null; } catch { return false; } })());
+  const ev = { data: null, contexts: { trace: { data: { cookie: "c" } } }, spans: [{ data: { token: "t" } }] }; SPv.scrubSentryEvent(ev);
+  check("P162254", "an error report whose extra data is null still has its trace and span secrets blanked", ev.contexts.trace.data.cookie === SPv.REDACTED && ev.spans[0].data.token === SPv.REDACTED);
+  check("P162255", "the admin panel's frame never carries an ?as= that is not a real id", PGv.panelIframeSrc("/p/", RA, { as: "x&rid=y" }) === `/p/?rid=${RA}`);
+  check("P162256", "the 'couldn't read every restaurant' reply is a 503 (retryable)", OSv.incompleteListResponse().status === 503);
+  const H = await UA.hashSecret("guard5b-pass");
+  const u = { id: "00000000-0000-4000-8000-00000000e001", username: "g5b", role: "manager", restaurant_id: RA, name: "G5B", active: true, deleted_at: null, token_version: 0, failed_count: 0, locked_until: null, password_hash: H, profile_confirmed: true };
+  fresh(); G.FIX.staff_users = [JSON.parse(JSON.stringify(u))];
+  const e0 = console.error; console.error = () => {};
+  const bt = await PLv.POST(nreq("/api/panel-login", { method: "POST", json: { username: "g5b", password: "guard5b-pass", trap: "bot" } }));
+  console.error = e0;
+  check("P162257", "a filled bot trap is refused EVEN WITH THE RIGHT PASSWORD (and no pass is handed out)", bt.status === 401 && !(bt.headers.getSetCookie?.() || []).some((c) => c.startsWith("lfh_user=")));
+  fresh(); G.FIX.staff_users = [JSON.parse(JSON.stringify(u))];
+  const ep = await UA.loginUser("g5b", "");
+  check("P162258", "a name with an EMPTY password is refused as empty — never looked up, never counted as a wrong try", ep.reason === "empty" && G.READS.length === 0 && G.RPCS.length === 0);
+  const tok = await SA.sha256hex("guard5b-admin-pw");
+  fresh(); G.FIX.restaurants = [{ id: RA, slug: "g5b-o", name: "A", active: true, deleted_at: null }];
+  G.RPC_IMPL = { ...(G.RPC_IMPL || {}), lfh_guest_restaurant: ({ p_slug }) => (G.FIX.restaurants || []).find((x) => x.slug === p_slug) || null };
+  const orr = await ORv.GET(nreq("/r/g5b-o/owner", { cookie: `lfh_staff_auth=${tok}` }), { params: Promise.resolve({ restaurant: "g5b-o" }) });
+  const act = (orr.headers.getSetCookie?.() || []).find((c) => c.startsWith("aevidine_admin_rid=")) || "";
+  check("P162259", "the admin's act-as cookie is HttpOnly and lasts exactly 6 hours", /HttpOnly/i.test(act) && /Max-Age=21600/.test(act), act);
+  process.env.ADMIN_PASSWORD = "b".repeat(200);
+  fresh(); G.RPC_IMPL = { ...(G.RPC_IMPL || {}), lfh_throttle_fail: () => [{ fail_count: 1, locked: false }] };
+  const okLong = await (await SLv.POST(nreq("/api/staff-login", { method: "POST", form: { password: "b".repeat(200) }, headers: { accept: "application/json", "x-forwarded-for": "7.7.7.77" } }))).json();
+  process.env.ADMIN_PASSWORD = "b".repeat(201);
+  fresh(); G.RPC_IMPL = { ...(G.RPC_IMPL || {}), lfh_throttle_fail: () => [{ fail_count: 1, locked: false }] };
+  const noLong = await (await SLv.POST(nreq("/api/staff-login", { method: "POST", form: { password: "b".repeat(201) }, headers: { accept: "application/json", "x-forwarded-for": "7.7.7.78" } }))).json();
+  check("P162260", "an admin password of exactly 200 characters is accepted; 201 is refused without being hashed", okLong.ok === true && noLong.ok === false);
+  process.env.ADMIN_PASSWORD = "guard5b-admin-pw";
+  fresh(); const mm = { ...u, sw_version: "v5", last_seen_at: new Date().toISOString() }; G.FIX.staff_users = [mm]; G.FIX.restaurants = [{ id: RA, deleted_at: null, active: true }];
+  const pass = (await (async () => { const r = await UA.loginUser("g5b", "guard5b-pass"); return r.cookie; })());
+  G.FIX.staff_users[0].last_seen_at = new Date().toISOString(); G.WRITES.length = 0;
+  const PAx = await import("@/lib/panelAccess.ts"); PAx.forgetRestaurant(RA);
+  await UA.requireRole({ cookies: { get: (n) => (n === "lfh_user" ? { value: pass } : undefined) }, headers: { get: () => null } }, "manager"); await new Promise((r) => setTimeout(r, 5));
+  check("P162261", "a panel call with NO app-version header never writes (or clears) the stored version", !G.WRITES.some((w) => w.table === "staff_users"));
+  G.FIX.staff_users[0].last_seen_at = new Date(Date.now() - 50000).toISOString(); G.WRITES.length = 0; PAx.forgetRestaurant(RA);
+  await UA.requireRole({ cookies: { get: (n) => (n === "lfh_user" ? { value: pass } : undefined) }, headers: { get: () => null } }, "manager"); await new Promise((r) => setTimeout(r, 5));
+  check("P162262", "…while a 'last seen' 50 seconds old IS refreshed", G.WRITES.some((w) => w.table === "staff_users" && w.patch?.last_seen_at));
+  PAx.forgetRestaurant(RA);
+  for (const k of ["ADMIN_PASSWORD", "STAFF_PASSWORD", "EDITOR_PASSWORD", "REVEAL_PASSWORD"]) if (keepEnv[k] === undefined) delete process.env[k]; else process.env[k] = keepEnv[k];
+  G.FAIL = {}; G.FAIL_NTH = {};
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
@@ -1244,14 +1380,16 @@ check("P78822", "the person only ever sees r.error, never r.reason",
   !rx(PL, /json\(\{[^}]*reason/));
 check("P78823", "an owner is checked against what they OWN, never against their home namespace",
   before(PL, 'if (u.role === "owner")', "enabledOwnedRestaurantIds(u.id, false)"));
+// Round 5, item 30 added the fourth refusal (a switched-off restaurant).
 check("P78824", "a refused owner login is recorded as login_denied, a different event from login_failed",
-  count(PL, /"login_denied"/g) === 3);
+  count(PL, /"login_denied"/g) === 4);
 check("P78825", "the binned-restaurant refusal names the recycle bin in the log",
   has(PL, "the restaurant is in the recycle bin"));
 check("P78826", "the disabled-panel refusal names the role in the log",
   has(PL, "the ${u.role} panel is not enabled for this restaurant"));
-check("P78827", "all three refusals answer 403, not 401 — the password was RIGHT",
-  count(PL, /\}, \{ status: 403 \}\)/g) === 3);
+// Round 5, item 30 added the fourth (switched-off restaurant).
+check("P78827", "all four refusals answer 403, not 401 — the password was RIGHT",
+  count(PL, /\}, \{ status: 403 \}\)/g) === 4);
 check("P78828", "the successful sign-in is logged under the person's own role",
   has(PL, "await logAction(u.role, \"login\", {"));
 check("P78829", "the cookie's max age matches the signature's max age (7 days), so neither outlives the other",
@@ -1877,8 +2015,9 @@ check("P79119", "the panel gate sends a signed-out person to the SCOPED door, wh
   has(read("lib/panelGate.ts"), "redirect(`/r/${slug}/login?next="));
 check("P79120", "…and it names the panel they were heading for, so the sign-in lands them back there",
   has(read("lib/panelGate.ts"), "`/r/${slug}${ROLE_HOME[role]}`"));
-check("P79121", "the card honours that ?next only when it equals this person's own panel",
-  has(LF, "next && next === home ? next : home"));
+// Round 5, item 31: inside this person's own panel (same site), not only equal to its home — see P04679.
+check("P79121", "the card honours that ?next only inside this person's own panel",
+  has(LF, 'if (u.pathname !== home && !u.pathname.startsWith(home + "/")) return home;'));
 check("P79122", "…so a ?next pointing at another site is dropped, not followed",
   !rx(LF, /router\.push\(next\)/));
 check("P79123", "the three doors between them import no analytics, no third-party script and no tracker",

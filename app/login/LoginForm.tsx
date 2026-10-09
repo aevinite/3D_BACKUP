@@ -12,9 +12,22 @@ const ROLE_HOME: Record<string, string> = { owner: "/owner", manager: "/manager"
 // restaurantSlug/restaurantName come from the tenant-scoped door (/r/<slug>/login):
 // the slug is posted so only THAT restaurant's staff can match, and the card shows
 // the restaurant's own name instead of the platform brand.
+// The only place a sign-in's ?next is trusted: same site, and inside the signed-in person's own panel.
+function landingFor(next: string, home: string): string {
+  if (!next || !home.startsWith("/") || typeof window === "undefined") return home;
+  try {
+    const u = new URL(next, window.location.origin);
+    if (u.origin !== window.location.origin) return home;
+    if (u.pathname !== home && !u.pathname.startsWith(home + "/")) return home;
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return home;
+  }
+}
+
 export default function LoginForm({
-  next, restaurantSlug, restaurantName,
-}: { next: string; restaurantSlug?: string; restaurantName?: string }) {
+  next, restaurantSlug, restaurantName, notice,
+}: { next: string; restaurantSlug?: string; restaurantName?: string; notice?: string }) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -61,8 +74,12 @@ export default function LoginForm({
       // keeps saying which restaurant this is.
       const base = ROLE_HOME[data.role];
       const home = base ? (restaurantSlug ? `/r/${restaurantSlug}${base}` : base) : "/menu";
-      // Open-redirect guard: only honour ?next if it points to THIS user's panel.
-      const dest = next && next === home ? next : home;
+      // Open-redirect guard: a ?next is honoured only inside THIS user's own panel (see landingFor).
+      // WHERE TO LAND (sweep #10 T17 round 5, item 31, owner 2026-10-09). The old rule honoured ?next only when it was
+      // EXACTLY the panel's home, so a deep link (an owner's bookmark to /owner/reports) always landed on the home page.
+      // Now a ?next INSIDE this person's own panel is kept — resolved by the browser against this site, so only a path
+      // on this site, under their own home, ever survives (never another site, never someone else's panel).
+      const dest = landingFor(next, home);
       router.push(dest);
     } catch {
       setErr("Network error — please try again.");
@@ -105,10 +122,14 @@ export default function LoginForm({
         </div>
 
         {/* Item 19 (owner, 2026-10-08): a visible ring on the box the cursor is in. The boxes keep
-            outline:none for the mouse; :focus-visible draws the ring for the keyboard (inline styles
+            outline:none and :focus-visible draws the ring instead — for a TEXT box browsers treat every focus,
+            mouse or keyboard, as focus-visible, so the ring shows either way (corrected in round 5; inline styles
             cannot express :focus, hence this one small rule). Item 20: each word is tied to its box
             (htmlFor/id), so tapping "Username" selects the box and screen readers read "Username". */}
         <style>{`.lfh-signin input:focus-visible{box-shadow:0 0 0 3px rgba(91,140,255,.55);border-color:#5b8cff!important}`}</style>
+        {/* Item 30/33: why this person cannot go in right now (switched off / no longer available). One of a few fixed
+            sentences chosen by the server — never text from the address bar. */}
+        {notice ? <div role="status" style={{ margin: "0 0 14px", padding: "10px 12px", borderRadius: 10, background: "rgba(251,191,36,.12)", border: "1px solid rgba(251,191,36,.35)", color: "#fbbf24", fontSize: 13, lineHeight: 1.45 }}>{notice}</div> : null}
         <label htmlFor="lfh-login-username" style={{ fontSize: 12, color: "#8aa0c9" }}>Username</label>
         <input
           id="lfh-login-username"
