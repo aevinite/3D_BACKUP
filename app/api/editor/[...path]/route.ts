@@ -1170,7 +1170,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // its id either, or the reach would be a matter of knowing an id.
       const oneReach = billsReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
       const oneSince = oneReach === "today_yesterday" ? businessDayStartIso(new Date(Date.now() - 24 * 3600 * 1000)) : businessDayStartIso();
-      const bill = must(await sb.from("banquet_bills").select("*").eq("id", id).eq("restaurant_id", rid).gte("issued_at", oneSince).limit(1))[0];
+      // Named columns (item 7): everything the banquet sheet re-prints exactly as first printed —
+      // advances and tax_lines included — and not restaurant_id.
+      const bill = must(await sb.from("banquet_bills").select("id,order_id,session_id,bill_seq,bill_no,issued_at,subtotal,tax,total,received,advances,hall,func,fn_date,fn_from,fn_to,pax,rate,cust_name,cust_phone,cust_gstin,cust_addr,cust_person,remark,prepared_by,table_number,voided_at,void_reason,voided_by,created_by,created_at,discount,tax_lines").eq("id", id).eq("restaurant_id", rid).gte("issued_at", oneSince).limit(1))[0];
       if (!bill) return err("bill not found", 404);
       const order = bill.order_id
         ? must(await sb.from("orders").select("id,items,subtotal,tax,total,discount,status").eq("id", bill.order_id).eq("restaurant_id", rid).limit(1))[0]
@@ -1667,7 +1669,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     if (p === "calls") {
       const tbl = new URL(req.url).searchParams.get("table"); // targeted refetch (see /orders)
-      let cq = sb.from("waiter_calls").select("*").eq("restaurant_id", rid);
+      // Named columns (item 7, sweep #10 T9): every field the calls list and the table card read,
+      // and not restaurant_id, which the caller already is.
+      let cq = sb.from("waiter_calls").select("id,table_number,note,resolved,created_at,session_id,member_id").eq("restaurant_id", rid);
       if (tbl) cq = cq.eq("table_number", tbl);
       return ok(must(await cq.order("created_at", { ascending: false }).limit(100)));
     }
@@ -1675,7 +1679,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // Issues this restaurant has raised (newest first, open before resolved) — so the
     // manager can see what they've reported + its status. Scoped to THIS restaurant.
     if (p === "issues") {
-      const rows = must(await sb.from("issues").select("*").eq("restaurant_id", rid).order("status", { ascending: true }).order("created_at", { ascending: false }).limit(100));
+      // Named columns (item 7): the complaint card's fields, the two media links signRows() turns into
+      // short-lived links, and who resolved it.
+      const rows = must(await sb.from("issues").select("id,raised_by,raised_role,subject,body,status,created_at,resolved_at,resolved_by,image_url,audio_url").eq("restaurant_id", rid).order("status", { ascending: true }).order("created_at", { ascending: false }).limit(100));
       // A photo or voice note attached to a complaint is private paperwork: hand the screen a
       // short-lived signed link, never the permanent public one (lib/mediaLinks.ts).
       return ok(await signRows("issue-media", rows as Record<string, unknown>[], ["image_url", "audio_url"]));
@@ -2948,7 +2954,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, session:sessions(table_number, status)")
           .eq("restaurant_id", rid).order("joined_at", { ascending: false }).limit(500)
       );
-      const customers = must(await sb.from("customers").select("*").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(500));
+      // Named columns (item 7): everything the customer log draws, consent included (DPDP).
+      const customers = must(await sb.from("customers").select("phone,name,blocked,first_seen_at,last_seen_at,visits,consent,consent_at,points").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(500));
       // The blocklist read had NO limit at all. Columns named to match what the panel renders
       // (b.id / b.phone / b.table_number / b.reason) plus member_id, which unblocking needs.
       // unban_phone / unban_requested_at are what a BLOCKED GUEST left on the "you've been
@@ -2971,7 +2978,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // ADMIN's actions (panel='admin') AND the OWNER's actions (panel='owner' —
       // staff changes, permission grants…) are both hidden here; they show only in
       // their own panels' logs.
-      const rows = (must(await sb.from("staff_actions").select("*").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").order("created_at", { ascending: false }).limit(200)) || []) as { actor_id?: string | null }[];
+      // Named columns (item 7): the Activity log row, its error-board state, and actor_id (masked below
+      // for a staff reader when it is the admin's view marker).
+      const rows = (must(await sb.from("staff_actions").select("id,panel,action,table_number,order_id,detail,created_at,device_id,actor,actor_id,level,resolved_at,seen_at,snoozed_until,occurrences,last_seen_at").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").order("created_at", { ascending: false }).limit(200)) || []) as { actor_id?: string | null }[];
       // Actions the ADMIN performed from a panel view carry actor_id='admin:view' (owner,
       // 2026-07-28). Only the admin's own view may see that marker — for staff/owner
       // viewers the row must stay a plain, neutral panel row (the admin stays invisible).

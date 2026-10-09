@@ -359,6 +359,28 @@ console.log("\nS10-T9 item 6 · banquet bills and the Bills reach");
   else bad("an older banquet bill was queued for printing", `${r.status}`);
 }
 
+// ── S10-T9 item 7 · the manager route's reads name their columns ─────────────────────────────
+// Five reads took every column; they name them now. The only whole-row reads left are the ones whose
+// comment says why (the editor form edits every column of a dish/category/filter/settings row, and
+// the live floor renders the full order row). A new select("*") must come with that same reason.
+console.log("\nS10-T9 item 7 · whole-row reads in the manager route");
+{
+  // The FIRST half of the route only (through the table-sections branch) — sweep #10 T9's boundary.
+  // The second half has one more (the blocklist row read before an unblock); its owner decides it.
+  const whole = (await import("node:fs")).readFileSync(join(ROOT, "app/api/editor/[...path]/route.ts"), "utf8");
+  const cut = whole.indexOf('if (a === "customer-capture")');
+  const src = cut > 0 ? whole.slice(0, cut) : whole;
+  const ALLOWED = new Set(["menu_items", "categories", "filters", "settings"]);
+  const stars = [...src.matchAll(/from\("([a-z_]+)"\)\.select\("\*"\)/g)].map((m) => m[1]);
+  const unexplained = stars.filter((t) => !ALLOWED.has(t));
+  if (unexplained.length === 0) ok("no read takes every column except the editor bundle's four, whose comment says why", stars.join(", "));
+  else bad("a read takes every column with no reason given", unexplained.join(", "));
+  for (const [t, col] of [["waiter_calls", "member_id"], ["issues", "audio_url"], ["customers", "consent_at"], ["staff_actions", "actor_id"], ["banquet_bills", "tax_lines"]]) {
+    if (new RegExp(`from\\("${t}"\\)\\.select\\("[^"*]*\\b${col}\\b`).test(src)) ok(`the ${t} read names its columns (and keeps ${col}, which a screen reads)`);
+    else bad(`the ${t} read lost its column list or the ${col} column`);
+  }
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });
