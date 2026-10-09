@@ -3995,27 +3995,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, id: b, printed_at: at });
     }
 
-    // platform/toggles — flip "kitchen can accept" / "show in bills"
-    if (a === "platform" && b === "toggles") {
-      const patch: Record<string, boolean> = {};
-      if (typeof body.kitchen_can_accept_platform === "boolean") patch.kitchen_can_accept_platform = body.kitchen_can_accept_platform;
-      if (typeof body.platform_in_bills === "boolean") patch.platform_in_bills = body.platform_in_bills;
-      if (!Object.keys(patch).length) return err("no toggle given");
-      must(await sb.from("settings").update(patch).eq("restaurant_id", rid).select());
-      // A SENTENCE, NOT THE PATCH OBJECT (owner, 2026-09-02: "it should be in the human
-      // language"). This recorded `{"platform_in_bills":true}` — a database column name and a
-      // boolean, on a screen the manager and the owner both read. Both toggles are named here in
-      // the words their own switches use on the Parcel & platforms screen.
-      const TOGGLE_WORDS: Record<string, [string, string]> = {
-        kitchen_can_accept_platform: ["the kitchen can now accept delivery-app orders", "the kitchen can no longer accept delivery-app orders"],
-        platform_in_bills: ["delivery-app orders now show in the bills", "delivery-app orders no longer show in the bills"],
-      };
-      const said = Object.entries(patch)
-        .map(([k, v]) => TOGGLE_WORDS[k]?.[v ? 0 : 1] ?? `${k.replace(/_/g, " ")} turned ${v ? "on" : "off"}`)
-        .join("; ");
-      await log("manager", "platform_toggle", { restaurant_id: rid, detail: said, device_id: dev });
-      return ok({ ok: true, ...patch });
-    }
+    // ── platform/toggles IS GONE (sweep #10 T10, item 2) ─────────────────────────────────────────
+    // It flipped settings.kitchen_can_accept_platform and settings.platform_in_bills, and it asked
+    // NOTHING first — not the Platform module, not the `platform` power — so any signed-in manager
+    // could switch the kitchen's right to accept delivery-app orders, from a typed request. Its only
+    // caller, the Platform tab's "Show in bills" checkbox, was removed on 2026-07-07 as a dead toggle
+    // (#194); this half was left behind. A door no screen opens is still a door, so it goes too
+    // (the "a new way replaces the old one" rule). The `platform_toggle` words stay in
+    // lib/plainError.ts so the Activity log's old rows still read as English.
+    // Guarded by scripts/verify-t10-manager-writes.mjs.
 
     // ── banquet (mig 130): item CRUD + bill generation. All rid-scoped; the
     // entitlement is re-checked here (and again inside the place RPC) so a
