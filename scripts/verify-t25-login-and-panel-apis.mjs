@@ -1249,7 +1249,20 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   check("P163153", "the admin's view names the restaurant, falling back to 'this restaurant' only when it has no name (both places)",
     (OL.match(/r\?\.name \|\| "this restaurant"/g) || []).length === 2);
   check("P163154", "the owner layout reads who is signed in and their restaurants inside ONE try (a blip there shows the reconnecting screen)",
-    /try \{\s*u = await userFromCookie[\s\S]{0,300}ownedIds = await enabledOwnedRestaurantIds\(u\.id\);\s*\} catch \(e\) \{/.test(OL));
+    /try \{\s*u = await userFromCookie[\s\S]{0,300}if \(u && u\.role === "owner"\) ownedIds = await enabledOwnedRestaurantIds\(u\.id\);\s*\} catch \(e\) \{/.test(OL));
+}
+// ── SWEEP #10 T17 ROUND 6 — safety rules a deliberate break survived in mutation pass C — P163155–P163157 ──────────
+{
+  const RGc = await import("@/lib/revealGate.ts"); const PVc = await import("@/lib/passwordVault.ts"); const { createHash } = await import("node:crypto");
+  const keep = { ...process.env };
+  process.env.ADMIN_PASSWORD = "guard6c-admin"; delete process.env.REVEAL_PASSWORD;
+  check("P163155", "an uncover cookie that is not text is LOCKED (an error inside the check never counts as unlocked)", (await RGc.revealUnlocked(12345)) === false && (await RGc.revealUnlocked({})) === false);
+  delete process.env.ADMIN_PASSWORD; delete process.env.STAFF_PASSWORD; delete process.env.EDITOR_PASSWORD;
+  const exp = Date.now() + 60000; const key = createHash("sha256").update("aevidine.reveal.v1$").digest("hex");
+  check("P163156", "with NO password configured, an unlock signed with the empty password stays locked", (await RGc.revealUnlocked(`${exp}.${createHash("sha256").update(`${key}$${exp}`).digest("hex")}`)) === false);
+  delete process.env.CREDENTIAL_VAULT_KEY; delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  check("P163157", "with no vault key, a new password's readable copy is exactly null — so the OLD copy is cleared, never left on the handover sheet", (await PVc.passwordFields("x-pass-1")).password_shown === null);
+  for (const k of ["ADMIN_PASSWORD", "STAFF_PASSWORD", "EDITOR_PASSWORD", "REVEAL_PASSWORD", "CREDENTIAL_VAULT_KEY", "SUPABASE_SERVICE_ROLE_KEY"]) if (keep[k] === undefined) delete process.env[k]; else process.env[k] = keep[k];
 }
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
