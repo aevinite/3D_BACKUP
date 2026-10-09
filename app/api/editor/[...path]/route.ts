@@ -6717,9 +6717,16 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
     }
 
     if (a === "blocklist" && id) {
-      const existing = must(await sb.from("blocklist").select("*").eq("id", id).eq("restaurant_id", rid).limit(1));
+      // A BAN THAT WAS ALREADY LIFTED IS NOT LIFTED AGAIN (sweep #10 T10, item 8). This read every
+      // column (`select("*")`) to use one, and whatever it found it went on to write "unbanned" into
+      // the Activity log — so two devices lifting the same ban, or a stale Users list, put a second
+      // person's name against an unban only the first one made. "A record of something that didn't
+      // happen is worse than no record" is this file's rule three times over (the menu delete below
+      // was given the same answer by sweep #8 T25).
+      const existing = must(await sb.from("blocklist").select("id, phone").eq("id", id).eq("restaurant_id", rid).limit(1)) as { id: string; phone: string | null }[];
+      if (!existing.length) return err("That ban was already lifted — refresh to see the current list.", 404);
       must(await sb.from("blocklist").delete().eq("id", id).eq("restaurant_id", rid));
-      const phone = existing[0] && existing[0].phone;
+      const phone = existing[0].phone;
       if (phone) {
         const others = must(await sb.from("blocklist").select("id").eq("phone", phone).eq("restaurant_id", rid).limit(1));
         if (!others.length) await sb.from("customers").update({ blocked: false }).eq("phone", phone).eq("restaurant_id", rid);
