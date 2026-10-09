@@ -236,7 +236,11 @@ export async function settleBillInParts(
   if (!Number.isFinite(sum)) {
     return { ok: false, status: 400, message: "One of the parts is not a real amount — re-enter them." };
   }
-  if (Math.abs(sum - due) > 0.02) {
+  // IN WHOLE PAISE (sweep #10 T30 round 2, item 23, 2026-10-09). `Math.abs(sum - due) > 0.02` was
+  // decided by floating-point dust: parts of ₹525.02 for a ₹525 bill gave 0.01999… and were accepted,
+  // while ₹200.02 for a ₹200 bill gave 0.02000…01 and were REFUSED — the same two-paise difference,
+  // answered both ways depending on the bill. Counting paise makes the rule the one the note promises.
+  if (Math.abs(Math.round(sum * 100) - Math.round(due * 100)) > 2) {
     return { ok: false, status: 409, message: `The parts add up to ₹${sum.toFixed(2)} but the bill due is ₹${due.toFixed(2)} — they must match.` };
   }
 

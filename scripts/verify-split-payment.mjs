@@ -580,6 +580,15 @@ head("8 · an even split of any bill adds back up to that bill");
       "…and a tab that lost the race is refused the same way, its parts stamped reversed", r);
   }
 
+  // item 23 — the ±2 paise tolerance is counted in whole paise, so it answers the same on every bill
+  for (const [base, due] of [[190.48, 200], [500, 525], [0.95, 1]]) {
+    const one = { ...ROWS[0], subtotal: base, taxable_base: base, total: due };
+    const { sb } = standIn(); const realFrom = sb.from; sb.from = (tb) => { const q = realFrom(tb); if (tb === "orders") { const th = q.then; q.then = (res, rej) => Promise.resolve({ data: [one], error: null }).then(res, rej); void th; } return q; };
+    const half = Math.round((due / 2 + 0.01) * 100) / 100;
+    const r = await ps.settleBillInParts(sb, { rid: "00000000-0000-0000-0000-000000000001", table: "5", splits: [{ amount: half, method: "Cash" }, { amount: half, method: "UPI" }] });
+    want(r.ok === true, `parts exactly 2 paise over a ₹${due} bill are accepted (item 23 — the same rule on every bill)`, r);
+  }
+
   // item 6 — a failed SAVE says what happened to the bill, never the database's own sentence
   const PG_SENTENCE = { message: 'duplicate key value violates unique constraint "session_payments_pkey"', code: "23505" };
   const PG_BROKE = { message: "internal error: could not extend file base/16384", code: "XX000" };
