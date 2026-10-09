@@ -90,7 +90,7 @@ const defs = [];
 export const check = (id, what, how, fn) => defs.push({ id, what, how, fn });
 export const SUBJECT = "`app/api/editor/[...path]/route.ts`";
 
-export async function runAll({ ledger = false, quiet = false, only = null } = {}) {
+export async function runAll({ ledger = false, quiet = false, only = null, stubOnly = false, bail = false } = {}) {
   const seen = new Set();
   for (const d of defs) {
     if (seen.has(d.id)) throw new Error(`duplicate id ${d.id}`);
@@ -101,6 +101,8 @@ export async function runAll({ ledger = false, quiet = false, only = null } = {}
   const rows = [];
   for (const d of defs) {
     if (only && d.id !== only) continue;
+    if (stubOnly && !/^STUB/.test(d.how)) continue; // coverage runs: only the in-memory checks touch route.ts
+    if (bail && rows.some((r) => r.mark === "❌")) break;     // mutation runs: the first red is enough
     let res, note = "";
     try { res = await d.fn(); } catch (e) { res = false; note = `threw: ${(e && e.message) || e}`.slice(0, 160); }
     let mark;
@@ -129,6 +131,14 @@ export async function stubRoute() {
   process.env.NEXT_PUBLIC_SUPABASE_URL ||= "http://127.0.0.1:9/stub";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= "stub-anon-key";
   process.env.SUPABASE_SERVICE_ROLE_KEY ||= "stub-service-key";
+  // COVERAGE MODE (round 2): the real route.ts, loaded through ./hooks.mjs, so V8's coverage lands on
+  // the lines of the file itself. Run as:  T9_COVERAGE=1 node --import ./scripts/sweep/t9s10/hooks.mjs …
+  if (process.env.T9_COVERAGE) {
+    const st = await import(pathToFileURL(join(ROOT, "scripts/panel-stubs/state.mjs")).href);
+    // T9_ROUTE_ABS: a mutated copy of route.ts (scripts/sweep/t9s10/mutate.mjs) — same code path, other file.
+    _G = st.G; _reset = st.resetWorld; _route = await import(pathToFileURL(process.env.T9_ROUTE_ABS || join(ROOT, ROUTE_REL)).href);
+    return { route: _route, G: _G, resetWorld: _reset };
+  }
   const out = join(ROOT, "node_modules/.cache/t9s10-editor-route.cjs");
   execFileSync("npx", ["esbuild", ROUTE_REL, "--bundle", "--platform=node", "--format=cjs", "--alias:@=.",
     "--alias:@/lib/supabaseAdmin=./scripts/panel-stubs/sb.mjs",
@@ -148,6 +158,11 @@ export async function world(o = {}) {
   resetWorld();
   delete G.FAIL; delete G.FAIL_NTH; delete G.CALLS; delete G.RPC_IMPL;
   G.HONOUR_RANGE = true; // real paging (scripts/panel-stubs/sb.mjs opt-in) — a paged report must not loop
+  G.HONOUR_NOT_IN = true; // real "not in (…)" — the Activity log and Staff watch filter the admin's rows out
+  G.STORAGE = o.storage ? {} : undefined; G.STORAGE_LOG = [];
+  G.NULL_DATA = o.nullData || undefined;
+  G.HONOUR_LIMIT = true;
+  G.SCOPE_LOG ||= [];
   const who = o.who || "manager";
   G.ACTOR = who === "admin" ? { ok: true, user: null }
     : who === "owner" ? { ok: true, user: { id: "o1", role: "owner", name: "Owner", username: "own1", restaurant_id: RID, permissions: {} } }
@@ -170,7 +185,8 @@ export async function world(o = {}) {
 }
 /** Call one handler. Returns { status, json, text, headers }. */
 export async function call(verb, path, opts = {}) {
-  const { route } = await stubRoute();
+  const { route, G } = await stubRoute();
+  G.SCOPE_WHERE = `${verb} ${path}${opts.query || ""}`; // which request a logged query belonged to
   const { NextRequest } = require_("next/server");
   const headers = { "content-type": "application/json", cookie: "aevidine_admin_rid=" + (opts.adminRid || RID), ...(opts.headers || {}) };
   const init = { method: verb, headers };

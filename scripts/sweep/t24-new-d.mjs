@@ -145,7 +145,8 @@ check(nid(), "…driven live, both shapes answer the five lists", "driven live",
 check(nid(), "the Platform board carries no refusal that can never fire (both of its modules are permanent)", "read GET /platform",
   // Both ladders are permanent since 2026-08-03, so the "both off" refusal could never fire; it was
   // removed on 2026-10-09 (sweep #10 T9 item 8). What must hold now: no dead refusal, and the obituary.
-  () => !/return err\("The Platform board isn't enabled/.test(B("platform")) && /WAS HERE, refusing when both ladders/.test(B("platform")));
+  // The obituary is a COMMENT, so it is looked for in the raw endpoint text, not the comment-stripped B().
+  () => !/return err\("The Platform board isn't enabled/.test(B("platform")) && /WAS HERE, refusing when both ladders/.test(endpointBlock("platform")));
 check(nid(), "…a restaurant with every channel off gets an empty board and NO query at all", "read GET /platform",
   () => /if \(!sources\.length\) return ok\(\{ orders: \[\]/.test(B("platform")));
 check(nid(), "…the polled read names its columns instead of dragging the whole webhook body back", "read GET /platform",

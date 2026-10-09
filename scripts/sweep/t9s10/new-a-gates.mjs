@@ -56,7 +56,8 @@ sepCase("khata/customers", { khata_customers: BOTH((rid, s) => ({ id: `k-${s}`, 
   { world: { settings: { khata_allowed: true, khata_owner_control: false, khata_enabled: true }, rpc: { lfh_khata_outstanding: [] } }, query: "?q=Ravi" });
 sepCase("banquet/items", { banquet_items: BOTH((rid, s) => ({ id: `b-${s}`, restaurant_id: rid, title: "Hall", price: 1, sort_order: 1, active: true })) }, (j) => j && j.items,
   { world: { settings: { banquet_allowed: true, banquet_owner_control: false, banquet_enabled: true } } });
-sepCase("banquet/bills", { banquet_bills: BOTH((rid, s) => ({ id: `bb-${s}`, restaurant_id: rid, bill_no: "1", issued_at: "2026-10-01" })) }, (j) => j && j.bills,
+// issued NOW: since item 6 the banquet list reaches only as far as the Bills record (today by default).
+sepCase("banquet/bills", { banquet_bills: BOTH((rid, s) => ({ id: `bb-${s}`, restaurant_id: rid, bill_no: "1", issued_at: new Date().toISOString() })) }, (j) => j && j.bills,
   { world: { settings: { banquet_allowed: true, banquet_owner_control: false, banquet_enabled: true } } });
 sepCase("ratings", { feedback: BOTH((rid, s) => ({ id: `f-${s}`, restaurant_id: rid, rating: 5, created_at: "2026-10-01", acknowledged: false })) }, (j) => j && j.ratings,
   { world: { rpc: { lfh_ratings_summary: [{ total: 1 }] } } });

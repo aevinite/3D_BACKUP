@@ -8,7 +8,9 @@ import { check, world, call, live, noLive, sql, SUBJECT, RID, RID2, FRENCH_HOUSE
 let N = 178401;
 const id = () => { if (N > 178600) throw new Error("block C is full"); return "P" + N++; };
 const C = (what, how, fn) => check(id(), `${SUBJECT} — ${what}`, how, fn);
-const NOW = () => new Date().toISOString();
+// One second ago: a report cuts at "until now", and a row stamped in the same millisecond falls
+// outside it — a fixture flicker, not a product fault (found in round 2).
+const NOW = () => new Date(Date.now() - 1000).toISOString();
 const routes = (r) => ({ modules: { printing: { routes: r } } });
 const AGENT = (o = {}) => ({ id: "ag1", restaurant_id: RID, name: "Shop PC", last_seen_at: NOW(), revoked_at: null, printers: [{ name: "POS80" }], ...o });
 
@@ -270,7 +272,9 @@ L("the ratings summary total is the database's", "/ratings", async (j, r) => { i
 L("the removals list is the database's newest 100, answers excluded", "/audit", async (j) => { const d = await one(`select count(*)::int n from deletion_audit where restaurant_id='${FH}' and kind <> 'removal_classified'`); return { ok: Array.isArray(j) && j.length === Math.min(100, d.n), note: `${j.length} vs ${d.n}` }; });
 L("the customer log's guest list is French House's (capped at 500)", "/users", async (j) => { const d = await one(`select count(*)::int n from session_members where restaurant_id='${FH}'`); return { ok: j.members?.length === Math.min(500, d.n), note: `${j.members?.length} vs ${d.n}` }; });
 L("the activity log never shows the admin's or the owner's rows to a manager", "/oplog", async (j) => ({ ok: Array.isArray(j) && j.length <= 200 && !j.some((x) => ["admin", "owner", "db"].includes(x.panel)), note: `${j.length} rows` }));
-L("…and never the admin-view marker", "/oplog", async (j) => ({ ok: !j.some((x) => x.actor_id === "admin:view") }));
+// CORRECTED in round 2: the marker is lib/logMarks.ts's uuid, not the text "admin:view" this row first
+// looked for — which can never appear, so the first version could only pass.
+L("…and never the admin-view marker", "/oplog", async (j) => ({ ok: !j.some((x) => x.actor_id === "00000000-0000-0000-0000-0000000000ad"), note: `${j.filter((x) => x.actor_id === null).length} row(s) with the actor id blanked` }));
 L("…and every error row carries a plain sentence beside its exact text", "/oplog", async (j) => { const e = j.filter((x) => x.level === "error" && x.detail); return { ok: e.every((x) => typeof x.plain === "string" && x.plain.length > 0), note: `${e.length} error rows` }; });
 L("the Bills record holds only bills inside the reach window, none binned", "/orders?bills=1", async (j) => { const from = startIso(); const rows = j.rows || []; return { ok: rows.every((o) => !o.deleted_at && o.created_at >= from) && (j.reach === "today" || j.reach === "today_yesterday"), note: `${rows.length} rows · reach ${j.reach}` }; });
 L("the live floor read carries no binned order", "/orders", async (j) => ({ ok: Array.isArray(j) && j.every((o) => !o.deleted_at), note: `${j.length}` }));

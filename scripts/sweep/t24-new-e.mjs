@@ -78,7 +78,8 @@ check(nid(), "the GRAND TOTAL is money actually collected — paid bills only, p
   () => /grandTotal: r2\(paidNet \+ platRevenue\)/.test(Z));
 check(nid(), "every read on this endpoint says WHICH restaurant it is for", "read GET /zreport, statement by statement",
   () => { const st = F.chains(Z);
-    const bad = st.filter((c) => !/restaurant_id/.test(c.flat) && !/\.in\("id", daysSessionIds\)/.test(c.flat));
+    // The restaurant ROW itself is found by its own id (item 11 reads its name for the heading).
+    const bad = st.filter((c) => !/restaurant_id/.test(c.flat) && !/\.in\("id", daysSessionIds\)/.test(c.flat) && !/from\("restaurants"\)[^;]*\.eq\("id", rid\)/.test(c.flat));
     return { ok: bad.length === 0, note: bad.length ? bad.map((b) => b.flat.slice(0, 60)).join(" | ") : `${st.length} statements, all scoped` }; });
 check(nid(), "the day-close answers live, with all six sections a manager reads", "driven live",
   () => needLive("zreport") || (live("zreport").status !== 200 ? { ok: live("zreport").status === 403, note: "refused, honestly" }

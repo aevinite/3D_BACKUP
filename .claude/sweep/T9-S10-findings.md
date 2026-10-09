@@ -19,3 +19,27 @@ Ledger: `.claude/sweep/LEDGER/T9-S10.md` (562 new rows) · re-run: 868 rows of T
 Tooling fixed on the way (no product change): the T24 runner's POST slice (empty since 2026-09-17),
 its net_amount check, its statement-count lock (re-locked with every move explained), its
 signed-out rows (now driven in memory), and an opt-in `.range()` for the panel stub.
+
+## Round 2 (owner, 2026-10-09: "do all … make sure there shouldn't be any error left within the boundaries")
+
+4. **Lint cap (fixed on main, PR #1459)** — T9's merged files + T39's new cap took main's lint red; T9's warnings removed.
+5. **Repeat-customer chip ignored the Customer directory switch** — GET customer-recognize now answers "not known" when it is off.
+6. **Banquet bills reached any date** — the list, one bill and the banquet print door now follow the Bills reach (owner "do all").
+7. **Five reads took every column** — calls, complaints, customer log, activity log, one banquet bill now name their columns.
+8. **A Platform-board refusal that could never fire** — removed, with an obituary.
+9. **A comment above the wrong code** — the customer-capture explanation moved back above customer-capture.
+10. **A refused waiter id answered 500** (the offline queue would retry it forever) — now 404 in plain words.
+11. **Restaurant #1's name on other restaurants' tax documents** — the Z-report and the GST report fell back to "Little
+    French House" for any restaurant with no Billing name (six live dev restaurants). Now billdoc's billIdentity(),
+    the printed bill's own rule. Found by the branch-coverage pass.
+12. **Two Bills-record reads keyed on session ids alone** — now name the restaurant and a bound. Found by the
+    whole-suite query audit (2,599 statements, 3 unscoped shapes: these two, and `select menu_items [eq:id]` from
+    POST items in the OTHER half — left for its owner).
+
+Guard for all of 5–12: `npm run verify:manager-gates` (58 checks), each sabotage-tested.
+
+How "no error left" was measured, not claimed: 100% of the half's 1,342 code lines executed (V8 coverage on the real
+file), every reachable branch arm taken, 438 of 456 mutants caught with a CONTROL run first (the 18 survivors read by
+hand and equivalent — listed in LEDGER/T9-S10.md), and one query audit over the whole suite.
+Tools: `scripts/sweep/t9s10/{coverage,mutate,hooks}.mjs`. Trap recorded: Node will not strip TypeScript types under
+node_modules — the first mutation run "killed" 454/454 because every copy failed to load.
