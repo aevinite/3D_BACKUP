@@ -179,5 +179,45 @@ const liveTicket = (o = {}) => world({ fix: {
   else bad("the waiter's route calls softDeleteOrders again — R27: nobody at the restaurant removes a bill");
 }
 
+// ── 4. A TAP ON SOMETHING ALREADY GONE SAYS SO — NOT "ask your manager to add the table" (item 4) ──────
+// Sections are always on for a waiter, so the section gate runs before every row-id action. It could
+// not tell "no such row" from "couldn't tell", and refused the first with the section sentence.
+console.log("\n4. a stale tap is told the thing is gone, not that the table is someone else's");
+// An IN-MEMORY waiter holding tables 1–3 (nothing real is written; no restaurant's setting moves).
+const SECTION_1_TO_3 = [1, 2, 3];
+const GONE_DOORS = [
+  ["calls/gone1/attend", {}, /no longer on the board/, "attending a call that was already cleared"],
+  ["members/gone1/approve", {}, /no longer on this table/, "letting in a guest who already left"],
+  ["items/gone1/status", { status: "served" }, /isn't on this restaurant's board/, "serving a dish that was removed"],
+  ["orders/gone1/serve-all", {}, /isn't there anymore/, "serving an order that is gone"],
+  ["requests/gone1/resolve", { status: "approved" }, /no longer there/, "answering a request that is gone"],
+];
+for (const [path, body, want, what] of GONE_DOORS) {
+  const G = await world({ fix: {} });
+  const r = await call("POST", path, { body });
+  // A scoped update that matched no row is still a statement the stub logs; what matters is that it CHANGED nothing.
+  if (r.status === 404 && want.test(r.text) && G.WRITES.every((w) => w.matched === 0)) ok(`${what} → 404 "${(r.json && r.json.error || "").slice(0, 60)}"`);
+  else bad(`${what} answered ${r.status} ${r.text.slice(0, 90)}`);
+}
+{
+  // The gate still does its job: a dish on a table OUTSIDE the waiter's section is refused by name.
+  const G = await world({ user: { assigned_tables: SECTION_1_TO_3 }, fix: {
+    orders: [{ id: "o9", restaurant_id: RID, status: "preparing", table_number: "9", items: [] }],
+    order_items: [{ id: "i9", restaurant_id: RID, order_id: "o9", status: "preparing" }],
+  } });
+  const r = await call("POST", "items/i9/status", { body: { status: "served" } });
+  if (r.status === 403 && /Table 9 isn't in your section/.test(r.text) && G.WRITES.length === 0) ok("a dish on someone else's table is still refused, naming table 9");
+  else bad(`someone else's table answered ${r.status} ${r.text.slice(0, 90)}`);
+}
+{
+  // A FAILED lookup is still "couldn't tell" and still refused — a blip never reads as allowed.
+  const G = await world({ user: { assigned_tables: SECTION_1_TO_3 }, fail: { waiter_calls: "error" }, fix: {
+    waiter_calls: [{ id: "c9", restaurant_id: RID, table_number: "9", resolved: false }],
+  } });
+  const r = await call("POST", "calls/c9/attend", { body: {} });
+  if (r.status === 403 && G.WRITES.length === 0) ok("a lookup that FAILED still refuses (403) and writes nothing");
+  else bad(`a failed lookup answered ${r.status} with ${G.WRITES.length} write(s)`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
