@@ -41,15 +41,17 @@ async function recentlyAlerted(key: string): Promise<boolean> {
 // SILENT alerts (owner 2026-07-29): some pings are "good to know", not "run to the kitchen" —
 // a rate limit being reached hurts nobody (the person just waits a few minutes). Those must still
 // ARRIVE and stay readable in the notification list, but with NO sound and NO vibration.
-//   • ntfy   → Priority "min" = it lands in the notification drawer and the ntfy list, with NO
-//              sound, NO vibration and no pop-over. ("low" was tried first and STILL vibrated the
-//              owner's phone on 2026-07-29 — Android's per-channel vibration overrode it.)
+//   • ntfy   → Priority "low" (QUIET_PRIORITY below) = it lands in the notification drawer and the ntfy
+//              list with no sound. History, kept because it matters: "min" was used for a while after
+//              "low" still vibrated the owner's phone on 2026-07-29 (Android's per-channel vibration
+//              overrode it) — but "min" can drop the alert from the list entirely, so the code went back
+//              to "low". (Corrected sweep #10 T17 round 6, item 39 — this line used to say "min".)
 //   • Telegram → disable_notification: true = the message appears in the chat silently.
 // Nothing is ever hidden or dropped — silent means quiet, not invisible.
 // WHICH ALERTS MAY BUZZ — the owner's final rule (2026-07-29). LOUD is the default, because a thing
 // that is actually BROKEN on the website must be felt during service.
 //   • SILENT — EXACTLY ONE alert in the whole app: the **staff/owner login** limit
-//     (`silent: true` → ntfy "min", Telegram silent: it lands in the notification drawer with no
+//     (`silent: true` → ntfy "low", Telegram silent: it lands in the notification drawer with no
 //     sound and no vibration). Nothing is broken when that wall is hit; the person waits a few
 //     minutes. It is also the one that fires most often during our own testing.
 //   • LOUD — EVERYTHING else: something went wrong, screen errors, new complaints, the admin-login
