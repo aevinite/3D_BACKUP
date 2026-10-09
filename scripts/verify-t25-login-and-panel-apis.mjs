@@ -1239,6 +1239,18 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   check("P163150", "item 39: the alerts header names the SAME quiet priority the code sends ('low')",
     /const QUIET_PRIORITY = "low";/.test(AL) && /Priority "low" \(QUIET_PRIORITY below\)/.test(AL) && /`silent: true` → ntfy "low"/.test(AL));
 }
+// ── SWEEP #10 T17 ROUND 6 — the owner layout's rules a deliberate break survived (mutation pass B) — P163151–P163154 ──
+{
+  const OL = stripComments(read("app/owner/layout.tsx"));
+  check("P163151", "the owner cockpit opens for a signed-in OWNER (role check is exactly 'owner'), and only they get the owner shell first",
+    /if \(u && u\.role === "owner"\) \{\s*if \(!ownedIds\.length\) redirect\("\/login\?next=\/owner"\);/.test(OL));
+  check("P163152", "…an owner with NO live restaurant goes to the sign-in card (which tells them why) — one with restaurants is never sent there",
+    (OL.match(/redirect\("\/login\?next=\/owner"\)/g) || []).length === 1 && /if \(!ownedIds\.length\) redirect/.test(OL));
+  check("P163153", "the admin's view names the restaurant, falling back to 'this restaurant' only when it has no name (both places)",
+    (OL.match(/r\?\.name \|\| "this restaurant"/g) || []).length === 2);
+  check("P163154", "the owner layout reads who is signed in and their restaurants inside ONE try (a blip there shows the reconnecting screen)",
+    /try \{\s*u = await userFromCookie[\s\S]{0,300}ownedIds = await enabledOwnedRestaurantIds\(u\.id\);\s*\} catch \(e\) \{/.test(OL));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
