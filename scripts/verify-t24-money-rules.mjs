@@ -83,7 +83,7 @@ const BILLDOC = (await import("@/public/panels/billdoc.js")).default;
 head("1. lib/tax.ts — ONE source of truth for a restaurant's rate");
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 const { effectiveTaxRate, effectiveTaxPct, taxComponents, priceTaxMode, itemTaxModesAllowed,
-        resolveTaxMode, isMrpDish, splitBill, maxDiscount, TAX_SETTINGS_COLUMNS } = tax;
+        resolveTaxMode, isMrpDish, splitBill, TAX_SETTINGS_COLUMNS } = tax;
 
 eq("composition ⇒ the effective rate is exactly 0, not a hidden 5%",
   effectiveTaxRate({ price_tax_mode: "composition", tax_rate: 0.05 }), 0);
@@ -182,7 +182,8 @@ eq("an 'exempt' line lands in nontaxAmount and never in taxableBase",
   eq("the identity subtotal − discount + tax === total holds", Math.round((s.subtotal - s.discount + s.tax) * 100) / 100, s.total);
   eq("a discount above the cap is clamped to the cap, never applied beyond it", splitBill(lines, S5, 5000).discount, 1000);
   eq("a negative discount is clamped to zero", splitBill(lines, S5, -50).discount, 0);
-  eq("maxDiscount() === splitBill(lines, settings, 0).discountBase", maxDiscount(lines, S5), splitBill(lines, S5, 0).discountBase);
+  // maxDiscount() was a one-line alias nothing called — removed 2026-10-09 (sweep #10 T30 item 14).
+  eq("maxDiscount() is gone, so there is ONE name for the discount ceiling (splitBill's discountBase)", typeof tax.maxDiscount, "undefined");
 }
 {
   // A mixed bill: taxed food + tax-inclusive drinks + a sealed MRP bottle, at an awkward rate.

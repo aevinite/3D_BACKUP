@@ -424,8 +424,10 @@ const IDENTITIES = [
   ["a sealed MRP item never counts for more than the whole bill WHERE THAT FIGURE IS USED (a zero rate)",
     (s) => s.rate > 0 || s.mrpAmount <= s.subtotal + 0.005],
   ["a composition-scheme restaurant charges exactly zero tax", (s, raw) => raw.price_tax_mode !== "composition" || (s.rate === 0 && s.tax === 0)],
+  // maxDiscount() was removed 2026-10-09 (sweep #10 T30 item 14 — nothing called it); the identity it
+  // stood for is that the most a discount may be is splitBill's own discountBase, asked with no discount.
   ["asking for the maximum discount gives back exactly the maximum discount",
-    (s, raw, ln) => tax.maxDiscount(ln, raw) === s.discountBase],
+    (s, raw, ln) => tax.splitBill(ln, raw, 0).discountBase === s.discountBase],
 ];
 for (const [pname, raw] of PROFILES) {
   for (const [iname, holds] of IDENTITIES) {

@@ -239,18 +239,7 @@ export class ReadSet {
   }
 }
 
-/**
- * The "degrade gracefully, but a TOTAL failure is still an error" rule, in one place.
- *
- * Several routes fan a per-restaurant RPC out over an owner's whole set. Losing one restaurant must
- * not blank the page (the 2026-07-09 audit), but keeping "what answered" quietly turns a GROUP TOTAL
- * into a subset — so the caller gets back the ones that worked AND whether any were missing, and is
- * expected to name it in `partial` when some were.
- */
-export function keepWhatAnswered<T extends { error?: unknown }>(
-  results: T[],
-): { ok: T[]; missing: number; allFailed: boolean; firstError: unknown } {
-  const ok = results.filter((r) => !r.error);
-  const firstError = results.find((r) => r.error)?.error ?? null;
-  return { ok, missing: results.length - ok.length, allFailed: ok.length === 0 && results.length > 0, firstError };
-}
+// keepWhatAnswered() USED TO LIVE HERE ("degrade gracefully, but a TOTAL failure is still an
+// error"). No route ever imported it — every fan-out route spells that rule out next to its own
+// `partial` list — so it was a helper that looked like the rule while enforcing nothing. Removed by
+// sweep #10 T30 (item 14, 2026-10-09). If a third fan-out route needs it, bring it back WITH a caller.

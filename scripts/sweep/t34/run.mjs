@@ -335,13 +335,12 @@ N("P104915", "'every read failed' is false for an empty set and true only when t
         && some.allFailed === false && some.anyFailed === true
         && all.allFailed === true && all.failedNames.join(",") === "a,b";
   });
-N("P104916", "fanning a read over several restaurants keeps the ones that answered AND says how many did not",
-  "keepWhatAnswered() — the 'a group total must not quietly become a subset' rule", () => {
-    const r = rg.keepWhatAnswered([{ error: null, v: 1 }, { error: { message: "x" } }, { error: null, v: 3 }]);
-    const none = rg.keepWhatAnswered([]);
-    const dead = rg.keepWhatAnswered([{ error: { message: "x" } }]);
-    return r.ok.length === 2 && r.missing === 1 && r.allFailed === false && r.firstError.message === "x"
-        && none.allFailed === false && dead.allFailed === true;
+// keepWhatAnswered() was removed 2026-10-09 (sweep #10 T30 item 14): no route ever imported it, so
+// this row now checks the removal holds — the helper is gone and nothing reaches for it.
+N("P104916", "fanning a read over several restaurants keeps the ones that answered AND says how many did not (re-stated: the unused keepWhatAnswered helper is gone, nothing imports it)",
+  "the module's exports + a grep of app/ lib/ components/", () => {
+    return typeof rg.keepWhatAnswered === "undefined"
+        && !tsFiles.some((f) => f !== "lib/readGuard.ts" && /\bkeepWhatAnswered\b/.test(read(f)));
   });
 N("P104917", "the database's own words are logged OUR side exactly once, with the route name — never returned",
   "capture console.error while a ReadSet is built from two failures", () => {

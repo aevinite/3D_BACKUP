@@ -127,7 +127,7 @@ export type BillSplit = {
   nontaxAmount: number;  // every untaxed line — MRP AND ordinary nil-rated goods
   mrpAmount: number;     // the LOCKED part only: a sealed item whose printed price is final
   subtotal: number;      // taxableBase + nontaxAmount  (so subtotal + tax = total, as before)
-  discountBase: number;  // the most a discount may be — see maxDiscount() for the rule
+  discountBase: number;  // the most a discount may be — see discountBaseOf() for the rule
   discount: number;      // clamped to discountBase, never silently beyond it
   taxable: number;       // taxableBase − discount (when tax applies)
   rate: number;
@@ -199,8 +199,7 @@ export function splitBill(lines: SplitLine[], raw: ModeSettings, discount = 0): 
   };
 }
 
-/** The most a whole-bill discount may be. Anything above this is REFUSED out loud rather
- *  than silently trimmed — a tap that vanishes is indistinguishable from a broken button. */
-export function maxDiscount(lines: SplitLine[], raw: ModeSettings): number {
-  return splitBill(lines, raw, 0).discountBase;
-}
+// maxDiscount() USED TO LIVE HERE — a one-line wrapper returning splitBill(lines, s, 0).discountBase.
+// Nothing in app/, lib/ or components/ ever called it (sweep #10 T30 measured it, item 14,
+// 2026-10-09): the panels read `discountBase` off splitBill directly, so it was a second name for one
+// number that could only drift. Removed rather than kept looking like a second rule.

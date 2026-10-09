@@ -259,9 +259,7 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
   A("splitBill: a price written '₹1,250.50' is read as 1250.5", "real function", () => tx.splitBill([{ price: "₹1,250.50", qty: 1 }], { tax_rate: 0.05 }).taxableBase === 1250.5);
   A("splitBill: qty '3' (a string) multiplies like 3", "real function", () => tx.splitBill([{ price: "10", qty: "3" }], { price_tax_mode: "composition" }).subtotal === 30);
   A("splitBill(null) does not throw and returns zeros", "real function", () => { const b = tx.splitBill(null, null); return b.total === 0 && b.subtotal === 0; });
-  A("maxDiscount equals splitBill(lines, s, 0).discountBase on random bills", "real function", () => many(() => {
-    const l = lines(3); const s = pick([{ tax_rate: 0.05 }, { price_tax_mode: "composition" }]); return tx.maxDiscount(l, s) === tx.splitBill(l, s, 0).discountBase || "differs";
-  }));
+  A("maxDiscount is gone (item 14) — the discount ceiling has one name, splitBill's discountBase", "module exports", () => typeof tx.maxDiscount === "undefined" && tx.splitBill([{ price: "100" }], { tax_rate: 0.05 }, 0).discountBase === 100);
   A("effectiveTaxPct never shows float dust for any rate 0.25–28% in 0.25 steps", "real function", () => {
     for (let p = 0.25; p <= 28; p += 0.25) { const v = tx.effectiveTaxPct({ tax_rate: p / 100 }); if (String(v).length > 5) return { ok: false, note: `${p} → ${v}` }; } return true;
   });
@@ -680,8 +678,7 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
     const r = await sql(`select distinct column_name c from information_schema.columns where table_schema='public' and table_name in (${Object.keys(comparable).map((t) => `'${t}'`).join(",")})`);
     const cols = new Set(r.map((x) => x.c)); const sub = ["notes", "id_type", "id_number"];
     const off = names.filter((nm) => !cols.has(nm) && !sub.includes(nm));
-    // sold_out / available: plain-words labels for fields no comparable table has — dead, harmless (Part 4).
-    return { ok: off.every((nm) => ["sold_out", "available"].includes(nm)), note: off.length ? `labels for no column (dead, harmless): ${off.join(", ")}` : `${names.length} names` };
+        return { ok: !off.length, note: off.length ? `labels for no column: ${off.join(", ")}` : `${names.length} names, every one a real column` };
   });
   Fc("QUIET_COLUMNS covers the money columns a panel sends an expectation for", "read the file", () => ["discount", "price", "payment_status", "total"].every((c) => new RegExp(`QUIET_COLUMNS = new Set\\(\\[[^\\]]*"${c}"`).test(S)));
   Fc("a field name with punctuation (a quote, a space, a comma) is dropped before it reaches the select", "the regex, executed", () => {
@@ -845,8 +842,8 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
   J("slowerThan lists only the reads over the threshold", "real class", () => { const s = new rg.ReadSet("x", [{ name: "a", data: [], error: null, count: null, ms: 900, retried: false }, { name: "b", data: [], error: null, count: null, ms: 10, retried: false }]); return s.slowerThan(500).map((x) => x.name).join() === "a"; });
   J("rd() does NOT retry a refusal (a CHECK violation is not transient)", "real function, stand-in", async () => { let calls = 0; await rg.rd("a", async () => (calls++, { data: null, error: { code: "23514", message: "violates check constraint" } })); return calls === 1; });
   J("rd() gives a transient failure at most ONE retry", "real function, stand-in", async () => { let calls = 0; await rg.rd("a", async () => (calls++, { data: null, error: { message: "fetch failed", code: "ECONNRESET" } })); return calls <= 2; });
-  J("keepWhatAnswered: one of three failing keeps two, says one is missing, not allFailed", "real function", () => { const r = rg.keepWhatAnswered([{ error: null }, { error: "x" }, { error: null }]); return r.ok.length === 2 && r.missing === 1 && !r.allFailed && r.firstError === "x"; });
-  J("keepWhatAnswered([]) is not 'all failed'", "real function", () => rg.keepWhatAnswered([]).allFailed === false);
+  J("keepWhatAnswered is gone (item 14) — nothing ever imported it", "module exports", () => typeof rg.keepWhatAnswered === "undefined");
+  J("…and no route reaches for it", "grep", () => !tsFiles.some((f) => f !== "lib/readGuard.ts" && /\bkeepWhatAnswered\b/.test(read(f))));
   J("the owner routes read through ReadSet / rd()", "grep app/api/owner", () => { const f = tsFiles.filter((p) => /^app\/api\/owner\//.test(p)); const users = f.filter((p) => /ReadSet|\brd\(/.test(read(p))); return { ok: users.length >= 7, note: `${users.length} of ${f.length} owner routes — the rest check .error by hand (an older improvement, Part 3)` }; });
   J("readGuard itself never builds a response (it only logs)", "read the file", () => !/NextResponse|new Response\(/.test(SRC[F]));
 }
