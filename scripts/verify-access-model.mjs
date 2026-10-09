@@ -26,6 +26,7 @@ const {
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
   waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
   nodeExpect, expectHeader, MODULE_ALLOWED_DEFAULTS, MODULE_BAG_KEYS,
+  NODE_BY_ID,
 } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
@@ -1023,6 +1024,39 @@ else ok("the read/write route derives every allow-list from the model");
     if (misses.length) fail(`a folder whose rows are generated has a stale description: ${misses.join("; ")}`);
     else ok(`the ${generated.length} folder(s) built from a generated list still name every row inside them`);
   }
+}
+
+// ── 51b · …AND EVERY ROW THE SENTENCE NAMES OR COUNTS MUST STILL BE INSIDE IT ───────────────
+// Check 51 asks "is every row named?". It never asked the other half — "is every name still a row?"
+// — and that is how the folder went on promising "whether they may set the printers up from their
+// own computer" for 25 days after the owner RETIRED that row (2026-09-14: "that setup will be done
+// by me only"). The commit that removed the row left the sentence, the sentence still named three
+// printing rows over a folder holding two, and every admin opening the ⓘ was told a manager could
+// be handed the printer setup. (sweep #10 T18, item 1 — a regression of ledger row P22157.)
+//
+// Two questions, both mechanical, so neither can cry wolf on good prose:
+//   · a COUNT in the sentence ("the two printing ones") must equal the rows whose id carries that word;
+//   · a phrase the owner retired must not come back in ANY row's words. The list holds exactly one
+//     phrase today; add to it the day another row is retired, in the same commit.
+{
+  const RETIRED_PHRASES = [
+    ["set the printers up", "the manager printer-setup permission (retired 2026-09-14, docs/REJECTED-IDEAS.md → Reversed)"],
+  ];
+  const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+  const probs = [];
+  const folder = NODE_BY_ID.mgr_may;
+  if (!folder) probs.push("check 51b could not find the 'Permission for manager' folder (mgr_may) — if it moved, update this guard");
+  else {
+    for (const m of folder.what.matchAll(/\bthe (one|two|three|four|five|six) (\w+?)i?n?g? ones\b/gi)) {
+      const said = WORDS[m[1].toLowerCase()], stem = m[2].toLowerCase().replace(/(ing|s)$/, "");
+      const real = folder.children.filter((c) => c.id.includes(stem)).length;
+      if (said !== real) probs.push(`"${folder.name}" says "${m[0]}" but holds ${real} row(s) whose id carries "${stem}"`);
+    }
+  }
+  for (const n of ALL_NODES) for (const [phrase, why] of RETIRED_PHRASES)
+    if ((n.what || "").toLowerCase().includes(phrase)) probs.push(`row "${n.name}" (${n.id}) still offers "${phrase}" — ${why}`);
+  if (probs.length) fail(`a folder's words name a row it no longer has: ${probs.join("; ")}`);
+  else ok("every row a folder's sentence counts or names is still inside it, and no retired permission is offered in any row's words");
 }
 
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
