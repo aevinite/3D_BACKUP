@@ -1210,6 +1210,35 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   for (const k of ["ADMIN_PASSWORD", "STAFF_PASSWORD", "EDITOR_PASSWORD", "REVEAL_PASSWORD"]) if (keepEnv[k] === undefined) delete process.env[k]; else process.env[k] = keepEnv[k];
   G.FAIL = {}; G.FAIL_NTH = {};
 }
+// ── SWEEP #10 T17 ROUND 6 — items 37, 38, 39, 40 (owner 2026-10-09: "do all 4") ─────────────────────────────────────────
+// ids P163142–P163150. The owner layout and the console page are JSX, so their rules are read here; the browser half is
+// in the round's ledger rows (every signed-out owner page carried to sign-in and back, JS off included).
+{
+  const srcOf = (f) => stripComments(read(f));
+  const ALL = ["lib/panelAccess.ts", "lib/panelGate.ts", "lib/userAuth.ts", "app/api/panel-login/route.ts", "app/r/[restaurant]/login/page.tsx", "app/login/page.tsx", "app/owner/layout.tsx"].map(srcOf).join("\n");
+  check("P163142", "item 40: no sign-in file asks the retired per-panel switch any more (getEnabledPanels / isPanelEnabled are deleted)", !/getEnabledPanels|isPanelEnabled/.test(ALL));
+  const ADM = srcOf("app/api/admin/restaurants/route.ts");
+  const sus = ADM.slice(ADM.indexOf('action === "set_restaurant_active"'), ADM.indexOf('action === "soft_delete_restaurant"'));
+  check("P163143", "item 38: suspending or reactivating clears the remembered restaurant state at once (forgetRestaurant), before logging",
+    /forgetRestaurant\(rid, await ownersOf\(rid\)\);\s*await logAction\("admin", active \? "restaurant_reactivate" : "restaurant_suspend"/.test(sus));
+  const RP = read("app/aevinite/restaurants/page.tsx");
+  check("P163144", "item 38: the console never says a suspended restaurant's staff keep working",
+    !/Its own staff can still sign in to their panels/.test(RP) && !/Staff panels stay reachable to you via the buttons below/.test(RP) && !/staff panels stay reachable to you via act-as/.test(RP) && /its manager, kitchen and waiter apps STOP immediately/.test(RP));
+  const OL = srcOf("app/owner/layout.tsx");
+  check("P163145", "item 37: a signed-out visitor to any owner page is handed to the browser step that carries the page (not a fixed /owner)",
+    /return <SignInBounce \/>;\s*\}\s*$/.test(OL.trim() + "\n") || /return <SignInBounce \/>;\n\}/.test(OL));
+  const SB = read("app/owner/SignInBounce.tsx");
+  check("P163146", "item 37: the step carries path + query + #part, encoded, and replaces the history entry (Back does not bounce)",
+    /const here = window\.location\.pathname \+ window\.location\.search \+ window\.location\.hash;/.test(SB) && /window\.location\.replace\(`\/login\?next=\$\{encodeURIComponent\(here\)\}`\);/.test(SB));
+  check("P163147", "…and without JavaScript a refresh still reaches the sign-in card", /<noscript>\s*<meta httpEquiv="refresh" content="0;url=\/login\?next=%2Fowner" \/>/.test(SB));
+  check("P163148", "item 37: Menu, Inventory and Manager mode draw nothing for a signed-out visitor instead of throwing the page away with a redirect",
+    ["app/owner/menu/page.tsx", "app/owner/inventory/page.tsx", "app/owner/manager/page.tsx"].every((f) => { const s = srcOf(f); const a = s.indexOf("if (!u && !(store.get(ADMIN_ACT_COOKIE)?.value && (await tokenIsValid(store.get(AUTH_COOKIE)?.value)))) return null;"); const b = s.search(/if \(!(selected|restaurants\.length)\) redirect\("\/owner"\);/); return a > 0 && b > a; }));
+  check("P163149", "the owner layout shows its reconnecting screen (not the crash page) when an owner's restaurants cannot be read",
+    /if \(e instanceof AuthDbError \|\| e instanceof OwnedLookupFailed\) return <OwnerReconnecting \/>;/.test(OL));
+  const AL = read("lib/alerts.ts");
+  check("P163150", "item 39: the alerts header names the SAME quiet priority the code sends ('low')",
+    /const QUIET_PRIORITY = "low";/.test(AL) && /Priority "low" \(QUIET_PRIORITY below\)/.test(AL) && /`silent: true` → ntfy "low"/.test(AL));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
