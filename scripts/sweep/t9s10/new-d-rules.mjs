@@ -3,7 +3,7 @@
 // the server only, every rejected idea still carries its marker (the list is docs/REJECTED-IDEAS.md), every new read since the last
 // sweep is scoped and bounded, and the guards that name this file are green.
 import { execFileSync } from "node:child_process";
-import { check, sql, SUBJECT, ROOT, HC, GC, PC, MC, MINE, chains, endpoint, helper, rd } from "./lib.mjs";
+import { check, sql, SUBJECT, ROOT, PC, MC, MINE, chains, endpoint, helper } from "./lib.mjs";
 
 let N = 178601;
 const id = () => { if (N > 178700) throw new Error("block D is full"); return "P" + N++; };

@@ -7,12 +7,11 @@
 // Rows whose subject is the OTHER half of the route (the cancel branch, POST /issue, ratings/ack,
 // the void door) are deliberately absent: their owner re-runs them.
 import { execFileSync } from "node:child_process";
-import { check, runAll, src, MC, GC, HC, PC, endpoint, rd, call, world, live, noLive, sql, FRENCH_HOUSE, ROOT, BASE } from "./lib.mjs";
+import { check, runAll, src, MC, HC, PC, endpoint, rd, call, world, live, noLive, sql, ROOT } from "./lib.mjs";
 import { readFileSync as RF, writeFileSync as WF } from "node:fs";
 import { join } from "node:path";
 
 const panel = rd("public/panels/editor/app.js");
-const routeCode = MC;            // my half, comments stripped
 const whole = src;               // the whole file, for rows that were always about the whole file
 const guard = (script, args = []) => {
   try { execFileSync("node", [script, ...args], { cwd: ROOT, stdio: "pipe", timeout: 240000 }); return { ok: true, code: 0 }; }

@@ -6,7 +6,6 @@ import { check, world, call, SUBJECT, RID, RID2 } from "./lib.mjs";
 
 let N = 178201;
 const id = () => { if (N > 178400) throw new Error("block B is full"); return "P" + N++; };
-const r2 = (n) => Math.round(n * 100) / 100;
 const NOW = () => new Date().toISOString();
 const OLD = "2000-01-01T00:00:00.000Z";
 const bizDay = () => new Date(Date.now() + (330 - 300) * 60000).toISOString().slice(0, 10);
