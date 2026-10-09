@@ -138,6 +138,7 @@ async function counterPrintTarget(
 import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError, isDataRefusal } from "@/lib/dbRefusal";
+import { spreadOrderAllergies } from "@/lib/orderAllergies";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
@@ -4393,16 +4394,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return err("Say why the allergy is changing — that line is what the kitchen cooks to.", 400);
       }
       must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).eq("restaurant_id", rid));
-      if (addedOW.length || removedOW.length) {
-        const items = must(await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", b).eq("restaurant_id", rid));
-        for (const it of items) {
-          const mark = new Set((Array.isArray(it.added_allergens) ? it.added_allergens : []).map((x: any) => String(x).toLowerCase()));
-          let rf = !!it.removed_flag;
-          for (const s of addedOW) mark.add(s);
-          for (const s of removedOW) { if (mark.has(s)) mark.delete(s); else rf = true; }
-          await sb.from("order_items").update({ added_allergens: [...mark], removed_flag: rf }).eq("id", it.id).eq("restaurant_id", rid);
-        }
-      }
+      // One write per distinct result, errors surfaced — lib/orderAllergies.ts (sweep #10 T30 item 16;
+      // it was one unchecked UPDATE per dish, here and in the twin route).
+      await spreadOrderAllergies(sb, rid, b, addedOW, removedOW);
       const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : "",
         owReason.note ? `— ${owReason.note}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
       await log("editor", "order_allergies", { restaurant_id: rid, order_id: b, detail, device_id: dev });
