@@ -74,3 +74,21 @@ real browser with faked server replies; the database-side counter on the dev DB 
 Left for the owner (not changed): a SUSPENDED restaurant's staff are refused at `/r/<slug>/<panel>` but let in at the plain `/<panel>`
 and by every panel API — the two doors disagree. Improvement ideas (not built): honour a sign-in `?next=` deep link inside the person's own
 panel; stop a developer machine sending every page load to the error reporter.
+
+## Round 5 (2026-10-09, owner: "don't do 32 and do everything else … 700 phases or more … fully error free in this boundary")
+
+909 new checks (P162233–P163141), all ✅. Owner decisions built: R61 (item 32 rejected — doc row + code comments), item 30
+(suspended = the restaurant's staff apps stop, on every door, with a plain sentence; owners and the admin unaffected) and item 31
+(a deep link inside the person's own panel survives sign-in). Re-runnable now: `npm run verify:t17-signin` (501 hermetic checks).
+
+| # | problem | fix | guard |
+|---|---|---|---|
+| 33 | A binned restaurant's still-signed-in staff (and an owner whose last restaurant was binned) looped between their panel and /login until the browser gave up — requirePanel sent them to /login, and /login sends anyone signed in straight back. | One shared answer, `panelDoor` (lib/panelGate.ts): /login stays put and says why; the gates redirect with `?why=`. | P162239–P162243 |
+| 34 | The sign-in limit alert read "+1 more account use this name". | "uses" / "use" by count. | P162247–P162248 |
+| 35 | The focus-ring comment promised no ring for a mouse click (browsers ring every focused text box). | Comment corrected. | — (comment) |
+| 36 | Mutation testing (291 automatic breaks) left 72 breaks uncaught: 39 were missing tests, 33 provably harmless. The security-relevant rules among the 39 (the bot trap refusing even a right password, the right uncover password opening, the limiter failing open, an empty password never counted, the act-as cookie's 6 hours, …) had no guard. | All 39 closed in the harness and re-proved; 14 pinned in verify:t25-doors, each proved red on its own. | P162249–P162262 |
+
+Outside T17's boundary, noticed and left: the owner/manager/kitchen/tablet layouts pass only their HOME as `?next`, so item 31's deep
+link only helps once those layouts pass the page they were on; `lib/alerts.ts`'s header comment still says quiet alerts are priority
+"min" (the code sends "low", on purpose); the console's "Suspended" label still says only "its guest menu is offline", and suspending
+does not call forgetRestaurant, so staff stop within 30 seconds rather than at once.
