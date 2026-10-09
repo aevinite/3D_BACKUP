@@ -8,11 +8,13 @@ const t = suite("scripts/t30-harness (proofs)", 168821, 20);
 const F = await import("@/lib/taxFiling.ts");
 const tree = await import("@/lib/accessTree.ts");
 const src = (p) => readFileSync(join(root, p), "utf8");
+// a line is named by where its text IS today, never by a number typed once (round 3)
+const lineOf = (p, text) => src(p).split("\n").findIndex((l) => l.includes(text)) + 1;
 { let seed = 3, worst = Infinity; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
   for (let i = 0; i < 100000; i++) { const w = Array.from({ length: 1 + Math.floor(rnd() * 30) }, () => (rnd() < 0.2 ? 0 : rnd() * 1000)); const tot = Math.round((rnd() - 0.3) * 1e6);
     const target = Math.round(tot); const s = w.reduce((a, x) => a + x, 0); if (s <= 0) continue; const floors = w.map((x) => Math.floor((x / s) * target)).reduce((a, x) => a + x, 0); worst = Math.min(worst, target - floors); }
-  t("lib/taxFiling.ts:68 — the 'negative leftover' loop can never run: the floors never exceed the target (100,000 random cases, the smallest leftover seen is ≥ 0)", worst >= 0, `smallest leftover ${worst}`); }
-t("lib/taxFiling.ts:151 — `r.parts[j] ?? 0` can never fall back: every row's parts has exactly one entry per tax line", (() => { const f = F.buildFiling([{ t: 1 }, { t: 2 }], [{ label: "A", rate: 1 }, { label: "B", rate: 2 }, { label: "C", rate: 3 }], (r) => r.t); return f.rows.every((r) => r.parts.length === 3); })());
+  t(`lib/taxFiling.ts:${lineOf("lib/taxFiling.ts", "left < 0 && k >= 0")} — the 'negative leftover' loop can never run: the floors never exceed the target (100,000 random cases, the smallest leftover seen is ≥ 0)`, worst >= 0, `smallest leftover ${worst}`); }
+t(`lib/taxFiling.ts:${lineOf("lib/taxFiling.ts", "r.parts[j] ?? 0")} — \`r.parts[j] ?? 0\` can never fall back: every row's parts has exactly one entry per tax line`, (() => { const f = F.buildFiling([{ t: 1 }, { t: 2 }], [{ label: "A", rate: 1 }, { label: "B", rate: 2 }, { label: "C", rate: 3 }], (r) => r.t); return f.rows.every((r) => r.parts.length === 3); })());
 t("lib/clash.ts:262 — describe() never sees an object: every object value takes the quiet sentence before describe() is called", /const quiet = QUIET_COLUMNS\.has\(c\) \|\| isPlainObject\(current\);/.test(src("lib/clash.ts")) && /const plain = quiet\s*\? /.test(src("lib/clash.ts")));
 t("lib/paySplit.ts:265–266 — a pay-later part reaching the name branch always has a non-blank name: badSplitShape refuses one with neither a person id nor a name first", /if \(isPayLater\(s\) && !String\(s\?\.khataCustomerId \|\| ""\)\.trim\(\) && !String\(s\?\.khataName \|\| ""\)\.trim\(\)\)/.test(src("lib/paySplit.ts")) && /const shape = badSplitShape\(splits\);\s*\n\s*if \(shape\) return/.test(src("lib/paySplit.ts")));
 t("lib/paySplit.ts:396 — `(live || [])` at the sum is only reached after `if (!ids.length) return`, so live is never null there", /if \(!ids\.length\) return \{ reversed: 0, amount: 0 \};\s*\n\s*const amount = Math\.round\(\(live \|\| \[\]\)/.test(src("lib/paySplit.ts")));

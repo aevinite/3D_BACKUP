@@ -32,11 +32,22 @@ export function splitTax(rates: number[], target: number): number[] {
   if (!rates.length) return [];
   const sum = rates.reduce((a, r) => a + (Number(r) || 0), 0) || 1;
   let running = 0;
-  return rates.map((r, i) => {
+  const out = rates.map((r, i) => {
     const amt = i === rates.length - 1 ? p2(target - running) : p2(target * ((Number(r) || 0) / sum));
     running = p2(running + amt);
     return amt;
   });
+  // A TAX LINE CAN NEVER POINT THE OTHER WAY (sweep #10 T30 round 3, item 26, 2026-10-09). With three
+  // or more lines and a few paise of tax, the lines before the last can each round UP and leave the
+  // last one NEGATIVE: rates 6/6/9/3 on ₹0.02 gave 0.01 + 0.01 + 0.01 − 0.01. It adds up, and it is
+  // still a minus sign on a GST line. Only then — never for a split that is already right, so every
+  // existing figure stays byte for byte — the paise are shared out by largest remainder instead,
+  // which adds up exactly AND keeps every line on the same side of zero as the tax.
+  const last = out[out.length - 1];
+  if (last !== 0 && Math.sign(last) === -Math.sign(target)) {
+    return allocateWhole(Math.round(target * 100), rates.map((r) => Number(r) || 0)).map((x) => x / 100);
+  }
+  return out;
 }
 
 /**
