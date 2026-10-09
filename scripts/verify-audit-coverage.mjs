@@ -104,7 +104,9 @@ const TABLET_MUST = [
   ['a === "items" && c === "qty"', "qty_reduced", "a waiter lowering a dish's quantity"],
   ['a === "orders" && c === "discount"', "discount_given", "a waiter discounting one ticket"],
   ['a === "sessions" && c === "bill-discount"', "discount_given", "a waiter discounting the whole bill"],
-  ['a === "orders" && c === "delete"', "order_deleted", "a waiter deleting a bill"],
+  // MOVED DELIBERATELY (sweep #10 T13, item 3): the waiter's "Delete order" CANCELS since R27 was
+  // brought to the tablet — nobody at the restaurant removes a bill — so it records the cancel.
+  ['a === "orders" && c === "delete"', "order_cancelled", "a waiter's \"Delete order\" (a cancel since item 3)"],
   ['a === "tables" && c === "on-the-house"', "on_the_house", "a waiter settling on the house"],
   ['a === "tables" && c === "unpay"', "payment_reverted", "a waiter un-marking a bill as paid"],
 ];

@@ -24,7 +24,8 @@ import { helperFor, queueJob } from "@/lib/printHelpers";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
-import { softDeleteOrders } from "@/lib/softDelete";
+// (softDeleteOrders is no longer imported: item 3 — the waiter's delete is a cancel now, see orders/:id/delete.)
+import { watchCancellations } from "@/lib/cancelWatch";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { mergeParentTable } from "@/lib/tableMerge";
 import { rateAllowed } from "@/lib/rateLimit";
@@ -2199,28 +2200,48 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(data);
     }
 
-    // orders/:id/delete — remove a WHOLE order (and its dishes). Refuses a PAID
-    // order (it's a financial record); otherwise SOFT-deletes it (mig 188): the row
-    // is stamped deleted, never erased, so the bill is retained for tax/audit and
-    // still shows as a tombstone in the admin ledger. Never a real SQL DELETE.
+    // orders/:id/delete — the waiter's "🗑 Delete order". It CANCELS the ticket; it never removes it.
+    //
+    // ── NOBODY AT THE RESTAURANT REMOVES A BILL — THE WAITER INCLUDED (sweep #10 T13, item 3) ──────
+    // The owner's rule, R27 (2026-08-16, re-confirmed 2026-08-21) and docs/COMPLIANCE-GUARDRAILS.md
+    // §3.0 rule 4: *"I don't want to give permission to the restaurant owner to delete the bill because
+    // he will fake the bill and delete the bill."* Cancel is the only route out of a bill for anyone
+    // at the restaurant — a ₹0 sale that stays visible with its reason, its person and its time. The
+    // manager's route enforces it (canDeleteBill() is true for the Aevidine console only); THIS branch
+    // predated the rule and was never brought under it. It soft-deleted the ticket — and, when the
+    // ticket was the bill's only one, the bill's session with it — so any waiter on the floor could take
+    // a sale out of every report with one tap, which neither the manager nor the owner can do.
+    //
+    // The tap keeps working; what it does is the manager's CANCEL, word for word in effect: status
+    // 'cancelled' + cancelled_at, an `order_cancel` line in the Activity log, an `order_cancelled`
+    // record in Audit & logs, and the day's cancellation watch (lib/cancelWatch.ts). The ticket stays
+    // on the bill at ₹0, in the Z-report and the Cancellations report, and the manager can Restore it
+    // within 30 minutes. A paid ticket is still refused, and so is one on a printed invoice (item 2).
+    // The endpoint name stays because the panel posts to it; renaming it would strand every handheld
+    // still running the old script.
     if (a === "orders" && c === "delete") {
-      // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS) — without
-      // it a foreign order id could be touched from another restaurant. Scope the gate read.
-      const cur = must(await sb.from("orders").select("payment_status, total, session_id, table_number").eq("id", b).eq("restaurant_id", rid).single());
-      if (cur && cur.payment_status === "paid") return err("Won't delete a PAID order — mark it unpaid first.", 409);
-      const reason = String(body?.reason ?? "").trim();
-      const who = actor?.name || actor?.username || "staff";
-      await softDeleteOrders(rid, [b], { actor: who, actorId: actor?.id ?? null, reason });
-      await log("order_delete", { order_id: b, device_id: dev, detail: reason || undefined });
-      // Taking a bill out of the reports is the biggest removal there is — recorded here, from the
-      // tablet, exactly as the manager's twin records it (2026-08-03).
+      const cur = must(await sb.from("orders").select("status, payment_status, session_id, table_number").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { status?: string; payment_status?: string; session_id?: string | null; table_number?: unknown } | null;
+      if (!cur) return err("That order isn't there anymore — refresh.", 404);
+      if (cur.payment_status === "paid" && cur.status !== "cancelled") return err("Won't cancel a PAID order — mark it unpaid first.", 409);
+      // Already cancelled (a double tap, or a colleague got there first): the outcome asked for holds.
+      if (cur.status === "cancelled") return ok({ ok: true, cancelled: true });
+      if (await invoiceLockedByOrder(b, rid)) {
+        return err("This ticket was on the printed bill, so it can't be taken off. Reopen the bill to add to it, or issue a credit note if it is already settled.", 409);
+      }
+      const tableNo = cur.table_number != null ? String(cur.table_number) : null;
+      // `.neq("status","cancelled")` so two devices cancelling together write the stamp once.
+      must(await sb.from("orders").update({ status: "cancelled", cancelled_at: nowIso() })
+        .eq("id", b).eq("restaurant_id", rid).neq("status", "cancelled"));
+      await log("order_cancel", { order_id: b, table_number: tableNo, device_id: dev, detail: "cancelled from the waiter tablet" });
       await recordRemoval({
-        rid, kind: "order_deleted", reason: reasonFromBody(body), user: actor ?? null, deviceId: dev,
-        orderId: b, sessionId: cur?.session_id ?? null,
-        tableNumber: cur?.table_number != null ? String(cur.table_number) : null,
-        amount: Number(cur?.total) || 0, meta: { from: "waiter tablet" },
+        rid, kind: "order_cancelled", reason: reasonFromBody(body), user: actor ?? null, deviceId: dev,
+        orderId: b, sessionId: cur.session_id ?? null, tableNumber: tableNo,
+        meta: { was_paid: false, from: "waiter tablet" },
       });
-      return ok({ ok: true });
+      // Fire-and-forget by contract — it never throws and never blocks the cancel it watches.
+      await watchCancellations(rid);
+      return ok({ ok: true, cancelled: true });
     }
 
     // orders/:id/move — move a SINGLE order (and its dish rows) to another table's

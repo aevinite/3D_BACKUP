@@ -127,5 +127,57 @@ for (const [path, body, what, rpc] of MONEY_DOORS) {
   else bad("the tablet's invoiceLockedByOrder and the manager's have drifted apart — change both, or neither");
 }
 
+// ── 3. NOBODY AT THE RESTAURANT REMOVES A BILL — "Delete order" CANCELS (item 3) ─────────────────────
+// R27 / COMPLIANCE-GUARDRAILS §3.0 rule 4. The waiter's delete used to soft-delete the ticket (and an
+// emptied bill's session) out of every report.
+console.log("\n3. the waiter's \"Delete order\" cancels the ticket and never removes it");
+const liveTicket = (o = {}) => world({ fix: {
+  orders: [{ id: "o5", restaurant_id: RID, status: "preparing", payment_status: "pending", session_id: "s5", table_number: "5", total: 200, created_at: hourAgo, ...o }],
+  sessions: [{ id: "s5", restaurant_id: RID, table_number: "5", status: "open", invoice_no: null }],
+} });
+{
+  const G = await liveTicket();
+  const r = await call("POST", "orders/o5/delete", { body: { reason: "wrong table" } });
+  const o = G.FIX.orders[0], sess = G.FIX.sessions[0];
+  if (r.status === 200 && o.status === "cancelled" && o.cancelled_at) ok("the ticket is CANCELLED (status cancelled, cancelled_at stamped)");
+  else bad(`the ticket answered ${r.status} and reads status '${o.status}'`);
+  if (!o.deleted_at && !sess.deleted_at && !G.WRITES.some((w) => w.patch && "deleted_at" in w.patch)) ok("…nothing is stamped deleted — not the ticket, not the bill");
+  else bad("…but something was stamped deleted_at — the sale left the reports");
+  if (G.LOGS.some((l) => l.action === "order_cancel" && l.order_id === "o5")) ok("…the Activity log says order_cancel");
+  else bad("…no order_cancel line in the Activity log");
+  const rr = G.RPCS.find((x) => x.name === "lfh_record_removal");
+  if (rr && rr.args.p_kind === "order_cancelled" && rr.args.p_actor === "Diag Waiter") ok("…Audit & logs records order_cancelled, naming the waiter");
+  else bad(`…the removal record is ${rr ? rr.args.p_kind : "missing"}`);
+  if (!G.RPCS.some((x) => x.args && x.args.p_kind === "order_deleted")) ok("…and no order_deleted record is written");
+  else bad("…an order_deleted record was written");
+}
+{
+  const G = await liveTicket({ payment_status: "paid", status: "served" });
+  const r = await call("POST", "orders/o5/delete", { body: {} });
+  if (r.status === 409 && G.FIX.orders[0].status === "served") ok("a PAID ticket is still refused (409) and left alone");
+  else bad(`a paid ticket answered ${r.status}, status ${G.FIX.orders[0].status}`);
+}
+{
+  const G = await world({ fix: {
+    orders: [{ id: "o5", restaurant_id: RID, status: "preparing", payment_status: "pending", session_id: "s5", table_number: "5", created_at: hourAgo }],
+    sessions: [{ id: "s5", restaurant_id: RID, table_number: "5", status: "open", invoice_no: 9, invoice_voided: false, invoice_at: recent }],
+  } });
+  const r = await call("POST", "orders/o5/delete", { body: {} });
+  if (r.status === 409 && G.FIX.orders[0].status === "preparing" && writesOn(G, "orders").length === 0) ok("a ticket on a printed invoice is refused (409) and left alone");
+  else bad(`a ticket on a printed invoice answered ${r.status}, status ${G.FIX.orders[0].status}`);
+}
+{
+  const G = await liveTicket({ status: "cancelled", cancelled_at: recent });
+  const r = await call("POST", "orders/o5/delete", { body: {} });
+  if (r.status === 200 && writesOn(G, "orders").length === 0 && !G.RPCS.some((x) => x.name === "lfh_record_removal")) ok("cancelling an already-cancelled ticket is a quiet no-op (no second audit row)");
+  else bad(`a second cancel answered ${r.status} with ${writesOn(G, "orders").length} write(s)`);
+}
+{
+  const { readFileSync } = await import("node:fs");
+  const t = readFileSync(new URL("../app/api/tablet/[...path]/route.ts", import.meta.url), "utf8").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+  if (!/softDeleteOrders\s*\(/.test(t)) ok("the waiter's route calls softDeleteOrders nowhere");
+  else bad("the waiter's route calls softDeleteOrders again — R27: nobody at the restaurant removes a bill");
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
