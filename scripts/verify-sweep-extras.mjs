@@ -126,7 +126,11 @@ async function ctx(role){
     if(!tiles.length) return null;
     tiles[0].click(); return (tiles[0].textContent||"").replace(/\s+/g," ").trim().slice(0,40);
   });
-  await p.waitForTimeout(2200);
+  // WAIT FOR THE BUTTON, NOT A CLOCK (sweep #10 T39 item 74, 2026-10-09). KOT ▾ is drawn once the
+  // popup has the party's session, which comes from the server; a fixed 2.2s was enough on a quiet
+  // dev box and not on the deployed site or a busy one — 5465 went red on both while the screen was
+  // right (reproduced: the popup opens, headed T9965, with #kotMenuBtn in it). Up to 12s, then judge.
+  await fr.waitForSelector("#kotMenuBtn, .kot-menu-btn, [id*=kotMenu]", { timeout: 12000 }).catch(() => {});
   const btn = fr.locator("#kotMenuBtn, .kot-menu-btn, [id*=kotMenu]").first();
   if (!opened) no("5465","tablet KOT \u25be button exists",
     seated ? `seated a party on table ${seated} but no tile on the floor shows it — the waiter's floor is not drawing a live table`
