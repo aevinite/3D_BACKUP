@@ -5,9 +5,8 @@
 //
 // Checks written because a deliberate break SURVIVED round 6's mutation pass B (421 breaks, new seed). The number in each
 // check is the survivor it kills.
-import { G, world, person, sign, req, t, save, quiet, RID_A, RID_B, ADMIN_PW, sha, randomUUID, refuseNet } from "./r5lib.mjs";
+import { G, world, person, sign, req, t, save, quiet, RID_A, randomUUID, refuseNet } from "./r5lib.mjs";
 const ONLY = process.env.R5_ONLY || ""; const want = (f) => !ONLY || ONLY === f;
-const body = async (res) => { try { return await res.clone().json(); } catch { return null; } };
 const sent = []; const capture = async (u, init) => { sent.push({ body: String(init?.body ?? ""), headers: new Headers(init?.headers) }); return new Response("{}", { status: 200 }); };
 const withAlerts = async (fn) => { const k = process.env.NTFY_TOPIC; process.env.NTFY_TOPIC = "r6-topic"; sent.length = 0; globalThis.fetch = capture; try { return await fn(); } finally { globalThis.fetch = refuseNet; if (k === undefined) delete process.env.NTFY_TOPIC; else process.env.NTFY_TOPIC = k; } };
 if (want("lib/sentryPrivacy.ts")) { const f = "lib/sentryPrivacy.ts"; const SP = await import("@/lib/sentryPrivacy.ts");

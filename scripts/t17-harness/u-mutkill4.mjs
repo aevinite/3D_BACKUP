@@ -4,7 +4,7 @@
 // counter or the owner's phone (any fetch a check has not replaced is refused).
 //
 // Checks written because a deliberate break SURVIVED round 6's mutation pass D. D#n = survivor n.
-import { G, world, person, sign, req, t, save, quiet, RID_A, RID_B, refuseNet } from "./r5lib.mjs";
+import { G, world, person, sign, req, t, save, RID_A, RID_B, refuseNet } from "./r5lib.mjs";
 const ONLY = process.env.R5_ONLY || ""; const want = (f) => !ONLY || ONLY === f;
 const sent = []; const capture = async (u, init) => { sent.push(String(init?.body ?? "")); return new Response("{}", { status: 200 }); };
 const withAlerts = async (fn) => { const k = process.env.NTFY_TOPIC; process.env.NTFY_TOPIC = "r6-topic"; sent.length = 0; globalThis.fetch = capture; try { return await fn(); } finally { globalThis.fetch = refuseNet; if (k === undefined) delete process.env.NTFY_TOPIC; else process.env.NTFY_TOPIC = k; } };

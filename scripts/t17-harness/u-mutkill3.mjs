@@ -4,7 +4,7 @@
 // counter or the owner's phone (any fetch a check has not replaced is refused).
 //
 // Checks written because a deliberate break SURVIVED round 6's mutation pass C (235 never-tried breaks). C#n = survivor n.
-import { G, world, person, sign, req, t, save, quiet, RID_A, RID_B, ADMIN_PW, sha, randomUUID, refuseNet, rootFile } from "./r5lib.mjs";
+import { G, world, person, sign, req, t, save, quiet, RID_A, RID_B, randomUUID, refuseNet, rootFile } from "./r5lib.mjs";
 import { createHash } from "node:crypto";
 const ONLY = process.env.R5_ONLY || ""; const want = (f) => !ONLY || ONLY === f;
 const sent = []; const capture = async (u, init) => { sent.push(String(init?.body ?? "")); return new Response("{}", { status: 200 }); };
