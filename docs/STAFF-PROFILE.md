@@ -67,14 +67,15 @@ the other or teach the host about it — do NOT add a second code path in the co
   (both routes use it). It is not a gate: the caller proves its right to that restaurant first.
 
 Verified running on both consoles: a waiter shows 9 rows in 2 folders with `On + manager PIN`; a
-manager shows 3 folders / 7 dropdowns; the admin copy is byte-for-byte the same layout with its
+manager shows 3 folders / 8 dropdowns (it was 7 until `May clear the printing queue` joined on
+2026-09-13; re-count with `capKeysForRole("manager")`, do not trust the digit); the admin copy is byte-for-byte the same layout with its
 photo button, PIN control and signing-in toggles intact.
 
 ## The shape — do not invent a second one
 
 | | |
 |---|---|
-| **Left rail** | photo (optional) · name · role/active/PIN chips · “record complete X of 14” · the buttons you press daily (password, PIN, open their panel, Access & permissions, disable) · last seen / joined / login created / restaurant |
+| **Left rail** | photo (optional) · name · role/active/PIN chips · “record complete X of 14” (X of 13 where there is no Pay card to fill — sweep T15, 2026-08-18) · the buttons you press daily (password, PIN, open their panel, Access & permissions, disable) · last seen / joined / login created / restaurant |
 | **Right column** | ① **Permissions** ② who they are ③ emergency contact ④ the job ⑤ pay + what has been paid ⑥ papers ⑦ signing in ⑧ what they did lately ⑨ your private note ⑩ danger zone |
 
 A new thing about a person goes **inside one of those cards**. A new card goes at the end of
@@ -94,7 +95,11 @@ the right column, above the danger zone. Nothing about a person gets its own sep
   stored value only ever exists where somebody deliberately set one; clearing it back to
   Default deletes the key.
 - **Blocks per role:**
-  - **manager** → two: **Permissions** (their menus/tabs) and **What … may manage** (money & floor actions).
+  - **manager** → three, named exactly as Access → Manager names its folders: **Manager's menu**
+    (their menus/tabs and the parts inside them), **Permission for manager** (money and printing
+    actions) and **Manager settings (what manager can do)** (the sections of their own Settings,
+    with the three Users switches inside). Only the eight grant rows are per-person dropdowns; the
+    rest are restaurant-wide and shown read-only. (This line said "two" until 2026-10-09.)
   - **owner** → one: **Owner's menu**. An owner runs a whole separate panel, so they have no
     "what they may manage" list. Their rows are **read-only** here: `owner_entitlements` is a
     restaurant setting, not a per-person one, and a dropdown that saved nothing is exactly the

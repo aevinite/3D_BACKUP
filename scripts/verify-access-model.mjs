@@ -1114,6 +1114,41 @@ else ok("the read/write route derives every allow-list from the model");
   }
 }
 
+// ── 59 · THE TWO DOCS THAT DESCRIBE THIS SCREEN MUST DESCRIBE THIS SCREEN ─────────────────────
+// CLAUDE.md sends every session to docs/ACCESS-MODEL.md as "the spec" and to docs/STAFF-PROFILE.md
+// before touching anything about a person — so a stale line there is an instruction to rebuild the
+// past. Measured 2026-10-09: the spec's card table named an "Auto-print KOT" row five weeks after it
+// moved to the Printing menu, never listed the three floor switches or Loyalty points, and said
+// "Permission for manager" held TWO rows over a folder of four; the profile doc said a manager's
+// page has two blocks (it has three) and 7 dropdowns (8). (sweep #10 T18, item 6.) Only NUMBERS and
+// NAMES are compared — never prose — so this cannot cry wolf on good writing.
+{
+  const { SECTION_BY_ID, NODE_BY_ID: B } = await import("../node_modules/.cache/accessTree.mjs");
+  const caps = await import("../node_modules/.cache/staffCaps.mjs").catch(() => null);
+  const md = read("docs/ACCESS-MODEL.md"), sp = read("docs/STAFF-PROFILE.md");
+  const probs = [];
+  const norm = (x) => x.toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+  const t = md.match(/\| \*\*Main features\*\* \| \*\*Extra features\*\* \|\n\|---\|---\|\n\| ([^|]+) \| ([^|]+) \|/);
+  if (!t) probs.push("docs/ACCESS-MODEL.md: the Main | Extra card table is gone — if it moved, update this guard");
+  else for (const [cell, sec] of [[t[1], "main"], [t[2], "extra"]]) {
+    const said = cell.split("·").map((x) => norm(x.replace(/\(and its whole sub-tree\)/, "")));
+    const real = SECTION_BY_ID[sec].children.map((n) => norm(n.name));
+    if (said.length !== real.length || real.some((r, i) => r !== said[i])) probs.push(`the ${sec} card in docs/ACCESS-MODEL.md lists [${said.join(", ")}] but the screen has [${real.join(", ")}]`);
+  }
+  const WORD = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+  const b2 = md.match(/2\. \*\*Permission for manager\*\* — (\w+) rows/i);
+  const grants = B.mgr_may.children.filter((n) => n.bind.t === "grant").length;
+  if (!b2 || WORD[b2[1].toLowerCase()] !== grants) probs.push(`docs/ACCESS-MODEL.md B.2 says "${b2 ? b2[1] : "?"} rows"; the folder holds ${grants}`);
+  if (caps) {
+    const m = sp.match(/\*\*manager\*\* → (\w+),?/), groups = caps.capGroupsForRole("manager").length;
+    if (!m || WORD[m[1]] !== groups) probs.push(`docs/STAFF-PROFILE.md says a manager's page has "${m ? m[1] : "?"}" blocks; it has ${groups}`);
+    const f = sp.match(/manager shows (\d+) folders \/ (\d+) dropdowns/), d = caps.capKeysForRole("manager").length;
+    if (!f || +f[1] !== groups || +f[2] !== d) probs.push(`docs/STAFF-PROFILE.md says "${f ? f[0] : "?"}"; today it is ${groups} folders / ${d} dropdowns`);
+  }
+  if (probs.length) fail(`a doc that describes the Access screen describes a different one: ${probs.join("; ")}`);
+  else ok("docs/ACCESS-MODEL.md's card table and row count, and docs/STAFF-PROFILE.md's block and dropdown counts, match the screen");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27

@@ -43,10 +43,17 @@ on as well:
 
 | **Main features** | **Extra features** |
 |---|---|
-| Menu (and its whole sub-tree) · Auto-print KOT · Quick order / Parcel · Orders without a table · Bill · Table | Pay later (khata) · Banquet billing · Staff profiles & pay · Inventory |
+| Menu (and its whole sub-tree) · Quick order / Parcel (QO/P) · Take a new order · Move, merge & split tables · Table types (VIP / Family / Guest) · Parcel & delivery platforms · Bill · Table | Pay later (khata) · Banquet billing · Staff profiles & pay · Inventory management · Loyalty points |
 
-So A2–A7 below describe rows that live on the **Extra features** card, all OFF by default. Their
-storage, defaults and dropdowns are unchanged — only which card they sit on.
+So A2, A5–A7 and A9 below describe rows that live on the **Extra features** card, all OFF by
+default. Their storage, defaults and dropdowns are unchanged — only which card they sit on.
+
+> **This table is checked against the screen** (`npm run verify:access` check 59). It named an
+> "Auto-print KOT" row for five weeks after that switch moved to the Printing menu (owner,
+> 2026-08-29: *"remove it completely from the access and permission"*), and it never listed the
+> three floor switches that came back on 2026-08-18 or Loyalty points (2026-09-19). Sweep #10 T18
+> corrected it on 2026-10-09; a row added to or removed from either card now turns that check red
+> until this line moves with it.
 
 ### A1 · Menu  *(the whole guest menu)*
 
@@ -103,7 +110,13 @@ Both kinds of order are stored in `aggregator_orders` and share the 🛵 board; 
 storage detail, not a shared switch. The board **names itself** after what the restaurant
 has: both ⇒ "🛵 Platform", parcel only ⇒ "🥡 Parcels".
 
-### A4 · Auto-print KOT
+### A4 · Auto-print KOT — NOT ON THIS SCREEN ANY MORE (2026-08-29)
+It moved to `/aevinite/printing` with the rest of printing (*"Now printing has a new menu, so all
+the settings of the printing will be there"*). Nothing about printing is configured on Access
+except who may be the printer and who may clear a queue — both under **Permission for manager** (B.2).
+### A4b · Take a new order · Move, merge & split tables · Table types — Main features, default ON
+Three real gates given their switch back on 2026-08-18 (`settings.<x>_allowed`). A new restaurant is
+seeded with all three ON (owner, 2026-08-28); an existing restaurant keeps whatever it has stored.
 ### A5 · Banquet billing
 ### A6 · Payroll
 One row, no sub-option. Pay counts as an expense wherever money is shown already — a "Staff pay
@@ -111,7 +124,11 @@ out" line in the day book and "Staff pay out" + "After staff pay" on the owner d
 there is nothing to switch. (This heading promised a "show payroll cost in reports" sub-option
 until 2026-08-06; no such row has ever existed, and the module's own ⓘ says the opposite.
 Inventory's equivalent row DOES exist and is honestly labelled left-to-build — see A7.)
-### A7 · Inventory — sub: show inventory cost inside the main reports as an expense line
+### A7 · Inventory management — sub: show inventory cost inside the main reports as an expense line
+### A9 · Loyalty points  *(Extra features, default OFF — 2026-09-19)*
+The first module whose switch lives in the shared `settings.modules` bag (migration 326) instead of
+columns of its own: `settings.modules.loyalty.allowed`. Off means billing is exactly as before — no
+points line on the bill, no Redeem button on the pay sheet, no owner Loyalty page.
 ### A8 · Bill
 A pure group — a restaurant can always issue a bill, so there is no on/off. What is inside:
 
@@ -161,11 +178,18 @@ menu, permission for manager, manager settings."*
    instead; no such viewer exists, and the model's own row text always agreed with the code
    ("The Feature switch removes it from every manager of this restaurant"). Corrected
    2026-08-04 — if the viewer is wanted, it is a build, not a description.
-2. **Permission for manager** — TWO rows, not three. `Delete a bill` **is gone and must not come
+2. **Permission for manager** — FOUR rows (two money, two printing) plus the Bills folder.
+   `Delete a bill` **is gone and must not come
    back** (owner, 2026-08-16 — `docs/REJECTED-IDEAS.md` **R27**): cancel is the only route out of a
    bill for anyone at the restaurant, the owner included, and `canDeleteBill()` answers true only
    for the Aevidine admin console. This line listed it as a live row until 2026-08-18, which sends
-   a session to rebuild exactly what he refused. The two that exist:
+   a session to rebuild exactly what he refused. (It then said "TWO rows" until 2026-10-09 — the two
+   printing rows had joined beside them; `verify:access` check 59 now counts them.)
+   The two printing rows: `May be the printer (print on their own screen)` (default **ON** — every
+   manager screen could print before it existed) and `May clear the printing queue` (default
+   **OFF** — Aevidine names the person). *"May set the printers up"* existed from 2026-08-27 to
+   2026-09-14 and was retired by the owner (*"that setup will be done by me only"*); it is not a
+   row and must not be offered. The two money rows:
    `Reopen a bill` (**default OFF for every
    restaurant** — owner, 2026-08-02, superseding his earlier same-day word that it ships on;
    with **Only within**, default **5 min**, enforced at the void-invoice endpoint for a real
