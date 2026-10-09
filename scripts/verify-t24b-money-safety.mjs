@@ -169,8 +169,10 @@ check("a name is capped at 80 characters before it is stored", /khataName \|\| "
 check("a phone is capped at 20 characters before it is stored", /khataPhone \|\| ""\)\.trim\(\)\.slice\(0, 20\)/.test(srcPaySplit));
 check("a blank phone is stored as nothing, never as an empty string that looks like a number",
   /\.slice\(0, 20\) \|\| null/.test(srcPaySplit));
+// Since 2026-10-09 (sweep #10 T30, item 6) a failed save answers through saveFailed(): ok:false,
+// a plain sentence instead of the database's, and 500 unless dbRefusal names a truer status.
 check("a failure creating the person answers 500 — it never carries on and books a debt against nobody",
-  /if \(made\.error\) return \{ ok: false, message: made\.error\.message, status: 500 \}/.test(srcPaySplit));
+  /if \(made\.error\) return saveFailed\(/.test(srcPaySplit) && /refusalStatus\(error, 500\)/.test(srcPaySplit));
 
 check("every part of ONE tap shares a settle group", /const group = crypto\.randomUUID\(\)/.test(srcPaySplit));
 check("…and that group is written on every leg, not only the tab", /settle_group: group,/.test(srcPaySplit));
@@ -183,8 +185,12 @@ check("the group exists so an earlier settle on the same bill is not subtracted 
   // straight into the else-arm's `payment_status: "paid"` and prove the opposite of what it says.
   const armStart = srcPaySplit.indexOf("const upd = laterPart");
   const arm = srcPaySplit.slice(armStart, srcPaySplit.indexOf("    : await sb.from(\"orders\")", armStart));
+  // The WRITE is the update's payload, not the whole arm: since 2026-10-09 (sweep #10 T30, item 5)
+  // the arm also FILTERS on payment_status — `.neq("payment_status", "paid")`, so a tab never parks a
+  // row someone else just settled — and a filter is the opposite of stamping it.
+  const payload = (/\.update\((\{[^}]*\})\)/.exec(arm) || [])[1] || "";
   check("a parked bill is NOT stamped paid — the money was not collected",
-    arm.includes("khata_at: stamp") && !arm.includes("payment_status") && !arm.includes("paid_at"), arm.slice(0, 300));
+    payload.includes("khata_at: stamp") && !payload.includes("payment_status") && !payload.includes("paid_at"), payload || arm.slice(0, 300));
 }
 check("a parked bill goes into the book with khata_at and the person", /khata_at: stamp, khata_customer_id: customer!\.id/.test(srcPaySplit));
 check("a parked bill is taken off the live floor", /khata_at: stamp[\s\S]{0,120}?archived: true, archived_at: stamp/.test(srcPaySplit));
@@ -859,7 +865,7 @@ check("the parts are rounded ONCE, and that same rounding is what gets stored",
   /One rounding, used for the\s*\n\s*\/\/ check AND for the row/.test(srcPaySplit));
 check("a settle that cannot be stamped reverses its own money rows rather than claiming money nobody took",
   /THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN/.test(srcPaySplit));
-check("…and still answers 500, so the person knows to try again", /return \{ ok: false, message: upd\.error\.message, status: 500 \}/.test(srcPaySplit));
+check("…and still answers 500, so the person knows to try again", /return saveFailed\("stamping the bill", upd\.error,/.test(srcPaySplit) && /refusalStatus\(error, 500\)/.test(srcPaySplit));
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 console.log(

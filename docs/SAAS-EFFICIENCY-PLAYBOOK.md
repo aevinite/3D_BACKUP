@@ -156,9 +156,12 @@ readable; blocking devtools only annoys real users. Real protection:
   and computing a tax rate for every restaurant on the table. The endpoint is polled every 60s by
   every open owner tab and shared for 8s by `lib/ownerOverviewCache.ts` on top of that. Checked
   again on 2026-08-21: still the rollup, still scoped.
-- [x] **Analytics indexes are live** — `idx_orders_created_at` + `idx_orders_restaurant_created`
-  (mig 095) confirmed via `pg_indexes` on 2026-06-26, so the windowed analytics RPCs are
-  index-covered. The all-time `orders_all` / `revenue_all` aggregate cannot be range-indexed and is
+- [x] **Analytics indexes are live** — `idx_orders_analytics_covering` on `(restaurant_id,
+  created_at)` and `idx_orders_created_covering` on `(created_at)`, both carrying the money columns as
+  INCLUDEs, so the windowed analytics RPCs are index-covered (read from `pg_indexes` on 2026-10-09).
+  This entry used to name the two plain indexes migration 095 created on 2026-06-26; migrations 155
+  and 267 replaced them with these covering ones and dropped the originals, so a reader checking the
+  old names found nothing and could believe the analytics were unindexed. The all-time `orders_all` / `revenue_all` aggregate cannot be range-indexed and is
   **YAGNI per CLAUDE.md** at this scale; it now reads the rollup, so there is nothing owed here.
 
 ### Medium — ALL RESOLVED 2026-06-26
@@ -181,9 +184,11 @@ readable; blocking devtools only annoys real users. Real protection:
   that ceiling. Every live match costs one PBKDF2 verify at 120,000 iterations, so this was CPU per
   login attempt as well as egress.
 - [ ] **N+1: batch the allergen per-item UPDATE loop.** Still one `order_items` UPDATE per item,
-  inside a `for` loop — `app/api/editor/[...path]/route.ts` around line **3440** (the old "~505-511"
-  in this file pointed at nothing after the route grew). The manager-PIN loop beside it is
-  restaurant-scoped now, so it is much smaller.
+  inside a `for` loop — `app/api/editor/[...path]/route.ts`, in the order-allergies handler, the loop
+  that runs right after the refusal *"Say why the allergy is changing"*. Found by that sentence, not
+  by a line number: this entry named line ~505, then ~3440, and both went stale as the route grew
+  (the loop was at line 4277 on 2026-10-09). The manager-PIN loop is restaurant-scoped now, so it
+  is much smaller.
 - [ ] **Trim `orders.select("*")` (editor `/orders`) to rendered columns.** Still `select(billsMode
   ? BILLS_COLS : "*")` — the Bills view already names its columns; the floor/board view does not.
   Plus `s-maxage` on the menu reads.

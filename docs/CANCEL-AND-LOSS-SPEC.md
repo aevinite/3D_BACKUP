@@ -70,7 +70,10 @@ Read `docs/COMPLIANCE-GUARDRAILS.md` §3.0 first. This feature only ever **adds*
 
 ## 4b. Where it ended up — all six phases done, 2026-08-19
 
-Migration **337**. Guards: `npm run verify:cancel-loss` (the database, 18 checks) and
+Migration **340** — `supabase/migrations/340_was_the_food_actually_made.sql`, a migration file. (It
+was written as 336, renumbered 337 when main took 336, and landed as **340** on 2026-08-19 because
+two other files had also taken 337 — commit `27cca10b`. This line said 337 until 2026-10-09, which is
+a report about the takings, not this feature.) Guards: `npm run verify:cancel-loss` (the database, 18 checks) and
 `npm run verify:cancel-made` (through the real manager endpoint, 13 checks); `verify:audit` grew to 87
 and now asserts the tag map's two halves agree; `verify:owner-screen` to 55. Full pass: **17 of 17**.
 

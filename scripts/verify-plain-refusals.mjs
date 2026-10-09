@@ -44,7 +44,11 @@ const bad = (m) => { console.log("  FAIL " + m); fails++; };
 const codeOf = (src) => src.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
 
 // A caught error's own words, in the shapes this codebase actually writes them.
-const RAW = String.raw`(?:\w*[eE]rr(?:or)?\w*|\w+Q|e)\??\.(?:message|details|hint)`;
+// A CHAIN COUNTS TOO (sweep #10 T30, item 6, 2026-10-09): `made.error.message` and `upd.error.message`
+// were invisible to the first version, which only knew a bare `error.message` / `e.message`. That is
+// exactly how lib/paySplit.ts handed a waiter "duplicate key value violates unique constraint …"
+// three times over while this guard read green. So any `<name>.`/`<name>?.` prefix is allowed now.
+const RAW = String.raw`(?:\w+\??\.)*(?:\w*[eE]rr(?:or)?\w*|\w+Q|e)\??\.(?:message|details|hint)`;
 // …reaching a field a screen renders. Either side of the concatenation.
 const PATTERNS = [
   new RegExp(String.raw`\b(?:message|error)\s*:\s*[^,\n}]*?["'\`][^"'\`\n]*["'\`]\s*\+\s*${RAW}`),
@@ -74,6 +78,10 @@ const NOT_A_SCREEN = new Set([
   // ownerScope.dbFail() logs the raw text and answers a plain sentence — it is the worked example
   // this guard exists to spread, and its own `message` field is the PLAIN one.
   "lib/ownerScope.ts",
+  // Added with the chain pattern (2026-10-09). Its `{ error }` is documented as "an admin-readable
+  // reason" and only the two /api/admin owner/restaurant routes call it — the Aevidine console, not a
+  // restaurant's screen. Exempt for exactly that reason, which EXEMPT_STILL_TRUE re-checks below.
+  "lib/ownerHome.ts",
 ]);
 
 const offenders = [];
@@ -94,6 +102,10 @@ if (!offenders.length) {
 // a hole. (A guard whose exemptions are never re-checked is how a stale allowance hides a fault —
 // verify:admin-refusals' own allowance drifted from 2 to 3 that way.)
 const EXEMPT_STILL_TRUE = {
+  "lib/ownerHome.ts": [
+    /`\{ error \}` with an admin-readable reason/,
+    "lib/ownerHome.ts no longer documents its error as admin-readable — the exemption was granted on that basis; check who shows it now",
+  ],
   // dbRefusal.ts has NO imports on purpose (tests/error-text.test.mjs loads it with plain node), so
   // it cannot log — it CLASSIFIES, and refusalMessage() is the decision about what a person is shown
   // instead of the raw text. That function existing, and still mapping a recognised refusal to a

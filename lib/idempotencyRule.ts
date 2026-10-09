@@ -28,3 +28,26 @@ export function didSomething(status: number, body: unknown): boolean {
 export function storedIsRefusal(stored: unknown): boolean {
   return !!stored && typeof stored === "object" && (stored as { ok?: unknown }).ok === false;
 }
+
+// ── A SECRET IS NEVER KEPT AS A STORED REPLY (sweep #10 T30, item 7, 2026-10-09) ──────────────────
+// lib/idempotency.ts stores a completed action's JSON reply so a duplicate can be answered with it.
+// Three of the routes it wraps answer with a PASSWORD — the admin console's Show password and
+// Reset password, and the owner's staff reset — so every one of those taps wrote the plaintext
+// password into action_idempotency.result, where it sat until the opportunistic prune came round
+// (measured on the dev database: 27 stored replies carried one). A stored reply exists to repeat an
+// order id or a count, never a credential, so anything keyed like a secret is dropped before it is
+// kept — and dropped again on the way out, for rows written before this rule existed.
+const SECRET_KEY = /pass(?:word|code)|^pass$|secret|token|(?:^|_)pin(?:$|_|s$)|(?:^|_)otp(?:$|_)|api_?key|setup_?code|private_?key/i;
+
+/** The reply with every secret-looking field removed, at any depth (arrays included). */
+export function withoutSecrets(v: unknown, depth = 0): unknown {
+  if (v === null || typeof v !== "object") return v;
+  if (depth > 8) return null;          // a reply is never this deep; refuse to keep what we cannot read
+  if (Array.isArray(v)) return v.map((x) => withoutSecrets(x, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (SECRET_KEY.test(k)) continue;
+    out[k] = withoutSecrets(x, depth + 1);
+  }
+  return out;
+}

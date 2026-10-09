@@ -53,9 +53,11 @@ export function effectiveTaxPct(raw: TaxSettings): number {
 //   'exempt' — no GST at all; the price is final.                   (MRP items, nil-rated)
 //
 // This is the TypeScript half of `lfh_resolve_tax_mode` / `lfh_split_items_tax` (migration
-// 269). The two MUST agree — the server prices the order, but the guest cart, the manager's
-// bill card and the printed paper all show a figure derived here, so a disagreement is four
-// different totals for one meal (the bug this codebase already learned in 2026-07-04).
+// 270, restated by 272; `lfh_resolve_tax_mode` again by 273 and 300 — the LATEST file wins. Until
+// 2026-10-09 this pointed at the migration before 270, which is about printing). The two MUST
+// agree — the server prices the order, but the guest cart, the manager's bill card and the
+// printed paper all show a figure derived here, so a disagreement is four different totals
+// for one meal (the bug this codebase already learned in 2026-07-04).
 
 export type TaxBehaviour = "excl" | "incl" | "exempt";
 export type DishTaxMode = "default" | "excl" | "incl" | "mrp" | "none";
@@ -137,7 +139,9 @@ export type BillSplit = {
 
 type SplitLine = { price?: unknown; qty?: unknown; tax_mode?: unknown; is_mrp?: unknown };
 
-/** The most a whole-bill discount may be, stated once. Mirrors lfh_order_discount_base (271).
+/** The most a whole-bill discount may be, stated once. Mirrors lfh_order_discount_base
+ *  (migration 270, restated by 272. Until 2026-10-09 this pointed at the migration after 270,
+ *  which is about the session's split state.)
  *
  *  · rate > 0  → the TAXABLE base. The discount has to land on the taxed part, or the identity
  *                every panel relies on — due = total − discount × (1 + rate) — silently stops

@@ -452,12 +452,16 @@ eq("orderTaxRate falls back to the settings rate when the order was never stampe
   // split part became allowed to be a tab (mig 352), and a guard pinned to the old literal would
   // have gone red on code that still does exactly the right thing.
   check("a failed paid-stamp REVERSES the parts it just recorded rather than leaving them standing",
-    /if \(upd\.error\) \{[\s\S]{0,1200}?reversed_at:/.test(src));
+    // Since 2026-10-09 the reversal is one helper (`reverseOurLegs`) that the failed stamp AND the
+    // second-device refusal both call (sweep #10 T30, item 5), so this reads the two halves.
+    /if \(upd\.error\) \{[\s\S]{0,1200}?reverseOurLegs\(/.test(src) && /const reverseOurLegs = [\s\S]{0,300}?reversed_at:/.test(src));
   check("…and it stamps them (mig 285) rather than deleting them",
     /\/\/ THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN/.test(src)
     && !/session_payments"\)\s*\n?\s*\.delete\(/.test(src));
+    // Since 2026-10-09 (sweep #10 T30, item 6) a failed save answers through saveFailed(): ok:false,
+    // a plain sentence instead of the database's, and 500 unless dbRefusal names a truer status.
   check("…and the person is still told the settle failed (500), not quietly told it worked",
-    /return \{ ok: false, message: upd\.error\.message, status: 500 \};/.test(src));
+    /return saveFailed\("stamping the bill", upd\.error,/.test(src) && /refusalStatus\(error, 500\)/.test(src) && /return \{ ok: false, status, message:/.test(src));
 
   // ── T24 fix 2: one rounding for the check AND the row ──────────────────────────────────
   // Again the behaviour: ONE rounding feeds both the gate and the stored row. The object literal
@@ -643,7 +647,12 @@ head("8. the two docs I own tell the truth about the code they name");
       offenders.length === 0, offenders);
     check("…and it is a LATER definition than the ones that used to delete bills (309 closed that)",
       parseInt(live, 10) > 309, live);
-    check("§3 names the live purge rather than a single migration", /rewritten six times/.test(c));
+    // It used to look for the words "rewritten six times" — which made the guard REQUIRE a count
+    // that was already stale (twelve files defined the purge by 2026-10-09). The property it stood
+    // for is that §3 sends the reader to the LIVE purge, so that is what it reads now: the heading
+    // and the command that lists every definition (sweep #10 T30, item 3).
+    check("§3 names the live purge rather than a single migration",
+      /Check the LIVE purge, not one migration/.test(c) && /grep -liE "FUNCTION\\s\+\(public\\\.\)\?admin_purge_restaurant"/.test(c));
   }
   const playbook = read("docs/SAAS-EFFICIENCY-PLAYBOOK.md");
   // §3a promises to list EVERY live expire:0 call site. A fourth one that never got listed is
@@ -673,10 +682,36 @@ head("8. the two docs I own tell the truth about the code they name");
   check("the playbook's own 'not in this file yet' banner is gone, because the three lessons are in it",
     !/THREE LATER LESSONS ARE NOT IN THIS FILE YET/.test(playbook)
     && /## 0\. The three rules learned AFTER the June incident/.test(playbook));
+  // It used to REQUIRE "around line **3440**" — a line number that had itself gone stale (the loop
+  // was at 4277 by 2026-10-09). The entry now quotes the refusal the loop sits under, and
+  // scripts/verify-money-pointers.mjs check 5 proves that sentence still leads to the loop.
   check("the playbook's stale line reference for the allergen loop was corrected",
-    !/editor route ~505-511/.test(playbook) && /around line \*\*3440\*\*/.test(playbook));
+    !/editor route ~505-511/.test(playbook) && !/around line \*\*\d+\*\*/.test(playbook)
+    && /Say why the allergy is changing/.test(playbook));
   check("the playbook points at the security checklist rather than only saying the sweep is owed",
     /docs\/SECURITY-CHECKLIST\.md/.test(playbook));
+}
+
+
+// ── the clash gate looks rows up by a column that EXISTS (sweep #10 T30, item 9, 2026-10-09) ──
+// categories and filters have no `id` (their key is restaurant + slug) and table_tags has none
+// either, yet all three were listed as "id": the lookup errored and failed open, and the editor sent
+// no expectation for a category because `before.id` was undefined. Static half: the two sides name
+// the same key. The database half (every listed column really exists) is in the --db block.
+{
+  const clashSrc = read("lib/clash.ts");
+  const appSrc = read("public/panels/editor/app.js");
+  const block = (/const COMPARABLE_TABLES: Record<string, string> = \{([\s\S]*?)\n\};/.exec(clashSrc) || [])[1] || "";
+  const comparable = Object.fromEntries([...block.matchAll(/^\s{2}(\w+): "(\w+)",/gm)].map((m) => [m[1], m[2]]));
+  check("lib/clash.ts looks a category and a filter up by its slug — they have no id column",
+    comparable.categories === "slug" && comparable.filters === "slug", comparable);
+  check("…and table_tags, which has no id either and was never sent an expectation, is not listed",
+    !("table_tags" in comparable), Object.keys(comparable));
+  const expectTable = Object.fromEntries([...((/const EXPECT_TABLE = \{([^}]*)\}/.exec(appSrc) || [])[1] || "").matchAll(/(\w+): "(\w+)"/g)].map((m) => [m[1], m[2]]));
+  const expectId = Object.fromEntries([...((/const EXPECT_ID_FIELD = \{([^}]*)\}/.exec(appSrc) || [])[1] || "").matchAll(/(\w+): "(\w+)"/g)].map((m) => [m[1], m[2]]));
+  const drift = Object.values(expectTable).filter((t) => comparable[t] && (expectId[t] || "id") !== comparable[t]);
+  check("the manager panel's menu-edit expectation names the same key column the gate looks up, for every table it edits",
+    Object.keys(expectTable).length >= 3 && !drift.length, { drift, expectId });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -766,6 +801,20 @@ if (process.argv.includes("--db")) {
       offenders.length === 0, offenders);
     check("…and the installed purge still keeps the restaurants row, marked purged_at, so bills have a parent",
       /purged_at/.test(body));
+  }
+  {
+    // item 9's database half: every column the clash gate looks a row up by really exists, and every
+    // table it scopes by restaurant really has the column.
+    const clashSrc = read("lib/clash.ts");
+    const block = (/const COMPARABLE_TABLES: Record<string, string> = \{([\s\S]*?)\n\};/.exec(clashSrc) || [])[1] || "";
+    const comparable = Object.fromEntries([...block.matchAll(/^\s{2}(\w+): "(\w+)",/gm)].map((m) => [m[1], m[2]]));
+    const tenantRows = (((/TENANT_ROW_TABLES = new Set\(\[([^\]]+)\]\)/.exec(clashSrc) || [])[1]) || "").match(/"(\w+)"/g)?.map((x) => x.slice(1, -1)) || [];
+    const cols = await sql(`select table_name t, column_name c from information_schema.columns where table_schema='public' and table_name in (${Object.keys(comparable).map((t) => `'${t}'`).join(",")})`);
+    const has = new Set(cols.map((x) => `${x.t}.${x.c}`));
+    const missing = Object.entries(comparable).filter(([t, c]) => !has.has(`${t}.${c}`)).map(([t, c]) => `${t}.${c}`);
+    check(`every key column the clash gate looks up exists on the database (${Object.keys(comparable).length} tables)`, !missing.length, missing);
+    const unscoped = Object.keys(comparable).filter((t) => !tenantRows.includes(t) && !has.has(`${t}.restaurant_id`));
+    check("…and every table it scopes by restaurant has a restaurant_id column", !unscoped.length, unscoped);
   }
 }
 

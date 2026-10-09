@@ -21,6 +21,7 @@ import { effectiveTaxRate, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 // The rate ONE order was charged at is decided in the same file the printed bill uses, so this
 // path and the paper can never answer differently — see orderTaxRate's own note for why it moved.
 import BILLDOC from "@/public/panels/billdoc.js";
+import { BUSY_MESSAGE, refusalStatus } from "@/lib/dbRefusal";
 
 export type SplitLeg = {
   amount: number;
@@ -56,6 +57,31 @@ export type SplitResult =
  *  becoming a whole-bill payment method that records money nobody collected. */
 export const PAY_LATER = "Pay later";
 export const SPLIT_METHODS: readonly string[] = [...PAYMENT_METHODS, PAY_LATER];
+
+// ── A READ THAT FAILED IS NOT AN ANSWER (sweep #10 T30, item 4, 2026-10-09) ──────────────────────
+// Every read below used to keep only `.data` and never look at `.error`. So when the database did
+// not answer, the order read came back null and the waiter was told "Nothing to settle — already
+// paid" (a 409 the panel shows and never retries) for a bill nobody had paid; a failed settings
+// read quietly priced the due at the 5% default; and a failed pay-later lookup either said the
+// person "isn't in this restaurant's pay-later book" or ADDED them a second time. A failed read now
+// answers the busy reply — 503, which the panel's outbox keeps and sends again, the same as no
+// internet — and the detail is logged here, never shown. readGuard.ts states the same rule.
+const busy = (step: string, error: unknown): SplitResult => {
+  console.error(`[paySplit] ${step} read failed:`, (error as { message?: unknown })?.message ?? error);
+  return { ok: false, status: 503, message: BUSY_MESSAGE };
+};
+
+// ── A FAILED SAVE SAYS WHAT HAPPENED, NOT WHAT POSTGRES SAID (sweep #10 T30, item 6) ───────────
+// The three writes below answered with the database's own sentence — "duplicate key value violates
+// unique constraint …" — straight to a waiter mid-service. The detail is logged here; the person
+// gets a sentence about their bill. The STATUS is the honest one too (lib/dbRefusal): a value the
+// database refuses is a 4xx the panel shows rather than a 500 its outbox would retry for ever, and
+// a database that did not answer is the busy reply.
+const saveFailed = (step: string, error: unknown, sentence: string): SplitResult => {
+  console.error(`[paySplit] ${step} failed:`, (error as { message?: unknown })?.message ?? error);
+  const status = refusalStatus(error, 500);
+  return { ok: false, status, message: status === 503 ? BUSY_MESSAGE : sentence };
+};
 
 /** Is this part a tab rather than money? */
 const isPayLater = (s: SplitLeg) => String(s?.method) === PAY_LATER;
@@ -100,9 +126,11 @@ export async function settleBillInParts(
 
   // Same scoping as a normal settle: the table's OPEN session's orders (fallback:
   // its active un-archived orders), only accepted + unpaid + non-cancelled ones.
-  const openSess = (await sb.from("sessions").select("id")
+  const sessQ = await sb.from("sessions").select("id")
     .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
-    .order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
+    .order("last_activity_at", { ascending: false }).limit(1);
+  if (sessQ.error) return busy("open session", sessQ.error);
+  const openSess = sessQ.data?.[0] as { id: string } | undefined;
   // A SOFT-DELETED ORDER IS NOT PART OF THE BILL (2026-08-05) — it was neither excluded from the
   // due nor from the rows marked paid, so a split settle collected for a tombstoned line. The
   // printed bill and lib/billLedger.ts both drop it now; this is the third door onto the same rule.
@@ -113,7 +141,9 @@ export async function settleBillInParts(
   // 400, not 200: the cap silently CHANGES the answer rather than refusing — the due would be
   // summed over a partial set and only those rows marked paid. 200 KOTs on one open table is
   // implausible, but a cap that quietly under-collects is the wrong failure mode for money.
-  const rows = (await oq.limit(400)).data as { id: string; subtotal: number; discount: number; session_id: string | null }[] | null;
+  const ordQ = await oq.limit(400);
+  if (ordQ.error) return busy("orders", ordQ.error);
+  const rows = ordQ.data as { id: string; subtotal: number; discount: number; session_id: string | null }[] | null;
   if (rows && rows.length >= 400) {
     return { ok: false, status: 409, message: "This bill has too many orders to split in one go — settle it in parts from the table instead." };
   }
@@ -136,7 +166,9 @@ export async function settleBillInParts(
   // own 18% — is not asked for at the dine-in 5%, and a rate corrected today cannot re-price a bill
   // taken this morning. `> 0` on purpose: a genuine 0 (composition) falls through to the settings,
   // which also return 0, rather than being read as "not stamped".
-  const set = (await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle()).data || {};
+  const setQ = await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle();
+  if (setQ.error) return busy("settings", setQ.error);
+  const set = setQ.data || {};
   const settingsRate = effectiveTaxRate(set);
   const r2 = (n: number) => Math.round(n * 100) / 100;
   type MoneyRow = { taxable_base?: number | null; nontax_amount?: number | null; mrp_amount?: number | null; subtotal?: number; discount?: number; tax_rate?: number | null };
@@ -223,8 +255,10 @@ export async function settleBillInParts(
   if (laterPart) {
     const wantId = String(laterPart.khataCustomerId || "").trim();
     if (wantId) {
-      const got = (await sb.from("khata_customers").select("id,name")
-        .eq("restaurant_id", rid).eq("id", wantId).maybeSingle()).data as { id: string; name: string } | null;
+      const gotQ = await sb.from("khata_customers").select("id,name")
+        .eq("restaurant_id", rid).eq("id", wantId).maybeSingle();
+      if (gotQ.error) return busy("pay-later person", gotQ.error);
+      const got = gotQ.data as { id: string; name: string } | null;
       if (!got) return { ok: false, status: 404, message: "That person isn't in this restaurant's pay-later book." };
       customer = got;
     } else {
@@ -232,12 +266,14 @@ export async function settleBillInParts(
       if (!name) return { ok: false, status: 400, message: "A pay-later part needs a person — pick who owes it." };
       const phone = String(laterPart.khataPhone || "").trim().slice(0, 20) || null;
       if (phone) {
-        customer = (await sb.from("khata_customers").select("id,name")
-          .eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data as { id: string; name: string } | null;
+        const byPhone = await sb.from("khata_customers").select("id,name")
+          .eq("restaurant_id", rid).eq("phone", phone).maybeSingle();
+        if (byPhone.error) return busy("pay-later phone", byPhone.error);
+        customer = byPhone.data as { id: string; name: string } | null;
       }
       if (!customer) {
         const made = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone }).select("id,name");
-        if (made.error) return { ok: false, message: made.error.message, status: 500 };
+        if (made.error) return saveFailed("adding the pay-later person", made.error, "Couldn't add that person to the pay-later book — nothing was settled. Try again.");
         customer = (made.data as { id: string; name: string }[])[0];
       }
     }
@@ -254,7 +290,7 @@ export async function settleBillInParts(
     khata_customer_id: isPayLater(s) ? customer!.id : null,
   }));
   const ins = await sb.from("session_payments").insert(legs).select("id");
-  if (ins.error) return { ok: false, message: ins.error.message, status: 500 };
+  if (ins.error) return saveFailed("recording the parts", ins.error, "Couldn't record the payment parts — nothing was settled. Try again.");
   const legIds = ((ins.data || []) as { id: string }[]).map((l) => l.id);
 
   const note = `${parts.length}-way split: ` + parts.map((s) => `₹${s.amount.toFixed(0)} ${s.method}`).join(" + ")
@@ -266,29 +302,64 @@ export async function settleBillInParts(
   // payment_status stays 'pending' so the money is not claimed, khata_at / khata_customer_id put it
   // in the book, and `archived` takes it off the live floor. The CALLER closes the session — that is
   // where the close reason, the ladder and the log line already live.
+  // Stamp the parts reversed — corrected, never deleted (mig 285) — so the trail never claims money
+  // for a settle that did not happen. Best-effort: the reply below is what tells the person.
+  const reverseOurLegs = async (by: string, why: string) => {
+    if (!legIds.length) return;
+    try {
+      await sb.from("session_payments").update({ reversed_at: stamp, reversed_by: by, reversed_reason: why })
+        .in("id", legIds).eq("restaurant_id", rid);
+    } catch { /* nothing is deleted either way */ }
+  };
+
+  // ── FIRST SAVE WINS (sweep #10 T30, item 5, 2026-10-09) ────────────────────────────────────
+  // Two people can settle the same table at the same moment — the waiter on the tablet and the
+  // manager at the till, both tapping Pay in parts. Both read the bill unpaid, both record their
+  // parts, and the stamp used to match the rows however they stood by then, so BOTH settles
+  // "succeeded" and session_payments held the bill's money twice. The day-close "how the money came
+  // in" lines sum those parts, so the cash drawer was asked for double.
+  //
+  // So the stamp only matches rows that are STILL unsettled, and says which rows it reached. If it
+  // reached fewer than it read, someone else got there first: our parts are stamped reversed, any
+  // row we did reach goes back to exactly how it was a moment ago (unsettled — that is all the
+  // update could match), and the second person is told plainly. The project's one rule for this
+  // (CLAUDE.md, checklist item 11): first save wins, the loser is told.
   const upd = laterPart
     ? await sb.from("orders")
         .update({ khata_at: stamp, khata_customer_id: customer!.id, archived: true, archived_at: stamp })
-        .in("id", ids).eq("restaurant_id", rid)
+        .in("id", ids).eq("restaurant_id", rid).neq("payment_status", "paid").is("khata_at", null)
+        .select("id")
     : await sb.from("orders")
         .update({ payment_status: "paid", paid_at: stamp, payment_method: "Split", payment_note: note.slice(0, 200) })
-        .in("id", ids).eq("restaurant_id", rid);
+        .in("id", ids).eq("restaurant_id", rid).neq("payment_status", "paid")
+        .select("id");
   if (upd.error) {
     // THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN. The parts land first and the stamp
     // second, with no transaction across the two. Left alone, a failed stamp leaves the bill unpaid
     // while session_payments says the parts were collected on it — so "how did table 6 pay?"
     // answers for a settle that never happened. Stamp them reversed (mig 285's rule: a money record
-    // is corrected, never deleted), then still answer 500 so the person knows to retry.
-    if (legIds.length) {
+    // is corrected, never deleted), then still answer a failure so the person knows to retry.
+    await reverseOurLegs("auto · the bill was not settled", "the settle failed after the parts were recorded");
+    return saveFailed("stamping the bill", upd.error, "Couldn't mark the bill settled — the parts were not kept. Try again.");
+  }
+  const reached = ((upd.data || []) as { id: string }[]).map((o) => o.id);
+  if (reached.length < ids.length) {
+    if (reached.length) {
       try {
-        await sb.from("session_payments").update({
-          reversed_at: stamp,
-          reversed_by: "auto · the bill was not settled",
-          reversed_reason: "the settle failed after the parts were recorded",
-        }).in("id", legIds).eq("restaurant_id", rid);
-      } catch { /* best-effort: the 500 below is what tells the person, and nothing is deleted */ }
+        await sb.from("orders")
+          .update(laterPart
+            ? { khata_at: null, khata_customer_id: null, archived: false, archived_at: null }
+            : { payment_status: "pending", paid_at: null, payment_method: null, payment_note: null })
+          .in("id", reached).eq("restaurant_id", rid);
+      } catch { /* the 409 below still tells them to look at the bill */ }
     }
-    return { ok: false, message: upd.error.message, status: 500 };
+    await reverseOurLegs("auto · someone else settled this bill first", "another device settled the bill while these parts were being recorded");
+    return {
+      ok: false, status: 409,
+      message: reached.length
+        ? "Someone else settled part of this bill while you were splitting it — nothing of yours was recorded. Refresh the bill and split what is left."
+        : "Someone else settled this bill a moment ago — your parts were not recorded. Refresh the bill before taking any money.",
+    };
   }
 
   return {

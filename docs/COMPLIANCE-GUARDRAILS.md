@@ -175,12 +175,20 @@ database, unread. See `docs/REJECTED-IDEAS.md` R27 before ever re-adding it.
   a parent. `bill_chain` cannot be removed even deliberately: migration 332's append-only trigger
   refuses a DELETE to every role, service role included.
 
-  **Check the LIVE purge, not one migration.** `admin_purge_restaurant` has been rewritten six times
-  (migs 128 → 309 → 321 → 342 → 345 → 346, the last two adding operational and printing tables), so
-  a check that reads one migration's text stops guarding the moment the next one lands.
+  **Check the LIVE purge, not one migration.** `admin_purge_restaurant` is rewritten every time a
+  new table has to be cleared on a purge, so a check that reads one migration's text stops guarding
+  the moment the next one lands. Never trust a count of those rewrites typed into a document — this
+  paragraph gave a count of six, and said the admin-restaurants guard looked at migration 342 alone,
+  for weeks after both stopped being true (twelve migration files defined it on 2026-10-09, and that
+  guard had long since been pointed at the newest one). Re-derive the list instead:
+
+      grep -liE "FUNCTION\s+(public\.)?admin_purge_restaurant" supabase/migrations/*.sql
+
+  Two guards hold the line, and both follow the newest definition by themselves:
   `npm run verify:t24-money-rules` asserts that **every** migration defining that function deletes
-  no money table; `npm run verify:admin-restaurants` still reads migration 342 only and should be
-  pointed at the newest definition.
+  no money table and, with `--db`, reads the function the database has INSTALLED;
+  `npm run verify:admin-restaurants` checks the newest file defining it, while keeping its
+  recycle-bin RULES checks on migration 342, where those rules were written.
 
 ## 4. Customer data — DPDP Act 2023 (we collect phone / khata book / feedback)
 
