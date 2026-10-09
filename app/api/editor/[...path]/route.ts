@@ -3962,11 +3962,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
        The exact shape of platform/:id/printed below, one table across, and for the same stated
        reason: the fact has to live on the BILL, not on the device that printed it, because the
        manager prints at the till and a waiter may reprint from the tablet a minute later — that
-       second device has no way to know, and would hand out an unbranded duplicate.
-       Stamped ONCE and never moved: the first print stays the first print, so every later copy is
-       a reprint and the document brands it. Deliberately not reversible from here — this is a
-       record that paper was produced. Answering ok() when it is already stamped means a panel can
-       call it after every print without a guard of its own, and a retry is free. */
+       second device has no other way to know paper already exists.
+       Stamped ONCE and never moved: the first print stays the first print. Deliberately not
+       reversible from here. Answering ok() when it is already stamped means a panel can call it
+       after every print without a guard of its own, and a retry is free.
+       WHAT IT IS FOR, AND WHAT IT IS NOT (corrected by sweep #10 T10, item 5): it ONLY lets the
+       button read "Reprint" instead of "Print". The second copy is NOT branded — R37 (owner,
+       2026-08-19) removed the "Reprint · Duplicate" band — and a reprint is NOT recorded anywhere —
+       R38. This comment used to promise that every later copy carries a reprint brand — the one
+       sentence most likely to make someone rebuild the band. See docs/REJECTED-IDEAS.md R37/R38. */
     if (a === "sessions" && c === "bill-printed") {
       const owns = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
       if (!owns) return err("That bill isn't for this restaurant.", 404);
