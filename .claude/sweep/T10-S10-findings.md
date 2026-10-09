@@ -17,3 +17,32 @@ the file (lines ~3,442–end on 2026-10-09). Ledger: `LEDGER/T10-S10.md`. Each i
   13 red). Ledger P179001–P179017.
 - **Not mine, same shape:** the waiter tablet's and the kitchen's `orders/:id/accept` and the
   tablet's `items/:id/status` (their own terminals).
+
+## 2 · A leftover door switched the kitchen's delivery-app power with no permission check
+
+- **Where:** backend only, nothing on screen (the Platform tab's "Show in bills" checkbox that used
+  it was removed on 2026-07-07).
+- **Fix:** POST `platform/toggles` removed, obituary in place. Guard: `verify:t10-writes` (item 2).
+
+## 3 · An owner's settings save could write a module's admin switches
+
+- **Where:** backend only — the manager panel's settings save, which an owner also reaches.
+- **What was wrong:** `modules` (Loyalty points' admin switch), every `*_owner_control` and
+  `*_enabled` added after mig 166, and `platform_channels` were not stripped for a staff save.
+- **Fix:** dropped for any staff-cookie save; admin console untouched. Guard: `verify:t10-writes`.
+
+## 4 · The manager's discount limit was measured against the bill's first ticket
+
+- **Where:** Manager panel → a table → − Discount → Apply.
+- **What was wrong:** the screen allows the person's % of the whole bill; the server measured the %
+  against the one ticket whose id was sent, refusing legitimate discounts on multi-ticket bills.
+- **Fix:** the cap uses the bill's base on a table, the ticket's on a solo order. Guard: `verify:t10-writes`.
+
+## 5 · A comment promised a branded reprint the owner removed (R37/R38)
+
+- **Where:** backend only. Comment corrected. Guard: `verify:t10-writes` (item 5).
+
+## 6 · A tip on a ticket that had gone was reported as saved
+
+- **Where:** Manager panel → a table → 💳 Mark paid → tip.
+- **Fix:** zero-row match answers 404 (the waiter twin's words). Guard: `verify:t10-writes`.

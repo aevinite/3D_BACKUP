@@ -4257,7 +4257,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // write that ignores a Mark-paid row if one ever returns — not because a hole was found.
       if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("record a tip");
       const amt = Math.min(Math.max(0, Number(body?.amount) || 0), 100000);
-      must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid));
+      // A TIP THAT LANDED NOWHERE MUST NOT SAY "SAVED" (sweep #10 T10, item 6). This answered
+      // ok:true whatever the update matched, so a tip typed against a ticket that had just been
+      // moved, merged away or deleted on another device was reported as recorded and written
+      // nowhere — the tips line on the day-close simply came up short. The waiter tablet's twin
+      // has always refused ("That order isn't there anymore — refresh."); `.select("id")` makes a
+      // zero-row match visible here without a second trip.
+      const tipped = must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid).select("id")) as { id: string }[] | null;
+      if (!tipped || !tipped.length) return err("That order isn't there anymore — refresh.", 404);
       await log("manager", "order_tip", { restaurant_id: rid, order_id: b, detail: `tip ₹${amt}`, device_id: dev });
       return ok({ ok: true });
     }
