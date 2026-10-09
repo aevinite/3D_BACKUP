@@ -195,12 +195,18 @@ readable; blocking devtools only annoys real users. Real protection:
   --db` fails the day the panel starts reading a column the list lacks. The `s-maxage` half of this
   entry is superseded on purpose: the menu-data route answers with an ETag and a 304 rather than a
   CDN cache (its own header explains why a shared cache would serve one restaurant's menu stale).
-- [ ] **Full RLS/secrets sweep** — work from `docs/SECURITY-CHECKLIST.md` (§4 above), in
-  product-correctness wording, inline and never in a sub-agent. The concrete bugs it would have
-  targeted (the cross-restaurant manager-PIN scope) were found and fixed; a systematic per-table
-  read-policy review is still owed. Note the related trap already learned twice: **a read policy
-  with no matching GRANT does nothing**, and narrowing a grant without matching the code is how a
-  guest config read broke.
+- [x] **Full RLS / table-access review — done 2026-10-09** (sweep #10 T30 round 3, item 21), in
+  product-correctness wording, read from the database's own catalog: all 77 public tables have
+  row-level security on; the public and signed-in keys can READ exactly five tables, each through a
+  policy that exists on purpose (categories, filters, menu_items and reviews for the guest menu,
+  realtime_events for Realtime — it carries a table number and a kind, never a name or a figure);
+  neither key can WRITE any table. The last 46 unused default privileges (write grants on those five,
+  everything on deletion_audit and table_merges) were removed by migration 416. **`npm run
+  verify:grants` now checks all three rules on every run**, so a new table that arrives with
+  Supabase's default grants turns it red. The broader 20-point `docs/SECURITY-CHECKLIST.md` stays
+  the list to work from for everything that is not a table grant (§4 above). Still true: **a read
+  policy with no matching GRANT does nothing**, and narrowing a grant without matching the code is
+  how a guest config read broke.
 
 ### Done (2026-06-26)
 - [x] Targeted per-table refetch on the manager (PR #45) + kitchen + tablet (PR #50).
