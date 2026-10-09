@@ -4384,8 +4384,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
-
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).single());
+      if (cur.status === "cancelled") return err(VOIDED_MSG, 409);   // item 1 — see VOIDED_MSG
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: client re-fetches the board → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
@@ -4423,7 +4423,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const idx = Number(body && body.index);
       const status = body && body.status;
       if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).single());
+      if (cur.status === "cancelled") return err(VOIDED_MSG, 409);   // item 1 — see VOIDED_MSG
       const items = Array.isArray(cur.items) ? cur.items : [];
       if (!items[idx]) return err("bad item index");
       items[idx] = { ...items[idx], status };
@@ -5082,7 +5083,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "status") {
       const status = body && body.status;
       if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
-       
+      // Item 1 — the dish's ORDER is asked first, because this handler rewrites that order's status
+      // from its dishes below. Both reads are scoped and single-row; the panel sends this tap in the
+      // background (it flips the dish on screen first), so the extra trip is never waited on.
+      const owner = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
+      if (!owner) return err("That dish isn't on this order any more — refresh and try again.", 404);
+      if (owner.order_id) {
+        const ord = (await sb.from("orders").select("status").eq("id", owner.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
+        if (ord?.status === "cancelled") return err(VOIDED_MSG, 409);
+      }
       const patch: any = { status };
       // Serving stamps served_at; an undo that sends the dish back must clear it
       // again so the row never keeps a stale served time (owner undo bar, 2026-07-22).
@@ -6239,6 +6248,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   }
 }
 
+// ── A CANCELLED TICKET STAYS CANCELLED UNTIL SOMEBODY RESTORES IT (sweep #10 T10, item 1) ───────
+// There is ONE way back from a cancel: PATCH /orders/:id → status 'received' (the panel's Restore).
+// It is limited to 30 minutes from cancelled_at and it writes `order_uncancel` to the Activity log.
+//
+// Four other doors could also move a cancelled order's status, with neither the window nor the
+// line: POST orders/:id/accept, POST orders/:id/item, POST items/:id/status (each recomputes the
+// order's status from its dishes) and PATCH /orders/:id with 'preparing' or 'served'. serve-all was
+// given exactly this refusal on 2026-08-04 and its four siblings were not. The way it is reached is
+// ordinary: the floor tile still says "received", a colleague cancels that ticket on another
+// device, and this screen's ✓ Accept & Prepare lands a second later — the ticket comes back to the
+// kitchen, its money rejoins the bill, and the Activity log says nothing about it.
+// docs/COMPLIANCE-GUARDRAILS.md §3: a cancel/restore pair must never move a sale unobserved.
+// Guarded by scripts/verify-voided-stays-voided.mjs (npm run verify:voided-stays).
+const VOIDED_MSG = "That ticket was cancelled — restore it first if it should go back to the kitchen.";
+
 // ── PATCH ────────────────────────────────────────────────────────────────────
 export const PATCH = withIdempotency(invalidateFloorAfter(patchImpl), "editor");
 async function patchImpl(req: NextRequest, ctx: Ctx) {
@@ -6372,6 +6396,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // trusting a comment. The guard now fails if that wording ever comes back.
       if (patch.payment_status === "paid" && cur.status === "cancelled")
         return err("Can't take payment on a cancelled order.", 409);
+      // Item 1 — 'received' is the ONE way back (the 30-minute window + order_uncancel below).
+      if (cur.status === "cancelled" && (patch.status === "preparing" || patch.status === "served"))
+        return err(VOIDED_MSG, 409);
       // RULE (owner 2026-06-29): a bill can only be paid once the order is ACCEPTED (gone to
       // prepare). A brand-new 'received' order must be accepted first — you can't take payment
       // on something the kitchen hasn't confirmed. (No payment system yet; when one is added it
