@@ -184,6 +184,7 @@
     "verify:staff-accounts": "node scripts/verify-staff-accounts.mjs",
     "verify:static": "node scripts/verify-static.mjs",
     "verify:migration-numbers": "node scripts/verify-migration-numbers.mjs",
+    "verify:installed-packages": "node scripts/verify-installed-packages.mjs",
     "verify:launch-risks": "node scripts/verify-launch-risks.mjs",
     "verify:summary-parity": "node scripts/verify-summary-parity.mjs",
     "verify:tablet-parity": "node scripts/verify-tablet-parity.mjs",

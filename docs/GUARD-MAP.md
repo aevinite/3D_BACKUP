@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **231** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **232** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 197 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -261,6 +261,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 |---|---|---|---|
 | **created a new Postgres function** | `verify:grants` ← a new function is PUBLIC-executable by default | `.env.local` | no |
 | a one-time migration that rewrites existing data | `verify:grants` — and wrap it in `lfh_already_applied('<key>')` or a re-seed applies it twice | `.env.local` | no |
+| **ran `npm install`, merged a dependency bump, or a page behaves differently here than on the site** | `verify:installed-packages` ← the packages in THIS folder's node_modules must be the versions the lock names; on 2026-10-09 the shared folder was still on the versions from before #1441 (CI can never see this — it installs fresh). Fix: `npm ci` | nothing | no |
 | **added a migration file** — its NUMBER | `verify:migration-numbers` ← two sessions working at once can each take "the next" number; this fails on a new same-number pair or a new hole, with no database (the folder half of `verify:grants`, inside `verify:static`) | nothing | no |
 | **anything that looks a DISH up from an order line** — a report, a trigger, a breakdown | `verify:order-keys` ← an order line names its dish by **`id`**; it has no `slug`. `lfh_price_order` (the single builder behind all three order doors) emits `{id,title,price,qty,options,removed,note,tax_mode,is_mrp}`. Three migrations have joined `menu_items` on `it->>'slug'` anyway, and a join that matches nothing returns a NUMBER, not an error: mig 089 collapsed every dish into one "Other" row (fixed by 130, which wrote the shape down); mig 224's stock depletion never fired for one order the APP created — it DID fire for seeded rows carrying a stray `slug`, so ~23k consumption rows exist while real trade moved nothing, the fault matching test data and missing production — silently, because it is fail-open; mig 227's food-cost and recipe-coverage reports read hard zeros — including the denominator of the % that mig 227 itself calls "the honesty gate". All fixed by mig 409. Asks the RUNNING database, because the bad SQL and the good SQL look identical in a file | `.env.local` | no |
 | **CREATE OR REPLACE of a function that already existed** | `verify:fix-survives` ← it asserts every earlier fix is still in the NEWEST definition. Three rewrites have silently dropped one (203/215 put a flat 5% tax back for 55 migrations; 190 dropped the pay-later day from four reports) | nothing | no |
