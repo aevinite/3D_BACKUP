@@ -129,7 +129,7 @@ export async function runAll({ ledger = false, quiet = false, only = null } = {}
 const require_ = createRequire(import.meta.url);
 const CACHE = join(ROOT, "node_modules/.cache");
 const ALIASES = ["--alias:@=.",
-  "--alias:@/lib/supabaseAdmin=./scripts/panel-stubs/sb.mjs",
+  "--alias:@/lib/supabaseAdmin=./scripts/sweep/t13s10/stubs/sb.mjs",
   "--alias:@/lib/userAuth=./scripts/sweep/t13s10/stubs/userAuth.mjs",
   "--alias:@/lib/oplog=./scripts/sweep/t13s10/stubs/oplog.mjs",
   "--external:next/server", "--external:next/cache", "--external:next/headers"];

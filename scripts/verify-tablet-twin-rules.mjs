@@ -59,5 +59,73 @@ for (const [path, body, what] of [
   else bad(`a live dish's serve answered ${r.status}, dish ${G.FIX.order_items[0].status}, order ${G.FIX.orders[0].status}`);
 }
 
+// ── 2. A PRINTED INVOICE LOCKS WHAT IS ON IT (item 2) ──────────────────────────────────────────────
+// Owner's rule 10 (docs/COMPLIANCE-GUARDRAILS.md §3.0b). The lock lives in the routes, not the
+// database, and the tablet's route had none of it.
+console.log("\n2. once the invoice is printed, nothing comes off the bill from the handheld");
+const hourAgo = new Date(Date.now() - 3600e3).toISOString();
+const invWorld = (sess = {}, order = {}) => world({
+  fix: {
+    sessions: [{ id: "s1", restaurant_id: RID, table_number: "4", status: "open", invoice_no: 17, invoice_voided: false, invoice_at: recent, discount: 0, ...sess }],
+    orders: [{ id: "o1", restaurant_id: RID, status: "served", payment_status: "pending", session_id: "s1", table_number: "4",
+      subtotal: 500, total: 525, taxable_base: 500, discount: 0, created_at: hourAgo, items: [], ...order }],
+    order_items: [{ id: "i1", restaurant_id: RID, order_id: "o1", status: "served", qty: 2, title: "Pasta", unit_price: 250 }],
+  },
+  settings: { discount_cap_tablet: null },
+});
+const MONEY_DOORS = [
+  ["items/i1/delete", { reason: "x" }, "taking a dish off", "lfh_delete_order_item"],
+  ["items/i1/qty", { qty: 1 }, "lowering a quantity", "lfh_staff_edit_item_qty"],
+  ["items/i1/qty", { qty: 3 }, "raising a quantity on a printed ticket", "lfh_staff_edit_item_qty"],
+  ["orders/o1/discount", { amount: 10 }, "a ticket discount", null],
+  ["sessions/s1/bill-discount", { amount: 10 }, "a whole-bill discount", "lfh_staff_bill_discount"],
+  ["orders/o1/add-item", { dishId: "d9" }, "adding a dish to a printed ticket", "lfh_staff_add_item_to_order"],
+];
+for (const [path, body, what, rpc] of MONEY_DOORS) {
+  const G = await invWorld();
+  const r = await call("POST", path, { body });
+  const touched = writesOn(G, "orders", "order_items", "sessions").length + G.RPCS.filter((x) => x.name === rpc).length;
+  if (r.status === 409 && /printed bill/.test(r.text) && touched === 0) ok(`${what} on an invoiced bill is refused (409) and nothing moves`);
+  else bad(`${what} on an invoiced bill answered ${r.status} ${r.text.slice(0, 80)} — ${touched} write/call(s)`);
+}
+// A REOPENED bill (mig 407 keeps the number) locks only what was on the paper; a ticket punched
+// after the reopen is free — the owner's 2026-09-25 rule, identical to the manager's.
+{
+  const G = await invWorld({ invoice_voided: true, invoice_at: hourAgo }, { created_at: recent });
+  const r = await call("POST", "items/i1/delete", { body: { reason: "x" } });
+  if (r.status === 200 && G.RPCS.some((x) => x.name === "lfh_delete_order_item")) ok("after a reopen, a dish on a ticket punched AFTER the invoice can still come off");
+  else bad(`after a reopen, a new ticket's dish answered ${r.status} ${r.text.slice(0, 80)}`);
+}
+{
+  const G = await invWorld({ invoice_voided: true, invoice_at: recent }, { created_at: hourAgo });
+  const r = await call("POST", "items/i1/delete", { body: { reason: "x" } });
+  if (r.status === 409 && !G.RPCS.some((x) => x.name === "lfh_delete_order_item")) ok("after a reopen, a dish that WAS on the paper still cannot come off");
+  else bad(`after a reopen, a printed dish answered ${r.status}`);
+}
+{
+  const G = await invWorld({ invoice_no: null, invoice_at: null });
+  const r = await call("POST", "items/i1/delete", { body: { reason: "x" } });
+  if (r.status === 200 && G.RPCS.some((x) => x.name === "lfh_delete_order_item")) ok("a bill with NO invoice still lets a dish come off (the lock is not refusing everything)");
+  else bad(`an un-invoiced bill's dish delete answered ${r.status} ${r.text.slice(0, 80)}`);
+}
+{
+  const G = await invWorld({ invoice_no: null, invoice_at: null });
+  const r = await call("POST", "sessions/s1/bill-discount", { body: { amount: 10 } });
+  if (r.status === 200 && G.RPCS.some((x) => x.name === "lfh_staff_bill_discount")) ok("a whole-bill discount on an un-invoiced bill still goes through");
+  else bad(`an un-invoiced whole-bill discount answered ${r.status} ${r.text.slice(0, 80)}`);
+}
+// The copy must stay a copy. The manager's helper is the rule; if either side changes, both must.
+{
+  const { readFileSync } = await import("node:fs");
+  const fn = (file) => {
+    const t = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    const i = t.indexOf("async function invoiceLockedByOrder(");
+    return i < 0 ? null : t.slice(i, t.indexOf("\n}\n", i) + 2).replace(/\s+/g, " ");
+  };
+  const ed = fn("app/api/editor/[...path]/route.ts"), tb = fn("app/api/tablet/[...path]/route.ts");
+  if (ed && tb && ed === tb) ok("the tablet's invoiceLockedByOrder is byte-for-byte the manager's");
+  else bad("the tablet's invoiceLockedByOrder and the manager's have drifted apart — change both, or neither");
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

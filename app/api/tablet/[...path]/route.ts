@@ -355,6 +355,52 @@ const editErrMsg = (reason?: string) =>
 // Guarded by scripts/verify-tablet-twin-rules.mjs (npm run verify:tablet-twins).
 const VOIDED_MSG = "That ticket was cancelled — restore it first if it should go back to the kitchen.";
 
+// ── ONCE THE INVOICE IS PRINTED, NOTHING COMES OFF THE BILL — FROM THE HANDHELD TOO (item 2) ──────
+// The owner's rule 10 (docs/COMPLIANCE-GUARDRAILS.md §3.0b, 2026-08-26): *"whenever the invoice has
+// been printed … after [that] you won't be able to delete the thing."* The paper the guest is holding
+// and the record must never disagree. It is enforced IN THE ROUTE, not the database — none of the
+// edit functions (lfh_delete_order_item, lfh_staff_edit_item_qty, lfh_staff_add_item_to_order,
+// lfh_staff_bill_discount) looks at the invoice — and it was only ever written into the MANAGER's
+// route. So a manager printed the invoice at the till, and a waiter could then take a dish off it,
+// halve a quantity, add a dish to a printed ticket or discount it from the handheld, and the guest's
+// paper no longer matched the books.
+//
+// These two are a BYTE-FOR-BYTE COPY of the manager route's helpers (app/api/editor/[...path]/route.ts
+// → invoiceLockedByOrder / invoiceLockedByItem, and LOCKED_MSG), on purpose: one rule, one meaning of
+// "invoiced". A live invoice locks the whole bill; a REOPENED one (mig 407 keeps the number) locks
+// only the tickets that were already on the paper, and frees what was punched afterwards (owner,
+// 2026-09-25). A missing timestamp means LOCKED. `npm run verify:tablet-twins` fails if this copy and
+// the manager's ever stop being identical.
+const LOCKED_MSG = "This was on the printed bill, so it can't be taken off. Reopen the bill to add to it, or issue a credit note to correct it.";
+async function invoiceLockedByOrder(orderId: string, rid: string): Promise<boolean> {
+  const o = (await sb.from("orders").select("session_id,created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { session_id?: string; created_at?: string | null } | null;
+  if (!o?.session_id) return false;
+  const s = (await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
+  if (!s || s.invoice_no == null) return false;
+  if (!s.invoice_voided) return true;
+  if (!s.invoice_at || !o.created_at) return true;
+  return new Date(o.created_at).getTime() <= new Date(s.invoice_at).getTime();
+}
+async function invoiceLockedByItem(itemId: string, rid: string): Promise<boolean> {
+  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string } | null;
+  return it?.order_id ? invoiceLockedByOrder(it.order_id, rid) : false;
+}
+// The WHOLE-BILL discount names a session, not an order, and spreads across every unpaid ticket on it
+// (lfh_staff_bill_discount). So it is locked when ANY of those tickets is — the same per-ticket answer
+// as above, asked of each. The manager's twin asks it of the ticket its panel sends, which is the
+// bill's first; asking every one is the same answer on a live invoice and the honest one on a reopen.
+// Two scoped reads at most (the session, then — only for a reopened bill — its live tickets' times),
+// never one pair per ticket.
+async function invoiceLockedBySession(sessionId: string, rid: string): Promise<boolean> {
+  const s = (await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
+  if (!s || s.invoice_no == null) return false;
+  if (!s.invoice_voided) return true;
+  const live = ((await sb.from("orders").select("created_at").eq("session_id", sessionId).eq("restaurant_id", rid)
+    .neq("status", "cancelled").neq("payment_status", "paid").limit(200)).data || []) as { created_at?: string | null }[];
+  const cut = s.invoice_at ? new Date(s.invoice_at).getTime() : NaN;
+  return live.some((o) => !o.created_at || !Number.isFinite(cut) || new Date(o.created_at).getTime() <= cut);
+}
+
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
 type Ctx = { params: Promise<{ path?: string[] }> };
@@ -1488,6 +1534,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // 0..order total, money-safe. Mirrors the editor endpoint. (owner, 2026-06-17)
     if (a === "orders" && c === "discount") {
       const g = recordPin(await tabletPerm("tablet_discount", req, body, rid, actor)); if (!g.allow) return g.resp; // off/pin/on per settings
+      if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS); the perm
       // gate above is a FEATURE gate, not a tenant one, so a foreign ?rid= must still be blocked.
       const cur = must(await sb.from("orders").select("total, subtotal, taxable_base, session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
@@ -1535,6 +1582,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // same as the per-ticket discount (off/on/pin). (mig 143)
     if (a === "sessions" && c === "bill-discount") {
       const g = recordPin(await tabletPerm("tablet_discount", req, body, rid, actor)); if (!g.allow) return g.resp;
+      if (await invoiceLockedBySession(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       const sess = must(await sb.from("sessions").select("id, discount").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!sess) return err("That table isn't there anymore — refresh.", 404);
       // Reciprocal of the per-ticket guard above: the two discounts are mutually exclusive (the
@@ -1981,6 +2029,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const gone = (await sb.from("order_items").select("id, title, qty, unit_price, order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
         { id: string; title: string | null; qty: number | null; unit_price: number | null; order_id: string | null } | null;
       if (!gone) return err("That dish was already removed.", 404);
+      if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) {
@@ -2018,6 +2067,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const wasRow = (await sb.from("order_items").select("id, title, qty, unit_price").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
         { id: string; title: string | null; qty: number | null; unit_price: number | null } | null;
       if (!wasRow) return err("That dish was already removed.", 404);
+      if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -2127,6 +2177,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // read below is already rid-scoped, but it runs AFTER the dish has been added.)
       const ownAdd = (await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
       if (!ownAdd) return err(editErrMsg("order_not_found"), 404);
+      // Item 2 — a dish ADDED to a printed ticket changes that ticket's total on paper the guest holds.
+      // After a reopen the bill takes a NEW ticket instead (a fresh order is not locked).
+      if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);
       const { data, error } = await sb.rpc("lfh_staff_add_item_to_order", { p_order: b, p_items: [line] });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
