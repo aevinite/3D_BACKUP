@@ -53,11 +53,24 @@ const sql = async (q) => {
 const lit = (s) => "'" + String(s).replace(/'/g, "''") + "'";
 
 const ROWS = [];
-let ID = 167501;
-const check = async (file, what, fn) => {
-  const id = `P${ID++}`; if (ID > 167701) throw new Error("id range P167501–P167700 exhausted");
-  let res; try { res = await fn(); } catch (e) { res = "threw: " + (e && e.message); }
-  ROWS.push({ id, file, what, ok: res === true, skip: typeof res === "string" && res.startsWith("skip:"), note: res === true ? "" : String(res).slice(0, 220) });
+let NOTE = ""; const note = (t) => { NOTE = String(t); return true; };
+// PERMANENT IDS (round 4, 2026-10-10). Several sections are enumerated from live data — the
+// constraints lib/dbRefusal names, the guards the docs name, the bills settled in parts, the
+// restaurants — so a numbered position is NOT a permanent id: item 11 added one constraint and every
+// row after it moved one place. Each row now has a KEY (its subject, numbers stripped, or an explicit
+// one) and its id is looked up in parity-ids.json, seeded from the round-3 ledger; a subject seen for
+// the first time takes the next free id in the block and is written there with --assign-ids.
+const IDFILE = join(root, "scripts/sweep/t30s10/parity-ids.json");
+const IDS = existsSync(IDFILE) ? JSON.parse(readFileSync(IDFILE, "utf8")) : {};
+// counts drift with the data (3+ digits, comma-grouped, or rupees); short codes and rates (LFH01, 18%) do not
+const keyOf = (file, what) => file + "|" + String(what).replace(/₹[\d,.]+|\b\d{1,3}(?:,\d{2,3})+\b|\b\d{3,}(?:\.\d+)?\b/g, "#").replace(/\s+/g, " ").trim();
+const seen = new Set(); const unassigned = [];
+const check = async (file, what, fn, key = keyOf(file, what)) => {
+  if (seen.has(key)) throw new Error(`two rows share the key ${key}`); seen.add(key);
+  let id = IDS[key];
+  if (!id) { const used = new Set(Object.values(IDS)); let n = 167654; while (used.has(`P${n}`)) n++; if (n > 167700) { id = "P—"; unassigned.push(key + " (block full)"); } else { id = `P${n}`; IDS[key] = id; unassigned.push(key); } }
+  let res; NOTE = ""; try { res = await fn(); } catch (e) { res = "threw: " + (e && e.message); }
+  ROWS.push({ id, key, file, what, ok: res === true, skip: typeof res === "string" && res.startsWith("skip:"), note: res === true ? NOTE.slice(0, 220) : String(res).slice(0, 220) });
 };
 const gen = (s) => () => { s |= 0; s = (s + 0x6d2b79f5) | 0; let x = Math.imul(s ^ (s >>> 15), 1 | s); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
 const int = (R, a, b) => a + Math.floor(R() * (b - a + 1));
@@ -74,7 +87,7 @@ const SHAPES = [...new Map(RESTS.map((r) => [shapeKey(r), r])).values()];
 // ═══ A · the rate and each dish's behaviour, for every restaurant ══════════════════════════════════
 await check("lib/tax.ts", `effectiveTaxRate = the database's lfh_effective_tax_rate for EVERY restaurant on dev (${RESTS.length}, with and without a settings row)`, () => {
   const bad = RESTS.filter((r) => Math.abs(T.effectiveTaxRate(settingsOf(r)) - Number(r.db_rate)) > 1e-12); return !bad.length || `${bad.length} differ, e.g. ${bad[0].slug}: app ${T.effectiveTaxRate(settingsOf(bad[0]))} vs db ${bad[0].db_rate}`; });
-await check("lib/tax.ts", `…and the set-ups are really different: ${SHAPES.length} distinct tax set-ups among them (a parity check over one set-up proves little)`, () => SHAPES.length >= 3 || `only ${SHAPES.length}`);
+await check("lib/tax.ts", `…and the set-ups are really different: ${SHAPES.length} distinct tax set-ups among them (a parity check over one set-up proves little)`, () => SHAPES.length >= 3 || `only ${SHAPES.length}`, "lib/tax.ts|setups-differ");
 const MODES = ["default", "excl", "incl", "mrp", "none", null, "garbage", ""];
 const RES = await sql(`select r.id, m.mode, lfh_resolve_tax_mode(m.mode, r.id) as db from restaurants r cross join (values ${MODES.map((m) => `(${m == null ? "null::text" : lit(m)})`).join(",")}) m(mode)`);
 const byId = new Map(RESTS.map((r) => [r.id, r]));
@@ -117,20 +130,22 @@ const exactAdd = (g, bp) => { const num = g * bp, q = Math.floor(num / 10000), r
 const exactIncl = (g, bp) => { const num = g * 10000, den = 10000 + bp, q = Math.floor(num / den), r = num - q * den; return 2 * r >= den ? q + 1 : q; };
 const sweep = async (kind, bp) => {
   const rate = bp / 10000; const off = []; const R = gen(bp + (kind === "incl" ? 7 : 3)); const sample = Array.from({ length: 2000 }, () => int(R, 1, 1000000));
-  for (let g = 1; g <= 1000000; g++) { const app = kind === "incl" ? Math.round(((g / 100) / (1 + rate)) * 100) : Math.round((g / 100) * rate * 100); if (app !== (kind === "incl" ? exactIncl(g, bp) : exactAdd(g, bp))) off.push(g); }
+  // the APP side is the app's own rule (lib/tax.ts roundPaise — what splitBill, the paper and Pay in parts use)
+  const appOf = (g) => P(kind === "incl" ? T.roundPaise((g / 100) / (1 + rate)) : T.roundPaise((g / 100) * rate));
+  for (let g = 1; g <= 1000000; g++) { if (appOf(g) !== (kind === "incl" ? exactIncl(g, bp) : exactAdd(g, bp))) off.push(g); }
   const ask = [...new Set([...off.slice(0, 3000), ...sample])];
   const expr = kind === "incl" ? `round((g/100.0) / (1 + ${rate}), 2)` : `round((g/100.0) * ${rate}, 2)`;
   const db = await sql(`select g, (${expr})::text v from unnest(array[${ask.join(",")}]::int[]) g`);
   const modelOk = db.every((r) => P(r.v) === (kind === "incl" ? exactIncl(Number(r.g), bp) : exactAdd(Number(r.g), bp)));
-  return { off, modelOk, asked: ask.length, ex: off.length ? `₹${off[0] / 100}: app ${(kind === "incl" ? Math.round(((off[0] / 100) / (1 + rate)) * 100) : Math.round((off[0] / 100) * rate * 100)) / 100} vs db ${db.find((r) => Number(r.g) === off[0])?.v}` : "" };
+  return { off, modelOk, asked: ask.length, ex: off.length ? `₹${off[0] / 100}: app ${appOf(off[0]) / 100} vs db ${db.find((r) => Number(r.g) === off[0])?.v}` : "" };
 };
 for (const [bp, label] of [[500, "5% (the rate every dev restaurant uses)"], [1800, "18%"], [1200, "12%"], [2800, "28%"]]) {
   const x = await sweep("incl", bp);
-  await check("lib/tax.ts", `tax INSIDE the price at ${label}: the app's per-line net = the database's, on every amount ₹0.01–₹10,000`, () => (x.modelOk && !x.off.length) || (!x.modelOk ? "the exact model did not match the database" : `${x.off.length.toLocaleString("en-IN")} of 1,000,000 amounts differ by a paisa, e.g. ${x.ex}`));
+  await check("lib/tax.ts", `tax INSIDE the price at ${label}: the app's per-line net = the database's, on every amount ₹0.01–₹10,000`, () => (x.modelOk && !x.off.length) || (!x.modelOk ? "the exact model did not match the database" : `${x.off.length.toLocaleString("en-IN")} of 1,000,000 amounts differ by a paisa, e.g. ${x.ex}`), `lib/tax.ts|inside|${bp}`);
 }
 for (const [bp, label] of [[500, "5%"], [1800, "18%"], [1200, "12%"], [2800, "28%"]]) {
   const x = await sweep("add", bp);
-  await check("lib/tax.ts", `tax ON TOP at ${label}: the app's tax = the database's, on every taxable amount ₹0.01–₹10,000`, () => (x.modelOk && !x.off.length) || (!x.modelOk ? "the exact model did not match the database" : `${x.off.length.toLocaleString("en-IN")} of 1,000,000 amounts differ by a paisa, e.g. ${x.ex} — the database rounds the exact half up, the app's float lands a hair under it`));
+  await check("lib/tax.ts", `tax ON TOP at ${label}: the app's tax = the database's, on every taxable amount ₹0.01–₹10,000`, () => (x.modelOk && !x.off.length) || (!x.modelOk ? "the exact model did not match the database" : `${x.off.length.toLocaleString("en-IN")} of 1,000,000 amounts differ by a paisa, e.g. ${x.ex} — the database rounds the exact half up, the app's float lands a hair under it`), `lib/tax.ts|on-top|${bp}`);
 }
 await check("lib/tax.ts", "the whole-number model of the database's rounding was confirmed BY the database on every amount it was asked about (so the counts above are the database's, not a guess)", async () => {
   const x = await sweep("add", 1250); return x.modelOk || "model and database disagree"; });
@@ -163,25 +178,26 @@ const RULES = [["d_sub", "subtotal = taxable base + untaxed lines"], ["d_disc", 
   ["d_taxoff", "the stored tax is the taxable base × the stamped rate (within the one paisa the app's rounding can differ by)"]];
 for (const x of NAMED) {
   const bad = RULES.filter(([k]) => Number(x[k]) > 0);
-  await check("lib/tax.ts", `${x.slug}: all ${Number(x.n).toLocaleString("en-IN")} of its saved orders follow all ${RULES.length} money rules`, () => !bad.length || bad.map(([k, w]) => `${x[k]}× ${w}`).join("; "));
+  await check("lib/tax.ts", `${x.slug}: all ${Number(x.n).toLocaleString("en-IN")} of its saved orders follow all ${RULES.length} money rules`, () => !bad.length || bad.map(([k, w]) => `${x[k]}× ${w}`).join("; "), `lib/tax.ts|saved-orders-rules|${x.slug}`);
 }
-for (const [k, w] of RULES) await check("lib/tax.ts", `the ${TESTS.length} throwaway test restaurants (zz…): ${w}, on all ${sum(TESTS, "n").toLocaleString("en-IN")} of their orders`, () => sum(TESTS, k) === 0 || `${sum(TESTS, k)} orders break it`);
+for (const [k, w] of RULES) await check("lib/tax.ts", `the ${TESTS.length} throwaway test restaurants (zz…): ${w}, on all ${sum(TESTS, "n").toLocaleString("en-IN")} of their orders`, () => sum(TESTS, k) === 0 || `${sum(TESTS, k)} orders break it`, `lib/tax.ts|test-restaurants|${k}`);
 const FIRST_COMMIT = String(spawnSync("git", ["log", "--reverse", "--format=%ad", "--date=short"], { cwd: root, encoding: "utf8" }).stdout || "").split("\n")[0];
 await check("lib/tax.ts", `the rows set apart are recognised by ORIGIN — ${SEEDN[0].film} film-history, ${SEEDN[0].fixed} stamped 2024-01-01 04:00, ${SEEDN[0].empty} with no dishes — and that seed time is older than the repository itself (first commit ${FIRST_COMMIT})`, () =>
-  (FIRST_COMMIT > "2024-01-01" && Number(SEEDN[0].empty) <= 3) || `first commit ${FIRST_COMMIT}; ${SEEDN[0].empty} dish-less orders`);
+  (FIRST_COMMIT > "2024-01-01" && Number(SEEDN[0].empty) <= 3) || `first commit ${FIRST_COMMIT}; ${SEEDN[0].empty} dish-less orders`, "lib/tax.ts|set-apart-by-origin");
 const SP = await sql(`select coalesce(method,'(none)') m, count(*) n, count(*) filter (where amount <= 0) nonpos from session_payments group by 1 order by 2 desc`);
 await check("lib/paySplit.ts", `every part ever stored by Pay in parts uses a method the app offers (${SP.map((x) => x.m).join(", ")})`, () => SP.every((x) => PS.SPLIT_METHODS.includes(x.m)) || `unknown: ${SP.filter((x) => !PS.SPLIT_METHODS.includes(x.m)).map((x) => x.m).join(", ")}`);
 await check("lib/paySplit.ts", "…and no stored part is ₹0 or less", () => SP.every((x) => Number(x.nonpos) === 0) || `${sum(SP, "nonpos")} parts ≤ 0`);
 const GRP = await sql(`select count(*) groups, count(*) filter (where n < 2) single from (select settle_group, count(*) n from session_payments where settle_group is not null and reversed_at is null group by 1) g`);
-await check("lib/paySplit.ts", `every settle group Pay in parts wrote has at least two parts (${GRP[0].groups} groups on dev)`, () => Number(GRP[0].single) === 0 || `${GRP[0].single} groups have one part`);
+await check("lib/paySplit.ts", `every settle group Pay in parts wrote has at least two parts (${GRP[0].groups} groups on dev)`, () => Number(GRP[0].single) === 0 || `${GRP[0].single} groups have one part`, "lib/paySplit.ts|groups-two-parts");
 // The method is checked against the app's list on every path since 51afda30 (2026-08-05, the "how did
 // they pay?" sheet fix); two rows written by the diagnostic login that same morning say "cash".
 const PMS = await sql(`select coalesce(o.payment_method,'(none)') m, count(*) n, count(*) filter (where o.paid_at >= '2026-08-06') since_check from orders o where o.payment_status = 'paid' and not ${SEEDED} group by 1 order by 2 desc`);
 const FILMPAY = await sql(`select count(*) n, count(*) filter (where coalesce(placed_by,'') <> 'film-history') not_film from orders where payment_status = 'paid' and payment_method in ('Swiggy','Zomato','Website')`);
 const KNOWN_PAID = [...PAY.PAYMENT_METHODS, "Split", "On the house", "(none)"];
-await check("lib/payments.ts", `every order the app marked paid since the method check landed uses a method the app knows (${PMS.filter((x) => Number(x.since_check)).map((x) => `${x.m} ${x.since_check}`).join(" · ")})`, () => PMS.every((x) => KNOWN_PAID.includes(x.m) || Number(x.since_check) === 0) || `unknown since 2026-08-06: ${PMS.filter((x) => !KNOWN_PAID.includes(x.m) && Number(x.since_check)).map((x) => `${x.m} (${x.since_check})`).join(", ")}`);
-await check("lib/payments.ts", `…older than that, the only unknown spelling is ${PMS.filter((x) => !KNOWN_PAID.includes(x.m)).map((x) => `"${x.m}" ×${x.n}`).join(", ") || "none"} — from before the check existed`, () => PMS.filter((x) => !KNOWN_PAID.includes(x.m)).every((x) => Number(x.since_check) === 0 && Number(x.n) <= 2));
-await check("lib/payments.ts", `a dine-in bill paid "Swiggy / Zomato / Website" exists ONLY in the film seeder's rows (${FILMPAY[0].n}) — the app never writes a platform name onto a dine-in bill`, () => Number(FILMPAY[0].not_film) === 0 || `${FILMPAY[0].not_film} not from the film seeder`);
+await check("lib/payments.ts", "every order the app marked paid since the method check landed uses a method the app knows", () => (PMS.every((x) => KNOWN_PAID.includes(x.m) || Number(x.since_check) === 0) && note(PMS.filter((x) => Number(x.since_check)).map((x) => `${x.m} ${x.since_check}`).join(" · "))) || `unknown since 2026-08-06: ${PMS.filter((x) => !KNOWN_PAID.includes(x.m) && Number(x.since_check)).map((x) => `${x.m} (${x.since_check})`).join(", ")}`);
+await check("lib/payments.ts", "…older than that, any unknown spelling is from before the check existed (none since item 11's repair)", () => (PMS.filter((x) => !KNOWN_PAID.includes(x.m)).every((x) => Number(x.since_check) === 0 && Number(x.n) <= 2) && note(PMS.filter((x) => !KNOWN_PAID.includes(x.m)).map((x) => `"${x.m}" ×${x.n}`).join(", ") || "none left")), "lib/payments.ts|older-spelling");
+// (re-stated round 4: item 12 repaired the film rows and mig 417 now refuses a platform name, so the rule is absolute)
+await check("lib/payments.ts", "no dine-in bill is paid by \"Swiggy / Zomato / Website\" — not even the film seeder's (a platform sale is its own row in aggregator_orders)", () => (Number(FILMPAY[0].n) === 0 && note("0 rows")) || `${FILMPAY[0].n} rows (${FILMPAY[0].not_film} not from the film seeder)`, "lib/payments.ts|platform-names");
 
 // ═══ E · every table, column, filter and function the 14 files use ═══════════════════════════════
 const FILES = ["lib/tax.ts", "lib/taxFiling.ts", "lib/paySplit.ts", "lib/payments.ts", "lib/discountCap.ts", "lib/clash.ts", "lib/clashCompare.ts", "lib/idempotency.ts", "lib/idempotencyRule.ts", "lib/dbRefusal.ts", "lib/readGuard.ts", "lib/money.ts", "lib/money.mjs", "lib/orderAllergies.ts"];
@@ -201,16 +217,16 @@ const chainCols = (text) => {
 };
 for (const f of FILES.filter((f) => /\.from\("/.test(read(f)))) {
   const q = chainCols(read(f)); const miss = q.flatMap(({ t, cols }) => (!colset.has(t) ? [`table ${t}`] : cols.filter((c) => !colset.get(t).has(c)).map((c) => `${t}.${c}`)));
-  await check(f, `every table and column ${f} names in its ${q.length} queries exists in the dev database`, () => (q.length > 0 && !miss.length) || `missing: ${[...new Set(miss)].join(", ")}`);
+  await check(f, `every table and column ${f} names in its ${q.length} queries exists in the dev database`, () => (q.length > 0 && !miss.length) || `missing: ${[...new Set(miss)].join(", ")}`, `${f}|tables-and-columns`);
 }
 await check("lib/tax.ts", "TAX_SETTINGS_COLUMNS names real columns of settings", () => T.TAX_SETTINGS_COLUMNS.split(",").map((x) => x.trim()).every((c) => colset.get("settings").has(c)));
 const tmp = mkdtempSync(join(tmpdir(), "t30-parity-")); const recFile = join(tmp, "rec.json");
 const run = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--import", "./scripts/t30-harness/hooks.mjs", "scripts/t30-harness/run.mjs", "--quiet"], { cwd: root, encoding: "utf8", env: { ...process.env, T30_RECORD: recFile }, timeout: 300000 });
 const REC = existsSync(recFile) ? JSON.parse(readFileSync(recFile, "utf8")) : null; rmSync(tmp, { recursive: true, force: true });
 await check("scripts/t30-harness", "the recording run of the whole harness passed (so what it recorded is what the real code does)", () => (run.status === 0 && !!REC) || (run.stdout || "").slice(-200));
-await check("lib (the 14 money files, as recorded)", `every table the 14 files touched at run time exists in the dev database (${REC ? REC.tables.join(", ") : "?"})`, () => (REC && REC.tables.every((t) => colset.has(t))) || `missing: ${REC && REC.tables.filter((t) => !colset.has(t)).join(", ")}`);
+await check("lib (the 14 money files, as recorded)", "every table the 14 files touched at run time exists in the dev database", () => (REC && REC.tables.every((t) => colset.has(t)) && note(REC.tables.join(", "))) || `missing: ${REC && REC.tables.filter((t) => !colset.has(t)).join(", ")}`);
 const FNS = await sql(`select p.proname, has_function_privilege('service_role', p.oid, 'EXECUTE') svc, has_function_privilege('anon', p.oid, 'EXECUTE') anon from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'`);
-await check("lib/idempotency.ts", `every database function the 14 files call exists and the server's key may run it (${REC ? REC.rpcs.join(", ") : "?"})`, () => (REC && REC.rpcs.length > 0 && REC.rpcs.every((n) => FNS.some((f) => f.proname === n && f.svc === true))) || "a function is missing or not runnable");
+await check("lib/idempotency.ts", "every database function the 14 files call exists and the server's key may run it", () => (REC && REC.rpcs.length > 0 && REC.rpcs.every((n) => FNS.some((f) => f.proname === n && f.svc === true)) && note(REC.rpcs.join(", "))) || "a function is missing or not runnable");
 await check("lib/idempotency.ts", "…and the public key may NOT run them (they are server-only housekeeping)", () => (REC && REC.rpcs.every((n) => FNS.filter((f) => f.proname === n).every((f) => f.anon === false))) || "the public key can run one");
 const IDX = await sql(`select t.relname tbl, i.relname idx, (select array_agg(a.attname order by k.ord) from unnest(ix.indkey) with ordinality k(attnum, ord) join pg_attribute a on a.attrelid = t.oid and a.attnum = k.attnum) cols, ix.indisunique uq
   from pg_index ix join pg_class t on t.oid = ix.indrelid join pg_class i on i.oid = ix.indexrelid join pg_namespace n on n.oid = t.relnamespace where n.nspname = 'public'`);
@@ -263,7 +279,7 @@ for (const o of SAVED) {
 await check("lib/tax.ts", `${SAVED.length.toLocaleString("en-IN")} saved orders whose dishes carry their tax mode were re-computed (enough to mean something)`, () => SAVED.length >= 1000 || `only ${SAVED.length}`);
 for (const [k, x] of HBY) {
   if (x.n < 3) continue;
-  await check("lib/tax.ts", `${k}: all ${x.n.toLocaleString("en-IN")} saved orders — subtotal, taxable base, untaxed and MRP figures are exactly what the screen computes from the same dishes`, () => (!x.sub.length && !x.base.length && !x.nt.length && !x.mrp.length) || `subtotal ${x.sub.length} · base ${x.base.length} · untaxed ${x.nt.length} · MRP ${x.mrp.length} differ, e.g. ${[...x.sub, ...x.base, ...x.nt, ...x.mrp][0]}`);
+  await check("lib/tax.ts", `${k}: all ${x.n.toLocaleString("en-IN")} saved orders — subtotal, taxable base, untaxed and MRP figures are exactly what the screen computes from the same dishes`, () => (!x.sub.length && !x.base.length && !x.nt.length && !x.mrp.length) || `subtotal ${x.sub.length} · base ${x.base.length} · untaxed ${x.nt.length} · MRP ${x.mrp.length} differ, e.g. ${[...x.sub, ...x.base, ...x.nt, ...x.mrp][0]}`, `lib/tax.ts|recomputed|${k}`);
 }
 for (const [f, label] of [["sub", "subtotal"], ["base", "taxable base"], ["nt", "untaxed amount"], ["mrp", "locked MRP amount"]]) {
   const off = [...HBY.values()].reduce((a, x) => a + x[f].length, 0);
@@ -274,20 +290,25 @@ for (const [f, label] of [["sub", "subtotal"], ["base", "taxable base"], ["nt", 
 const BILLDOC = (await imp("public/panels/billdoc.js")).default;
 const GROUPS = await sql(`select g.settle_group, g.session_id, g.restaurant_id, g.legs, g.amount, coalesce((select json_agg(o) from (select id, status, deleted_at, subtotal, taxable_base, nontax_amount, mrp_amount, discount, tax_rate, items, payment_method, payment_status from orders where session_id = g.session_id and restaurant_id = g.restaurant_id) o), '[]') orders,
   (select row_to_json(s) from (select tax_rate, tax_components, price_tax_mode, item_tax_modes_allowed, mrp_tax_treatment from settings where restaurant_id = g.restaurant_id) s) st
-  from (select settle_group, session_id, restaurant_id, count(*) legs, sum(amount) amount from session_payments where settle_group is not null and reversed_at is null group by 1, 2, 3) g`);
+  from (select settle_group, session_id, restaurant_id, count(*) legs, sum(amount) amount, bool_and(reversed_at is not null) reversed, max(reversed_reason) why from session_payments where settle_group is not null group by 1, 2, 3) g`);
 const ACTS = await sql(`select distinct order_id from staff_actions where order_id in (select o.id from orders o where o.session_id in (select session_id from session_payments where settle_group is not null)) and action ilike '%cancel%'`);
 const EDITOR_REFUSES = /if \(patch\.status === "cancelled" && cur\.payment_status === "paid"\)\s*\n\s*return err\("Can't cancel a paid order/.test(read("app/api/editor/[...path]/route.ts"));
 for (const g of GROUPS) {
   const all = typeof g.orders === "string" ? JSON.parse(g.orders) : g.orders; const st = typeof g.st === "string" ? JSON.parse(g.st) : g.st;
   const live = all.filter((o) => o.status !== "cancelled" && !o.deleted_at); const m = BILLDOC.billMoney(all, st || {});
-  if (live.length) {
-    await check("lib/paySplit.ts", `settled-in-parts bill ${String(g.settle_group).slice(0, 8)}… (${g.legs} parts${all.some((o) => o.payment_status !== "paid") ? ", one parked on a tab" : ""}): the parts stored add up to exactly what its printed bill says (₹${Number(g.amount).toFixed(2)})`, () => Math.abs(P(g.amount) - P(m.total)) <= 2 || `parts ₹${g.amount} vs paper ₹${m.total}`);
+  const gk = `lib/paySplit.ts|settled-in-parts bill ${String(g.settle_group).slice(0, 8)}`;
+  if (g.reversed) {
+    // (round 4, item 14) a test rig's bill whose parts were reversed with a reason — no longer counted.
+    await check("lib/paySplit.ts", `settled-in-parts bill ${String(g.settle_group).slice(0, 8)}…: its order was cancelled after payment by a test rig, and its parts are now REVERSED with a reason — no longer counted as collected`, () =>
+      (!live.length && !!g.why && all.every((o) => !ACTS.some((x) => x.order_id === o.id))) || "a reversed group with a live order, or no reason", gk);
+  } else if (live.length) {
+    await check("lib/paySplit.ts", `settled-in-parts bill ${String(g.settle_group).slice(0, 8)}… (${g.legs} parts${all.some((o) => o.payment_status !== "paid") ? ", one parked on a tab" : ""}): the parts stored add up to exactly what its printed bill says (₹${Number(g.amount).toFixed(2)})`, () => Math.abs(P(g.amount) - P(m.total)) <= 2 || `parts ₹${g.amount} vs paper ₹${m.total}`, gk);
   } else {
     // Its order was cancelled AFTER it was paid. The app cannot do that ("Can't cancel a paid order —
     // mark it unpaid (refund) first.", and no database function cancels a paid order), so this must be
     // a test rig's clean-up — proven by the cancel having no Activity line, which every app path writes.
     await check("lib/paySplit.ts", `settled-in-parts bill ${String(g.settle_group).slice(0, 8)}…: its order was cancelled after payment — by a test rig's clean-up, NOT the app (no Activity line for the cancel, and the app refuses to cancel a paid order)`, () =>
-      (EDITOR_REFUSES && all.every((o) => !ACTS.some((x) => x.order_id === o.id))) || "an app path cancelled a paid, settled-in-parts bill");
+      (EDITOR_REFUSES && all.every((o) => !ACTS.some((x) => x.order_id === o.id))) || "an app path cancelled a paid, settled-in-parts bill", gk);
   }
 }
 
@@ -299,10 +320,14 @@ for (const r of RESTS.filter((x) => x.has_settings && !/^zz|^t28-|^hi$/.test(x.s
   const s = settingsOf(r); let bad = null;
   for (const row of rows) { const db = typeof row.s === "string" ? JSON.parse(row.s) : row.s; const b = T.splitBill(carts[Number(row.n) - 1], s, 0);
     if (P(b.taxableBase) !== P(db.taxable_base) || P(b.nontaxAmount) !== P(db.nontax_amount) || P(b.mrpAmount) !== P(db.mrp_amount)) { bad = `cart ${row.n}: app ${b.taxableBase}/${b.nontaxAmount}/${b.mrpAmount} vs db ${db.taxable_base}/${db.nontax_amount}/${db.mrp_amount}`; break; } }
-  await check("lib/tax.ts", `${r.slug}: its OWN settings give the same taxable / untaxed / MRP split in the app and the database, on 200 random carts`, () => (rows.length === 200 && !bad) || bad || `${rows.length} rows`);
+  await check("lib/tax.ts", `${r.slug}: its OWN settings give the same taxable / untaxed / MRP split in the app and the database, on 200 random carts`, () => (rows.length === 200 && !bad) || bad || `${rows.length} rows`, `lib/tax.ts|own-settings-split|${r.slug}`);
 }
 
+await check("scripts/sweep/t30s10/parity.mjs", "every row has a PERMANENT id — none is new to parity-ids.json (a new subject is given one with --assign-ids)", () => !unassigned.length || `new: ${unassigned.join(" · ")}`, "parity|ids");
+if (ARGV.includes("--assign-ids") && unassigned.length) { (await import("node:fs")).writeFileSync(IDFILE, JSON.stringify(IDS, null, 1) + "\n"); console.log(`assigned ${unassigned.length} new id(s) in parity-ids.json`); }
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
+if (ARGV.includes("--keys")) { console.log(JSON.stringify(ROWS.map((r) => ({ key: r.key, what: r.what })))); process.exit(0); }
 if (ARGV.includes("--ledger")) {
   const esc = (x) => String(x).replace(/\|/g, "\\|").replace(/\n/g, " ");
   for (const r of ROWS) console.log(`| ${r.id} | \`${r.file}\` — ${esc(r.what)} | read-only SQL on the dev database vs the real code · \`scripts/sweep/t30s10/parity.mjs\` | ${r.ok ? "✅" : r.skip ? "⏭" : "❌"} | ${esc(r.note)} |`);
