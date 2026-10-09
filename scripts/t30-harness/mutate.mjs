@@ -1,6 +1,6 @@
 // scripts/t30-harness/mutate.mjs — "is every line actually CHECKED, not just run?"
 //   node scripts/t30-harness/mutate.mjs [--max 320] [--file lib/tax.ts] [--list]
-// Makes one small break at a time in the 13 code files (=== ↔ !==, && ↔ ||, >= ↔ >, <= ↔ <, true ↔
+// Makes one small break at a time in the 14 code files (=== ↔ !==, && ↔ ||, >= ↔ >, <= ↔ <, true ↔
 // false, + 1 ↔ - 1, a dropped `!`, ?? 0 → ?? 1), runs the whole round-2 harness, and puts the file back
 // BYTE FOR BYTE (also on Ctrl-C). A break the harness does not notice is a SURVIVOR: either a missing
 // check (add one) or a change that cannot alter behaviour (an equivalent mutant — named in the report).
@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { root } from "./hooks.mjs";
-const FILES = ["lib/tax.ts", "lib/taxFiling.ts", "lib/paySplit.ts", "lib/payments.ts", "lib/discountCap.ts", "lib/clash.ts", "lib/clashCompare.ts", "lib/idempotency.ts", "lib/idempotencyRule.ts", "lib/dbRefusal.ts", "lib/readGuard.ts", "lib/money.ts", "lib/money.mjs"];
+const FILES = ["lib/tax.ts", "lib/taxFiling.ts", "lib/paySplit.ts", "lib/payments.ts", "lib/discountCap.ts", "lib/clash.ts", "lib/clashCompare.ts", "lib/idempotency.ts", "lib/idempotencyRule.ts", "lib/dbRefusal.ts", "lib/readGuard.ts", "lib/money.ts", "lib/money.mjs", "lib/orderAllergies.ts"];
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const MAX = Number(arg("--max", 320)); const ONLY = arg("--file", null);
 const dirty = execFileSync("git", ["status", "--porcelain", "--", ...FILES], { cwd: root, encoding: "utf8" }).trim();
