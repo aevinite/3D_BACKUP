@@ -16,7 +16,8 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { getOwnerEntitlements, getOwnerEntitlementsUnion } from "@/lib/ownerEntitlements";
-import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
+import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
+import SignInBounce from "./SignInBounce";
 import { khataLadder, inventoryLadder } from "@/lib/tableTags";
 import OwnerShell from "@/components/owner/OwnerShell";
 import OwnerReconnecting from "@/components/owner/OwnerReconnecting";
@@ -51,7 +52,10 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
     // #1's nav and mis-rendered a real owner as owning nothing; audit 2026-07-07.)
     if (u && u.role === "owner") ownedIds = await enabledOwnedRestaurantIds(u.id);
   } catch (e) {
-    if (e instanceof AuthDbError) return <OwnerReconnecting />;
+    // OwnedLookupFailed too (sweep #10 T17 round 6, with item 37): enabledOwnedRestaurantIds THROWS when it cannot read an
+    // owner's restaurants — it never answers "owns nothing" on a blip — and only AuthDbError was caught here, so a
+    // database blip showed the crash page instead of the reconnecting screen this layout already has for exactly that.
+    if (e instanceof AuthDbError || e instanceof OwnedLookupFailed) return <OwnerReconnecting />;
     throw e;
   }
 
@@ -103,5 +107,7 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
     );
   }
 
-  redirect("/login?next=/owner");
+  // Signed out: go to the sign-in card carrying THIS page, so a bookmark lands back on it (item 37). (An owner whose
+  // every restaurant is gone still gets the plain redirect above — /login then tells them why, item 33.)
+  return <SignInBounce />;
 }

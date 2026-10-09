@@ -62,6 +62,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   // he is sent back to his dashboard instead. The ADMIN is unaffected: only a real owner can reach
   // this line, because the admin act-as branch above is never module-gated — admin = top power, and
   // its X-ray nav says outright "You can still open it from this view".
+  // Signed out entirely: draw nothing — the owner layout sends them to sign-in carrying THIS page as ?next, so they come
+  // back here after (item 37). Redirecting to /owner first would throw the page away.
+  if (!u && !(store.get(ADMIN_ACT_COOKIE)?.value && (await tokenIsValid(store.get(AUTH_COOKIE)?.value)))) return null;
   if (!selected) redirect("/owner");
 
   return <OwnerInventory restaurants={restaurants} initial={selected} skin={skin} />;

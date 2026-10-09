@@ -105,6 +105,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   // comment said it was: the launcher in components/owner/OwnerManagerMode.tsx still carried it,
   // and `verify:owner-money` item 7 only ever walked `app/`, so the guard stayed green over it.
   // Both are fixed (T17 sweep, 2026-09-04); the walk now covers `app/` AND `components/`.
+  // Signed out entirely: draw nothing — the owner layout sends them to sign-in carrying THIS page as ?next, so they come
+  // back here after (item 37). Redirecting to /owner first would throw the page away.
+  if (!u && !(store.get(ADMIN_ACT_COOKIE)?.value && (await tokenIsValid(store.get(AUTH_COOKIE)?.value)))) return null;
   if (!restaurants.length) redirect("/owner");
 
   return <OwnerManagerMode restaurants={restaurants} initial={selected} skin={skin} />;
