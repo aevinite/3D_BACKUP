@@ -341,8 +341,11 @@ export async function POST(req: NextRequest) {
   if (next.length < 6) return NextResponse.json({ error: "New password must be at least 6 characters." }, { status: 400 });
   if (next === current) return NextResponse.json({ error: "New password must be different from the current one." }, { status: 400 });
 
-  const row = (await sb.from("staff_users").select("password_hash, token_version").eq("id", owner.id).maybeSingle()).data as
-    { password_hash: string | null; token_version: number } | null;
+  // A failed read is not "no such account" (sweep #10 T30 item 15): it used to answer 404 "Account
+  // not found." to an owner changing their own password during a blip.
+  const rowQ = await sb.from("staff_users").select("password_hash, token_version").eq("id", owner.id).maybeSingle();
+  if (rowQ.error) return dbFail("owner/settings password", rowQ.error);
+  const row = rowQ.data as { password_hash: string | null; token_version: number } | null;
   if (!row) return NextResponse.json({ error: "Account not found." }, { status: 404 });
   // Same wall as app/api/panel-profile (sweep 2026-08-04, mig 277) — see the note there for why an
   // already-signed-in password box still needs one. Counted per account, before the check.

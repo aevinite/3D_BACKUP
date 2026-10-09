@@ -1,3 +1,5 @@
+import * as __fs from "node:fs";
+globalThis.__T30FS = __fs;
 // scripts/t30-harness/sb.mjs — the in-memory stand-in for lib/supabaseAdmin. One world on globalThis.
 //   W.FIX[table] = rows · W.FAIL["table:op"] = "error" | "throw" | {code, message} · W.FAIL_NTH["table:op"] = {at, mode}
 //   W.WRITES / W.READS record every call; W.RPC[name] = fn(args) answers an rpc.
@@ -7,8 +9,18 @@ export function world(fix = {}) {
   W.WRITES.length = 0; W.READS.length = 0; W.RPCS.length = 0; W.RPC = {};
 }
 const clone = (v) => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
+// T30_RECORD=<file> (round 3): note every table the real code touches, every database function it
+// calls, and the filters each query uses, so scripts/sweep/t30s10/parity.mjs can check them against
+// the dev database's own catalog. The harness runs every line of these files, so this is every query
+// they can make — not a sample. (COLUMNS are not taken from here: the clash tests hand in made-up
+// field names on purpose; parity.mjs reads each query's columns from the code instead.)
+const REC = process.env.T30_RECORD ? (globalThis.__T30REC ||= { tables: new Set(), queries: new Map(), rpcs: new Set() }) : null;
+if (REC && !globalThis.__T30RECHOOK) {
+  globalThis.__T30RECHOOK = 1;
+  process.on("exit", () => globalThis.__T30FS.writeFileSync(process.env.T30_RECORD, JSON.stringify({ tables: [...REC.tables].sort(), rpcs: [...REC.rpcs].sort(), queries: [...REC.queries.values()] })));
+}
 function builder(table) {
-  const st = { table, filters: [], op: "select", patch: null, cols: null, lim: null, order: null };
+  const st = { table, filters: [], op: "select", patch: null, cols: null, lim: null, order: null, rng: null };
   const match = (row) => st.filters.every(([k, c, v]) => {
     const x = row[c];
     if (k === "eq") return String(x) === String(v);
@@ -24,6 +36,11 @@ function builder(table) {
     return W.FAIL[ck];
   };
   const settle = async (one) => {
+    if (REC) {
+      REC.tables.add(table);
+      const filters = [...new Set(st.filters.filter((f) => f[0] === "eq" || f[0] === "in" || f[0] === "is").map((f) => f[1]))].sort();
+      const key = `${table}|${st.op}|${filters.join(",")}`; if (!REC.queries.has(key)) REC.queries.set(key, { table, op: st.op, filters });
+    }
     const f = failOf();
     if (f === "throw") throw new Error(`stub: ${table} unreachable`);
     if (f === "nodata") return { data: null, error: null, count: null };
@@ -31,7 +48,8 @@ function builder(table) {
     let found = (W.FIX[table] || []).filter(match);
     if (st.order) found = [...found].sort((a, b) => (String(a[st.order.col]) < String(b[st.order.col]) ? -1 : 1) * (st.order.asc ? 1 : -1));
     if (st.lim != null) found = found.slice(0, st.lim);
-    if (st.op === "select") { W.READS.push({ table, cols: st.cols, filters: clone(st.filters) }); return { data: one ? (found.length === 1 ? clone(found[0]) : found.length ? clone(found[0]) : null) : clone(found), error: null, count: found.length }; }
+    if (st.rng) found = found.slice(st.rng[0], st.rng[1] + 1);
+    if (st.op === "select") { W.READS.push({ table, cols: st.cols, filters: clone(st.filters), range: st.rng ? [...st.rng] : null, order: st.order ? { ...st.order } : null }); return { data: one ? (found.length === 1 ? clone(found[0]) : found.length ? clone(found[0]) : null) : clone(found), error: null, count: found.length }; }
     W.WRITES.push({ table, op: st.op, patch: clone(st.patch), filters: clone(st.filters), matched: found.length });
     if (st.op === "update") { const before = clone(found); for (const r of found) Object.assign(r, clone(st.patch)); return { data: one ? before[0] ?? null : before, error: null }; }
     if (st.op === "insert") {
@@ -56,6 +74,7 @@ function builder(table) {
     gte(c, v) { st.filters.push(["gte", c, v]); return q; },
     order(col, o) { st.order = { col, asc: !(o && o.ascending === false) }; return q; },
     limit(n) { st.lim = n; return q; },
+    range(a, b) { st.rng = [a, b]; return q; },
     single() { return settle(true); }, maybeSingle() { return settle(true); },
     then(res, rej) { return settle(false).then(res, rej); },
   };
@@ -63,5 +82,5 @@ function builder(table) {
 }
 export const supabaseAdmin = {
   from: (t) => builder(t),
-  rpc: async (name, args) => { W.RPCS.push({ name, args: clone(args) }); const f = W.FAIL["rpc:" + name]; if (f === "throw") throw new Error("stub rpc unreachable"); if (f) return { data: null, error: { message: "stub rpc failed" } }; return { data: W.RPC[name] ? W.RPC[name](args) : null, error: null }; },
+  rpc: async (name, args) => { if (REC) REC.rpcs.add(name); W.RPCS.push({ name, args: clone(args) }); const f = W.FAIL["rpc:" + name]; if (f === "throw") throw new Error("stub rpc unreachable"); if (f) return { data: null, error: { message: "stub rpc failed" } }; return { data: W.RPC[name] ? W.RPC[name](args) : null, error: null }; },
 };

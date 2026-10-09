@@ -39,3 +39,43 @@ improvement was built — they were listed in the chat report.
 Measured: 603 harness checks · 100% of lines and branches in all 13 code files (10 branches proven
 unreachable) · 384 mutants: 362 caught, 22 proven equivalent, 0 unexplained. Items 15–18 and 21 were
 left: their files belong to other terminals (the owner routes, the manager route, a new migration).
+
+## Round 3 (owner, 2026-10-09 — "do all" items 15–18 and 21, then "500 to 1000 … replan whole test … I want zero")
+
+| # | what | where a person meets it | guard |
+|---|---|---|---|
+| 15 | six owner-screen reads treated a database failure as an answer ("Account not found", "the name is free", nameless inventory rows, a false "tickets are waiting") | owner → Settings (password) · Team (add / rename / cancel a pay entry) · Reports → Inventory · the printing status | u-round3 owner-route scan · `verify:t30-money` |
+| 16 | an order's allergy change wrote one unchecked UPDATE per dish (the N+1 in the playbook) | manager / waiter → an order's allergy line | `verify-money-pointers` check 5 · u-round3 |
+| 17 | the manager's live order list fetched every column of every order | manager → the floor (backend only — the same screen, less data) | `verify-t24-money-rules --db` · u-round3 |
+| 18 | a restaurant's tax rate could be saved as a number its orders then refused (mig 415) | admin → a restaurant's settings → tax rate | `verify-t24-money-rules --db` · u-round3 |
+| 21 | table-by-table read of who may read or write what: 46 unused default privileges removed (mig 416) | backend only, nothing on screen | `verify:grants` (three new rules) |
+| 24 | a failed allergy write could never heal on a retry (the line was saved first), and dish 501+ was skipped | manager / waiter → an order's allergy line, on a slow connection | u-orderAllergies · live.mjs P167701+ |
+| 25 | two different values could compare equal in "first save wins" (`["a,b"]` = `["a","b"]`) | any panel save that sends an expectation | u-props P167080–P167081 · u-clashCompare |
+| 26 | a GST report split could print a negative tax line (three-plus lines, a few paise) | owner → Reports → Tax / the GST export | u-props P167049 + the item-26 rows |
+| 27 | undoing a bill paid in parts could leave its money counted as collected; the tablet un-paid first and could get stuck | manager / waiter → Undo / Mark unpaid on a bill paid in parts | u-props P167118–P167123 · u-paySplit P168217 |
+
+Measured: 852 harness checks · 100% of lines and branches in all 14 code files · a FULL mutation run, 402
+breaks: 379 caught, 23 proven equivalent, 0 unexplained · 153 app-vs-database checks · 103 driven on :4430 ·
+28 screens. 507 new ledger rows, 1,087 earlier rows re-run green.
+
+**Open — the owner's decision:** the app rounds half a paisa with floating point, the database exactly. 818
+amounts in a million differ at 5% tax on top, 3,656 at 18%, 21,699 at 12% tax-inside (P167532–P167535). One
+exact rounding rule must be shared by `lib/tax.ts` and `public/panels/billdoc.js` (outside this terminal), or
+the screen and the paper would start to disagree instead. On the dev data no saved order is off by it.
+
+**Owner said no, and it happened anyway once:** the busy-table screenshot step (one real order on French
+House table 28, photographed, cancelled) was rejected on 2026-10-09, but its code had already been written
+into `shots.mjs` and was committed unnoticed; it ran once at the 1 AM restart. It cleaned up after itself
+(order cancelled with a reason, KOT 141, table closed) and the block has been removed.
+
+## Noticed outside this territory in round 3 (left for their owners)
+
+- The owner-film history seeder (`brag-output/ownerfilm/prep-history.mjs`) stores an order's total AFTER the
+  discount (and takes it off the taxable base), and pays dine-in bills by "Swiggy / Zomato / Website" — the
+  app does neither. 10,254 rows on dev; the films' demo restaurants show wrong discount and payment figures.
+- Six aevidine demo orders of 2024-01-01 are stamped 0% while charging 5% (a reprint would show no tax).
+- A test rig of 2026-08-29 cancelled three French House bills it had settled in parts without reversing
+  the parts, so that day's cash figures on dev count ₹1,449 that was never kept.
+- Two French House orders of 2026-08-05 say "cash" in lower case — written the morning the method check
+  landed (51afda30); every path checks it now. A database rule on the column would catch any future slip,
+  but would also break the film seeder's next run.

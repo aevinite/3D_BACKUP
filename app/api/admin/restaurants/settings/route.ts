@@ -79,7 +79,10 @@ function sanitize(body: Patch): Patch {
   }
   if ("tax_rate" in body) {
     const v = parseFloat(String(body.tax_rate));
-    out.tax_rate = Number.isFinite(v) && v >= 0 && v <= 1 ? v : null;
+    // 0..0.5, the range migration 415 puts on settings.tax_rate and 396 on every order's stamped rate
+    // (it was 0..1: a 0.6 saved here, then every order the restaurant took was refused — sweep #10 T30
+    // item 18). Out of range → null, which lib/tax.ts reads as the 5% default, as before.
+    out.tax_rate = Number.isFinite(v) && v >= 0 && v <= 0.5 ? v : null;
   }
   // ── GST and prices (mig 270) ──────────────────────────────────────────────
   // Both columns carry a CHECK constraint, so an unexpected value would be refused by the

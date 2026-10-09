@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { root } from "./hooks.mjs";
-const FILES = ["lib/tax.ts", "lib/taxFiling.ts", "lib/paySplit.ts", "lib/payments.ts", "lib/discountCap.ts", "lib/clash.ts", "lib/clashCompare.ts", "lib/idempotency.ts", "lib/idempotencyRule.ts", "lib/dbRefusal.ts", "lib/readGuard.ts", "lib/money.ts", "lib/money.mjs"];
+const FILES = ["lib/tax.ts", "lib/taxFiling.ts", "lib/paySplit.ts", "lib/payments.ts", "lib/discountCap.ts", "lib/clash.ts", "lib/clashCompare.ts", "lib/idempotency.ts", "lib/idempotencyRule.ts", "lib/dbRefusal.ts", "lib/readGuard.ts", "lib/money.ts", "lib/money.mjs", "lib/orderAllergies.ts"];
 // Branches PROVEN unreachable, each by its own check in ./u-proofs.mjs (which fails the suite if the
 // proof stops holding). Anything else that never runs is a gap.
 // Matched by the LINE'S TEXT, not its number, so an edit above them cannot silently move the allowance
@@ -38,5 +38,5 @@ for (const f of FILES) {
   console.log(`${full ? "✓" : "✗"} ${f}: lines ${num("LH")}/${num("LF")} · branches ${num("BRH")}/${num("BRF")} · functions ${num("FNH")}/${num("FNF")}${lines.length ? ` · lines never run: ${lines.join(",")}` : ""}${br.length ? ` · branches never taken at lines: ${[...new Set(br)].join(",")}` : ""}`);
 }
 rmSync(out, { force: true });
-console.log(allFull ? "\n✓ every line and every branch of the 13 code files ran" : "\n✗ some code never ran (above)");
+console.log(allFull ? `\n✓ every line and every branch of the ${FILES.length} code files ran` : "\n✗ some code never ran (above)");
 process.exit(process.argv.includes("--strict") && !allFull ? 1 : 0);

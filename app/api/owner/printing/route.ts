@@ -142,13 +142,22 @@ export async function GET(req: NextRequest) {
     // is nearly all of them) pays exactly what it paid before. The poll is 15s and already stops
     // when the tab is hidden.
     perRestaurant: await (async () => {
+      // A FAILED FILTER READ IS NOT "NO RESTAURANT PRINTS" (sweep #10 T30 round 3, item 15). Both reads
+      // below kept only `.data`, so a blip answered with an empty map — and every row the page draws
+      // then fell back to the amber "no screen has taken it yet — tickets are waiting" warning this
+      // whole block exists to stop. On an error the filter is skipped instead: each restaurant in
+      // scope gets its own real paperStatus answer, which is never wrong, only a little more work.
+      const allQ = scope.all ? await sb.from("settings").select("restaurant_id").eq("auto_print_kot_allowed", true).limit(12) : null;
+      if (allQ?.error) console.error("[owner/printing] printing-on read failed:", allQ.error.message);
       const scoped = scope.all
-        ? ((await sb.from("settings").select("restaurant_id")
-            .eq("auto_print_kot_allowed", true).limit(12)).data || []).map((r) => (r as { restaurant_id: string }).restaurant_id)
+        ? (allQ!.error ? ids.slice(0, 12) : (allQ!.data || []).map((r) => (r as { restaurant_id: string }).restaurant_id))
         : ids.slice(0, 12);
-      const on = scope.all ? scoped : ((await sb.from("settings").select("restaurant_id")
-        .in("restaurant_id", scoped).eq("auto_print_kot_allowed", true).limit(12)).data || [])
-        .map((r) => (r as { restaurant_id: string }).restaurant_id);
+      const onQ = scope.all ? null : await sb.from("settings").select("restaurant_id")
+        .in("restaurant_id", scoped).eq("auto_print_kot_allowed", true).limit(12);
+      if (onQ?.error) console.error("[owner/printing] printing-on read failed:", onQ.error.message);
+      const on = scope.all ? scoped
+        : onQ!.error ? scoped
+        : (onQ!.data || []).map((r) => (r as { restaurant_id: string }).restaurant_id);
       return Object.fromEntries(await Promise.all(
         on.map(async (id) => [id, id === target ? live : await paperStatus(id)] as const),
       ));

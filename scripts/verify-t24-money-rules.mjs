@@ -838,6 +838,20 @@ if (process.argv.includes("--db")) {
     const unscoped = Object.keys(comparable).filter((t) => !tenantRows.includes(t) && !has.has(`${t}.restaurant_id`));
     check("…and every table it scopes by restaurant has a restaurant_id column", !unscoped.length, unscoped);
   }
+  {
+    // round 3, item 17: the manager's live floor names its order columns (FLOOR_COLS) — every column of
+    // `orders` that the panel's code reads must be in it, or the board would silently lose a field.
+    const ed = read("app/api/editor/[...path]/route.ts");
+    const floor = ((ed.match(/const FLOOR_COLS: string = "([^"]+)"/) || [])[1] || "").split(",");
+    const ocols = (await sql(`select column_name c from information_schema.columns where table_schema='public' and table_name='orders'`)).map((x) => x.c);
+    const panel = ["public/panels/editor/app.js", "public/panels/editor/inventory.js", "public/panels/billdoc.js", "public/panels/realtime.js", "public/panels/outbox.js", "public/panels/auditsort.js"].map(read).join("\n");
+    const missing = ocols.filter((c) => new RegExp("\\b" + c + "\\b").test(panel) && !floor.includes(c));
+    check(`every orders column the manager panel reads is in FLOOR_COLS (${floor.length} named of ${ocols.length})`, floor.length > 20 && !missing.length, missing);
+    check("…and FLOOR_COLS names no column the table does not have", floor.every((c) => ocols.includes(c)), floor.filter((c) => !ocols.includes(c)));
+    // round 3, item 18: a restaurant's tax rate is constrained like an order's
+    const cons = await sql(`select conname, pg_get_constraintdef(oid) d from pg_constraint where conname in ('settings_tax_rate_is_a_rate','orders_tax_rate_is_a_rate')`);
+    check("settings.tax_rate and orders.tax_rate carry the SAME 0..0.5 rule on the database (migs 396 + 415)", cons.length === 2 && cons.every((c) => /tax_rate >= \(0\)::numeric\) AND \(tax_rate <= 0\.5\)/.test(c.d)), cons);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════

@@ -13,8 +13,12 @@ if (!process.env.T30_MUTATING) {
   let k = 0;
   const twin = async (file, line, from, to) => {
     const lines = readFileSync(join(root, file), "utf8").split("\n");
+    // Found by its TEXT (round 3): the line number is only a hint — an edit higher up the file moved
+    // every taxFiling line by twelve and crashed this suite. The text must be on exactly one line.
+    const has = (i) => lines[i].replace(/\/\/.*$/, "").includes(from);
+    if (!has(line - 1)) { const hits = lines.map((_, i) => i).filter(has); if (hits.length !== 1) throw new Error(`${file}: "${from}" is on ${hits.length} lines`); line = hits[0] + 1; }
+    twin.at = line;
     const L = lines[line - 1]; const at = L.replace(/\/\/.*$/, "").indexOf(from);
-    if (at < 0) throw new Error(`${file}:${line} no longer contains ${from}`);
     lines[line - 1] = L.slice(0, at) + to + L.slice(at + from.length);
     const out = join(dir, `m${k++}-${file.split("/").pop()}`); writeFileSync(out, lines.join("\n"));
     return import(pathToFileURL(out).href + `?v=${k}`);
@@ -38,13 +42,35 @@ if (!process.env.T30_MUTATING) {
   for (let i = 0; i < 20000; i++) allocIn.push([Math.round((rnd() - 0.3) * 1e5), Array.from({ length: 1 + Math.floor(rnd() * 12) }, () => (rnd() < 0.2 ? 0 : Math.round(rnd() * 1000) / 10))]);
   for (const [line, from, to, name] of [[66, "left > 0 && k < order.length", "left > 0 || k < order.length", "&& → || (the second loop undoes the overshoot)"], [66, "k < order.length", "k <= order.length", "< → <= (the leftover is always fewer than the rows)"], [68, "k >= 0", "k > 0", ">= → > (the loop never runs: the leftover is never negative)"], [68, "order.length - 1", "order.length + 1", "− 1 → + 1 (same: the loop never runs)"]]) {
     const m = await twin("lib/taxFiling.ts", line, from, to); const r = sameAll(orig.tf.allocateWhole, m.allocateWhole, allocIn);
-    t(`lib/taxFiling.ts:${line} (${name}) is equivalent on 20,000 random splits`, r === true, r);
+    t(`lib/taxFiling.ts:${twin.at} (${name}) is equivalent on 20,000 random splits`, r === true, r);
   }
   { const m = await twin("lib/taxFiling.ts", 151, "?? 0", "?? 1"); const ins = allocIn.slice(0, 3000).map(([, w]) => [w.map((x) => ({ t: x })), [{ label: "C", rate: 2.5 }, { label: "S", rate: 2.5 }], (r) => r.t]);
-    const r = sameAll(orig.tf.buildFiling, m.buildFiling, ins); t("lib/taxFiling.ts:151 (?? 0 → ?? 1) is equivalent — every row carries a part for every line, so the fallback is never used (3,000 filings)", r === true, r); }
+    const r = sameAll(orig.tf.buildFiling, m.buildFiling, ins); t(`lib/taxFiling.ts:${twin.at} (?? 0 → ?? 1) is equivalent — every row carries a part for every line, so the fallback is never used (3,000 filings)`, r === true, r); }
   { const D = await import("@/lib/discountCap.ts"); const m = await twin("lib/discountCap.ts", 48, "> capPct + 0.01", ">= capPct + 0.01"); const ins = []; for (let base = 1; base <= 20000; base += 37) for (let a = 0; a <= base; a += Math.max(1, Math.floor(base / 113))) for (const cap of [0, 5, 10, 50, 100]) ins.push([a, base, cap]);
     const r = sameAll(D.overDiscountCap, m.overDiscountCap, ins);
     t(`lib/discountCap.ts:48 (> → >= at cap + 0.01%) answers the same on ${ins.length} whole-rupee discounts — the boundary is a hundredth of a percent that no whole-rupee discount lands on`, r === true, r); }
+}
+const twinOA = async (file, from, to) => {
+  const dir = join(tmpdir(), "t30-equiv"); mkdirSync(dir, { recursive: true });
+  const lines = readFileSync(join(root, file), "utf8").split("\n"); const hits = lines.map((_, i) => i).filter((i) => lines[i].replace(/\/\/.*$/, "").includes(from));
+  if (hits.length !== 1) throw new Error(`${file}: "${from}" is on ${hits.length} lines`); twinOA.at = hits[0] + 1;
+  lines[hits[0]] = lines[hits[0]].replace(from, to);
+  // the twin lives outside the repo, so its own "@/lib/…" imports resolve through hooks.mjs exactly as the real file's do
+  const out = join(dir, `oa-${Date.now()}.ts`); writeFileSync(out, lines.join("\n")); return import(pathToFileURL(out).href);
+};
+// lib/orderAllergies.ts — the paged read's DIRECTION. Paging needs a fixed order over a unique key, not
+// a particular direction: newest-first covers every dish exactly once just as oldest-first does.
+if (!process.env.T30_MUTATING) {
+  const { W, world } = await import("./sb.mjs"); const sb = (await import("./sb.mjs")).supabaseAdmin;
+  const orig = await import("@/lib/orderAllergies.ts"); const m = await twinOA("lib/orderAllergies.ts", 'ascending: true', 'ascending: false');
+  let bad = null;
+  for (const n of [0, 1, 499, 500, 501, 999, 1000, 1001, 1234, 2500]) for (const change of [[["nuts"], []], [[], ["egg"]], [["soy", "fish"], ["egg"]]]) {
+    const start = Array.from({ length: n }, (_, i) => ({ id: `d${String(i).padStart(5, "0")}`, order_id: "o", restaurant_id: "R", added_allergens: i % 3 ? ["egg"] : [], removed_flag: i % 7 === 0 }));
+    world({ order_items: start }); await orig.spreadOrderAllergies(sb, "R", "o", ...change); const a = JSON.stringify(W.FIX.order_items);
+    world({ order_items: start }); await m.spreadOrderAllergies(sb, "R", "o", ...change); const b = JSON.stringify(W.FIX.order_items);
+    if (a !== b) bad ||= `${n} dishes, change ${JSON.stringify(change)}`;
+  }
+  t(`lib/orderAllergies.ts:${twinOA.at} (ascending: true → false) is equivalent — oldest-first or newest-first, every dish of orders from 0 to 2,500 dishes ends the same (30 orders × changes)`, !bad, bad || "");
 }
 // the clash gate's defensive checks: fuzz the SAME 3,000 odd headers through the real gate and through
 // each broken copy, against the same in-memory world, and compare every answer.

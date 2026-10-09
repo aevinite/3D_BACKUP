@@ -46,6 +46,18 @@ for (const vp of ["desktop", "a35", "ipad"]) for (const skin of ["light", "dark"
 }
 for (const vp of ["desktop", "a35", "ipad"]) await shoot("admin", "/aevinite/billing", vp, null, "admin-billing", /plan|billing/i);
 for (const vp of ["desktop", "a35"]) await shoot("manager", "/manager", vp, null, "manager-floor", null);
+// round 3 (items 15–18, 24–27): the screens those changes feed — the manager floor reads FLOOR_COLS now
+// (item 17), the owner screens answer a failed read honestly (item 15), the tablet undoes a split first.
+for (const vp of ["desktop", "a35"]) {
+  await shoot("owner", "/owner/settings", vp, null, "r3-owner-settings", /password|setting/i);
+  await shoot("owner", "/owner/staff", vp, null, "r3-owner-staff", /staff|team|people/i);
+  await shoot("owner", "/owner/inventory", vp, null, "r3-owner-inventory", /stock|inventory|item/i);
+  await shoot("owner", "/owner/reports?open=inventory", vp, null, "r3-owner-reports-inventory", /report/i);
+}
+for (const vp of ["ipad", "a35"]) await shoot("tablet", "/tablet", vp, null, "r3-tablet-floor", null);
+await shoot("admin", "/aevinite/restaurants", "desktop", null, "r3-admin-restaurants", /restaurant/i);
+// (A busy-table block — one real order placed, photographed and cancelled — was REMOVED: the owner
+// rejected that step on 2026-10-09. Item 17's column list is checked by verify-t24-money-rules --db.)
 await browser.close();
 for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name} → ${r.note} · ${r.file}`);
 process.stdout.write("", () => process.exit(results.some((r) => !r.ok) ? 1 : 0));

@@ -1010,8 +1010,18 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
   M("§5 lib/ownerOverviewCache.ts shares the overview for 8 s", "read the file", () => /TTL_MS = 8000/.test(read("lib/ownerOverviewCache.ts")));
   M("§5 loginUser caps its candidates at 50", "read lib/userAuth.ts", () => /MAX_LOGIN_CANDIDATES = 50/.test(read("lib/userAuth.ts")) && /\.limit\(MAX_LOGIN_CANDIDATES\)/.test(read("lib/userAuth.ts")));
   M("§5 the editor's blocklist read names its columns and caps at 500", "read the editor route", () => /from\("blocklist"\)\.select\("[^*"]+"\)[^;]{0,200}\.limit\(500\)/.test(ED));
-  M("§5 the still-open select('*') entry is honestly open", "read both", () => /select\(billsMode \? BILLS_COLS : "\*"\)/.test(ED) && /- \[ \] \*\*Trim `orders\.select\("\*"\)`/.test(D));
-  M("§5 the still-open N+1 entry is honestly open and found by its sentence (item 8)", "read both", () => /- \[ \] \*\*N\+1/.test(D) && ED.includes("Say why the allergy is changing"));
+  // Re-stated in round 3 (items 16 and 17 shipped): the box and the code must agree, BOTH ways — a tick
+  // while the code still reads "*" is as wrong as an open box over code that no longer does.
+  M("§5 the select('*') entry's box agrees with the code (ticked now FLOOR_COLS replaced \"*\")", "read both", () => {
+    const star = /select\(billsMode \? BILLS_COLS : "\*"\)/.test(ED), cols = /select\(billsMode \? BILLS_COLS : FLOOR_COLS\)/.test(ED);
+    const ticked = /- \[x\] \*\*Trim `orders\.select\("\*"\)`/.test(D), open = /- \[ \] \*\*Trim `orders\.select\("\*"\)`/.test(D);
+    return (cols && !star && ticked && !open) || (star && open && !ticked);
+  });
+  M("§5 the N+1 entry's box agrees with the code and is still found by its sentence (items 8, 16)", "read both", () => {
+    const at = ED.indexOf("Say why the allergy is changing"), batched = at >= 0 && /spreadOrderAllergies\(/.test(ED.slice(at, at + 1800));
+    const ticked = /- \[x\] \*\*N\+1/.test(D), open = /- \[ \] \*\*N\+1/.test(D);
+    return at >= 0 && ((batched && ticked && !open) || (!batched && open && !ticked));
+  });
   M("§4 the security checklist the playbook points at exists", "fs", () => existsSync(join(root, "docs/SECURITY-CHECKLIST.md")));
   M("§4 no secret is a NEXT_PUBLIC_ variable", "grep app/ lib/ components/", () => { const names = [...new Set(tsFiles.flatMap((f) => [...read(f).matchAll(/process\.env\.(NEXT_PUBLIC_\w+)/g)].map((m) => m[1])))]; const bad = names.filter((nm) => /SERVICE|SECRET|TOKEN|PASSWORD/.test(nm)); return { ok: !bad.length, note: names.join(", ") }; });
   M("'Do NOT reach for infrastructure' — no Redis / queue client is a dependency", "package.json", () => { const p = JSON.parse(read("package.json")); const deps = Object.keys({ ...(p.dependencies || {}), ...(p.devDependencies || {}) }); return !deps.some((d) => /redis|bullmq|kafka|rabbit|amqp/i.test(d)); });
@@ -1106,7 +1116,8 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
     Q("lib/clash.ts", `${f.replace(/^app\/api\//, "/api/").replace(/\/route\.ts$/, "")} hands the clash gate a restaurant it resolved itself (rid, or the row's own restaurant_id) — never one from the header`, "read the call", () =>
       [...src.matchAll(/expectClash\(req, ([^)]*)\)/g)].every((m) => /^(rid|String\(\w+(\.\w+)*\.restaurant_id \|\| ""\)?)$/.test(m[1].trim())));
   }
-  for (const [where, re] of [["the whole-bill discount", /overDiscountCap\(rawDisc, base, cap\)/], ["the parcel discount", /overDiscountCap\(rawPDisc, parcelDiscBase, pcap\)/], ["the per-line discount", /overDiscountCap\(Math\.max\(raw, 0\), discBase, cap\)/]]) {
+  // (re-stated 2026-10-10: T10 item 4 measures the per-line cap against the whole bill when there is one)
+  for (const [where, re] of [["the whole-bill discount", /overDiscountCap\(rawDisc, base, cap\)/], ["the parcel discount", /overDiscountCap\(rawPDisc, parcelDiscBase, pcap\)/], ["the per-line discount", /overDiscountCap\(Math\.max\(raw, 0\), (?:cur\.session_id \? billBase : )?discBase, cap\)/]]) {
     Q("lib/discountCap.ts", `the manager route checks the cap on ${where} with the signed-in person's role`, "read the editor route", () => re.test(ED) && /discountCapPct\(rid, discountRole\(g\.user\?\.role\)\)/.test(ED));
   }
   const pmSites = [...(ED + "\n" + TB).matchAll(/PAYMENT_METHODS(?: as readonly string\[\])?\)?\.(includes|find)\(/g)].length;

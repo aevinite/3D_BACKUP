@@ -34,6 +34,7 @@ import { raiseIssue } from "@/lib/issues";
 // tabletPerm(). WAITER_NEVER is the owner's "no printing, no reopening" rule made structural.
 import { waiterCapValue, waiterConfigCapValue, resolveWaiterCaps, WAITER_NEVER, WAITER_FEATURE_OF, waiterFeatureOffCols, type WaiterCap } from "@/lib/accessTree";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
+import { spreadOrderAllergies } from "@/lib/orderAllergies";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
@@ -1962,17 +1963,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if ((addedOW.length || removedOW.length) && !owReason.note && !owReason.code) {
         return err("Say why the allergy is changing — that line is what the kitchen cooks to.", 400);
       }
+      // One write per distinct result, errors surfaced — lib/orderAllergies.ts (sweep #10 T30 item 16;
+      // it was one unchecked UPDATE per dish, here and in the twin route). The DISHES go first and
+      // the order's line last (item 24): the change is "old line vs new", so saving the line first
+      // would leave a retry with nothing to spread after a failed dish write.
+      await spreadOrderAllergies(sb, rid, b, addedOW, removedOW);
       must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).eq("restaurant_id", rid));
-      if (addedOW.length || removedOW.length) {
-        const items = must(await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", b).eq("restaurant_id", rid));
-        for (const it of items) {
-          const mark = new Set((Array.isArray(it.added_allergens) ? it.added_allergens : []).map((x: any) => String(x).toLowerCase()));
-          let rf = !!it.removed_flag;
-          for (const s of addedOW) mark.add(s);
-          for (const s of removedOW) { if (mark.has(s)) mark.delete(s); else rf = true; }
-          await sb.from("order_items").update({ added_allergens: [...mark], removed_flag: rf }).eq("id", it.id).eq("restaurant_id", rid);
-        }
-      }
       const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
       await log("order_allergies", { order_id: b, detail, device_id: dev });
       return ok({ ok: true });
@@ -2575,6 +2571,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // show a green "Bill reopened" toast while NOTHING changed — a silent money mismatch.
       // Match the editor's behaviour: tell the user plainly it can't be reopened here. (sweep C2)
       if (!paid.length) return err("This bill was settled more than 30 minutes ago and can no longer be reopened here — ask an admin to correct it.", 409);
+      // A split settle recorded payment LEGS in session_payments. They are REVERSED, not deleted
+      // (mig 285): this used to be a hard DELETE, which erased the only record of what had been
+      // collected and in what parts — while the manager panel's twin left the legs standing and
+      // went on claiming the money was in. One shared helper now, so both read the same.
+      // It runs FIRST, before the bill is marked unpaid (item 27, 2026-10-09 — the manager route
+      // already did): if it fails, the bill is still paid and Undo can simply be tapped again. The
+      // other way round, a failure left the bill unpaid with its parts still counted, and the
+      // retry found no paid bill to reopen — stuck for good.
+      // The return value is not read — reverseSplitLegs does the writing. (Named nothing rather
+      // than a variable eslint has to warn about; T4 sweep, 2026-08-11.)
+      await reverseSplitLegs(sb, {
+        rid, sessionId: openSess.id, since: cutoff,
+        actor: actor?.name || actor?.username || null,
+        reason: String((body && body.reason) || "undo settle (within the 30-minute window)").slice(0, 200),
+      });
       // Common revert: unpaid again + clear the paid stamp and HOW it was paid.
       // tip:0 — reverting the settle un-collects the payment, and the TIP went with it; leaving
       // it makes a re-pay-without-tip keep the old tip, which the Z-report counts again. (sweep C2)
@@ -2586,17 +2597,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const otherIds = paid.filter((o) => o.payment_method !== ON_THE_HOUSE_METHOD).map((o) => o.id);
       if (otherIds.length) must(await sb.from("orders").update(base).in("id", otherIds).eq("restaurant_id", rid).select("id"));
       if (onHouseIds.length) must(await sb.from("orders").update({ ...base, discount: 0, discount_note: null }).in("id", onHouseIds).eq("restaurant_id", rid).select("id"));
-      // A split settle recorded payment LEGS in session_payments. They are REVERSED, not deleted
-      // (mig 285): this used to be a hard DELETE, which erased the only record of what had been
-      // collected and in what parts — while the manager panel's twin left the legs standing and
-      // went on claiming the money was in. One shared helper now, so both read the same.
-      // The return value is not read — reverseSplitLegs does the writing. (Named nothing rather
-      // than a variable eslint has to warn about; T4 sweep, 2026-08-11.)
-      await reverseSplitLegs(sb, {
-        rid, sessionId: openSess.id, since: cutoff,
-        actor: actor?.name || actor?.username || null,
-        reason: String((body && body.reason) || "undo settle (within the 30-minute window)").slice(0, 200),
-      });
       // The quick undo bar sends no reason; the explicit "Mark unpaid" button sends one
       // (a refund/correction) — record it for the money-accountability trail either way.
       const reason = String((body && body.reason) || "").trim().slice(0, 120);

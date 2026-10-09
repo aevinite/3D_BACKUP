@@ -129,9 +129,11 @@ console.log("\nMONEY POINTERS · every pointer in the money and compliance files
   const route = read("app/api/editor/[...path]/route.ts");
   const at = route.indexOf(anchor);
   const after = at >= 0 ? route.slice(at, at + 1800) : "";
-  check(pb.includes(anchor) && at >= 0 && /for \(const it of items\)[\s\S]{0,500}from\("order_items"\)\.update\(/.test(after),
-    "the playbook's N+1 entry quotes a sentence still in the editor route, with the per-item update loop right after it",
-    "the playbook's N+1 anchor no longer leads to the per-item update loop — either the loop was batched (tick the entry) or the sentence moved");
+  // Since round 3 (item 16) the loop is BATCHED: the entry is ticked, and the sentence must lead to the
+  // shared helper rather than to a per-dish update.
+  check(pb.includes(anchor) && at >= 0 && /spreadOrderAllergies\(sb, rid, b, addedOW, removedOW\)/.test(after) && /- \[x\] \*\*N\+1/.test(pb),
+    "the playbook's N+1 entry is ticked, and its quoted sentence leads to the batched helper in the editor route",
+    "the playbook's N+1 entry and the editor route disagree — the loop is unbatched again, or the entry is unticked");
 }
 
 // ── 6. An index named in these files still exists — the last migration to touch it CREATES it ─────

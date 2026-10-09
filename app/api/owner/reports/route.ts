@@ -802,8 +802,11 @@ export async function GET(req: NextRequest) {
       const invEff = await mapLimit(invIdsAll, FANOUT_HEAVY, (id) => inventoryLadder(id).then((l) => l.effective));
       const invEnabled: string[] = invIdsAll.filter((_, i) => invEff[i]);
       if (!rid && invEnabled.length > 1) {
-        const names = new Map(((await sb.from("restaurants").select("id, name").in("id", invEnabled)).data || [])
-          .map((r) => [r.id as string, r.name as string]));
+        // The names read is checked like the rest of this fan-out (sweep #10 T30 item 15): a failure
+        // used to leave every row of the group breakdown nameless while the totals looked complete.
+        const namesQ = await sb.from("restaurants").select("id, name").in("id", invEnabled);
+        if (namesQ.error) return dbFail("owner/reports inventory names", namesQ.error);
+        const names = new Map((namesQ.data || []).map((r) => [r.id as string, r.name as string]));
         // EVERY ERROR IN THIS FAN-OUT WAS IGNORED (T9 finding F5, merged branch). This is the
         // multi-restaurant "All restaurants" view, where the damage is worse than in the single
         // branch: the figures below are SUMMED across restaurants, so one restaurant answering

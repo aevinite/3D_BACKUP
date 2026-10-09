@@ -797,6 +797,42 @@ function checkMigrations() {
 // lfh_owner_payment_breakdown). Name-level replay reads those as retirements and cries wolf on
 // three healthy functions — measured, not guessed. Telling those apart needs real signature
 // parsing, and a function that lingers is a far smaller problem than one that has vanished.
+// ── WHO MAY TOUCH WHICH TABLE (sweep #10 T30 round 3, item 21, 2026-10-09) ────────────────────────
+// The read-policy review the efficiency playbook §5 listed as owed, made permanent. Three rules:
+//   1. every public table has row-level security ON;
+//   2. the public key (anon) and the signed-in key (authenticated) hold NO table privilege that no
+//      policy uses — migrations 362/392/393/416 removed Supabase's default grants, and a new table
+//      that arrives with them (as the loyalty tables did, mig 413) turns this red;
+//   3. the tables either key can READ are exactly the ones a guest screen needs, each through its policy.
+const GUEST_READABLE = ["categories", "filters", "menu_items", "realtime_events", "reviews"];
+async function checkTablePrivileges(label, env) {
+  head(`${label} — who may touch which table`);
+  const tabs = await q(env, `
+    SELECT c.relname AS t, c.relrowsecurity AS rls,
+      has_table_privilege('anon', c.oid, 'select') AS a_s, has_table_privilege('anon', c.oid, 'insert') AS a_i,
+      has_table_privilege('anon', c.oid, 'update') AS a_u, has_table_privilege('anon', c.oid, 'delete') AS a_d,
+      has_table_privilege('authenticated', c.oid, 'select') AS u_s, has_table_privilege('authenticated', c.oid, 'insert') AS u_i,
+      has_table_privilege('authenticated', c.oid, 'update') AS u_u, has_table_privilege('authenticated', c.oid, 'delete') AS u_d
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')`);
+  const pols = await q(env, `SELECT tablename AS t, cmd, roles::text AS roles FROM pg_policies WHERE schemaname = 'public'`);
+  const covers = (t, role, cmd) => pols.some((p) => p.t === t && (p.cmd === cmd || p.cmd === "ALL") && (/\bpublic\b/.test(p.roles) || p.roles.includes(role)));
+  const off = tabs.filter((x) => !x.rls).map((x) => x.t);
+  if (off.length) fail(`row-level security is OFF on: ${off.join(", ")}`);
+  else pass(`row-level security is on for all ${tabs.length} public tables`);
+  const inert = [], readable = new Set();
+  for (const x of tabs) for (const [role, k] of [["anon", "a"], ["authenticated", "u"]]) for (const [cmd, c] of [["SELECT", "s"], ["INSERT", "i"], ["UPDATE", "u"], ["DELETE", "d"]]) {
+    if (!x[`${k}_${c}`]) continue;
+    if (covers(x.t, role, cmd)) { if (cmd === "SELECT") readable.add(x.t); else fail(`${role} may ${cmd} ${x.t} through a policy — no guest or signed-in key should write a table directly`); }
+    else inert.push(`${x.t}:${role}:${cmd}`);
+  }
+  if (inert.length) fail(`${inert.length} table privilege(s) the public or signed-in key holds with no policy using them (remove them, as mig 416 did): ${inert.slice(0, 12).join(", ")}`);
+  else pass("the public and signed-in keys hold no table privilege that no policy uses");
+  const extra = [...readable].filter((t) => !GUEST_READABLE.includes(t)), missing = GUEST_READABLE.filter((t) => !readable.has(t));
+  if (extra.length || missing.length) fail(`guest-readable tables differ from the expected five — readable but not expected: ${extra.join(", ") || "none"}; expected but not readable: ${missing.join(", ") || "none"}`);
+  else pass(`exactly the ${GUEST_READABLE.length} tables a guest screen needs are readable with the public key (${GUEST_READABLE.join(", ")})`);
+}
+
 function expectedLiveFunctions() {
   const dir = join(root, "supabase", "migrations");
   const lastCreate = new Map(); // name → "<file>#<offset>" of its last CREATE
@@ -847,6 +883,7 @@ if (process.argv.includes("--files-only")) {
 const dev = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
 await checkDb("BACKUP / DEV database", dev);
 await checkAbsentFunctions("BACKUP / DEV database", dev);
+await checkTablePrivileges("BACKUP / DEV database", dev);
 
 if (WITH_AV) {
   // READ-ONLY on AV live: SELECTs against the catalog only, never a write. The sweep found the

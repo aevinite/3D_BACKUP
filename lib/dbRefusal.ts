@@ -60,6 +60,9 @@ const REFUSAL_TEXT = /violates (check|unique|foreign key|not-null|exclusion) con
 // of a manager mid-service. Add a line here when you add a constraint a person can trip.
 const PLAIN: Record<string, string> = {
   settings_floor_per_row_range: "Tables per row has to be a whole number between 2 and 30.",
+  // mig 415 (sweep #10 T30 item 18) and mig 396: a tax rate is a FRACTION — 5% is 0.05.
+  settings_tax_rate_is_a_rate: "The tax rate is written as a fraction between 0 and 0.5 — 5% is 0.05.",
+  orders_tax_rate_is_a_rate: "This order's tax rate is out of range — check the restaurant's tax setting (5% is written 0.05).",
 };
 
 // Our own codes → the sentence a person reads (mig 278). Keyed by SQLSTATE, so the wording of the
