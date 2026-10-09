@@ -1091,6 +1091,29 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("every switch on the Access screen reads back the value it was just set to, through the same local merge the screen paints with");
 }
 
+// ── 58 · A PERSON'S PAGE LISTS EVERY ROW THE ACCESS SCREEN HAS FOR THEIR ROLE ─────────────────
+// lib/staffCaps.ts's own rule (owner, 2026-08-18): "a person's rows are EXACTLY the rows Access has
+// for their role". It is enforced by walking folders, and a walk that stops one level too early
+// drops rows without a sound. That happened for the three switches inside Manager settings →
+// Users (add a login · reset a password · switch a login off): the Access screen showed them and
+// every manager's profile did not. (sweep #10 T18, item 4.) So the question is asked from the
+// OTHER end — every storing row in the role's section, compared with what the person page lists.
+{
+  const { capsForRole } = await import("../node_modules/.cache/staffCaps.mjs").catch(() => ({ capsForRole: null }));
+  if (!capsForRole) fail("check 58 could not load the staffCaps bundle — npm run verify:access builds it; fix the guard");
+  else {
+    const { SECTIONS, walk } = await import("../node_modules/.cache/accessTree.mjs");
+    const ROLE_OF = { mgrMenu: "manager", waiter: "tablet", ownMenu: "owner" };
+    const lost = [];
+    for (const s of SECTIONS.filter((x) => ROLE_OF[x.id])) {
+      const listed = new Set(capsForRole(ROLE_OF[s.id]).map((c) => c.node.id));
+      walk(s.children, (n) => { if (n.bind.t !== "none" && !listed.has(n.id)) lost.push(`${ROLE_OF[s.id]}: "${n.name}" (${n.id})`); });
+    }
+    if (lost.length) fail(`a row on the Access screen is missing from that role's person page: ${lost.join("; ")}`);
+    else ok("every row the Access screen shows for manager, waiter and owner is on that person's own page");
+  }
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27
