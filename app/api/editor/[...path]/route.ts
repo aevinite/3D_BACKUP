@@ -144,7 +144,7 @@ import { panelFailure } from "@/lib/panelFailure";
 import { MANAGER_POWER_FLAGS, getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
-import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
+import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS, MODULE_DEFS } from "@/lib/accessModel";
 import { earnOnSettle, reverseOnUnpay, loyaltyStateFor, redeemOntoBill } from "@/lib/loyalty";
 import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, MENU_PART_DEFAULTS, type ManagerTabKey } from "@/lib/accessTree";
 import { managerCan } from "@/lib/managerCan";
@@ -5920,6 +5920,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // is the OWNER's toggle (owner panel) — a manager must not flip rungs above them. (mig 166)
         delete (body as Record<string, unknown>).table_tags_owner_control;
         delete (body as Record<string, unknown>).table_tags_enabled;
+        // …AND THE SAME TWO RUNGS OF EVERY OTHER MODULE (sweep #10 T10, item 3). The two lines above
+        // were written for mig 166, when table types was the only laddered module. Eleven more came
+        // after it (khata, banquet, table & ticket operations, take orders, parcel, platform, payroll,
+        // inventory…) and the `settings.modules` bag that Loyalty points lives in (mig 320/326), and
+        // none of them was added here. `*_allowed` is stripped by the regex above, but a bag module
+        // has no `_allowed` column — its admin switch is `modules.loyalty.allowed`. So an OWNER (who
+        // passes this route) could send `{ modules: { loyalty: { allowed: true } } }` and switch on a
+        // module the admin had not granted, or rewrite another module's power-transfer switch. The
+        // owner's own Settings page (/api/owner/settings) flips only a module the admin HANDED to him;
+        // this generic save must not be a second, unchecked door to the same rungs. The delivery
+        // channels (and their connection keys) are the admin's too — their own route says "the owner
+        // cannot change this". None of these is sent by any panel save today, so dropping them
+        // changes nothing a screen does. Admin (no staff cookie) is untouched.
+        if (g.user) {
+          const BODY = body as Record<string, unknown>;
+          for (const m of MODULE_DEFS) { delete BODY[m.control]; delete BODY[m.enabled]; }
+          delete BODY.modules;
+          delete BODY.platform_channels;
+        }
         // Admin/owner-only settings (owner 2026-07-28): a REAL MANAGER may edit only per-table
         // NAME + seats + auto-close from this panel — never the billing identity, KOT printing,
         // the dining-session system, or the table COUNT. Those live in the admin panel
