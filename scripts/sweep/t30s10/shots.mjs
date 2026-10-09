@@ -48,4 +48,4 @@ for (const vp of ["desktop", "a35", "ipad"]) await shoot("admin", "/aevinite/bil
 for (const vp of ["desktop", "a35"]) await shoot("manager", "/manager", vp, null, "manager-floor", null);
 await browser.close();
 for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name} → ${r.note} · ${r.file}`);
-process.exit(results.some((r) => !r.ok) ? 1 : 0);
+process.stdout.write("", () => process.exit(results.some((r) => !r.ok) ? 1 : 0));

@@ -1175,11 +1175,12 @@ async function main() {
   if (ARGV.includes("--ledger")) {
     const esc = (x) => String(x).replace(/\|/g, "\\|").replace(/\n/g, " ");
     for (const r of rows) console.log(`| ${r.id} | \`${r.file}\` — ${esc(r.what)} | ${esc(r.how)} | ${r.mark} | ${esc(r.note)} |`);
-    process.exit(0);
+    process.stdout.write("", () => process.exit(0));
+    return;
   }
   const bad = rows.filter((r) => r.mark === "❌");
   for (const r of rows) { if (QUIET && r.mark === "✅") continue; console.log(`${r.mark} ${r.id}  [${r.file}] ${r.what}${r.note ? `  → ${r.note}` : ""}`); }
   console.log(`\n${bad.length ? "✗ FAIL" : "✓ PASS"} — ${rows.length} checks · ${rows.filter((r) => r.mark === "✅").length} ✅ · ${bad.length} ❌ · ${rows.filter((r) => r.mark === "⏭").length} ⏭`);
-  process.exit(bad.length ? 1 : 0);
+  process.stdout.write("", () => process.exit(bad.length ? 1 : 0));
 }
 await main();

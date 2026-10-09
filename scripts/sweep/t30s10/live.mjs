@@ -157,4 +157,4 @@ if (LEDGER) {
 }
 const bad = rows.filter((r) => r.mark === "❌");
 if (!LEDGER) console.log(`\n${bad.length ? "✗ FAIL" : "✓ PASS"} — ${rows.length} driven checks · ${bad.length} ❌`);
-process.exit(bad.length ? 1 : 0);
+process.stdout.write("", () => process.exit(bad.length ? 1 : 0));
