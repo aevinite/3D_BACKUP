@@ -344,6 +344,17 @@ const editErrMsg = (reason?: string) =>
   : reason === "price_required" ? "That dish needs a price typed in before it can be added."
   : (reason || "Couldn't edit the order.");
 
+// ── A CANCELLED TICKET STAYS CANCELLED UNTIL SOMEBODY RESTORES IT (sweep #10 T13, item 1) ───────
+// There is ONE way back from a cancel, and it is on the manager panel: Restore (PATCH /orders/:id →
+// 'received' on /api/editor — a 30-minute window, and `order_uncancel` in the Activity log). The
+// waiter's handheld has no restore of its own, so every door here that would move a cancelled
+// ticket's status refuses instead: orders/:id/accept, items/:id/status (both recompute the ticket's
+// status), and orders/:id/serve-all (refused since 2026-08-04, in its own words). Word for word the
+// manager route's sentence, so one refusal reads the same whichever panel produced it.
+// docs/COMPLIANCE-GUARDRAILS.md §3: a cancel/restore pair must never move a sale unobserved.
+// Guarded by scripts/verify-tablet-twin-rules.mjs (npm run verify:tablet-twins).
+const VOIDED_MSG = "That ticket was cancelled — restore it first if it should go back to the kitchen.";
+
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
 type Ctx = { params: Promise<{ path?: string[] }> };
@@ -1808,6 +1819,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "status") {
       const status = body && body.status;
       if (!["received", "preparing", "ready", "served"].includes(status)) return err("invalid status");
+      // A CANCELLED TICKET STAYS CANCELLED (sweep #10 T13, item 1). This handler rewrites the
+      // order's status from its dishes below, so a dish tapped on a ticket a colleague had just
+      // cancelled turned the whole ticket back into 'preparing' or 'served' — back on the bill, back
+      // in the kitchen, and nothing in the Activity log. The manager's twin was given exactly this
+      // refusal as sweep #10 T10 item 1; the waiter's handheld, the screen most often left showing a
+      // stale tile, was not. Asked first, before anything is written. See VOIDED_MSG near the top of the file.
+      const owner = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
+      if (!owner) return err("That dish isn't on this restaurant's board any more — refresh and try again.", 404);
+      if (owner.order_id) {
+        const ord = (await sb.from("orders").select("status").eq("id", owner.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
+        if (ord?.status === "cancelled") return err(VOIDED_MSG, 409);
+      }
       const patch: any = { status };
       // Serving stamps served_at; sending a dish BACK (undo a mis-tap) must clear it
       // again, or the row keeps a stale "served at" time (owner undo bar, 2026-07-22).
@@ -1815,13 +1838,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Only order_id + session_id are needed below; the client discards the body → no full row.
       // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
       // this is the only tenant boundary — stops a foreign dish/order id being advanced.
-      // Item 12 (sweep #10 T10 round 2): ask the dish's ORDER first — this handler rewrites that order's
-      // status from its dishes below, so on a cancelled ticket it would quietly revive it.
-      { const own = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
-        if (own && own.order_id) {
-          const ord = (await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
-          if (ord && ord.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409);
-        } }
+      // (Item 12 of sweep #10 T10 round 2 added this same ask here in parallel; the one above is kept.)
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id, session_id"));
       const item = updated[0];
       // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS (sweep 2026-08-05). The update is scoped by
@@ -1849,9 +1866,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // orders/:id/accept — accept a (often phone/online) order: everything not yet
     // served → preparing, so it shows up on the kitchen pass. Mirrors the kitchen.
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("items, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't there anymore — refresh.", 404);
-      if (cur.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409); // sweep #10 T10 round 2, item 12 — a cancelled ticket comes back only through Restore (the manager route's VOIDED_MSG rule)
+      // A cancelled ticket comes back only through Restore (see VOIDED_MSG) — accepting writes
+      // 'preparing' unconditionally, so a stale tile's ✓ Accept revived it. Closed in parallel by
+      // sweep #10 T10 round 2 item 12 and T13 item 1; one refusal kept.
+      if (cur.status === "cancelled") return err(VOIDED_MSG, 409);
       const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: client re-fetches → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
