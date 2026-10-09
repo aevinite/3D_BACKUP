@@ -21,7 +21,7 @@ import { effectiveTaxRate, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 // The rate ONE order was charged at is decided in the same file the printed bill uses, so this
 // path and the paper can never answer differently — see orderTaxRate's own note for why it moved.
 import BILLDOC from "@/public/panels/billdoc.js";
-import { BUSY_MESSAGE, refusalStatus } from "@/lib/dbRefusal";
+import { BUSY_MESSAGE, refusalStatus, pgError } from "@/lib/dbRefusal";
 
 export type SplitLeg = {
   amount: number;
@@ -392,9 +392,18 @@ export async function reverseSplitLegs(
 ): Promise<{ reversed: number; amount: number }> {
   const { rid, sessionId, since } = opts;
   // BOUNDED below (T25 round 2, item 31): 500 part-payments on one table is far past anything real.
-  const live = (await sb.from("session_payments").select("id, amount")
+  // A FAILED READ IS NOT "NOTHING TO REVERSE" (sweep #10 T30 round 3, item 27, 2026-10-09). Only
+  // `.data` was kept, so a read that failed answered { reversed: 0 } and the bill went back to
+  // unpaid with its parts still counted as collected — the drawer asked for the same money twice.
+  const read = await sb.from("session_payments").select("id, amount")
     .eq("session_id", sessionId).eq("restaurant_id", rid)
-    .is("reversed_at", null).gte("created_at", since).limit(500)).data as { id: string; amount: number }[] | null;
+    .is("reversed_at", null).gte("created_at", since).limit(500);
+  if (read.error) {
+    const e = pgError(read.error);
+    e.message = `couldn't read the payment legs to reverse them: ${e.message}`;
+    throw e;
+  }
+  const live = read.data as { id: string; amount: number }[] | null;
   const ids = (live || []).map((l) => l.id);
   if (!ids.length) return { reversed: 0, amount: 0 };
   const amount = Math.round((live || []).reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100;

@@ -13,7 +13,7 @@
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { loginAs } from "../login.mjs";
 import { requireUp } from "../appUp.mjs";
@@ -181,6 +181,48 @@ try {
       const off = await call(ctx, "POST", `${pre}/orders/${ord3.id}/allergies`, { allergies: base, reason_note: "T30 round 3: taking the test allergy off again" });
       R3("lib/orderAllergies.ts", `${who}: taking it off (with a reason) saves, and every dish is EXACTLY as it started — same marks, same removed-flag`, off.status === 200 && JSON.stringify(await dishes()) === JSON.stringify(start) && !(await lineOf()).includes(TEST_ALG), `status ${off.status}`);
     }
+  }
+
+  // ── ROUND 3: a tap sent twice runs ONCE (lib/idempotency.ts), driven on the same allergy line ──
+  // Same archived order, same test allergy, taken off again at the end (and by the finally).
+  if (ord3) {
+    const start = await dishes();
+    const aid = `t30-r3-${randomUUID()}`;
+    const t1 = (await sql("select now()::text t"))[0].t;
+    const h = { "X-LFH-Action-Id": aid };
+    const first = await call(mgr, "POST", `/api/editor/orders/${ord3.id}/allergies`, { allergies: [...base, TEST_ALG], reason_note: "T30 round 3: a tap sent twice" }, h);
+    const second = await call(mgr, "POST", `/api/editor/orders/${ord3.id}/allergies`, { allergies: [...base, TEST_ALG], reason_note: "T30 round 3: a tap sent twice" }, h);
+    const lines = await sql(`select count(*) n from staff_actions where order_id='${ord3.id}' and action='order_allergies' and created_at >= '${t1}'`);
+    R3("lib/idempotency.ts", "driven: the same tap sent twice (one action id) — the first saves, the second answers ok with duplicate:true", first.status === 200 && first.j?.ok === true && second.status === 200 && second.j?.duplicate === true, `${first.status}/${second.status} ${second.t.slice(0, 60)}`);
+    R3("lib/idempotency.ts", "…and the change ran ONCE: exactly one Activity line, not two", Number(lines[0].n) === 1, `${lines[0].n} lines`);
+    const other = await call(tab, "POST", `/api/tablet/orders/${ord3.id}/allergies`, { allergies: [...base, TEST_ALG], reason_note: "T30 round 3: a tap sent twice" }, h);
+    R3("lib/idempotency.ts", "…a DIFFERENT person sending that action id is told it is done — and is handed nothing of the first reply", other.status === 200 && (other.j?.duplicate === true || other.j?.ok === true) && Object.keys(other.j || {}).every((k) => ["ok", "duplicate"].includes(k)), other.t.slice(0, 80));
+    const back = await call(mgr, "POST", `/api/editor/orders/${ord3.id}/allergies`, { allergies: base, reason_note: "T30 round 3: taking the test allergy off again" }, { "X-LFH-Action-Id": `t30-r3-${randomUUID()}` });
+    R3("lib/idempotency.ts", "…and a NEW action id is a new tap: taking the allergy off runs, and every dish is exactly as it started", back.status === 200 && JSON.stringify(await dishes()) === JSON.stringify(start), `status ${back.status}`);
+    const bid = `t30-r3-${randomUUID()}`;
+    const refused = await call(mgr, "POST", `/api/editor/orders/${ord3.id}/allergies`, { allergies: [...base, TEST_ALG] }, { "X-LFH-Action-Id": bid });
+    const retry = await call(mgr, "POST", `/api/editor/orders/${ord3.id}/allergies`, { allergies: [...base, TEST_ALG], reason_note: "T30 round 3: the retry after a refusal" }, { "X-LFH-Action-Id": bid });
+    R3("lib/idempotency.ts", "driven: a REFUSED tap does not use up its action id — the same id, sent again with the reason, really saves (not a stale 'duplicate')", refused.status === 400 && retry.status === 200 && retry.j?.duplicate !== true && (await lineOf()).includes(TEST_ALG), `${refused.status} then ${retry.status} ${retry.t.slice(0, 60)}`);
+    await call(mgr, "POST", `/api/editor/orders/${ord3.id}/allergies`, { allergies: base, reason_note: "T30 round 3: taking the test allergy off again" });
+    R3("lib/orderAllergies.ts", "…and after all of it the order and every dish are exactly as they started", JSON.stringify(await dishes()) === JSON.stringify(start) && !(await lineOf()).includes(TEST_ALG));
+  }
+
+  // ── ROUND 3: the owner's GST report, every period, rebuilt with the real buildFiling ───────────
+  // The report page builds its filing table in the browser from the reply's rows (app/owner/reports
+  // page.tsx → buildFiling). The same function is run here on the same reply, for every period the
+  // route accepts, and every way the table can fail to add up is checked.
+  const TF = await import(pathToFileURL(join(root, "lib/taxFiling.ts")).href);
+  for (const range of ["today", "yesterday", "week", "7d", "30d", "month", "lastmonth", "12m", "fy", "all"]) {
+    const rr = await call(own, "GET", `/api/owner/reports?type=tax&range=${range}&rid=${FH}`);
+    const tt = rr.j?.totals || {}; const comps = rr.j?.tax?.components || []; const rws = Array.isArray(rr.j?.rows) ? rr.j.rows : [];
+    const lines = comps.map((c) => ({ label: c.label, rate: Number(c.rate) }));
+    const f = TF.buildFiling(lines.length ? rws.filter((r) => r.tax > 0) : [], lines, (r) => r.tax);
+    const cents = (x) => Math.round(Number(x) * 100);
+    R3("lib/taxFiling.ts", `GST report "${range}": answers 200 with finite money, ${rws.length} period rows`, rr.status === 200 && !!rr.j?.tax && !/NaN|Infinity/.test(rr.t), `status ${rr.status}`);
+    R3("lib/taxFiling.ts", `GST report "${range}": the CGST + SGST amounts add up to the total tax, to the paisa`, comps.length >= 2 && cents(comps.reduce((a, c) => a + Number(c.amount || 0), 0)) === cents(tt.tax), `${comps.map((c) => c.amount).join(" + ")} vs ${tt.tax}`);
+    R3("lib/taxFiling.ts", `GST report "${range}": the period rows' tax adds up to the total (nothing lost between the rows and the tile)`, Math.abs(cents(rws.reduce((a, r) => a + Number(r.tax || 0), 0)) - cents(tt.tax)) <= 1, `${rws.reduce((a, r) => a + Number(r.tax || 0), 0).toFixed(2)} vs ${tt.tax}`);
+    R3("lib/taxFiling.ts", `GST report "${range}": the filing table's grand total is the tax tile rounded to the rupee, and its rows add up to it`, f.total === Math.round(Number(tt.tax) || 0) && f.rows.reduce((a, r) => a + r.tax, 0) === f.total, `filing ${f.total} · tile ${tt.tax}`);
+    R3("lib/taxFiling.ts", `GST report "${range}": every row's CGST + SGST equals that row, and the columns add up to the grand total — none negative`, f.rows.every((r) => cents(r.parts.reduce((a, x) => a + x, 0)) === cents(r.tax) && r.parts.every((x) => x >= 0)) && cents(f.columnTotals.reduce((a, x) => a + x, 0)) === cents(f.total), `${f.rows.length} rows`);
   }
 } finally {
   await cleanupAllergy().catch(() => {});

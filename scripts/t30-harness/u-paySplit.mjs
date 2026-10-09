@@ -160,7 +160,10 @@ world({ session_payments: [{ id: "l1", session_id: "s1", restaurant_id: RID, amo
 world({ session_payments: [{ id: "l1", session_id: "s1", restaurant_id: RID, amount: "x", reversed_at: null, created_at: "2026-10-09T10:00:00Z" }] });
 { const r = await P.reverseSplitLegs(globalThis.__sbAdmin, { rid: RID, sessionId: "s1", since: "2026-10-09" }); t("reverseSplitLegs: a junk amount counts as ₹0 in the total, never NaN", r.amount === 0 && r.reversed === 1); }
 world({ session_payments: [{ id: "l1", session_id: "s1", restaurant_id: RID, amount: 5, reversed_at: null, created_at: "2026-10-09T10:00:00Z" }] }); W.FAIL["session_payments:select"] = { message: "down" };
-{ const r = await P.reverseSplitLegs(globalThis.__sbAdmin, { rid: RID, sessionId: "s1", since: "2026-10-09" }); t("reverseSplitLegs: if the read of the parts fails, nothing is reversed and nothing is written", r.reversed === 0 && W.WRITES.length === 0); }
+// RE-STATED in round 3 (item 27): this row used to bless the silent { reversed: 0 } answer — the very
+// fault item 27 fixes (the bill went back to unpaid with its parts still counted). A failed read now THROWS.
+{ let threw = null; try { await P.reverseSplitLegs(globalThis.__sbAdmin, { rid: RID, sessionId: "s1", since: "2026-10-09" }); } catch (e) { threw = e; }
+  t("reverseSplitLegs: if the read of the parts fails it THROWS (never 'nothing to reverse') and nothing is written", !!threw && /couldn't read the payment legs/.test(threw.message) && W.WRITES.length === 0, threw && threw.message); }
 // branches the first pass left unrun (coverage.mjs)
 base([ord()]); W.FAIL["orders:select"] = { code: "57014" };
 { const r = await settle(two()); t("item 4: a failed read whose error has no message still gives the busy reply", !r.ok && r.status === 503); }

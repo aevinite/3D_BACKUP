@@ -300,3 +300,30 @@ t("splitTax item 26: every split that was already right is unchanged — CGST/SG
   for (const rates of [[2.5, 2.5], [9, 9], [6, 6], [2.5, 2.5, 1]]) for (let p = 0; p <= 300000; p++) if (F.splitTax(rates, p / 100).join() !== old(rates, p / 100).join() && old(rates, p / 100).every((x) => x >= 0)) return false; return true; })());
 await prop("splitTax: a negative target (a refund) never gets a line pointing the other way, and still adds up exactly", 30000, (R) => ({ rates: ratesOf(R), target: -pick(R, [int(R, 1, 5) / 100, paise(R, 3), int(R, 1, 50000)]) }), ({ rates, target }) => {
   const p = F.splitTax(rates, target); return (p.every((x) => x <= 0) && eqp(p.reduce((a, x) => a + x, 0), target)) || JSON.stringify(p); });
+
+// ═══ appended in round 3: item 27 — undoing a bill paid in parts ═══════════════════════════════════
+const { readFileSync: __rf } = await import("node:fs"); const { join: __j } = await import("node:path"); const { root: __root } = await import("./hooks.mjs");
+const SRC = (p) => __rf(__j(__root, p), "utf8");
+world({ session_payments: [{ id: "L1", session_id: "s1", restaurant_id: "R", amount: 100, reversed_at: null, created_at: "2026-10-09T10:00:00Z" }] }); W.FAIL["session_payments:select"] = { code: "57014", message: "canceling statement due to statement timeout" };
+{ let e = null; try { await PS.reverseSplitLegs(sb, { rid: "R", sessionId: "s1", since: "2026-10-09T09:00:00Z" }); } catch (x) { e = x; }
+  t("item 27: a FAILED read of the parts throws (code kept, so the screen says busy) — it is never read as 'nothing to reverse'", !!e && e.code === "57014" && /couldn't read the payment legs/.test(e.message) && DB.refusalStatus(e) === 503, e && e.message);
+  t("item 27: …and nothing was written", W.WRITES.length === 0 && W.FIX.session_payments[0].reversed_at === null); }
+await prop("reverseSplitLegs undoes EXACTLY this bill's live parts inside the window — not a reversed one, an older one, another bill's or another restaurant's — and adds them up", 3000, (R) =>
+  Array.from({ length: int(R, 0, 14) }, (_, i) => ({ id: `L${i}`, session_id: pick(R, ["s1", "s1", "s2"]), restaurant_id: pick(R, ["R", "R", "R", "OTHER"]), amount: paise(R, 3000), reversed_at: R() < 0.2 ? "2026-10-09T09:30:00Z" : null, created_at: pick(R, ["2026-10-09T08:00:00Z", "2026-10-09T10:00:00Z", "2026-10-09T10:20:00Z"]) })),
+  async (legs) => {
+    world({ session_payments: legs }); const want = legs.filter((l) => l.session_id === "s1" && l.restaurant_id === "R" && !l.reversed_at && l.created_at >= "2026-10-09T09:00:00Z");
+    const r = await PS.reverseSplitLegs(sb, { rid: "R", sessionId: "s1", since: "2026-10-09T09:00:00Z", actor: "Asha", reason: "refund" });
+    const now = new Map(W.FIX.session_payments.map((l) => [l.id, l]));
+    const ok = r.reversed === want.length && eqp(r.amount, want.reduce((a, l) => a + l.amount, 0)) && legs.every((l) => (want.includes(l) ? !!now.get(l.id).reversed_at && now.get(l.id).reversed_by === "Asha" && now.get(l.id).reversed_reason === "refund" : now.get(l.id).reversed_at === l.reversed_at));
+    const again = await PS.reverseSplitLegs(sb, { rid: "R", sessionId: "s1", since: "2026-10-09T09:00:00Z" });
+    return (ok && again.reversed === 0 && again.amount === 0) || `${r.reversed}/${want.length} reversed, again ${again.reversed}`;
+  });
+t("item 27: the waiter tablet undoes the parts BEFORE it marks the bill unpaid (a failure leaves it paid, so Undo can be tapped again)", (() => {
+  const s = SRC("app/api/tablet/[...path]/route.ts"); const rev = s.indexOf("await reverseSplitLegs(sb, {"); const unpay = s.indexOf('if (otherIds.length) must(await sb.from("orders").update(base)');
+  return rev > 0 && unpay > rev && unpay - rev < 2500; })());
+t("item 27: …and the manager route does the same — the parts are undone before the bill's update is written", (() => {
+  const s = SRC("app/api/editor/[...path]/route.ts"); const rev = s.indexOf("const legs = await reverseSplitLegs(sb, {"); const upd = s.indexOf('must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid));', rev);
+  return rev > 0 && upd > rev; })());
+world({ session_payments: [{ id: "L1", session_id: "s1", restaurant_id: "R", amount: 100, reversed_at: null, created_at: "2026-10-09T10:00:00Z" }] }); W.FAIL["session_payments:select"] = "nodata";
+{ const r = await PS.reverseSplitLegs(sb, { rid: "R", sessionId: "s1", since: "2026-10-09T09:00:00Z" });
+  t("item 27: a read that answers with neither rows nor an error is no parts — { 0, 0 }, nothing written (only a real error throws)", r.reversed === 0 && r.amount === 0 && W.WRITES.length === 0, JSON.stringify(r)); }

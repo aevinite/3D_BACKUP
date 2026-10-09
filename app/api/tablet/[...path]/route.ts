@@ -2571,6 +2571,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // show a green "Bill reopened" toast while NOTHING changed — a silent money mismatch.
       // Match the editor's behaviour: tell the user plainly it can't be reopened here. (sweep C2)
       if (!paid.length) return err("This bill was settled more than 30 minutes ago and can no longer be reopened here — ask an admin to correct it.", 409);
+      // A split settle recorded payment LEGS in session_payments. They are REVERSED, not deleted
+      // (mig 285): this used to be a hard DELETE, which erased the only record of what had been
+      // collected and in what parts — while the manager panel's twin left the legs standing and
+      // went on claiming the money was in. One shared helper now, so both read the same.
+      // It runs FIRST, before the bill is marked unpaid (item 27, 2026-10-09 — the manager route
+      // already did): if it fails, the bill is still paid and Undo can simply be tapped again. The
+      // other way round, a failure left the bill unpaid with its parts still counted, and the
+      // retry found no paid bill to reopen — stuck for good.
+      // The return value is not read — reverseSplitLegs does the writing. (Named nothing rather
+      // than a variable eslint has to warn about; T4 sweep, 2026-08-11.)
+      await reverseSplitLegs(sb, {
+        rid, sessionId: openSess.id, since: cutoff,
+        actor: actor?.name || actor?.username || null,
+        reason: String((body && body.reason) || "undo settle (within the 30-minute window)").slice(0, 200),
+      });
       // Common revert: unpaid again + clear the paid stamp and HOW it was paid.
       // tip:0 — reverting the settle un-collects the payment, and the TIP went with it; leaving
       // it makes a re-pay-without-tip keep the old tip, which the Z-report counts again. (sweep C2)
@@ -2582,17 +2597,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const otherIds = paid.filter((o) => o.payment_method !== ON_THE_HOUSE_METHOD).map((o) => o.id);
       if (otherIds.length) must(await sb.from("orders").update(base).in("id", otherIds).eq("restaurant_id", rid).select("id"));
       if (onHouseIds.length) must(await sb.from("orders").update({ ...base, discount: 0, discount_note: null }).in("id", onHouseIds).eq("restaurant_id", rid).select("id"));
-      // A split settle recorded payment LEGS in session_payments. They are REVERSED, not deleted
-      // (mig 285): this used to be a hard DELETE, which erased the only record of what had been
-      // collected and in what parts — while the manager panel's twin left the legs standing and
-      // went on claiming the money was in. One shared helper now, so both read the same.
-      // The return value is not read — reverseSplitLegs does the writing. (Named nothing rather
-      // than a variable eslint has to warn about; T4 sweep, 2026-08-11.)
-      await reverseSplitLegs(sb, {
-        rid, sessionId: openSess.id, since: cutoff,
-        actor: actor?.name || actor?.username || null,
-        reason: String((body && body.reason) || "undo settle (within the 30-minute window)").slice(0, 200),
-      });
       // The quick undo bar sends no reason; the explicit "Mark unpaid" button sends one
       // (a refund/correction) — record it for the money-accountability trail either way.
       const reason = String((body && body.reason) || "").trim().slice(0, 120);
