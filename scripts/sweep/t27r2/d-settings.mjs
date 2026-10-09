@@ -14,6 +14,29 @@ export default function section(c) {
   const P = "/api/admin/restaurants/settings";
   sec("D · one restaurant's operational settings");
   const save = (body) => req(P, { method: "POST", body: { restaurant_id: FH, ...body } });
+
+  // TABLE 1'S QR CODE IS PUT BACK (sweep #10 T39 item 80). The three regen phases below each mint
+  // French House table 1 a brand-new permanent code, and the harness's snapshot covers the settings
+  // row and the permission columns — not `table_qr_codes`. So every run left table 1 on a code no
+  // printed sticker carried. The code as found is read once, before the first regen, and written
+  // back after the last one; `restoreOnExit` covers a run that is stopped in between.
+  const QR1 = `table_qr_codes?restaurant_id=eq.${FH}&table_number=eq.1`;
+  let qr1;  // undefined = not read yet · null = table 1 had no code · string = the code as found
+  const keepQr1 = async () => {
+    if (qr1 !== undefined) return;
+    const r = await sq(`${QR1}&select=code`);
+    if (r.status !== 200) throw new Error(`could not read table 1's QR code before changing it: ${r.status}`);
+    qr1 = r.json?.[0]?.code ?? null;
+    c.restoreOnExit("French House · table 1's QR code", putQr1Back);
+  };
+  const putQr1Back = async () => {
+    if (qr1 === undefined) return true;
+    const r = qr1 === null
+      ? await sq(QR1, { method: "DELETE" })
+      : await sq(QR1, { method: "PATCH", body: JSON.stringify({ code: qr1 }) });
+    if (r.status >= 300) console.error(`  ⚠️ table 1's QR code was NOT put back (${r.status}) — it should be ${qr1}`);
+    return r.status < 300;
+  };
   const get = (cols) => sq(`settings?select=${cols}&restaurant_id=eq.${FH}`).then((q) => q.json?.[0] || {});
 
   // ── the file's own rules ─────────────────────────────────────────────────────────────────────
@@ -214,11 +237,11 @@ export default function section(c) {
     "try to save a column the route does not own",
     async () => { const before = (await sq(`settings?select=features&restaurant_id=eq.${FH}`)).json?.[0]?.features; await save({ features: { hacked: true } }); const after = (await sq(`settings?select=features&restaurant_id=eq.${FH}`)).json?.[0]?.features; return JSON.stringify(before) === JSON.stringify(after); });
   phase("a new QR code for one table really replaces the old one", "regen and compare",
-    async () => { const before = (await req(`${P}?restaurant_id=${FH}`)).json.codes["1"]; const r = await req(P, { method: "POST", body: { restaurant_id: FH, action: "regen_code", table: 1 } }); return r.status === 200 && !!r.json?.code && r.json.code !== before; });
+    async () => { await keepQr1(); const before = (await req(`${P}?restaurant_id=${FH}`)).json.codes["1"]; const r = await req(P, { method: "POST", body: { restaurant_id: FH, action: "regen_code", table: 1 } }); return r.status === 200 && !!r.json?.code && r.json.code !== before; });
   phase("…and the new code is in the unmistakable alphabet", "test it",
     async () => { const r = await req(P, { method: "POST", body: { restaurant_id: FH, action: "regen_code", table: 1 } }); return /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/.test(r.json?.code || ""); });
   phase("…and it is written into the record, naming the table", "read staff_actions",
-    async () => { const since = new Date(Date.now() - 20000).toISOString(); await req(P, { method: "POST", body: { restaurant_id: FH, action: "regen_code", table: 1 } }); return (await c.actionsSince(since, ["table_qr_regen"])).some((r) => /table 1 got a new QR code/.test(r.detail || "")); });
+    async () => { const since = new Date(Date.now() - 20000).toISOString(); await req(P, { method: "POST", body: { restaurant_id: FH, action: "regen_code", table: 1 } }); const logged = (await c.actionsSince(since, ["table_qr_regen"])).some((r) => /table 1 got a new QR code/.test(r.detail || "")); await putQr1Back(); return logged; });
   phase("a table number that is not a number is refused", 'regen_code for table "patio"',
     async () => (await req(P, { method: "POST", body: { restaurant_id: FH, action: "regen_code", table: "patio" } })).status === 400);
   phase("table zero is refused, because there is no table zero", "regen_code for table 0",

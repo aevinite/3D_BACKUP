@@ -781,6 +781,25 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     open.join("\n    ") + "\n    Before the soft delete: PATCH { status: \"cancelled\", cancelled_at } on its own unpaid, unbilled orders.");
 }
 
+// ── 18. A TEST THAT RENEWS A TABLE'S QR CODE PUTS THE OLD ONE BACK (sweep #10 T39 item 80) ────
+// A table's QR code is PERMANENT — it is printed on the sticker on the table. The admin settings
+// suite renewed French House table 1's code three times per run and its harness put back only the
+// settings row, so every run left table 1 on a code no sticker carried. A script that sends
+// `action: "regen_code"` must read the code first and write it back into `table_qr_codes`, with a
+// `restoreOnExit` for a run that is stopped in between.
+{
+  const open = [];
+  for (const f of files) {
+    if (f === "scripts/verify-test-safety.mjs" || f.startsWith("scripts/sweep/t39s10/")) continue;
+    const src = read(f).replace(/\/\/.*$/gm, "");
+    if (!/action:\s*["']regen_code["']/.test(src)) continue;
+    if (!/table_qr_codes/.test(src) || !/restoreOnExit\(/.test(src)) open.push(f);
+  }
+  check("a test that renews a table's QR code puts the old code back",
+    open.length === 0,
+    open.join("\n    ") + "\n    Read the code from table_qr_codes before the first regen_code, PATCH it back after the last, and register the put-back with restoreOnExit.");
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
