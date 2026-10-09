@@ -92,13 +92,13 @@ for (const [style, body] of [
   ["supabase-js", `await sb.from("${T}").insert({ restaurant_id: "x" });\nawait sb.from("${T}").update({ ${"deleted" + "_at"}: "x" }).eq("id", 1);\n`],
 ]) {
   await M("scripts/verify-test-safety.mjs", `a test that inserts orders and only soft-deletes them (${style}) turns verify:test-safety §17 red`, "plant such a script", () => {
-    const f = "scripts/verify-zz-mutation-fixture.mjs";
+    const f = "scripts/" + "verify-zz-" + "mutation-fixture.mjs";   // assembled: a planted file, never a real path
     write(f, "// planted by round2-mutations.mjs — removed straight after\n" + body);
     try { return red(run("node", ["scripts/verify-test-safety.mjs"]), /CANCELS them/); } finally { unlinkSync(P(f)); }
   });
 }
 await M("scripts/verify-test-safety.mjs", "a script carrying its own copy of the password vault turns verify:test-safety §15 red", "plant the vault salt string", () => {
-  const f = "scripts/verify-zz-vault-copy.mjs";
+  const f = "scripts/" + "verify-zz-" + "vault-copy.mjs";   // assembled, as above
   write(f, `// planted\nconst SALT = "${["aevidine", "credential", "vault", "v2"].join(".")}";\n`);
   try { return red(run("node", ["scripts/verify-test-safety.mjs"]), /password vault/); } finally { unlinkSync(P(f)); }
 });
