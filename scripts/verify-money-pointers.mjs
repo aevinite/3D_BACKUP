@@ -134,5 +134,27 @@ console.log("\nMONEY POINTERS · every pointer in the money and compliance files
     "the playbook's N+1 anchor no longer leads to the per-item update loop — either the loop was batched (tick the entry) or the sentence moved");
 }
 
+// ── 6. An index named in these files still exists — the last migration to touch it CREATES it ─────
+// (item 10.) The playbook said the analytics were covered by idx_orders_created_at and
+// idx_orders_restaurant_created; migrations 155 and 267 had dropped both in favour of covering
+// indexes. An index name in a doc is a claim about the database, so it is checked like one: walk the
+// migrations in order and the final word on each named index must be a CREATE, not a DROP.
+{
+  const named = [...new Set(FILES.flatMap((f) => [...read(f).matchAll(/`(idx_[a-z0-9_]+)`/g)].map((m) => m[1])))];
+  const gone = named.filter((ix) => {
+    let state = null;
+    for (const m of migs) {
+      const t = migText.get(m);
+      for (const hit of t.matchAll(new RegExp(String.raw`(CREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+CONCURRENTLY)?(?:\s+IF\s+NOT\s+EXISTS)?\s+${ix}\b)|(DROP\s+INDEX(?:\s+CONCURRENTLY)?(?:\s+IF\s+EXISTS)?\s+(?:public\.)?${ix}\b)`, "gi"))) {
+        state = hit[1] ? "created" : "dropped";
+      }
+    }
+    return state !== "created";
+  });
+  check(named.length >= 1 && !gone.length,
+    `all ${named.length} index name(s) these files cite are still created by the migrations (${named.join(", ")})`,
+    `cited but dropped (or never created) by the migrations: ${gone.join(", ")}`);
+}
+
 console.log(`\n${failed ? "✗ FAIL" : "✓ PASS"} — ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
