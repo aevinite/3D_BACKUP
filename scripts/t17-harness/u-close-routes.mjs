@@ -2,9 +2,9 @@
 // touches — staff_users, staff_actions, rate_limit_events, login_throttle, fail_count, restaurants — lives in the in-memory
 // stub (./sb.mjs) and is wiped by world() before each check, so no wrong password here ever reaches a database, a limit
 // counter or the owner's phone (any fetch a check has not replaced is refused).
-import { G, world, person, sign, req, t, save, quiet, RID_A, RID_B, ADMIN_PW, sha, randomUUID } from "./r5lib.mjs";
+import { G, world, person, sign, req, t, save, quiet, RID_A, RID_B, ADMIN_PW, sha } from "./r5lib.mjs";
 const ONLY = process.env.R5_ONLY || ""; const want = (f) => !ONLY || ONLY === f;
-const PA = await import("@/lib/panelAccess.ts"); const UA = await import("@/lib/userAuth.ts");
+const PA = await import("@/lib/panelAccess.ts"); await import("@/lib/userAuth.ts");
 const adminTok = await sha(ADMIN_PW);
 const body = async (res) => { try { return await res.clone().json(); } catch { return null; } };
 const logs = (a) => (G.FIX.staff_actions || []).filter((r) => !a || r.action === a);
@@ -49,7 +49,7 @@ if (want("app/api/panel-login/route.ts")) { const f = "app/api/panel-login/route
   const keep = process.env.TURNSTILE_SECRET_KEY; process.env.TURNSTILE_SECRET_KEY = "r5-ts";
   world({ staff_users: [m] }); globalThis.fetch = async () => new Response(JSON.stringify({ success: true }), { status: 200 });
   const ts = await call({ username: "cl1", password: "pw-1", "cf-turnstile-response": "tok" });
-  globalThis.fetch = async (u) => { throw new TypeError("r5: network refused"); };
+  globalThis.fetch = async () => { throw new TypeError("r5: network refused"); };
   if (keep === undefined) delete process.env.TURNSTILE_SECRET_KEY; else process.env.TURNSTILE_SECRET_KEY = keep;
   t(f, "with the human check on and a PASSING token, the sign-in goes through", ts.status === 200);
 }

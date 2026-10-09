@@ -2,7 +2,7 @@
 // touches — staff_users, staff_actions, rate_limit_events, login_throttle, fail_count, restaurants — lives in the in-memory
 // stub (./sb.mjs) and is wiped by world() before each check, so no wrong password here ever reaches a database, a limit
 // counter or the owner's phone (any fetch a check has not replaced is refused).
-import { G, world, person, sign, req, t, save, quiet, RID_A, RID_B, randomUUID } from "./r5lib.mjs";
+import { G, world, person, sign, req, t, save, quiet, RID_A } from "./r5lib.mjs";
 const f = "app/api/panel-profile/route.ts"; const PP = await import("@/app/api/panel-profile/route.ts"); const UA = await import("@/lib/userAuth.ts");
 process.env.CREDENTIAL_VAULT_KEY = "r5-vault-key-0123456789abcdef";
 const body = async (res) => { try { return await res.clone().json(); } catch { return null; } };
@@ -19,7 +19,7 @@ t(f, "the change and its log line say nothing of either password", !JSON.stringi
 world({ staff_users: [pw] }); G.FAIL_NTH["staff_users:select"] = { at: 2, mode: "empty" };
 t(f, "an account whose stored password row has vanished meanwhile: the current password is 'wrong' (nothing to match)", (await POST(pw, { currentPassword: "Old-Pass-1", newPassword: "New-Pass-2" })).status === 403);
 world({ staff_users: [pw] }); G.FAIL_NTH["staff_users:select"] = { at: 2, mode: "throw" };
-const thr = await quiet(() => POST(pw, { currentPassword: "Old-Pass-1", newPassword: "New-Pass-2" }));
+await quiet(() => POST(pw, { currentPassword: "Old-Pass-1", newPassword: "New-Pass-2" }));
 t(f, "a stored-password read that THROWS (not just fails) does not change the password", G.FIX.staff_users[0].password_hash === pw.password_hash);
 const pr = await person({ role: "tablet", username: "prof", profile: { notes: "N", id_verified: true } });
 world({ staff_users: [pr], settings: ON }); G.FAIL_NTH["staff_users:select"] = { at: 2, mode: "error" };
@@ -53,7 +53,7 @@ const nm = await person({ role: "tablet", username: "u1", name: "U1", phone: "1"
 world({ staff_users: [nm] }); await POST(nm, { name: "Ünïcode Náme" });
 t(f, "a name in other letters (accents) keeps them; the sign-in name is its lower-case", G.FIX.staff_users[0].name === "Ünïcode Náme" && G.FIX.staff_users[0].username === "ünïcode náme");
 world({ staff_users: [nm] }); G.FAIL["staff_users:update"] = "error";
-const sv = await quiet(() => POST(nm, { name: "New" }));
+await quiet(() => POST(nm, { name: "New" }));
 t(f, "a rename whose write fails changes nothing and logs no change", G.FIX.staff_users[0].name === "U1" && logs("profile_update").length === 0);
 const mp = await person({ role: "manager", can_self_set_pin: true });
 for (const [pin, st] of [["12345678", 200], ["1234", 200], ["0000", 200], ["١٢٣٤", 400]]) { world({ staff_users: [mp] }); t(f, `the PIN “${pin}” answers ${st}`, (await POST(mp, { pin })).status === st); }

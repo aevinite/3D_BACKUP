@@ -56,7 +56,6 @@ const tf = await import(pathToFileURL(join(root, "lib/taxFiling.ts")).href);
 const tx = await import(pathToFileURL(join(root, "lib/tax.ts")).href);
 const BILLDOC = (await import(pathToFileURL(join(root, "public/panels/billdoc.js")).href)).default;
 
-const srcReadGuard = read("lib/readGuard.ts");
 const srcRefusal = read("lib/dbRefusal.ts");
 const srcClash = read("lib/clash.ts");
 const srcPaySplit = read("lib/paySplit.ts");
@@ -101,8 +100,6 @@ const tsFiles = [];
 // BLOCK 1 — RE-RUN: the 37 existing rows the three T24 guards do not execute
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 const R = (id, what, fn) => check(id, what, "re-run · sweep #9 T34", fn);
-const guestMenu = read("app/menu/page.tsx") + read("components/CartPanel.tsx") + read("lib/menu.ts")
-  + tsFiles.filter((f) => /guest|cart|menu/i.test(f)).map(read).join("\n");
 const editorRoute = read("app/api/editor/[...path]/route.ts");
 const tabletRoute = read("app/api/tablet/[...path]/route.ts");
 const appJs = read("public/panels/editor/app.js");

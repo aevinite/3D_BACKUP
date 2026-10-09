@@ -262,12 +262,12 @@ want(/turbopack:\s*\{[\s\S]{0,200}root:\s*path\.(join|resolve)\(/.test(NEXT),
 /* ── the lint warning count can only go down (sweep #10 T39 item 65) ─────────────────────────── */
 // 1,132 warnings (1,101 plus 31 in scripts/t17-harness, merged the same day) had piled up because nothing stopped the next one. `--max-warnings` makes a new
 // one fail CI; this check stops the cap itself being quietly deleted or raised past the number it
-// was set at.
+// was set at. 115 → 70 on 2026-10-10 (item 83): the last 45 in scripts/, tests/, .github/ cleared.
 {
   const lint = String(JSON.parse(read("package.json")).scripts?.lint || "");
   const cap = Number((lint.match(/--max-warnings[= ](\d+)/) || [])[1]);
-  want(Number.isFinite(cap) && cap <= 115,
-    `the lint script caps warnings at ${cap} (it may only go down from 115)`,
+  want(Number.isFinite(cap) && cap <= 70,
+    `the lint script caps warnings at ${cap} (it may only go down from 70)`,
     `the lint script has no warning cap, or raised it: "${lint}"`,
     "Without the cap the warning count only ever grows; lower it when warnings are cleaned up, never raise it.");
 }

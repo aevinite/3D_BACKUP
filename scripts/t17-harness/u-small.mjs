@@ -2,7 +2,7 @@
 // touches — staff_users, staff_actions, rate_limit_events, login_throttle, fail_count, restaurants — lives in the in-memory
 // stub (./sb.mjs) and is wiped by world() before each check, so no wrong password here ever reaches a database, a limit
 // counter or the owner's phone (any fetch a check has not replaced is refused).
-import { G, world, req, t, save, quiet, RID_A, RID_B, ADMIN_PW, sha, refuseNet, NET } from "./r5lib.mjs";
+import { world, t, save, RID_A, RID_B, ADMIN_PW, sha, refuseNet, NET } from "./r5lib.mjs";
 import { rng, str, ascii, uni } from "./fz.mjs";
 const ONLY = process.env.R5_ONLY || "";
 const want = (f) => !ONLY || ONLY === f;

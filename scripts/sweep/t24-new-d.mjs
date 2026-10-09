@@ -2,10 +2,9 @@
 // actually returns and driven live for what a manager's screen actually gets.
 import { check, nid, F } from "./t24-run.mjs";
 
-const { src, GETBLK, endpointBlock, live, needLive, J, panel, chains } = F;
+const { endpointBlock, live, needLive, J } = F;
 const code = (t) => t.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 const B = (n) => code(endpointBlock(n));
-const GC = code(GETBLK);
 const count = (t, re) => (t.match(re) || []).length;
 
 const NOISE = /\[object Object\]|\bundefined\b|\bNaN\b|-->|\$\{/;

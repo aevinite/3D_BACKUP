@@ -3,7 +3,7 @@
 // stub (./sb.mjs) and is wiped by world() before each check, so no wrong password here ever reaches a database, a limit
 // counter or the owner's phone (any fetch a check has not replaced is refused).
 // Round 5 · checks written because a deliberate break SURVIVED the first mutation pass (the number = the survivor).
-import { G, world, person, sign, req, t, save, quiet, RID_A, RID_B, ADMIN_PW, sha, randomUUID, refuseNet, rootFile } from "./r5lib.mjs";
+import { G, world, person, sign, req, t, save, quiet, RID_A, ADMIN_PW, sha, randomUUID, refuseNet, rootFile } from "./r5lib.mjs";
 const ONLY = process.env.R5_ONLY || ""; const want = (f) => !ONLY || ONLY === f;
 const body = async (res) => { try { return await res.clone().json(); } catch { return null; } };
 const logs = (a) => (G.FIX.staff_actions || []).filter((r) => !a || r.action === a);

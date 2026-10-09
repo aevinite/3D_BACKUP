@@ -33,7 +33,7 @@ Kept honest by `npm run verify:pointers`: it fails if a guard named here has van
 | `npm run typecheck` | `tsc --noEmit`. **`npm run lint` does NOT check types** — they are separate gates. | nothing | no |
 | `npm run test` | `test:money` + `test:errors` + `test:netretry` + `test:units` — ~0.2s. | nothing | no |
 | `npm run test:netretry` | a read never cries "no internet" before a quiet retry has failed too, and a WRITE still goes out exactly once (owner, 2026-09-12). Drives the real `public/panels/netretry.js` and cross-checks `lib/netRetry.ts`. | nothing | no |
-| `npm run lint` | ESLint, with the warning count LOCKED at 115 (was 1,132; sweep #10 T39 item 66 cleared 1,061 in scripts/, tests/, .github/ — every one left is outside that area or in a file another session was editing) (`--max-warnings`, sweep #10 T39 item 65, 2026-10-09). A change that adds a warning fails; one that removes some should lower the number in package.json so it can only go down. | nothing | no |
+| `npm run lint` | ESLint, with the warning count LOCKED at 70 (was 1,132; sweep #10 T39 items 66 and 83 cleared every one in scripts/, tests/, .github/ — all 70 left are in the app's own app/, components/, lib/) (`--max-warnings`, sweep #10 T39 item 65, 2026-10-09). A change that adds a warning fails; one that removes some should lower the number in package.json so it can only go down. | nothing | no |
 | `npm run verify:static` | all 67 static guards (~100s; verify:panel-scope is ~85s of it). Runs **every** one and reports **every** failure — add `-- --quiet` for failures only. Inside `verify:push`. | nothing | no |
 | `npm run check:current` | is this folder level with `origin/main`? **Run before any audit or "X is broken" claim.** | nothing | no |
 

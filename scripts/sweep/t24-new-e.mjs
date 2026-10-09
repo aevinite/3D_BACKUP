@@ -2,12 +2,11 @@
 // filing — the two documents a manager signs and an inspector reads.
 import { check, nid, F } from "./t24-run.mjs";
 
-const { src, endpointBlock, live, needLive, J, panel, sql, FRENCH_HOUSE } = F;
+const { endpointBlock, live, needLive, J, panel, sql, FRENCH_HOUSE } = F;
 const code = (t) => t.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 const Z = code(endpointBlock("zreport"));
 const G = code(endpointBlock("gst-report"));
 const PANEL = code(panel);
-const count = (t, re) => (t.match(re) || []).length;
 
 
 // ── the Z-report ───────────────────────────────────────────────────────────────────────────────
