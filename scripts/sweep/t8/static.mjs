@@ -48,7 +48,8 @@ check("P61717","requirePanel checks the staff cookie FIRST, then the admin one",
   return (u>-1&&a>u)||"the admin branch runs before the staff branch";
 });
 check("P61718","requirePanel refuses a manager whose restaurant is in the recycle bin",()=>has(GATE,/!\(await isRestaurantDeleted\(u\.restaurant_id\)\)/));
-check("P61719","…and one whose restaurant has the manager panel switched off",()=>has(GATE,/await isPanelEnabled\(role, u\.restaurant_id\)/));
+/* Moved in sweep #10 T17 round 6, item 40 (owner 2026-10-09): the per-panel switch is retired and deleted; the gate now refuses a SWITCHED-OFF restaurant instead (panelDoor). */
+check("P61719","…and one whose restaurant is switched off (suspended) — the retired per-panel switch is gone",()=>has(GATE,/await panelDoor\(u\)/)&&!/isPanelEnabled/.test(GATE));
 check("P61720","an admin with no restaurant named for this tab goes back to the console",()=>has(GATE,/redirect\("\/aevinite"\);/));
 
 /* ═══════════ B · app/manager/page.tsx — the host page (P61721–P61790) ═══════════ */

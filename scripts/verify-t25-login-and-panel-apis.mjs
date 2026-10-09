@@ -212,10 +212,12 @@ check("P04664", "an owner with no owner-panel-enabled restaurant is refused with
 check("P04665", "the owner's entitlement is read UNCACHED at the door",
   // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
   has(CODE.panelLogin, "enabledOwnedRestaurantIds(u.id, false)"));
-check("P04666", "a binned restaurant blocks every non-owner role, before the panel check",
-  CODE.panelLogin.indexOf("isRestaurantDeleted(u.restaurant_id)") < CODE.panelLogin.indexOf("isPanelEnabled(u.role"));
-check("P04667", "a disabled panel refuses the login with an actionable sentence",
-  has(CODE.panelLogin, "This panel isn't enabled for your restaurant. Ask your admin to turn it on."));
+// Moved in sweep #10 T17 round 6, item 40 (owner 2026-10-09): the per-panel switch and its checks were deleted; the rule
+// that remains is the recycle bin + the suspension (item 30), re-checked the same way.
+check("P04666", "a binned restaurant blocks every non-owner role, before the suspension check",
+  CODE.panelLogin.indexOf("isRestaurantDeleted(u.restaurant_id)") > 0 && CODE.panelLogin.indexOf("isRestaurantDeleted(u.restaurant_id)") < CODE.panelLogin.indexOf("isRestaurantSuspended(u.restaurant_id)"));
+check("P04667", "the retired 'this panel isn't enabled' refusal is gone, and the switched-off refusal says who can help",
+  !has(CODE.panelLogin, "This panel isn't enabled for your restaurant") && !/isPanelEnabled/.test(CODE.panelLogin) && has(CODE.panelLogin, "error: DOOR_OFF"));
 check("P04668", "the login log row carries the person's OWN restaurant_id",
   // (sweep #10 T17 item 7: an owner's line is filed under a restaurant they OWN — the literal moved.)
   has(CODE.panelLogin, ": (u.restaurant_id ?? null),") && has(CODE.panelLogin, "await ownerLogRestaurant(u.id, [restaurantId, u.restaurant_id], ownedIds)"));
@@ -428,9 +430,10 @@ check("P11691", "roleSatisfies: owner covers everything, manager covers kitchen+
 check("P11692", "requireRole checks the STAFF cookie before the admin fallback",
   CODE.userAuth.indexOf("userFromCookie(req.cookies.get(USER_COOKIE)?.value)")
     < CODE.userAuth.lastIndexOf("tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)"));
-check("P11693", "requireRole re-checks the panel entitlement and the recycle bin on every request",
-  has(CODE.userAuth, "isPanelEnabledCached(u.role, u.restaurant_id)")
-  && has(CODE.userAuth, "isRestaurantDeleted(u.restaurant_id)"));
+// Moved in sweep #10 T17 round 6, item 40 (owner 2026-10-09): the per-panel switch and its checks were deleted; the rule
+// that remains is the recycle bin + the suspension (item 30), re-checked the same way.
+check("P11693", "requireRole re-checks the recycle bin and the suspension on every request",
+  has(CODE.userAuth, "isRestaurantSuspended(u.restaurant_id)") && has(CODE.userAuth, "isRestaurantDeleted(u.restaurant_id)") && !/isPanelEnabled/.test(CODE.userAuth));
 check("P11752", "userAuth never returns the sensitive failure reason to the person",
   (CODE.userAuth.match(/error: "[^"]+"/g) || []).every((e) => !/no_such_name|wrong_password|too_long/.test(e)));
 check("P11799", "the userAuth candidate loop is still capped",
@@ -996,8 +999,7 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   check("P161535", "each panel device is counted on its own; only a device with no cookie falls back to its address", dev === "dev-1" && ip.startsWith("ip:"), `${dev} / ${ip}`);
   check("P161536", "every database read is given the 8-second deadline (the deadline fetch is what the client uses)",
     /fetch\(input, \{ \.\.\.init, signal: init\?\.signal \?\? AbortSignal\.timeout\(DB_TIMEOUT_MS\) \}\)/.test(src("lib/supabaseAdmin.ts")) && /global: \{ fetch: withDeadline \}/.test(src("lib/supabaseAdmin.ts")));
-  const panels = await PA.getEnabledPanels("r1");
-  check("P161537", "the retired per-panel switch stays retired — every panel, the owner's included, is on", PA.PANEL_KEYS.every((k) => panels[k] === true));
+  check("P161537", "the retired per-panel switch is GONE (round 6, item 40) — no file can switch a staff app off any more", !("getEnabledPanels" in PA) && !("isPanelEnabled" in PA) && !("isPanelEnabledCached" in PA) && !/isPanelEnabled|getEnabledPanels/.test(["lib/userAuth.ts", "lib/panelGate.ts", "app/api/panel-login/route.ts", "app/r/[restaurant]/login/page.tsx"].map((f) => stripComments(read(f))).join("\n")));
   check("P161538", "the 'no secret on this site' message is words a waiter can read, not a setting name",
     / /.test(UA.NOT_SET_UP) && UA.NOT_SET_UP.length > 30 && !/[A-Z]{2,}_[A-Z]{2,}/.test(UA.NOT_SET_UP), UA.NOT_SET_UP);
 }
@@ -1381,15 +1383,16 @@ check("P78822", "the person only ever sees r.error, never r.reason",
 check("P78823", "an owner is checked against what they OWN, never against their home namespace",
   before(PL, 'if (u.role === "owner")', "enabledOwnedRestaurantIds(u.id, false)"));
 // Round 5, item 30 added the fourth refusal (a switched-off restaurant).
+// Moved in sweep #10 T17 round 6, item 40: the per-panel 'isn't enabled' refusal was deleted with the retired switch.
 check("P78824", "a refused owner login is recorded as login_denied, a different event from login_failed",
-  count(PL, /"login_denied"/g) === 4);
+  count(PL, /"login_denied"/g) === 3);
 check("P78825", "the binned-restaurant refusal names the recycle bin in the log",
   has(PL, "the restaurant is in the recycle bin"));
-check("P78826", "the disabled-panel refusal names the role in the log",
-  has(PL, "the ${u.role} panel is not enabled for this restaurant"));
+check("P78826", "the switched-off refusal names the suspension in the log (the disabled-panel one is gone)",
+  has(PL, "the restaurant is switched off (suspended)") && !has(PL, "panel is not enabled for this restaurant"));
 // Round 5, item 30 added the fourth (switched-off restaurant).
-check("P78827", "all four refusals answer 403, not 401 — the password was RIGHT",
-  count(PL, /\}, \{ status: 403 \}\)/g) === 4);
+check("P78827", "all three refusals answer 403, not 401 — the password was RIGHT",
+  count(PL, /\}, \{ status: 403 \}\)/g) === 3);
 check("P78828", "the successful sign-in is logged under the person's own role",
   has(PL, "await logAction(u.role, \"login\", {"));
 check("P78829", "the cookie's max age matches the signature's max age (7 days), so neither outlives the other",
@@ -1411,7 +1414,7 @@ check("P78836", "the not-a-person check and the turnstile check share ONE refusa
 check("P78837", "the turnstile answer is AWAITED (an un-awaited promise is always truthy)",
   has(PL, "await verifyTurnstile("));
 check("P78838", "…and so is every ladder/entitlement read on the success path",
-  count(PL, /await (enabledOwnedRestaurantIds|isRestaurantDeleted|isPanelEnabled)\(/g) === 3);
+  count(PL, /await (enabledOwnedRestaurantIds|isRestaurantDeleted|isRestaurantSuspended)\(/g) === 3);
 check("P78839", "the sign-in log carries the device, so 'which tablet was this' has an answer",
   has(PL, "device_id: deviceIdFrom(req)"));
 check("P78840", "nothing in this file writes the typed password anywhere",
@@ -1424,8 +1427,12 @@ const DOOR_SENTENCES = [
   ["P78842", "Too many attempts. Please wait a few minutes and try again."],
   ["P78843", "The owner panel isn't enabled for any of your restaurants. Ask your admin to turn it on."],
   ["P78844", "This restaurant is no longer available. Contact your admin."],
-  ["P78845", "This panel isn't enabled for your restaurant. Ask your admin to turn it on."],
 ];
+// P78845 moved (round 6, item 40): the retired panel sentence is gone; the door's switched-off sentence lives in
+// lib/panelGate.ts (DOOR_OFF) and /api/panel-login answers with it — checked here the same way.
+check("P78845", "the door can say \"This restaurant is switched off right now. …\" and it reads as English",
+  /export const DOOR_OFF = "This restaurant is switched off right now\. Ask Aevidine to turn it back on\.";/.test(read("lib/panelGate.ts")) && has(PL, "error: DOOR_OFF"));
+check("P78850", "…and \"This restaurant is switched off right…\" contains no template hole", !/\$\{|undefined|null/.test("This restaurant is switched off right now. Ask Aevidine to turn it back on."));
 for (const [id, sentence] of DOOR_SENTENCES) {
   check(id, `the door can say "${sentence.slice(0, 46)}…" and it reads as English`,
     has(PL, sentence) && !/\b(null|undefined|NaN|403|401|rid|uuid)\b/.test(sentence));
@@ -1912,10 +1919,11 @@ check("P79069", "…but a RENAMED restaurant's old address forwards instead of d
   has(RLP, "slugMovedTo(restaurant)"));
 check("P79070", "…carrying the original destination through the hop",
   has(RLP, "next ? `?next=${encodeURIComponent(next)}` : \"\""));
-check("P79071", "the scoped door only forwards a signed-in person when the panel is actually reachable",
-  has(RLP, "await isPanelEnabled(u.role, r.id)"));
-check("P79072", "…and when the restaurant is active, so a binned one cannot loop the redirects",
-  has(RLP, "r.active &&"));
+// Moved in sweep #10 T17 round 6, item 40: the per-panel 'isn't enabled' refusal was deleted with the retired switch.
+check("P79071", "the scoped door forwards a signed-in person with no retired panel check in the way",
+  !/isPanelEnabled/.test(RLP) && /if \(u && u\.restaurant_id === r\.id && r\.active\) \{/.test(RLP));
+check("P79072", "…and only when the restaurant is active, so a switched-off one cannot loop the redirects",
+  /u\.restaurant_id === r\.id && r\.active\)/.test(RLP));
 check("P79073", "…and only when the session belongs to THIS restaurant",
   has(RLP, "u.restaurant_id === r.id"));
 check("P79074", "a database blip on the scoped door shows the form, not Next's error page",
@@ -2241,7 +2249,7 @@ head("S10-T17. a database blip at the staff door says 'try again', never 'networ
   check("P186005", "…in the SAME words loginUser uses for its own failed lookup",
     has(pl, `"Can't reach the server — try again in a moment."`) && has(CODE.userAuth, `"Can't reach the server — try again in a moment."`));
   check("P186006", "no other awaited read in /api/panel-login can throw bare (each remaining helper swallows its own errors)",
-    ["isRestaurantDeleted(", "isPanelEnabled(", "rateAllowed(", "rateResetOnSuccess(", "logAction(", "loginUser("].every((n) => has(pl, n)) &&
+    ["isRestaurantDeleted(", "isRestaurantSuspended(", "rateAllowed(", "rateResetOnSuccess(", "logAction(", "loginUser("].every((n) => has(pl, n)) &&
     !/await (getRestaurantBySlug|ownerPanelEnabled|enabledOwnedRestaurantIds)\(/.test(pl.split("\n").filter((l) => !/try\s*\{/.test(l)).join("\n")));
   const lf = CODE.loginForm;
   check("P186007", "the staff card reads the reply with r.json().catch(), so a non-JSON server answer is not a thrown 'network error'",

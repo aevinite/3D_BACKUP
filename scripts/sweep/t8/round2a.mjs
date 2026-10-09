@@ -216,9 +216,10 @@ await checkA("P99341","the gate checks the staff cookie BEFORE the admin one, so
 });
 await checkA("P99342","…and the file says why that order matters",()=>/the person who explicitly signed in wins/.test(GATE)||"the reason was removed");
 await checkA("P99343","a manager whose restaurant is in the recycle bin is refused by the same gate",()=>/isRestaurantDeleted\(u\.restaurant_id\)/.test(GATE)||"the bin check is gone");
-await checkA("P99344","a manager whose panel the admin switched off is refused by the same gate",()=>/isPanelEnabled\(role, u\.restaurant_id\)/.test(GATE)||"the entitlement check is gone");
+/* Moved in sweep #10 T17 round 6, item 40 (owner 2026-10-09): the per-panel switch is retired and deleted; the gate now refuses a SWITCHED-OFF restaurant instead (panelDoor). */
+await checkA("P99344","a manager whose restaurant the admin switched off is refused by the same gate",()=>/await panelDoor\(u\)/.test(GATE)||"the switched-off check is gone");
 await checkA("P99345","…and both are re-read on every page load, not cached in the session",()=>{
-  return (/await isRestaurantDeleted/.test(GATE)&&/await isPanelEnabled/.test(GATE))||"one of the two is no longer awaited per request";
+  return (/await panelDoor\(u\)/.test(GATE)&&/await isRestaurantDeleted/.test(read("lib/panelGate.ts")))||"the bin/suspension check is no longer awaited per request";
 });
 await checkA("P99346","the door sends a refused person to /login with somewhere to come back to",()=>/redirect\(`\/login\?next=\$\{encodeURIComponent\(next\)\}`\)/.test(GATE)||"the return address is gone");
 await checkA("P99347","…and the manager door passes its own route as that address",()=>/requirePanel\("manager", "\/manager"\)/.test(read("app/manager/layout.tsx"))||"the manager door names the wrong return route");

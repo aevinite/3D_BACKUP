@@ -285,9 +285,10 @@ console.log("\nT28's picked items — a read that failed is never reported as a 
   need(/export function forgetRestaurant/.test(lib) && /export async function ownersOf/.test(lib),
     "item 16 · the owner-scope caches can be told a restaurant has changed",
     "item 16 · forgetRestaurant/ownersOf is gone — a binned restaurant is back to waiting out a 30s timer on Settings, Team and Guests");
-  need(/_deletedCache\.delete/.test(lib) && /_panelCache\.delete/.test(lib) && /_ownerCache\.(delete|clear)/.test(lib),
-    "item 16 · …and it clears all three of them, not just the one the caller happened to think of",
-    "item 16 · forgetRestaurant no longer clears all three caches — the screens will disagree with each other instead of with the database");
+  // Sweep #10 T17 round 6, item 40: the per-panel cache (_panelCache) was deleted with the retired switch, so two caches remain.
+  need(/_deletedCache\.delete/.test(lib) && /_ownerCache\.(delete|clear)/.test(lib) && !/_panelCache/.test(lib),
+    "item 16 · …and it clears both of them (the restaurant state and the owners'), not just the one the caller happened to think of",
+    "item 16 · forgetRestaurant no longer clears both caches — the screens will disagree with each other instead of with the database");
 
   const adm = code(read("app/api/admin/restaurants/route.ts"));
   const calls = (adm.match(/forgetRestaurant\(/g) || []).length;

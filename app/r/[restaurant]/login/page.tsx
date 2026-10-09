@@ -8,7 +8,6 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
 import { ROLE_HOME, DOOR_OFF } from "@/lib/panelGate";
-import { isPanelEnabled } from "@/lib/panelAccess";
 import { getRestaurantBySlug, slugMovedTo } from "@/lib/tenant";
 import LoginForm from "@/app/login/LoginForm";
 
@@ -55,7 +54,7 @@ export default async function ScopedLoginPage({
   // actually reachable, though — a disabled panel (or inactive restaurant) would
   // bounce right back from requirePanelAt and loop the redirects forever; showing
   // the form instead lets a re-login surface the clear 403 "panel isn't enabled".
-  if (u && u.restaurant_id === r.id && r.active && (await isPanelEnabled(u.role, r.id))) {
+  if (u && u.restaurant_id === r.id && r.active) {
     redirect(`/r/${restaurant}${ROLE_HOME[u.role] || "/menu"}`);
   }
   // A SWITCHED-OFF restaurant's door says so before anyone types (item 30). Signing in is refused by /api/panel-login

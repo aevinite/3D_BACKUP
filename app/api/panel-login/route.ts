@@ -3,7 +3,7 @@
 // client which panel to go to (+ whether first-login profile capture is needed).
 import { NextRequest, NextResponse } from "next/server";
 import { loginUser, USER_COOKIE, describeLoginTarget } from "@/lib/userAuth";
-import { isPanelEnabled, isRestaurantDeleted, isRestaurantSuspended, enabledOwnedRestaurantIds, ownerLogRestaurant } from "@/lib/panelAccess";
+import { isRestaurantDeleted, isRestaurantSuspended, enabledOwnedRestaurantIds, ownerLogRestaurant } from "@/lib/panelAccess";
 import { DOOR_OFF } from "@/lib/panelGate";
 import { getRestaurantBySlug } from "@/lib/tenant";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
@@ -134,25 +134,19 @@ export async function POST(req: NextRequest) {
     }
   } else {
     // Restaurant in the recycle bin (mig 128): its logins are dead until it's
-    // restored. Checked before the panel entitlement so a binned restaurant blocks
-    // every role, not just disabled panels.
+    // restored. Checked first, so a binned restaurant answers 'no longer available' even when it is also switched off.
     if (await isRestaurantDeleted(u.restaurant_id)) {
       await logAction(u.role, "login_denied", { actor: uWho, device_id: dev, restaurant_id: u.restaurant_id, detail: `"${uWho}" signed in but the restaurant is in the recycle bin` });
       return NextResponse.json({ ok: false, error: "This restaurant is no longer available. Contact your admin." }, { status: 403 });
     }
-    // Per-restaurant PANEL entitlement (mig 106): if the admin turned this role's panel OFF
-    // for the user's restaurant, they can't sign in here. (The admin reaches panels via the
-    // separate staff gate / act-as, not this route, so this never blocks the admin.)
     // SUSPENDED = THE STAFF APPS STOP (item 30, owner 2026-10-09). Refused here with the same sentence the door shows,
     // so a right password never "works" only to be bounced back to the card in silence. No pass is handed out.
     if (await isRestaurantSuspended(u.restaurant_id)) {
       await logAction(u.role, "login_denied", { actor: uWho, device_id: dev, restaurant_id: u.restaurant_id, detail: `"${uWho}" signed in but the restaurant is switched off (suspended)` });
       return NextResponse.json({ ok: false, error: DOOR_OFF }, { status: 403 });
     }
-    if (!(await isPanelEnabled(u.role, u.restaurant_id))) {
-      await logAction(u.role, "login_denied", { actor: uWho, device_id: dev, restaurant_id: u.restaurant_id, detail: `"${uWho}" signed in but the ${u.role} panel is not enabled for this restaurant` });
-      return NextResponse.json({ ok: false, error: "This panel isn't enabled for your restaurant. Ask your admin to turn it on." }, { status: 403 });
-    }
+    // (The "this panel isn't enabled for your restaurant" refusal that stood here is gone — item 40: every restaurant has
+    // all four staff apps since 2026-07-31, so it could never be reached.)
   }
   // Audit the login in the operation log: who (name), their username, and the
   // generated user-id all land in `detail`; `actor` is the friendly name. The
