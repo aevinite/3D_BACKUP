@@ -1836,3 +1836,11 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
   their home, so a bookmark benefits once they pass the page.
 - [x] **No more sign-in loop for a binned restaurant** (item 33) — VERIFIED 2026-10-09.
 - [x] **Item 32 (developer-machine trace rate) — NO.** Recorded as R61 in docs/REJECTED-IDEAS.md and on the code line.
+
+## 2026-10-09 — sweep #10 T17 round 6 (owner: "do all 4 and also check again … until you find 0 errors")
+
+- [x] **A signed-out owner's bookmark comes back to that page after signing in** (item 37) — VERIFIED live on backup 2026-10-09
+  (/owner/reports?range=week, /owner/menu, /owner/staff; JavaScript off still reaches sign-in). PR #1461.
+- [x] **The console tells the truth about Suspend** (item 38) — staff apps stop, owner + admin keep access; applies at once. VERIFIED live.
+- [x] **The alerts header matches the code** (item 39) and **the retired per-panel switch is deleted** (item 40). VERIFIED (guards).
+- [x] **Checked again until zero** — four mutation passes (720 breaks), 54 gaps closed, the last pass found none.
