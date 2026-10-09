@@ -4526,10 +4526,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // bill). Server-authoritative. A RE-issue (after a void) carries a reason and is REFUSED
     // once the bill is settled (mig 189 enforces both — the invoice locks at settlement).
     if (a === "sessions" && c === "invoice") {
-      // "Generate bills" is a row on the Access screen and now genuinely bites. It never did:
-      // the switch wrote manager_permissions.print_invoice and NOTHING read it, so a manager it
-      // was switched off for could still issue a numbered tax invoice (found 2026-08-01).
-      // Default is ON, so no restaurant changes until an admin deliberately turns it off.
+      // "Generate bills" is NOT a switch any more, and this line does not refuse anyone today
+      // (corrected by sweep #10 T10, item 11 — the comment said the opposite). The owner took
+      // take_orders / mark_paid / print_invoice / table_tags / table_ops out of the grant list on
+      // 2026-08-01 ("how the floor RUNS; a restaurant that switched them off could not trade"), so
+      // managerGrantValue() answers ON for print_invoice permanently and a stored
+      // manager_permissions.print_invoice is ignored — exactly the mark_paid case written out at the
+      // on-the-house gate. It is a guard in waiting, kept so that if a row ever returns every bill
+      // door honours it the same day. What actually decides who may issue a number is the manager
+      // gate itself, the customer rule below and lfh_generate_invoice's own refusals.
       if (!(await managerCan(g, rid, "print_invoice"))) return permDenied("generate bills");
       // lfh_generate_invoice has no tenant param — confirm the session is THIS restaurant's
       // first (service-role bypasses RLS; a foreign session id must not get an invoice).

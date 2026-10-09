@@ -188,5 +188,18 @@ const noDbWords = (r) => r.status >= 400 && !/stub:/.test(r.text);
   t(r2.status === 400 && /Please add a subject/.test(r2.text), "item 10 · …while the complaint form's own sentence (no subject) still reaches the person", `item 10 · empty subject said ${r2.status} ${r2.text.slice(0, 60)}`);
 }
 
+// ── 11 ────────────────────────────────────────────────────────────────────────────────────
+// The comment over the invoice door must say what the code does: print_invoice is not switchable.
+{
+  const i = route.indexOf('if (a === "sessions" && c === "invoice")');
+  const head = route.slice(i, i + 1400);
+  t(i > 0 && !/genuinely bites/.test(head) && /NOT a switch any more/.test(head),
+    "item 11 · the invoice comment no longer claims 'Generate bills' is a live switch", "item 11 · the invoice comment claims a switch that does not exist");
+  await world({ perms: { print_invoice: false }, fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "4", bill_no: 1 }] } });
+  const r = await call("POST", "sessions/s1/invoice", { body: { cust_phone: "9876543210", cust_name: "A" } });
+  t(r.status === 200, "item 11 · …and that is true: a stored print_invoice=false refuses nobody (the owner's 2026-08-01 rule)",
+    `item 11 · print_invoice=false answered ${r.status} — the comment and the code disagree again`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
