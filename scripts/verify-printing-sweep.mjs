@@ -15,7 +15,7 @@
 // Needs: .env.local · the app running on --base · (for the print phases) the three ZZ-Virt-* CUPS
 // queues and scripts/sweep/virtual-printers.mjs listening. Without those it SAYS so and skips them
 // rather than passing quietly — a skipped check that reads as green is worse than a red one.
-import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, readdirSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
@@ -749,7 +749,7 @@ await phase("a complaint can be filed against one printer", async () => {
   made.events.push(e.id); return !!e.id || "not filed"; });
 await phase("…a print on ANOTHER printer leaves it open", async () => {
   await drain();
-  const o = await newOrder(92, "Other printer dish");
+  await newOrder(92, "Other printer dish");
   const g = await agentCall("/next").then((r) => (r.status === 200 ? r.json() : null));
   if (g) await agentCall(`/job/${g.id}/done`, { method: "POST", body: "{}" });
   const [e] = await db(`printer_events?id=eq.${made.events[made.events.length - 1]}&select=status`);
@@ -768,7 +768,7 @@ await phase("…and a print on ITS printer closes it", async () => {
 // retired — and these phases are what stop it, or its meaning, quietly coming back.
 {
   await phase("a screen route can name a BACKUP screen, and it is stored", async () => {
-    const r = await setRoutes({ kot: { via: "screen", panel: "kitchen", backupPanel: "manager", backupAfterMs: 30000 } });
+    await setRoutes({ kot: { via: "screen", panel: "kitchen", backupPanel: "manager", backupAfterMs: 30000 } });
     const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
     const k = st.modules?.printing?.routes?.kot || {};
     return (k.backupPanel === "manager" && k.backupAfterMs === 30000) || JSON.stringify(k);
@@ -1357,7 +1357,6 @@ await phase("…and a print on ITS printer closes it", async () => {
   // 2026-08-29: `role=eq.manager&limit=1` picked "raj" while the cookie was diagm1's, and eight
   // phases accused the product of the exact bug the owner's review had found.
   const [mgrU] = await db(`staff_users?select=id,name,username,permissions&restaurant_id=eq.${RID}&username=eq.diagm1`);
-  const [othU] = await db(`staff_users?select=id,name,username,permissions&restaurant_id=eq.${RID}&role=eq.manager&order=id.desc&limit=1`);
   const [rr] = await db(`restaurants?select=manager_permissions,access_config&id=eq.${RID}`);
   const mpWas = rr.manager_permissions || {}, acWas = rr.access_config || {};
   const permWas = mgrU.permissions || {};
@@ -3018,7 +3017,6 @@ if (!browser) {
     await pb.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
     return true;
   });
-  const frontBefore = front();
   await phase("…and a REAL order is placed while both are open", async () => {
     order = await newOrder(58, "Two-Chrome sweep dish");
     return !!order.order.id;
@@ -3102,7 +3100,7 @@ if (!browser) {
     });
     await phase("…and an order placed AFTER the move goes to the new screen only", async () => {
       await drain();
-      const o = await newOrder(60, "After-the-move dish");
+      await newOrder(60, "After-the-move dish");
       const k = await settles(() => asKitchen("/board?autojobs=1"), (b) => (b.printJobs || []).length > 0);
       const m = await asManager("/print-jobs/pending");
       return (k.ok && (m.jobs || []).length === 0)
@@ -3538,7 +3536,6 @@ for (const g of ["verify:print-helper", "verify:print-queue", "verify:print-form
       return before === after || `changing one restaurant's printing changed the other's: ${before} → ${after}`;
     });
     await phase("a helper token belongs to ONE restaurant — it is handed only that one's tickets", async () => {
-      const jobs = await db(`print_jobs?select=id,restaurant_id&restaurant_id=eq.${RID2}&limit=5`);
       // Nothing is written to the control restaurant; if it has no tickets of its own there is
       // nothing to confuse, and the check below is the one that matters either way.
       const body = await agentCall("/next").then((x) => (x.status === 200 ? x.json() : {})).catch(() => ({}));

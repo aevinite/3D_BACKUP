@@ -68,7 +68,7 @@ function topLevel(raw) {
 // A 3-digit run that is not part of a longer number. `\b\d{3}\b` CANNOT be used here: `_` is a
 // word character, so `\b` never matches in `224_inventory_recipes.sql` and the check silently
 // passed every file by finding no number at all.
-const threeDigits = (s) => [...s.matchAll(/(?<!\d)(\d{3})(?!\d)/g)].map((m) => m[1]);
+
 
 // What every one of my eighty files declares, derived from the files themselves — never a typed list.
 function declared() {

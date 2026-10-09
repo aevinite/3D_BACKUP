@@ -29,7 +29,7 @@
  *
  *   node .github/scripts/verify-doc-counts.mjs
  */
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 

@@ -18,13 +18,13 @@
 //
 //   node scripts/sweep/t5/round2.mjs        # R1, R2, R3, R5
 //   node scripts/sweep/t5/round2-live.mjs   # R4
-import { read, exists, check, skip, report, has, hasNot, countOf, eq, codeOf, ROOT } from "./lib.mjs";
+import { read, exists, check, report, has, hasNot, countOf, eq, codeOf, ROOT } from "./lib.mjs";
 import { lift, renderedClasses } from "./lib2.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
 const C = (n) => read(`components/${n}.tsx`);
-const SW = read("public/sw.js"), OFF = read("public/offline.html"), I18N = read("lib/i18n.ts");
+const SW = read("public/sw.js"), OFF = read("public/offline.html");
 const CSS = read("app/globals.css");
 
 /* ══════════ R1 · BEHAVIOUR, EXECUTED (P94701–P94900) ══════════ */
@@ -227,7 +227,6 @@ check("P94786", "a dropped live connection says it is reconnecting", () =>
   /reconnecting/i.test(statusLine(computeView("weak", true, null, 0, false), false)));
 
 // ── R1f · OfflineNotice — how old is 'old', and which screens stay quiet ──
-const ON = C("OfflineNotice");
 const ago = lift("components/OfflineNotice.tsx", "ago");
 check("P94787", "ago(0) says 'earlier' rather than 1970", () => eq(ago(0), "earlier"));
 check("P94788", "a reply saved seconds ago reads 'a moment ago'", () => eq(ago(Date.now() - 4000), "a moment ago"));
@@ -490,7 +489,7 @@ for (const n of MINE_C.concat(["../public/sw", "../public/offline"])) {
     keys.set(m[2], e);
   }
 }
-for (const [k, e] of [...keys.entries()].sort()) {
+for (const [k] of [...keys.entries()].sort()) {
   check(`P${ev++}`, `the stored value "${k}" has both a writer and a reader somewhere in the app`, () => {
     const w = countOf(WHOLE, new RegExp(`setItem\\(\\s*["'\`]${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     const r = countOf(WHOLE, new RegExp(`getItem\\(\\s*["'\`]${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));

@@ -20,10 +20,10 @@
 // (P95701–P95714 were spent on round 2's item 13 — see the ledger.)
 //
 //   node scripts/sweep/t5/round3.mjs
-import { read, exists, check, skip, report, has, hasNot, countOf, eq, codeOf, ROOT } from "./lib.mjs";
-import { lift } from "./lib2.mjs";
-import fs from "node:fs";
-import path from "node:path";
+import { read, exists, check, report, has, hasNot, countOf, eq, codeOf } from "./lib.mjs";
+import "./lib2.mjs";
+import "node:fs";
+import "node:path";
 
 const I18N = read("lib/i18n.ts");
 const OFF = read("public/offline.html");

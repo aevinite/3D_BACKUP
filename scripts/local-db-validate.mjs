@@ -23,7 +23,7 @@
  * The script drops + recreates lfh_dev each run, so it is fully idempotent.
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

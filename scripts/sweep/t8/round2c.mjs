@@ -4,7 +4,7 @@
 // H · with no internet: does the shell open, and does it say so honestly?
 // I · cache and repeat — the ?v= really busts, and remembered choices survive a reload.
 // J · a shared script failing to arrive, and the shell still opening.
-import { checkA, skip, report, eq, browser, ctxAs, pageOf, frameOf, BASE, SLUG, read, ONSCREEN } from "./r2lib.mjs";
+import { checkA, report, eq, browser, ctxAs, pageOf, frameOf, BASE, read, ONSCREEN } from "./r2lib.mjs";
 
 let n = 99611; const id = () => "P" + (n++);
 const A35 = { width: 360, height: 780, dpr: 3 };
@@ -19,7 +19,7 @@ const A35 = { width: 360, height: 780, dpr: 3 };
   const open  = () => f.evaluate(() => document.getElementById("navBurger").click());
   const close = () => f.evaluate(() => document.getElementById("navClose").click());
   const isOpen = () => f.evaluate(() => document.body.classList.contains("nav-open"));
-  const backLayers = () => f.evaluate(() => (window.LFH_BACK && window.LFH_BACK.depth ? window.LFH_BACK.depth() : null));
+  
 
   await checkA(id(),"the drawer opens",async()=>{ await open(); await page.waitForTimeout(400); return (await isOpen())||"it did not open"; });
   await checkA(id(),"…and closes",async()=>{ await close(); await page.waitForTimeout(400); return (await isOpen())===false||"it stayed open"; });
@@ -58,12 +58,11 @@ const A35 = { width: 360, height: 780, dpr: 3 };
     const still=f2?await f2.evaluate(()=>document.body.classList.contains("nav-open")).catch(()=>null):null;
     return (path==="/manager"&&still===false)||`path ${path}, drawer open ${still}`;
   });
-  const f3 = await frameOf(page);
+  await frameOf(page);
   await checkA(id(),"…and BACK a second time, with the drawer shut, leaves the panel as it should",async()=>{
     const before=new URL(page.url()).pathname;
     await page.goBack().catch(()=>{});
     await page.waitForTimeout(700);
-    const after=new URL(page.url()).pathname;
     return (before==="/manager")||`we were at ${before}`;
   });
   await page.goto(BASE+"/manager",{waitUntil:"networkidle",timeout:90000});
@@ -71,7 +70,7 @@ const A35 = { width: 360, height: 780, dpr: 3 };
   await page.waitForTimeout(1500);
   const op=()=>f4.evaluate(()=>document.getElementById("navBurger").click());
   const cl=()=>f4.evaluate(()=>document.getElementById("navClose").click());
-  const isOp=()=>f4.evaluate(()=>document.body.classList.contains("nav-open"));
+  
   await checkA(id(),"the drawer registers exactly one back layer while it is open",()=>
     /LFH_BACK\.layer\("nav-drawer"/.test(read("public/panels/editor/app.js"))||"the drawer no longer registers a back step");
   await checkA(id(),"…and gives it back when it closes, so BACK presses do not stack up",()=>
@@ -202,7 +201,7 @@ for (const [w,h,label] of [[320,568,"a small phone, 320px"],[390,844,"an iPhone-
       clipped: [...document.querySelectorAll(".tab-lbl, .brand, .brand-rest")].filter(on)
         .filter(e=>e.scrollWidth-e.clientWidth>1)
         .filter(e=>getComputedStyle(e).textOverflow!=="ellipsis")
-        .filter(e=>!document.body.classList.contains("nav-rail")||document.body.classList.contains("nav-rail-open"))
+        .filter(()=>!document.body.classList.contains("nav-rail")||document.body.classList.contains("nav-rail-open"))
         .map(e=>(e.textContent||"").trim().slice(0,16)),
       ellipsised: [...document.querySelectorAll(".brand-rest")].filter(on)
         .filter(e=>e.scrollWidth-e.clientWidth>1).map(e=>({t:(e.textContent||"").trim(),shown:Math.round(e.clientWidth)})),
@@ -252,10 +251,10 @@ for (const [w,h,label] of [[320,568,"a small phone, 320px"],[390,844,"an iPhone-
 /* ═══ H · with no internet (P99721–P99760) ═══ */
 {
   const c=await ctxAs("manager",{width:390,height:844,dpr:2});
-  const { page, errors }=await pageOf(c);
+  const { page }=await pageOf(c);
   // one good visit first, so the device HAS something saved — which is the honest starting point
   await page.goto(BASE+"/manager",{waitUntil:"networkidle",timeout:90000});
-  let f=await frameOf(page);
+  await frameOf(page);
   await page.waitForTimeout(4000);
   const swReady=await page.evaluate(()=>navigator.serviceWorker?navigator.serviceWorker.getRegistrations().then(r=>r.length):0);
   await checkA(id(),"a service worker is installed by the panel, which is what lets it open offline",()=>
@@ -418,7 +417,7 @@ for (const [w,h,label] of [[320,568,"a small phone, 320px"],[390,844,"an iPhone-
 for (const [file,what] of [["guestbell.js","the guest bell"],["swipehint.js","the swipe hint"],
   ["myprofile.js","my profile & pay"],["auditsort.js","the audit words"],["fitnums.js","the number auto-fit"]]) {
   const c=await ctxAs("manager");
-  const { page, errors }=await pageOf(c);
+  const { page }=await pageOf(c);
   await page.route(`**/panels/${file}*`,(r)=>r.abort());
   let opened=false, floor="", chrome=false;
   try {

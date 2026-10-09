@@ -41,7 +41,7 @@ const MENU = "app/owner/menu/page.tsx", ROSTER = "app/owner/staff/page.tsx",
 const rawM = read(MENU), rawR = read(ROSTER), rawP = read(PERSON), rawS = read(SET);
 if (!rawM || !rawR || !rawP || !rawS) { console.log("❌ one of the four owned files is missing — if they moved, update this guard"); process.exit(1); }
 const m = code(rawM), r = code(rawR), pr = code(rawP), st = code(rawS);
-const mT = plain(m), rT = plain(r), stT = plain(st);
+const mT = plain(m), rT = plain(r);
 const route = code(read("app/api/owner/staff/route.ts"));
 const ents = code(read("lib/ownerEntitlements.ts"));
 const shell = code(read("components/owner/OwnerShell.tsx"));

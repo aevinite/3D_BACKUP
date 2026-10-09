@@ -11,7 +11,7 @@
 //
 // It is the real source, not a copy: the text is read from page.tsx at run time, so the moment
 // the function changes, these rows exercise the new one.
-import { chk, skip, code, src, report, setOnly, writeLedger } from "./lib.mjs";
+import { chk, code, src, report, setOnly, writeLedger } from "./lib.mjs";
 
 const PAGE = "app/owner/page.tsx";
 const p = code(PAGE);
@@ -105,7 +105,6 @@ function run(name) {
   };
   walk(name);
   const bodies = order.map((n) => deTs(lift(n))).join("\n");
-  // eslint-disable-next-line no-new-func
   return new Function(`${preambleJs}\n${bodies}\nreturn (${name});`)();
 }
 
@@ -486,7 +485,7 @@ chk("P67030", "…and it does not upper-case an 'am' that is part of a WORD", ()
     ? true : `the am/pm replace is not word-anchored: ${src.slice(0, 160)}`;
 });
 
-const n = report("T13 NEW band C · the dashboard's own helpers, EXECUTED (P66933–P67029)", { minChecks: 80 });
+report("T13 NEW band C · the dashboard's own helpers, EXECUTED (P66933–P67029)", { minChecks: 80 });
 const out = process.argv.find((x) => x.startsWith("--ledger="));
 if (out) writeLedger(out.slice(9), {
   how: "lifted each function's REAL source text out of app/owner/page.tsx and ran it, asserting values",

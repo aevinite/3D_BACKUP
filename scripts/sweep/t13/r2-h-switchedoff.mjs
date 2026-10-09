@@ -5,7 +5,7 @@
 // Audit & logs away from an owner, the dashboard must read as OFF — never as broken, never as a
 // confident zero. Every figure, every card, every popup, both skins, both widths, one restaurant
 // and five.
-import { chk, skip, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
+import { chk, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
 import { openWith, closeBrowser, refuse, setRange, screenText, pageErrors, ESTATE, BASE, idFor } from "./r2lib.mjs";
 
 const id = idFor(67300);

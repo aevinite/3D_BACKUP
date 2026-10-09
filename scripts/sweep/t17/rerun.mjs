@@ -20,7 +20,7 @@ const set = (ids, result, note) => { for (const id of ids.trim().split(/\s+/)) V
 const S = "verify:owner-shell (98 static checks, sabotage-tested)";
 const L = "driven headless on port 4317 (scripts/sweep/t17/live.mjs, 304 rows)";
 const I = "driven headless on port 4317 (scripts/sweep/t17/interact.mjs, 71 rows)";
-const R = "scripts/sweep/t17/report-checks.mjs (89 rows, the document as a pure builder)";
+
 
 // ── the shell: nav, crumb, switcher, skin, overlays ─────────────────────────────────────────────
 set("P05695", "✅", "re-read the loop: `it.exact ? path === it.href : path === it.href || path.startsWith(it.href + \"/\")`, longest match wins. Still right, and still stricter than `isActive` a few lines below (which uses a bare startsWith) — no two owner routes are prefixes of each other today, so nothing is mis-labelled.");

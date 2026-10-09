@@ -98,8 +98,8 @@ const kitchenMerge = (serverItems, pendingReady) =>
 // sound and proves nothing about the product).
 import { readFileSync, existsSync } from "node:fs";
 import { repoRootFrom } from "./sweep/repoRoot.mjs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import "node:url";
 // The repo to scan: the first argument that really IS one, else the repo this file lives in.
 // It used to be a bare `process.argv[2]`, so `-- --base http://localhost:4228` — which every
 // sweep lane passes to every guard — made this scan a folder called "--base" and exit 1.

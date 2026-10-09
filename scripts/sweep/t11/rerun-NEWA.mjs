@@ -129,7 +129,7 @@ const ONE_OFFS = {
       || `both fall on ${key(IST(2026, 8, 17, 4, 59))} — the business day no longer turns at 05:00`;
   },
   "a bare date string (no time) is read as an India date on every device": () => {
-    const seen = everyDevice((v) => (/([A-Z]+) PAY DT\.([0-9/]+)/.exec(bqHtml(IST(2026, 8, 16, 21, 31), { advances: [{ mode: "upi", amt: 500, date: "2026-08-01" }] })) || [])[2], null);
+    const seen = everyDevice(() => (/([A-Z]+) PAY DT\.([0-9/]+)/.exec(bqHtml(IST(2026, 8, 16, 21, 31), { advances: [{ mode: "upi", amt: 500, date: "2026-08-01" }] })) || [])[2], null);
     const distinct = [...new Set(seen.map((s) => s.v))];
     return (distinct.length === 1 && distinct[0] === "01/08/2026") || `${distinct.length} answers: ${distinct.join(" · ")}`;
   },

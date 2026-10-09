@@ -5,8 +5,8 @@
 // appeared in no row: 135 symbols in page.tsx, 54 in the analytics route, 49 CSS classes, 15
 // pieces of page state, all 9 RPCs and all 5 back-button layers. Plus two SHAPES nothing had ever
 // driven: a restaurant that is switched OFF, and an estate whose figures are all zero.
-import { chk, skip, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
-import { openWith, closeBrowser, screenText, setRange, patchJson, ESTATE, BASE, idFor } from "./r2lib.mjs";
+import { chk, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
+import { openWith, closeBrowser, screenText, setRange, patchJson, ESTATE, BASE } from "./r2lib.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 
 const EXPECT_ROWS = 198;
@@ -152,7 +152,7 @@ for (const [rpc, file, what] of RPCS) {
 for (const [what, fn] of [
   ["every RPC in the analytics route is given a bounded window", () => {
     const calls = [...analytics.matchAll(/sb\.rpc\("(\w+)",\s*\{([^}]*)\}/g)];
-    const unbounded = calls.filter(([, name, args]) => !/p_from|p_restaurant_id|p_ids/.test(args)).map(([, n2]) => n2);
+    const unbounded = calls.filter(([, , args]) => !/p_from|p_restaurant_id|p_ids/.test(args)).map(([, n2]) => n2);
     return unbounded.length === 0;
   }],
   ["the group scope pushes its restaurant list INTO the database", () => /p_ids: pIds/.test(analytics)],

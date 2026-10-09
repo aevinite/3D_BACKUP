@@ -44,7 +44,7 @@ import { claimedTables } from "./sweep/fixtureTables.mjs";
 // stops the run.
 async function loginAs(ctx, role, base, creds) {
   try { return await loginOnce(ctx, role, base, creds); }
-  catch (e) {
+  catch  {
     console.log(`  · sign-in as ${role} timed out, retrying once`);
     await new Promise((r) => setTimeout(r, 3000));
     return loginOnce(ctx, role, base, creds);
@@ -359,7 +359,7 @@ async function run() {
   const setupPost = async (path, data, tries = 2) => {
     for (let i = 0; i < tries; i++) {
       try { return await staff.request.post(BASE + path, { headers: { "content-type": "application/json" }, data, timeout: 90000 }); }
-      catch (e) {
+      catch  {
         if (i === tries - 1) { console.log(`  · setup ${path} timed out twice (shared database under load)`); return null; }
         console.log(`  · setup ${path} timed out, retrying once`);
         await sleep(2000);
@@ -1176,7 +1176,7 @@ async function run() {
       await sleep(2500);
       // Reads now take 14s — past the layer's patience — but the connection is FINE.
       await ctx.request.get(SLOW + "/__slow?ms=14000");
-      await inPanel(hp, () => { try { pollOrders(); } catch (e) {} });
+      await inPanel(hp, () => { try { pollOrders(); } catch  {} });
       await sleep(16000);
       const st = await inPanel(hp, () => ({
         bar: (function () { const b = document.querySelector("#lfhOffBar"); return b ? b.innerText.replace(/\n/g, " | ") : ""; })(),

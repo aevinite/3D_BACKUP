@@ -27,7 +27,7 @@
 //   D  STATE    — no invoiced bill is sitting fully cancelled with no correction recorded.
 //
 // Exit 1 = an issued invoice could be edited again, or a bill is uncorrected. Exit 2 = could not run.
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

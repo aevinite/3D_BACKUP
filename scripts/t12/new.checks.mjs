@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export function run({ c, raw, check, skipRow, fnBody, before, count }) {
+export function run({ c, raw, check, count }) {
   const FILES = {
     outbox: "outbox.js", realtime: "realtime.js", connbadge: "connbadge.js", offline: "offline.js",
     errlog: "errlog.js", theme: "theme.js", fitnums: "fitnums.js", backstack: "backstack.js",
@@ -65,7 +65,7 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
   })();
   const allConsumers = CONSUMERS.map((k) => c[k] || "").join("\n") + "\n" + guardSrc + "\n" + siblingSrc + "\n" + reactSrc;
   const allMine = Object.keys(FILES).map((k) => c[k] || "").join("\n");
-  const everywhere = allMine + "\n" + allConsumers;
+  
 
   let id = 66219;
   const next = () => "P" + id++;
@@ -402,7 +402,7 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
     check(next(), `${file} is still on disk and is not empty`, () =>
       (raw[key] || "").length > 200 ? true : `${file} is missing or has been emptied`);
   }
-  for (const [key, file] of Object.entries(FILES)) {
+  for (const [, file] of Object.entries(FILES)) {
     check(next(), `${file} is still loaded by at least one panel`, () => {
       const loaded = ["editorHtml", "kitchenHtml", "tabletHtml"].some((k) => new RegExp(file.replace(".", "\\.")).test(c[k] || ""));
       return loaded ? true : `${file} is on disk but no panel loads it — dead weight, or a load that was removed`;

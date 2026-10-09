@@ -1,5 +1,5 @@
 // Section B of T8.md re-run — the bill's MONEY, P03556–P03615.
-import { BILLDOC as B, read, visible, totalRows, baseBill, row } from "./lib.mjs";
+import { BILLDOC as B, read, row } from "./lib.mjs";
 
 const S5 = { tax_rate: 0.05 };
 const ord = (o) => ({ id: "o" + Math.random(), status: "served", subtotal: 100, taxable_base: 100, items: [{ title: "X", qty: 1, price: 100, tax_mode: "excl" }], ...o });

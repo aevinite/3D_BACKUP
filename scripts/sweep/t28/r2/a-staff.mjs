@@ -253,7 +253,7 @@ row(S("an owner can add a waiter, and the password is handed back exactly once")
   return !!(typeof r.j.password === "string" && r.j.password.length >= 6 && !/password/.test(JSON.stringify(again.j.person || {})))
     || `password on create=${typeof r.j.password}; on re-read the person carries one: ${/password/.test(JSON.stringify(again.j.person || {}))}`;
 });
-row(S("…and a waiter is created with tables assigned, never with none"), "read assigned_tables on the row just created", async (c) => {
+row(S("…and a waiter is created with tables assigned, never with none"), "read assigned_tables on the row just created", async () => {
   if (!fx.waiter) return "SKIP: no waiter created";
   const q = await sb.from("staff_users").select("assigned_tables").eq("id", fx.waiter).maybeSingle();
   const t = q.data?.assigned_tables;
@@ -332,7 +332,7 @@ row(S("…and one over 128 characters too, so nothing unbounded is hashed"), "PO
   if (r.status === 200) { owns("staff_users", r.j.id); return "a 200-character password was accepted"; }
   return r.status === 400 || `${r.status} ${r.j?.error}`;
 });
-row(S("a login is created with its restaurant on it, always"), "read restaurant_id on every row this block created", async (c) => {
+row(S("a login is created with its restaurant on it, always"), "read restaurant_id on every row this block created", async () => {
   const made = [fx.waiter, fx.mgr, fx.kit].filter(Boolean);
   if (!made.length) return "SKIP: nothing was created";
   const q = await sb.from("staff_users").select("id, restaurant_id").in("id", made);
@@ -356,7 +356,7 @@ row(S("switching a login off needs a real true/false, never a truthy string"), "
   const r = await PATCH(c.O, "/api/owner/staff", { id: fx.kit, action: "set_active", active: "false" });
   return !!(r.status === 400 && /true\/false|true or false/i.test(r.j?.error || "")) || `${r.status} ${r.j?.error}`;
 });
-row(S("…and the string 'false' did NOT leave the account enabled-by-accident"), "read active on that row", async (c) => {
+row(S("…and the string 'false' did NOT leave the account enabled-by-accident"), "read active on that row", async () => {
   if (!fx.kit) return "SKIP";
   const q = await sb.from("staff_users").select("active").eq("id", fx.kit).maybeSingle();
   return q.data?.active === true || `active=${q.data?.active} — a refused call changed state`;
@@ -561,7 +561,7 @@ row(S("putting somebody on the pay list records WHO did it and when"), "PATCH se
   return !!(r.status === 200 && q.in_payroll === true && q.payroll_added_by && q.payroll_added_at)
     || `${r.status} ${JSON.stringify(q)}`;
 });
-row(S("…and that name is a PERSON, never a uuid"), "read payroll_added_by", async (c) => {
+row(S("…and that name is a PERSON, never a uuid"), "read payroll_added_by", async () => {
   if (!fx.enrolled) return "SKIP: not enrolled";
   const q = (await sb.from("staff_users").select("payroll_added_by").eq("id", fx.mgr).maybeSingle()).data;
   return !/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(String(q?.payroll_added_by || "")) || `payroll_added_by=${q?.payroll_added_by}`;
@@ -688,7 +688,7 @@ row(S("…and so is a completely empty body"), "PATCH with nothing", async (c) =
   const r = await PATCH(c.O, "/api/owner/staff", undefined, { data: Buffer.from("", "utf8"), headers: { "content-type": "application/json" } });
   return !!(r.status >= 400 && r.status < 500) || `${r.status} ${r.txt.slice(0, 90)}`;
 });
-row(S("every write this route makes leaves a line in the Activity log"), "count staff_actions for the fixtures this block wrote", async (c) => {
+row(S("every write this route makes leaves a line in the Activity log"), "count staff_actions for the fixtures this block wrote", async () => {
   const q = await sb.from("staff_actions").select("id, action, actor, panel")
     .eq("restaurant_id", FH).in("action", ["staff_create", "staff_enable", "staff_disable", "staff_reset_password", "staff_set_role", "staff_set_permissions", "staff_payment", "staff_payment_void", "payroll_add", "payroll_remove", "staff_rename", "staff_job_edit", "staff_delete"])
     .gte("created_at", new Date(Date.now() - 20 * 60_000).toISOString()).limit(200);
@@ -696,14 +696,14 @@ row(S("every write this route makes leaves a line in the Activity log"), "count 
   for (const x of (q.data || [])) owns("staff_actions", x.id);
   return !!((q.data || []).length >= 8) || `only ${(q.data || []).length} log rows for this block's writes`;
 });
-row(S("…and every one of those lines names a panel, never an empty one"), "the rows just counted", async (c) => {
+row(S("…and every one of those lines names a panel, never an empty one"), "the rows just counted", async () => {
   const q = await sb.from("staff_actions").select("id, panel, action")
     .eq("restaurant_id", FH).in("action", ["staff_create", "staff_disable", "staff_reset_password", "payroll_add", "staff_payment"])
     .gte("created_at", new Date(Date.now() - 20 * 60_000).toISOString()).limit(60);
   const bad = (q.data || []).filter((x) => !x.panel);
   return bad.length === 0 || `${bad.length} log row(s) with no panel`;
 });
-row(S("…and an OWNER's write is recorded against the owner panel, not the admin's"), "read panel on this block's own rows", async (c) => {
+row(S("…and an OWNER's write is recorded against the owner panel, not the admin's"), "read panel on this block's own rows", async () => {
   const q = await sb.from("staff_actions").select("panel, action")
     .eq("restaurant_id", FH).eq("action", "staff_create")
     .gte("created_at", new Date(Date.now() - 20 * 60_000).toISOString()).limit(20);
@@ -714,7 +714,6 @@ row(S("…and an OWNER's write is recorded against the owner panel, not the admi
 
 // ══ A10 · MONEY ON THE ROSTER, AND JUDGMENT ═════════════════════════════════════════════════════
 row(S("a caller who may see pay gets figures; the payload never carries a rate they may not see"), "GET as diago1 and as diagm1, compare the pay keys", async (c) => {
-  const o = await GET(c.O, "/api/owner/staff");
   const g = await GET(c.G, "/api/owner/staff");
   if (g.status !== 200) return "SKIP: the manager cannot open the roster";
   const mgrSeesPay = (g.j.restaurants || [])[0]?.payAccess?.canSeePay;

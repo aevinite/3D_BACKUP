@@ -30,8 +30,7 @@ const H = adminHeaders(B);
 // stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
 await requireUp(B, "the live Access-screen walk");
 const env = {}; for (const l of readFileSync(new URL("../.env.local", import.meta.url),"utf8").split("\n")) { const m=l.match(/^([A-Z0-9_]+)=(.*)$/); if(m) env[m[1]]=m[2].trim(); }
-const U = env.NEXT_PUBLIC_SUPABASE_URL, K = env.SUPABASE_SERVICE_ROLE_KEY;
-const db = (q) => fetch(`${U}/rest/v1/${q}`, { headers: { apikey: K, Authorization: `Bearer ${K}` } }).then((r) => r.json());
+
 // A TRANSPORT HICCUP IS NOT A PRODUCT FAULT (2026-08-05).
 // Every read here was a bare fetch with no retry, and the checks below assert an EXACT status
 // (200 / 404 / 403). Run standalone that is fine; run inside the 520-phase suite — where other

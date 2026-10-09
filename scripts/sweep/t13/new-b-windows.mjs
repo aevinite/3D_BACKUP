@@ -11,7 +11,7 @@
 // IST, for all eleven range values plus the ones it must refuse.
 //
 // ONE login for the whole run, and every request is a plain GET the dashboard itself makes.
-import { chk, skip, code, report, setOnly, writeLedger, count, executedIds } from "./lib.mjs";
+import { chk, code, report, setOnly, writeLedger, count, executedIds } from "./lib.mjs";
 import { loginAs } from "../login.mjs";
 import { chromium } from "playwright";
 
@@ -515,7 +515,7 @@ if (results_count() !== EXPECT_ROWS) {
   console.log(`\nID DRIFT: this band executed ${results_count()} rows but declares EXPECT_ROWS = ${EXPECT_ROWS}.\nEvery id after the inserted row has shifted. Append at the end, or renumber deliberately and update the ledger.`);
   process.exit(2);
 }
-const n = report(`T13 NEW band B · the analytics route's windows, driven (P66801–P${id - 1})`, { minChecks: 90 });
+report(`T13 NEW band B · the analytics route's windows, driven (P66801–P${id - 1})`, { minChecks: 90 });
 const out = process.argv.find((x) => x.startsWith("--ledger="));
 if (out) writeLedger(out.slice(9), {
   how: `GET /api/owner/analytics on ${BASE} as the diag owner, asserting the resolved window it reports`,

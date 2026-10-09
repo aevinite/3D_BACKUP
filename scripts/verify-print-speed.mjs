@@ -1182,12 +1182,17 @@ await phase("…and a parked ticket files a printer problem, so somebody learns 
 //
 // So this is drilled, not asserted: five tickets, printed for real on a machine that forgets, and the
 // count of paper at the head has to equal the count of tickets.
-await phase("this machine really does forget finished jobs, so the drill below means something", () => {
+// A PHASE THAT COULD NOT FAIL, MADE HONEST (sweep #10 T39 item 68, 2026-10-09). It returned true in
+// both branches ("either way the drill runs; this records which it was") and recorded nothing. What
+// the drill below really needs is the virtual kitchen printer's queue to ANSWER — so that is asserted,
+// and which kind of machine this is (forgets finished jobs or keeps them) is printed, not claimed.
+await phase("the virtual kitchen printer's queue answers, so the drill below can count its paper", () => {
   if (!LIVE) return noLive;
   try {
-    const done = execFileSync("lpstat", ["-W", "completed", "-o", VIRT.kitchen], { encoding: "utf8", timeout: 4000 }).trim();
-    return true;                                          // either way the drill runs; this records which it was
-  } catch { return true; }
+    const kept = execFileSync("lpstat", ["-W", "completed", "-o", VIRT.kitchen], { encoding: "utf8", timeout: 4000 }).trim();
+    console.log(`     (this machine ${kept ? "keeps" : "forgets"} finished jobs)`);
+    return true;
+  } catch (e) { return `lpstat could not read ${VIRT.kitchen}: ${String(e.message).split("\n")[0]}`; }
 });
 let DUP = null;
 await phase("five tickets are printed for real, one after another, and counted", async () => {
@@ -1462,7 +1467,6 @@ await phase("…and the TYPICAL pickup is under a second, which is the promise h
 await phase("hello is asked roughly once every five rounds, not every one", async () => {
   if (!LIVE) return noLive;
   await stopHelper(); await drain();
-  const before = (await db(`print_agents?id=eq.${AGENT.id}&select=last_seen_at`))[0].last_seen_at;
   await startHelper();
   await sleep(14_000);
   const log = helperLog();

@@ -127,7 +127,7 @@ const fresh = async () => {
   // once; a second failure is a real one and still throws.
   try {
     await page.reload({ waitUntil: "domcontentloaded" });
-  } catch (e) {
+  } catch  {
     await page.waitForTimeout(300);
     await page.goto(BASE + "/page", { waitUntil: "domcontentloaded" });
   }
@@ -331,7 +331,7 @@ const bothSent = await until(async () => seen.filter((x) => /\/tables\/7\//.test
 if (bothSent) ok("both changes for table 7 were delivered");
 else bad("table 7's changes did not both arrive", JSON.stringify(seen.map((x) => x.path)));
 const order = seen.filter((x) => /\/tables\/7\//.test(x.path)).map((x) => x.id);
-const firstId = await page.evaluate(() => "");   // ids are opaque; order is what matters
+   // ids are opaque; order is what matters
 if (order.length === 2 && order[0] !== order[1]) ok("…in the order they were made, not the order they were retried");
 else bad("the two changes for one table did not arrive as two distinct writes", JSON.stringify(order));
 

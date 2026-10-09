@@ -8,7 +8,7 @@
 // Both are about the bill-customer sheet's Generate button, and both are about a TAP NOT DYING IN
 // SILENCE — P03689 is the row that was ❌ once already (finding F4: "the handler existed and read
 // correctly", but the button could not actually receive the click).
-import { row, skipRow, read } from "./lib.mjs";
+import { row, skipRow } from "./lib.mjs";
 
 const BASE = process.env.T11_BASE || "http://localhost:4311";
 const pw = await import("playwright").catch(() => null);

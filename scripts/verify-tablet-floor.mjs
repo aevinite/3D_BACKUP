@@ -92,13 +92,13 @@ const vis = (sel) => F.evaluate((s) => {
 // A picker (Change table / Move a KOT / the KOT menu) REUSES the .detail-pop card and its own
 // hook is the ✕ .picker-back. Telling them apart matters: reading "the discount button isn't
 // there" off a picker is a claim about the wrong screen.
-const onPopup = async () => (await vis(".detail-pop")) && !(await vis(".picker-back"));
+
 const onPicker = () => vis(".picker-back");
 // One hardware-BACK press. If the frame DETACHES, the panel navigated away — that is the
 // back button leaving the app, which is a real fault, so it is reported rather than thrown.
 let leftThePanel = false;
 const backOnce = async () => {
-  try { await F.evaluate(() => history.back()); } catch (e) { leftThePanel = true; return; }
+  try { await F.evaluate(() => history.back()); } catch  { leftThePanel = true; return; }
   await page.waitForTimeout(1000);
 };
 // Close an open popup the way a finger does, WITHOUT spending a history entry — so a check

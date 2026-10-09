@@ -295,8 +295,10 @@ await (NARROW ? chk : skipRow)("P67300", "the drawer opens and the phone's BACK 
   if ((await burger.count()) === 0) return "no ☰ control at this width";
   await burger.click();
   await pg.waitForTimeout(600);
+  // The menu's opening was computed and thrown away (sweep #10 T39 item 68) — it is asserted now.
   const opened = await pg.evaluate(() => !!document.querySelector(".adm-nav.open, .adm-drawer, [data-nav-open='true']")
     || getComputedStyle(document.querySelector(".adm-side") || document.body).transform !== "none");
+  if (!opened) return "tapping ☰ did not open the menu";
   await pg.goBack();
   await pg.waitForTimeout(700);
   const stillHere = /\/owner/.test(new URL(pg.url()).pathname);

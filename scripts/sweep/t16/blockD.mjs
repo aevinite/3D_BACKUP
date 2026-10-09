@@ -9,7 +9,7 @@
 // Aangan is never touched: it is the read-only control at factory defaults.
 import { chromium } from "playwright";
 import { createClient } from "@supabase/supabase-js";
-import { loginAs, DIAG_LOGINS } from "../login.mjs";
+import { loginAs } from "../login.mjs";
 import { mkdirSync } from "node:fs";
 
 const BASE = process.argv.includes("--base") ? process.argv[process.argv.indexOf("--base") + 1] : "http://localhost:4316";

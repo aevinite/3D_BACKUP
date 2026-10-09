@@ -17,7 +17,7 @@
 // a real restaurant's screen because registering a signal handler is not cleanup.
 import { row, skipRow, onFinish, read } from "./lib.mjs";
 import { adminHeaders, adminCookie } from "../login.mjs";
-import { canDrive, BASE as BROWSER_BASE } from "./browser.mjs";
+import { canDrive } from "./browser.mjs";
 
 const BASE = process.env.T11_BASE || "http://localhost:4311";
 const RID = "00000000-0000-0000-0000-000000000001";
@@ -316,13 +316,12 @@ S("…and never for a restaurant that does not exist", async () => {
   return (!r.ok || !(r.j?.agents || []).length) || `it answered with ${(r.j.agents || []).length} computer(s)`;
 });
 S("…and a computer belonging to one restaurant cannot be renamed from another's screen", async () => {
-  const r = await admin(`/agents/${AGENT.id}/rename`, { rid: "00000000-0000-0000-0000-0000000000ff", name: "moved" });
+  await admin(`/agents/${AGENT.id}/rename`, { rid: "00000000-0000-0000-0000-0000000000ff", name: "moved" });
   const st = await state();
   const still = (st?.agents || []).find((a) => a.id === AGENT.id)?.name;
   return still === AGENT.name || `it is now called ${JSON.stringify(still)}`;
 });
 S("the screen's own words about switching a line off are the same words the manager panel uses", async () => {
-  const words = read("lib/printBoardWords.ts");
   const page_ = read("app/aevinite/printing/page.tsx");
   const usesShared = /printBoardWords|KIND_OFF_LABEL|KIND_LABEL/.test(page_);
   return usesShared || "the admin screen writes its own labels, so the two screens can drift apart";
@@ -465,7 +464,7 @@ for (const skin of ["dark", "light"]) {
       const bad = await s.p.evaluate((sel) => {
         const root = document.querySelector(sel) || document.body;
         const px = (c) => { const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(c || ""); return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null; };
-        const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+        
         /* NO GUESSED BACKGROUND. This used to fall back to a dark grey when no ancestor declared
            an opaque colour — and the console paints its page background somewhere this walk does
            not reach, so the breadcrumb came out at 1.1:1 against a colour that is not behind it.

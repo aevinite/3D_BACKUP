@@ -11,7 +11,7 @@
 // agree with the tile it came from — plus the 4+ estate tier, which no sweep before this one
 // could reach at all.
 import { chromium } from "playwright";
-import { chk, skip, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
+import { chk, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
 import { loginAs } from "../login.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
@@ -404,7 +404,7 @@ if (results_count() !== EXPECT_ROWS) {
   console.log(`\nID DRIFT: this band executed ${results_count()} rows but declares EXPECT_ROWS = ${EXPECT_ROWS}.\nEvery id after the inserted row has shifted. Append at the end, or renumber deliberately and update the ledger.`);
   process.exit(2);
 }
-const n = report(`T13 NEW band E · every period crossed with every scope, driven (P67094–P${id - 1})`, { minChecks: 100 });
+report(`T13 NEW band E · every period crossed with every scope, driven (P67094–P${id - 1})`, { minChecks: 100 });
 const out = process.argv.find((x) => x.startsWith("--ledger="));
 if (out) writeLedger(out.slice(9), {
   how: `drove ${BASE} as a one-restaurant owner and as a five-restaurant owner, adding up the figures on screen`,

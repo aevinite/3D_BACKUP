@@ -3,7 +3,7 @@
 //   /api/log/client-error (241, 2)
 // Between them: 555 lines carrying 21 ledger rows. Three of the four are PUBLIC and two of them
 // WRITE, which is the whole reason they deserve forty.
-import { FH, PP, GHOST, GET, POST, sb, owns, undo, block, of_, code, read } from "./harness.mjs";
+import { FH, PP, GET, POST, sb, owns, block, of_, code, read } from "./harness.mjs";
 export const H = block(160871, "H · health · maintenance · blocked · the crash sink");
 const { row } = H;
 const HE = of_("app/api/health/route.ts"), MA = of_("app/api/maintenance/route.ts"),

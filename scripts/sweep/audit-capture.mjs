@@ -31,7 +31,7 @@ const DESTRUCTIVE = /delete|remove|logout|log ?out|\bpay\b|settle|close table|vo
 // text, and zero-size visible buttons. Has false positives — it only PICKS which
 // shots deserve a human/vision look.
 const SCAN_FN = () => {
-  const vw = window.innerWidth, vh = window.innerHeight;
+  const vw = window.innerWidth;
   const vis = (el) => { const s = getComputedStyle(el); if (s.display === "none" || s.visibility === "hidden" || Number(s.opacity) === 0) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
   // An element is "intentionally" off-screen if any ancestor is a horizontal (or
   // both-axis) scroll container (overflow-x auto/scroll) — category bars, chip

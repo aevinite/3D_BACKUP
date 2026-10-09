@@ -1,7 +1,7 @@
 // SWEEP #8 · T9 · NEW CHECKS, block E — P62951–P63200.
 // The route's own endpoints end to end, the ⋯ menu machinery, the "Sold out only" filter, the
 // whole-table note, the guest chime contract, and the card-forget path.
-import { row, APP, APPC, HTML, CSS, CSSC, ROUTE, ROUTEC, PAGE, has, hasRe, lacks, lacksRe, P, src, contentHash } from "./lib.mjs";
+import { row, APP, APPC, HTML, CSS, CSSC, ROUTE, ROUTEC, PAGE, has, hasRe, lacksRe, P, src, contentHash } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };

@@ -6,7 +6,7 @@
 // alignment with what they claim to test. Anything the parser cannot place REPORTS ITSELF rather
 // than being skipped.
 import { BILLDOC as B, row, read, visible, totalRows, codeOnly } from "./lib.mjs";
-import { BASE, canDrive, renderDoc, seenText, inkWidth, ROLL_PX } from "./browser.mjs";
+import { BASE, canDrive, renderDoc, ROLL_PX } from "./browser.mjs";
 
 const T8 = read(".claude/sweep/LEDGER/T8.md").split("\n");
 const ROWS = [];

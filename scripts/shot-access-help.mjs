@@ -35,7 +35,7 @@ const only = process.argv[2]; // "guest" | "staff" | undefined (both)
 const onlyId = process.argv[3] || "";
 const wanted = (id) => !onlyId || id === onlyId;
 fs.mkdirSync(PUB, { recursive: true });
-const RID = "00000000-0000-0000-0000-000000000001";
+
 const M = "/r/french-house/menu?table=5";
 const LOGIN = { manager: ["diagm1", "diag-mgr-2026", "/manager"], owner: ["diago1", "diag-o1-2026", "/owner"], kitchen: ["diagkitchen", "diag-kitchen-2026", "/kitchen"], tablet: ["diagt1", "diag-t1-2026", "/tablet"] };
 

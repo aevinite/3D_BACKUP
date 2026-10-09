@@ -1,5 +1,5 @@
 // ITEM 10 · batch 4 — P17909–P17960. The remaining source and stylesheet invariants.
-import { t6, t6skip } from "./replay-t6-harness.mjs";
+import { t6 } from "./replay-t6-harness.mjs";
 
 t6("P17909", "state gains only the keys the board read brings", "A", (a) => {
   const decl = (a.match(/^const state = \{.*$/m) || [""])[0];
@@ -9,7 +9,7 @@ t6("P17909", "state gains only the keys the board read brings", "A", (a) => {
   return extra.length === 0 || `new boot keys: ${extra.join(", ")}`;
 });
 t6("P17910", "the view variable has exactly two values", "A", /let view = localStorage\.getItem\("kds_view"\) === "wall" \? "wall" : "columns";/);
-t6("P17911", "PLAT_META covers every source the route can send, plus a fallback", "A", (a, S) => {
+t6("P17911", "PLAT_META covers every source the route can send, plus a fallback", "A", (a) => {
   const meta = [...((a.match(/const PLAT_META = \{([\s\S]*?)\};/) || ["", ""])[1]).matchAll(/^\s*(\w+):/gm)].map((m) => m[1]);
   const routeSources = ["zomato", "swiggy", "takeaway", "parcel"];
   const missing = routeSources.filter((s) => !meta.includes(s));

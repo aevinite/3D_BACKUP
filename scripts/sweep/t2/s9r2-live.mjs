@@ -2,7 +2,7 @@
 //   npm run build && npx next start -p 4402
 //   node scripts/sweep/t2/s9r2-live.mjs --base http://localhost:4402
 import { chromium } from "playwright";
-import { check, skip, save, nextId, idsLeft } from "./s9r2-lib.mjs";
+import { check, save, nextId, idsLeft } from "./s9r2-lib.mjs";
 
 const BASE = (() => { const i = process.argv.indexOf("--base"); return i > 0 ? process.argv[i + 1] : "http://localhost:4402"; })();
 const browser = await chromium.launch();
@@ -18,7 +18,7 @@ const grab = async (url, { wait = 2000, theme, route, ctxOpts } = {}) => {
   p.on("pageerror", (e) => errs.push(String(e.message)));
   p.on("console", (m) => { if (m.type() === "error") errs.push("console: " + m.text()); });
   p.on("request", (r) => reqs.push(r.url()));
-  if (theme) await p.addInitScript((t) => { try { localStorage.setItem("lfh_theme", t); } catch (e) {} }, theme);
+  if (theme) await p.addInitScript((t) => { try { localStorage.setItem("lfh_theme", t); } catch  {} }, theme);
   if (route) await route(p);
   const res = await p.goto(url, { waitUntil: "domcontentloaded" }).catch(() => null);
   const servedHead = await p.evaluate(() => ({

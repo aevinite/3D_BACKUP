@@ -1,7 +1,7 @@
 // SWEEP #8 · T9 · the three items the owner picked off the report — P63236–P63300.
 // Item 7 (the Ready lane on an iPad in portrait) · item 8 (the dark-skin status colours, which
 // turned out to be already built) · item 9 (a delivery ticket's 🖨 reprint).
-import { row, APP, APPC, HTML, CSS, CSSC, has, hasRe, lacks, lacksRe, P, src, contentHash } from "./lib.mjs";
+import { row, APPC, HTML, CSS, CSSC, has, hasRe, lacksRe, P, contentHash } from "./lib.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };
@@ -177,12 +177,10 @@ row("P63296", "R37 is honoured — the KITCHEN ticket keeps its duplicate banner
 });
 row("P63297", "the delivery reprint reuses the same 44px target the dine-in one was fixed to", () => hasRe(CSS(), /\.reprint \{[^}]*min-width: 44px/));
 row("P63298", "both reprint buttons are drawn for EVERY restaurant, never gated on auto-print", () => {
-  const a = APPC();
   const pt = PT();
   return (lacksRe(pt, /autoPrintKot/) === true) || "the delivery button is gated on a setting";
 });
 row("P63299", "the change added no new network call, no new setting and no new column", () => {
-  const a = APPC();
   const r = RP();
   return (!/settings/.test(r) && !/api\(/.test(r)) || "item 9 reached for a setting or the server";
 });
@@ -224,7 +222,6 @@ row("P63307", "…and the ticket the second one broke", () => hasRe(CSS(), /seen
 row("P63308", "the header still wraps rather than clipping either value", () => hasRe(CSS(), /\.thead \{[^}]*flex-wrap: wrap/));
 row("P63309", "the age chip is still nowrap, which is what makes the wrap safe", () => hasRe(CSS(), /\.age \{[^}]*white-space: nowrap/));
 row("P63310", "there is exactly one .thead rule and one .thead-r rule", () => {
-  const c = CSS();
   const a = (CSSC().match(/\.thead\s*\{/g) || []).length, b = (CSSC().match(/\.thead-r\s*\{/g) || []).length;
   return (a === 1 && b === 1) || `${a} .thead and ${b} .thead-r rules — a second could disagree`;
 });

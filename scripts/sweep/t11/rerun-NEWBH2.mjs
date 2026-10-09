@@ -21,7 +21,7 @@ const D = (id, what, fn) => {
     : skipRow(id, what, `needs playwright and a server at ${BASE} — start the dev server and re-run`);
 };
 const S5 = { tax_rate: 0.05 };
-const r2 = (n) => Math.round(n * 100) / 100;
+
 const ord = (o = {}) => ({ id: "o" + Math.random().toString(36).slice(2), status: "served", subtotal: 400,
   taxable_base: 400, tax_rate: 0.05, items: [{ title: "Dal", qty: 2, price: 200, tax_mode: "excl" }], ...o });
 const dataOf = (orders, settings = S5, session = {}) =>

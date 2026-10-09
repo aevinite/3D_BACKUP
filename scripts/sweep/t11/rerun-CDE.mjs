@@ -1,13 +1,12 @@
 // Sections C · D · E of T8.md re-run — the KITCHEN TICKET (P03616–P03640),
 // the BANQUET sheet (P03641–P03665) and the NUMBERS (P03666–P03675).
-import { BILLDOC as B, read, visible, row, codeOnly } from "./lib.mjs";
+import { BILLDOC as B, read, row, codeOnly } from "./lib.mjs";
 const SRC = read("public/panels/billdoc.js");
 
 // ── C · the kitchen ticket ───────────────────────────────────────────────────────────────────
 const kot = (o = {}) => B.kotDocHtml({ rname: "Test Cafe", head: "KITCHEN TICKET", kot: 12, tableLabel: "T5",
   when: "01:00 PM", lines: [{ qty: 2, title: "Dal", options: ["extra cheese"], removed: ["onion"], note: "no chilli" }], ...o });
 // One fixed instant so TODAY/YESTERDAY is deterministic: 2026-08-16 21:31 IST = 16:01Z.
-const T = Date.parse("2026-08-16T16:01:00Z");
 
 row("P03616", "kotWhen prints the TIME in one fixed format on every device", () => {
   // TODAY has to be an actual today, or kotWhen is RIGHT to prefix the date — which is what my
@@ -130,7 +129,7 @@ row("P03640", "a ticket opened as its own page gets a Print button, a ✕ Close 
 const bq = (bill = {}, lines = [{ title: "Hall", qty: 1, price: 1000 }], settings = {}) =>
   B.banquetDocHtml({ bill: { bill_no: "B/1", issued_at: "2026-08-16T16:01:00Z", subtotal: 1000, discount: 0, tax: 180, total: 1180, ...bill },
     lines, settings, restaurant: { slug: "x" } });
-const cells = (html, cls) => [...html.matchAll(new RegExp(`<td class="${cls}">([^<]*)</td>`, "g"))].map((m) => m[1]);
+
 
 row("P03641", "a saved bill's FROZEN tax_lines are used when present", () => {
   const h = bq({ tax_lines: [{ label: "ZZTAX", rate: 18, amt: 180 }] });

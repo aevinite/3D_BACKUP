@@ -1,5 +1,5 @@
 // Drives components/owner/ownerReportDoc.ts as a pure builder — no browser, no database.
-import { register } from "node:module";
+import "node:module";
 import ts from "typescript";
 import fs from "node:fs";
 const src = fs.readFileSync(new URL("../../../components/owner/ownerReportDoc.ts", import.meta.url), "utf8");

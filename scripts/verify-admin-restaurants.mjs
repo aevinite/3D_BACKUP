@@ -24,8 +24,8 @@
 //   node scripts/verify-admin-restaurants.mjs <root>    # another checkout / worktree
 import { readFileSync, readdirSync } from "node:fs";
 import { repoRootFrom } from "./sweep/repoRoot.mjs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import "node:url";
 
 // The repo to scan: the first argument that really IS one, else the repo this file lives in.
 // It used to be plain `process.argv[2]`, so `-- --base http://localhost:4228` — which every

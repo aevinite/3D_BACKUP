@@ -22,7 +22,7 @@
 // properties of the GENERATED TEXT and of the RENDERED DOCUMENT, both of which are things this
 // machine can hold. It cannot watch a Windows shop print. Where that is the honest answer, the phase
 // says so out loud rather than passing quietly (see §D).
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -909,7 +909,7 @@ P("369 · no LATER migration adds kot_print_target back", () =>
 // paper. Each kind is printed and read.
 console.log("\n§P · every kind of discount");
 const DISCOUNTS = [
-  ["no discount",        (sub) => 0],
+  ["no discount",        () => 0],
   ["a flat ₹50",         (sub) => Math.min(50, sub)],
   ["10%",                (sub) => Math.round(sub * 0.10)],
   ["25%",                (sub) => Math.round(sub * 0.25)],
@@ -1040,7 +1040,7 @@ console.log("\n§R · the light-skin ink fix stays in the light skin");
      the next blank line" and the selectors fell outside that span, so making a rule global changed
      nothing and the phase stayed green. Sabotage caught it. This finds every rule that paints one of
      the two fix inks and checks the selector it is attached to. */
-  const INKS = [/#1f1505/i, /var\(--gold-ink/];
+  
   const ruleFor = (inkRe) => {
     // walk backwards from the ink to the "{" that opens its rule, then to the start of the selector
     const m = css.match(inkRe);

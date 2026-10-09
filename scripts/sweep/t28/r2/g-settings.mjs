@@ -113,7 +113,7 @@ row(S("…and it records WHO flipped it, by name"), "read the log row that flip 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(String(a.actor || ""));
   return !!(a.panel === "owner" && a.actor && !isUuid) || `panel=${a.panel} actor=${a.actor}`;
 });
-row(S("…and that line carries the person's id too, so their own Activity tab can find it"), "read actor_id", async (c) => {
+row(S("…and that line carries the person's id too, so their own Activity tab can find it"), "read actor_id", async () => {
   const q = await sb.from("staff_actions").select("actor_id, actor").eq("action", "module_toggle")
     .gte("created_at", new Date(Date.now() - 10 * 60_000).toISOString()).eq("panel", "owner").limit(3);
   const rows = q.data || [];

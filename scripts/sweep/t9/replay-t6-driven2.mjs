@@ -115,7 +115,6 @@ async function main() {
           const d = document.createElement("div"); d.className = "ticket " + cl; document.body.appendChild(d);
           const v = getComputedStyle(d).borderLeftColor; d.remove(); return v;
         });
-        const head = t.querySelector("h2");
         return {
           drawn: true, worst: Math.round(worst * 100) / 100,
           tick: box("[data-item-ready]"), reprint: box(".reprint"), big: box("[data-ready]"),

@@ -193,7 +193,7 @@ row(S("a guest who still OWES pay-later money is refused, and told how much and 
   return !!(r.status === 409 && r.j?.reason === "khata_outstanding" && typeof r.j.owed === "number" && /Collect or write that off/i.test(r.j.error || ""))
     || `${r.status} ${JSON.stringify(r.j).slice(0, 150)}`;
 });
-row(S("…and that refusal leaves their pay-later record completely intact"), "read the khata row after the refusal", async (c) => {
+row(S("…and that refusal leaves their pay-later record completely intact"), "read the khata row after the refusal", async () => {
   if (!fx.debtor) return "SKIP: no debtor seeded";
   const q = await sb.from("khata_customers").select("name, phone").eq("id", fx.debtor.id).maybeSingle();
   return !!(q.data && q.data.phone === fx.debtor.phone && q.data.name === "T28R2 Debtor")
@@ -243,13 +243,13 @@ row(S("the erase writes a line into the Removals record, because that is where a
   fx.audit = a;
   return !!a || "the guest was erased and nothing was recorded in the Removals record";
 });
-row(S("…and that line names the person only by the last four digits — the audit of an erasure is not a fresh copy of the number"), "read the audit row", async (c) => {
+row(S("…and that line names the person only by the last four digits — the audit of an erasure is not a fresh copy of the number"), "read the audit row", async () => {
   if (!fx.audit) return "SKIP: no audit row";
   const blob = JSON.stringify(fx.audit);
   const full = blob.match(/9\d{9}/);
   return !full || `the full number ${full[0]} is in the audit of its own erasure`;
 });
-row(S("…and it names every table the erase actually touched, derived from the declared list"), "read meta.also_erased and meta.anonymised", async (c) => {
+row(S("…and it names every table the erase actually touched, derived from the declared list"), "read meta.also_erased and meta.anonymised", async () => {
   if (!fx.audit) return "SKIP: no audit row";
   const m = fx.audit.meta || {};
   const src = code(read("lib/personalData.ts"));
@@ -257,7 +257,7 @@ row(S("…and it names every table the erase actually touched, derived from the 
   const named = (m.also_erased || []).length + (m.anonymised || []).length + 1;   // +1 for `customers` itself
   return named >= erasable || `the record names ${named} table(s) of the ${erasable} the erase walks`;
 });
-row(S("…and it keeps \"deleted\" separate from \"emptied of the person but kept\""), "read the two lists apart", async (c) => {
+row(S("…and it keeps \"deleted\" separate from \"emptied of the person but kept\""), "read the two lists apart", async () => {
   if (!fx.audit) return "SKIP";
   const m = fx.audit.meta || {};
   return !!(Array.isArray(m.also_erased) && Array.isArray(m.anonymised) && m.anonymised.includes("khata_customers"))
@@ -280,7 +280,7 @@ row(S("the erase also writes a line into the Activity log, naming who did it"), 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(String(a.actor || ""));
   return !!(a.panel === "owner" && a.actor && !isUuid) || `panel=${a.panel} actor=${a.actor}`;
 });
-row(S("…and that line does not repeat the whole phone number either"), "read the detail", async (c) => {
+row(S("…and that line does not repeat the whole phone number either"), "read the detail", async () => {
   const q = await sb.from("staff_actions").select("detail").eq("action", "customer_erase")
     .gte("created_at", new Date(Date.now() - 10 * 60_000).toISOString()).limit(5);
   const full = (q.data || []).map((x) => String(x.detail)).find((d) => /9\d{9}/.test(d));
@@ -318,7 +318,7 @@ row(S("a guest who was never there is answered without pretending to erase them"
   const r = await DEL(c.O, "/api/owner/customers", { data: { restaurant_id: FH, phone: ph } });
   return !!(r.status === 200 && r.j.erased === 0) || `${r.status} erased=${r.j?.erased} for a number proved absent`;
 });
-row(S("the erase is the only verb here that writes — there is no way to EDIT a guest from this route"), "POST and PATCH are not exported", async (c) => {
+row(S("the erase is the only verb here that writes — there is no way to EDIT a guest from this route"), "POST and PATCH are not exported", async () => {
   const src = code(read("app/api/owner/customers/route.ts"));
   return !/export async function (POST|PATCH|PUT)/.test(src) || "this route has grown a write verb other than the erase";
 });

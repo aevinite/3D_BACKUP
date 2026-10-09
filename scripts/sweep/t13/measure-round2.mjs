@@ -1,7 +1,7 @@
 // Round 2 is planned from a MEASUREMENT, not a fresh idea.
 // Round 1 filed 557 checks. This asks: of everything my territory names, and of every WAY a check
 // can be made, what did round 1 not reach?
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 const W = "/Users/aevinite/Documents/Projects/wt-s8-t13/";
 const LED = W + ".claude/sweep/LEDGER/";
 
@@ -38,11 +38,10 @@ for (const [f, tag] of Object.entries(FILES)) {
   for (const m of t.matchAll(/\b(?:const|let|function|type)\s+([A-Za-z_$][\w$]*)/g)) add(m[1], tag + ":symbol");
   for (const m of t.matchAll(/\.((?:ow2|owr|owd|own|hq|rv|owx)[\w-]*)/g)) add(m[1], tag + ":css");
   for (const m of t.matchAll(/sb\.rpc\("(\w+)"/g)) add(m[1], tag + ":rpc");
-  for (const m of t.matchAll(/useState<?[^>]*>?\(\s*(?:null|\[\]|\{\}|false|true|"")/g)) {/* counted below */}
-  for (const m of t.matchAll(/const \[(\w+), set\w+\]/g)) add(m[1], tag + ":state");
+    for (const m of t.matchAll(/const \[(\w+), set\w+\]/g)) add(m[1], tag + ":state");
   for (const m of t.matchAll(/useBackClose\("([^"]+)"/g)) add(m[1], tag + ":backlayer");
   for (const m of t.matchAll(/aria-label="([^"]{4,40})"/g)) add(m[1], tag + ":aria");
-  for (const m of t.matchAll(/onKeyDown|onKeyUp|onKeyPress/g)) add("keyboard-handler", tag + ":keyboard");
+  for (let k = [...t.matchAll(/onKeyDown|onKeyUp|onKeyPress/g)].length; k > 0; k--) add("keyboard-handler", tag + ":keyboard");
 }
 const uncovered = [...named].filter(([n]) => !hay.includes(n.toLowerCase()));
 console.log(`NAMED THINGS: ${named.size}   ·   named by NO round-1 row: ${uncovered.length}`);

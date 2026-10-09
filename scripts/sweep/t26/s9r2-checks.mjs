@@ -356,7 +356,6 @@ await gw("a credit note of zero or less is refused",
 // ══ H · MY OWN JUDGEMENT — 13 ════════════════════════════════════════════════════════════════════
 // "Is this how it should work for a real platform?" Thirteen questions no static rule can ask.
 const J = (what, how, fn) => R.add("H", what, how, fn);
-const all = FILES.map((f) => strip(read(f))).join("\n");
 
 await J("no route in this territory reads settings by the retired single-row key EXCEPT the two that are allowed to",
   "static: `.eq(\"id\", \"site\")` is the pre-tenancy shape. verify-settings-columns names exactly two deliberate flagship fallbacks and deliberately scopes its own rule to lib/ so it does not go red on them — this asks the same question with the same two exceptions, so the two guards cannot drift into disagreeing",

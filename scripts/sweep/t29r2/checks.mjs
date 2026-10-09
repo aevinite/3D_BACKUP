@@ -32,7 +32,7 @@
 //   node scripts/sweep/t29r2/checks.mjs            # A-E and G (440 rows)
 //   node scripts/sweep/t29r2/checks.mjs --quiet    # failures only
 //   node scripts/sweep/t29r2/checks.mjs --ledger   # print the ledger table
-import { MINE, ALL_MIG, code, raw, declares, connect, Phases, ID_BLOCK } from "./lib.mjs";
+import { MINE, ALL_MIG, code, declares, connect, Phases, ID_BLOCK } from "./lib.mjs";
 
 const db = await connect();
 if (!db) { console.log("no .env.local — cannot run"); process.exit(2); }

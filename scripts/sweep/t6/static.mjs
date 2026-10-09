@@ -108,7 +108,7 @@ const reg = [
   ["item 7 · maint.js asks for its deadline through the shared helper", () => /window\.LFH_PANEL_DEADLINE \? window\.LFH_PANEL_DEADLINE\(\) : undefined/.test(read("public/panels/maint.js")), "the bare deadline() call came back"],
   ["item 7 · …and maint.js is still CRLF (its guard checks that)", () => { const b = read("public/panels/maint.js"); const crlf = (b.match(/\r\n/g) || []).length, lf = (b.match(/\n/g) || []).length; return crlf > 0 && crlf === lf; }, "line endings were tidied"],
 ];
-for (const [label, fn, why] of reg) { let ok; try { ok = !!fn(); } catch (e) { ok = false; } R.add(label, ok, ok ? "" : (why || "regressed")); }
+for (const [label, fn, why] of reg) { let ok; try { ok = !!fn(); } catch  { ok = false; } R.add(label, ok, ok ? "" : (why || "regressed")); }
 // ── H · the cross-panel single-definition rules this territory shares ─────────────────────────
 R.add("discPct is the ONE definition — editor, tablet and billdoc all call it",
   /function discPct\(subtotal, disc\) \{ return LFH_BILLDOC\.discPct/.test(RAW) && /discPct/.test(BILLDOC) && /discPct/.test(TABLET), "");

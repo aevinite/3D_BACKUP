@@ -104,7 +104,7 @@ try {
   // ── L2 · the KITCHEN board — migration 041's lfh_kitchen_tickets, on a screen ──────────────
   const kitchenCtx = await b.newContext({ viewport: { width: 1280, height: 900 } });
   let kRoute = null;
-  try { kRoute = await loginAs(kitchenCtx, "kitchen", BASE); } catch (e) { kRoute = null; }
+  try { kRoute = await loginAs(kitchenCtx, "kitchen", BASE); } catch  { kRoute = null; }
   if (kRoute) {
     const k = await kitchenCtx.newPage();
     const kErr = []; k.on("pageerror", (e) => kErr.push(String(e).slice(0, 110)));
@@ -129,7 +129,7 @@ try {
   // ── L3 · the MANAGER floor — migration 041's lfh_floor_state, on a screen ──────────────────
   const mgrCtx = await b.newContext({ viewport: { width: 1440, height: 900 } });
   let mRoute = null;
-  try { mRoute = await loginAs(mgrCtx, "manager", BASE); } catch (e) { mRoute = null; }
+  try { mRoute = await loginAs(mgrCtx, "manager", BASE); } catch  { mRoute = null; }
   if (mRoute) {
    try {
     const m = await mgrCtx.newPage();

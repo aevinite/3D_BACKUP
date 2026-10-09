@@ -170,7 +170,6 @@ function dateWindow() {
     let lo = null, hi = null;
     const oq = { gte: (_c, v) => { lo = v; return oq; }, lt: (_c, v) => { hi = v; return oq; } };
     const body = text.replace(/^\s*oq = oq\.gte/m, "  var _ = oq.gte");
-    const f = new Function("histQ", "oq", "ok", `${body}; return { lo: arguments[3] };`);
     // `return ok([])` inside the lifted code needs somewhere to go; a thrown sentinel is clearest.
     try {
       new Function("histQ", "oq", "ok", body)(histQ, oq, () => { throw new Error("__BAILED__"); });
@@ -178,7 +177,7 @@ function dateWindow() {
     return { lo, hi };
   };
 
-  const IST = 5.5 * 3600e3;
+  
   const w = runFor("2026-08-05");
   // The window must be exactly the IST calendar day: 05-Aug 00:00 IST → 06-Aug 00:00 IST.
   eq("a day starts at 00:00 IST", new Date(w.lo).toISOString(), new Date(Date.parse("2026-08-05T00:00:00+05:30")).toISOString());
@@ -296,7 +295,6 @@ async function catchUpPoll() {
 
   // Now the mechanism itself, from the real realtime.js: rising delay while a read fails,
   // straight back to the base once one succeeds.
-  const rt = src("public/panels/realtime.js");
   const body = lift("public/panels/realtime.js", "function catchUp(fn, opts) {", "\n  }", "catchUp");
   const delays = [];
   const f = new Function("document", "navigator", "connStatus", "setTimeout", "clearTimeout", `${body}; return catchUp;`);

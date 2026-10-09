@@ -3,14 +3,13 @@
 // real two-restaurant session (P40001–P40150, P40386–P40435) are driven in live.mjs beside this.
 //
 // Round 3 was the multi-restaurant estate, driven for the first time with `diagmulti`.
-import { chk, skip, code, src, styles, report, setOnly, count } from "./lib.mjs";
+import { chk, code, src, styles, report, setOnly, count } from "./lib.mjs";
 
 const PAGE = "app/owner/page.tsx";
 const LAYOUT = "app/owner/layout.tsx";
 const ANALYTICS = "app/api/owner/analytics/route.ts";
-const OVERVIEW = "app/api/owner/overview/route.ts";
 const p = code(PAGE), praw = src(PAGE), css = styles(PAGE);
-const a = code(ANALYTICS), o = code(OVERVIEW), lay = code(LAYOUT);
+const a = code(ANALYTICS), lay = code(LAYOUT);
 
 const argOnly = process.argv.find((x) => x.startsWith("--only="));
 if (argOnly) setOnly(argOnly.slice(7).split(","));

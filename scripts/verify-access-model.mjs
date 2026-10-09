@@ -21,7 +21,7 @@ const fail = (m) => fails.push(m);
 // The model itself, compiled. `npm run verify:access` bundles it first (see package.json), so
 // these are the REAL exported values — every generated row included.
 const {
-  MANAGER_GRANT_DEFAULTS, isConfigurableGrant, MODULE_KEYS, HAS_IDS, ALL_NODES,
+  MANAGER_GRANT_DEFAULTS, MODULE_KEYS, HAS_IDS, ALL_NODES,
   nodePatch, defOf, SETTING_KEYS, CHOICE_KEYS, LIST_KEYS, TEXT_KEYS, TABLET_COLS,
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
   waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
@@ -317,7 +317,7 @@ if (!deadRows) ok("no row is a switch with nothing behind it");
     .filter((f) => !/lib\/accessTree\.ts$/.test(f) && !/scripts\//.test(f))
     .map((f) => { try { return readFileSync(f, "utf8"); } catch { return ""; } });
   const corpus = sources.join("\n");
-  const someFileHasBoth = (a, b) => sources.some((t) => t.includes(a) && t.includes(b));
+  
 
   // Pull every node together with the keys it writes and whether it is labelled unbuilt.
   // A NODE start is `id: "x", name:` — a bind's `id:` is followed by side/key instead. Using

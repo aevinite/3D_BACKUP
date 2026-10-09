@@ -1,6 +1,6 @@
 // Replay of LEDGER/T6.md block 1 — "reading the code for correctness", P02501–P02700.
 // Every row here was verified by READING a file, so every row here is an assertion.
-import { row, APP, APPC, HTML, CSS, PAGE, LAYOUT, has, hasRe, lacks, lacksRe, before, contentHash, P } from "./lib.mjs";
+import { row, APP, APPC, HTML, PAGE, LAYOUT, has, hasRe, lacks, lacksRe, before, contentHash, P } from "./lib.mjs";
 import { readdirSync } from "node:fs";
 
 // ── app/kitchen/{layout,page}.tsx — P02501–P02510 ────────────────────────────

@@ -56,8 +56,6 @@ function N(msg: string, cond: boolean, note = "") {
   if (nextNew > NEW_TO) { console.log("  ⚠️ ID BLOCK EXHAUSTED"); process.exit(2); }
   record(`P${nextNew++}`, msg, cond, note);
 }
-/** A NEW check this half decided not to answer, with the reason. Takes an id from the block. */
-function S_NEW(msg: string, why: string) { skip++; const id = `P${nextNew++}`; used.add(id); rows.push({ id, msg, res: "⏭", note: why }); console.log(`  ⏭ ${id} ${msg} — ${why}`); }
 const S = (id: string, msg: string, why: string) => { used.add(id); skip++; rows.push({ id, msg, res: "⏭", note: why }); console.log(`  ⏭ ${id} ${msg} — ${why}`); };
 const head = (s: string) => console.log(`\n── ${s} ──`);
 const near = (a: number, b: number, eps = 1) => Math.abs(a - b) <= eps;

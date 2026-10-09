@@ -7,7 +7,7 @@
 // analytics route sends, and the failure message the overview sends. A sentence nothing checks is
 // a sentence that drifts, and this owner reads every one of them.
 import { chromium } from "playwright";
-import { chk, skip, code, src, report, setOnly, writeLedger, count, executedIds } from "./lib.mjs";
+import { chk, code, src, report, setOnly, writeLedger, count, executedIds } from "./lib.mjs";
 import { loginAs } from "../login.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
@@ -19,7 +19,6 @@ const PAGE = "app/owner/page.tsx";
 const p = code(PAGE), praw = src(PAGE);
 const a = code("app/api/owner/analytics/route.ts");
 const ov = code("app/api/owner/overview/route.ts");
-const mkt = src("app/owner/marketing/page.tsx"), onl = src("app/owner/online/page.tsx");
 
 // ── THE IDS IN THIS BAND ARE POSITIONAL, SO THE COUNT IS LOCKED ───────────────────────────────
 // `nextId()` hands out P67236 onwards in execution order. That is fine for a band that is run,
@@ -282,7 +281,6 @@ await chk(nextId(), "the Orders caption cannot state an average when nothing has
   /kMain\.paidOrders \? `\$\{inr\(kMain\.avg\)\} per paid order` : "none paid yet"/.test(p)
     ? true : "the Orders tile can print a ₹0 average as fact again");
 await chk(nextId(), "the estate row is a positioned box, so nothing in it escapes to the document", () => {
-  const phone = /@media \(max-width: 760px\) \{([\s\S]*?)\n        \}/.exec(src(PAGE).match(/<style jsx>\{`([\s\S]*?)`\}<\/style>/g).join("\n"));
   const sheet = src(PAGE);
   return /\.hq-table :global\(tr\.hq-row\) \{ position: relative;/.test(sheet)
     ? true : "the estate row lost its containing block — the rank cell would stretch the page again";
@@ -295,7 +293,7 @@ if (results_count() !== EXPECT_ROWS) {
   console.log(`\nID DRIFT: this band executed ${results_count()} rows but declares EXPECT_ROWS = ${EXPECT_ROWS}.\nEvery id after the inserted row has shifted. Append at the end, or renumber deliberately and update the ledger.`);
   process.exit(2);
 }
-const n = report(`T13 NEW band F · the words on these screens, and the rules (P67236–P${id - 1})`, { minChecks: 40 });
+report(`T13 NEW band F · the words on these screens, and the rules (P67236–P${id - 1})`, { minChecks: 40 });
 const out = process.argv.find((x) => x.startsWith("--ledger="));
 if (out) writeLedger(out.slice(9), {
   how: "read every string a person sees, and drove both Coming-soon pages; checked this territory against the project rules",

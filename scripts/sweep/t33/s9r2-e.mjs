@@ -1,5 +1,5 @@
 // T33 round 2 · BLOCK D2 (one row per live restaurant) + BLOCK E (judgment). 85 phases.
-import { q, one } from "./tx.mjs";
+import { q } from "./tx.mjs";
 import { nextId } from "./ids.mjs";
 export const rows = [];
 const add = (subject, check, how, pass, note) => {

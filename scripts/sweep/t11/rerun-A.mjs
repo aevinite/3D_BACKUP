@@ -1,5 +1,5 @@
 // Section A of T8.md re-run for real — the BILL document (billDocHtml, billRows), P03501–P03555.
-import { BILLDOC as B, read, visible, totalRows, baseBill, row } from "./lib.mjs";
+import { BILLDOC as B, visible, totalRows, baseBill, row } from "./lib.mjs";
 
 const H = (o) => B.billDocHtml(baseBill(o));
 const foots = (d) => {

@@ -12,7 +12,7 @@
 // Product-correctness wording throughout: "does every owner request require being logged in?",
 // "does each restaurant only see its own numbers?", "are the takings hidden where required?".
 // Read by following the code and by observing normal use — never by trickery.
-import { chk, skip, code, src, report, setOnly, writeLedger, count } from "./lib.mjs";
+import { chk, code, src, report, setOnly, writeLedger, count } from "./lib.mjs";
 
 const LAYOUT = "app/owner/layout.tsx";
 const OVERVIEW = "app/api/owner/overview/route.ts";
@@ -283,7 +283,7 @@ chk("P66800", "the layout is small enough to read in one sitting — the gate st
   return lines < 200 ? true : `layout.tsx is ${lines} lines; a gate nobody reads is a gate nobody checks`;
 });
 
-const n = report("T13 NEW band A · the owner gate and the overview payload (P66725–P66800)", { minChecks: 70 });
+report("T13 NEW band A · the owner gate and the overview payload (P66725–P66800)", { minChecks: 70 });
 const out = process.argv.find((x) => x.startsWith("--ledger="));
 if (out) writeLedger(out.slice(9), {
   how: "read app/owner/layout.tsx and app/api/owner/overview/route.ts, following each branch",

@@ -23,7 +23,7 @@
 // stamp, the bill rows, the two tabs and the scroll hand-off. That is where block A goes.
 //
 // Nothing here touches a database, a login or a deployed site.
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 

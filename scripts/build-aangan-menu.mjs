@@ -241,7 +241,6 @@ const categories = CATS.map(([slug, name, icon, color], i) => ({
 const filters = FILTERS.map(([slug, name, icon, sortOrder]) => ({ slug, icon, sortOrder, active: true, name: { en: name } }));
 
 const items = [];
-let order = 0;
 for (const [cat] of CATS) {
   const rows = ITEMS[cat] || [];
   rows.forEach(([title, price, description, ...extra]) => {
@@ -252,7 +251,6 @@ for (const [cat] of CATS) {
       slug: slugify(title), title, price: String(price), image: PLACEHOLDER, category: cat,
       veg: true, is4d: false, description, tags,
     });
-    order++;
   });
 }
 

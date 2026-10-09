@@ -3,7 +3,7 @@
 // B · what the door does with an address a person could plausibly arrive with: mistyped, truncated,
 //     copied out of a chat, or carrying a value from a different restaurant's link. Product
 //     correctness: does the panel show an honest screen instead of a blank or a raw error?
-import { checkA, skip, report, eq, browser, ctxAs, pageOf, frameOf, BASE, SLUG, read, ROOT } from "./r2lib.mjs";
+import { checkA, report, browser, ctxAs, pageOf, frameOf, BASE, SLUG, read } from "./r2lib.mjs";
 
 const land = async (role, url, vp) => {
   const c = await ctxAs(role, vp);
@@ -316,7 +316,7 @@ for (const [id,what,val] of ODD) {
     return (r.frames===1&&!/rid=/.test(r.src||""))||`${r.frames} frame(s), src ${String(r.src).slice(0,60)}, path ${r.path}`;
   });
 }
-for (const [i,[id,what,val]] of ODD.slice(0,10).entries()) {
+for (const [i,[,what,val]] of ODD.slice(0,10).entries()) {
   await checkA(`P993${77+i}`,`${what} also throws nothing on the way`,async()=>{
     const r=await land("manager",`/manager?rid=${val}`);
     return r.errors.length===0||r.errors.slice(0,2).join(" · ");
@@ -393,7 +393,7 @@ for (const [id,what,val] of TSLUG) {
     return honest||`status ${r.status}, ${r.frames} frame(s), path ${r.path}, text "${r.text.slice(0,60)}"`;
   });
 }
-for (const [i,[id,what,val]] of TSLUG.entries()) {
+for (const [i,[,what,val]] of TSLUG.entries()) {
   await checkA(`P994${12+i}`,`${what} also throws nothing`,async()=>{
     const r=await land("manager",`/r/${val}/manager`);
     return r.errors.length===0||r.errors.slice(0,2).join(" · ");

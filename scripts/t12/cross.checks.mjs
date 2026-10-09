@@ -11,7 +11,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 
-export function run({ c, raw, check, skipRow, fnBody, before, count, P }) {
+export function run({ c, check, count, P }) {
   // ── load the real module ────────────────────────────────────────────────────────────────
   let A = null, loadErr = "";
   try {
@@ -19,7 +19,7 @@ export function run({ c, raw, check, skipRow, fnBody, before, count, P }) {
     A = require(P("public/panels/auditsort.js"));
   } catch (e) { loadErr = e && e.message; }
 
-  const S = c.auditsort, R = raw.auditsort;
+  const S = c.auditsort;
   const rows = (n = 5) => Array.from({ length: n }, (_, i) => ({
     id: i + 1,
     at: new Date(Date.UTC(2026, 0, 1 + i, 12)).toISOString(),

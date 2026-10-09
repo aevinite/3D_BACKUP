@@ -200,7 +200,7 @@ async function ctx(role){
   // the console reaches a panel through act-as/go, which is what attaches the restaurant scope —
   // visiting /manager with only an admin cookie has none ("open this panel from the admin console")
   await p.goto(B+"/aevinite",{waitUntil:"domcontentloaded",timeout:90000}); await p.waitForTimeout(5000);
-  const rid = await p.evaluate(async(B)=>{
+  const rid = await p.evaluate(async()=>{
     for (const u of ["/api/admin/restaurants","/api/admin/restaurants?limit=5"]) {
       const r=await fetch(u,{credentials:"include"}).catch(()=>null);
       if(!r||!r.ok) continue;

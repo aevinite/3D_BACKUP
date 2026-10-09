@@ -22,7 +22,6 @@ const CUSTOMERS = code(read("app/owner/customers/page.tsx"));
 const KHATA = code(read("app/owner/khata/page.tsx"));
 const ISSUES = code(read("app/owner/issues/page.tsx"));
 const MEDIA = code(read("app/api/issue-media/route.ts"));
-const ADMIN_ISSUES = code(read("app/aevinite/issues/page.tsx"));
 // The admin's complaints screen is split across the folder (a server page plus its client parts),
 // so read the whole folder rather than guessing which file holds the word.
 import { readdirSync } from "node:fs";
@@ -31,7 +30,6 @@ const ADMIN_ISSUES_ANY = (() => {
   catch { return ""; }
 })();
 const OWNER_ISSUES_ROUTE = code(read("app/api/owner/issues/route.ts"));
-const OWNER_CUST_ROUTE = code(read("app/api/owner/customers/route.ts"));
 const LIB_ISSUES = code(read("lib/issues.ts"));
 const SW = read("public/sw.js");
 

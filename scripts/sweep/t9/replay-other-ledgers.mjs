@@ -1,7 +1,7 @@
 // Replay of the kitchen rows that live in OTHER terminals' ledgers — T10, T25, T27, T28, T29, T30.
 // Sweep #8 re-cut the territories, so these rows are about files T9 now owns even though they sit
 // in someone else's file. Their `result` is updated in place there; the mechanics live here.
-import { row, APP, APPC, HTML, CSS, ROUTE, ROUTEC, PAGE, LAYOUT, has, hasRe, lacks, lacksRe, P, src } from "./lib.mjs";
+import { row, APP, APPC, HTML, ROUTEC, PAGE, LAYOUT, has, hasRe, lacksRe, P } from "./lib.mjs";
 import { readFileSync, existsSync } from "node:fs";
 
 // ── T10 · the kitchen API route (P04729, P19878–P19937, P19998) ──────────────

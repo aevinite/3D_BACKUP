@@ -1,6 +1,6 @@
 // T33 round 2 · BLOCK D — invariants over the REAL data, not a fixture. 60 phases.
 // Read-only throughout. Scoped, column-listed, no full-table analytics.
-import { q, one } from "./tx.mjs";
+import { one } from "./tx.mjs";
 import { nextId } from "./ids.mjs";
 
 export const rows = [];

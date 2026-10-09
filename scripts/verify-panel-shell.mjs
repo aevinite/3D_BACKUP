@@ -24,7 +24,7 @@
 // It is deliberately CROSS-FILE: it never asserts that the markup says a particular thing, it
 // asserts that the markup AGREES with app.js, with panelGate.ts, with fitnums.js and with the
 // panel's own stylesheet. A guard that only reads one file can only ever go stale with it.
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,7 +37,6 @@ const CSS = rd("public/panels/editor/style.css");
 const FIT = rd("public/panels/fitnums.js");
 const ED = rd("app/editor/page.tsx");
 const PAGE = rd("app/manager/page.tsx");
-const GATE = rd("lib/panelGate.ts");
 const GO = rd("app/api/admin/act-as/go/route.ts");
 const SAB = rd("lib/safeAreaBridge.ts");
 // CODE, not notes. Both traps this repo has scars from: a check asserting a string is ABSENT

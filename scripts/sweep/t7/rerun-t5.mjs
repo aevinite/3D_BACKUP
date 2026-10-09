@@ -57,7 +57,6 @@ for (let i = 0; i < lines.length; i++) {
   ran++;
   let ok, e = null;
   try {
-    // eslint-disable-next-line no-new-func
     ok = Function("rd,has,count,app,html,css,fl,inv,undobar,editorRoute,route,kit,tab,mgrPage,mgrLayout,edPage,doc,noComments,boardIvs,printIv,rej,floorLay,bell,outbox,sortmod,logTrail,adminShared,noCommentsFn",
       "return (" + expr + ");")(rd,has,count,app,html,css,fl,inv,undobar,editorRoute,route,kit,tab,mgrPage,mgrLayout,edPage,doc,noComments,boardIvs,printIv,rej,floorLay,bell,outbox,sortmod,logTrail,adminShared,noCommentsFn);
   } catch (ex) { e = ex.message; }

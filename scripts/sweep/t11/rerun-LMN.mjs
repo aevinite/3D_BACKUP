@@ -9,7 +9,7 @@
 // section's own header asks for.
 // N is judgment; each row answers with the evidence this run actually has.
 import { BILLDOC as B, row, skipRow, read, visible, totalRows, codeOnly, ROOT } from "./lib.mjs";
-import { BASE, canDrive, renderDoc, seenText, inkWidth, ROLL_PX } from "./browser.mjs";
+import { BASE, canDrive, renderDoc, seenText } from "./browser.mjs";
 import { mkdirSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -202,8 +202,7 @@ R("P03894", "…and − / + change it", () =>
 R("P03895", "…and the chip fits the whole bill, down to the documented 0.6 floor", () =>
   on("bill", bill({ lines: Array.from({ length: 30 }, (_, i) => ({ title: `Dish ${i + 1}`, qty: 1, price: 100 })), subtotal: 3000, total: 3150 }), { width: 1280, height: 700 }, async ({ page }) => {
     await page.waitForTimeout(700);
-    const before = await page.evaluate(() => document.documentElement.scrollHeight);
-    await page.evaluate(() => document.querySelector(".zl")?.click());
+      await page.evaluate(() => document.querySelector(".zl")?.click());
     await page.waitForTimeout(500);
     const s = await page.evaluate(() => ({ need: document.documentElement.scrollHeight, have: innerHeight, z: parseFloat(getComputedStyle(document.body).zoom) }));
     // ZMIN is 0.6 ON PURPOSE — "below that a 10.5px label stops being readable and a scrollbar is
@@ -243,7 +242,7 @@ R("P03900", "…and its Print/Close buttons are ≥40px tall on the phone", () =
   on("bill", bill(), { width: 360, height: 780 }, async ({ page }) => {
     await page.waitForTimeout(700);
     const hs = await page.evaluate(() => [...document.querySelectorAll(".bar button")].map((b) => {
-      const r = b.getBoundingClientRect(); const z = parseFloat(getComputedStyle(b.closest(".bar")).zoom) || 1;
+      const r = b.getBoundingClientRect();
       return { t: (b.textContent || "").trim().slice(0, 8), h: Math.round(r.height) };
     }));
     const small = hs.filter((x) => x.h < 28);

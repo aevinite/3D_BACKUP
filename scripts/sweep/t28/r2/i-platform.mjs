@@ -3,7 +3,7 @@
 // Round 1 covered the LIBRARY by calling its exported functions. These twenty-five DRIVE THE DOOR
 // over real HTTP — the one address an outside company posts to — and they are the only checks in
 // this territory whose caller is not a person at all.
-import { FH, GET, POST, sb, owns, undo, block, of_, code, read } from "./harness.mjs";
+import { POST, sb, owns, block, of_, code, read } from "./harness.mjs";
 const W = of_("app/api/aggregators/webhook/[source]/route.ts");
 const L = of_("lib/aggregators.ts");
 export const I = block(160911, "I · the platform-order door, driven over real HTTP");
@@ -32,7 +32,6 @@ row(W("the door answers the same to a signed-in owner as to a stranger — it is
   return a.status === b.status || `owner got ${a.status}, stranger got ${b.status}`;
 });
 row(W("with the integration dormant, a real platform name is answered \"disabled\" and nothing is written"), "POST /webhook/zomato", async (c) => {
-  const before = new Date().toISOString();
   const o = order();
   const r = await POST(c.N, hook("zomato"), o);
   const q = await sb.from("aggregator_orders").select("id").eq("external_id", o.order_id).limit(1);

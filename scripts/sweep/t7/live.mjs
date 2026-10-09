@@ -87,7 +87,7 @@ const REQUESTS = [
 // `generate_series(1, table_count) UNION open sessions UNION live orders` (mig 166, line 39). A
 // fixture that only carried T3 was quietly testing a floor that cannot exist, and made the call
 // badge on T1 look missing when it is not.
-const FREE_TILE = (t) => ({ state: "free", label: "Free", meta: "", counts: { nw: 0, ck: 0, rd: 0, sv: 0 },
+const FREE_TILE = () => ({ state: "free", label: "Free", meta: "", counts: { nw: 0, ck: 0, rd: 0, sv: 0 },
   pay: "", due: 0, hasNew: false, hasCall: false, hasReq: false, hasJoin: false, members: 0, reqs: 0, pending: 0, tag: "" });
 const FRESH_ORDER_TILE = { ...FREE_TILE(4), state: "new", label: "New order", counts: { nw: 1, ck: 0, rd: 0, sv: 0 }, hasNew: true };
 const SUMMARY = { tiles: { "1": FREE_TILE(1), "2": FREE_TILE(2), "3": TILE, "4": FRESH_ORDER_TILE }, calls: CALLS, requests: REQUESTS, joiners: JOINERS, blocklist: [], merges: [], order_count: 1, latest_order_table: "3", printer: PRINTER, slowOrders: SLOW };
@@ -415,7 +415,7 @@ await check("P61230 a stuck BILL is a notification too, and says the counter —
 });
 await check("P61231 tapping Print it here really prints and closes the job", async () => {
   const out = await page.evaluate(async () => {
-    let printed = false, dismissed = false;
+    let printed = false;
     const realPrint = window.printTicketHtml;
     window.printTicketHtml = () => { printed = true; return true; };
     const btn = document.querySelector("button[class*=lfh-bell]");

@@ -69,7 +69,7 @@ const COOKIES = await seed.cookies();
 await seed.close();
 
 const DESKTOP = { width: 1280, height: 900 };
-const A35 = { width: 360, height: 780, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
+
 async function mk(vp = DESKTOP, skin = "dark") {
   const c = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: vp.deviceScaleFactor ?? 1, isMobile: !!vp.isMobile, hasTouch: !!vp.hasTouch, acceptDownloads: true });
   c.setDefaultNavigationTimeout(120000); c.setDefaultTimeout(45000);
@@ -177,11 +177,7 @@ head("A · the file he downloads, character by character");
     if (dl) { const f = join(DL, "n.csv"); await dl.saveAs(f); csv = readFileSync(f, "utf8"); }
     N(`…and the CSV downloads with ${what} in it`, !!dl);
     // A CSV row must still parse into the same number of columns as its header.
-    const cols = (line) => {
-      let n = 1, q = false;
-      for (const ch of line) { if (ch === '"') q = !q; else if (ch === "," && !q) n++; }
-      return n;
-    };
+    
     const parseCsv = (t) => {
       const out = []; let cur = "", row = [], q = false;
       for (let i = 0; i < t.length; i++) {

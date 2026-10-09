@@ -19,7 +19,7 @@
 // The 44 class names here are not a fresh idea either: they are the ones the gap measurement
 // found that NO ledger row anywhere on disk mentions.
 import { chromium } from "playwright";
-import { chk, skip, code, styles, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
+import { chk, styles, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
 import { loginAs } from "../login.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
@@ -34,7 +34,7 @@ const route = await loginAs(seed, "owner", BASE);
 const state = await seed.storageState();
 
 /** open a page for a role at a width, and return it */
-async function open({ role = "owner", width = 1280, height = 900, creds = null } = {}) {
+async function open({ width = 1280, height = 900, creds = null } = {}) {
   const c = await browser.newContext({ storageState: creds ? undefined : state, viewport: { width, height },
     ...(width <= 400 ? { deviceScaleFactor: 3, isMobile: true, hasTouch: true } : {}) });
   let r = route;
@@ -554,7 +554,7 @@ if (results_count() !== EXPECT_ROWS) {
   console.log(`\nID DRIFT: this band executed ${results_count()} rows but declares EXPECT_ROWS = ${EXPECT_ROWS}.\nEvery id after the inserted row has shifted. Append at the end, or renumber deliberately and update the ledger.`);
   process.exit(2);
 }
-const n = report(`T13 NEW band D · does each style rule REACH its element (P67031–P${id - 1})`, { minChecks: 45 });
+report(`T13 NEW band D · does each style rule REACH its element (P67031–P${id - 1})`, { minChecks: 45 });
 const out = process.argv.find((x) => x.startsWith("--ledger="));
 if (out) writeLedger(out.slice(9), {
   how: `opened the real page at three widths and two roles and read getComputedStyle — never the source`,

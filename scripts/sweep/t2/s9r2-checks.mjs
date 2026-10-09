@@ -1,5 +1,5 @@
 // T2 · sweep #9 round 2 — the SOURCE half. See s9r2-lib.mjs for why these ids and this aim.
-import { F, raw, code, check, save, nextId, idsLeft } from "./s9r2-lib.mjs";
+import { F, raw, code, check, save, nextId } from "./s9r2-lib.mjs";
 
 const S = Object.fromEntries(Object.entries(F).map(([k, p]) => [k, code(p)]));
 const R = Object.fromEntries(Object.entries(F).map(([k, p]) => [k, raw(p)]));

@@ -2,7 +2,7 @@
 // Drives the real manager panel on THIS terminal's own port and asserts on the RENDERED result.
 //   node scripts/sweep/t8/live.mjs [--base http://localhost:4308]
 import { chromium } from "playwright";
-import { check, checkA, skip, report, eq, ROOT } from "./lib.mjs";
+import { check, checkA, report, eq, ROOT } from "./lib.mjs";
 import { loginAs } from "../login.mjs";
 import path from "node:path";
 import fs from "node:fs";
@@ -538,7 +538,6 @@ await checkA("P62506","the connection pill the shared script injects is 25px tal
   return true;   // measured for the report; the pill is connbadge.js's geometry, not the shell's
 });
 await checkA("P62507","the guest bell's count badge text is 10.5px — recorded, not mine to change",async()=>{
-  const px=await PFR.evaluate(()=>{const e=document.querySelector(".lfh-bell-n");return e?getComputedStyle(e).fontSize:null;});
   return true;   // measured for the report; guestbell.js's geometry, not the shell's
 });
 await checkA("P62508","the phone bar's util rows really moved INTO the drawer, so nothing was lost",async()=>{
@@ -558,7 +557,7 @@ await checkA("P62509","…and the theme toggle really works from there",async()=
   return (before!==after)||`the skin stayed ${before}`;
 });
 await checkA("P62510","the Bills tab opens on the phone, on the RECORD of today's bills",async()=>{
-  await PFR.evaluate(()=>{try{localStorage.setItem("lfh_editor_ordersview","previous");}catch(e){}});
+  await PFR.evaluate(()=>{try{localStorage.setItem("lfh_editor_ordersview","previous");}catch{}});
   await PFR.evaluate(()=>{window.state && (window.state.ordersView="previous");});
   await PFR.evaluate(()=>document.querySelector('.tab[data-tab="orders"]').click());
   await P.waitForTimeout(2500);

@@ -48,7 +48,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 //   "app-down" → the reachability probe answers, /api/health does not
 //   "well"     → both answer
 let mode = "dead";
-let reachHits = 0, healthHits = 0;
+let reachHits = 0;
 const server = http.createServer((req, res) => {
   const path = String(req.url).split("?")[0];
   if (path === "/offline.html" || path === "/") {
@@ -61,7 +61,6 @@ const server = http.createServer((req, res) => {
     res.writeHead(404); return res.end("no route");     // a 404 is a perfectly good yes
   }
   if (path === "/api/health") {
-    healthHits++;
     if (mode === "well") { res.writeHead(200, { "content-type": "application/json" }); return res.end('{"ok":true}'); }
     res.writeHead(503); return res.end("busy");
   }

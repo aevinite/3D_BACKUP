@@ -73,7 +73,7 @@ const code = (f) => {
   if (!_c.has(f)) _c.set(f, readFileSync(join(DIR, f), "utf8").split("\n").map((l) => l.replace(/--.*$/, "")).join("\n"));
   return _c.get(f);
 };
-const rx = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 
 // Every object each file CREATES and every object it DROPS, in file order.
 const KINDS = [

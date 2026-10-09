@@ -27,7 +27,7 @@
 //   node scripts/verify-plain-refusals.mjs        (npm run verify:plain-refusals)
 //   node scripts/verify-plain-refusals.mjs --repo /path/to/other/checkout
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
