@@ -26,7 +26,7 @@
 //                write at runtime; this catches it in review, which is cheaper.
 //
 // READ-ONLY. Exit 1 = a rate could be a percentage again. Exit 2 = could not run.
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

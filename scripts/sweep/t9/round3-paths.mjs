@@ -103,8 +103,7 @@ row("P100473", "every id in this territory's suite is unique", () => {
 row("P100474", "no id in this suite falls outside the two blocks T9 was given plus the two it claimed", () => {
   const ok = (n) => (n >= 62701 && n <= 63700) || (n >= 99801 && n <= 100482) || n < 54701;
   const bad = [];
-  for (const f of readFileSync(P("scripts/verify-kitchen-screen.mjs"), "utf8").matchAll(/"([\w-]+)"/g)) {}
-  for (const f of ["round3-branches", "round3-paths", "new-f-items789"]) {
+    for (const f of ["round3-branches", "round3-paths", "new-f-items789"]) {
     const t = readFileSync(P("scripts/sweep/t9/" + f + ".mjs"), "utf8");
     for (const m of t.matchAll(/(?:row|t6|t6skip)\("P(\d{5,6})"/g)) if (!ok(Number(m[1]))) bad.push("P" + m[1]);
   }

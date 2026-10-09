@@ -36,11 +36,9 @@ const P = (id, name, ok, extra) => {
 const OUT = read("lib/guestOutbox.ts");
 const MENU = read("lib/menu.ts");
 const CART = read("components/CartPanel.tsx");
-const TRACK = read("components/OrderTracker.tsx");
 const PL = read("app/api/guest/place-order/route.ts");
 const CW = read("app/api/guest/call-waiter/route.ts");
 const LV = read("app/api/guest/leave/route.ts");
-const LH = read("app/api/guest/limit-hit/route.ts");
 const CHIP = read("components/GuestOutboxChip.tsx");
 
 // The reason codes the four guest RPCs really answer, read out of their own bodies.

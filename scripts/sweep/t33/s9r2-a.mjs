@@ -10,7 +10,7 @@
 // A probe that reads a trigger's work must therefore be its own statement, after the write.
 // (Recorded because this is indistinguishable from a real fault in the output, and sweep #6 found
 // three of three "dead guard" hits were the detector too.)
-import { tx, tx1, q, one, RID } from "./tx.mjs";
+import { tx1, RID } from "./tx.mjs";
 import { nextId } from "./ids.mjs";
 
 export const rows = [];

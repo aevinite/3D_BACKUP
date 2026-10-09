@@ -462,7 +462,6 @@ if (!ONLY || ONLY === "5") {
     return jobs.length === 3 || `it handed out ${jobs.length} — kitchen and bill would still be one behind the other`;
   });
   await phase("…and every one of them is on a DIFFERENT printer", async () => {
-    const [j] = await db(`print_jobs?restaurant_id=eq.${RID}&status=eq.printing&select=printer&order=created_at.asc&limit=9`);
     const rows = await db(`print_jobs?restaurant_id=eq.${RID}&status=eq.printing&select=printer`);
     const names = rows.map((x) => x.printer);
     return (new Set(names).size === names.length) || `two lanes share a printer: ${names.join(", ")}`;

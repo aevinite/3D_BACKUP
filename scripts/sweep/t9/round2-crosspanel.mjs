@@ -6,7 +6,7 @@
 //
 // Traced by READING — a breadcrumb's delivery is verify:realtime's job, and driving four panels at
 // once is what deadlocks a shared browser. Where a row cannot be settled by reading, it says so.
-import { row, APPC, ROUTE, ROUTEC, has, hasRe, lacks, lacksRe, P } from "./lib.mjs";
+import { row, APPC, ROUTE, ROUTEC, has, hasRe, lacksRe, P } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 
 const TABLET = () => readFileSync(P("public/panels/tablet/app.js"), "utf8");
@@ -27,7 +27,7 @@ const WRITES = [
   ["a printer problem", 'printer-events', ["printer_events"]],
   ["a print job finished", 'print-jobs/:id/done', ["print_jobs"]],
 ];
-for (const [what, ep, tables] of WRITES) {
+for (const [what] of WRITES) {
   row(next(), `${what} drops this restaurant's shared floor snapshot, so the next floor read is not pre-write`, () => {
     // one wrapper covers every write on this route — that is the point of it
     const r = ROUTEC();
@@ -37,7 +37,6 @@ for (const [what, ep, tables] of WRITES) {
   });
   row(next(), `${what} writes an Activity row a person can read`, () => {
     const r = ROUTEC();
-    const key = ep.split("/").pop().replace("-", "_");
     return (r.match(/logAction\("kitchen", /g) || []).length >= 7 || "fewer log calls than write paths";
   });
 }

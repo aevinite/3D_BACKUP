@@ -12,7 +12,7 @@ const sha8 = (f) => createHash("sha1").update(readFileSync(P(f))).digest("hex").
 const kot = () => { const b = readFileSync(P("public/panels/billdoc.js"), "utf8"); const i = b.indexOf("function kotDocHtml(o)"); return b.slice(i, b.indexOf("function kotBarCss()")); };
 const rd  = (a) => { const i = a.indexOf("function renderDishes("), j = a.indexOf("const RT_VOLATILE"); return a.slice(i, j); };
 const cols = (a) => { const i = a.indexOf("function renderColumns()"), j = a.indexOf("function renderWall()"); return a.slice(i, j); };
-const wall = (a) => { const i = a.indexOf("function renderWall()"), j = a.indexOf("function render()"); return a.slice(i, j); };
+
 
 // ── P32159–P32172 · the paper's shared note, and billdoc hash parity ──
 t6("P32159", "the paper drops a line's note only when it IS the shared one", "BD", /kotLineHtml\(r, shared\)/);

@@ -1,6 +1,6 @@
 // Sweep #8 · terminal 8 · sections E–F of P61701–P62700.
 // E = lib/safeAreaBridge.ts · F = public/panels/editor/index.html <head>
-import { read, exists, check, skip, report, has, hasNot, countOf, eq, before, codeOf, htmlCodeOf, ROOT } from "./lib.mjs";
+import { read, exists, check, report, has, hasNot, countOf, eq, before, codeOf, htmlCodeOf, ROOT } from "./lib.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -10,7 +10,6 @@ const SC   = codeOf(SAB);
 const H    = read("public/panels/editor/index.html");
 const HC   = htmlCodeOf(H);
 const CSS  = read("public/panels/editor/style.css");
-const APP  = read("public/panels/editor/app.js");
 const PF   = read("components/PanelFrame.tsx");
 const sha8 = (f) => createHash("sha1").update(fs.readFileSync(path.join(ROOT, f))).digest("hex").slice(0, 8);
 

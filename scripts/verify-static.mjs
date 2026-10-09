@@ -125,6 +125,7 @@ const GUARDS = [
   ["verify-session-gate-taps.mjs", "the guest's table sheet"],
   ["verify-guest-waits-for-its-restaurant.mjs", "every guest screen waits until it knows which restaurant it is on"],
   ["verify-migration-numbers.mjs", "two sessions never give two database changes the same number, and no number goes missing"],
+  ["verify-installed-packages.mjs", "the packages installed here are the versions the lock names (the folder runs what the site runs)"],
 ];
 
 // NOT HERE, AND WHY — the admission test is stricter than it first looks.

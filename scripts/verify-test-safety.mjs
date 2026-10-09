@@ -766,8 +766,14 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   const open = [];
   for (const f of files) {
     const src = read(f).replace(/\/\/.*$/gm, "");
-    const inserts = /db\(\s*["'`]orders["'`]\s*,\s*\{\s*method:\s*["']POST["']/.test(src);
-    const softDeletes = /orders\?[^`"']*["'`]\s*,\s*\{\s*method:\s*["']PATCH["'][^}]*deleted_at/.test(src);
+    // Both ways a script writes the table: the REST helper (`db("orders", { method: "POST" })` …
+    // `PATCH { deleted_at }`) and supabase-js (`.from("orders").insert(` … `.update({ deleted_at`) —
+    // the second shape was invisible to this rule until verify-table-ownership was found leaving a
+    // removed "paid" test order counting on Pizza Palace (sweep #10 T39 item 70, 2026-10-09).
+    const inserts = /db\(\s*["'`]orders["'`]\s*,\s*\{\s*method:\s*["']POST["']/.test(src)
+      || /\.from\(\s*["'`]orders["'`]\s*\)\s*\.insert\(/.test(src);
+    const softDeletes = /orders\?[^`"']*["'`]\s*,\s*\{\s*method:\s*["']PATCH["'][^}]*deleted_at/.test(src)
+      || /\.from\(\s*["'`]orders["'`]\s*\)\s*\.update\(\s*\{[^}]*deleted_at/.test(src);
     if (inserts && softDeletes && !/status:\s*["']cancelled["']/.test(src)) open.push(f);
   }
   check("a test that inserts orders and retires them CANCELS them, so they never count as sales",

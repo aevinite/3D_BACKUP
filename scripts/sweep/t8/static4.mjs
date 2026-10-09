@@ -1,6 +1,6 @@
 // Sweep #8 · terminal 8 · sections J–L of P61701–P62700.
 // J = the script manifest · K = this project's own written rules · L = cross-panel truth.
-import { read, exists, check, skip, report, has, hasNot, countOf, eq, before, codeOf, htmlCodeOf, ROOT } from "./lib.mjs";
+import { read, exists, check, report, has, hasNot, countOf, eq, codeOf, htmlCodeOf, ROOT } from "./lib.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -358,7 +358,7 @@ check("P62333","…and the note names the exact browsers it was measured in",()=
 check("P62334","the inset bridge reserves only what the phone reports",()=>has(PF,/We reserve ONLY what the phone reports/));
 check("P62335","…and refuses the old hard 48px, naming what it painted",()=>has(PF,/the earlier hard 48px painted exactly that\n\/\/    dead band/));
 check("P62336","the panel shell would still open if a shared script 404'd — each is independent",()=>{
-  return SCRIPTS.every(s=>!/type="module"/.test(H))||"a script is a module, so one failure would stop the rest";
+  return SCRIPTS.every(()=>!/type="module"/.test(H))||"a script is a module, so one failure would stop the rest";
 });
 check("P62337","nothing in the shell writes to localStorage — the scripts own their own keys",()=>hasNot(HC,/localStorage/));
 check("P62338","the shell declares no role, so a screen reader is not told a wrong one",()=>eq(countOf(HC,/role="/g),1));

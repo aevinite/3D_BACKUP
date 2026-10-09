@@ -1,7 +1,7 @@
 // Sweep #8 · terminal 7 · the code-reading half of P60701–P61700.
 // Territory: public/panels/editor/app.js lines ~9,300→end · public/panels/editor/inventory.js ·
 // public/panels/floor-layouts.js.  Run: node scripts/sweep/t7/static.mjs
-import { read, exists, check, skip, report, has, hasNot, countOf, eq, atLeast, codeOf, tail } from "./lib.mjs";
+import { read, exists, check, report, has, hasNot, countOf, eq, atLeast, codeOf, tail } from "./lib.mjs";
 
 const APP  = read("public/panels/editor/app.js");
 const A    = tail(APP);                       // my half only
@@ -11,9 +11,6 @@ const INV  = read("public/panels/editor/inventory.js");
 const INVC = codeOf(INV);
 const FL   = read("public/panels/floor-layouts.js");
 const HTML = read("public/panels/editor/index.html");
-const CSS  = read("public/panels/editor/style.css");
-const MAINT = read("public/panels/maint.js");
-const OUTBOX = read("public/panels/outbox.js");
 const TAB  = read("public/panels/tablet/app.js");
 const CLASH = read("lib/clash.ts");
 const INVAPI = read("app/api/inventory/[...path]/route.ts");

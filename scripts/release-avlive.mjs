@@ -25,8 +25,8 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import "node:url";
 
 const BACKUP = "/Users/aevinite/Documents/Projects/backup_Menu";
 const LIVE = "/Users/aevinite/Documents/LIVE_PROJECTS/3D_Menu_Av";

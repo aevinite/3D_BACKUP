@@ -5,8 +5,8 @@
 // Tab but not ACTIVATED by Enter is a control that does not exist for anyone using one.
 //
 // Everything below asks the RENDERED page: what has focus, what is announced, what a key does.
-import { chk, skip, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
-import { openWith, closeBrowser, screenText, ESTATE, BASE, idFor } from "./r2lib.mjs";
+import { chk, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
+import { openWith, closeBrowser, ESTATE, BASE, idFor } from "./r2lib.mjs";
 
 const id = idFor(67531);
 let n = 1;

@@ -4,7 +4,7 @@
 // asserts what is on screen or on the emitted PDF — never the source string." That is what this
 // does; the documents come from the SERVED billdoc.js, so it is the bytes a restaurant runs.
 import { BILLDOC as B, row, skipRow, read, codeOnly } from "./lib.mjs";
-import { BASE, canDrive, renderDoc, seenText, inkWidth, bodyWidth, toPdf, ROLL_PX, closeBrowser } from "./browser.mjs";
+import { BASE, canDrive, renderDoc, seenText, inkWidth, bodyWidth, toPdf, ROLL_PX } from "./browser.mjs";
 
 const R = (id, what, fn) => (canDrive ? row(id, what, fn)
   : skipRow(id, what, `needs playwright and a server at ${BASE} — start the dev server and re-run`));
@@ -211,7 +211,6 @@ R("P03833", "🖨 Print this / again is wired and calls print()", () =>
   withDoc("bill", bill(), {}, async ({ page }) => {
     const fired = await page.evaluate(() => {
       let n = 0; window.print = () => { n++; };
-      document.querySelector(".bar button")?.parentElement; // touch the bar
       const b = [...document.querySelectorAll(".bar button")].find((x) => /Print/.test(x.textContent || ""));
       b?.click(); return { n, found: !!b };
     });
@@ -247,7 +246,7 @@ R("P03836", "afterprint focuses the ✕ Close button and closes NOTHING", () =>
   }));
 R("P03837", "a REAL bill fires the print dialog by itself", () =>
   withDoc("bill", bill({ autoPrint: true }), { settle: 900 }, async ({ page }) => {
-    const n = await page.evaluate(() => window.__printed || 0);
+    
     // the dialog is stubbed before the document's own timeout fires
     return true === true ? (await page.evaluate(() => typeof printAgain === "function")) || "printAgain is absent" : true;
   }));

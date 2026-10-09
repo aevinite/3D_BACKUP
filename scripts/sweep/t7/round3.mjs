@@ -23,7 +23,6 @@ const INVC = codeOf(INV);
 const FL   = read("public/panels/floor-layouts.js");
 const CSS  = read("public/panels/editor/style.css");
 const HTML = read("public/panels/editor/index.html");
-const BELL = read("public/panels/guestbell.js");
 
 /* ═════ H1 · editor/inventory.js — the sub-views and popups nothing had named (P98801–P98960) ═══ */
 

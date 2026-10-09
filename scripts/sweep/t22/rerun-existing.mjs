@@ -12,7 +12,7 @@
 // those. Two terminals editing one row is how three ledger collisions have already happened.
 //
 // Run: node --experimental-strip-types scripts/sweep/t22/rerun-existing.mjs --base http://localhost:4322
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";

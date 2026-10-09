@@ -111,8 +111,13 @@ export default function section(c) {
     async () => {
       // Window starts after the clock is read — the first draft looked back 15s and counted the
       // record left by the bulk-clear phase above it. Same withdrawn shape as the handover sheet's.
-      const since = new Date().toISOString();
-      await new Promise((r) => setTimeout(r, 1100));
+      // THE DATABASE'S CLOCK, NOT THIS MACHINE'S (sweep #10 T39 item 78, 2026-10-09). `since` was this
+      // machine's time, and the records are stamped by the database, whose clock ran ~1s ahead here —
+      // so the record of the press one phase above fell inside the window and this read "2 records for
+      // one press" on a route that writes exactly one (lib route: one logAction per bulk press). The
+      // window now starts at the newest such record the DATABASE already holds.
+      const prev = (await c.actionsSince("1970-01-01T00:00:00Z", ["errors_resolved_all"]))[0];
+      const since = prev ? new Date(new Date(prev.created_at).getTime() + 1).toISOString() : new Date(0).toISOString();
       await seed(2, "T27R2 bulk one record");
       const r = await req(P, { method: "POST", body: { all: true, restaurant_id: FH } });
       // A BUSY SERVER IS NOT EVIDENCE ABOUT THE RECORD-WRITING RULE. Five sweep terminals share one
@@ -134,10 +139,20 @@ export default function section(c) {
     async () => { const [a] = await seed(1, "T27R2 already parked"); await req(P, { method: "POST", body: { action_id: a, snooze_hours: 10 } }); const first = (await rowOf(a)).snoozed_until; await seed(1, "T27R2 fresh fault"); await req(P, { method: "POST", body: { all: true, restaurant_id: FH, snooze_hours: 2 } }); return (await rowOf(a)).snoozed_until === first; });
   phase("a bulk wait claims nothing was fixed", "read `remembered` on a bulk wait",
     async () => { await seed(1, "T27R2 bulk wait"); const r = await req(P, { method: "POST", body: { all: true, restaurant_id: FH, snooze_hours: 3 } }); return r.json?.remembered === false && r.json?.resolved === 0; });
-  phase("a bulk action with a malformed restaurant id is treated as all restaurants, not refused oddly",
-    "POST all:true with a junk scope",
-    async () => { const r = await req(P, { method: "POST", body: { all: true, restaurant_id: "nope" } }); return r.status === 200; });
-  phase("no answer from this endpoint carries a database sentence", "replay the refusals",
+  // REFUSED NOW, AND IT CLEARS NOTHING (sweep #10 T39 item 78, 2026-10-09). This used to assert the
+  // opposite — a malformed id was "treated as all restaurants" — and so EVERY run of this section
+  // cleared every restaurant's open problem reports on the shared board ("Cleared 3 problem report(s)
+  // (all restaurants)" once a run). The route now refuses a present-but-invalid scope; an absent one
+  // still means all restaurants, which is what the Repair screen sends.
+  phase("a bulk action with a malformed restaurant id is refused in words, and clears nothing",
+    "POST all with restaurant_id 'nope'; count open reports before and after",
+    async () => {
+      const [id] = await seed(1, "T27R2 must survive a bad scope");
+      const r = await req(P, { method: "POST", body: { all: true, restaurant_id: "nope" } });
+      const row = await rowOf(id);
+      return (r.status === 400 && typeof r.json?.error === "string" && row && row.resolved_at === null)
+        || `answered ${r.status}${row?.resolved_at ? " and CLEARED an open report" : ""}`;
+    });  phase("no answer from this endpoint carries a database sentence", "replay the refusals",
     async () => { const t = []; for (const b of [{ action_id: "x" }, { action_id: NOSUCH }, { action_id: NOSUCH, snooze_hours: 99999 }]) t.push((await req(P, { method: "POST", body: b })).text); return t.every((x) => !DB_WORDS.test(x)); });
   phase("every refusal from this endpoint is a sentence a person can act on", "each carries `error`",
     async () => { for (const b of [{ action_id: "x" }, { action_id: NOSUCH }]) { const r = await req(P, { method: "POST", body: b }); if (!r.json?.error || r.json.error.length < 5) return false; } return true; });

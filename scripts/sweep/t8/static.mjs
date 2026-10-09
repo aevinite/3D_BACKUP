@@ -1,27 +1,24 @@
 // Sweep #8 · terminal 8 · the code-reading half of P61701–P62700.
 // Territory: app/manager/**, app/editor/**, public/panels/editor/index.html,
 // components/PanelFrame.tsx, lib/safeAreaBridge.ts — the manager panel's HOST and SHELL.
-import { read, exists, check, skip, report, has, hasNot, countOf, eq, before, codeOf, htmlCodeOf, ROOT } from "./lib.mjs";
+import { read, exists, check, report, has, hasNot, countOf, eq, codeOf, ROOT } from "./lib.mjs";
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import "node:crypto";
 
 const LAY  = read("app/manager/layout.tsx");
 const PAGE = read("app/manager/page.tsx");
 const ED   = read("app/editor/page.tsx");
 const H    = read("public/panels/editor/index.html");
-const HC   = htmlCodeOf(H);                       // markup with its comments stripped
+                       // markup with its comments stripped
 const PF   = read("components/PanelFrame.tsx");
 const SAB  = read("lib/safeAreaBridge.ts");
 const GATE = read("lib/panelGate.ts");
-const APP  = read("public/panels/editor/app.js");
 const CSS  = read("public/panels/editor/style.css");
 const TWIN = read("app/r/[restaurant]/manager/page.tsx");
 const KIT  = read("app/kitchen/page.tsx");
 const TAB  = read("app/tablet/page.tsx");
-const HKIT = read("public/panels/kitchen/index.html");
-const HTAB = read("public/panels/tablet/index.html");
-const sha8 = (f) => createHash("sha1").update(fs.readFileSync(path.join(ROOT, f))).digest("hex").slice(0, 8);
+
 
 /* ═══════════ A · app/manager/layout.tsx — the door (P61701–P61720) ═══════════ */
 check("P61701","the manager route has a layout at all, so the gate cannot be skipped",()=>exists("app/manager/layout.tsx"));

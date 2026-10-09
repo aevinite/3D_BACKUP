@@ -92,7 +92,7 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
     /if \(taps\.length > 60\) taps\.shift\(\);/.test(S));
   check("P04204", "nothing here can throw into the panel", () => {
     // every listener body and every send path is wrapped
-    const bodies = [post, send, stash, flushPending, reportError];
+    
     const unwrapped = [];
     if (!/try \{/.test(post)) unwrapped.push("post");
     if (!/try \{/.test(send)) unwrapped.push("send");

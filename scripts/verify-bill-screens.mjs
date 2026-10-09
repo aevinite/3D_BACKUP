@@ -122,7 +122,7 @@ const browser = await chromium.launch({ headless: true });
     await page.setContent(bill(n), { waitUntil: "load" });
     await page.waitForTimeout(180);
     // nudge the size by hand first, so a remembered zoom is in play
-    await page.evaluate(() => { try { zStep(-1); zStep(-1); } catch (e) {} });
+    await page.evaluate(() => { try { zStep(-1); zStep(-1); } catch  {} });
     await page.emulateMedia({ media: "print" });
     const r = await page.evaluate(() => ({
       zoom: getComputedStyle(document.body).zoom,

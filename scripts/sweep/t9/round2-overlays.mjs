@@ -44,7 +44,6 @@ async function main() {
 
       for (const [oname, open, sel, isOpen, close] of OVERLAYS) {
         const r = await F.evaluate(async ([openSrc, selector, isOpenSrc, closeSrc]) => {
-          // eslint-disable-next-line no-new-func
           new Function(openSrc)();
           await new Promise((res) => setTimeout(res, 350));
           const shown = new Function("return (" + isOpenSrc + ")()")();

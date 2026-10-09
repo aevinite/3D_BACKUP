@@ -149,7 +149,11 @@ export default function section(c) {
   phase("…and never carrying the password", "search those lines for the value",
     async () => { const since = new Date(Date.now() - 120000).toISOString(); const r = await req(P, { method: "POST", body: { restaurant_id: FH, user_id: made.userId }, cookie: await uncover() }); const rows = await actionsSince(since, ["user_reset_password"]); return rows.every((x) => !(x.detail || "").includes(r.json.password)); });
   phase("a double-tap with one key mints once", "same idempotency key twice",
-    async () => { const key = crypto.randomUUID(); const a = await req(P, { method: "POST", body: { restaurant_id: FH, user_id: made.userId }, cookie: await uncover(), headers: { "X-LFH-Action-Id": key } }); const b = await req(P, { method: "POST", body: { restaurant_id: FH, user_id: made.userId }, cookie: await uncover(), headers: { "X-LFH-Action-Id": key } }); return a.json?.password === b.json?.password; });
+    async () => { const key = crypto.randomUUID(); const a = await req(P, { method: "POST", body: { restaurant_id: FH, user_id: made.userId }, cookie: await uncover(), headers: { "X-LFH-Action-Id": key } }); const b = await req(P, { method: "POST", body: { restaurant_id: FH, user_id: made.userId }, cookie: await uncover(), headers: { "X-LFH-Action-Id": key } });
+      // The second tap is a DUPLICATE with no password in it (sweep #10 T39 item 75 — since cadfb96c
+      // a stored reply never keeps a secret); "mints once" is the library's own duplicate flag.
+      return (!!a.json?.password && b.json?.duplicate === true && b.json?.password === undefined)
+        || `second tap duplicate=${b.json?.duplicate} password ${b.json?.password === undefined ? "absent" : "PRESENT"}`; });
   phase("the mint clears the failed-try counter and any lockout", "read both columns",
     async () => { await sq(`staff_users?id=eq.${made.userId}`, { method: "PATCH", body: JSON.stringify({ failed_count: 4, locked_until: new Date(Date.now() + 600000).toISOString() }) }); await req(P, { method: "POST", body: { restaurant_id: FH, user_id: made.userId }, cookie: await uncover() }); const row = (await sq(`staff_users?select=failed_count,locked_until&id=eq.${made.userId}`)).json?.[0] || {}; return (row.failed_count === 0 || row.failed_count === null) && row.locked_until === null; });
   phase("no answer from this door echoes a hash or a stored copy", "scan a successful mint's body",

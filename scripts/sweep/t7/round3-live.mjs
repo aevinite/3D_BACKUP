@@ -123,15 +123,7 @@ await page.waitForTimeout(900);
 
 console.log("\nsweep #8 · T7 · round 3 — driven in the real panel\n");
 
-const bell = async (fn) => page.evaluate(async (body) => {
-  document.querySelector(".lfh-bell-x")?.click();
-  document.querySelector("button[class*=lfh-bell]").click();
-  await new Promise((r) => setTimeout(r, 250));
-  // eslint-disable-next-line no-new-func
-  const out = await new Function("return " + body)()();
-  document.querySelector(".lfh-bell-x")?.click();
-  return out;
-}, fn.toString());
+
 
 await check("P99261 the floor's stats strip counts what is actually drawn", async () => {
   const t = await page.locator(".floor-stats").innerText();

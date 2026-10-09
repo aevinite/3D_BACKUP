@@ -139,7 +139,6 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
     check("P04368", "it resolves LFH_OUTBOX at CALL time, not parse time", () =>
       /if \(window\.LFH_OUTBOX && window\.LFH_OUTBOX\.send\) \{/.test(profileSave));
     check("P04369", "a password change deliberately does NOT queue", () => {
-      const pw = S.slice(S.indexOf("currentPassword"), S.indexOf("currentPassword") + 400);
       return /fetch\("\/api\/panel-profile"/.test(S.slice(S.indexOf("const savePw"), S.indexOf("const savePw") + 900));
     });
     check("P04370", "a password change offline says so instead of failing silently", () =>

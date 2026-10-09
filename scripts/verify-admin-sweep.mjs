@@ -647,7 +647,7 @@ for (const [key, f] of Object.entries({
 }
 await phase("the label list has no fallback that leaks the raw key", () => !/ACT_LABEL\[[^\]]+\]\s*\|\|\s*[a-z]/.test(CODE.shared) || "`MAP[x] || x` leaks the database key by design — never write it for anything a person reads");
 await phase("actLabel prettifies a code nobody has written a line for", () => {
-  const { actLabel } = { actLabel: null };
+  
   return /charAt\(0\)\.toUpperCase\(\)/.test(CODE.shared) || "an action added tomorrow would print as order_item_qty";
 });
 await phase("the panel chip prints the human name, never the column value", () => /PANEL_LABEL/.test(CODE.shared) || '"editor" is a word that names nothing a person can open');

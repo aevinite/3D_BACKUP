@@ -131,7 +131,7 @@ try {
     ? pass("party A's visit is booked against party A's own session")
     : fail(`party A's visit points at ${JSON.stringify(visitA.map((v) => v.session_id?.slice(0, 8)))}, not A's session ${sessA.slice(0, 8)}`);
   // A leaves — the table is closed the normal way.
-  const { closeSession } = { closeSession: null }; // (the route helper isn't importable here)
+  
   must(await sb.from("sessions").update({ status: "closed" }).eq("id", sessA).select("id"));
 
   // ── PARTY B: a new party is seated at the same table and orders ONE dish ────

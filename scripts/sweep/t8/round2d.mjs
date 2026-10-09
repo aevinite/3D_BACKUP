@@ -12,7 +12,7 @@
 // died two steps later.
 //
 //   node scripts/sweep/t8/round2d.mjs [--base http://localhost:4308]
-import { checkA, report, eq, browser, ctxAs, pageOf, frameOf, BASE, SLUG, read, ONSCREEN } from "./r2lib.mjs";
+import { checkA, report, browser, ctxAs, pageOf, frameOf, BASE, ONSCREEN } from "./r2lib.mjs";
 import { adminHeaders } from "../login.mjs";
 
 const RID = "00000000-0000-0000-0000-000000000001";        // My Little French House
@@ -118,7 +118,7 @@ try {
   /* ── the same three tabs at 360px, since two of them had never been drawn on a phone ── */
   {
     const c = await ctxAs("manager", { width: 360, height: 780, dpr: 3 }, { isMobile: true, hasTouch: true });
-    const { page, errors } = await pageOf(c);
+    const { page } = await pageOf(c);
     await page.goto(BASE + "/manager", { waitUntil: "networkidle", timeout: 90000 });
     const f = await frameOf(page);
     await page.waitForTimeout(3500);

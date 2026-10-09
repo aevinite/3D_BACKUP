@@ -5,8 +5,7 @@
 // have caught. Read the reason before "fixing" a failure: several of these look like style and are
 // not.
 import { readFileSync, readdirSync } from "node:fs";
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
+import "node:module";
 
 const read = (p) => { try { return readFileSync(p, "utf8"); } catch { return ""; } };
 // "IS THIS FILE STILL HERE" IS ITS OWN QUESTION, and read() cannot answer it: a deleted file and an
@@ -889,9 +888,6 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   // file's — and its own `toast("Copied.")`, so a file-wide search stayed green while the setup
   // code's toast was deleted. Proved by sabotage (2026-09-13). Read the handler's own block.
   {
-    const h = code(epanel);
-    const i = h.indexOf('what === "copycode"');
-    const block = i < 0 ? "" : h.slice(i, i + 900);
     // The manager panel's twin of this button went with the card it copied (2026-09-14). What it
     // taught survives on the admin console above, and on the Test buttons, which say "Sent ✓" on the
     // control as well as in a toast for the same reason: a toast at the bottom of a tall page can be

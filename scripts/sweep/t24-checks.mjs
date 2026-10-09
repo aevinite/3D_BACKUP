@@ -1,14 +1,13 @@
 // scripts/sweep/t24-checks.mjs — the checks themselves. See t24-run.mjs for how to run them.
 //
 // Sweep #8, terminal 24 · app/api/editor/[...path]/route.ts lines 1 → ~3,000.
-import { check, run, F } from "./t24-run.mjs";
+import { check, F } from "./t24-run.mjs";
 
-const { src, HELPERS, GETBLK, POSTBLK_A, MINE, panel, billdoc, chains, endpointBlock, api, sql, FRENCH_HOUSE, live, needLive, J, ANON } = F;
+const { src, HELPERS, GETBLK, POSTBLK_A, chains, endpointBlock, live, needLive, J, ANON } = F;
 
 // Strip LINE comments before BLOCK comments — a "/*" sitting inside a "//" line otherwise hides
 // the rest of the file from the scanner. This repo has lost 190 lines to that exact order twice.
 const code = (t) => t.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-const CODE = code(MINE);
 const SRCCODE = code(src);
 const GETCODE = code(GETBLK);
 const HELPCODE = code(HELPERS);

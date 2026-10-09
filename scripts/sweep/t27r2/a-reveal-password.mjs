@@ -213,10 +213,15 @@ export default function section(c) {
       const a = await req(P, { method: "POST", body: { user_id: made.userId, action: "set" }, cookie: await uncover(), headers: { "X-LFH-Action-Id": key } });
       const b = await req(P, { method: "POST", body: { user_id: made.userId, action: "set" }, cookie: await uncover(), headers: { "X-LFH-Action-Id": key } });
       st.second = a.json?.password;
-      // The second request must come back with the SAME password AND say it was a duplicate — the
-      // value alone could match by luck of a re-read; `duplicate` is the library saying it short-
-      // circuited rather than minting again.
-      return a.status === 200 && b.status === 200 && a.json?.password === b.json?.password && b.json?.duplicate === true;
+      // THE DUPLICATE SAYS SO AND CARRIES NO PASSWORD (sweep #10 T39 item 75, 2026-10-09). Since
+      // cadfb96c the double-tap guard keeps a reply WITHOUT secrets (lib/idempotencyRule.ts
+      // withoutSecrets — 27 plaintext passwords had piled up in action_idempotency.result), so the
+      // second tap answers { ok, duplicate: true } and no password. This used to demand the SAME
+      // password twice and went red on a correct, safer route. "ONE password burned" is now proved
+      // by `duplicate` (the library short-circuited instead of minting) and by the next phase: the
+      // database holds the FIRST tap's password.
+      return a.status === 200 && b.status === 200 && !!a.json?.password && b.json?.duplicate === true && b.json?.password === undefined
+        || `first ${a.status} ${a.json?.password ? "with" : "without"} a password · second ${b.status} duplicate=${b.json?.duplicate} password ${b.json?.password === undefined ? "absent" : "PRESENT"}`;
     });
   phase("…and the one on screen is the one the database is holding",
     "read it back through the route and compare against what the double-tap answered",

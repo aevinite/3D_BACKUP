@@ -368,6 +368,15 @@ html[data-theme="light"] .t-new .tnum { color: color-mix(in srgb, var(--c) 50%, 
   .tile:has(.tbadges):has(.t-act) .t-linenum { display: none; }
   .tile:has(.tbadges):has(.t-act) .tbadges { margin-top: 2px; }
 }
+/* …AND ON THE SMALLEST SQUARES, THE GAPS GO TOO (sweep #10 T39 item 73, 2026-10-09). At a 77px tile
+   (A35, 360px, 4 per row) a seated table with a waiter call still needed 78px in 75: number 12 + badges
+   17 + actions 26, the 2px and 4px gaps above them, and 9px of padding each end — so the bottom 3px of
+   ＋ Take order was cut. The words were already shed; what is left to shed is AIR, never the buttons'
+   height (it is the tap target, T14). Both gaps come down here and nowhere else: 4px back, 1px spare. */
+@container (max-width: 80px) {
+  .tile:has(.tbadges):has(.t-act) .tbadges { margin-top: 0; }
+  .tile:has(.tbadges):has(.t-act) .t-act { margin-top: 2px; }
+}
 @container (max-width: 50px) { .t-act { display: none; } }                   /* tap the tile instead */
 .tacc, .tpay, .tclose { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   width: clamp(22px, 17cqw, 36px); border-radius: clamp(6px, 6cqw, 10px);

@@ -7,10 +7,10 @@
 //
 // Product-correctness wording only. Nothing here swaps an id to see what happens: the admin is
 // signed in properly, opens a restaurant properly, and the checks READ what the page then does.
-import { chk, skip, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
+import { chk, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
 import { chromium } from "playwright";
-import { adminHeaders, adminCookie } from "../login.mjs";
-import { openWith, closeBrowser, screenText, pageErrors, BASE, idFor } from "./r2lib.mjs";
+import { adminCookie } from "../login.mjs";
+import { closeBrowser, screenText, pageErrors, BASE, idFor } from "./r2lib.mjs";
 import { stripComments } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 

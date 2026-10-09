@@ -105,7 +105,7 @@ async function main() {
   const base = (o = {}) => ({ id: "t9-probe", kot_no: 7, table_number: 3, status: "preparing",
                               created_at: new Date(Date.now() - 6e5).toISOString(), items: [], allergies: [], ...o });
   const baseItem = (o = {}) => ({ id: "t9-i1", order_id: "t9-probe", title: "Test Dish", qty: 1, status: "preparing", ...o });
-  const clean = (s) => LEAKS.filter((re) => re.test(s || ""));
+  
   let id = 63313;
   const next = () => "P" + id++;
 

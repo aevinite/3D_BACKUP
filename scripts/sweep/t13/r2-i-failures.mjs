@@ -10,7 +10,7 @@
 // Nothing is written and no real restaurant is switched off. Service workers are blocked in
 // r2lib — otherwise the panel's offline layer answers first and none of this arrives.
 import { chk, skip, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
-import { openWith, closeBrowser, fail500, drop, patchJson, setRange, screenText, pageErrors, ESTATE, BASE, idFor } from "./r2lib.mjs";
+import { openWith, closeBrowser, fail500, drop, patchJson, screenText, ESTATE, BASE, idFor } from "./r2lib.mjs";
 
 const id = idFor(67380);
 let n = 1;

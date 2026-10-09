@@ -6,7 +6,7 @@
 // helper could never install its PDF printer) came from exactly here.
 //
 // Every check asks the GENERATED text, not the template.
-import { row, skipRow, read } from "./lib.mjs";
+import { row } from "./lib.mjs";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -250,8 +250,7 @@ row(id(), "…and the LINUX script reports exactly the same thing against the sa
 });
 row(id(), "…and the server ACCEPTS what the machine reported (asPaper's sanity range)", async () => {
   if (!discovered || !discovered.length) return "no printers to offer the server";
-  const { helperScript: _ } = { helperScript };   // keep the import used
-  // asPaper refuses anything outside 20-500mm wide and 20-3600mm long: a real roll must pass.
+    // asPaper refuses anything outside 20-500mm wide and 20-3600mm long: a real roll must pass.
   const bad = discovered.filter((p) => !(p.paper.wMm >= 20 && p.paper.wMm <= 500 && p.paper.hMm >= 20 && p.paper.hMm <= 3600));
   return bad.length === 0 || `the server would DISCARD ${bad.length} real printer(s): ${JSON.stringify(bad[0].paper)}`;
 });

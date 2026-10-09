@@ -3,8 +3,8 @@
 // PLANNED FROM A MEASUREMENT, not from a fresh idea: 251 named things exist in this territory and
 // 69 of them are named by NO row in any of the 30 existing ledgers. Two whole features are in that
 // list — the blocked-device wall, and the ☰ menu → ⚙️ Settings sheet — so they go first.
-import { row, APP, APPC, HTML, CSS, ROUTE, ROUTEC, has, hasRe, lacks, lacksRe, P } from "./lib.mjs";
-import { readFileSync } from "node:fs";
+import { row, APPC, HTML, CSS, ROUTEC, has, hasRe, lacksRe } from "./lib.mjs";
+import "node:fs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };
 

@@ -233,7 +233,7 @@ try {
   head("1) Orders flooding in while both Table views sit open");
   const reqBefore = crews.map((c) => c.reqs.length);
   for (let i = 0; i < ROUNDS; i++) {
-    await Promise.all(crews.map(async (crew, ci) => {
+    await Promise.all(crews.map(async (crew) => {
       const t = crew.tables[i % crew.tables.length];
       if (!t) return;
       const dish = crew.dishes[i % crew.dishes.length];

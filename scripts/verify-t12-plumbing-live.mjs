@@ -306,9 +306,9 @@ try {
         const f = await panel(page);
         const order = await f.evaluate(async () => {
           const seen = [];
-          const a = window.LFH_BACK.layer("t12-a", () => seen.push("a"));
+          window.LFH_BACK.layer("t12-a", () => seen.push("a"));
           await new Promise((r) => setTimeout(r, 60));
-          const b = window.LFH_BACK.layer("t12-b", () => seen.push("b"));
+          window.LFH_BACK.layer("t12-b", () => seen.push("b"));
           await new Promise((r) => setTimeout(r, 120));
           history.back();
           await new Promise((r) => setTimeout(r, 250));

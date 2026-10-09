@@ -1056,7 +1056,7 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   const posts = [];
   for (const m of route.matchAll(/if \(\(?a === "([a-z-]+)"[^)\n]*?\)?\s*&&\s*([bc]) === "([a-z-]+)"/g)) posts.push({ a: m[1], pos: m[2], v: m[3] });
   for (const m of route.matchAll(/if \(a === "([a-z-]+)" && path\.length === 1\)/g)) posts.push({ a: m[1], pos: "len1", v: "" });
-  for (const m of route.matchAll(/\(a === "order" \|\| \(a === "sessions" && b === "open"\)\)/g)) posts.push({ a: "sessions", pos: "b", v: "open" });
+  for (let k = [...route.matchAll(/\(a === "order" \|\| \(a === "sessions" && b === "open"\)\)/g)].length; k > 0; k--) posts.push({ a: "sessions", pos: "b", v: "open" });
   const missing = [];
   for (const c of calls) {
     const segs = shape(c.raw);

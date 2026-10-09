@@ -280,7 +280,7 @@ D("a queued ticket is offered to the computer it was queued for", need(async () 
   return (n.status === 200 && n.j?.id === q.j?.id) || `next answered ${n.status} with ${JSON.stringify(n.j).slice(0, 100)}`;
 }));
 D("…and the offer names the printer, so the machine does not have to guess", need(async () => {
-  const q = await queueTest();
+  await queueTest();
   const n = await agentCall("/next", { tok: AGENT.token });
   return (n.j?.printer === "Sweep-Roll-80") || `it was offered ${JSON.stringify(n.j?.printer)}`;
 }));
@@ -836,7 +836,7 @@ D("two computers asking at the same instant are never given the same ticket", ne
   MADE.agents.push(other.j.id);
   await agentCall("/hello", { tok: other.j.code, body: { fingerprint: "sweep-race", printers: PRINTERS } });
   await drain();
-  const q = await queueTest({ clean: false });
+  await queueTest({ clean: false });
   const [a, b] = await Promise.all([
     agentCall("/next", { tok: AGENT.token }),
     agentCall("/next", { tok: other.j.code }),
@@ -1082,7 +1082,7 @@ D("a machine reporting a ticket it does not own is refused, not believed", need(
   await agentCall("/hello", { tok: other.j.code, body: { printers: PRINTERS } });
   const q = await queueTest();
   await agentCall("/next", { tok: AGENT.token });
-  const before = (await sbOnce()).then ? null : null;
+  void ((await sbOnce()).then ? null : null);
   await agentCall(`/job/${q.j.id}/done`, { tok: other.j.code, body: {} });
   const sb = await sbOnce();
   const row_ = (await sb.from("print_jobs").select("status, agent_id").eq("id", q.j.id).maybeSingle()).data;

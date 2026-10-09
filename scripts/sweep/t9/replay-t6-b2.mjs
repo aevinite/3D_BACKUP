@@ -1,9 +1,9 @@
 // ITEM 10 · batch 2 — P17661–P17768. Settings' station rows, the printer sheet, the queue client,
 // printKot, printedIds, index.html's script order and markup, and the stylesheet's own invariants.
-import { t6, t6skip } from "./replay-t6-harness.mjs";
+import { t6 } from "./replay-t6-harness.mjs";
 
 const setSec = (a) => { const i = a.indexOf("function renderKitchenSettings()"), j = a.indexOf("function waitingWords()"); return a.slice(i, j); };
-const sheet  = (a) => { const i = a.indexOf("function openPrinterSheet()"), j = a.indexOf("const NET_AFTER_MS"); return a.slice(i, j); };
+
 const status = (a) => { const i = a.indexOf("function printerStatusHtml()"), j = a.indexOf("function paintPrinterSheetStatus()"); return a.slice(i, j); };
 const ppj    = (a) => { const i = a.indexOf("function processPrintJobs(jobs)"), j = a.indexOf("let kdsDrawerOff"); return a.slice(i, j); };
 const net    = (a) => { const i = a.indexOf("function autoPrintNet("), j = a.indexOf('if (typeof document !== "undefined") {'); return a.slice(i, j); };

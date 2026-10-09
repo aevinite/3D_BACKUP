@@ -138,7 +138,7 @@ for (const [label, url, role, want] of [["the kitchen screen","/kitchen","kitche
   let src=null,st=null;
   try { const r=await page.goto(BASE+url,{waitUntil:"networkidle",timeout:90000}); st=r&&r.status();
     await page.waitForSelector("iframe",{timeout:20000}).catch(()=>{});
-    if (await page.locator("iframe").count()) src=await page.locator("iframe").first().getAttribute("src"); } catch(e){ st="threw"; }
+    if (await page.locator("iframe").count()) src=await page.locator("iframe").first().getAttribute("src"); } catch{ st="threw"; }
   const real=errors.filter(e=>!/Failed to load resource/.test(e));
   await c.close();
   await checkA(id(),`${label} opens its OWN shell, never the manager's`,()=>
@@ -299,7 +299,7 @@ while (n <= 99500) await checkA(id(),"the surface sweep left every door working"
       skip("P"+(n++),`…and it renders no leaked code text`,`same reason — ${label} is not on screen for this person`);
       continue;
     }
-    let txt="",errs=0;
+    let txt="";
     await f.evaluate((k)=>document.querySelector(`.tab[data-tab="${k}"]`).click(),key);
     await page.waitForTimeout(3200);
     txt=((await f.evaluate(()=>document.getElementById("editor")?.innerText||"").catch(()=>""))||"").replace(/\s+/g," ").trim();

@@ -3,13 +3,13 @@
 //
 // These are the rows worth the most per line: a panel and its route drifting apart is invisible
 // until a cook taps something and nothing happens.
-import { row, APPC, ROUTE, ROUTEC, has, hasRe, lacks, lacksRe, P } from "./lib.mjs";
+import { row, APPC, ROUTE, ROUTEC, hasRe, lacksRe, P } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 
 const aslice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };
 
 // ── the Activity log (P02951–P02957) ────────────────────────────────────────
-const ACTIONS = () => [...ROUTEC().matchAll(/logAction\("kitchen", ("?\w+"?|[^,]+),/g)].map((m) => m[1]);
+
 row("P02951", "the kitchen's ✓ writes an Activity row a person can read", () =>
   hasRe(ROUTEC(), /logAction\("kitchen", "item_status", \{ \.\.\.adminMark, order_id: item\.order_id \?\? null, detail: status/));
 row("P02952", "the kitchen's ALL READY writes an Activity row", () => hasRe(ROUTEC(), /logAction\("kitchen", "order_ready"/));

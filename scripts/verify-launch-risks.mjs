@@ -23,7 +23,7 @@
 //
 // READ-ONLY. Reads files, writes nothing.   node scripts/verify-launch-risks.mjs [--quiet]
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");

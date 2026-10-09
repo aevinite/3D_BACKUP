@@ -6,7 +6,7 @@
 // territory (OfflineNoticeStatic 1 row, InfinityLoader 2, Particles 2, StarRating 2,
 // ChefCallButton 4, ConnectionBadge 4, ComingSoon 5, CustomerGreeter 6, ModelToastHost 6,
 // VegIcon 6 — counted across all 44 ledger files, not trusted from a document).
-import { src, code, has, grepRepo, walk, makeRunner, ROOT } from "./lib.mjs";
+import { src, code, grepRepo, walk, makeRunner, ROOT } from "./lib.mjs";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 

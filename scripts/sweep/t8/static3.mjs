@@ -1,6 +1,6 @@
 // Sweep #8 · terminal 8 · sections G–I of P61701–P62700 — the panel document's BODY.
 // G = the top bar · H = the nav / tabs · I = the sidebar, the main area and the toast.
-import { read, exists, check, skip, report, has, hasNot, countOf, eq, before, codeOf, htmlCodeOf, ROOT } from "./lib.mjs";
+import { read, check, report, has, hasNot, countOf, eq, before, codeOf, htmlCodeOf, ROOT } from "./lib.mjs";
 import fs from "node:fs";
 import path from "node:path";
 

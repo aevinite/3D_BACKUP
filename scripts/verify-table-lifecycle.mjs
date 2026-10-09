@@ -165,7 +165,7 @@ try {
     walked.status === "cancelled" && walked.archived && walked.cancelled_at
       ? pass(`the walk-out is a visible ✕ cancelled record (₹${walked.total}), off the floor`)
       : fail(`the walk-out was left as ${walked.status}/archived=${walked.archived} — it would land on the next party`);
-    const sB = await openTable(TA); const oB = await order(TA, dishes[1] || dishes[0], 1);
+    const sB = await openTable(TA); await order(TA, dishes[1] || dishes[0], 1);
     await assertFresh(TA, "after a walk-out", sB);
     await clean(TA); }
 
@@ -219,7 +219,7 @@ try {
   // ── 5. MERGE ────────────────────────────────────────────────────────────────
   head("5) Two parties merged onto one bill");
   { const s1 = await openTable(TA); const o1 = await order(TA, dishes[0], 1); await accept(o1);
-    const s2 = await openTable(TB); const o2 = await order(TB, dishes[1] || dishes[0], 2); await accept(o2);
+    await openTable(TB); const o2 = await order(TB, dishes[1] || dishes[0], 2); await accept(o2);
     // real signature: lfh_staff_merge_tables(p_session uuid, p_to text, p_rid uuid)
     const r = await sb.rpc("lfh_staff_merge_tables", { p_session: s1, p_to: TB, p_rid: RID });
     const merged = r && !r.error && r.data?.ok !== false;

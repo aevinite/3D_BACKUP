@@ -253,7 +253,7 @@ R("…and no control is clipped OUT OF REACH at 360px", async () => {
 });
 for (const skin of ["dark", "light"]) {
   R(`it renders in the ${skin} skin with no unreadable text`, async () => {
-    const { page, text, errs } = await openPrinting({ skin });
+    const { page, errs } = await openPrinting({ skin });
     // A NARROW, HONEST CHECK. A full contrast audit needs to resolve gradients, background images
     // and the pill/badge styles this console uses, and a crude luminance walk gets those wrong — my
     // first version flagged the "Live" connection pill and the "Restaurants" breadcrumb, both of

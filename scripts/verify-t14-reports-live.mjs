@@ -821,8 +821,6 @@ head("5 · the file he downloads");
       await p.waitForTimeout(200);
     }
     const csv = grabbed.CSV, xls = grabbed.Excel;
-    const shown = flat(await visibleText(p));
-    const hero = flat(await p.locator(".rs-stat.big .rs-stat-v").first().innerText().catch(() => ""));
     R(`P${cid++}`, `${label}: the file downloads`, !!csv, csv ? csv.name : "no download");
     R(`P${cid++}`, `${label}: the file names the report, the period and the day it was made`,
       !!csv && csv.name.includes(slug.split("-")[0]) && /\d{4}-\d{2}-\d{2}/.test(csv.name), csv?.name);

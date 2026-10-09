@@ -5,7 +5,7 @@
 // The audit/activity-log rows in that block (P20691–P20775, P20886–P20916, and the label/actor
 // rows) are NOT here: /owner/activity/** and the shared audit modules are another sweep-#8
 // terminal's territory, and two terminals editing one row is how three collisions happened.
-import { chk, skip, code, src, styles, report, setOnly, count } from "./lib.mjs";
+import { chk, code, src, styles, report, setOnly, count } from "./lib.mjs";
 
 const PAGE = "app/owner/page.tsx";
 const ANALYTICS = "app/api/owner/analytics/route.ts";

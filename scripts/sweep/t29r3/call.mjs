@@ -19,7 +19,7 @@
 //
 // SAFE BY CONSTRUCTION: every function called is on lib.mjs's hand-picked SAFE_TO_CALL list, with
 // its delegates read. Nothing here writes a row.
-import { call, sb, RID, Phases, ID_BLOCK, SAFE_TO_CALL } from "./lib.mjs";
+import { call, sb, RID, Phases, ID_BLOCK } from "./lib.mjs";
 
 const P = new Phases(ID_BLOCK);
 const head = (m) => { if (!process.argv.includes("--quiet")) console.log("\n" + m); };
@@ -419,8 +419,6 @@ console.log(`\n  H+I+J+K used ${P.used} of 500 ids`);
 // Read-only. Each is one aggregate query; none returns more than a handful of rows.
 head("M — the rows these eighty files' tables hold, against the rules those files wrote");
 {
-  const q = async (label, sql, ok, note) => { const r = await sbQuery(sql); return P.add(label, "one aggregate query over the live data", ok(r), note ? note(r) : (Array.isArray(r) ? `${r.length} row(s)` : JSON.stringify(r).slice(0, 70))); };
-  const sbQuery = async (sql) => { const { data, error } = await sb.rpc("__none__", {}).then(() => ({}), () => ({})); return sql; };
 
   // Supabase's REST client cannot run arbitrary SQL, so these use the table API with counts.
   // `categories` and `filters` are keyed by `slug`, not `id` — counting a column they do not have

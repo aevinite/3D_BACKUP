@@ -2,12 +2,11 @@
 // dashboard, the logs — and the write path's first branches.
 import { check, nid, F } from "./t24-run.mjs";
 
-const { src, HELPERS, GETBLK, POSTBLK_A, endpointBlock, live, needLive, J, panel, chains } = F;
+const { HELPERS, POSTBLK_A, endpointBlock, live, needLive, J } = F;
 const code = (t) => t.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 const B = (n) => code(endpointBlock(n));
 const HC = code(HELPERS);
 const PC = code(POSTBLK_A);
-const PANEL = code(panel);
 const count = (t, re) => (t.match(re) || []).length;
 
 

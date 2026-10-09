@@ -34,7 +34,7 @@
 // five of the six went red on the right rows. The sixth did NOT — there was no row anywhere
 // asserting `tshort`'s null guard — which is now `P63221` below. A guard that cannot fail is worse
 // than no guard, so if you add a row here, break the thing it defends and watch it go red.
-import { runRows, report, row, APP, APPC, hasRe } from "./sweep/t9/lib.mjs";
+import { runRows, report, row, APPC, hasRe } from "./sweep/t9/lib.mjs";
 
 for (const m of ["replay-block1", "replay-block1b", "replay-block2", "replay-contracts",
                  "new-a-blocked-and-menu", "new-c-printing", "new-e-route-and-rest",

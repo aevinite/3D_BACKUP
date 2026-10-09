@@ -171,4 +171,5 @@ check(`P${id++}`, "every file this band broke is byte-identical again afterwards
   const bad = [...touchedAtStart].filter(([f, body]) => fs.readFileSync(path.join(ROOT, f), "utf8") !== body);
   return bad.length === 0 || `left modified: ${bad.map(([f]) => f).join(", ")}`;
 });
-((id <= 95196) || (() => { throw new Error(`R5 overran its slice: it ended at P${id}`); })(), report("T5 round 2 — R5 sabotage"));
+if (id > 95196) throw new Error(`R5 overran its slice: it ended at P${id}`);
+report("T5 round 2 — R5 sabotage");

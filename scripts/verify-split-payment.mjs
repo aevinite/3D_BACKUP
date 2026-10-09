@@ -23,8 +23,8 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { repoRootFrom } from "./sweep/repoRoot.mjs";
-import { join, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { registerHooks } from "node:module";
 
 // The repo to scan: the first argument that really IS one, else the repo this file lives in.

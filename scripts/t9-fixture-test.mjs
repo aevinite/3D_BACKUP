@@ -196,7 +196,6 @@ async function main() {
   //    The page and the report must ask the SAME function over the SAME window and agree exactly.
   // ════════════════════════════════════════════════════════════════════════════════════════════
   console.log("\n3. The Inventory page and the Inventory report agree (F27)");
-  const { inventoryMonthWindow } = await import("../lib/inventoryWindow.ts").catch(() => ({}));
   // The lib is TS; recompute the same window here rather than importing it, so this test is an
   // INDEPENDENT check of the rule instead of a restatement of the implementation.
   const IST = 5.5 * 3600_000, BIZ = 5;

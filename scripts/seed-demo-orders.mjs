@@ -182,11 +182,9 @@ for (const rest of restaurants) {
   // a) TODAY's orders (spread through the day so far).
   const todayN = randInt(plan.today[0], plan.today[1]);
   const sinceStartMs = Date.now() - TODAY_START.getTime();
-  let liveCount = 0;
   for (let i = 0; i < todayN; i++) {
     const at = new Date(TODAY_START.getTime() + Math.floor(rand() * Math.max(sinceStartMs, 1)));
     const live = i < Math.min(3, Math.floor(todayN / 3)); // a few still live
-    if (live) liveCount++;
     ordersToInsert.push(makeOrder(rest, at, live));
   }
 

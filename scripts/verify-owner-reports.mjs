@@ -365,7 +365,6 @@ check("the phone column-hiding reaches the header too",
 
 console.log("\n── 20. THE IMPROVEMENTS STAY IMPROVED (T5, 2026-08-06) ──");
 const money = read("lib/money.ts");
-const animNum2 = read("components/owner/AnimatedNumber.tsx");
 // I1 — one short money form, and it goes to CRORES (the owner's pick: "do 1.2 Cr").
 check("there is ONE compact money form, and it reaches crores",
   /export function compactINR/.test(money) && /Cr/.test(money)

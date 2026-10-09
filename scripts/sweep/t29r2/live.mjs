@@ -78,7 +78,7 @@ try {
   await p2.close();
 
   // ── a dish page: migration 030's real reviews, and the honest empty state ──
-  const { p: p3, text: t3, errs: e3 } = await open(desk, "/r/spice-route/menu?table=1");
+  const { p: p3, errs: e3 } = await open(desk, "/r/spice-route/menu?table=1");
   const link = p3.locator("a[href*='/item/'], a[href*='/dish/']").first();
   const hasLink = await link.count();
   if (hasLink) {

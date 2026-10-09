@@ -18,7 +18,7 @@
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { loginAs, loginRequestCount } from "../login.mjs";
-import { chk, skip, report, setOnly } from "./lib.mjs";
+import { chk, report, setOnly } from "./lib.mjs";
 
 const arg = (k, d) => {
   const i = process.argv.indexOf(`--${k}`);
@@ -80,7 +80,6 @@ await chk("P05806", "ONE sign-in for the whole run", () =>
   loginRequestCount() <= 1 ? true : `${loginRequestCount()} real sign-in requests`);
 
 // ── the tile row ─────────────────────────────────────────────────────────────────────────────
-const tiles = await pg.locator(".ow2-kpi").all();
 const tileLabels = await pg.locator(".ow2-kpi .ow2-kt .k").allInnerTexts();
 const tileValues = await pg.locator(".ow2-kpi .v").allInnerTexts();
 await chk("P20858", "the five tiles render with the right labels", () => {

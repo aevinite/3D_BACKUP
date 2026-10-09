@@ -7,7 +7,6 @@
 import { chromium } from "playwright";
 import { loginAs, adminCookie } from "./sweep/login.mjs";
 import { requireAppUp } from "./sweep/appUp.mjs";
-const argv=process.argv.slice(2);
 // Nothing answering used to end this as an uncaught ReferenceError under node:internal/…, which
 // reads as "the guard is broken" rather than "start the dev server". One shared preflight, one
 // sentence, exit 2 = could not run (never confused with "ran and found a fault"). T10, 2026-08-12.

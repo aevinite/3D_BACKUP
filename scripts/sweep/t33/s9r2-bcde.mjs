@@ -4,10 +4,9 @@
 //   D  invariants over the REAL data, not a fixture (60)
 //   E  judgment — should a real restaurant work this way (59)
 import { readFileSync, readdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { q, one, tx1, RID } from "./tx.mjs";
+import { q } from "./tx.mjs";
 import { nextId } from "./ids.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");

@@ -2,7 +2,7 @@
 // Territory: components/AppShell.tsx, public/sw.js, public/offline.html, lib/i18n.ts,
 // components/RealtimeProvider.tsx, components/OfflineNotice.tsx and every remaining
 // top-level components/*.tsx (37 of them).
-import { read, exists, check, skip, report, has, hasNot, countOf, eq, codeOf } from "./lib.mjs";
+import { read, exists, check, report, has, hasNot, countOf, eq, codeOf } from "./lib.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "./lib.mjs";
@@ -20,7 +20,7 @@ const BOT = C("BotTrap"), CHEF = C("ChefPopup"), CCB = C("ChefCallButton"), CG =
 const FC = C("FoodCard"), MC = C("MiniCart"), MTH = C("ModelToastHost"), NP = C("NavPicker");
 const OCM = C("OrderConfirmModal"), PART = C("Particles"), PF = C("PanelFrame"), PCG = C("PointerCaptureGuard");
 const SCS = C("SessionCartSync"), SO = C("SessionOwner"), STB = C("SessionTableBill"), SR = C("StarRating");
-const VEG = C("VegIcon"), CS = C("ComingSoon"), IL = C("InfinityLoader"), PANF = PF;
+const VEG = C("VegIcon"), CS = C("ComingSoon"), IL = C("InfinityLoader");
 
 const ALL_MINE = {
   "public/sw.js": SW, "public/offline.html": OFF, "lib/i18n.ts": I18N,
@@ -55,7 +55,7 @@ check("P58705","activate keeps exactly the four current caches and deletes older
 check("P58706","install precaches the offline page and skips waiting",()=>
   has(SW,/precacheOffline\(\)\.then\(\(\) => self\.skipWaiting\(\)\)/));
 check("P58707","a non-GET returns before any cache is consulted",()=>{
-  const i = SW.indexOf('if (req.method !== "GET")'), j = SW.indexOf("caches.open", i);
+  const i = SW.indexOf('if (req.method !== "GET")');
   return (i > 0 && SW.slice(i, SW.indexOf("\n  }", i)).includes("return;")) || "no early return";
 });
 check("P58708","a non-GET to our own /api/ stamps the write window for its family",()=>
@@ -1302,8 +1302,6 @@ const MINE_FILES = Object.entries(ALL_MINE);
 check("P59401","every popup or overlay in this territory registers with the back-button manager",()=>{
   // A surface that renders an overlay AND can be closed must register, or the phone's back button
   // skips it and leaves the site. `.overlay`/`role="dialog"`/a fixed sheet is the tell.
-  const REGISTERED = { ConnectionBadge:"conn-badge", NavPicker:"nav-", OrderConfirmModal:"order-confirm",
-    ChefPopup:"chef-popup", SessionOwner:"session-owner", GuestOutboxChip:"guest-outbox" };
   const missing = [];
   for (const [name, body] of MINE_FILES) {
     if (typeof name !== "string" || !/^[A-Z]/.test(name)) continue;
@@ -1338,7 +1336,7 @@ check("P59402","no component in this territory polls faster than the project's 6
   return bad.length===0 || bad.join(", ");
 });
 check("P59403","every setInterval in this territory is cleared",()=>{
-  const bad = MINE_FILES.filter(([n,b]) => /setInterval\(/.test(b) && !/clearInterval\(/.test(b)).map(([n])=>n);
+  const bad = MINE_FILES.filter(([,b]) => /setInterval\(/.test(b) && !/clearInterval\(/.test(b)).map(([n])=>n);
   return bad.length===0 || bad.join(", ");
 });
 check("P59404","every addEventListener in this territory has a matching removeEventListener",()=>{
@@ -1455,7 +1453,7 @@ check("P59416","no component in this territory hard-codes restaurant #1's brandi
   return bad.length===0 || bad.join(", ");
 });
 check("P59417","the four backend-only feature flags appear in no UI in this territory",()=>{
-  const bad = MINE_FILES.filter(([n,b]) => /features\.(verification|payments|aggregators|gst_invoice)/.test(b)).map(([n])=>n);
+  const bad = MINE_FILES.filter(([,b]) => /features\.(verification|payments|aggregators|gst_invoice)/.test(b)).map(([n])=>n);
   return bad.length===0 || bad.join(", ");
 });
 check("P59418","no rejected idea has been quietly re-implemented here",()=>{
@@ -1477,11 +1475,11 @@ check("P59424","every component in this territory that can render nothing does s
   return nulls >= 14 || `only ${nulls} components have an explicit null path`;
 });
 check("P59425","no file in this territory leaves a console.log behind",()=>{
-  const bad = MINE_FILES.filter(([n,b]) => /console\.log\(/.test(codeOf(b))).map(([n])=>n);
+  const bad = MINE_FILES.filter(([,b]) => /console\.log\(/.test(codeOf(b))).map(([n])=>n);
   return bad.length===0 || bad.join(", ");
 });
 check("P59426","no file in this territory carries a TODO or FIXME with no owner",()=>{
-  const bad = MINE_FILES.filter(([n,b]) => /\b(TODO|FIXME|XXX)\b/.test(b)).map(([n])=>n);
+  const bad = MINE_FILES.filter(([,b]) => /\b(TODO|FIXME|XXX)\b/.test(b)).map(([n])=>n);
   return bad.length===0 || bad.join(", ");
 });
 check("P59427","the offline layer's read families still match the API families that exist",()=>{
@@ -1662,7 +1660,7 @@ check("P59477","…but never on a bill, where the exact figure is the law",()=>
 check("P59478","the kitchen still has no profile, and nothing here gives it one",()=>
   MINE_FILES.every(([,b]) => !/PROFILE_ROLES/.test(b)) || "a component in this territory touches PROFILE_ROLES");
 check("P59479","nothing in this territory can hide a sale from the Z-report",()=>
-  MINE_FILES.every(([n,b]) => !/z-?report/i.test(b)) || "a guest component names the Z-report");
+  MINE_FILES.every(([,b]) => !/z-?report/i.test(b)) || "a guest component names the Z-report");
 check("P59480","a restaurant with one language never sees a picker it cannot use",()=>
   has(HDR,/currencyOptions\.length > 1/) === true && has(HDR,/languageOptions\.length > 1/) === true);
 

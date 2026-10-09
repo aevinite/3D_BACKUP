@@ -5,9 +5,9 @@
 // three printing docs are spread across sixteen files written by other terminals. The rule is to
 // re-run every row whose SUBJECT is a file you own, wherever it lives — and to leave the rest
 // alone. Each row below names the ledger it lives in, so its result can be written back there.
-import { BILLDOC as B, row, skipRow, read, visible, totalRows, codeOnly, ROOT } from "./lib.mjs";
+import { BILLDOC as B, row, skipRow, read, totalRows, codeOnly, ROOT } from "./lib.mjs";
 import { BASE, canDrive, renderDoc, seenText, inkWidth, ROLL_PX } from "./browser.mjs";
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -477,7 +477,7 @@ R("P11457", "T23", "mig 335: a KOT queued by the trigger is claimable by the kit
 });
 R_ASYNC("P11461", "T23", "mig 341: a restaurant with NO helper still prints, because a screen claims the job", async () => {
   const r = liftScreenMayPrint()({ kind: "none" }, { panel: "kitchen", personId: "p1", deviceId: "d1" });
-  const _who = null;
+  
   return r.ok === true || `with no computer set up the screen is refused: ${r.why}`;
 });
 R("P11722", "T24", "lib/paySplit.ts's rate resolution and billdoc.js's orderTaxRate are the same rule", () => {
@@ -585,7 +585,7 @@ for (const [id, frag] of [["P28372", "saved."], ["P28373", "Could not copy"], ["
     // "Something a person can act on" is not the same demand for every message. "Saved." and
     // "…unlinked." are CONFIRMATIONS: the act is finished, and padding them out would be noise.
     // A refusal is the one that owes a next step, and "Could not copy" gives one.
-    const line = /^[\s\S]*?toast\([\s\S]{0,120}?\)/;
+    
     const call = codeOnly(PG).slice(codeOnly(PG).indexOf(hit[0]) - 40, codeOnly(PG).indexOf(hit[0]) + 160);
     const isRefusal = /"err"/.test(call);
     return (!isRefusal || /select the text|try again|check |first|instead/i.test(hit[0]))
@@ -748,7 +748,6 @@ D("P24338", "T19", "Admin → Printing renders at 1280×800 with no error", asyn
 });
 D("P24353", "T19", "Admin → Printing is usable at 360px — its header controls do not run off the edge", () => {
   // The fix this terminal shipped: the control group wraps and the select may shrink.
-  const seg = PG.slice(0, 6000);
   const hdr = /flexWrap: "wrap"/.test(PG) && /flex: "1 1 180px"/.test(PG) && /minWidth: 0/.test(PG);
   return hdr || "the header control group can no longer wrap on a phone";
 });

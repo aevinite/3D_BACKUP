@@ -42,7 +42,7 @@ const MENU = "app/owner/menu/page.tsx", ROSTER = "app/owner/staff/page.tsx",
 const rawM = read(MENU), rawR = read(ROSTER), rawP = read(PERSON), rawS = read(SET);
 if (!rawM || !rawR || !rawP || !rawS) { console.log("❌ one of the four owned files is missing — if they moved, update this guard"); process.exit(1); }
 const m = code(rawM), r = code(rawR), pr = code(rawP), st = code(rawS);
-const stT = flat(st), rT = flat(r), mT = flat(m);
+const rT = flat(r), mT = flat(m);
 const css = read("app/globals.css") || "";
 const printRoute = code(read("app/api/owner/printing/route.ts") || "");
 const setRoute = code(read("app/api/owner/settings/route.ts") || "");

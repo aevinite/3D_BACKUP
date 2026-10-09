@@ -1,7 +1,7 @@
 // SWEEP #8 · T9 · NEW CHECKS, block C+D — P62801–P62950.
 // The printer status sheet, the waiting-to-print counter, the stuck badge, and the whole client
 // end of the durable print queue. Every name in here was in the 69 that no ledger row mentioned.
-import { row, APP, APPC, HTML, CSS, ROUTE, ROUTEC, has, hasRe, lacks, lacksRe, P } from "./lib.mjs";
+import { row, APPC, CSS, ROUTEC, has, hasRe, lacksRe, P } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };

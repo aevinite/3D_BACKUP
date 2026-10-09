@@ -226,7 +226,6 @@ console.log(`\n═══ T33 · ${MINE.length} files, ${MINE[0]} → ${MINE[MINE
     const decl = b.search(/v_rate\s+numeric/i);
     const asg  = b.search(/v_rate\s*:=\s*lfh_effective_tax_rate/i);
     const uses = [...b.matchAll(/v_rate/gi)].map((m) => m.index).filter((i) => i !== decl && i !== asg);
-    const firstUse = Math.min(...uses.filter((i) => i > asg + 1), Infinity);
     const anyBefore = uses.some((i) => i > decl && i < asg);
     judge(id, !/v_rate\s+numeric\s*:=\s*0\.05/i.test(b) && asg > -1 && !anyBefore,
       `${fn}: the dead ":= 0.05" is gone from the declaration, and the rate is read from lfh_effective_tax_rate strictly BEFORE it is ever used — so removing the initialiser cannot have turned a 5% into a NULL`,
@@ -473,7 +472,7 @@ console.log(`\n═══ T33 · ${MINE.length} files, ${MINE[0]} → ${MINE[MINE
   const guardRes = [];
   for (const g of guards) {
     try { execFileSync("npm", ["run", "-s", g.replace("verify:", "verify:")], { cwd: root, encoding: "utf8", stdio: ["ignore","pipe","pipe"] }); guardRes.push(`${g} green`); }
-    catch (e) { guardRes.push(`${g} RED`); }
+    catch  { guardRes.push(`${g} RED`); }
   }
   judge("P104845", guardRes.every((r) => r.endsWith("green")),
     `the guards that watch the print-helper chain (migrations 341, 367, 368, 376, 380) are green: ${guardRes.join(" · ")}`,

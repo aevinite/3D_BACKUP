@@ -3,13 +3,10 @@
 // exists twice is a money rule that drifts — this file's own comments say so three times.
 import { check, nid, F } from "./t24-run.mjs";
 
-const { src, HELPERS, GETBLK, billdoc, endpointBlock, sql, FRENCH_HOUSE, live, needLive, J } = F;
+const { src, HELPERS, billdoc, endpointBlock, sql, FRENCH_HOUSE } = F;
 const code = (t) => t.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 const HC = code(HELPERS);
-const GC = code(GETBLK);
-const SC = code(src);
 const BD = billdoc;
-const count = (t, re) => (t.match(re) || []).length;
 
 
 // ── discountBaseOf — what a discount may work on ───────────────────────────────────────────────

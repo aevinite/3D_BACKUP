@@ -56,7 +56,7 @@ const SERVER_ONLY = [
 // Every table that had a leftover grant, now revoked. Kept as one list because the distinction
 // between "server-only" and "guest" stopped mattering the moment 393 proved the guest journey does
 // not need a table grant at all — it goes through SECURITY DEFINER RPCs from end to end.
-const GUEST_LEGACY = new Set();
+
 
 const parseEnv = (t) => Object.fromEntries(t.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
   const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")];

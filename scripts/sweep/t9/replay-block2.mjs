@@ -2,7 +2,7 @@
 // The rows that need another guard to run, a browser, or a type-check are marked here as
 // DEFERRED and are executed by the runner (see verify-kitchen-screen.mjs --with-gates) or by
 // scripts/sweep/t9/live.mjs. Everything else is an assertion.
-import { row, APP, APPC, HTML, CSS, ROUTE, ROUTEC, PAGE, has, hasRe, lacks, lacksRe, contentHash, P, src } from "./lib.mjs";
+import { row, APP, APPC, HTML, CSS, ROUTE, ROUTEC, has, hasRe, lacksRe, contentHash, P, src } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };

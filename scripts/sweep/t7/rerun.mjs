@@ -8,7 +8,7 @@
 //
 // T5.md's 675 rows that assert against editor/app.js are re-run by scripts/sweep/t7/rerun-t5.mjs,
 // which is a separate file because app.js is shared by line range with terminal 6.
-import { read, check, report, has, hasNot, countOf, eq, atLeast, codeOf } from "./lib.mjs";
+import { read, check, report, has, hasNot, countOf, atLeast, codeOf } from "./lib.mjs";
 
 const INV  = read("public/panels/editor/inventory.js");
 const INVC = codeOf(INV);

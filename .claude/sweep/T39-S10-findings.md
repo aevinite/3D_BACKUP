@@ -69,6 +69,19 @@ message. Improvements were not built; they are in the chat report only. Ledger: 
 | 63 | (guard) | Reports bar-hover check read after a fixed 700ms | waits for the tooltip |
 | 64 | (tests) | printing-sweep (1,478) and stuck-test (43) leftovers also counted as French House sales | cancelled (owner's rule); every order-inserting test must cancel — verify:test-safety §17; sabotaged |
 | 65 | (lint) | 1,132 ESLint warnings (31 of them from T17 round 5, merged the same day) had piled up with nothing stopping the next | --max-warnings=1132 (can only go down) + verify-root-config guards the cap; sabotaged |
+| 66 | (lint) | 1,061 warnings in scripts/, tests/, .github/ | 630 were the guards' own result shorthand (rule option, scripts only); 431 removed by an AST pass that keeps every side effect + by hand; 0 left in this area; cap 1,132 → 115 |
+| 67 | (guard) | verify-table-ownership read the order builder's heading and threw it away (could never fail) | asserted: the builder names THIS table ("T26") |
+| 68 | (guards) | three checks that could not fail: print-speed's printer phase, t13's ☰ menu, shrink-help-shots' failure count | each now asserts or reports |
+| 69 | (packages) | the shared folder ran packages older than the lock (#1441 never re-installed) | npm ci in the shared folder; verify:installed-packages in verify:static |
+| 70 | Owner → Reports (Pizza Palace, French House) | table-ownership put 167 fake PAID orders (₹37,074) on Pizza Palace; verify:customers drew 53 invoice numbers for fake bills | both tests fixed; owner chose cancel — 260 cancelled; §17 reads both write styles |
+| 71 | (guards) | two t9s10 runners ended with a bare process.exit() | superseded — sweep #10 T9 made the same fix on main first; mine dropped on rebase |
+| 72 | (guards) | the two tax-mode checks crashed on a web-page answer from the database service | "could not run" with the status, exit 2 |
+| 73 | Waiter tablet → floor at 360px | a table with a waiter call cut 3px off ＋ Take order | the gaps (not the buttons) shrink on the smallest tiles; 104/104 |
+| 74 | (guard) | the KOT ▾ check waited a fixed 2.2s | waits for the button; green on dev and backup |
+| 75 | (guards) | two double-tap password checks expected the password repeated, which the safer store no longer keeps | first tap has it, the duplicate does not, the database holds the first |
+| 76 | (guard) | Payments vs Sales compared across other sessions' writes | steady read |
+| 77 | (guard) | "Payments reconciles to Sales" compared two snapshots taken minutes apart | both recomputed (refresh=1) on a steady read — the owner's 5-minute snapshot rule is by design |
+| 78 | Admin → Repair → Resolve all | a garbled restaurant id cleared EVERY restaurant's open problems; the test did it every run | the route refuses a bad scope (fail closed); the test asserts the refusal and that nothing is cleared |
 
 Not fixed, with the reason: `verify:db-parity` (reads the client stack — not run; its folder half now runs
 as verify:migration-numbers, where 388 is a listed, explained pair). Payments vs Sales: both use the same

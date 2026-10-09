@@ -4,7 +4,7 @@
 // none. These are the parts of the page that run while nobody is looking at it, and the parts
 // that decide what he sees in the first 200ms of opening it.
 import { chk, skip, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
-import { openWith, closeBrowser, screenText, ESTATE, BASE, idFor } from "./r2lib.mjs";
+import { openWith, closeBrowser, BASE, idFor } from "./r2lib.mjs";
 import { readFileSync } from "node:fs";
 
 const id = idFor(67581);

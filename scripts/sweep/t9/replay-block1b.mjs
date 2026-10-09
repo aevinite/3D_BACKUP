@@ -1,5 +1,5 @@
 // Replay of LEDGER/T6.md block 1, second half — P02601–P02700.
-import { row, APP, APPC, HTML, has, hasRe, lacks, lacksRe } from "./lib.mjs";
+import { row, APPC, hasRe, lacksRe } from "./lib.mjs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };
 
@@ -26,7 +26,6 @@ row("P02608", "renderColumns() draws dine-in tickets then platform tickets in ea
 row("P02609", "renderColumns() writes \"0\" rather than a blank pill for an empty lane", () =>
   hasRe(APPC(), /\$\("#count-" \+ key\)\.textContent = String\(list\.length \+ \(plist \? plist\.length : 0\)\)/));
 row("P02610", "renderColumns() never collapses an empty lane on a phone (R3)", () => {
-  const a = APPC();
   const fn = slice("function renderColumns()", "function renderWall()");
   return (lacksRe(fn, /hidden = true|display\s*=\s*"none"/) === true) || "a lane is being hidden";
 });

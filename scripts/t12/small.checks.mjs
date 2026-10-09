@@ -103,7 +103,7 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
   // fitnums.js - auto-fit big numbers (P04231-P04262)
   // ===========================================================================================
   {
-    const S = c.fitnums, R = raw.fitnums;
+    const S = c.fitnums;
     const fit = fnBody(S, "function fit(");
     const queue = fnBody(S, "function queue(");
     const boot = fnBody(S, "function boot(");
@@ -181,7 +181,6 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
          the `title` that is the only way to read the digits the box cut off. A `return` here
          skipped both. Fixed 2026-09-04; see the note in the file for why it was not reachable
          with today's selectors and when it becomes so. */
-      const loop = fit.slice(fit.indexOf("for (var pass"), fit.indexOf("}\n") + 2);
       if (/if \(next >= cur\) return;/.test(fit)) return "the early exit is still a `return`, so the tail is skipped";
       return /if \(next >= cur\) break;/.test(fit);
     });

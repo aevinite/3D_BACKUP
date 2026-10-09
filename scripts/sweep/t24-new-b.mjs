@@ -2,7 +2,7 @@
 // the three log views, the retention lock, the delete-a-bill rule, and the discount ceiling.
 import { check, nid, F } from "./t24-run.mjs";
 
-const { src, HELPERS, GETBLK, POSTBLK_A, endpointBlock, live, needLive, J, panel } = F;
+const { src, HELPERS, GETBLK, endpointBlock, needLive, J, panel } = F;
 const code = (t) => t.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 const HC = code(HELPERS);
 const GC = code(GETBLK);

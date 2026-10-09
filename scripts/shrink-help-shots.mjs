@@ -78,3 +78,5 @@ const pct = before ? Math.round((1 - after / before) * 100) : 0;
 // COUNT WHAT WAS WRITTEN, not what was attempted — a PNG that was already smaller is left alone
 // and must not be reported as a conversion.
 console.log(`\n${wrote} converted · ${(before / 1048576).toFixed(2)} MB → ${(after / 1048576).toFixed(2)} MB (${pct}% smaller). The PNGs stay as the fallback.`);
+// …and how many could NOT be converted — counted all along, never told (sweep #10 T39 item 66).
+if (failed) console.log(`${failed} picture(s) could not be encoded as WebP and stay PNG-only — see the ✗ lines above.`);

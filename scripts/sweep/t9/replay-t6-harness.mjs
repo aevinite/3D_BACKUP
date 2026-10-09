@@ -16,8 +16,8 @@
 // obvious to whoever adds the next. A predicate is either a RegExp (must match), a string (must be
 // contained), or a function (given the sources). Prefix a RegExp/string with `!` in the mode column
 // to require ABSENCE.
-import { row, APP, APPC, HTML, CSS, CSSC, ROUTE, ROUTEC, PAGE, LAYOUT, P, src, contentHash } from "./lib.mjs";
-import { readFileSync, existsSync } from "node:fs";
+import { row, APP, APPC, HTML, CSS, CSSC, ROUTE, ROUTEC, PAGE, LAYOUT, P } from "./lib.mjs";
+import { readFileSync } from "node:fs";
 
 // which source each check reads
 const SRC = {

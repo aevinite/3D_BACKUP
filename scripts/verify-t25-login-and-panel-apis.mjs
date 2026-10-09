@@ -851,10 +851,8 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   const SA = await import("@/lib/staffAuth.ts");
   const RG = await import("@/lib/revealGate.ts");
   const PV = await import("@/lib/passwordVault.ts");
-  const PC = await import("@/lib/publicCap.ts");
   const AF = await import("@/lib/adminFetch.ts");
   const OP = await import("@/lib/ownerPin.ts");
-  const LT = await import("@/lib/loginThrottle.ts");
   const src = (f) => stripComments(read(f));
   const fnFrom = (f, name, params) => { const s = read(f); const i = s.indexOf(`export function ${name}(`); const body = s.slice(s.indexOf("{", s.indexOf(")", i)) , s.indexOf("\n}\n", i) + 2); return new Function(...params, body); };
   const keepEnv = { ...process.env };

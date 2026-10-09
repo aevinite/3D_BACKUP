@@ -1,8 +1,8 @@
 // Sweep #8 · terminal 8 · section O of P61701–P62700 — my own judgment about whether a real
 // restaurant needs the manager panel's host and shell to work the way it does.
-import { read, exists, check, skip, report, has, hasNot, countOf, eq, codeOf, htmlCodeOf, ROOT } from "./lib.mjs";
-import fs from "node:fs";
-import path from "node:path";
+import { read, check, skip, report, has, hasNot, countOf, eq, codeOf, htmlCodeOf } from "./lib.mjs";
+import "node:fs";
+import "node:path";
 
 const H=read("public/panels/editor/index.html"), HC=htmlCodeOf(H);
 const APP=read("public/panels/editor/app.js"), CSS=read("public/panels/editor/style.css");

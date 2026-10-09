@@ -7,7 +7,7 @@
 //
 //   node scripts/sweep/t5s9/rerun-foreign.mjs            # all
 //   node scripts/sweep/t5s9/rerun-foreign.mjs --only P00187,P00188
-import { src, code, has, grepRepo, walk, makeRunner } from "./lib.mjs";
+import { src, code, has, grepRepo, makeRunner } from "./lib.mjs";
 
 const { check, done } = makeRunner("T5 sweep-9 — foreign ledger rows");
 
@@ -510,7 +510,6 @@ check("P17025", "AppShell's poll and its realtime path both call the SAME refres
 });
 check("P17028", "BanGate asks the server once per mount, not once per render", () => need("components/BanGate.tsx", /useEffect\(/));
 check("P17029", "BanGate's coalescing window is short enough to still lift the wall promptly", () => {
-  const m = code("components/BanGate.tsx").match(/(\d{3,5})\s*(?:\/\/.*)?$/m);
   return /\d/.test(code("components/BanGate.tsx")) || "no window at all";
 });
 check("P17030", "BanGate keeps focus as well, because a desktop click changes no visibility", () =>
@@ -555,7 +554,6 @@ check("P58094", "the shared basket sync listens for the same signal", () => need
 
 /* ───────── T2 / T12 / T20 / T21 / T25 / T26 / T9 — one-off rows about MY files ───────── */
 check("P00977", "nothing changed is invisible to the offline layer — DATA_PATHS still names the guest families", () => {
-  const s = code(SW);
   const e = dataPathEntries();
   return e.some((x) => x.endsWith("api\\/r")) || "the guest menu family left DATA_PATHS: " + e.join(" ");
 });
@@ -576,7 +574,7 @@ check("P10465", "a maintenance switch reaches the dish pages that render outside
   const b = grepRepo(/serviceMode/, ["app"]).length > 0;
   return (a && b) || `shell=${a} outside=${b}`;
 });
-const SWV = "lib/swVersion.ts";
+
 check("P27142", "swVersion returns the version public/sw.js actually declares, right now", () => {
   const decl = src(SW).match(/const VERSION\s*=\s*"([^"]+)"/);
   return !!decl || "sw.js no longer declares a VERSION const in that shape";

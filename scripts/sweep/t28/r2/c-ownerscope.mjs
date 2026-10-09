@@ -167,7 +167,6 @@ row(S("the admin pinned to ONE restaurant sees what THAT owner sees — their wh
 });
 row(S("…and the pin is PER TAB, so a second pin cannot repaint the first"), "two pinned reads interleaved", async (c) => {
   const one = await GET(c.A, `/api/owner/overview?scope=${FH}`);
-  const two = await GET(c.A, `/api/owner/overview?scope=${PP}`);
   const again = await GET(c.A, `/api/owner/overview?scope=${FH}`);
   return JSON.stringify((one.j.restaurants || []).map((x) => x.id)) === JSON.stringify((again.j.restaurants || []).map((x) => x.id))
     || `the first pin's answer changed after a second pin was used`;

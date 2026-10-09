@@ -324,7 +324,7 @@ try {
   resetShown && (await page.locator(".ost-pw").inputValue()).length >= 6 ? ok("P06354 Reset password reveals a new one") : bad("P06354 no new password appeared");
   /current login stops working/i.test(dlg.at(-1) || "") ? ok("P06069 …and the question says the current login stops working") : bad("P06069 the reset question is missing its consequence");
   if (resetShown) await page.locator(".ost-reveal").getByText("Done").click();
-  { let held; await page.route("**/api/owner/staff", async (q) => { if (q.request().method() === "PATCH") await new Promise((x) => { held = x; setTimeout(x, 4000); }); await q.continue(); });
+  { await page.route("**/api/owner/staff", async (q) => { if (q.request().method() === "PATCH") await new Promise((x) => { setTimeout(x, 4000); }); await q.continue(); });
     await row(NAME).getByRole("button", { name: /^Disable$/ }).click();
     await page.waitForTimeout(900);
     const btns = await row(NAME).locator("button.ost-mini").evaluateAll((e) => e.map((x) => x.disabled));
@@ -585,7 +585,7 @@ try {
   { const base = (ORIGINAL && typeof ORIGINAL === "object") ? ORIGINAL : {};
     await writeEnt({ ...base, menu: false }); await new Promise((r) => setTimeout(r, 1500));
     const c = await mk({ viewport: { width: 1280, height: 900 } }); const p = await c.newPage();
-    const rr = await p.goto(BASE + "/owner/menu", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(2500);
+    await p.goto(BASE + "/owner/menu", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(2500);
     // EXPECTATION MOVED 2026-09-01, same id, same rule. This used to require a SENTENCE
     // ("isn't switched on for your restaurant — ask your administrator"). R36 was finished across
     // the last three owner screens on 2026-08-31: naming a section he has not been given tells him a

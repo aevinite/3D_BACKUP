@@ -5,7 +5,7 @@
 // a gap found by reading is REPORTED, not demonstrated, and nothing here touches the network. What
 // each row asserts is that the handler has a guard for that shape and answers it with a sentence and
 // a status, rather than letting the value reach a query.
-import { row, ROUTE, ROUTEC, APPC, has, hasRe, lacks, lacksRe } from "./lib.mjs";
+import { row, ROUTE, ROUTEC, APPC, has } from "./lib.mjs";
 
 const rslice = (from, to) => { const r = ROUTEC(); const i = r.indexOf(from); const j = r.indexOf(to); return i < 0 || j < 0 ? "" : r.slice(i, j); };
 const ENDPOINTS = [

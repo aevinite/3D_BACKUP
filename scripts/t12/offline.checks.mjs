@@ -3,7 +3,7 @@
  * Its whole job is saying what is actually true, so the checks here are mostly about WORDING:
  * every fault this file has ever had was it claiming something the queue had not done.
  */
-export function run({ c, raw, check, skipRow, fnBody, before, count }) {
+export function run({ c, raw, check, fnBody, before, count }) {
   const S = c.offline;
   const R = raw.offline;
   const noteResponse = fnBody(S, "function noteResponse(");

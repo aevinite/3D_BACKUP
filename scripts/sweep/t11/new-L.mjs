@@ -17,8 +17,8 @@
 // The Windows halves cannot be run from a Mac and are not pretended about — bank A reads them,
 // and report items 16 and 17 say plainly what still needs a Windows machine.
 import { row, skipRow, read, onFinish } from "./lib.mjs";
-import { execFileSync, execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 

@@ -2,7 +2,7 @@
  * this run's own P65734-P65790. This is the file that decides how much traffic every staff
  * device in every restaurant is handed, so the scoping and backoff claims are the expensive ones.
  */
-export function run({ c, raw, check, skipRow, fnBody, before, count }) {
+export function run({ c, raw, check, fnBody, before, count }) {
   const S = c.realtime;
   const R = raw.realtime;
   const start = fnBody(S, "async function start(");
