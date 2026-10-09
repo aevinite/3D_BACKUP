@@ -166,7 +166,9 @@ const LIVE = argv.includes("--live") ? argv[argv.indexOf("--live") + 1] : "";
 if (LIVE) {
   const live = (args) => run("npm", ["run", "-s", ...args, "--", "--base", LIVE]);
   for (const [file, from, to, what, want] of [
-    ["app/api/admin/users/route.ts", 'return bad("unauthorized", 401);', 'return bad("unauthorized", 403);', "the admin 'add staff' refusal answering 403 instead of 401", /add staff/],
+    // The same line opens all four handlers; the guard reads POST's ("add staff"), so the break
+    // must land THERE — breaking GET's first occurrence left the guard rightly green.
+    ["app/api/admin/users/route.ts", 'export async function POST(req: NextRequest) {\n  if (!(await admin(req))) return bad("unauthorized", 401);', 'export async function POST(req: NextRequest) {\n  if (!(await admin(req))) return bad("unauthorized", 403);', "the admin 'add staff' refusal answering 403 instead of 401", /add staff/],
     ["app/api/panel-login/route.ts", "status: r.transient || r.unavailable ? 503 : 401", "status: r.transient || r.unavailable ? 503 : 400", "a wrong password answered 400 instead of 401", /wrong password is refused/],
     ["lib/userAuth.ts", "const MAX_FAILS = 5;", "const MAX_FAILS = 6;", "the lock after 6 wrong tries instead of 5", /locks after 5/],
     ["app/api/kitchen/[...path]/route.ts", "async function postImpl(req: NextRequest, ctx: Ctx) {\n", "async function postImpl(req: NextRequest, ctx: Ctx) {\n  const zzEarly = 1;\n", "a kitchen handler that does something before its sign-in gate", /kitchen sign-in/],
