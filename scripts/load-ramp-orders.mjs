@@ -26,6 +26,9 @@ import { readFileSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adminHeaders } from "./sweep/login.mjs";
+// The dev-only lock this file calls below was added on 2026-08-13 WITHOUT this import, so the script
+// crashed with "refuseUnlessDevTestDb is not defined" before doing anything (sweep #10 T39 item 79).
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ARGS = process.argv.slice(2);

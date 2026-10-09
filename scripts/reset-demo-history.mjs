@@ -33,6 +33,9 @@ import { execSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+// The dev-only lock this file calls below was added on 2026-08-13 WITHOUT this import, so the script
+// crashed with "refuseUnlessDevTestDb is not defined" before doing anything (sweep #10 T39 item 79).
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const env = Object.fromEntries(
