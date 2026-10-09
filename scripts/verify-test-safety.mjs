@@ -800,6 +800,27 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     open.join("\n    ") + "\n    Read the code from table_qr_codes before the first regen_code, PATCH it back after the last, and register the put-back with restoreOnExit.");
 }
 
+// ── 19. A CHECK THAT ASKS THE CLIENT DATABASE ASKS IN READ-ONLY MODE (sweep #10 T39 item 82) ──
+// verify-db-parity compares the test database with the client one through the management query
+// endpoint, and sent its SQL without `read_only: true` — so only the SQL text stood between a typo
+// and a change on a paying restaurant. A verify-/compare- script that names the client project and
+// posts to `database/query` must ask the database itself to refuse writes. (Release tools, whose job
+// IS to write there, are not named verify-/compare- and are asked-first by rule.)
+{
+  const open = [];
+  for (const f of files) {
+    if (!/^scripts\/(verify|compare)-[\w-]+\.mjs$/.test(f) || f === "scripts/verify-test-safety.mjs") continue;
+    // The address is matched in the RAW text: stripping `//` comments first also cuts every
+    // `https://…/database/query` in half, and this rule then saw no query at all (its first sabotage).
+    const raw = read(f), src = raw.replace(/(^|[^:])\/\/.*$/gm, "$1");
+    if (!/database\/query/.test(raw) || !/kclqkmdxnwlhtyrducku|\.env\.AV\.live/.test(raw)) continue;
+    if (!/read_only:\s*true/.test(src)) open.push(f);
+  }
+  check("a check that asks the client database a question asks in read-only mode",
+    open.length === 0,
+    open.join("\n    ") + "\n    Send { query, read_only: true } to the management query endpoint.");
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
