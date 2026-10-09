@@ -22,10 +22,15 @@ registerHooks({
     }
   },
   load(url, ctx, next) {
-    if (url.startsWith("file:") && /\.tsx(\?.*)?$/.test(url)) {
+    if (url.startsWith("file:") && /\.tsx?(\?.*)?$/.test(url)) {
       const file = fileURLToPath(url.replace(/\?.*$/, ""));
-      const out = esbuild.transformSync(readFileSync(file, "utf8"), { loader: "tsx", format: "esm", jsx: "automatic", sourcemap: "inline", sourcefile: file, target: "es2022" });
-      return { format: "module", source: out.code, shortCircuit: true };
+      const src = readFileSync(file, "utf8");
+      // .tsx always; a .ts only when it uses syntax Node's type-stripping refuses (constructor parameter properties,
+      // enums, namespaces) — everything else keeps Node's own loader, so coverage maps exactly as before.
+      if (/\.tsx(\?.*)?$/.test(url) || /constructor\s*\([^)]*\b(private|public|protected|readonly)\s/.test(src) || /^\s*(export\s+)?(const\s+)?enum\s/m.test(src) || /^\s*(export\s+)?namespace\s/m.test(src)) {
+        const out = esbuild.transformSync(src, { loader: /\.tsx(\?.*)?$/.test(url) ? "tsx" : "ts", format: "esm", jsx: "automatic", sourcemap: "inline", sourcefile: file, target: "es2022" });
+        return { format: "module", source: out.code, shortCircuit: true };
+      }
     }
     return next(url, ctx);
   },
