@@ -1,4 +1,4 @@
-// lib/panelAccess.ts — per-restaurant PANEL entitlements (owner 2026-06-29).
+// lib/panelAccess.ts — who may still enter: an owner's live restaurants, and whether a restaurant is binned or switched off.
 //
 // Which operational panels a restaurant has: manager / kitchen / tablet / owner. SINCE 2026-07-31 THE ANSWER IS
 // ALWAYS "ALL FOUR" — the per-restaurant switches (settings.enabled_panels, mig 106) were removed by the owner, and
@@ -6,67 +6,26 @@
 // sweep #10, item 25). What still decides access here is ownership and the recycle bin, never a stored switch.
 //
 // SERVER-ONLY: the gate runs server-side (panel-login route + panelGate), so this reads via
-// supabaseAdmin and pulls in NO React (unlike lib/features.ts) so route handlers can import
-// it. A missing row / missing-or-non-boolean key defaults ON — backward-compatible with any
-// restaurant that predates the column (though mig 106 backfills every existing row all-on).
+// supabaseAdmin and pulls in NO React (unlike lib/features.ts) so route handlers can import it.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import type { Role } from "@/lib/userAuth";
 import { readInChunks } from "@/lib/inChunks";
 
-export const PANEL_KEYS = ["manager", "kitchen", "tablet", "owner"] as const;
-export type PanelKey = (typeof PANEL_KEYS)[number];
-const ALL_ON: Record<PanelKey, boolean> = { manager: true, kitchen: true, tablet: true, owner: true };
-
-// EVERY RESTAURANT HAS ALL FOUR STAFF APPS (owner, 2026-07-31: "remove it completely, all panels
-// always on"). The four switches were deleted from the Access screen in the same change, so this
-// must NOT go on honouring a stored value: one restaurant (demo-bistro) had its owner panel off,
-// and reading that column would have left an owner login refused by a switch nobody can reach any
-// more. Answering ON regardless is what makes the removal safe instead of a trap.
-//
-// Kept as a function rather than ripped out: settings.enabled_panels still holds the old values,
-// several callers read this, and ONE honest place that says "always on" is clearer than deleting it
-// and scattering `true` through every caller. It also stays a cheap no-op — this used to be a
-// settings read on the hot path, which is why the cached variant below exists.
-//
-// Whether the MENU EDITOR exists is a different question and is NOT decided here: that follows the
-// Menu feature in Main features, enforced by the Edit-menu tab gate, so a restaurant without a menu
-// never builds one (no dead screen, no wasted reads).
-export async function getEnabledPanels(_restaurantId: string): Promise<Record<PanelKey, boolean>> {
-  return { ...ALL_ON };
-}
-
-// Is this role's panel enabled for the restaurant? owner/manager/kitchen/tablet map 1:1 to a
-// panel; any other role string is allowed (defensive — never lock someone out on a typo).
-export async function isPanelEnabled(role: Role, restaurantId: string): Promise<boolean> {
-  if (!(PANEL_KEYS as readonly string[]).includes(role)) return true;
-  const p = await getEnabledPanels(restaurantId);
-  return p[role as PanelKey] !== false;
-}
-
-// Cached variant for the HOT path (requireRole runs on every polled request). A per-request
-// settings read would reintroduce the egress the owner fights, so cache the enabled-panels
-// map per restaurant for a short TTL — an admin flipping a panel OFF then takes effect within
-// TTL seconds instead of instantly, which is fine (bug M3, 2026-07-05). The login route keeps
-// using the uncached isPanelEnabled (login is rare + must be immediate).
-const _panelCache = new Map<string, { at: number; on: boolean }>();
+// ── THE PER-PANEL SWITCH IS GONE (sweep #10 T17 round 6, item 40, owner 2026-10-09: "do all 4") ─────────────────────────
+// Since 2026-07-31 every restaurant has all four staff apps ("remove it completely, all panels always on"), so
+// getEnabledPanels / isPanelEnabled / isPanelEnabledCached could only ever answer YES — and every caller still asked,
+// each with a "this panel isn't enabled" refusal no one could ever reach (round 5's mutation pass proved it: flipping
+// those checks changed nothing). Following the owner's standing rule that a new way REPLACES the old one, the three
+// functions, their 30-second cache and every call are deleted. What decides access now is only: the person's role,
+// their restaurant being live (not binned, not switched off — panelDoor in lib/panelGate.ts), and for an owner the
+// restaurants they own. settings.enabled_panels is left in the database untouched (nothing reads it).
 const PANEL_TTL_MS = 30_000;
-export async function isPanelEnabledCached(role: Role, restaurantId: string): Promise<boolean> {
-  if (!(PANEL_KEYS as readonly string[]).includes(role)) return true;
-  if (!restaurantId) return true;
-  const key = `${restaurantId}:${role}`;
-  const hit = _panelCache.get(key);
-  if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.on;
-  const on = await isPanelEnabled(role, restaurantId);
-  _panelCache.set(key, { at: Date.now(), on });
-  return on;
-}
 
 // OWNER-panel entitlement for a specific OWNER USER. An owner's staff_users row
 // carries the #1 "home" restaurant_id (a namespace, not ownership), so checking
-// isPanelEnabled('owner', u.restaurant_id) tested restaurant #1's toggle — wrong
+// the old per-panel check against u.restaurant_id tested restaurant #1 — wrong
 // restaurant entirely (found in the 2026-07-06 owner-portfolio redesign). The
 // real rule: an owner may use the owner panel if ANY live (non-binned) restaurant
-// they own (restaurant_owners, mig 097) has the owner panel enabled. Cached like
+// they own (restaurant_owners, mig 097) exists — there is no owner switch any more (items 25 + 40). Cached like
 // the per-restaurant map — requireRole runs on every polled owner request.
 const _ownerCache = new Map<string, { at: number; ids: string[] }>();
 
@@ -149,8 +108,8 @@ export async function enabledOwnedRestaurantIds(userId: string, cached = true): 
     //
     // THE RETIRED OWNER SWITCH IS NO LONGER READ (sweep #10 T17 round 4, item 25, 2026-10-08). A second read here
     // fetched settings.enabled_panels and dropped any restaurant whose stored `owner` was false — the very switch the
-    // owner removed on 2026-07-31 ("remove it completely, all panels always on"; see getEnabledPanels above, which
-    // already answers ON for exactly this reason). Nothing can set it or show it any more, so honouring it could only
+    // owner removed on 2026-07-31 ("remove it completely, all panels always on" — the always-ON functions that
+    // stood above were then removed altogether in round 6, item 40). Nothing can set it or show it any more, so honouring it could only
     // ever lock an owner out with "Ask your admin to turn it on" and no switch for the admin to turn. Measured on the
     // dev stack: two restaurants still carry owner=false (both in the recycle bin today) — restoring either would have
     // locked its owner out. Removing the read also saves one settings query on every owner sign-in and cockpit load.
@@ -273,9 +232,6 @@ export async function isRestaurantSuspended(restaurantId: string): Promise<boole
 export function forgetRestaurant(restaurantId: string, ownerIds?: readonly string[]): void {
   if (!restaurantId) return;
   _deletedCache.delete(restaurantId);
-  for (const key of [..._panelCache.keys()]) {
-    if (key.startsWith(`${restaurantId}:`)) _panelCache.delete(key);
-  }
   if (ownerIds) for (const u of ownerIds) _ownerCache.delete(u);
   else _ownerCache.clear();
 }

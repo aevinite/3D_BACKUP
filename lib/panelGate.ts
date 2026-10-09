@@ -12,7 +12,7 @@ import { notFound, redirect } from "next/navigation";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, type Role, type StaffUser } from "@/lib/userAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
-import { isPanelEnabled, isRestaurantDeleted, isRestaurantSuspended, ownerPanelEnabled } from "@/lib/panelAccess";
+import { isRestaurantDeleted, isRestaurantSuspended, ownerPanelEnabled } from "@/lib/panelAccess";
 import { getRestaurantBySlug, slugMovedTo } from "@/lib/tenant";
 
 // Where each role lands after login. The canonical copy — LoginForm keeps a
@@ -58,7 +58,7 @@ export async function requirePanel(role: Role, next: string): Promise<void> {
   let door: PanelDoor | null = null;
   if (u && u.role === role) {
     door = await panelDoor(u);
-    if (door.ok && (await isPanelEnabled(role, u.restaurant_id))) return;
+    if (door.ok) return;
   }
   // Admin super-access: may hop into any panel — even one turned OFF for the
   // restaurant (admin sets up / inspects everything) — but only via the admin
@@ -185,7 +185,7 @@ export async function requirePanelAt(
   // ONE PLACE FOR ALL THREE SCOPED PANELS (mig 350). /r/<slug>/kitchen, /manager and /tablet all
   // come through here, so a staff bookmark or a taped-up link to a restaurant's OLD address lands
   // on its panel instead of a dead end. Only when the address resolves to nothing; a restaurant that
-  // exists but has this panel switched off is handled below, where it belongs.
+  // exists but is switched off is handled below, where it belongs.
   if (!r) {
     const moved = await slugMovedTo(slug);
     if (moved) redirect(`/r/${moved}${ROLE_HOME[role]}`);
@@ -193,7 +193,7 @@ export async function requirePanelAt(
   }
   const store = await cookies();
   const u = await userFromCookie(store.get(USER_COOKIE)?.value);
-  if (u && u.role === role && u.restaurant_id === r.id && r.active && (await isPanelEnabled(role, r.id))) {
+  if (u && u.role === role && u.restaurant_id === r.id && r.active) {
     return { restaurantId: r.id, admin: false };
   }
   // Admin super-access: any slug, even an inactive restaurant or a disabled panel

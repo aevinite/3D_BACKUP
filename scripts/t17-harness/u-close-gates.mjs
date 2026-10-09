@@ -90,8 +90,8 @@ if (want("lib/panelGate.ts")) { const f = "lib/panelGate.ts";
   t(f, "ROLE_HOME has exactly the four staff apps", JSON.stringify(Object.keys(PG.ROLE_HOME).sort()) === '["kitchen","manager","owner","tablet"]');
 }
 if (want("lib/panelAccess.ts")) { const f = "lib/panelAccess.ts";
-  t(f, "a role outside the four apps is always 'on' (never lock someone out on a typo)", (await PA.isPanelEnabled("ghost", RID_A)) && (await PA.isPanelEnabledCached("ghost", RID_A)));
-  t(f, "the cached check with no restaurant id is 'on' and reads nothing", await (async () => { world({}); const a = await PA.isPanelEnabledCached("manager", ""); return a === true && G.READS.length === 0; })());
+  t(f, "item 40: the retired per-panel switch functions are gone from lib/panelAccess (nothing can switch a staff app off)", !("isPanelEnabled" in PA) && !("isPanelEnabledCached" in PA) && !("getEnabledPanels" in PA) && !("PANEL_KEYS" in PA));
+  t(f, "item 40: forgetRestaurant no longer needs a panel cache — a restaurant's state and its owners' lists are what it clears", await (async () => { world({ restaurants: [{ id: RID_A, active: true, deleted_at: null }] }); await PA.isRestaurantSuspended(RID_A); G.FIX.restaurants[0].active = false; PA.forgetRestaurant(RID_A); return (await PA.isRestaurantSuspended(RID_A)) === true; })());
   t(f, "an owner with no id owns nothing and nothing is read", await (async () => { world({}); const a = await PA.enabledOwnedRestaurantIds(""); return a.length === 0 && G.READS.length === 0; })());
   const ow = randomUUID(); world({ restaurant_owners: [], restaurants: [] });
   t(f, "an owner with no ownership links owns nothing, and only the links were read", await (async () => { const a = await PA.enabledOwnedRestaurantIds(ow, false); return a.length === 0 && !G.READS.some((r) => r.table === "restaurants"); })());

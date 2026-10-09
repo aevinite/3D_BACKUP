@@ -560,11 +560,15 @@ console.log("\n22. Suspend is described by what it actually stops");
   // — nothing on the staff sign-in path reads it. (item 12.)
   want(!/The guest menu is offline and staff can't log in/.test(RESTn),
     "the suspended-state line no longer claims suspending stops the restaurant's own staff signing in");
-  want(/Its own staff can still sign in to their panels/.test(REST),
-    "…and says what suspend really does, and which step does stop them");
+  // THE RULE CHANGED ON PURPOSE (owner 2026-10-09, sweep #10 T17 items 30 + 38): suspending NOW stops the restaurant's
+  // manager / kitchen / waiter apps on every door (sign-in, panel addresses, every panel call); its owner and the admin
+  // keep access. This guard used to pin the OLD meaning ("its own staff can still sign in"); it now pins the new one,
+  // so the screen and the code still cannot disagree.
+  want(/stops its manager, kitchen and waiter apps immediately/.test(REST) && /its staff apps are stopped/.test(REST) && !/Its own staff can still sign in to their panels/.test(REST),
+    "…and says what suspend really does now: the staff apps stop, the owner and the admin keep access");
   const LOGIN = read("app/api/panel-login/route.ts");
-  want(/isRestaurantDeleted\(/.test(LOGIN) && !/\.active\b[^)]*restaurant/.test(LOGIN),
-    "…which is still true of the sign-in path: it refuses a BINNED restaurant, and reads no `active` flag");
+  want(/isRestaurantDeleted\(/.test(LOGIN) && /isRestaurantSuspended\(/.test(LOGIN),
+    "…which is true of the sign-in path: it refuses a BINNED restaurant and a SUSPENDED one");
   want(/staff can&apos;t log in/.test(REST) || /staff can't log in/.test(REST),
     "…and the DELETE paragraph, where that sentence IS true, still carries it");
 }

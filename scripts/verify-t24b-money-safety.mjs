@@ -351,12 +351,14 @@ const gate = srcUserAuth.slice(srcUserAuth.indexOf("export async function requir
 check("the per-tab admin pin is still checked before anything else", gate.indexOf('searchParams?.get("rid")') < gate.indexOf("userFromCookie"));
 check("the staff cookie is still checked BEFORE the admin fallback",
   gate.indexOf("userFromCookie") < gate.lastIndexOf("tokenIsValid"));
-check("the panel entitlement is still re-checked on every request", /isPanelEnabledCached\(u\.role, u\.restaurant_id\)/.test(gate));
+// Moved in sweep #10 T17 round 6, item 40 (owner 2026-10-09): the per-panel switch and its checks were deleted; the rule
+// that remains is the recycle bin + the suspension (item 30), re-checked the same way.
+check("the restaurant's suspension is still re-checked on every request", /isRestaurantSuspended\(u\.restaurant_id\)/.test(gate));
 check("the recycle-bin check is still there", /isRestaurantDeleted\(u\.restaurant_id\)/.test(gate));
-check("owners are still exempt from the panel map and get their own check", /ownerPanelEnabled\(u\.id\)/.test(gate));
+check("owners still get their own check (their estate, not one restaurant)", /ownerPanelEnabled\(u\.id\)/.test(gate));
 check("a database blip is still a 503, never a sign-out", /AuthDbError\) return \{ ok: false, transient: true \}/.test(gate));
-check("the beat happens only AFTER the entitlement checks pass, so a blocked panel writes nothing",
-  gate.indexOf("isPanelEnabledCached") < gate.indexOf("x-lfh-sw"));
+check("the beat happens only AFTER the bin + suspension checks pass, so a blocked panel writes nothing",
+  gate.indexOf("isRestaurantSuspended") > 0 && gate.indexOf("isRestaurantSuspended") < gate.indexOf("x-lfh-sw"));
 check("…and only for a real staff user — an admin-only session has no row to beat on",
   gate.indexOf("x-lfh-sw") < gate.lastIndexOf("admin super"));
 

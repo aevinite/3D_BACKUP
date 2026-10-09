@@ -70,7 +70,8 @@ check("P62575","JUDGMENT — the host page cannot be slow: it reads no data and 
 });
 check("P62576","JUDGMENT — the gate runs on the SERVER before anything paints, so a signed-out person never glimpses the panel",()=>has(LAY,/await requirePanel\("manager", "\/manager"\);/));
 check("P62577","JUDGMENT — a manager whose restaurant was binned is locked out the moment it happens",()=>has(read("lib/panelGate.ts"),/isRestaurantDeleted\(u\.restaurant_id\)/));
-check("P62578","JUDGMENT — a manager whose panel the admin switched off is locked out on the next page load",()=>has(read("lib/panelGate.ts"),/isPanelEnabled\(role, u\.restaurant_id\)/));
+/* Moved in sweep #10 T17 round 6, item 40 (owner 2026-10-09): the per-panel switch is retired and deleted; the gate now refuses a SWITCHED-OFF restaurant instead (panelDoor). */
+check("P62578","JUDGMENT — a manager whose restaurant the admin switched off is locked out on the next page load",()=>has(read("lib/panelGate.ts"),/await panelDoor\(u\)/));
 check("P62579","JUDGMENT — the shell's comments would let a beginner change it safely: every load-order rule says what breaks",()=>{
   return (has(H,/Must load BEFORE app\.js/)===true&&has(H,/nothing prints/)===true)||"the crash-ordering warnings were thinned out";
 });

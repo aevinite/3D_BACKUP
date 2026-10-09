@@ -318,7 +318,7 @@ export default function AdminRestaurants() {
                     to grow; the row is pinned to 540px and scrolls, which is the deliberate design. */}
                 <span style={{ fontWeight: 700 }}>
                   {r.name}
-                  {!r.active && <span className="rest-sus" title="Suspended — its guest menu is offline">Suspended</span>}
+                  {!r.active && <span className="rest-sus" title="Suspended — its guest menu and its staff apps are off">Suspended</span>}
                 </span>
                 <span className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{r.slug}</span>
                 {/* AN OWNER WHO CANNOT SIGN IN IS STILL AN OWNER (T16 sweep, 2026-08-19).
@@ -671,8 +671,8 @@ function NewRestaurant({ onCreated, takenSlugs }: { onCreated: () => void; taken
 // The per-restaurant detail: assign its OWNER + flip its guest feature switches.
 // StatusCard — Live vs SUSPENDED, with the kill switch (owner 2026-07-04: "what does
 // suspended mean? where is the button?"). Suspended = active:false → the tenant
-// resolver stops serving the guest menu; the admin still reaches every panel via
-// act-as. Suspending is confirmed first — flipping the LIVE client off by accident
+// resolver stops serving the guest menu AND (since 2026-10-09, item 30) the restaurant's
+// manager / kitchen / tablet apps stop; its owner and the admin (act-as) keep access. Suspending is confirmed first — flipping the LIVE client off by accident
 // would be an outage.
 function StatusCard({ restaurant }: { restaurant: Restaurant }) {
   const [err, setErr] = useState<string | null>(null);
@@ -719,7 +719,7 @@ function StatusCard({ restaurant }: { restaurant: Restaurant }) {
         <span className="adm-chip" style={statusStyle}>{statusLabel}</span>
         <span style={{ flex: 1, fontSize: 13 }} className="adm-muted">
           {!restaurant.active
-            ? "Suspended — the guest menu is offline. Staff panels stay reachable to you via the buttons below."
+            ? "Suspended — the guest menu is offline and its manager, kitchen and waiter apps are stopped. You can still open every panel via the buttons below; its owner can still see their numbers."
             : maint === true
               ? "In maintenance — guests see a “we’ll be right back” screen. Staff panels keep working."
               : maint === false
@@ -1127,7 +1127,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 }
 
 // DangerCard — move a restaurant to the RECYCLE BIN. Distinct from Suspend:
-// suspend just hides the guest menu (reversible instantly, staff/admin keep working);
+// suspend hides the guest menu and stops the staff apps (reversible instantly; owner + admin keep access);
 // DELETE puts the whole restaurant in the bin (guest 404 + staff logins blocked), from
 // where it can be restored at any time OR permanently removed at any time. To
 // make an accidental delete near-impossible, the admin must TYPE the exact name to
@@ -1146,7 +1146,7 @@ function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaura
   // Suspend / reactivate lives here now (owner 2026-07-24: suspend belongs at the BOTTOM,
   // not the top). Delete is gated behind a SUSPENDED restaurant — you must suspend first.
   const setActive = async (active: boolean) => {
-    if (!active && !window.confirm(`Suspend ${restaurant.name}?\n\nIts guest menu goes OFFLINE immediately (staff panels stay reachable to you via act-as). You can reactivate any time.`)) return;
+    if (!active && !window.confirm(`Suspend ${restaurant.name}?\n\nIts guest menu goes OFFLINE and its manager, kitchen and waiter apps STOP immediately (they are told the restaurant is switched off). Its owner can still see their numbers, and you can still open every panel. You can reactivate any time.`)) return;
     setSusBusy(true); setErr(null);
     try {
       const r = await fetch("/api/admin/restaurants", {
@@ -1191,10 +1191,14 @@ function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaura
               other three sentences on this screen (the confirm, the status card, and the line
               above) all describe it correctly. This was the one that disagreed — and it disagreed
               in the direction that matters, because an admin reading it would believe a suspended
-              restaurant's staff had been shut out when they had not. */}
+              restaurant's staff had been shut out when they had not.
+              ── AND THEN THE RULE CHANGED (sweep #10 T17 rounds 5–6, items 30 + 38, owner 2026-10-09): suspending
+              NOW DOES stop the staff apps — sign-in, every panel address and every panel call refuse a
+              suspended restaurant's manager / kitchen / tablet with "switched off". The owner panel and the
+              admin's act-as are not stopped. Every sentence on this screen was updated together. */}
           <p className="hint" style={{ margin: "3px 0 0" }}>{restaurant.active
-            ? "Takes the guest menu offline immediately. Staff panels stay reachable to you. Instantly reversible — nothing is erased."
-            : "The guest menu is offline. Its own staff can still sign in to their panels — deleting it below is what stops that. Reactivate any time."}</p>
+            ? "Takes the guest menu offline and stops its manager, kitchen and waiter apps immediately. Its owner and you keep access. Instantly reversible — nothing is erased."
+            : "The guest menu is offline and its staff apps are stopped (they see “switched off”). Its owner and you keep access. Reactivate any time."}</p>
         </div>
         {restaurant.active
           ? <button className="adm-btn danger" disabled={susBusy} onClick={() => setActive(false)}><i className="fas fa-power-off" style={{ marginRight: 7 }} aria-hidden="true" />{susBusy ? "Suspending…" : "Suspend…"}</button>

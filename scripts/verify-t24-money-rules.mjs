@@ -577,8 +577,9 @@ head("7. lib/clash.ts + lib/idempotency.ts + lib/userAuth.ts + lib/rateLimit.ts 
     /throw new AuthDbError/.test(s));
   check("the staff cookie is checked BEFORE the admin fallback",
     s.indexOf("userFromCookie(req.cookies.get(USER_COOKIE)") < s.indexOf("// No satisfying staff session"));
-  check("the panel entitlement and the recycle bin are re-checked on every request",
-    /isPanelEnabledCached\(u\.role, u\.restaurant_id\)/.test(s) && /isRestaurantDeleted\(u\.restaurant_id\)/.test(s));
+  // Moved in sweep #10 T17 round 6, item 40: the per-panel switch was deleted; the bin + the suspension remain.
+  check("the recycle bin and the suspension are re-checked on every request",
+    /isRestaurantSuspended\(u\.restaurant_id\)/.test(s) && /isRestaurantDeleted\(u\.restaurant_id\)/.test(s));
   check("a missing SESSION_SECRET is warned about once per server start", /warnedNoSessionSecret/.test(s));
   check("the presence heartbeat is throttled and fire-and-forget", /45_000/.test(s));
   check("the wall-hit describe reads are scoped, column-listed and limited",

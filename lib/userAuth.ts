@@ -14,7 +14,7 @@
 //   • Login is rate-limited: 5 wrong tries locks the account for 60 seconds.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sha256hex, safeEqual, AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { isPanelEnabledCached, ownerPanelEnabled, isRestaurantDeleted, isRestaurantSuspended } from "@/lib/panelAccess";
+import { ownerPanelEnabled, isRestaurantDeleted, isRestaurantSuspended } from "@/lib/panelAccess";
 
 export const USER_COOKIE = "lfh_user";
 export type Role = "owner" | "manager" | "tablet" | "kitchen";
@@ -418,17 +418,15 @@ export async function requireRole(
     throw e;
   }
   if (u && roleSatisfies(u.role, role)) {
-    // Panel entitlement (bug M3, 2026-07-05): if the admin turned this role's panel OFF for
-    // the user's restaurant, block the request — not just new logins. Before, requireRole
-    // ignored the toggle, so an already-open manager/kitchen/tablet kept loading AND SAVING
-    // until it reloaded. Cached (30s TTL) so this hot path never adds a per-request read.
+    // Is the person's restaurant still one they may work in? Checked on EVERY request, not just at sign-in, so an
+    // already-open manager/kitchen/tablet stops at once (cached 30s so the hot path adds no read). The old per-panel
+    // switch check that stood here is gone (round 6, item 40 — every restaurant has all four apps since 2026-07-31).
     // OWNERS are special (2026-07-06): their row's restaurant_id is the #1 "home"
-    // namespace, not what they own — their entitlement is "any owned restaurant has
-    // the owner panel on" (ownerPanelEnabled reads the restaurant_owners join).
+    // namespace, not what they own — they may enter while ANY restaurant they own is live
+    // (ownerPanelEnabled reads the restaurant_owners join).
     if (u.role === "owner") {
       if (!(await ownerPanelEnabled(u.id))) return { ok: false };
     } else {
-      if (!(await isPanelEnabledCached(u.role, u.restaurant_id))) return { ok: false };
       // Recycle-bin block (bug H2, 2026-07-06): if the admin soft-deleted this restaurant,
       // a manager/kitchen/tablet tab left OPEN kept loading AND saving orders on a "deleted"
       // restaurant until it reloaded — the M3 panel-toggle fix never added the parallel

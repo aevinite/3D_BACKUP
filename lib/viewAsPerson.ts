@@ -36,7 +36,7 @@ export const isPersonId = (v: string | undefined | null): v is string => !!v && 
 // The pinned person is re-read at most every 20s. An admin-view tab polls its panel, so
 // a naive lookup would add one read per poll; 20s keeps a permission the admin just
 // changed in the profile arriving within a few seconds while costing almost nothing.
-// (Same shape as isPanelEnabledCached — one small PK read behind a short TTL.)
+// (Same shape as the bin/suspension check in lib/panelAccess — one small PK read behind a short TTL.)
 const TTL_MS = 20_000;
 const cache = new Map<string, { at: number; row: StaffUser | null }>();
 

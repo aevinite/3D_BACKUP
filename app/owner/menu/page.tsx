@@ -102,6 +102,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   // The careful thing ABOVE this line is untouched and is why the redirect is safe: a failed READ
   // is answered separately (T13, 2026-08-17), so only a genuine entitlement "no" reaches here — a
   // database blip can never send him away. Sixth of the six screens; see app/owner/customers.
+  // Signed out entirely: draw nothing — the owner layout sends them to sign-in carrying THIS page as ?next, so they come
+  // back here after (item 37). Redirecting to /owner first would throw the page away.
+  if (!u && !(store.get(ADMIN_ACT_COOKIE)?.value && (await tokenIsValid(store.get(AUTH_COOKIE)?.value)))) return null;
   if (!selected) redirect("/owner");
 
   return <OwnerMenuEditor restaurants={restaurants} initial={selected} skin={skin} />;
