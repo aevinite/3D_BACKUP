@@ -35,7 +35,16 @@ const sql = async (query) => {
     headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
   });
-  const b = await r.json();
+  // READ THE TEXT FIRST (sweep #10 T39 item 72, 2026-10-09). On a busy minute the database service
+  // answers with an HTML page instead of JSON, and \`r.json()\` crashed this guard with a SyntaxError —
+  // a red that says nothing about tax. That is "could not run", said in words, with the status.
+  const text = await r.text();
+  let b;
+  try { b = JSON.parse(text); }
+  catch {
+    console.error(`\n⏭ could not run: the database service answered ${r.status} with ${/^\s*</.test(text) ? "a web page" : "something that is not JSON"}, not data — try again in a minute.`);
+    process.exit(2);
+  }
   if (!r.ok) throw new Error(`SQL ${r.status}: ${JSON.stringify(b)}`);
   return b;
 };
