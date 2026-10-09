@@ -1,3 +1,5 @@
+import * as __fs from "node:fs";
+globalThis.__T30FS = __fs;
 // scripts/t30-harness/sb.mjs — the in-memory stand-in for lib/supabaseAdmin. One world on globalThis.
 //   W.FIX[table] = rows · W.FAIL["table:op"] = "error" | "throw" | {code, message} · W.FAIL_NTH["table:op"] = {at, mode}
 //   W.WRITES / W.READS record every call; W.RPC[name] = fn(args) answers an rpc.
@@ -7,6 +9,16 @@ export function world(fix = {}) {
   W.WRITES.length = 0; W.READS.length = 0; W.RPCS.length = 0; W.RPC = {};
 }
 const clone = (v) => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
+// T30_RECORD=<file> (round 3): note every table the real code touches, every database function it
+// calls, and the filters each query uses, so scripts/sweep/t30s10/parity.mjs can check them against
+// the dev database's own catalog. The harness runs every line of these files, so this is every query
+// they can make — not a sample. (COLUMNS are not taken from here: the clash tests hand in made-up
+// field names on purpose; parity.mjs reads each query's columns from the code instead.)
+const REC = process.env.T30_RECORD ? (globalThis.__T30REC ||= { tables: new Set(), queries: new Map(), rpcs: new Set() }) : null;
+if (REC && !globalThis.__T30RECHOOK) {
+  globalThis.__T30RECHOOK = 1;
+  process.on("exit", () => globalThis.__T30FS.writeFileSync(process.env.T30_RECORD, JSON.stringify({ tables: [...REC.tables].sort(), rpcs: [...REC.rpcs].sort(), queries: [...REC.queries.values()] })));
+}
 function builder(table) {
   const st = { table, filters: [], op: "select", patch: null, cols: null, lim: null, order: null, rng: null };
   const match = (row) => st.filters.every(([k, c, v]) => {
@@ -24,6 +36,11 @@ function builder(table) {
     return W.FAIL[ck];
   };
   const settle = async (one) => {
+    if (REC) {
+      REC.tables.add(table);
+      const filters = [...new Set(st.filters.filter((f) => f[0] === "eq" || f[0] === "in" || f[0] === "is").map((f) => f[1]))].sort();
+      const key = `${table}|${st.op}|${filters.join(",")}`; if (!REC.queries.has(key)) REC.queries.set(key, { table, op: st.op, filters });
+    }
     const f = failOf();
     if (f === "throw") throw new Error(`stub: ${table} unreachable`);
     if (f === "nodata") return { data: null, error: null, count: null };
@@ -65,5 +82,5 @@ function builder(table) {
 }
 export const supabaseAdmin = {
   from: (t) => builder(t),
-  rpc: async (name, args) => { W.RPCS.push({ name, args: clone(args) }); const f = W.FAIL["rpc:" + name]; if (f === "throw") throw new Error("stub rpc unreachable"); if (f) return { data: null, error: { message: "stub rpc failed" } }; return { data: W.RPC[name] ? W.RPC[name](args) : null, error: null }; },
+  rpc: async (name, args) => { if (REC) REC.rpcs.add(name); W.RPCS.push({ name, args: clone(args) }); const f = W.FAIL["rpc:" + name]; if (f === "throw") throw new Error("stub rpc unreachable"); if (f) return { data: null, error: { message: "stub rpc failed" } }; return { data: W.RPC[name] ? W.RPC[name](args) : null, error: null }; },
 };

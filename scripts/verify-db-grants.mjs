@@ -818,18 +818,19 @@ async function checkTablePrivileges(label, env) {
   const pols = await q(env, `SELECT tablename AS t, cmd, roles::text AS roles FROM pg_policies WHERE schemaname = 'public'`);
   const covers = (t, role, cmd) => pols.some((p) => p.t === t && (p.cmd === cmd || p.cmd === "ALL") && (/\bpublic\b/.test(p.roles) || p.roles.includes(role)));
   const off = tabs.filter((x) => !x.rls).map((x) => x.t);
-  off.length ? fail(`row-level security is OFF on: ${off.join(", ")}`) : pass(`row-level security is on for all ${tabs.length} public tables`);
+  if (off.length) fail(`row-level security is OFF on: ${off.join(", ")}`);
+  else pass(`row-level security is on for all ${tabs.length} public tables`);
   const inert = [], readable = new Set();
   for (const x of tabs) for (const [role, k] of [["anon", "a"], ["authenticated", "u"]]) for (const [cmd, c] of [["SELECT", "s"], ["INSERT", "i"], ["UPDATE", "u"], ["DELETE", "d"]]) {
     if (!x[`${k}_${c}`]) continue;
     if (covers(x.t, role, cmd)) { if (cmd === "SELECT") readable.add(x.t); else fail(`${role} may ${cmd} ${x.t} through a policy — no guest or signed-in key should write a table directly`); }
     else inert.push(`${x.t}:${role}:${cmd}`);
   }
-  inert.length ? fail(`${inert.length} table privilege(s) the public or signed-in key holds with no policy using them (remove them, as mig 416 did): ${inert.slice(0, 12).join(", ")}`)
-    : pass("the public and signed-in keys hold no table privilege that no policy uses");
+  if (inert.length) fail(`${inert.length} table privilege(s) the public or signed-in key holds with no policy using them (remove them, as mig 416 did): ${inert.slice(0, 12).join(", ")}`);
+  else pass("the public and signed-in keys hold no table privilege that no policy uses");
   const extra = [...readable].filter((t) => !GUEST_READABLE.includes(t)), missing = GUEST_READABLE.filter((t) => !readable.has(t));
-  extra.length || missing.length ? fail(`guest-readable tables differ from the expected five — readable but not expected: ${extra.join(", ") || "none"}; expected but not readable: ${missing.join(", ") || "none"}`)
-    : pass(`exactly the ${GUEST_READABLE.length} tables a guest screen needs are readable with the public key (${GUEST_READABLE.join(", ")})`);
+  if (extra.length || missing.length) fail(`guest-readable tables differ from the expected five — readable but not expected: ${extra.join(", ") || "none"}; expected but not readable: ${missing.join(", ") || "none"}`);
+  else pass(`exactly the ${GUEST_READABLE.length} tables a guest screen needs are readable with the public key (${GUEST_READABLE.join(", ")})`);
 }
 
 function expectedLiveFunctions() {

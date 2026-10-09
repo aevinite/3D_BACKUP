@@ -2,9 +2,11 @@
 //
 //   node scripts/sweep/t30s10/live.mjs --base http://localhost:4430
 //
-// Ids P199671–P199720 (append only), plus the re-run of P20018 / P07456 (whoami's discount cap).
+// Ids P199671–P199720 (append only), plus the re-run of P20018 / P07456 (whoami's discount cap), plus
+// round 3's P167701+ (the order allergy line — the only section that writes; see it below).
 // Signs in ONCE per role through scripts/sweep/login.mjs (manager, waiter tablet, owner — all French
-// House, the restaurant that is written to; Aangan is never touched). Every write it sends is one the
+// House, the restaurant that is written to; Aangan is never touched). Apart from round 3's allergy section
+// (which adds a test allergy to one ARCHIVED order and takes it off again), every write it sends is one the
 // app REFUSES — a stale expectation, a table with nothing to settle, a split that is the wrong shape,
 // an out-of-range setting — so nothing is created. The one value it could change (the floor's tables
 // per row) is read first and put back in a finally, and on SIGINT/SIGTERM.
@@ -53,7 +55,8 @@ const restoreFloor = async (mgr) => {
   if (now !== floorBefore) await call(mgr, "POST", "/api/editor/settings", { restaurant_id: FH, floor_per_row: floorBefore });
 };
 let mgrCtx = null;
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { try { if (mgrCtx) await restoreFloor(mgrCtx); } finally { process.exit(130); } });
+let cleanupAllergy = async () => {};
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { try { await cleanupAllergy(); if (mgrCtx) await restoreFloor(mgrCtx); } finally { process.exit(130); } });
 
 try {
   // ── the manager panel ───────────────────────────────────────────────────────────────────────
@@ -146,7 +149,41 @@ try {
   // ── whoami for the waiter: it is the PERSON's cap that applies, and it is never sent unasked ──
   const tw = await call(tab, "GET", "/api/tablet/whoami");
   N("lib/discountCap.ts", "driven (waiter tablet): whoami answers without leaking any secret", [200, 404].includes(tw.status) && !/"(password|pin|token)"\s*:/.test(tw.t), `status ${tw.status}`);
+
+  // ── ROUND 3 (P167701+): an order's allergy line, driven end to end on BOTH routes (items 16, 24) ──
+  // The ONE section of this file that really writes: it adds a test allergy to an ARCHIVED French House
+  // order (no live floor moves), checks every dish got it, takes it off again and checks every dish is
+  // exactly as it started. The name says what it is if a run ever dies half-way, and the finally below
+  // takes it off whatever happened.
+  let m3 = 167701; const R3 = (file, what, ok, note) => rec(`P${m3++}`, file, what, ok, note);
+  const TEST_ALG = "t30 round-3 check (remove me)";
+  const ord3 = (await sql(`select o.id, o.allergies from orders o where o.restaurant_id='${FH}' and o.archived and o.status <> 'cancelled' and coalesce(o.allergies::text,'') not ilike '%t30 round-3%' and (select count(*) from order_items i where i.order_id = o.id and i.restaurant_id = o.restaurant_id) >= 2 order by o.created_at desc limit 1`))[0];
+  const dishes = async () => (await sql(`select id, added_allergens, removed_flag from order_items where order_id='${ord3.id}' and restaurant_id='${FH}' order by id`)).map((d) => JSON.stringify([d.id, [...(d.added_allergens || [])].sort(), d.removed_flag]));
+  const lineOf = async () => (await sql(`select allergies from orders where id='${ord3.id}'`))[0].allergies || [];
+  const base = ord3 ? (Array.isArray(ord3.allergies) ? ord3.allergies : []).map((x) => String(x).toLowerCase()) : [];
+  cleanupAllergy = async () => { if (ord3 && (await lineOf()).includes(TEST_ALG)) await call(mgr, "POST", `/api/editor/orders/${ord3.id}/allergies`, { allergies: base, reason_note: "T30 round 3: taking the test allergy off again" }); };
+  R3("lib/orderAllergies.ts", "an archived French House order with at least two dishes exists to drive the allergy line on (none of the floor moves)", !!ord3, ord3 ? `${(await dishes()).length} dishes` : "no such order");
+  if (ord3) {
+    const start = await dishes();
+    for (const [ctx, pre, who] of [[mgr, "/api/editor", "manager"], [tab, "/api/tablet", "waiter tablet"]]) {
+      const noWhy = await call(ctx, "POST", `${pre}/orders/${ord3.id}/allergies`, { allergies: [...base, TEST_ALG] });
+      R3("lib/orderAllergies.ts", `${who}: adding an allergy WITHOUT a reason is refused (400, "Say why…") and nothing moves`, noWhy.status === 400 && /Say why the allergy is changing/.test(noWhy.t) && JSON.stringify(await dishes()) === JSON.stringify(start) && !(await lineOf()).includes(TEST_ALG), `status ${noWhy.status}`);
+      const t0 = (await sql("select now()::text t"))[0].t;
+      const add = await call(ctx, "POST", `${pre}/orders/${ord3.id}/allergies`, { allergies: [...base, TEST_ALG], reason_note: "T30 round 3 check" });
+      const afterAdd = await sql(`select added_allergens from order_items where order_id='${ord3.id}' and restaurant_id='${FH}'`);
+      R3("lib/orderAllergies.ts", `${who}: with a reason it saves (200), and the order's line carries the allergy`, add.status === 200 && add.j?.ok === true && (await lineOf()).includes(TEST_ALG), `status ${add.status} ${add.t.slice(0, 80)}`);
+      R3("lib/orderAllergies.ts", `${who}: …and EVERY dish on the order is marked with it (${afterAdd.length} dishes)`, afterAdd.length >= 2 && afterAdd.every((d) => (d.added_allergens || []).includes(TEST_ALG)), JSON.stringify(afterAdd.map((d) => (d.added_allergens || []).length)));
+      const log3 = await sql(`select count(*) n from staff_actions where order_id='${ord3.id}' and action='order_allergies' and detail ilike '%added ${TEST_ALG.replace(/'/g, "''")}%' and created_at >= '${t0}'`);
+      R3("lib/orderAllergies.ts", `${who}: …and the Activity log says what was added — exactly one new line, written by this save`, Number(log3[0].n) === 1, `${log3[0].n} rows`);
+      const marked = await dishes();
+      const again = await call(ctx, "POST", `${pre}/orders/${ord3.id}/allergies`, { allergies: [...base, TEST_ALG] });
+      R3("lib/orderAllergies.ts", `${who}: saving the same line again needs no reason (nothing is changing) and moves nothing`, again.status === 200 && JSON.stringify(await dishes()) === JSON.stringify(marked), `status ${again.status}`);
+      const off = await call(ctx, "POST", `${pre}/orders/${ord3.id}/allergies`, { allergies: base, reason_note: "T30 round 3: taking the test allergy off again" });
+      R3("lib/orderAllergies.ts", `${who}: taking it off (with a reason) saves, and every dish is EXACTLY as it started — same marks, same removed-flag`, off.status === 200 && JSON.stringify(await dishes()) === JSON.stringify(start) && !(await lineOf()).includes(TEST_ALG), `status ${off.status}`);
+    }
+  }
 } finally {
+  await cleanupAllergy().catch(() => {});
   if (mgrCtx) await restoreFloor(mgrCtx).catch(() => {});
   await browser.close();
 }
