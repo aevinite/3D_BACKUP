@@ -183,15 +183,18 @@ readable; blocking devtools only annoys real users. Real protection:
   `MAX_LOGIN_CANDIDATES` (50) rows for one typed name and says so in the logs if it ever reaches
   that ceiling. Every live match costs one PBKDF2 verify at 120,000 iterations, so this was CPU per
   login attempt as well as egress.
-- [ ] **N+1: batch the allergen per-item UPDATE loop.** Still one `order_items` UPDATE per item,
-  inside a `for` loop — `app/api/editor/[...path]/route.ts`, in the order-allergies handler, the loop
-  that runs right after the refusal *"Say why the allergy is changing"*. Found by that sentence, not
-  by a line number: this entry named line ~505, then ~3440, and both went stale as the route grew
-  (the loop was at line 4277 on 2026-10-09). The manager-PIN loop is restaurant-scoped now, so it
-  is much smaller.
-- [ ] **Trim `orders.select("*")` (editor `/orders`) to rendered columns.** Still `select(billsMode
-  ? BILLS_COLS : "*")` — the Bills view already names its columns; the floor/board view does not.
-  Plus `s-maxage` on the menu reads.
+- [x] **N+1: batch the allergen per-item UPDATE loop — done 2026-10-09** (sweep #10 T30 round 3,
+  item 16). It was one `order_items` UPDATE per dish, in the order-allergies handler right after the
+  refusal *"Say why the allergy is changing"* — in the manager route AND its twin in the waiter route
+  — and none of those writes' errors was looked at. Both now call `lib/orderAllergies.ts`
+  `spreadOrderAllergies`: one read, then ONE update per distinct result (normally one or two for a
+  whole ticket), and a failed write throws. The manager-PIN loop is restaurant-scoped, so it is small.
+- [x] **Trim `orders.select("*")` (editor `/orders`) to rendered columns — done 2026-10-09** (item 17).
+  The live floor now reads `FLOOR_COLS` — the 31 order columns the manager panel's code reads,
+  measured against the table; the seven it never reads are no longer sent. `verify:t24-money-rules
+  --db` fails the day the panel starts reading a column the list lacks. The `s-maxage` half of this
+  entry is superseded on purpose: the menu-data route answers with an ETag and a 304 rather than a
+  CDN cache (its own header explains why a shared cache would serve one restaurant's menu stale).
 - [ ] **Full RLS/secrets sweep** — work from `docs/SECURITY-CHECKLIST.md` (§4 above), in
   product-correctness wording, inline and never in a sub-agent. The concrete bugs it would have
   targeted (the cross-restaurant manager-PIN scope) were found and fixed; a systematic per-table

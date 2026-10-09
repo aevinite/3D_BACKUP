@@ -504,12 +504,14 @@ N("P104940", "…and the login candidate loop is still capped, which was the oth
     // and this row passed with the fault present (measured 2026-09-18).
     return /MAX_LOGIN_CANDIDATES\s*=\s*50\b/.test(ua) && /\.limit\(MAX_LOGIN_CANDIDATES\)/.test(ua);
   });
-N("P104941", "the three items §5 still lists as OPEN are honestly open — none has quietly been done",
-  "check each unticked box against today's code", () => {
-    const open = [...playbook.matchAll(/^- \[ \] \*\*(.+?)\*\*/gm)].map((m) => m[1]);
-    const allergenLoopStillThere = /for \(const/.test(editorRoute) && /order_items/.test(editorRoute) && /allerg/i.test(editorRoute);
-    const starSelectStillThere = /billsMode \? BILLS_COLS : "\*"/.test(editorRoute);
-    return open.length === 3 && allergenLoopStillThere && starSelectStillThere;
+// Re-stated 2026-10-09 (sweep #10 T30 round 3): items 16 and 17 batched the allergen loop and named the
+// floor's columns, so §5's boxes are checked both ways now — a ticked box must really be done.
+N("P104941", "every item §5 lists as OPEN is honestly open, and every one it ticks is really done",
+  "check each box against today's code", () => {
+    const ticked = (k) => new RegExp(`^- \\[x\\] \\*\\*${k}`, "m").test(playbook);
+    const allergenBatched = /spreadOrderAllergies\(sb, rid, b, addedOW, removedOW\)/.test(editorRoute);
+    const floorNamed = /select\(billsMode \? BILLS_COLS : FLOOR_COLS\)/.test(editorRoute);
+    return ticked("N\\+1") === allergenBatched && ticked("Trim `orders\\.select") === floorNamed;
   });
 N("P104942", "the playbook still refuses infrastructure, which is the rule people come here looking to break",
   "read the closing section", () =>

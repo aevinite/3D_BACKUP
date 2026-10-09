@@ -1379,14 +1379,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // and the Platform board): everything the record cards, the bill modal, restore's
       // deadline math and the printed bill actually consume — and nothing else. NOT
       // customer_name: that is a SYNTHETIC field the enrichment below attaches from
-      // session_members, not a column. The no-param floor read keeps select("*") — the live
-      // board renders every column and RT_VOLATILE/boardSig depend on the full row shape.
+      // session_members, not a column. The no-param floor read names its columns as well — see
+      // FLOOR_COLS just below (it kept select("*") until 2026-10-09).
       // taxable_base + nontax_amount ride along (mig 270): billMath() splits a bill into the
       // part GST is charged on and the untaxed MRP part, and a Bills record fetched without
       // them falls back to "all of subtotal was taxable" — which would print a DIFFERENT total
       // on a record card than the live floor and the paper show for the same bill.
       const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at";
-      let oq = sb.from("orders").select(billsMode ? BILLS_COLS : "*").eq("restaurant_id", rid);
+      // THE LIVE FLOOR NAMES ITS COLUMNS TOO (sweep #10 T30 round 3, item 17, 2026-10-09). It read
+      // select("*") — every column of every order, on every poll and every targeted refetch of
+      // every open manager panel. These are the columns the panel's code (public/panels/editor/app.js,
+      // billdoc.js, realtime.js…) reads from an order, measured against the table: the seven it never
+      // reads (edited_at, khata_customer_id, deleted_by, deleted_by_id, delete_reason, disc_gross,
+      // net_amount) are no longer sent. boardSig still sees every column the board can show.
+      // `verify:t24-money-rules --db` fails the day the panel starts reading a column not listed here.
+      const FLOOR_COLS: string = "id,table_number,items,subtotal,tax,total,allergies,created_at,status,payment_status,archived,session_id,member_id,kot_no,discount,discount_note,restaurant_id,payment_method,payment_note,paid_at,archived_at,cancelled_at,tip,khata_at,deleted_at,placed_by_id,placed_by,tax_rate,taxable_base,nontax_amount,mrp_amount";
+      let oq = sb.from("orders").select(billsMode ? BILLS_COLS : FLOOR_COLS).eq("restaurant_id", rid);
       // A DELETED BILL LEAVES THIS PANEL ENTIRELY (owner, 2026-08-04: "it will show only to
       // admin — it will delete from manager and stuff like that").
       //
