@@ -447,6 +447,9 @@ ok("no page errors anywhere", pageErrs.length === 0, pageErrs.slice(0, 3).join("
 const gone = new Date().toISOString();
 for (const sid of madeSessions) {
   await sb.from("customer_visits").delete().eq("session_id", sid);
+  // Cancelled as well as removed (verify:test-safety §17): a removed order still counts in the owner's
+  // reports on purpose, and this fixture was never a sale. Only its own unpaid ones.
+  await sb.from("orders").update({ status: "cancelled", cancelled_at: gone }).eq("session_id", sid).neq("payment_status", "paid");
   await sb.from("orders").update({ deleted_at: gone, delete_reason: "verify:customers fixture" }).eq("session_id", sid);
   const hard = await sb.from("sessions").delete().eq("id", sid);
   if (hard.error) {

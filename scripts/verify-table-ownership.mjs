@@ -211,7 +211,11 @@ head("B. Live data — no order left behind by a closed session");
 // ── C. DB: the close net itself ──────────────────────────────────────────────
 head("C. Closing a session — its food leaves the floor with it");
 {
-  const rid = must(await sb.from("restaurants").select("id").is("deleted_at", null).order("created_at").limit(1))[0]?.id;
+  // FRENCH HOUSE, LIKE EVERY OTHER BLOCK IN THIS FILE (sweep #10 T39 item 70, 2026-10-09). This took
+  // "the oldest restaurant" — Pizza Palace — so its orders, and the kitchen slips mig 335 queues for
+  // every order, landed on a restaurant no test is meant to write to: six slips sat queued there from
+  // 17 Sep to 8 Oct. The diag manager's restaurant is the one the other blocks already use.
+  const rid = must(await sb.from("staff_users").select("restaurant_id").eq("username", "diagm1").limit(1))[0]?.restaurant_id;
   if (!rid) fail("no restaurant to test against");
   else {
     const T = "OWNCHK"; // a name no real floor uses, so parallel sessions can't collide
@@ -257,7 +261,14 @@ head("C. Closing a session — its food leaves the floor with it");
       // SOFT-delete: every order here gets a bill number, and the DB rightly refuses to
       // hard-delete an issued bill ("soft-delete it (deleted_at) instead"). Our test rows
       // obey the same rule, so they leave every view without breaking that guarantee.
-      await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true, archived_at: new Date().toISOString() }).in("id", [unpaidId, paidId]);
+      // …and CANCELLED, the way the file's other blocks end theirs: a soft-deleted order still counts
+      // in the owner's reports (a sale can never disappear), and these two were never sales — the
+      // "paid" one only stands in for a paid order. Its kitchen slips are set aside the way the
+      // kitchen read sets aside a cancelled order's slip (lib/printQueue.ts).
+      const goneAt = new Date().toISOString();
+      await sb.from("orders").update({ status: "cancelled", cancelled_at: goneAt, deleted_at: goneAt, archived: true, archived_at: goneAt }).in("id", [unpaidId, paidId]);
+      await sb.from("print_jobs").update({ status: "dismissed", done_at: goneAt, error: "the order was cancelled before this ticket printed" })
+        .in("order_id", [unpaidId, paidId]).eq("status", "queued");
       await sb.from("sessions").delete().eq("id", s1.id);
     }
   }
