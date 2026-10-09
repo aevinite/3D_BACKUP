@@ -92,3 +92,17 @@ Outside T17's boundary, noticed and left: the owner/manager/kitchen/tablet layou
 link only helps once those layouts pass the page they were on; `lib/alerts.ts`'s header comment still says quiet alerts are priority
 "min" (the code sends "low", on purpose); the console's "Suspended" label still says only "its guest menu is offline", and suspending
 does not call forgetRestaurant, so staff stop within 30 seconds rather than at once.
+
+## Round 6 (2026-10-09, owner: "do all 4 and also check again … until you find 0 errors")
+
+856 new checks (P163142–P163997), all ✅. Built at the owner's word: 37 (bookmarks land back on the owner page after sign-in), 40 (the
+retired per-panel switch deleted). Problems found and fixed:
+
+| # | problem | fix | guard |
+|---|---|---|---|
+| 38 | The console still said a suspended restaurant's staff keep working (5 sentences + 2 comments), and a suspension took up to 30 s to reach staff. | Wording corrected everywhere; set_restaurant_active clears the remembered state. | P163143–P163144 + harness u-r6 (suspended through the real route → refused next call) |
+| 39 | lib/alerts.ts's header said quiet alerts go out at ntfy "min"; the code sends "low". | Header corrected, history kept. | P163150 |
+| 41 | The owner layout showed the crash page when an owner's restaurants could not be read (OwnedLookupFailed uncaught — round 2's outside note). | Reconnecting screen, like AuthDbError. | P163149, P163154 |
+| 42 | Four fresh mutation passes (720 breaks) found 54 rules no test noticed breaking — e.g. the owner layout flipped to send owners WITH restaurants to sign-in (an endless loop no hermetic test could see), a manager finishing setup without their required PIN, an empty uncover password, a non-text uncover cookie, a failed seal leaving the OLD readable password on the handover sheet. | All 54 closed (harness u-mutkill2/3/4, u-r6) and each re-proved caught; the safety-relevant ones pinned in verify:t25-doors. The last pass found none. | P163151–P163158 |
+
+Left, not this territory: `verify:guards-alive` flags two scripts in scripts/sweep/t9s10/ (T9's) that end with a bare process.exit().
