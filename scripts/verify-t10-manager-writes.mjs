@@ -140,5 +140,53 @@ const named = (G, table) => G.SCOPE_LOG.filter((s) => s.table === table).every((
     "item 7 · clearing a table's round closes its party with the restaurant named on both writes", `item 7 · restart answered ${r.status}`);
 }
 
+// ── 8 ─────────────────────────────────────────────────────────────────────────────────────
+{
+  const G = await world({ fix: { blocklist: [] } });
+  const r = await call("DELETE", "blocklist/gone-ban", {});
+  t(r.status === 404 && !G.LOGS.some((l) => l.action === "blocklist_remove"),
+    "item 8 · lifting a ban that is already gone answers 404 and writes no 'unbanned' line", `item 8 · answered ${r.status}, logged=${G.LOGS.some((l) => l.action === "blocklist_remove")}`);
+}
+{
+  const G = await world({ fix: { blocklist: [{ id: "b1", restaurant_id: RID, phone: "9111" }], customers: [{ restaurant_id: RID, phone: "9111", blocked: true }] } });
+  const r = await call("DELETE", "blocklist/b1", {});
+  t(r.status === 200 && !G.FIX.blocklist.length && G.FIX.customers[0].blocked === false && G.LOGS.some((l) => l.action === "blocklist_remove"),
+    "item 8 · …and a real ban is still lifted, the guest unblocked and the unban logged", `item 8 · a real unban answered ${r.status}`);
+  const i = code.indexOf('if (a === "blocklist" && id)');
+  t(i > 0 && !/select\("\*"\)/.test(code.slice(i, i + 900)), "item 8 · the unban reads the two columns it uses, not every column", "item 8 · the unban reads select(\"*\") again");
+}
+// ── 9 ─────────────────────────────────────────────────────────────────────────────────────
+{
+  const G = await world({ fix: { printer_events: [{ id: "e1", restaurant_id: RID, status: "open" }] } });
+  const r = await call("POST", "printer-events/e1/resolve", { body: {} });
+  t(r.status === 404 && G.FIX.printer_events[0].status === "open" && !G.LOGS.some((l) => l.action === "printer_problem_resolved") && !/a === "printer-events"/.test(code),
+    "item 9 · the printer-problem 'resolve' door with no caller is gone (404, nothing written)", `item 9 · printer-events resolve answered ${r.status}`);
+}
+// ── 10 ────────────────────────────────────────────────────────────────────────────────────
+const noDbWords = (r) => r.status >= 400 && !/stub:/.test(r.text);
+{
+  await world({ fail: { "rpc:lfh_capture_customer": "error" } });
+  const r = await call("POST", "customer-capture", { body: { table: "4", phone: "98", consent: true } });
+  t(noDbWords(r) && /Couldn't save the customer/.test(r.text), "item 10 · a failed customer save says a sentence, not the database's words", `item 10 · customer-capture said ${r.status} ${r.text.slice(0, 80)}`);
+}
+{
+  await world({ perms: { khata: true }, settings: { khata_allowed: true }, fail: { "khata_customers:insert": "error" } });
+  const r = await call("POST", "khata/customers", { body: { name: "Meera" } });
+  t(noDbWords(r) && /pay-later book/.test(r.text), "item 10 · adding a person to the pay-later book fails in a sentence", `item 10 · khata/customers said ${r.status} ${r.text.slice(0, 80)}`);
+}
+{
+  await world({ perms: { khata: true }, settings: { khata_allowed: true }, fail: { "khata_customers:insert": "error" }, fix: {
+    orders: [{ id: "o1", restaurant_id: RID, table_number: "4", status: "served", payment_status: "pending", archived: false }] } });
+  const r = await call("POST", "tables/4/khata", { body: { name: "Meera" } });
+  t(noDbWords(r) && /pay-later book/.test(r.text), "item 10 · parking a bill on a NEW person fails in a sentence too", `item 10 · tables/:t/khata said ${r.status} ${r.text.slice(0, 80)}`);
+}
+{
+  await world({ fail: { "issues:insert": "error" } });
+  const r = await call("POST", "issue", { body: { subject: "Fridge" } });
+  t(noDbWords(r) && /Couldn't raise the issue/.test(r.text), "item 10 · a complaint the database refused is answered in a sentence", `item 10 · issue said ${r.status} ${r.text.slice(0, 80)}`);
+  const r2 = await call("POST", "issue", { body: { subject: "" } });
+  t(r2.status === 400 && /Please add a subject/.test(r2.text), "item 10 · …while the complaint form's own sentence (no subject) still reaches the person", `item 10 · empty subject said ${r2.status} ${r2.text.slice(0, 60)}`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

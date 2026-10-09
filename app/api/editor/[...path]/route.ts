@@ -3471,7 +3471,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         p_consent: body?.consent === true,
         p_session: capSession,
       });
-      if (error) return err(error.message, 500);
+      // The database's own words go to the server log, never to the screen (sweep #10 T10, item 10) — the
+      // waiter tablet's twin of this door has said it in a sentence since sweep #6 (row P04918).
+      if (error) { console.error("[editor/customer-capture] save failed:", error.message); return err("Couldn't save the customer — the bill itself is settled. Please try again.", 500); }
       if ((data as { ok?: boolean })?.ok) await log("editor", "customer_saved", { restaurant_id: rid, table_number: t, device_id: dev });
       // LOYALTY rides the SAME settle (mig 401), on the SAME session the capture just used — so
       // the manager panel and the waiter tablet can never award points to different parties.
@@ -3529,7 +3531,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           imageUrl: ib?.image_url,
           audioUrl: ib?.audio_url,
         });
-      } catch (e) { return err(e instanceof Error ? e.message : "Couldn't raise the issue.", 400); }
+      } catch (e) {
+        // lib/issues.ts throws two kinds of message: its own sentences for the person (no subject, a
+        // photo too big or the wrong kind) and, when storage or the database refuses, that system's own
+        // words. Only the first kind reaches the screen (sweep #10 T10, item 10); the rest is logged.
+        const m = e instanceof Error ? e.message : "";
+        if (/^(Please add a subject|Photo must|Voice note|Invalid restaurant)/.test(m)) return err(m, 400);
+        console.error("[editor/issue] raise failed:", m);
+        return err("Couldn't raise the issue — please try again.", 500);
+      }
       return ok({ ok: true });
     }
 
@@ -5374,7 +5384,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (phone) customer = (await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data as any;
         if (!customer) {
           const ins = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone, note }).select("id,name,phone");
-          if (ins.error) return err(ins.error.message, 500);
+          if (ins.error) { console.error("[editor/tables/khata] add person failed:", ins.error.message); return err("Couldn't add that person to the pay-later book — please try again.", 500); } // item 10
           customer = (ins.data as any[])[0];
         }
       }
@@ -5406,7 +5416,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (existing) return ok({ customer: existing, existed: true });
       }
       const ins = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone, note }).select("id,name,phone,note");
-      if (ins.error) return err(ins.error.message, 500);
+      if (ins.error) { console.error("[editor/khata/customers] add person failed:", ins.error.message); return err("Couldn't add that person to the pay-later book — please try again.", 500); } // item 10
       return ok({ customer: (ins.data as any[])[0], existed: false });
     }
 
@@ -6470,7 +6480,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
             });
           } catch (e) {
             // The person must know the trail could not be corrected — never silent.
-            return err(e instanceof Error ? e.message : "Couldn't reverse the split payment record.", 500);
+            // lib/paySplit's message carries the database's own words — logged, not shown (item 10).
+            console.error("[editor/orders] split-leg reversal failed:", e instanceof Error ? e.message : e);
+            return err("Couldn't correct the split payment record, so the bill was left as paid. Please try again.", 500);
           }
         }
         await log("editor", "payment_revert", { restaurant_id: rid, order_id: id, detail: reason, device_id: deviceIdFrom(req) });
