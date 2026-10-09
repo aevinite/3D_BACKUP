@@ -1694,7 +1694,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // (Zomato/Swiggy/website) when the platform module is effective AND that channel is on,
       // plus staff PARCELS (own source, own `parcel` module). Refuse only when BOTH are off.
       const [plat, parc] = await Promise.all([platformLadder(rid), parcelLadder(rid)]);
-      if (!plat.effective && !parc.effective) return err("The Platform board isn't enabled for this restaurant.", 403);
+      // "The Platform board isn't enabled for this restaurant" WAS HERE, refusing when both ladders
+      // were off. Both have been PERMANENT since 2026-08-03 (lib/tableTags → ALWAYS_ON), so it could
+      // never be said to anyone; removed on the owner's "do all" (sweep #10 T9, item 8, 2026-10-09).
+      // If either module ever becomes switchable again, the refusal comes back WITH the switch.
       // Which delivery channels are live for this restaurant (settings.platform_channels).
       // website is stored under source 'takeaway' (the existing plumbing) but labelled "Website".
       const settingsRow = must(await sb.from("settings")

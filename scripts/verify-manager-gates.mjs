@@ -381,6 +381,17 @@ console.log("\nS10-T9 item 7 · whole-row reads in the manager route");
   }
 }
 
+// ── S10-T9 item 8 · the Platform board answers even with nothing switched on ─────────────────
+// Delivery and parcels are both permanent (2026-08-03), so a "both off" refusal could never fire and
+// was removed. Driven with an empty settings row: the board must open, never refuse.
+console.log("\nS10-T9 item 8 · GET /platform with nothing switched on");
+{
+  world({}, { settings: { takeaway_allowed: false } });
+  const r = await call("GET", "platform");
+  if (r.status === 200 && r.platform_on === true && r.parcel_on === true) ok("the Platform board opens — its modules are permanent, so there is nothing to refuse");
+  else bad("the Platform board refused or answered oddly with nothing switched on", JSON.stringify({ status: r.status, error: r.error }));
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });
