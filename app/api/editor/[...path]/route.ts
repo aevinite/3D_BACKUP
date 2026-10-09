@@ -1772,7 +1772,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const [invQ, voidQ, platQ, setQ, legQ, openSessQ, cntQ, numAggQ] = await Promise.all([
+      const [invQ, voidQ, platQ, setQ, legQ, openSessQ, cntQ, numAggQ, zRestQ] = await Promise.all([
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
@@ -1821,6 +1821,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // (shipped 2026-08-06, caught the same day by the write-test half of the T7 re-run).
         sb.from("aggregator_orders").select("bill_no,invoice_no,status,created_at,source")
           .eq("restaurant_id", rid).gte("created_at", since).not("bill_no", "is", null).limit(20000),
+        // The restaurant's own name, for the sheet's heading when its Billing card is empty (see below).
+        sb.from("restaurants").select("id, slug, name, logo_text").eq("id", rid).maybeSingle(),
       ]);
       const set = (must(setQ) || {}) as any;
       // Effective rate = sum of named tax components (CGST/SGST/…), else the fallback
@@ -2129,7 +2131,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // the /stats endpoint; the old `net + platRevenue` overstated the day-close cash by the
         // value of any unpaid bills open at print time (owner-facing till mismatch). (2026-07-03)
         grandTotal: r2(paidNet + platRevenue), rate,
-        restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
+        // ── WHOSE NAME HEADS THE SHEET (sweep #10 T9, item 11, 2026-10-09) ──────────────────────
+        // This fell back to "Little French House" — restaurant #1's name — for ANY restaurant whose
+        // Billing card had no name: on the dev stack that is Pizza Palace, Spice Route, Green Bowl,
+        // Burger Barn, Sakura Sushi and Taco Fiesta, whose day-close sheet would have been headed
+        // with another business's name (the IntroSplash class of fault CLAUDE.md names). It now asks
+        // billdoc's billIdentity() — the ONE rule the printed bill already uses: the Billing name,
+        // else the flagship's own name for the flagship only, else this restaurant's logo text / name.
+        restaurant: { name: BILLDOC.billIdentity(set, ((zRestQ as { data?: Record<string, unknown> | null }).data || { id: rid }) as Record<string, unknown>).name, gstin: set.gstin || "" },
       });
     }
 
@@ -2192,7 +2201,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const set = (must(await sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, gstin`).eq("restaurant_id", rid).maybeSingle()) || {}) as any;
+      const [gstSetQ, gstRestQ] = await Promise.all([
+        sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, gstin`).eq("restaurant_id", rid).maybeSingle(),
+        // The restaurant's own name for the filing's heading — same rule as the Z-report (item 11).
+        sb.from("restaurants").select("id, slug, name, logo_text").eq("id", rid).maybeSingle(),
+      ]);
+      const set = (must(gstSetQ) || {}) as any;
       const rate = effectiveTaxRate(set);
       const comps = taxComponents(set);
       const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -2265,7 +2279,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // looking at from a date range in a table.
         monthMode, windowLabel, reach: gstReach,
         months: monthMode ? [thisMonth, prevMonth] : [],
-        restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
+        // The printed bill's own naming rule (billIdentity) — never restaurant #1's name on another
+        // restaurant's tax document (item 11).
+        restaurant: { name: BILLDOC.billIdentity(set, gstRestQ.data || { id: rid }).name, gstin: set.gstin || "" },
         ratePct: Math.round(rate * 10000) / 100,
         components,
         totals: { bills: bills.size, taxable: r2(taxable), tax: r2(tax), mrp: r2(mrp), gross: r2(gross) },

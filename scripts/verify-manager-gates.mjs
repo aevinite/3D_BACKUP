@@ -408,6 +408,22 @@ console.log("\nS10-T9 item 10 · POST /table-sections with an id the database re
   delete G.FAIL;
 }
 
+// ── S10-T9 item 11 · a report is headed with THIS restaurant's name, never restaurant #1's ───
+// Six dev restaurants have no Billing name; their Z-report and GST report fell back to "Little French
+// House". Both now use billdoc's billIdentity() — the printed bill's own rule.
+console.log("\nS10-T9 item 11 · whose name heads the day-close sheet and the GST report");
+for (const ep of ["zreport", "gst-report"]) {
+  world({ view_dashboard: true }, { settings: { restaurant_name: null } });
+  Object.assign(G.FIX.restaurants[0], { slug: "pizza-palace", name: "Pizza Palace", logo_text: "Pizza Palace" });
+  let r = await call("GET", ep);
+  if (r.restaurant?.name === "Pizza Palace") ok(`${ep}: a restaurant with no Billing name is headed with its OWN name`, r.restaurant.name);
+  else bad(`${ep}: another restaurant's name heads this one's report`, JSON.stringify(r.restaurant));
+  world({ view_dashboard: true }, { settings: { restaurant_name: "Pizzeria Uno Pvt Ltd" } });
+  r = await call("GET", ep);
+  if (r.restaurant?.name === "Pizzeria Uno Pvt Ltd") ok(`${ep}: …and the Billing name wins when it is filled in`);
+  else bad(`${ep}: the Billing name was not used`, JSON.stringify(r.restaurant));
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });
