@@ -96,8 +96,8 @@ const twoTicketBill = () => world({
 {
   const i = route.indexOf('if (a === "sessions" && c === "bill-printed")');
   const above = route.slice(Math.max(0, i - 2200), i);
-  t(i > 0 && !/the document brands it|unbranded duplicate/.test(above) && /R37/.test(above),
-    "item 5 · the bill-printed comment no longer says a second copy is branded, and names R37",
+  t(i > 0 && !/the document brands it|unbranded duplicate/.test(above) && /R38/.test(above),
+    "item 5 · the bill-printed comment no longer says a second copy is branded, and names the R38 rule",
     "item 5 · the bill-printed comment promises a branded reprint again (R37 refused it)");
 }
 

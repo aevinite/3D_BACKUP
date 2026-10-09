@@ -3967,10 +3967,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
        reversible from here. Answering ok() when it is already stamped means a panel can call it
        after every print without a guard of its own, and a retry is free.
        WHAT IT IS FOR, AND WHAT IT IS NOT (corrected by sweep #10 T10, item 5): it ONLY lets the
-       button read "Reprint" instead of "Print". The second copy is NOT branded — R37 (owner,
-       2026-08-19) removed the "Reprint · Duplicate" band — and a reprint is NOT recorded anywhere —
-       R38. This comment used to promise that every later copy carries a reprint brand — the one
-       sentence most likely to make someone rebuild the band. See docs/REJECTED-IDEAS.md R37/R38. */
+       button read "Reprint" instead of "Print". The second copy is NOT branded — the owner removed the "Reprint · Duplicate" band on
+       2026-08-19 (docs/REJECTED-IDEAS.md, the row beside R38) — and a reprint is NOT recorded
+       anywhere — R38. This comment used to promise that every later copy carries a reprint brand — the one
+       sentence most likely to make someone rebuild the band. See docs/REJECTED-IDEAS.md R38 and the row above it. */
     if (a === "sessions" && c === "bill-printed") {
       const owns = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
       if (!owns) return err("That bill isn't for this restaurant.", 404);
