@@ -136,3 +136,6 @@ brag-output*/
 
 # Playwright's last-run marker (was tracked by accident until 2026-09-27)
 test-results/
+
+# sweep #10 T9 mutation runner: temporary mutated copies of route.ts (scripts/sweep/t9s10/mutate.mjs deletes them)
+/.t9mut/

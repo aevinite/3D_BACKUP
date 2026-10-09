@@ -6,7 +6,9 @@ import { check, world, call, SUBJECT, RID, RID2 } from "./lib.mjs";
 
 let N = 178201;
 const id = () => { if (N > 178400) throw new Error("block B is full"); return "P" + N++; };
-const NOW = () => new Date().toISOString();
+// One second ago: a report cuts at "until now", and a row stamped in the same millisecond falls
+// outside it — a fixture flicker, not a product fault (found in round 2).
+const NOW = () => new Date(Date.now() - 1000).toISOString();
 const OLD = "2000-01-01T00:00:00.000Z";
 const bizDay = () => new Date(Date.now() + (330 - 300) * 60000).toISOString().slice(0, 10);
 const C = (what, how, fn) => check(id(), `${SUBJECT} — ${what}`, how, fn);

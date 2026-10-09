@@ -18493,6 +18493,8 @@ async function loadBanquetBills() {
   try {
     const r = await api("GET", "/banquet/bills?limit=40" + (bq.q ? "&q=" + encodeURIComponent(bq.q) : ""));
     bq.bills = r.bills || [];
+    // How far back the list reaches is the server's answer (Bills reach, item 6) — said in the empty line.
+    bq.billsWindow = r.windowLabel || "";
   } catch (e) {
     bq.bills = [];
     toast("Couldn't load the banquet bills: " + e.message, "err");
@@ -18629,7 +18631,7 @@ function bqBillsHtml() {
   return `<div class="card">
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
       <input class="sx-input" id="bqSearch" value="${esc(bq.q || "")}" placeholder="Search a name, a number or a bill no…" style="max-width:300px" />
-      <span style="color:var(--muted);font-size:12.5px">Banquet bills have their own numbers — they also appear under <b>Bills</b> and in the reports.</span>
+      <span style="color:var(--muted);font-size:12.5px">Banquet bills have their own numbers — they also appear under <b>Bills</b> and in the reports.${bq.billsWindow ? ` Showing ${esc(bq.billsWindow)}.` : ""}</span>
     </div>
     ${bq.bills.length ? `<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13.5px">
       <thead><tr style="text-align:left;color:var(--muted);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase">
@@ -18637,7 +18639,7 @@ function bqBillsHtml() {
         <th style="padding:0 8px 8px;text-align:right">Total</th><th style="padding:0 8px 8px;text-align:right">Received</th>
         <th style="padding:0 8px 8px;text-align:right">Balance</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`
-      : `<div class="sx-empty">No banquet bills yet.</div>`}
+      : `<div class="sx-empty">${bq.billsWindow ? `No banquet bills ${esc(bq.billsWindow)}.` : "No banquet bills yet."}</div>`}
   </div>`;
 }
 

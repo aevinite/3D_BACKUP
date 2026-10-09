@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const LEDGER_DIR = join(ROOT, ".claude/sweep/LEDGER");
 const OWN = "T24-S8.md";
-const STAMP = "↻ S10-T9 re-run 2026-10-09";
+const STAMP = "↻ S10-T9 re-run 2026-10-09 (round 2)";
 const [runFile] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const DRY = process.argv.includes("--dry");
 if (!runFile) { console.error("usage: t24-writeback.mjs <runner --ledger output>"); process.exit(2); }
@@ -54,8 +54,10 @@ for (const r of run.filter((r) => RUNNER_ID(r.id))) {
 const foreign = new Map(run.filter((r) => !RUNNER_ID(r.id)).map((r) => [r.id, r]));
 // Rows whose WORDS changed with this re-lock — the old wording maps to the new.
 const RENAMED = new Map([
+  ["the Platform board is refused only when BOTH modules are off",
+    "the Platform board carries no refusal that can never fire (both of its modules are permanent)"],
   ["this half still holds exactly 96 database statements, and the same number of them per table",
-    "this half still holds exactly 100 database statements, and the same number of them per table"],
+    "this half still holds exactly 105 database statements, and the same number of them per table"],
 ]);
 
 const fresh = (r) => `${r.note ? r.note + " · " : ""}${STAMP}`;

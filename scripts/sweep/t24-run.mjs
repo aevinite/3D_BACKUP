@@ -72,7 +72,7 @@ async function main() {
     console.log(`\n${rows.length} checks · ${rows.length - bad.length - skipped.length} ✅ · ${bad.length} ❌ · ${skipped.length} ⏭`);
     if (bad.length) { console.log("\nfailures:"); for (const b of bad) console.log(`  ${b.id}  ${b.what}${b.note ? ` — ${b.note}` : ""}`); }
   }
-  process.exit(bad.length ? 1 : 0);
+  process.stdout.write("", () => process.exit(bad.length ? 1 : 0));
 }
 
 export function run() { return main(); }

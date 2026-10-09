@@ -307,6 +307,139 @@ console.log("\nS10-T9 item 3 · POST /dish-photo and the Edit-menu switch");
   else bad("with Edit menu ON the photo door was refused", `${r.status} ${j.error}`);
 }
 
+// ── S10-T9 item 5 · the repeat-customer lookup obeys the Customer directory switch ──────────
+console.log("\nS10-T9 item 5 · GET /customer-recognize and the Customer directory switch");
+{
+  world({});
+  G.FIX.restaurants[0].owner_entitlements = { customers: false };
+  G.RPC_ANSWERS.lfh_recognize_customer = { known: true, name: "Ravi", visits: 3 };
+  let r = await call("GET", "customer-recognize", { query: "?phone=9876543210" });
+  if (r.known === false && !G.RPCS.some((c) => c.name === "lfh_recognize_customer")) ok("with the directory OFF the pay sheet is told 'not known', and the lookup is never run");
+  else bad("with the directory OFF a saved customer was still recognised", JSON.stringify(r));
+  world({});
+  G.RPC_ANSWERS.lfh_recognize_customer = { known: true, name: "Ravi", visits: 3 };
+  r = await call("GET", "customer-recognize", { query: "?phone=9876543210" });
+  if (r.known === true && r.name === "Ravi") ok("…and with it ON (the default) a returning guest is still greeted");
+  else bad("with the directory ON a returning guest was not recognised", JSON.stringify(r));
+}
+
+// ── S10-T9 item 6 · the banquet ledger reaches as far as the Bills record ────────────────────
+console.log("\nS10-T9 item 6 · banquet bills and the Bills reach");
+{
+  const BQ = { banquet_allowed: true, banquet_owner_control: false, banquet_enabled: true };
+  const IST = 5.5 * 3600e3, F5 = 5 * 3600e3;
+  const todayStart = Math.floor((Date.now() + IST - F5) / 864e5) * 864e5 + F5 - IST;
+  const BILLS = [
+    { id: "bq-today", restaurant_id: RID, bill_no: "B3", issued_at: new Date().toISOString(), total: 300 },
+    { id: "bq-yday", restaurant_id: RID, bill_no: "B2", issued_at: new Date(todayStart - 864e5 + 3600e3).toISOString(), total: 200 },
+    { id: "bq-old", restaurant_id: RID, bill_no: "B1", issued_at: new Date(todayStart - 10 * 864e5).toISOString(), total: 100 },
+  ];
+  const bqWorld = (range) => { world({}, { settings: BQ, accessConfig: range ? { view_bills: { manager_opts: { range } } } : {} }); G.FIX.banquet_bills = JSON.parse(JSON.stringify(BILLS)); };
+  bqWorld(null);
+  let r = await call("GET", "banquet/bills");
+  if ((r.bills || []).length === 1 && r.bills[0].id === "bq-today" && r.windowLabel === "today") ok("a today-only Bills reach lists today's banquet bills only, and says so");
+  else bad("the banquet list reached past the Bills reach", JSON.stringify({ n: (r.bills || []).length, label: r.windowLabel }));
+  bqWorld("today_yesterday");
+  r = await call("GET", "banquet/bills");
+  if ((r.bills || []).length === 2 && !r.bills.some((b) => b.id === "bq-old") && r.windowLabel === "today and yesterday") ok("…today + yesterday lists both days, and nothing older");
+  else bad("the two-day reach listed the wrong bills", JSON.stringify((r.bills || []).map((b) => b.id)));
+  bqWorld(null);
+  r = await call("GET", "banquet/bill", { query: "?id=bq-old" });
+  if (r.status === 404) ok("…a bill older than the reach cannot be opened by its id either");
+  else bad("an older banquet bill opened by id", `${r.status}`);
+  bqWorld(null);
+  r = await call("GET", "banquet/bill", { query: "?id=bq-today" });
+  if (r.status === 200 && r.bill?.id === "bq-today") ok("…while today's bill still opens for its reprint");
+  else bad("today's banquet bill no longer opens", `${r.status}`);
+  bqWorld(null);
+  G.FIX.settings[0].modules = { printing: { routes: { banquet: { agent: "ag1", printer: "POS80" } } } };
+  G.FIX.print_agents = [{ id: "ag1", restaurant_id: RID, name: "Shop PC", last_seen_at: new Date().toISOString(), revoked_at: null }];
+  r = await call("POST", "print/send", { body: { kind: "banquet", billId: "bq-old" } });
+  if (r.status === 404 && !G.WRITES.some((w) => w.table === "print_jobs")) ok("…and an older one cannot be sent to the printer by its id");
+  else bad("an older banquet bill was queued for printing", `${r.status}`);
+}
+
+// ── S10-T9 item 7 · the manager route's reads name their columns ─────────────────────────────
+// Five reads took every column; they name them now. The only whole-row reads left are the ones whose
+// comment says why (the editor form edits every column of a dish/category/filter/settings row, and
+// the live floor renders the full order row). A new select("*") must come with that same reason.
+console.log("\nS10-T9 item 7 · whole-row reads in the manager route");
+{
+  // The FIRST half of the route only (through the table-sections branch) — sweep #10 T9's boundary.
+  // The second half has one more (the blocklist row read before an unblock); its owner decides it.
+  const whole = (await import("node:fs")).readFileSync(join(ROOT, "app/api/editor/[...path]/route.ts"), "utf8");
+  const cut = whole.indexOf('if (a === "customer-capture")');
+  const src = cut > 0 ? whole.slice(0, cut) : whole;
+  const ALLOWED = new Set(["menu_items", "categories", "filters", "settings"]);
+  const stars = [...src.matchAll(/from\("([a-z_]+)"\)\.select\("\*"\)/g)].map((m) => m[1]);
+  const unexplained = stars.filter((t) => !ALLOWED.has(t));
+  if (unexplained.length === 0) ok("no read takes every column except the editor bundle's four, whose comment says why", stars.join(", "));
+  else bad("a read takes every column with no reason given", unexplained.join(", "));
+  for (const [t, col] of [["waiter_calls", "member_id"], ["issues", "audio_url"], ["customers", "consent_at"], ["staff_actions", "actor_id"], ["banquet_bills", "tax_lines"]]) {
+    if (new RegExp(`from\\("${t}"\\)\\.select\\("[^"*]*\\b${col}\\b`).test(src)) ok(`the ${t} read names its columns (and keeps ${col}, which a screen reads)`);
+    else bad(`the ${t} read lost its column list or the ${col} column`);
+  }
+}
+
+// ── S10-T9 item 8 · the Platform board answers even with nothing switched on ─────────────────
+// Delivery and parcels are both permanent (2026-08-03), so a "both off" refusal could never fire and
+// was removed. Driven with an empty settings row: the board must open, never refuse.
+console.log("\nS10-T9 item 8 · GET /platform with nothing switched on");
+{
+  world({}, { settings: { takeaway_allowed: false } });
+  const r = await call("GET", "platform");
+  if (r.status === 200 && r.platform_on === true && r.parcel_on === true) ok("the Platform board opens — its modules are permanent, so there is nothing to refuse");
+  else bad("the Platform board refused or answered oddly with nothing switched on", JSON.stringify({ status: r.status, error: r.error }));
+}
+
+// ── S10-T9 item 10 · a waiter id the database refuses is a 4xx, never "server busy" ─────────
+console.log("\nS10-T9 item 10 · POST /table-sections with an id the database refuses");
+{
+  world({});
+  G.FAIL = { "staff_users:update": "refuse" };
+  let r = await call("POST", "table-sections", { body: { user_id: "not-an-id", tables: [1] } });
+  if (r.status === 404 && /no longer on this restaurant's team/.test(String(r.error || ""))) ok("a refused id is answered 404 in plain words, so the offline queue does not retry it", `${r.status}`);
+  else bad("a refused id was answered as server trouble", `${r.status} ${r.error}`);
+  world({});
+  G.FAIL = { "staff_users:update": "error" };
+  r = await call("POST", "table-sections", { body: { user_id: "w1", tables: [1] } });
+  if (r.status === 500) ok("…while real database trouble is still a 500 (kept and retried)", `${r.status}`);
+  else bad("real database trouble stopped being a 500", `${r.status}`);
+  delete G.FAIL;
+}
+
+// ── S10-T9 item 11 · a report is headed with THIS restaurant's name, never restaurant #1's ───
+// Six dev restaurants have no Billing name; their Z-report and GST report fell back to "Little French
+// House". Both now use billdoc's billIdentity() — the printed bill's own rule.
+console.log("\nS10-T9 item 11 · whose name heads the day-close sheet and the GST report");
+for (const ep of ["zreport", "gst-report"]) {
+  world({ view_dashboard: true }, { settings: { restaurant_name: null } });
+  Object.assign(G.FIX.restaurants[0], { slug: "pizza-palace", name: "Pizza Palace", logo_text: "Pizza Palace" });
+  let r = await call("GET", ep);
+  if (r.restaurant?.name === "Pizza Palace") ok(`${ep}: a restaurant with no Billing name is headed with its OWN name`, r.restaurant.name);
+  else bad(`${ep}: another restaurant's name heads this one's report`, JSON.stringify(r.restaurant));
+  world({ view_dashboard: true }, { settings: { restaurant_name: "Pizzeria Uno Pvt Ltd" } });
+  r = await call("GET", ep);
+  if (r.restaurant?.name === "Pizzeria Uno Pvt Ltd") ok(`${ep}: …and the Billing name wins when it is filled in`);
+  else bad(`${ep}: the Billing name was not used`, JSON.stringify(r.restaurant));
+}
+
+// ── S10-T9 item 12 · the Bills record's two follow-up reads name their restaurant ─────────────
+// They were keyed on session ids alone (safe by construction, but the rule is: every read names its
+// restaurant and its bound). Driven: a guest row of ANOTHER restaurant on the same session id must
+// not become this bill's customer name.
+console.log("\nS10-T9 item 12 · the Bills record's session and guest reads are restaurant-scoped");
+{
+  world({}, {});
+  G.FIX.orders = [{ id: "o1", restaurant_id: RID, session_id: "s5", created_at: new Date().toISOString(), deleted_at: null }];
+  G.FIX.sessions = [{ id: "s5", restaurant_id: "rest-2", bill_no: 999 }];
+  G.FIX.session_members = [{ session_id: "s5", restaurant_id: "rest-2", name: "Not theirs", role: "owner" }];
+  const r = await call("GET", "orders", { query: "?bills=1" });
+  const o = (r.rows || [])[0] || {};
+  if (o.bill_no === undefined && o.customer_name === undefined) ok("another restaurant's session and guest rows never decorate this restaurant's bill");
+  else bad("another restaurant's session or guest row reached this bill", JSON.stringify({ bill_no: o.bill_no, name: o.customer_name }));
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });

@@ -137,7 +137,7 @@ async function counterPrintTarget(
 
 import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
-import { worthLogging, pgError } from "@/lib/dbRefusal";
+import { worthLogging, pgError, isDataRefusal } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
@@ -849,6 +849,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "customer-recognize") {
       const phone = (new URL(req.url).searchParams.get("phone") || "").trim().slice(0, 20);
       if (!phone) return ok({ known: false });
+      // ── THE CUSTOMER DIRECTORY SWITCH COVERS LOOKING A GUEST UP, NOT ONLY SAVING ONE ──────────
+      // (sweep #10 T9, item 5, 2026-10-09.) POST customer-capture refuses when the admin has the
+      // directory off; this read did not ask, so the pay sheet still greeted "✨ Repeat customer ·
+      // <name>" out of names saved before the switch went off. Answered as "not known" rather than
+      // refused: the sheet then simply shows nothing, which is what an absent feature looks like.
+      if (!(await getOwnerEntitlements(rid)).customers) return ok({ known: false });
       const { data, error } = await sb.rpc("lfh_recognize_customer", { p_phone: phone, p_restaurant_id: rid });
       if (error) throw new Error(error.message);
       return ok(data || { known: false });
@@ -1135,13 +1141,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // something other than what was typed (T9 finding F15, applied here 2026-08-16).
       const q = searchTerm(new URL(req.url).searchParams.get("q"), 40);
       const limit = Math.min(100, Math.max(1, Number(new URL(req.url).searchParams.get("limit")) || 40));
+      // ── THE BANQUET LEDGER REACHES AS FAR AS THE BILLS RECORD (owner, 2026-10-09: "do all") ──
+      // A banquet bill "also appears under Bills" (the panel says so above this list), and the Bills
+      // record shows today — or today + yesterday — exactly as Access → Manager → Bills → "Which
+      // bills they can see" says. This list showed the newest 40 of ANY date, so a manager limited
+      // to today could still read last month's banquet customers, phones and takings here. Same
+      // helper, same window, for everyone (sweep #10 T9, item 6), searches included.
+      const bqReach = billsReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+      const bqSince = bqReach === "today_yesterday" ? businessDayStartIso(new Date(Date.now() - 24 * 3600 * 1000)) : businessDayStartIso();
+      const bqWindow = bqReach === "today_yesterday" ? "today and yesterday" : "today";
       let sel = sb.from("banquet_bills")
         .select("id,bill_no,issued_at,total,received,cust_name,cust_phone,hall,func,fn_date,pax,order_id,voided_at,void_reason")
-        .eq("restaurant_id", rid);
+        .eq("restaurant_id", rid).gte("issued_at", bqSince);
       if (q.kind === "term") sel = sel.or(`cust_name.ilike.%${q.term}%,cust_phone.ilike.%${q.term}%,bill_no.ilike.%${q.term}%`);
-      if (q.kind === "unsearchable") return ok({ bills: [], unsearchable: true });
+      if (q.kind === "unsearchable") return ok({ bills: [], unsearchable: true, reach: bqReach, windowLabel: bqWindow });
       const bills = must(await sel.order("issued_at", { ascending: false }).limit(limit));
-      return ok({ bills });
+      return ok({ bills, reach: bqReach, windowLabel: bqWindow });
     }
 
     // banquet/bill?id= — ONE bill, everything needed to re-print exactly what was
@@ -1151,7 +1166,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       const id = String(new URL(req.url).searchParams.get("id") || "");
       if (!id) return err("id required");
-      const bill = must(await sb.from("banquet_bills").select("*").eq("id", id).eq("restaurant_id", rid).limit(1))[0];
+      // The same window as the list above (item 6): a bill the list cannot show cannot be opened by
+      // its id either, or the reach would be a matter of knowing an id.
+      const oneReach = billsReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+      const oneSince = oneReach === "today_yesterday" ? businessDayStartIso(new Date(Date.now() - 24 * 3600 * 1000)) : businessDayStartIso();
+      // Named columns (item 7): everything the banquet sheet re-prints exactly as first printed —
+      // advances and tax_lines included — and not restaurant_id.
+      const bill = must(await sb.from("banquet_bills").select("id,order_id,session_id,bill_seq,bill_no,issued_at,subtotal,tax,total,received,advances,hall,func,fn_date,fn_from,fn_to,pax,rate,cust_name,cust_phone,cust_gstin,cust_addr,cust_person,remark,prepared_by,table_number,voided_at,void_reason,voided_by,created_by,created_at,discount,tax_lines").eq("id", id).eq("restaurant_id", rid).gte("issued_at", oneSince).limit(1))[0];
       if (!bill) return err("bill not found", 404);
       const order = bill.order_id
         ? must(await sb.from("orders").select("id,items,subtotal,tax,total,discount,status").eq("id", bill.order_id).eq("restaurant_id", rid).limit(1))[0]
@@ -1547,8 +1568,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const [sessQ, memQ, chainQ, payQ] = await Promise.all([
           // `invoice_reopen_count` (mig 407) rides along so a bill that is LIVE again can still
           // show it was reopened — invoice_voided only covers the state while it is on the floor.
-          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,invoice_reopen_count,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
-          sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
+          // Both scoped to THIS restaurant and capped (sweep #10 T9, item 12). They were keyed on the ids
+          // alone — safe by construction, because `sids` came from a restaurant-scoped orders read, but
+          // the rule here is that every read names its restaurant and its bound, so that no future change
+          // to how `sids` is built can quietly widen them. The round-2 query audit found these two.
+          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,invoice_reopen_count,bill_no,cust_name,cust_phone,bill_printed_at").eq("restaurant_id", rid).in("id", sids).limit(sids.length),
+          sb.from("session_members").select("session_id,name,role").eq("restaurant_id", rid).in("session_id", sids).eq("role", "owner").limit(2000),
           // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
           // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
           // SERVER read of just these sessions, never something a client could ask for. Only the
@@ -1648,7 +1673,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     if (p === "calls") {
       const tbl = new URL(req.url).searchParams.get("table"); // targeted refetch (see /orders)
-      let cq = sb.from("waiter_calls").select("*").eq("restaurant_id", rid);
+      // Named columns (item 7, sweep #10 T9): every field the calls list and the table card read,
+      // and not restaurant_id, which the caller already is.
+      let cq = sb.from("waiter_calls").select("id,table_number,note,resolved,created_at,session_id,member_id").eq("restaurant_id", rid);
       if (tbl) cq = cq.eq("table_number", tbl);
       return ok(must(await cq.order("created_at", { ascending: false }).limit(100)));
     }
@@ -1656,7 +1683,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // Issues this restaurant has raised (newest first, open before resolved) — so the
     // manager can see what they've reported + its status. Scoped to THIS restaurant.
     if (p === "issues") {
-      const rows = must(await sb.from("issues").select("*").eq("restaurant_id", rid).order("status", { ascending: true }).order("created_at", { ascending: false }).limit(100));
+      // Named columns (item 7): the complaint card's fields, the two media links signRows() turns into
+      // short-lived links, and who resolved it.
+      const rows = must(await sb.from("issues").select("id,raised_by,raised_role,subject,body,status,created_at,resolved_at,resolved_by,image_url,audio_url").eq("restaurant_id", rid).order("status", { ascending: true }).order("created_at", { ascending: false }).limit(100));
       // A photo or voice note attached to a complaint is private paperwork: hand the screen a
       // short-lived signed link, never the permanent public one (lib/mediaLinks.ts).
       return ok(await signRows("issue-media", rows as Record<string, unknown>[], ["image_url", "audio_url"]));
@@ -1669,7 +1698,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // (Zomato/Swiggy/website) when the platform module is effective AND that channel is on,
       // plus staff PARCELS (own source, own `parcel` module). Refuse only when BOTH are off.
       const [plat, parc] = await Promise.all([platformLadder(rid), parcelLadder(rid)]);
-      if (!plat.effective && !parc.effective) return err("The Platform board isn't enabled for this restaurant.", 403);
+      // "The Platform board isn't enabled for this restaurant" WAS HERE, refusing when both ladders
+      // were off. Both have been PERMANENT since 2026-08-03 (lib/tableTags → ALWAYS_ON), so it could
+      // never be said to anyone; removed on the owner's "do all" (sweep #10 T9, item 8, 2026-10-09).
+      // If either module ever becomes switchable again, the refusal comes back WITH the switch.
       // Which delivery channels are live for this restaurant (settings.platform_channels).
       // website is stored under source 'takeaway' (the existing plumbing) but labelled "Website".
       const settingsRow = must(await sb.from("settings")
@@ -1744,7 +1776,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const [invQ, voidQ, platQ, setQ, legQ, openSessQ, cntQ, numAggQ] = await Promise.all([
+      const [invQ, voidQ, platQ, setQ, legQ, openSessQ, cntQ, numAggQ, zRestQ] = await Promise.all([
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
@@ -1793,6 +1825,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // (shipped 2026-08-06, caught the same day by the write-test half of the T7 re-run).
         sb.from("aggregator_orders").select("bill_no,invoice_no,status,created_at,source")
           .eq("restaurant_id", rid).gte("created_at", since).not("bill_no", "is", null).limit(20000),
+        // The restaurant's own name, for the sheet's heading when its Billing card is empty (see below).
+        sb.from("restaurants").select("id, slug, name, logo_text").eq("id", rid).maybeSingle(),
       ]);
       const set = (must(setQ) || {}) as any;
       // Effective rate = sum of named tax components (CGST/SGST/…), else the fallback
@@ -2101,7 +2135,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // the /stats endpoint; the old `net + platRevenue` overstated the day-close cash by the
         // value of any unpaid bills open at print time (owner-facing till mismatch). (2026-07-03)
         grandTotal: r2(paidNet + platRevenue), rate,
-        restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
+        // ── WHOSE NAME HEADS THE SHEET (sweep #10 T9, item 11, 2026-10-09) ──────────────────────
+        // This fell back to "Little French House" — restaurant #1's name — for ANY restaurant whose
+        // Billing card had no name: on the dev stack that is Pizza Palace, Spice Route, Green Bowl,
+        // Burger Barn, Sakura Sushi and Taco Fiesta, whose day-close sheet would have been headed
+        // with another business's name (the IntroSplash class of fault CLAUDE.md names). It now asks
+        // billdoc's billIdentity() — the ONE rule the printed bill already uses: the Billing name,
+        // else the flagship's own name for the flagship only, else this restaurant's logo text / name.
+        restaurant: { name: BILLDOC.billIdentity(set, ((zRestQ as { data?: Record<string, unknown> | null }).data || { id: rid }) as Record<string, unknown>).name, gstin: set.gstin || "" },
       });
     }
 
@@ -2164,7 +2205,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const set = (must(await sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, gstin`).eq("restaurant_id", rid).maybeSingle()) || {}) as any;
+      const [gstSetQ, gstRestQ] = await Promise.all([
+        sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, gstin`).eq("restaurant_id", rid).maybeSingle(),
+        // The restaurant's own name for the filing's heading — same rule as the Z-report (item 11).
+        sb.from("restaurants").select("id, slug, name, logo_text").eq("id", rid).maybeSingle(),
+      ]);
+      const set = (must(gstSetQ) || {}) as any;
       const rate = effectiveTaxRate(set);
       const comps = taxComponents(set);
       const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -2237,7 +2283,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // looking at from a date range in a table.
         monthMode, windowLabel, reach: gstReach,
         months: monthMode ? [thisMonth, prevMonth] : [],
-        restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
+        // The printed bill's own naming rule (billIdentity) — never restaurant #1's name on another
+        // restaurant's tax document (item 11).
+        restaurant: { name: BILLDOC.billIdentity(set, gstRestQ.data || { id: rid }).name, gstin: set.gstin || "" },
         ratePct: Math.round(rate * 10000) / 100,
         components,
         totals: { bills: bills.size, taxable: r2(taxable), tax: r2(tax), mrp: r2(mrp), gross: r2(gross) },
@@ -2929,7 +2977,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, session:sessions(table_number, status)")
           .eq("restaurant_id", rid).order("joined_at", { ascending: false }).limit(500)
       );
-      const customers = must(await sb.from("customers").select("*").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(500));
+      // Named columns (item 7): everything the customer log draws, consent included (DPDP).
+      const customers = must(await sb.from("customers").select("phone,name,blocked,first_seen_at,last_seen_at,visits,consent,consent_at,points").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(500));
       // The blocklist read had NO limit at all. Columns named to match what the panel renders
       // (b.id / b.phone / b.table_number / b.reason) plus member_id, which unblocking needs.
       // unban_phone / unban_requested_at are what a BLOCKED GUEST left on the "you've been
@@ -2952,7 +3001,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // ADMIN's actions (panel='admin') AND the OWNER's actions (panel='owner' —
       // staff changes, permission grants…) are both hidden here; they show only in
       // their own panels' logs.
-      const rows = (must(await sb.from("staff_actions").select("*").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").order("created_at", { ascending: false }).limit(200)) || []) as { actor_id?: string | null }[];
+      // Named columns (item 7): the Activity log row, its error-board state, and actor_id (masked below
+      // for a staff reader when it is the admin's view marker).
+      const rows = (must(await sb.from("staff_actions").select("id,panel,action,table_number,order_id,detail,created_at,device_id,actor,actor_id,level,resolved_at,seen_at,snoozed_until,occurrences,last_seen_at").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").order("created_at", { ascending: false }).limit(200)) || []) as { actor_id?: string | null }[];
       // Actions the ADMIN performed from a panel view carry actor_id='admin:view' (owner,
       // 2026-07-28). Only the admin's own view may see that marker — for staff/owner
       // viewers the row must stay a plain, neutral panel row (the admin stays invisible).
@@ -3273,9 +3324,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       } else {
         const bid = String((body as Record<string, unknown>)?.billId || "");
         if (!bid) return err("Which banquet bill?", 400);
-        const bill = (await sb.from("banquet_bills").select("id, bill_no").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as
+        // The Bills reach applies here too (item 6): the banquet list cannot show an older bill, so
+        // sending one to the printer by its id must not be the way round the list.
+        const sendReach = billsReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+        const sendSince = sendReach === "today_yesterday" ? businessDayStartIso(new Date(Date.now() - 24 * 3600 * 1000)) : businessDayStartIso();
+        const bill = (await sb.from("banquet_bills").select("id, bill_no").eq("id", bid).eq("restaurant_id", rid).gte("issued_at", sendSince).maybeSingle()).data as
           { id: string; bill_no: unknown } | null;
-        if (!bill) return err("That banquet bill is not this restaurant's.", 404);
+        if (!bill) return err("That banquet bill isn't on this restaurant's list.", 404);
         payload.billId = bid;
         printedWhat = `banquet sheet${bill.bill_no != null ? ` #${bill.bill_no}` : ""}`;
       }
@@ -3339,11 +3394,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     const overwrite = await expectClash(req, rid);
     if (overwrite) return clashJson(overwrite);
 
-    // customer-capture — save the guest's name+number at bill time, with consent
-    // (Customer CRM, mig 212). DPDP: the RPC stores NOTHING without consent. Records
-    // one visit for the table's session (idempotent), links devices, bumps the
-    // returning count. Gated by the "customers" entitlement (default on). Called once
-    // after the bill closes; a failure never blocks the settle that already happened.
     // ── table-sections — set ONE waiter's tables (waiter sections, mig 222) ────
     // Body: { user_id, tables: number[] }. The whole set is replaced, so the client can
     // send the result of a tick/untick without any merge logic. Same ladder as the GET.
@@ -3373,6 +3423,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Same rule as everywhere else: the database's own words go to the server log, never to the
       // person standing at the section editor. (T24 sweep #8, 2026-09-06)
       if (upd.error) {
+        // A value the database REFUSES (a user_id that is not an id at all — 22P02) is a request
+        // that will be refused identically forever, so it is a 4xx, never the 500 the offline queue
+        // reads as "server busy, keep retrying" (sweep #10 T9, item 10). Only real trouble is a 500.
+        if (isDataRefusal(upd.error)) return err("That waiter is no longer on this restaurant's team.", 404);
         console.error("[editor/table-sections] save failed:", upd.error.message);
         return err("Couldn't save that waiter's tables — please try again.", 500);
       }
@@ -3385,6 +3439,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, user: row });
     }
 
+    // customer-capture — save the guest's name+number at bill time, with consent
+    // (Customer CRM, mig 212). DPDP: the RPC stores NOTHING without consent. Records
+    // one visit for the table's session (idempotent), links devices, bumps the
+    // returning count. Gated by the "customers" entitlement (default on). Called once
+    // after the bill closes; a failure never blocks the settle that already happened.
     if (a === "customer-capture") {
       const tRaw = String(body?.table || "").trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");

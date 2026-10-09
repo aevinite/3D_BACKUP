@@ -174,4 +174,5 @@ for (const [id, verb, p] of T6) {
 
 const ARGV = process.argv.slice(2);
 await runAll({ ledger: ARGV.includes("--ledger"), quiet: ARGV.includes("--quiet") });
-process.exit(0);
+// Flushed before exiting: a bare process.exit() drops buffered rows when the ledger is piped.
+process.stdout.write("", () => process.exit(0));

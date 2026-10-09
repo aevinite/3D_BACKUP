@@ -8,7 +8,9 @@ import { check, world, call, live, noLive, sql, SUBJECT, RID, RID2, FRENCH_HOUSE
 let N = 178401;
 const id = () => { if (N > 178600) throw new Error("block C is full"); return "P" + N++; };
 const C = (what, how, fn) => check(id(), `${SUBJECT} — ${what}`, how, fn);
-const NOW = () => new Date().toISOString();
+// One second ago: a report cuts at "until now", and a row stamped in the same millisecond falls
+// outside it — a fixture flicker, not a product fault (found in round 2).
+const NOW = () => new Date(Date.now() - 1000).toISOString();
 const routes = (r) => ({ modules: { printing: { routes: r } } });
 const AGENT = (o = {}) => ({ id: "ag1", restaurant_id: RID, name: "Shop PC", last_seen_at: NOW(), revoked_at: null, printers: [{ name: "POS80" }], ...o });
 
@@ -254,8 +256,13 @@ L("whoami says this is a manager, not the admin", "/whoami", async (j) => ({ ok:
 L("the day-close sheet's issued count is the bill counter's", "/zreport", async (j) => { const d = await one(`select coalesce((select n from daily_counters where restaurant_id='${FH}' and key='bill' and day=(now() at time zone 'Asia/Kolkata' - interval '5 hours')::date),0) n`); return { ok: j.numbering?.issued === d.n, note: `${j.numbering?.issued} vs ${d.n}` }; });
 L("the sheet's 'on nothing at all' list is exactly the numbers no row in the database carries", "/zreport", async (j) => {
   const d = await sql(`with c as (select coalesce((select n from daily_counters where restaurant_id='${FH}' and key='bill' and day=(now() at time zone 'Asia/Kolkata' - interval '5 hours')::date),0) n)
-    select g::int no from c, generate_series(1, c.n) g where not exists (select 1 from sessions s where s.restaurant_id='${FH}' and s.bill_no=g and s.created_at > now() - interval '3 days')
-      and not exists (select 1 from aggregator_orders a where a.restaurant_id='${FH}' and a.bill_no=g and a.created_at > now() - interval '3 days') order by 1`);
+    -- Bill numbers RESTART every business day, so only rows of TODAY's day count — the sheet's own two
+    -- doors: a session created today, or one carrying one of today's orders (round 2: a three-day window
+    -- matched yesterday's #15 and called today's honest gap a false one).
+    , s as (select id, bill_no from sessions where restaurant_id='${FH}' and bill_no is not null
+              and (created_at >= '${startIso()}' or id in (select session_id from orders where restaurant_id='${FH}' and created_at >= '${startIso()}')))
+    select g::int no from c, generate_series(1, c.n) g where not exists (select 1 from s where s.bill_no=g)
+      and not exists (select 1 from aggregator_orders a where a.restaurant_id='${FH}' and a.bill_no=g and a.created_at >= '${startIso()}') order by 1`);
   const want = d.map((x) => x.no); return { ok: JSON.stringify(j.numbering?.unaccounted) === JSON.stringify(want), note: `sheet ${JSON.stringify(j.numbering?.unaccounted)} · database ${JSON.stringify(want)} (test cleanup leaves these — the sheet is honest)` }; });
 L("the sheet's live order count is the database's", "/zreport", async (j) => { const d = await one(`select count(*)::int n from orders where restaurant_id='${FH}' and created_at >= '${startIso()}' and status <> 'cancelled'`); return { ok: Math.abs(j.dineIn?.orderCount - d.n) <= 1, note: `${j.dineIn?.orderCount} vs ${d.n} (±1 for an order landing mid-check)` }; });
 L("invoices generated today match", "/zreport", async (j) => { const d = await one(`select count(*)::int n from sessions where restaurant_id='${FH}' and invoice_at >= '${startIso()}'`); return { ok: j.invoicesGenerated === d.n, note: `${j.invoicesGenerated} vs ${d.n}` }; });
@@ -270,7 +277,9 @@ L("the ratings summary total is the database's", "/ratings", async (j, r) => { i
 L("the removals list is the database's newest 100, answers excluded", "/audit", async (j) => { const d = await one(`select count(*)::int n from deletion_audit where restaurant_id='${FH}' and kind <> 'removal_classified'`); return { ok: Array.isArray(j) && j.length === Math.min(100, d.n), note: `${j.length} vs ${d.n}` }; });
 L("the customer log's guest list is French House's (capped at 500)", "/users", async (j) => { const d = await one(`select count(*)::int n from session_members where restaurant_id='${FH}'`); return { ok: j.members?.length === Math.min(500, d.n), note: `${j.members?.length} vs ${d.n}` }; });
 L("the activity log never shows the admin's or the owner's rows to a manager", "/oplog", async (j) => ({ ok: Array.isArray(j) && j.length <= 200 && !j.some((x) => ["admin", "owner", "db"].includes(x.panel)), note: `${j.length} rows` }));
-L("…and never the admin-view marker", "/oplog", async (j) => ({ ok: !j.some((x) => x.actor_id === "admin:view") }));
+// CORRECTED in round 2: the marker is lib/logMarks.ts's uuid, not the text "admin:view" this row first
+// looked for — which can never appear, so the first version could only pass.
+L("…and never the admin-view marker", "/oplog", async (j) => ({ ok: !j.some((x) => x.actor_id === "00000000-0000-0000-0000-0000000000ad"), note: `${j.filter((x) => x.actor_id === null).length} row(s) with the actor id blanked` }));
 L("…and every error row carries a plain sentence beside its exact text", "/oplog", async (j) => { const e = j.filter((x) => x.level === "error" && x.detail); return { ok: e.every((x) => typeof x.plain === "string" && x.plain.length > 0), note: `${e.length} error rows` }; });
 L("the Bills record holds only bills inside the reach window, none binned", "/orders?bills=1", async (j) => { const from = startIso(); const rows = j.rows || []; return { ok: rows.every((o) => !o.deleted_at && o.created_at >= from) && (j.reach === "today" || j.reach === "today_yesterday"), note: `${rows.length} rows · reach ${j.reach}` }; });
 L("the live floor read carries no binned order", "/orders", async (j) => ({ ok: Array.isArray(j) && j.every((o) => !o.deleted_at), note: `${j.length}` }));
