@@ -243,6 +243,8 @@
     "verify:t25-doors": "node scripts/verify-t25-login-and-panel-apis.mjs",
     "verify:t25-doors-live": "node scripts/verify-t25-login-and-panel-apis.mjs --live",
     "verify:t25-writes": "node scripts/verify-t25-editor-writes.mjs",
+    "verify:voided-stays": "node scripts/verify-voided-stays-voided.mjs",
+    "verify:t10-writes": "node scripts/verify-t10-manager-writes.mjs",
     "test:netretry": "node --test tests/net-retry.test.mjs",
     "verify:print-speed": "node scripts/verify-print-speed.mjs",
     "verify:t5s9": "node scripts/sweep/t5s9/rerun-foreign.mjs && node scripts/sweep/t5s9/rerun-t27-dictionary.mjs && node scripts/sweep/t5s9/new-static.mjs",

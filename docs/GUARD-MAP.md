@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **229** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **231** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 197 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -86,6 +86,8 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | `lfh_table_view_summary` (the floor's one big read) | `verify:summary-parity` ← **not hand-review** | `.env.local` | no |
 | the floor under load / rush hour | `verify:live-rush`, `verify:merged-floor` | `.env.local` | **YES** |
 | a permission gate in the panel | `verify:manager-gates`, `verify:manager-hidden` | `.env.local` | no |
+| a ticket's status — Accept, Serve, one dish's status, or PATCH `orders/:id` | `verify:voided-stays` ← sweep #10 T10 item 1: the real route driven in memory; a CANCELLED ticket is refused by every door except Restore (`received`), and the same doors still work on a live ticket | nothing | no |
+| the second half of `app/api/editor/[...path]/route.ts` — the settings save, a discount's %-limit, a tip, the Platform doors | `verify:t10-writes` ← sweep #10 T10 items 2–11: an owner's save cannot write a module's admin switches, the limit is a share of the bill, a tip on a gone ticket is refused, `platform/toggles` stays gone, a rating and a cleared table name their restaurant in every WHERE clause, an unban that changed nothing logs nothing, no door hands over the database's words | nothing | no |
 | the "Edit the menu" sub-switches | `verify:menu-parts`, then `verify:menu-parts-live` | nothing / app running | no |
 | Bills, a bill's money, a discount | `verify:audit`, `verify:one-number`, `verify:tax-mode` | nothing / `.env.local` | no |
 | **splitting one bill between people** — the amounts, the ways to pay, or a part put on a tab | `verify:split-payment` ← the parts must add to the bill the SERVER recomputed (never the browser's figure), one rounding feeds both the check and the stored row, and a Pay-later part owes only its own slice on the khata (migration 352). Manager panel and waiter tablet → a table → Mark paid → Split payment; then owner → Pay Later. | nothing | no |

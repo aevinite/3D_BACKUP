@@ -144,7 +144,7 @@ import { panelFailure } from "@/lib/panelFailure";
 import { MANAGER_POWER_FLAGS, getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
-import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
+import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS, MODULE_DEFS } from "@/lib/accessModel";
 import { earnOnSettle, reverseOnUnpay, loyaltyStateFor, redeemOntoBill } from "@/lib/loyalty";
 import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, MENU_PART_DEFAULTS, type ManagerTabKey } from "@/lib/accessTree";
 import { managerCan } from "@/lib/managerCan";
@@ -3471,7 +3471,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         p_consent: body?.consent === true,
         p_session: capSession,
       });
-      if (error) return err(error.message, 500);
+      // The database's own words go to the server log, never to the screen (sweep #10 T10, item 10) — the
+      // waiter tablet's twin of this door has said it in a sentence since sweep #6 (row P04918).
+      if (error) { console.error("[editor/customer-capture] save failed:", error.message); return err("Couldn't save the customer — the bill itself is settled. Please try again.", 500); }
       if ((data as { ok?: boolean })?.ok) await log("editor", "customer_saved", { restaurant_id: rid, table_number: t, device_id: dev });
       // LOYALTY rides the SAME settle (mig 401), on the SAME session the capture just used — so
       // the manager panel and the waiter tablet can never award points to different parties.
@@ -3529,7 +3531,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           imageUrl: ib?.image_url,
           audioUrl: ib?.audio_url,
         });
-      } catch (e) { return err(e instanceof Error ? e.message : "Couldn't raise the issue.", 400); }
+      } catch (e) {
+        // lib/issues.ts throws two kinds of message: its own sentences for the person (no subject, a
+        // photo too big or the wrong kind) and, when storage or the database refuses, that system's own
+        // words. Only the first kind reaches the screen (sweep #10 T10, item 10); the rest is logged.
+        const m = e instanceof Error ? e.message : "";
+        if (/^(Please add a subject|Photo must|Voice note|Invalid restaurant)/.test(m)) return err(m, 400);
+        console.error("[editor/issue] raise failed:", m);
+        return err("Couldn't raise the issue — please try again.", 500);
+      }
       return ok({ ok: true });
     }
 
@@ -3849,15 +3859,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (hasAck && typeof rb.acknowledged !== "boolean") return err("acknowledged must be true/false", 400);
       const hasNote = "note" in (rb || {});
       if (hasNote && typeof rb.note !== "string") return err("note must be text", 400);
-      const row = (await sb.from("feedback").select("id, restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
+      // THE RESTAURANT IS IN THE WHERE CLAUSE, NOT COMPARED AFTERWARDS (sweep #10 T10, item 7). This read
+      // found the rating by id ALONE and then compared its restaurant_id, and the update below wrote by
+      // id alone — correct, because the compare came first, but the service-role client skips the
+      // database's own row rules, so the WHERE clause is the only scope there is (verify:scoped-reads).
+      // Another restaurant's rating now simply is not found, which is also what it should look like.
+      const row = (await sb.from("feedback").select("id").eq("id", id).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
       if (!row) return err("not found", 404);
-      if (row.restaurant_id !== rid) return err("forbidden", 403);
       const who = g.user?.name || g.user?.username || "Manager";
       const patch: Record<string, unknown> = {};
       if (hasAck) { patch.acknowledged = rb.acknowledged; patch.acknowledged_at = rb.acknowledged ? new Date().toISOString() : null; patch.acknowledged_by = rb.acknowledged ? who : null; }
       if (hasNote) patch.staff_note = (rb.note as string).trim() || null;
       if (!Object.keys(patch).length) return err("nothing to update", 400);
-      const upd = await sb.from("feedback").update(patch).eq("id", id);
+      const upd = await sb.from("feedback").update(patch).eq("id", id).eq("restaurant_id", rid);
       if (upd.error) throw new Error(upd.error.message);
       return ok({ ok: true });
     }
@@ -3962,11 +3976,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
        The exact shape of platform/:id/printed below, one table across, and for the same stated
        reason: the fact has to live on the BILL, not on the device that printed it, because the
        manager prints at the till and a waiter may reprint from the tablet a minute later — that
-       second device has no way to know, and would hand out an unbranded duplicate.
-       Stamped ONCE and never moved: the first print stays the first print, so every later copy is
-       a reprint and the document brands it. Deliberately not reversible from here — this is a
-       record that paper was produced. Answering ok() when it is already stamped means a panel can
-       call it after every print without a guard of its own, and a retry is free. */
+       second device has no other way to know paper already exists.
+       Stamped ONCE and never moved: the first print stays the first print. Deliberately not
+       reversible from here. Answering ok() when it is already stamped means a panel can call it
+       after every print without a guard of its own, and a retry is free.
+       WHAT IT IS FOR, AND WHAT IT IS NOT (corrected by sweep #10 T10, item 5): it ONLY lets the
+       button read "Reprint" instead of "Print". The second copy is NOT branded — the owner removed the "Reprint · Duplicate" band on
+       2026-08-19 (docs/REJECTED-IDEAS.md, the row beside R38) — and a reprint is NOT recorded
+       anywhere — R38. This comment used to promise that every later copy carries a reprint brand — the one
+       sentence most likely to make someone rebuild the band. See docs/REJECTED-IDEAS.md R38 and the row above it. */
     if (a === "sessions" && c === "bill-printed") {
       const owns = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
       if (!owns) return err("That bill isn't for this restaurant.", 404);
@@ -3995,27 +4013,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, id: b, printed_at: at });
     }
 
-    // platform/toggles — flip "kitchen can accept" / "show in bills"
-    if (a === "platform" && b === "toggles") {
-      const patch: Record<string, boolean> = {};
-      if (typeof body.kitchen_can_accept_platform === "boolean") patch.kitchen_can_accept_platform = body.kitchen_can_accept_platform;
-      if (typeof body.platform_in_bills === "boolean") patch.platform_in_bills = body.platform_in_bills;
-      if (!Object.keys(patch).length) return err("no toggle given");
-      must(await sb.from("settings").update(patch).eq("restaurant_id", rid).select());
-      // A SENTENCE, NOT THE PATCH OBJECT (owner, 2026-09-02: "it should be in the human
-      // language"). This recorded `{"platform_in_bills":true}` — a database column name and a
-      // boolean, on a screen the manager and the owner both read. Both toggles are named here in
-      // the words their own switches use on the Parcel & platforms screen.
-      const TOGGLE_WORDS: Record<string, [string, string]> = {
-        kitchen_can_accept_platform: ["the kitchen can now accept delivery-app orders", "the kitchen can no longer accept delivery-app orders"],
-        platform_in_bills: ["delivery-app orders now show in the bills", "delivery-app orders no longer show in the bills"],
-      };
-      const said = Object.entries(patch)
-        .map(([k, v]) => TOGGLE_WORDS[k]?.[v ? 0 : 1] ?? `${k.replace(/_/g, " ")} turned ${v ? "on" : "off"}`)
-        .join("; ");
-      await log("manager", "platform_toggle", { restaurant_id: rid, detail: said, device_id: dev });
-      return ok({ ok: true, ...patch });
-    }
+    // ── platform/toggles IS GONE (sweep #10 T10, item 2) ─────────────────────────────────────────
+    // It flipped settings.kitchen_can_accept_platform and settings.platform_in_bills, and it asked
+    // NOTHING first — not the Platform module, not the `platform` power — so any signed-in manager
+    // could switch the kitchen's right to accept delivery-app orders, from a typed request. Its only
+    // caller, the Platform tab's "Show in bills" checkbox, was removed on 2026-07-07 as a dead toggle
+    // (#194); this half was left behind. A door no screen opens is still a door, so it goes too
+    // (the "a new way replaces the old one" rule). The `platform_toggle` words stay in
+    // lib/plainError.ts so the Activity log's old rows still read as English.
+    // Guarded by scripts/verify-t10-manager-writes.mjs.
 
     // ── banquet (mig 130): item CRUD + bill generation. All rid-scoped; the
     // entitlement is re-checked here (and again inside the place RPC) so a
@@ -4265,7 +4271,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // write that ignores a Mark-paid row if one ever returns — not because a hole was found.
       if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("record a tip");
       const amt = Math.min(Math.max(0, Number(body?.amount) || 0), 100000);
-      must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid));
+      // A TIP THAT LANDED NOWHERE MUST NOT SAY "SAVED" (sweep #10 T10, item 6). This answered
+      // ok:true whatever the update matched, so a tip typed against a ticket that had just been
+      // moved, merged away or deleted on another device was reported as recorded and written
+      // nowhere — the tips line on the day-close simply came up short. The waiter tablet's twin
+      // has always refused ("That order isn't there anymore — refresh."); `.select("id")` makes a
+      // zero-row match visible here without a second trip.
+      const tipped = must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid).select("id")) as { id: string }[] | null;
+      if (!tipped || !tipped.length) return err("That order isn't there anymore — refresh.", 404);
       await log("manager", "order_tip", { restaurant_id: rid, order_id: b, detail: `tip ₹${amt}`, device_id: dev });
       return ok({ ok: true });
     }
@@ -4286,10 +4299,24 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // the impossible amount; this is the guard behind it.
       const discRate = effectiveTaxRate(await taxSettings(rid));
       const discBase = discountBaseOf(cur as OrderMoney, discRate);
+      // The bill's own orders, read ONCE — the cap below and the whole-bill clamp further down both
+      // need them. A solo order (no session) has no siblings and keeps its own base.
+      const sib = cur.session_id
+        ? ((must(await sb.from("orders").select("subtotal, taxable_base, mrp_amount, status").eq("session_id", cur.session_id).eq("restaurant_id", rid).limit(500)) || []) as (OrderMoney & { status?: string })[])
+        : [];
+      const billBase = sib.reduce((acc, o) => acc + (o.status === "cancelled" ? 0 : discountBaseOf(o, discRate)), 0);
       // Per-role %-cap (owner 2026-07-24): refuse a discount over this actor's configured limit
       // (non-breaking — no cap → no block). Admin (g.user null) is uncapped.
+      //
+      // MEASURED AGAINST WHAT THE DISCOUNT IS ON (sweep #10 T10, item 4). On a table the amount is a
+      // WHOLE-BILL discount — it goes to lfh_staff_bill_discount and is split across every order — so
+      // the limit is a share of the bill. It was measured against the ONE order whose id the panel
+      // sent (the bill's first ticket), while the Discount screen measures it against the whole bill
+      // (openDiscountModal → capBase). On a two-ticket bill at a 10% restaurant (Saffron Street,
+      // Copper Kettle), ₹100 off a ₹1,000 bill whose first ticket was ₹200 was offered by the screen
+      // and refused here as "over your 10% limit". A solo order is still measured against itself.
       { const cap = await discountCapPct(rid, discountRole(g.user?.role));
-        if (Number.isFinite(raw) && overDiscountCap(Math.max(raw, 0), discBase, cap)) return err(`That discount is over your ${cap}% limit — ask the owner.`, 403); }
+        if (Number.isFinite(raw) && overDiscountCap(Math.max(raw, 0), cur.session_id ? billBase : discBase, cap)) return err(`That discount is over your ${cap}% limit — ask the owner.`, 403); }
       const note = String((body && body.note) || "").slice(0, 200) || null;
       // WHOLE-BILL (session) discount path — the FIX for the "discount shrinks when marked paid"
       // bug (2026-07-08). A table's discount is conceptually on the whole BILL, but the manager
@@ -4322,9 +4349,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // predates the split and would let a discount eat an MRP line. Clamping here, before
         // the RPC, is what keeps the cap true for the whole bill; on a bill with nothing
         // untaxed the two numbers are identical, so no existing restaurant sees a change.
-        const sib = (must(await sb.from("orders").select("subtotal, taxable_base, mrp_amount, status").eq("session_id", cur.session_id).eq("restaurant_id", rid)) || []) as
-          (OrderMoney & { status?: string })[];
-        const billBase = sib.reduce((acc, o) => acc + (o.status === "cancelled" ? 0 : discountBaseOf(o, discRate)), 0);
+        // (`sib` and `billBase` are read once, above the cap check — item 4.)
         const amount = Number.isFinite(raw) ? Math.round(Math.min(Math.max(raw, 0), billBase) * 100) / 100 : 0;
         const res = must(await sb.rpc("lfh_staff_bill_discount", { p_session: cur.session_id, p_amount: amount, p_note: note }));
         await log("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `bill discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
@@ -4384,8 +4409,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
-
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).single());
+      if (cur.status === "cancelled") return err(VOIDED_MSG, 409);   // item 1 — see VOIDED_MSG
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: client re-fetches the board → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
@@ -4423,7 +4448,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const idx = Number(body && body.index);
       const status = body && body.status;
       if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).single());
+      if (cur.status === "cancelled") return err(VOIDED_MSG, 409);   // item 1 — see VOIDED_MSG
       const items = Array.isArray(cur.items) ? cur.items : [];
       if (!items[idx]) return err("bad item index");
       items[idx] = { ...items[idx], status };
@@ -4500,10 +4526,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // bill). Server-authoritative. A RE-issue (after a void) carries a reason and is REFUSED
     // once the bill is settled (mig 189 enforces both — the invoice locks at settlement).
     if (a === "sessions" && c === "invoice") {
-      // "Generate bills" is a row on the Access screen and now genuinely bites. It never did:
-      // the switch wrote manager_permissions.print_invoice and NOTHING read it, so a manager it
-      // was switched off for could still issue a numbered tax invoice (found 2026-08-01).
-      // Default is ON, so no restaurant changes until an admin deliberately turns it off.
+      // "Generate bills" is NOT a switch any more, and this line does not refuse anyone today
+      // (corrected by sweep #10 T10, item 11 — the comment said the opposite). The owner took
+      // take_orders / mark_paid / print_invoice / table_tags / table_ops out of the grant list on
+      // 2026-08-01 ("how the floor RUNS; a restaurant that switched them off could not trade"), so
+      // managerGrantValue() answers ON for print_invoice permanently and a stored
+      // manager_permissions.print_invoice is ignored — exactly the mark_paid case written out at the
+      // on-the-house gate. It is a guard in waiting, kept so that if a row ever returns every bill
+      // door honours it the same day. What actually decides who may issue a number is the manager
+      // gate itself, the customer rule below and lfh_generate_invoice's own refusals.
       if (!(await managerCan(g, rid, "print_invoice"))) return permDenied("generate bills");
       // lfh_generate_invoice has no tenant param — confirm the session is THIS restaurant's
       // first (service-role bypasses RLS; a foreign session id must not get an invoice).
@@ -5082,7 +5113,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "status") {
       const status = body && body.status;
       if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
-       
+      // Item 1 — the dish's ORDER is asked first, because this handler rewrites that order's status
+      // from its dishes below. Both reads are scoped and single-row; the panel sends this tap in the
+      // background (it flips the dish on screen first), so the extra trip is never waited on.
+      const owner = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
+      if (!owner) return err("That dish isn't on this order any more — refresh and try again.", 404);
+      if (owner.order_id) {
+        const ord = (await sb.from("orders").select("status").eq("id", owner.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
+        if (ord?.status === "cancelled") return err(VOIDED_MSG, 409);
+      }
       const patch: any = { status };
       // Serving stamps served_at; an undo that sends the dish back must clear it
       // again so the row never keeps a stale served time (owner undo bar, 2026-07-22).
@@ -5189,13 +5228,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       let q = sb.from("orders").update({ status: "served", archived: true, archived_at: nowIso() }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
       const rows = must(await q.select());
-      if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("removed", false).select());
+      // Both closing writes name the restaurant as well as the session they found (sweep #10 T10, item 7):
+      // the session id came from a restaurant-scoped read, but the WHERE clause is the only scope there is.
+      if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("restaurant_id", rid).eq("removed", false).select());
       await clearTableSignals(rid, t); // the B12 fix — no ghost waiter-call bell on the emptied table
       // NO FRESH EMPTY PARTY (owner, 2026-08-01). This line used to open a new session so the
       // table stayed "open, waiting for guests" — a state no screen can show since open/close was
       // removed, which is exactly how he found table 30 reading Free on the floor and open in the
       // database. The party now ENDS with its round: the table is free, on both sides.
-      if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso(), last_activity_at: nowIso() }).eq("id", openSess.id).select());
+      if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso(), last_activity_at: nowIso() }).eq("id", openSess.id).eq("restaurant_id", rid).select());
       await log("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} ${rows.length === 1 ? "order" : "orders"} cleared`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
@@ -5348,7 +5389,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (phone) customer = (await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data as any;
         if (!customer) {
           const ins = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone, note }).select("id,name,phone");
-          if (ins.error) return err(ins.error.message, 500);
+          if (ins.error) { console.error("[editor/tables/khata] add person failed:", ins.error.message); return err("Couldn't add that person to the pay-later book — please try again.", 500); } // item 10
           customer = (ins.data as any[])[0];
         }
       }
@@ -5380,7 +5421,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (existing) return ok({ customer: existing, existed: true });
       }
       const ins = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone, note }).select("id,name,phone,note");
-      if (ins.error) return err(ins.error.message, 500);
+      if (ins.error) { console.error("[editor/khata/customers] add person failed:", ins.error.message); return err("Couldn't add that person to the pay-later book — please try again.", 500); } // item 10
       return ok({ customer: (ins.data as any[])[0], existed: false });
     }
 
@@ -5704,14 +5745,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
-    // printer-events/:id/resolve — the manager says the printer problem is handled.
-    // (The other resolver is automatic: any successful kitchen print closes all open events.)
-    if (a === "printer-events" && c === "resolve") {
-      must(await sb.from("printer_events").update({ status: "resolved", resolved_at: nowIso() })
-        .eq("id", b).eq("restaurant_id", rid).eq("status", "open"));
-      await log("editor", "printer_problem_resolved", { detail: b, device_id: dev, restaurant_id: rid });
-      return ok({ ok: true });
-    }
+    // ── printer-events/:id/resolve IS GONE (sweep #10 T10, item 9) ──────────────────────────────
+    // Its only caller was the floor's printer-trouble strip ("✓ Resolved"), which the owner had taken
+    // off the floor on 2026-08-31; the strip's last wiring was deleted on 2026-09-03 (4a82272b) and
+    // this door was left with no screen. It wrote "printer_problem_resolved" into the Activity log
+    // whether or not an open problem matched. A problem is still closed — automatically, by the next
+    // successful print (lib/printQueue → finishKotJob) — so nothing a restaurant relies on goes with
+    // it. Old log rows keep their wording. Guarded by scripts/verify-t10-manager-writes.mjs.
 
     // generic upsert: POST /:kind  (items | categories | filters | settings)
     if (path.length === 1) {
@@ -5923,6 +5963,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // is the OWNER's toggle (owner panel) — a manager must not flip rungs above them. (mig 166)
         delete (body as Record<string, unknown>).table_tags_owner_control;
         delete (body as Record<string, unknown>).table_tags_enabled;
+        // …AND THE SAME TWO RUNGS OF EVERY OTHER MODULE (sweep #10 T10, item 3). The two lines above
+        // were written for mig 166, when table types was the only laddered module. Eleven more came
+        // after it (khata, banquet, table & ticket operations, take orders, parcel, platform, payroll,
+        // inventory…) and the `settings.modules` bag that Loyalty points lives in (mig 320/326), and
+        // none of them was added here. `*_allowed` is stripped by the regex above, but a bag module
+        // has no `_allowed` column — its admin switch is `modules.loyalty.allowed`. So an OWNER (who
+        // passes this route) could send `{ modules: { loyalty: { allowed: true } } }` and switch on a
+        // module the admin had not granted, or rewrite another module's power-transfer switch. The
+        // owner's own Settings page (/api/owner/settings) flips only a module the admin HANDED to him;
+        // this generic save must not be a second, unchecked door to the same rungs. The delivery
+        // channels (and their connection keys) are the admin's too — their own route says "the owner
+        // cannot change this". None of these is sent by any panel save today, so dropping them
+        // changes nothing a screen does. Admin (no staff cookie) is untouched.
+        if (g.user) {
+          const BODY = body as Record<string, unknown>;
+          for (const m of MODULE_DEFS) { delete BODY[m.control]; delete BODY[m.enabled]; }
+          delete BODY.modules;
+          delete BODY.platform_channels;
+        }
         // Admin/owner-only settings (owner 2026-07-28): a REAL MANAGER may edit only per-table
         // NAME + seats + auto-close from this panel — never the billing identity, KOT printing,
         // the dining-session system, or the table COUNT. Those live in the admin panel
@@ -6239,6 +6298,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   }
 }
 
+// ── A CANCELLED TICKET STAYS CANCELLED UNTIL SOMEBODY RESTORES IT (sweep #10 T10, item 1) ───────
+// There is ONE way back from a cancel: PATCH /orders/:id → status 'received' (the panel's Restore).
+// It is limited to 30 minutes from cancelled_at and it writes `order_uncancel` to the Activity log.
+//
+// Four other doors could also move a cancelled order's status, with neither the window nor the
+// line: POST orders/:id/accept, POST orders/:id/item, POST items/:id/status (each recomputes the
+// order's status from its dishes) and PATCH /orders/:id with 'preparing' or 'served'. serve-all was
+// given exactly this refusal on 2026-08-04 and its four siblings were not. The way it is reached is
+// ordinary: the floor tile still says "received", a colleague cancels that ticket on another
+// device, and this screen's ✓ Accept & Prepare lands a second later — the ticket comes back to the
+// kitchen, its money rejoins the bill, and the Activity log says nothing about it.
+// docs/COMPLIANCE-GUARDRAILS.md §3: a cancel/restore pair must never move a sale unobserved.
+// Guarded by scripts/verify-voided-stays-voided.mjs (npm run verify:voided-stays).
+const VOIDED_MSG = "That ticket was cancelled — restore it first if it should go back to the kitchen.";
+
 // ── PATCH ────────────────────────────────────────────────────────────────────
 export const PATCH = withIdempotency(invalidateFloorAfter(patchImpl), "editor");
 async function patchImpl(req: NextRequest, ctx: Ctx) {
@@ -6372,6 +6446,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // trusting a comment. The guard now fails if that wording ever comes back.
       if (patch.payment_status === "paid" && cur.status === "cancelled")
         return err("Can't take payment on a cancelled order.", 409);
+      // Item 1 — 'received' is the ONE way back (the 30-minute window + order_uncancel below).
+      if (cur.status === "cancelled" && (patch.status === "preparing" || patch.status === "served"))
+        return err(VOIDED_MSG, 409);
       // RULE (owner 2026-06-29): a bill can only be paid once the order is ACCEPTED (gone to
       // prepare). A brand-new 'received' order must be accepted first — you can't take payment
       // on something the kitchen hasn't confirmed. (No payment system yet; when one is added it
@@ -6408,7 +6485,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
             });
           } catch (e) {
             // The person must know the trail could not be corrected — never silent.
-            return err(e instanceof Error ? e.message : "Couldn't reverse the split payment record.", 500);
+            // lib/paySplit's message carries the database's own words — logged, not shown (item 10).
+            console.error("[editor/orders] split-leg reversal failed:", e instanceof Error ? e.message : e);
+            return err("Couldn't correct the split payment record, so the bill was left as paid. Please try again.", 500);
           }
         }
         await log("editor", "payment_revert", { restaurant_id: rid, order_id: id, detail: reason, device_id: deviceIdFrom(req) });
@@ -6654,9 +6733,16 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
     }
 
     if (a === "blocklist" && id) {
-      const existing = must(await sb.from("blocklist").select("*").eq("id", id).eq("restaurant_id", rid).limit(1));
+      // A BAN THAT WAS ALREADY LIFTED IS NOT LIFTED AGAIN (sweep #10 T10, item 8). This read every
+      // column (`select("*")`) to use one, and whatever it found it went on to write "unbanned" into
+      // the Activity log — so two devices lifting the same ban, or a stale Users list, put a second
+      // person's name against an unban only the first one made. "A record of something that didn't
+      // happen is worse than no record" is this file's rule three times over (the menu delete below
+      // was given the same answer by sweep #8 T25).
+      const existing = must(await sb.from("blocklist").select("id, phone").eq("id", id).eq("restaurant_id", rid).limit(1)) as { id: string; phone: string | null }[];
+      if (!existing.length) return err("That ban was already lifted — refresh to see the current list.", 404);
       must(await sb.from("blocklist").delete().eq("id", id).eq("restaurant_id", rid));
-      const phone = existing[0] && existing[0].phone;
+      const phone = existing[0].phone;
       if (phone) {
         const others = must(await sb.from("blocklist").select("id").eq("phone", phone).eq("restaurant_id", rid).limit(1));
         if (!others.length) await sb.from("customers").update({ blocked: false }).eq("phone", phone).eq("restaurant_id", rid);
