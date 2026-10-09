@@ -1824,3 +1824,15 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
   (bill list + detail), `public/panels/editor/style.css`. Design work → UI/UX skill first, compare
   approaches; keep every compliance rule (a sale can be cancelled, never disappear; numbering untouched).
   Asked for LATER — nothing is built yet.
+
+## 2026-10-09 — sweep #10 T17 round 5 decisions (owner: "don't do 32 and do everything else")
+
+- [x] **Suspending a restaurant stops its staff apps** (item 30) — manager, kitchen and tablet are refused on every door (sign-in,
+  the plain and the restaurant's own panel addresses, every panel call) with "This restaurant is switched off right now. Ask
+  Aevidine to turn it back on."; the owner panel and the admin's act-as are unaffected. VERIFIED 2026-10-09: verify:t25-doors
+  P162233–P162244, verify:t17-signin, live on backup (PR #1455).
+- [x] **After signing in, land on the page you were opening** (item 31) — only inside your own panel, on this site. VERIFIED
+  live on backup 2026-10-09 (an owner's /owner/reports?range=week kept). Note: the panel layouts (outside T17) still pass only
+  their home, so a bookmark benefits once they pass the page.
+- [x] **No more sign-in loop for a binned restaurant** (item 33) — VERIFIED 2026-10-09.
+- [x] **Item 32 (developer-machine trace rate) — NO.** Recorded as R61 in docs/REJECTED-IDEAS.md and on the code line.
