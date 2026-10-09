@@ -1264,6 +1264,13 @@ check("P186909", "the owner entrance's try-again page sizes its padding INSIDE t
   check("P163157", "with no vault key, a new password's readable copy is exactly null — so the OLD copy is cleared, never left on the handover sheet", (await PVc.passwordFields("x-pass-1")).password_shown === null);
   for (const k of ["ADMIN_PASSWORD", "STAFF_PASSWORD", "EDITOR_PASSWORD", "REVEAL_PASSWORD", "CREDENTIAL_VAULT_KEY", "SUPABASE_SERVICE_ROLE_KEY"]) if (keep[k] === undefined) delete process.env[k]; else process.env[k] = keep[k];
 }
+// ── SWEEP #10 T17 ROUND 6 — mutation pass D's safety rule — P163158 ─────────────────────────────────────────────────
+{
+  const PVd = await import("@/lib/passwordVault.ts"); const keep = process.env.CREDENTIAL_VAULT_KEY; process.env.CREDENTIAL_VAULT_KEY = "guard6d-vault-key-0123456789";
+  const real = crypto.subtle.encrypt.bind(crypto.subtle); crypto.subtle.encrypt = async () => { throw new Error("guard: encrypt down"); };
+  let pf; try { pf = await PVd.passwordFields("x-pass-6d"); } finally { crypto.subtle.encrypt = real; if (keep === undefined) delete process.env.CREDENTIAL_VAULT_KEY; else process.env.CREDENTIAL_VAULT_KEY = keep; }
+  check("P163158", "if sealing the readable copy FAILS mid-way, it is exactly null — a password change clears the old copy, never leaves it", pf.password_shown === null && pf.password_hash.startsWith("pbkdf2$"));
+}
 check("P186015", "lib/userAuth.ts tests the id's SHAPE before the staff_users lookup, not after",
   (() => { const c = CODE.userAuth; const a = c.indexOf("if (!STAFF_ID.test(id)) return null;"); const b = c.indexOf('select("*").eq("id", id)');
     return a > 0 && b > a; })());
