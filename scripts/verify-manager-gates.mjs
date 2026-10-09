@@ -323,6 +323,42 @@ console.log("\nS10-T9 item 5 · GET /customer-recognize and the Customer directo
   else bad("with the directory ON a returning guest was not recognised", JSON.stringify(r));
 }
 
+// ── S10-T9 item 6 · the banquet ledger reaches as far as the Bills record ────────────────────
+console.log("\nS10-T9 item 6 · banquet bills and the Bills reach");
+{
+  const BQ = { banquet_allowed: true, banquet_owner_control: false, banquet_enabled: true };
+  const IST = 5.5 * 3600e3, F5 = 5 * 3600e3;
+  const todayStart = Math.floor((Date.now() + IST - F5) / 864e5) * 864e5 + F5 - IST;
+  const BILLS = [
+    { id: "bq-today", restaurant_id: RID, bill_no: "B3", issued_at: new Date().toISOString(), total: 300 },
+    { id: "bq-yday", restaurant_id: RID, bill_no: "B2", issued_at: new Date(todayStart - 864e5 + 3600e3).toISOString(), total: 200 },
+    { id: "bq-old", restaurant_id: RID, bill_no: "B1", issued_at: new Date(todayStart - 10 * 864e5).toISOString(), total: 100 },
+  ];
+  const bqWorld = (range) => { world({}, { settings: BQ, accessConfig: range ? { view_bills: { manager_opts: { range } } } : {} }); G.FIX.banquet_bills = JSON.parse(JSON.stringify(BILLS)); };
+  bqWorld(null);
+  let r = await call("GET", "banquet/bills");
+  if ((r.bills || []).length === 1 && r.bills[0].id === "bq-today" && r.windowLabel === "today") ok("a today-only Bills reach lists today's banquet bills only, and says so");
+  else bad("the banquet list reached past the Bills reach", JSON.stringify({ n: (r.bills || []).length, label: r.windowLabel }));
+  bqWorld("today_yesterday");
+  r = await call("GET", "banquet/bills");
+  if ((r.bills || []).length === 2 && !r.bills.some((b) => b.id === "bq-old") && r.windowLabel === "today and yesterday") ok("…today + yesterday lists both days, and nothing older");
+  else bad("the two-day reach listed the wrong bills", JSON.stringify((r.bills || []).map((b) => b.id)));
+  bqWorld(null);
+  r = await call("GET", "banquet/bill", { query: "?id=bq-old" });
+  if (r.status === 404) ok("…a bill older than the reach cannot be opened by its id either");
+  else bad("an older banquet bill opened by id", `${r.status}`);
+  bqWorld(null);
+  r = await call("GET", "banquet/bill", { query: "?id=bq-today" });
+  if (r.status === 200 && r.bill?.id === "bq-today") ok("…while today's bill still opens for its reprint");
+  else bad("today's banquet bill no longer opens", `${r.status}`);
+  bqWorld(null);
+  G.FIX.settings[0].modules = { printing: { routes: { banquet: { agent: "ag1", printer: "POS80" } } } };
+  G.FIX.print_agents = [{ id: "ag1", restaurant_id: RID, name: "Shop PC", last_seen_at: new Date().toISOString(), revoked_at: null }];
+  r = await call("POST", "print/send", { body: { kind: "banquet", billId: "bq-old" } });
+  if (r.status === 404 && !G.WRITES.some((w) => w.table === "print_jobs")) ok("…and an older one cannot be sent to the printer by its id");
+  else bad("an older banquet bill was queued for printing", `${r.status}`);
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });

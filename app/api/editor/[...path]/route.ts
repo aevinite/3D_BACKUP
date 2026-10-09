@@ -1141,13 +1141,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // something other than what was typed (T9 finding F15, applied here 2026-08-16).
       const q = searchTerm(new URL(req.url).searchParams.get("q"), 40);
       const limit = Math.min(100, Math.max(1, Number(new URL(req.url).searchParams.get("limit")) || 40));
+      // ── THE BANQUET LEDGER REACHES AS FAR AS THE BILLS RECORD (owner, 2026-10-09: "do all") ──
+      // A banquet bill "also appears under Bills" (the panel says so above this list), and the Bills
+      // record shows today — or today + yesterday — exactly as Access → Manager → Bills → "Which
+      // bills they can see" says. This list showed the newest 40 of ANY date, so a manager limited
+      // to today could still read last month's banquet customers, phones and takings here. Same
+      // helper, same window, for everyone (sweep #10 T9, item 6), searches included.
+      const bqReach = billsReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+      const bqSince = bqReach === "today_yesterday" ? businessDayStartIso(new Date(Date.now() - 24 * 3600 * 1000)) : businessDayStartIso();
+      const bqWindow = bqReach === "today_yesterday" ? "today and yesterday" : "today";
       let sel = sb.from("banquet_bills")
         .select("id,bill_no,issued_at,total,received,cust_name,cust_phone,hall,func,fn_date,pax,order_id,voided_at,void_reason")
-        .eq("restaurant_id", rid);
+        .eq("restaurant_id", rid).gte("issued_at", bqSince);
       if (q.kind === "term") sel = sel.or(`cust_name.ilike.%${q.term}%,cust_phone.ilike.%${q.term}%,bill_no.ilike.%${q.term}%`);
-      if (q.kind === "unsearchable") return ok({ bills: [], unsearchable: true });
+      if (q.kind === "unsearchable") return ok({ bills: [], unsearchable: true, reach: bqReach, windowLabel: bqWindow });
       const bills = must(await sel.order("issued_at", { ascending: false }).limit(limit));
-      return ok({ bills });
+      return ok({ bills, reach: bqReach, windowLabel: bqWindow });
     }
 
     // banquet/bill?id= — ONE bill, everything needed to re-print exactly what was
@@ -1157,7 +1166,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       const id = String(new URL(req.url).searchParams.get("id") || "");
       if (!id) return err("id required");
-      const bill = must(await sb.from("banquet_bills").select("*").eq("id", id).eq("restaurant_id", rid).limit(1))[0];
+      // The same window as the list above (item 6): a bill the list cannot show cannot be opened by
+      // its id either, or the reach would be a matter of knowing an id.
+      const oneReach = billsReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+      const oneSince = oneReach === "today_yesterday" ? businessDayStartIso(new Date(Date.now() - 24 * 3600 * 1000)) : businessDayStartIso();
+      const bill = must(await sb.from("banquet_bills").select("*").eq("id", id).eq("restaurant_id", rid).gte("issued_at", oneSince).limit(1))[0];
       if (!bill) return err("bill not found", 404);
       const order = bill.order_id
         ? must(await sb.from("orders").select("id,items,subtotal,tax,total,discount,status").eq("id", bill.order_id).eq("restaurant_id", rid).limit(1))[0]
@@ -3279,9 +3292,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       } else {
         const bid = String((body as Record<string, unknown>)?.billId || "");
         if (!bid) return err("Which banquet bill?", 400);
-        const bill = (await sb.from("banquet_bills").select("id, bill_no").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as
+        // The Bills reach applies here too (item 6): the banquet list cannot show an older bill, so
+        // sending one to the printer by its id must not be the way round the list.
+        const sendReach = billsReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+        const sendSince = sendReach === "today_yesterday" ? businessDayStartIso(new Date(Date.now() - 24 * 3600 * 1000)) : businessDayStartIso();
+        const bill = (await sb.from("banquet_bills").select("id, bill_no").eq("id", bid).eq("restaurant_id", rid).gte("issued_at", sendSince).maybeSingle()).data as
           { id: string; bill_no: unknown } | null;
-        if (!bill) return err("That banquet bill is not this restaurant's.", 404);
+        if (!bill) return err("That banquet bill isn't on this restaurant's list.", 404);
         payload.billId = bid;
         printedWhat = `banquet sheet${bill.bill_no != null ? ` #${bill.bill_no}` : ""}`;
       }
