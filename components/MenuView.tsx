@@ -715,15 +715,20 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           // number and is still read correctly — see the restore.
           try {
             const head = document.getElementById("menu-sticky")?.getBoundingClientRect().bottom ?? 0;
-            // THE FIRST DISH THE DINER CAN ACTUALLY SEE — the one whose top is at or below the
-            // header line, not the one half-hidden behind it. Anchoring on the half-hidden card put
-            // it fully below the header on the way back, which moved the whole list up by one row
-            // and returned the diner to the dish BEFORE the one they left at. Measured: left at
-            // "Mint Melon Juice", came back to "Nutella Shake".
+            // THE FIRST DISH THE DINER CAN SEE ANY OF, AND EXACTLY WHERE IT SAT (sweep #10 T39
+            // item 54, 2026-10-09). The version before this chose the first card whose TOP was
+            // below the header, then put that card 12px under the header on the way back. Dishes
+            // sit two to a row, and the row the diner is reading is usually tucked a little under
+            // the header — 11px at French House — so it was skipped, the NEXT row was remembered,
+            // and Back hid the row they had been reading. Measured on :4439, 8 runs of 8: left with
+            // "Nutella Shake" showing (158px, header at 169), came back with it hidden at -95px.
+            // Remembering the card AND its offset from the header puts back exactly the view they
+            // left, whichever row was half-tucked; the pixel stays as the fallback.
             const first = Array.from(el.querySelectorAll<HTMLElement>(".item-card-link"))
-              .find((c) => c.getBoundingClientRect().top >= head - 4);
+              .find((c) => c.getBoundingClientRect().bottom > head + 8);
             const id = first?.getAttribute("href") || "";
-            sessionStorage.setItem(sk("lfh_menu_scroll"), JSON.stringify({ y: Math.round(el.scrollTop), id }));
+            const off = first ? Math.round(first.getBoundingClientRect().top - head) : 12;
+            sessionStorage.setItem(sk("lfh_menu_scroll"), JSON.stringify({ y: Math.round(el.scrollTop), id, off }));
           } catch {}
         }
         // SCROLL-LINKED SHRINK. The brand bar (.nav) is LOCKED at the top. As the
@@ -805,10 +810,15 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       // sitting in a diner's tab. Neither can throw the restore off — a bad blob just means no
       // memory, which is where every first visit starts anyway.
       const raw = sessionStorage.getItem(sk("lfh_menu_scroll")) || "";
-      let y = 0, wantId = "";
+      // `off` = where that dish's top sat relative to the header line (negative = tucked under it);
+      // a value saved before it existed means 12px, the old fixed aim.
+      let y = 0, wantId = "", off = 12;
       try {
         const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") { y = parseInt(String(parsed.y), 10) || 0; wantId = String(parsed.id || ""); }
+        if (parsed && typeof parsed === "object") {
+          y = parseInt(String(parsed.y), 10) || 0; wantId = String(parsed.id || "");
+          if (Number.isFinite(Number(parsed.off))) off = Number(parsed.off);
+        }
         else y = parseInt(String(parsed), 10) || 0;
       } catch { y = parseInt(raw, 10) || 0; }
       const el = document.getElementById("main-scroll");
@@ -840,7 +850,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             const card = el.querySelector<HTMLElement>(`.item-card-link[href="${CSS.escape(wantId)}"]`);
             if (card) {
               const head = document.getElementById("menu-sticky")?.getBoundingClientRect().bottom ?? 0;
-              return Math.max(0, el.scrollTop + card.getBoundingClientRect().top - head - 12);
+              return Math.max(0, el.scrollTop + card.getBoundingClientRect().top - head - off);
             }
           }
           return y;

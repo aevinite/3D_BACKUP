@@ -676,7 +676,7 @@ working fine and not disturbing other, make this permanent rule. remove worker c
 **What replaces it — you, every time, before you say a thing is done:**
 
 1. **Run it and see the result.** `npm run verify:push` (typecheck → lint → tests → static guards →
-   access model, ~90s, the same set CI runs), plus whatever `docs/GUARD-MAP.md` names for the files you
+   access model, ~4 min, the same set CI runs), plus whatever `docs/GUARD-MAP.md` names for the files you
    touched. For a UI change, see it in a real browser, in the right role, on a non-flagship restaurant.
 2. **Prove you broke nothing else.** `verify:static` reports EVERY failure now, not just the first —
    read the whole summary. A guard that "should" pass is not a guard that passed.

@@ -835,6 +835,15 @@ async function checkAbsentFunctions(label, env) {
 
 // ── run ──────────────────────────────────────────────────────────────────────────────────────
 checkMigrations();
+// --files-only: the migrations-FOLDER checks above and nothing else — no .env.local, no database.
+// This is what scripts/verify-migration-numbers.mjs runs inside verify:static (and so on every
+// change), because the folder rules — no new same-number pair, no unexplained hole — are exactly
+// what two sessions break between them, and they need no database to judge (sweep #10 T39 item 49:
+// on 2026-10-08 two sessions both took 411, and only a by-hand run of this file noticed).
+if (process.argv.includes("--files-only")) {
+  console.log(failed ? `\n✗ ${failed} migrations-folder check(s) failed\n` : "\n✓ the migrations folder: no new same-number pair, no unexplained hole\n");
+  process.exit(failed ? 1 : 0);
+}
 const dev = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
 await checkDb("BACKUP / DEV database", dev);
 await checkAbsentFunctions("BACKUP / DEV database", dev);

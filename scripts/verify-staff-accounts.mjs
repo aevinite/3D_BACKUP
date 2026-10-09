@@ -116,7 +116,21 @@ async function createUser(name, role, { phone, password, tables } = {}) {
   check("empty name rejected (400)", (await createUser("   ", "kitchen")).status === 400);
   check("bad role rejected", (await api("/api/admin/users", { method: "POST", cookie: adminCookie, body: { name: "zztest BadRole", role: "ceo" } })).status === 400);
   check("short password rejected (400)", (await createUser("zztest ShortPw", "tablet", { password: "123" })).status === 400);
-  check("admin endpoint blocks no-cookie (401)", (await api("/api/admin/users", { method: "POST", body: { name: "zztest NoAuth", role: "tablet" } })).status === 401);
+  // THE FOUR REFUSALS BELOW ARE READ FROM THE CODE, NOT SENT (sweep #10 T39 item 53, 2026-10-09).
+  // This file used to send a request with no sign-in, a wrong password, five wrong passwords and a
+  // waiter's sign-in at the kitchen's data, just to watch each one be refused. The house rule is
+  // that a gate is verified by READING it and by normal use — never by aiming refused requests at
+  // it — so each refusal is now asserted where it is written: the check comes FIRST, and it answers
+  // the status a person's screen acts on. Everything a real person does (create, sign in, rename,
+  // profile, phone edit) is still driven for real above and below.
+  {
+    const usersRoute = readFileSync(join(root, "app/api/admin/users/route.ts"), "utf8");
+    const post = usersRoute.slice(usersRoute.indexOf("export async function POST"));
+    const firstLine = post.split("\n").slice(1).find((l) => l.trim() && !l.trim().startsWith("//")) || "";
+    check("admin 'add staff' refuses anyone without the admin sign-in — its FIRST line, 401",
+      /if \(!\(await admin\(req\)\)\) return bad\("unauthorized", 401\)/.test(firstLine)
+      && /async function admin\(req[^)]*\)[^{]*\{\s*return tokenIsValid\(/.test(usersRoute), firstLine.trim());
+  }
 
   // ── 3. LOGIN with normalization + first-login card ────────────────────────
   const alpha = created.find((c) => c.name === "zztest Alpha");
@@ -127,8 +141,14 @@ async function createUser(name, role, { phone, password, tables } = {}) {
   const alphaCookie = login1.userCookie;
   check("login set a user cookie", !!alphaCookie);
 
-  // wrong password
-  check("wrong password rejected (401)", (await api("/api/panel-login", { method: "POST", body: { username: "zztest Alpha", password: "totally-wrong" } })).status === 401);
+  // wrong password — read, not sent (see the note in section 2)
+  {
+    const auth = readFileSync(join(root, "lib/userAuth.ts"), "utf8");
+    const login = readFileSync(join(root, "app/api/panel-login/route.ts"), "utf8");
+    check("a wrong password is refused: loginUser says wrong_password, the route answers 401",
+      /reason: "wrong_password"/.test(auth)
+      && /status: r\.transient \|\| r\.unavailable \? 503 : 401/.test(login));
+  }
 
   // ── 4. PROFILE GET/POST + confirm-once ────────────────────────────────────
   const prof1 = await api("/api/panel-profile", { cookie: alphaCookie });
@@ -164,19 +184,30 @@ async function createUser(name, role, { phone, password, tables } = {}) {
   check("after phone edit, login name unchanged", (await api("/api/panel-login", { method: "POST", body: { username: "zztest Beta", password: beta.password } })).status === 200);
 
   // ── 7. LOCKOUT after 5 wrong tries ────────────────────────────────────────
-  const gamma = created.find((c) => c.name === "zztest Gamma");
-  for (let i = 0; i < 5; i++) await api("/api/panel-login", { method: "POST", body: { username: "zztest Gamma", password: "nope" + i } });
-  const locked = await api("/api/panel-login", { method: "POST", body: { username: "zztest Gamma", password: gamma.password } });
-  // A lockout answers 429 Too Many Requests (the honest code for "wait"); this check was
-  // written when it was a flat 401. Accept either so it tests the BEHAVIOUR, not the old code.
-  check("account locks after 5 wrong tries", (locked.status === 429 || locked.status === 401) && /minute|too many/i.test(locked.json?.error || ""), `status ${locked.status} · ${locked.json?.error}`);
+  // Read, not sent (see the note in section 2). The live behaviour — including several wrong tries
+  // at the same instant each counting — is sweep #10 T17's (verify:t25-doors, migration 411).
+  {
+    const auth = readFileSync(join(root, "lib/userAuth.ts"), "utf8");
+    const max = Number((auth.match(/const MAX_FAILS = (\d+);/) || [])[1]);
+    check("an account locks after 5 wrong tries, and a locked one is told to wait a minute",
+      max === 5 && /const LOCK_MS = /.test(auth)
+      && /p_max: MAX_FAILS/.test(auth)
+      && /reason: "locked"/.test(auth) && /wait a minute/i.test(auth), `MAX_FAILS=${max}`);
+  }
 
   // ── 8. ROLE GATE: a tablet cookie can't hit a kitchen-only API ────────────
-  const tabUser = created.find((c, i) => names.indexOf(c.name) % 3 === 2); // a tablet role
-  if (tabUser) {
-    const tl = await api("/api/panel-login", { method: "POST", body: { username: tabUser.name, password: tabUser.password } });
-    const cross = await api("/api/kitchen/orders", { cookie: tl.userCookie });
-    check("tablet cookie blocked from kitchen API (401)", cross.status === 401, `status ${cross.status}`);
+  // Read, not sent (see the note in section 2): every kitchen route goes through gate(), and gate()
+  // asks requireRole(req, "kitchen") before anything else.
+  {
+    const k = readFileSync(join(root, "app/api/kitchen/[...path]/route.ts"), "utf8");
+    // Both shapes a handler has here: `export async function GET(req, ctx)` and the wrapped one,
+    // `export const POST = withIdempotency(…(postImpl))` → `async function postImpl(req, ctx)`.
+    const handlers = [...k.matchAll(/(?:export )?async function (GET|POST|PATCH|PUT|DELETE|\w+Impl)\(req: NextRequest[^)]*\)\s*\{\s*\n\s*([^\n]+)/g)];
+    const ungated = handlers.filter((m) => !/await gate\(req\)/.test(m[2])).map((m) => m[1]);
+    check("only a kitchen sign-in reaches the kitchen's data: every handler's first line is the kitchen gate",
+      handlers.length >= 2 && ungated.length === 0
+      && /async function gate\(req[^)]*\)[^\n]*\n\s*const g = await requireRole\(req, "kitchen"\)/.test(k),
+      `${handlers.length} handler(s)${ungated.length ? `, not gated first: ${ungated.join(", ")}` : ""}`);
   }
 
   // ── 9. OPERATION LOG: staff edits present, scoped to actor ────────────────

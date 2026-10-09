@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **225** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **226** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 197 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -9,7 +9,7 @@ time). Both of those are the wrong answer.
 **So: find the row for the file you touched, and run what it says.**
 
 ```bash
-npm run verify:push          # ALWAYS. ~90s, no database, no login. Exactly what CI runs.
+npm run verify:push          # ALWAYS. ~4 min, no database, no login. Exactly what CI runs.
 npm run <the row's guard>    # THEN the one that covers your change.
 ```
 
@@ -33,7 +33,8 @@ Kept honest by `npm run verify:pointers`: it fails if a guard named here has van
 | `npm run typecheck` | `tsc --noEmit`. **`npm run lint` does NOT check types** — they are separate gates. | nothing | no |
 | `npm run test` | `test:money` + `test:errors` + `test:netretry` + `test:units` — ~0.2s. | nothing | no |
 | `npm run test:netretry` | a read never cries "no internet" before a quiet retry has failed too, and a WRITE still goes out exactly once (owner, 2026-09-12). Drives the real `public/panels/netretry.js` and cross-checks `lib/netRetry.ts`. | nothing | no |
-| `npm run verify:static` | all 31 static guards. Runs **every** one and reports **every** failure — add `-- --quiet` for failures only. Inside `verify:push`. | nothing | no |
+| `npm run lint` | ESLint, with the warning count LOCKED at today's 1,132 (`--max-warnings`, sweep #10 T39 item 65, 2026-10-09). A change that adds a warning fails; one that removes some should lower the number in package.json so it can only go down. | nothing | no |
+| `npm run verify:static` | all 67 static guards (~100s; verify:panel-scope is ~85s of it). Runs **every** one and reports **every** failure — add `-- --quiet` for failures only. Inside `verify:push`. | nothing | no |
 | `npm run check:current` | is this folder level with `origin/main`? **Run before any audit or "X is broken" claim.** | nothing | no |
 
 Everything in section 0 is also inside `verify:push`, so normally you just run that.
@@ -257,6 +258,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 |---|---|---|---|
 | **created a new Postgres function** | `verify:grants` ← a new function is PUBLIC-executable by default | `.env.local` | no |
 | a one-time migration that rewrites existing data | `verify:grants` — and wrap it in `lfh_already_applied('<key>')` or a re-seed applies it twice | `.env.local` | no |
+| **added a migration file** — its NUMBER | `verify:migration-numbers` ← two sessions working at once can each take "the next" number; this fails on a new same-number pair or a new hole, with no database (the folder half of `verify:grants`, inside `verify:static`) | nothing | no |
 | **anything that looks a DISH up from an order line** — a report, a trigger, a breakdown | `verify:order-keys` ← an order line names its dish by **`id`**; it has no `slug`. `lfh_price_order` (the single builder behind all three order doors) emits `{id,title,price,qty,options,removed,note,tax_mode,is_mrp}`. Three migrations have joined `menu_items` on `it->>'slug'` anyway, and a join that matches nothing returns a NUMBER, not an error: mig 089 collapsed every dish into one "Other" row (fixed by 130, which wrote the shape down); mig 224's stock depletion never fired for one order the APP created — it DID fire for seeded rows carrying a stray `slug`, so ~23k consumption rows exist while real trade moved nothing, the fault matching test data and missing production — silently, because it is fail-open; mig 227's food-cost and recipe-coverage reports read hard zeros — including the denominator of the % that mig 227 itself calls "the honesty gate". All fixed by mig 409. Asks the RUNNING database, because the bad SQL and the good SQL look identical in a file | `.env.local` | no |
 | **CREATE OR REPLACE of a function that already existed** | `verify:fix-survives` ← it asserts every earlier fix is still in the NEWEST definition. Three rewrites have silently dropped one (203/215 put a flat 5% tax back for 55 migrations; 190 dropped the pay-later day from four reports) | nothing | no |
 | a table storing a guest's phone number | `verify:personal-data` | nothing | no |

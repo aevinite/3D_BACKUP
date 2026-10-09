@@ -28,11 +28,18 @@
 // a failure: the app saying "not now, wait 30s" is the app working.
 import { stdout } from "node:process";
 import { randomUUID } from "node:crypto";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 ? argv[i + 1] : d; };
 const URL_ = arg("url");
 const SITE = arg("site");
+// DEV/TEST DATABASE ONLY, AND NEVER THE CLIENT SITE (sweep #10 T39 item 48, 2026-10-09). The fleet
+// that spawns this file already refuses anything else — but this file runs on its own too
+// (`node scripts/stress-tenant.mjs --url …`), and then nothing checked. It places a dinner rush of
+// real orders, so it gets the same lock every other stress script carries.
+refuseUnlessDevTestDb(URL_, "this places a dinner rush of real orders");
+if (/aevinite\.shop/i.test(String(SITE || ""))) { console.error("refusing: stress-tenant never runs against the client site"); process.exit(1); }
 // FROM THE ENVIRONMENT, NOT argv — `ps` shows every command line on the machine, and the panel
 // cookie holds sha256(ADMIN_PASSWORD), which the gate accepts as proof by itself. See the note
 // beside the spawn in stress-fleet.mjs.

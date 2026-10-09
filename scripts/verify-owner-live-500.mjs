@@ -25,11 +25,18 @@
 //   3. Match prose FLAT. JSX wraps a sentence wherever the line ran out.
 //   4. Block the service worker. `public/sw.js` caches /api/owner/*, so the second page in a context
 //      is served by the worker: a forced answer never arrives and a request count means nothing.
-import { requireUp } from "./sweep/appUp.mjs";
+import { requireUp, isDevServer } from "./sweep/appUp.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "https://3-d-backup.vercel.app";
 await requireUp(BASE);
+// ON A DEV SERVER, "ONCE" IS TWO (sweep #10 T39 item 60). React StrictMode runs every mount effect
+// twice in development only, so the request-count checks below read 2 on `npm run dev` and 1 on the
+// deployed site — and the dev server sends none of the site's production cache headers. Detected,
+// not assumed (scripts/sweep/appUp.mjs → isDevServer); an unreadable page counts as NOT dev.
+const DEV = await isDevServer(BASE);
+const ONCE = DEV ? 2 : 1;
+const onceNote = DEV ? " (dev server: StrictMode mounts twice, so 2 here means once on the site)" : "";
 
 let pass = 0, fail = 0, skip = 0; const fails = [];
 // ONE ID, ONE CHECK, FOREVER — enforced, not hoped for (T13, 2026-09-01).
@@ -97,6 +104,21 @@ const open = async (ctx, path, waitFor) => {
   return { p, status: r ? r.status() : 0 };
 };
 
+// ONE SLOW PAGE MUST NOT STOP THE OTHER BANDS (sweep #10 T39 item 46, 2026-10-09). Twice on
+// 2026-10-08 a single wait on the live site ran out — a roster that had not painted during a deploy
+// switch-over, then a navigation that timed out — and the uncaught throw ended the whole run: every
+// band after it reported nothing, and the summary never printed. Each band now runs inside this
+// wrapper: a throw is recorded as ONE failure that names the band and the reason, and the next band runs.
+const band = async (name, fn) => {
+  try { await fn(); }
+  catch (e) {
+    fail++;
+    const why = String(e && e.message || e).split("\n")[0].slice(0, 160);
+    fails.push(`band ${name} stopped early — ${why}`);
+    console.log(`  ❌ band ${name} stopped early — ${why} (the bands after it still run)`);
+  }
+};
+
 console.log(`T13's SECOND 500 — the owner's Menu, Team & Settings, on the LIVE site\n${BASE}\n`);
 console.log("READ-ONLY: no writes, no entitlement flips. Forced states are this browser's own request answered differently.\n");
 
@@ -104,7 +126,7 @@ try {
 
 // ══ L1 · THE THREE SCREENS, ON THE REAL SITE (P52701–P52780) ═════════════════════════════════
 console.log("L1 · the three screens open, and are the right restaurant's (P52701–P52780)");
-{
+await band("L1", async () => {
   let id = LB.L1[0];
   for (const [vp, tag] of [[DESK, "desk"], [A35, "a35"]]) {
     for (const skin of ["dark", "light"]) {
@@ -208,11 +230,11 @@ console.log("L1 · the three screens open, and are the right restaurant's (P5270
     await ctx.close();
   }
   while (id <= LB.L1[1]) S(`P${id++}`, "further first-load shape", "the loading, failed, empty and retry states are all driven above at both widths");
-}
+});
 
 // ══ L2 · THE SIX THINGS I JUST SHIPPED, ON THE LIVE SITE (P52781–P52860) ═════════════════════
 console.log("\nL2 · the fixes merged today, confirmed on the deployed site (P52781–P52860)");
-{
+await band("L2", async () => {
   let id = LB.L2[0];
   const ctx = await mk(DESK, "dark");
   // item 2 — a repeated identical refusal must come back onto the screen. READ-ONLY: the Add is
@@ -299,7 +321,7 @@ console.log("\nL2 · the fixes merged today, confirmed on the deployed site (P52
     } else {
       for (const m of ["item 9 the guide button gap", "item 14 the explanation behind a tap", "item 14 closed by default",
                        "item 14 opening adds it back", "item 14 no word lost", "item 14 the download note"])
-        S(`P${id++}`, `${m} (live)`, "this restaurant's printing is switched off, so the card correctly does not render (R36)");
+        S(`P${id++}`, `${m} (live)`, "this restaurant shows no Kitchen printing card — printing is off for it, or it is allowed but no printer line is set up — so the card correctly does not render (R36)");
     }
     const chips = (await p.locator(".adm-card").filter({ hasText: "What's enabled" }).locator(".adm-chip").allInnerTexts()).map(flat);
     P(`P${id++}`, "item 15 live — the Guest ratings chip says where it lives", chips.some((c) => /guest ratings — in feedback & complaints/i.test(c)), JSON.stringify(chips));
@@ -379,11 +401,11 @@ console.log("\nL2 · the fixes merged today, confirmed on the deployed site (P52
     await c2.close();
   }
   while (id <= LB.L2[1]) S(`P${id++}`, "further confirmation of today's fixes", "each shipped item is confirmed above at both widths");
-}
+});
 
 // ══ L3 · THE KITCHEN PRINTING CARD, LIVE, IN EVERY STATE (P52861–P52960) ═════════════════════
 console.log("\nL3 · the Kitchen printing card on the live site, in every state (P52861–P52960)");
-{
+await band("L3", async () => {
   let id = LB.L3[0];
   const probe = await mk(DESK, "dark");
   const pp = (await open(probe, "/owner/settings", ".adm-chip")).p;
@@ -515,11 +537,11 @@ console.log("\nL3 · the Kitchen printing card on the live site, in every state 
     });
     while (id <= LB.L3[1]) S(`P${id++}`, "further printing-card state", "every branch the card can take is driven above; another row would repeat one");
   }
-}
+});
 
 // ══ L4 · THE TEAM ROSTER, LIVE (P52961–P53060) ═══════════════════════════════════════════════
 console.log("\nL4 · the Team roster on the live site (P52961–P53060)");
-{
+await band("L4", async () => {
   let id = LB.L4[0];
   // BOTH SKINS, not just dark. Every contrast fault this territory has ever had was on the LIGHT
   // console — two role badges reading differently on one row, an Add button at 2.54:1 — and a band
@@ -619,11 +641,11 @@ console.log("\nL4 · the Team roster on the live site (P52961–P53060)");
    }
   }
   while (id <= LB.L4[1]) S(`P${id++}`, "further roster detail", "the roster is driven at both widths above; a further row would repeat one");
-}
+});
 
 // ══ L5 · WHAT THE LIVE SITE COSTS WHILE IT SITS OPEN (P53061–P53110) ═════════════════════════
 console.log("\nL5 · what each screen costs on the live site (P53061–P53110)");
-{
+await band("L5", async () => {
   let id = LB.L5[0];
   const count = async (path, ms, hide, waitFor) => {
     const ctx = await mk(DESK, "dark"); const p = await ctx.newPage();
@@ -645,13 +667,13 @@ console.log("\nL5 · what each screen costs on the live site (P53061–P53110)")
     return { onLoad, after };
   };
   const roster = await count("/owner/staff", 25000, false, ".ost-row");
-  P(`P${id++}`, "opening the roster asks its own endpoint exactly once", (roster.onLoad["/api/owner/staff"] || 0) === 1, JSON.stringify(roster.onLoad));
+  P(`P${id++}`, "opening the roster asks its own endpoint exactly once", (roster.onLoad["/api/owner/staff"] || 0) === ONCE, JSON.stringify(roster.onLoad) + onceNote);
   P(`P${id++}`, "…and asks it no more while it just sits there", (roster.after["/api/owner/staff"] || 0) === 0, JSON.stringify(roster.after));
   P(`P${id++}`, "…and starts no other owner poll", Object.keys(roster.after).filter((k) => k.startsWith("/api/owner")).length === 0, JSON.stringify(roster.after));
   const menu = await count("/owner/menu", 25000, false, null);
   P(`P${id++}`, "the Menu page starts no poll of its own", Object.keys(menu.after).filter((k) => k.startsWith("/api/owner")).length === 0, JSON.stringify(menu.after));
   const setV = await count("/owner/settings", 35000, false, ".adm-chip");
-  P(`P${id++}`, "opening Settings asks for the page once", (setV.onLoad["/api/owner/settings"] || 0) === 1, JSON.stringify(setV.onLoad));
+  P(`P${id++}`, "opening Settings asks for the page once", (setV.onLoad["/api/owner/settings"] || 0) === ONCE, JSON.stringify(setV.onLoad) + onceNote);
   P(`P${id++}`, "…and never re-reads the page itself on a timer", (setV.after["/api/owner/settings"] || 0) === 0, JSON.stringify(setV.after));
   P(`P${id++}`, "…and the only thing that repeats is the printing card, if it is there",
     Object.keys(setV.after).filter((k) => k.startsWith("/api/owner") && k !== "/api/owner/printing").length === 0, JSON.stringify(setV.after));
@@ -689,7 +711,7 @@ console.log("\nL5 · what each screen costs on the live site (P53061–P53110)")
     await p.goto(BASE + "/owner/staff", { waitUntil: "domcontentloaded" });
     await p.waitForSelector(".ost-row", { timeout: 90000 }); await p.waitForTimeout(2000);
     const first = seen.filter((x) => x === "/api/owner/staff").length;
-    P(`P${id++}`, "the roster does not fetch itself twice on mount", first === 1, `${first}`);
+    P(`P${id++}`, "the roster does not fetch itself twice on mount", first === ONCE, `${first}${onceNote}`);
     seen.length = 0;
     await p.locator(".ost-find input").first().fill("x");
     await p.locator(".ost-find .ost-x").first().click();
@@ -698,7 +720,8 @@ console.log("\nL5 · what each screen costs on the live site (P53061–P53110)")
     // the API must not be cached by the browser, or a stale roster could be shown
     const r = await p.request.get(BASE + "/api/owner/staff", { headers: { cookie: (await ctx.cookies()).map((c) => `${c.name}=${c.value}`).join("; ") } });
     const cc = r.headers()["cache-control"] || "";
-    P(`P${id++}`, "the roster's own answer is not cacheable by a shared cache", /no-store|no-cache|private|max-age=0/.test(cc), cc || "(none)");
+    if (DEV) S(`P${id++}`, "the roster's own answer is not cacheable by a shared cache", "a dev server sends none of the site's production cache headers — this is judged on the deployed site");
+    else P(`P${id++}`, "the roster's own answer is not cacheable by a shared cache", /no-store|no-cache|private|max-age=0/.test(cc), cc || "(none)");
     await p.close(); await ctx.close();
   }
   {
@@ -723,8 +746,8 @@ console.log("\nL5 · what each screen costs on the live site (P53061–P53110)")
     await p.goto(BASE + "/owner/staff", { waitUntil: "domcontentloaded" }); await p.waitForSelector(".ost-row", { timeout: 90000 });
     await p.goto(BASE + "/owner/settings", { waitUntil: "domcontentloaded" }); await p.locator(".adm-chip").first().waitFor({ timeout: 90000 });
     await p.goto(BASE + "/owner/menu", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(4000);
-    P(`P${id++}`, "walking all three screens asks the roster endpoint once", (hits["/api/owner/staff"] || 0) === 1, JSON.stringify(hits));
-    P(`P${id++}`, "…and the settings endpoint once", (hits["/api/owner/settings"] || 0) === 1, JSON.stringify(hits));
+    P(`P${id++}`, "walking all three screens asks the roster endpoint once", (hits["/api/owner/staff"] || 0) === ONCE, JSON.stringify(hits) + onceNote);
+    P(`P${id++}`, "…and the settings endpoint once", (hits["/api/owner/settings"] || 0) === ONCE, JSON.stringify(hits) + onceNote);
     P(`P${id++}`, "…and the Menu page adds no owner call of its own", !Object.keys(hits).some((k) => /menu/.test(k)), JSON.stringify(hits));
     P(`P${id++}`, "…and nothing was asked more than a handful of times in total",
       Object.values(hits).every((n) => n <= 4), JSON.stringify(hits));
@@ -752,11 +775,11 @@ console.log("\nL5 · what each screen costs on the live site (P53061–P53110)")
     }
   }
   while (id <= LB.L5[1]) S(`P${id++}`, "further cost measurement", "open, idle, hidden, on leaving, on re-entry, on search and across all three screens are all measured above");
-}
+});
 
 // ══ L6 · DOES THE LIVE SITE AGREE WITH ITSELF (P53111–P53160) ════════════════════════════════
 console.log("\nL6 · does the live site agree with itself (P53111–P53160)");
-{
+await band("L6", async () => {
   let id = LB.L6[0];
   const ctx = await mk(DESK, "dark");
   const p = (await open(ctx, "/owner/settings", ".adm-chip")).p;
@@ -861,11 +884,11 @@ console.log("\nL6 · does the live site agree with itself (P53111–P53160)");
     await c4.close();
   }
   while (id <= LB.L6[1]) S(`P${id++}`, "further cross-screen agreement", "the chips, the sidebar, the pins, the embed and the two screens' idea of the account are all traced above");
-}
+});
 
 // ══ L7 · MY OWN JUDGMENT, ON THE LIVE SITE (P53161–P53200) ═══════════════════════════════════
 console.log("\nL7 · would a real restaurant be happy with this, live (P53161–P53200)");
-{
+await band("L7", async () => {
   let id = LB.L7[0];
   const ctx = await mk(A35, "dark");
   const { p } = await open(ctx, "/owner/settings", ".adm-chip");
@@ -926,7 +949,7 @@ console.log("\nL7 · would a real restaurant be happy with this, live (P53161–
     await c3.close();
   }
   while (id <= LB.L7[1]) S(`P${id++}`, "further judgment", "every judgment question worth asking of these three screens is asked above; padding would cost more than it tells");
-}
+});
 
 } finally { await br.close(); }
 

@@ -48,8 +48,30 @@ message. Improvements were not built; they are in the chat report only. Ledger: 
 | 41 | Manager → Settings → Printing → Show the code | the code box drew with no frame (undeclared --accent) | verify:look-ink re-pinned to the tablet's replacement bars |
 | 42 | (guard) | verify:ledger-index refused a first-time terminal number's ledger | accepts the sweep-10 row that names the file |
 | 43 | Owner → Settings (backup) | printing ALLOWED but no paper line listed → no card drawn, yet the page asked /api/owner/printing every 15s (~1,200 reads an hour per open tab); verify:owner-live500 P52830 caught it on backup after the merge | refresh gated on the card's own condition; verify:owner-s7 P21201b, sabotaged |
+| 44 | (CI) | 33 code-only guards ran nowhere automatically — 7 of 2026-10-08's reds were among them | all 33 in verify:static (67), inventory-window its own CI step; sabotaged |
+| 45 | (guards) | session-ux / edge-cases stopped on the NORMAL setting (dining sessions are off at every restaurant) | switch it on for the run, put back on finish/Ctrl-C/crash; proved both |
+| 47 | (manager panel CSS) | two styles for the retired six-digit code nobody draws | removed; panel hash refreshed |
+| 48 | (load tests) | stress-tenant run on its own checked no database | dev-only lock + verify:test-safety §16; sabotaged |
+| 49 | (CI) | migration-number collisions/holes were caught only by a by-hand run (2026-10-08: two 411s) | verify:migration-numbers in verify:static, no database; sabotaged |
+| 50 | (guard) | one slow page ended the whole owner-live500 run | each band records one failure and the next runs; planted-throw proof |
+| 51 | (guard) | owner-live500 skip said "printing switched off" when it was allowed with no printer line | says either |
+| 52 | (CI) | the site's Node version lived only in Vercel's dashboard | engines.node 24.x + verify-root-config match check; sabotaged |
+| 53 | (guard) | verify:staff-accounts sent four requests just to watch them be refused | read from the code instead (house rule); four sabotages → four reds |
+| 54 | Guest menu → open a dish → Back | Back hid the row the diner was reading (both restaurants; 8 of 8 at French House) | remembers dish + offset; verify:guest P15611/P15332, both restaurants; sabotaged |
+| 55 | (guard) | hourly charts "missing hours" — Recharts draws no bar for a zero hour | judged by bar spacing on a 24-slot scale; proved both ways |
+| 56 | (guard) | a 477-row % column summed to 98.0 from rounding alone | each cell = its own share; proved both ways |
+| 57 | (guard) | the Reports path check read the whole top strip, too early | reads .owx-path after the report settles (no app change needed — one tried and reverted) |
+| 58 | Owner → Reports → Menu (French House) | print-speed left 5,265 fake orders on French House for ever (a removed order still counts) | its own zz-speed restaurant, binned + purged; owner chose: the 5,265 were CANCELLED |
+| 59 | (guard) | dashboard tooltip check hovered after a fixed 11s | waits for the chart and the tooltip; sabotaged |
+| 60 | (guards) | owner live checks red on a dev server (StrictMode mounts twice) | isDevServer(); 2 on dev, 1 on the site |
+| 61 | (guard) | owner-s7-live demanded the printing refresh even with no card — item 43's own fix turned it red on backup | asks the card it got; old version red on backup, new green |
+| 62 | (ledger) | 780 T28 rows labelled "names no guard" | 159 claimed by verify:split-payment, 132 split rows honestly unclaimed, 489 one-time judgments |
+| 63 | (guard) | Reports bar-hover check read after a fixed 700ms | waits for the tooltip |
+| 64 | (tests) | printing-sweep (1,478) and stuck-test (43) leftovers also counted as French House sales | cancelled (owner's rule); every order-inserting test must cancel — verify:test-safety §17; sabotaged |
+| 65 | (lint) | 1,132 ESLint warnings (31 of them from T17 round 5, merged the same day) had piled up with nothing stopping the next | --max-warnings=1132 (can only go down) + verify-root-config guards the cap; sabotaged |
 
-Not fixed, with the reason (in the chat report): `verify:db-parity` (reads the client stack; its repo-only
-red is migration 388's same-number pair, T35's), the six `verify:t14-live` Reports reds (T21), the
-intermittent Back-button dish jump on the guest menu (P15332, T1/T2), French House's sessions switch
-(a restaurant setting with no recorded owner — the owner's call).
+Not fixed, with the reason: `verify:db-parity` (reads the client stack — not run; its folder half now runs
+as verify:migration-numbers, where 388 is a listed, explained pair). Payments vs Sales: both use the same
+change-detector; a momentary difference is two reads seconds apart while tests wrote — not a fault.
+Data 2026-10-09: 72 practice restaurants' stale tables closed; 6,808 fake test orders cancelled (owner's
+choice); Aangan (the untouched control) and Green Bowl's 5 finished orders deliberately left.

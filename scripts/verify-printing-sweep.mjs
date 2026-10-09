@@ -3608,7 +3608,13 @@ for (const id of made.jobs)   { try { await db(`print_jobs?id=eq.${id}`,   { met
 // the result is COUNTED below rather than assumed — a cleanup nobody checks is a cleanup that can
 // quietly stop working, which is the whole story of this line.
 const gone = new Date().toISOString();
+// …AND CANCELLED (owner, 2026-10-09 — "Cancel them", about 1,478 of this file's orders and 5,265
+// of print-speed's left on French House). A soft-deleted order still counts in the owner's reports,
+// on purpose — a sale can never disappear — so every removed test order was French House's "units
+// sold". Cancelled is the honest word for an order that was never a sale, and it takes it out of
+// sales and units. Never on a paid or billed order: this run's orders are neither.
 for (const id of made.orders) {
+  try { await db(`orders?id=eq.${id}&payment_status=neq.paid&session_id=is.null`, { method: "PATCH", body: JSON.stringify({ status: "cancelled", cancelled_at: gone }) }); } catch {}
   try { await db(`orders?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true, archived_at: gone }) }); } catch {}
 }
 try {

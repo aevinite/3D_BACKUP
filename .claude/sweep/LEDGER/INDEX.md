@@ -91,7 +91,7 @@ terminals' rows — keep both sides.
 | T36 | `P205001`–`P206000` | LOGIN AND DATA-SEPARATION CORRECTNESS, EVERYWHERE (one dimension only) | ⏳ not run yet | — | — | — | — |
 | T37 | `P206001`–`P207000` | THE LOOK — layout, colour, size, fit (one dimension only) | ⏳ not run yet | — | — | — | — |
 | T38 | `P207001`–`P208000` | EVERY WORD ON EVERY SCREEN (one dimension only) | ⏳ not run yet | — | — | — | — |
-| T39 | `P208001`–`P209000` | THE REPO'S OWN GUARDS, CI, AND THE DEPENDENCIES | `T39-S10.md` | 500 | 494 | 42 | 42 |
+| T39 | `P208001`–`P209000` | THE REPO'S OWN GUARDS, CI, AND THE DEPENDENCIES | `T39-S10.md` | 500 | 494 | 63 | 63 |
 | T40 | `P209001`–`P210000` | Docs, root config, the odd folders, and THE REMAINDER | ⏳ not run yet | — | — | — | — |
 
 ## 🔴 SWEEP #9 ROUND-2 BLOCKS ARE PRE-ALLOCATED. **DO NOT CLAIM FROM THE LINE BELOW.**

@@ -738,8 +738,19 @@ const rupee = (s) => Number(String(s).replace(/[^\d.-]/g, "")) || 0;
     const attn = (d.boxes.find((b) => /puzzle/.test(b.k))?.n ?? 0) + (d.boxes.find((b) => /dog/.test(b.k))?.n ?? 0);
     const attnTile = Number(String(d.tiles.find((t) => /NEEDS ATTENTION/i.test(t.k))?.v || "").replace(/[^\d]/g, ""));
     R("P49327", "the NEEDS ATTENTION tile equals Puzzles + Dogs", attn === attnTile, `${attn} vs ${attnTile}`);
-    R("P49328", "the % units column sums to 100", Math.abs(d.body.reduce((a, r) => a + rupee(r[3]), 0) - 100) < 1.5);
-    R("P49329", "the % sales column sums to 100", Math.abs(d.body.reduce((a, r) => a + rupee(r[5]), 0) - 100) < 1.5);
+    // EACH ROW'S % IS ITS OWN SHARE, ROUNDED — NOT "THE COLUMN ADDS TO 100" (sweep #10 T39 item 56,
+    // 2026-10-09). Every cell is rounded to one decimal, so a column of n rows can drift up to
+    // n × 0.05 from 100 with every cell correct: French House's Menu report had 477 rows on :4439 and
+    // its % units column summed to 98.0. The 1.5 tolerance only ever held for a short menu. Now: each
+    // row's shown % equals its own Sold (or Sales) over the column total, to the shown precision.
+    const share = (col, pc) => {
+      const tot = d.body.reduce((a, r) => a + rupee(r[col]), 0);
+      const bad = tot > 0 ? d.body.filter((r) => Math.abs(rupee(r[pc]) - Math.round(rupee(r[col]) / tot * 1000) / 10) > 0.11) : [];
+      return { ok: d.body.length > 0 && tot > 0 && bad.length === 0, note: bad.slice(0, 2).map((r) => `${r[0]}: ${r[pc]} of ${r[col]}/${tot}`).join(" ; ") };
+    };
+    const su = share(2, 3), ss = share(4, 5);
+    R("P49328", "every % units cell is that dish's own share of units sold", su.ok, su.note);
+    R("P49329", "every % sales cell is that dish's own share of sales", ss.ok, ss.note);
     R("P49330", "it names a biggest opportunity, or says there is none", d.callout.length > 20 || d.body.length === 0, d.callout.slice(0, 60));
     await p.close();
   }
@@ -1216,8 +1227,28 @@ head("8 · the rest of the driven ledger");
       rows: [...document.querySelectorAll("#rs-hourly-table tbody tr")].map((tr) => ({ cells: [...tr.querySelectorAll("td")].map((c) => c.innerText.trim()), fire: !!tr.querySelector(".fa-fire") })),
       charts: document.querySelectorAll("svg.recharts-surface").length,
       bars: [...document.querySelectorAll("svg.recharts-surface")].map((s) => s.querySelectorAll(".recharts-bar-rectangle").length),
+      // WHERE each drawn bar sits, and how wide the drawing area is — see P05222 below.
+      grids: [...document.querySelectorAll("svg.recharts-surface")].map((s) => ({
+        xs: [...s.querySelectorAll(".recharts-bar-rectangle")].map((g) => g.getBoundingClientRect().x).sort((a, b) => a - b),
+        w: Number(s.querySelector("defs clipPath rect")?.getAttribute("width") || 0) })),
       text: (document.querySelector(".rs-root")?.innerText || "").replace(/\s+/g, " "),
     }));
+    // A 24-HOUR SCALE IS JUDGED BY WHERE THE BARS SIT, NOT BY HOW MANY ARE DRAWN (sweep #10 T39 item
+    // 55, 2026-10-09). The series is built as 24 buckets (Array.from({ length: 24 }) in
+    // app/owner/reports/page.tsx), but Recharts draws NO rectangle for a bucket whose value is 0 — so
+    // "24 rectangles" was true only for a restaurant open every hour of the day, and this went red on
+    // a correct chart ([8,20], measured on :4439). An hour missing from the SCALE shows instead as a
+    // spacing that does not fit 24 even slots across the drawing area, which is what is checked.
+    const on24 = (g) => {
+      if (g.xs.length < 2 || !g.w) return g.xs.length < 2;    // nothing to measure a spacing from
+      // One hour's width, from the bars themselves: the closest pair, refined across the whole span
+      // (the chart pads its edges, so width ÷ 24 is not quite one slot).
+      const gaps = g.xs.slice(1).map((x, i) => x - g.xs[i]).filter((d) => d > 1);
+      const span = g.xs[g.xs.length - 1] - g.xs[0];
+      const slot = span / Math.round(span / Math.min(...gaps));
+      const slots = g.w / slot;                               // how many hours the drawing area holds
+      return slots >= 23.5 && slots <= 25 && g.xs.every((x) => { const k = (x - g.xs[0]) / slot; return Math.abs(k - Math.round(k)) < 0.2; });
+    };
     R("P05216", "'Peak hour' agrees with the hour table's fire marker",
       (d.rows.find((r) => r.fire)?.cells[0] || "") === (d.tiles.find((t) => /PEAK HOUR/i.test(t.k))?.v || ""),
       `${d.rows.find((r) => r.fire)?.cells[0]} vs ${d.tiles.find((t) => /PEAK HOUR/i.test(t.k))?.v}`);
@@ -1229,8 +1260,9 @@ head("8 · the rest of the driven ledger");
       !!d.tiles.find((t) => /PER ORDER/i.test(t.k)) && !d.tiles.some((t) => /AVG BILL/i.test(t.k)));
     R("P05221", "the hour table's '% of revenue' sums to 100%",
       Math.abs(d.rows.reduce((a, r) => a + rupee(r.cells[3]), 0) - 100) < 1.5, `${d.rows.reduce((a, r) => a + rupee(r.cells[3]), 0).toFixed(1)}%`);
-    R("P05222", "both hourly charts cover all 24 hours", d.charts >= 2 && d.bars.every((n) => n === 0 || n === 24), JSON.stringify(d.bars));
-    R("P05046", "…re-stated: a full 24-bucket series, so the chart has no gaps", d.bars.every((n) => n === 0 || n === 24));
+    R("P05222", "both hourly charts cover all 24 hours", d.charts >= 2 && d.grids.every(on24),
+      JSON.stringify(d.grids.map((g) => ({ bars: g.xs.length, width: g.w }))));
+    R("P05046", "…re-stated: a full 24-bucket series, so the chart has no gaps", d.grids.every(on24));
     R("P49404", "a 24-bucket chart lives in a sideways scroller", await p.locator(".owx-scrollx").count() > 0);
     const sx = await p.evaluate(() => { const e = document.querySelector(".owx-scrollx"); return e ? getComputedStyle(e).overflowY : ""; });
     R("P49405", "…which never scrolls vertically", sx === "hidden", sx);
@@ -1508,9 +1540,15 @@ head("8d · the skin, the redirects and the shell");
   await p.reload({ waitUntil: "domcontentloaded" });
   await p.waitForSelector(".rs-root");
   R("P05469", "the light skin survives a reload", await p.evaluate(() => document.querySelector(".adm")?.getAttribute("data-skin")) === "light");
-  const crumb = flat(await p.evaluate(() => document.querySelector(".owx-crumb, .owx-path, .owx-top")?.innerText || ""));
+  // THE PATH ITSELF, `.owx-path`, ONCE THE REPORT HAS SAID WHERE IT IS (sweep #10 T39 item 57,
+  // 2026-10-09). The old selector list matched `.owx-top` first — the whole strip, "Owner overview
+  // … Connected" — and read it the instant .rs-root existed, before the report had announced its
+  // tail to the shell. Measured on :4439: after the report settles, a refreshed deep link reads
+  // "Owner › Reports › My Little French House › Sales › Revenue" (and did before this change too).
+  await p.waitForFunction(() => /Sales/.test(document.querySelector(".owx-path")?.textContent || ""), null, { timeout: 15000 }).catch(() => {});
+  const crumb = flat(await p.evaluate(() => document.querySelector(".owx-path")?.innerText || ""));
   R("P05484", "the breadcrumb the shell renders matches what this page is showing",
-    !crumb || (/Reports/.test(crumb) && /Sales/.test(crumb)), crumb.slice(0, 120));
+    /Reports/.test(crumb) && /Sales/.test(crumb), crumb.slice(0, 120));
   R("P05123", "…and it names the scope, the report and the sub-tab in that order",
     !crumb || crumb.indexOf("Reports") < crumb.indexOf("Sales") || !/Sales/.test(crumb), crumb.slice(0, 120));
   await p.close();
@@ -1676,8 +1714,12 @@ head("8f · the last of the recorded rows");
     // hovering a bar shows its value
     const { p: hp } = await openReports(ctx, "?open=sales&range=30d");
     const bar = hp.locator("svg.recharts-surface .recharts-bar-rectangle").first();
+    // A CONDITION, NOT A CLOCK (sweep #10 T39 item 59's twin, 2026-10-09): wait for a bar to be
+    // drawn, hover it, then wait up to 3s for the tooltip to hold a value. A fixed 700ms passed on
+    // one run and failed the next on the same code while the machine was busy.
+    await bar.waitFor({ timeout: 30000 }).catch(() => {});
     await bar.hover().catch(() => {});
-    await hp.waitForTimeout(700);
+    await hp.waitForFunction(() => /₹[\d,]+/.test(document.querySelector(".recharts-tooltip-wrapper")?.textContent || ""), null, { timeout: 3000 }).catch(() => {});
     const tip = flat(await hp.locator(".recharts-tooltip-wrapper").first().innerText().catch(() => ""));
     R("P49403", "hovering a bar can show its value", /₹[\d,]+/.test(tip), tip.slice(0, 60));
     R("P49417", "the page shows how old the figures are", await hp.locator(".rs-fresh-t").count() > 0);

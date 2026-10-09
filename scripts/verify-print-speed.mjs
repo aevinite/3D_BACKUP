@@ -115,6 +115,7 @@ const VIRT = { kitchen: "ZZ-Virt-Kitchen", counter: "ZZ-Virt-Counter", banquet: 
 const OUT = "/tmp/virtual-prints/out";
 const made = { agents: [], orders: [], jobs: [] };
 let RID = "", TOKEN = "", AGENT = null, bagWas = {}, switchesWas = {};
+let retireSpeedRestaurant = async () => {};   // set once its restaurant exists (item 58); the `finally` calls it
 const mint = () => { const t = "lfhp_" + randomBytes(24).toString("base64url"); return { t, h: createHash("sha256").update(t).digest("hex") }; };
 const agentCall = (path, init, tok) => fetch(BASE + "/api/print-agent" + path, { ...init, headers: { "x-lfh-agent": tok === undefined ? TOKEN : tok, "content-type": "application/json", ...(init?.headers || {}) } });
 
@@ -391,20 +392,60 @@ await phase("…and something is accepting on all three heads", () => !LIVE ? no
 await phase("the diag staff exist, so the panel phases mean something", async () => (await db("staff_users?select=id&username=eq.diagm1")).length === 1 || "diagm1 missing");
 
 const [dm] = await db("staff_users?select=restaurant_id&username=eq.diagm1");
-RID = dm.restaurant_id;
+const FRENCH_HOUSE = dm.restaurant_id;   // where every run before 2026-10-09 wrote — see below
 for (const leftover of ["Speed PC", "Speed PC 2"]) {
-  try { await db(`print_agents?restaurant_id=eq.${RID}&name=eq.${encodeURIComponent(leftover)}`, { method: "DELETE" }); } catch {}
+  try { await db(`print_agents?restaurant_id=eq.${FRENCH_HOUSE}&name=eq.${encodeURIComponent(leftover)}`, { method: "DELETE" }); } catch {}
 }
 try {
   const old = JSON.parse(readFileSync(STASH, "utf8"));
-  if (old.settings) { await db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify(old.settings) });
+  const where = old.rid || FRENCH_HOUSE;   // a stash from an older run has no rid: it was French House's
+  if (old.settings) { await db(`settings?restaurant_id=eq.${where}`, { method: "PATCH", body: JSON.stringify(old.settings) });
     console.log("  ↺ a previous run was killed — the printing settings it had rewritten were put back first."); }
 } catch {}
 try { unlinkSync(STASH); } catch {}
+
+// ITS OWN THROWAWAY RESTAURANT, NEVER FRENCH HOUSE (sweep #10 T39 item 58, 2026-10-09). Every run
+// placed its test orders on French House — 5,265 of them by 2026-10-09, between 14 September and
+// 8 October. An order can never be deleted (mig 331 / the purge keeps them: "keep bills forever"),
+// so soft-deleting them took them off the kitchen board but not out of the owner's reports: they
+// were French House's "units sold" in Owner → Reports → Menu, as "bulk 19", "warm 4", "bq starve
+// 5.3" … The run now makes a `zz-speed-…` restaurant, does everything there, and ends it the way
+// the admin ends one — bin it, then Recycle bin → Remove permanently (admin_purge_restaurant) —
+// so whatever it leaves lives on a binned restaurant nobody's reports include.
+const [speedRest] = await db("restaurants", { method: "POST", headers: { Prefer: "return=representation" },
+  body: JSON.stringify({ name: "ZZ Speed " + Date.now().toString(36), slug: "zz-speed-" + Date.now().toString(36), active: true }) });
+RID = speedRest.id;
+if (!(await db(`settings?restaurant_id=eq.${RID}&select=restaurant_id`)).length) await db("settings", { method: "POST", body: JSON.stringify({ restaurant_id: RID }) });
+// …WITH FRENCH HOUSE'S FEATURE SWITCHES, so it is the same kind of restaurant to print for. A new
+// restaurant starts with every module off, and the printing routes refuse a paper the restaurant
+// does not have ("does not have Banquet sheets — switch the feature on first"). Only the on/off
+// switches and the `modules` bag are copied — never a key, a secret or any other value — and only
+// INTO the new row (a settings clone must never write over a live row).
+{
+  const [fh] = await db(`settings?restaurant_id=eq.${FRENCH_HOUSE}&select=*`);
+  const flags = {};
+  for (const [k, v] of Object.entries(fh || {})) {
+    if (/key|secret|token|password|webhook|hash/i.test(k)) continue;
+    if (typeof v === "boolean" || k === "modules") flags[k] = v;
+  }
+  await db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify(flags) });
+}
+retireSpeedRestaurant = async () => {
+  const gone = new Date().toISOString();
+  // CANCELLED as well as removed (owner, 2026-10-09: the 5,265 left on French House were cancelled,
+  // "Cancel them"): a test order was never a sale, and cancelled is the one honest word for that.
+  try { await db(`orders?restaurant_id=eq.${RID}&status=neq.cancelled`, { method: "PATCH", body: JSON.stringify({ status: "cancelled", cancelled_at: gone }) }); } catch {}
+  try { await db(`orders?restaurant_id=eq.${RID}&deleted_at=is.null`, { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true, archived_at: gone }) }); } catch {}
+  try { await db(`print_agents?restaurant_id=eq.${RID}`, { method: "DELETE" }); } catch {}
+  try { await db(`restaurants?id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ active: false, deleted_at: gone }) }); } catch {}
+  try { await db("rpc/admin_purge_restaurant", { method: "POST", body: JSON.stringify({ p_rid: RID }) }); }
+  catch (e) { if (!/already been purged/.test(String(e.message))) console.log(`  ❌ COULD NOT REMOVE the test restaurant ${RID}: ${String(e.message).slice(0, 160)}`); }
+};
+restoreOnExit("the speed run's own test restaurant (binned, then removed permanently)", retireSpeedRestaurant);
 const [st0] = await db(`settings?restaurant_id=eq.${RID}&select=modules,auto_print_kot,auto_print_kot_allowed,kot_print_target`);
 bagWas = st0.modules || {};
 switchesWas = { auto_print_kot: st0.auto_print_kot, auto_print_kot_allowed: st0.auto_print_kot_allowed, kot_print_target: st0.kot_print_target };
-stash({ settings: { modules: bagWas, ...switchesWas } });
+stash({ settings: { modules: bagWas, ...switchesWas }, rid: RID });
 
 // ── THE WORLD IS BUILT HERE, NOT INSIDE A PHASE ──────────────────────────────────────────────
 // Every one of these used to be the body of a phase, and that quietly made `--from 17` useless: the
@@ -1962,6 +2003,7 @@ await phase("…and the virtual printers hold nothing", () => { lpClear(); retur
       { method: "PATCH", body: JSON.stringify({ deleted_at: gone, archived: true, archived_at: gone }) });
   } catch {}
   try { await drain(); } catch {}
+  await retireSpeedRestaurant();   // its own restaurant goes the way the admin ends one (item 58, above)
   try { unlinkSync(STASH); } catch {}
   try { rmSync(HELPER_HOME, { recursive: true, force: true }); } catch {}
 }

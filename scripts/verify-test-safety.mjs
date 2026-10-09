@@ -739,6 +739,42 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     copies.join("\n    ") + "\n    Import the real module: const V = await import(pathToFileURL(join(ROOT, \"lib/passwordVault.ts\")).href).");
 }
 
+// ── 16. EVERY LOAD-TEST SCRIPT REFUSES ANY DATABASE BUT DEV (sweep #10 T39 item 48) ─────────────
+// stress-tenant.mjs places a dinner rush of real orders. Its parent (stress-fleet) refused the
+// client database, but the file runs on its own too, and then nothing checked. A load script is the
+// one place a wrong .env line becomes thousands of orders, so each one must CALL the shared lock.
+{
+  const open = [];
+  for (const f of files) {
+    if (!/^scripts\/(stress[\w-]*|load-[\w-]+)\.mjs$/.test(f)) continue;
+    const src = read(f).replace(/\/\/.*$/gm, "");
+    if (!/refuseUnlessDevTestDb\(/.test(src)) open.push(f);
+  }
+  check("every load-test script refuses any database but the dev one (refuseUnlessDevTestDb)",
+    open.length === 0,
+    open.join("\n    ") + "\n    import { refuseUnlessDevTestDb } from \"./sweep/devStacks.mjs\" and call it with the database URL before the first request.");
+}
+
+// ── 17. A TEST ORDER IT RETIRES IS CANCELLED, NOT ONLY REMOVED (sweep #10 T39 item 64) ──────────
+// A soft-deleted order still counts in the owner's reports — deliberately: a sale can never
+// disappear. So a test that inserts orders straight into `orders` and only stamps `deleted_at` adds
+// fake "units sold" to that restaurant for ever: 5,265 from verify:print-speed and 1,478 from
+// verify:printing-sweep sat in French House's Menu report until the owner had them cancelled on
+// 2026-10-09. A script that INSERTS orders (`db("orders", { method: "POST"`) and retires them by
+// soft delete must also write `status: "cancelled"`.
+{
+  const open = [];
+  for (const f of files) {
+    const src = read(f).replace(/\/\/.*$/gm, "");
+    const inserts = /db\(\s*["'`]orders["'`]\s*,\s*\{\s*method:\s*["']POST["']/.test(src);
+    const softDeletes = /orders\?[^`"']*["'`]\s*,\s*\{\s*method:\s*["']PATCH["'][^}]*deleted_at/.test(src);
+    if (inserts && softDeletes && !/status:\s*["']cancelled["']/.test(src)) open.push(f);
+  }
+  check("a test that inserts orders and retires them CANCELS them, so they never count as sales",
+    open.length === 0,
+    open.join("\n    ") + "\n    Before the soft delete: PATCH { status: \"cancelled\", cancelled_at } on its own unpaid, unbilled orders.");
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
