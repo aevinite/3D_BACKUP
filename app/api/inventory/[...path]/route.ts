@@ -26,6 +26,7 @@ import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { inventoryLadder } from "@/lib/tableTags";
 import { panelFailure } from "@/lib/panelFailure";
+import { roundPaise } from "@/lib/tax";
 import { managerCan } from "@/lib/managerCan";
 
 export const dynamic = "force-dynamic";
@@ -652,7 +653,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
         const qty = num(l.qty_purchase); const rate = num(l.rate);
         if (!Number.isFinite(qty) || qty <= 0) throw new BadInput(`Quantity missing for ${it.name}.`);
         if (!Number.isFinite(rate) || rate < 0) throw new BadInput(`Rate missing for ${it.name}.`);
-        const amount = Math.round(qty * rate * 100) / 100;
+        const amount = roundPaise(qty * rate);   // the ONE rounding rule (lib/tax.ts, item 10)
         subtotal += amount;
         // `factor` and `track` used to ride along here for the movement loop below. That loop now
         // reads them from `byId` (they are per-ITEM, not per-line), so carrying them on the line

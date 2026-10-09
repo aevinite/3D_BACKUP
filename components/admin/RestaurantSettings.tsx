@@ -8,6 +8,7 @@
 // Data: GET/POST /api/admin/restaurants/settings (single scoped row + per-table QR
 // codes, mig 210). The KOT switch reuses the quick-features endpoint so it stays the
 // single source of truth with Main features + Access.
+import { roundPaise } from "@/lib/tax";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FLOOR_PER_ROW_MAX, FLOOR_PER_ROW_MIN, clampPerRow } from "@/lib/floorLayout";
 import { BANQUET_FIELDS, BANQUET_LOCKED, BANQUET_PRESETS, banquetBillNo, banquetTaxOf, cleanBanquetFields } from "@/lib/banquetFields";
@@ -678,7 +679,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     return "₹" + v.toLocaleString("en-IN", { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 });
   };
   const EG = 280;                                   // one ordinary dish, so the sum is easy to follow
-  const egNet = Math.round((EG / (1 + gstRate)) * 100) / 100;
+  const egNet = roundPaise(EG / (1 + gstRate));   // the same rounding the bill uses (item 10)
   const priceMode = ["excl", "incl", "composition"].includes(String(draft.price_tax_mode))
     ? String(draft.price_tax_mode) : "excl";
   const itemModes = draft.item_tax_modes_allowed === true;

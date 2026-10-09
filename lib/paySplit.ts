@@ -17,7 +17,7 @@
 // ============================================================================
 
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { effectiveTaxRate, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
+import { effectiveTaxRate, roundPaise, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 // The rate ONE order was charged at is decided in the same file the printed bill uses, so this
 // path and the paper can never answer differently — see orderTaxRate's own note for why it moved.
 import BILLDOC from "@/public/panels/billdoc.js";
@@ -170,7 +170,7 @@ export async function settleBillInParts(
   if (setQ.error) return busy("settings", setQ.error);
   const set = setQ.data || {};
   const settingsRate = effectiveTaxRate(set);
-  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const r2 = roundPaise;   // the ONE rounding rule (lib/tax.ts, item 10)
   type MoneyRow = { taxable_base?: number | null; nontax_amount?: number | null; mrp_amount?: number | null; subtotal?: number; discount?: number; tax_rate?: number | null };
   // THE RATE EACH ORDER WAS CHARGED AT, per order (mig 284) — not one rate borrowed from whichever
   // order came first (2026-08-05). `find(> 0)` asked for the whole bill at that order's rate, so a

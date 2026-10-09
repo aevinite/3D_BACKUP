@@ -769,6 +769,10 @@ function dishIsMrp(d) {
 // waiter board's order columns (lib/liveBoard.ts ORDER_COLS) do not fetch it. The server's own
 // clamp in app/api/tablet/[...path]/route.ts DOES read that column, so it is the ruling — this
 // is the screen's honest estimate of the same number, used to cap the UI and to say NO out loud.
+// moneyRound — the ONE rounding to the paisa, exact the way the database rounds (public/panels/billdoc.js,
+// sweep #10 T30 round 4, item 10, 2026-10-10). index.html loads billdoc.js before this file; the float
+// fallback only exists so the panel still works in the moment before it has.
+const moneyRound = (n) => (typeof LFH_BILLDOC !== "undefined" && LFH_BILLDOC.moneyRound ? LFH_BILLDOC.moneyRound(n) : Math.round(n * 100) / 100);
 function orderTaxSplit(o) {
   const rate = effRate();
   const lines = Array.isArray(o && o.items) ? o.items : [];
@@ -780,16 +784,16 @@ function orderTaxSplit(o) {
   for (const ln of lines) {
     const unit = parseFloat(String(ln.price == null ? "" : ln.price).replace(/[^0-9.]/g, "")) || 0;
     const qty = Math.max(1, parseInt(String(ln.qty == null ? "1" : ln.qty), 10) || 1);
-    const amt = Math.round(unit * qty * 100) / 100;
+    const amt = moneyRound(unit * qty);
     const mode = String(ln.tax_mode || "excl");
     if (mode === "exempt") nontax += amt;                              // final price — never taxable
-    else if (mode === "incl") base += Math.round((amt / (1 + rate)) * 100) / 100;
+    else if (mode === "incl") base += moneyRound(amt / (1 + rate));
     else base += amt;
   }
   // Counted from the lines themselves, never as (total − base×(1+rate)): that subtraction
   // picks up the server's own rounding and would report a phantom ₹0.01 "MRP" on an ordinary
   // bill, which then appears in the refusal wording as a reason nobody can act on.
-  return { base: Math.round(base * 100) / 100, nontax: Math.round(nontax * 100) / 100 };
+  return { base: moneyRound(base), nontax: moneyRound(nontax) };
 }
 // (taxableBaseOf() WAS HERE — one line wrapping orderTaxSplit(o).base, and gone with it,
 // owner's word 2026-08-28. Every caller reads `orderTaxSplit(o).base` directly, which is the same
@@ -2920,7 +2924,7 @@ function renderSplitBill(t, opts = {}) {
   if (!splitBillOn()) { toast("Splitting a bill is turned off for this restaurant.", false); return; }
   const payable = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received"); // a merged party splits its WHOLE bill
   if (!payable.length) { toast("Nothing to split — accept the order first, or it's already paid.", false); return; }
-  const round2 = (n) => Math.round(n * 100) / 100;
+  const round2 = moneyRound;
   const rate = effRate();
   const due = round2(payable.reduce((sum, o) => sum + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate), 0));
   const PAY_LATER = "Pay later";
@@ -4452,7 +4456,7 @@ async function genInvoice(sid) {
 // Styled inline like this file's other self-contained modals (openDishEditModal, pinPrompt).
 function openDiscountModal(order, opts = {}) {
   document.querySelector(".disc-overlay")?.remove();
-  const round2 = (n) => Math.round(n * 100) / 100;
+  const round2 = moneyRound;
   const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
   const total = Number(order.total) || 0;       // GROSS, tax-incl, BEFORE discount (orders.total)
   const current = Number(order.discount) || 0;  // stored discount is a PRE-TAX rupee amount

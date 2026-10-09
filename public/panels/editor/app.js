@@ -1347,7 +1347,7 @@ function lbl(text) {
 function taxModeExample(mode, price, settings) {
   const s = settings || {};
   const tm = taxModel(s);
-  const r2 = (n) => Math.round(n * 100) / 100;
+  const r2 = moneyRound;
   const m2 = (n) => "₹" + r2(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const typed = parseFloat(String(price == null ? "" : price).replace(/[^0-9.]/g, ""));
   const amt = Number.isFinite(typed) && typed > 0 ? typed : 100; // nothing typed yet → a round ₹100
@@ -2845,6 +2845,10 @@ function resolveTaxMode(dishMode, settings) {
 function isMrpDish(dishMode, settings) {
   return String(dishMode || "") === "mrp" && itemTaxModesAllowed(settings);
 }
+// moneyRound — the ONE rounding to the paisa, exact the way the database rounds (public/panels/billdoc.js,
+// sweep #10 T30 round 4, item 10, 2026-10-10). index.html loads billdoc.js before this file; the float
+// fallback only exists so the panel still works in the moment before it has.
+const moneyRound = (n) => (typeof LFH_BILLDOC !== "undefined" && LFH_BILLDOC.moneyRound ? LFH_BILLDOC.moneyRound(n) : Math.round(n * 100) / 100);
 // The ONE place a list of un-placed lines (the ⚡ QO/P cart) turns into a taxable/untaxed
 // split. Rounding is PER LINE, to match lfh_split_items_tax — a bill's lines are what a
 // person checks against the paper. Placed orders don't come through here: they carry the
@@ -2855,19 +2859,19 @@ function splitCartLines(lines, settings) {
   for (const ln of lines || []) {
     const unit = parseFloat(String(ln && ln.price != null ? ln.price : "").toString().replace(/[^0-9.]/g, "")) || 0;
     const qty = Math.max(1, parseInt(ln && ln.qty, 10) || 1);
-    const amt = Math.round(unit * qty * 100) / 100;
+    const amt = moneyRound(unit * qty);
     const mode = resolveTaxMode(ln && ln.tax_mode, settings);
     // The LOCKED part is only a real MRP dish (mig 272) — a nil-rated dish is untaxed but
     // perfectly discountable, and treating the two the same refused legitimate discounts.
     if (isMrpDish(ln && ln.tax_mode, settings)) { hasMrp = true; mrpAmount += amt; }
     if (mode === "exempt") nontax += amt;
-    else if (mode === "incl") taxableBase += Math.round((amt / (1 + rate)) * 100) / 100;
+    else if (mode === "incl") taxableBase += moneyRound(amt / (1 + rate));
     else taxableBase += amt;
   }
   return {
-    taxableBase: Math.round(taxableBase * 100) / 100,
-    nontax: Math.round(nontax * 100) / 100,
-    mrpAmount: Math.round(mrpAmount * 100) / 100,
+    taxableBase: moneyRound(taxableBase),
+    nontax: moneyRound(nontax),
+    mrpAmount: moneyRound(mrpAmount),
     hasMrp,
   };
 }
@@ -13049,7 +13053,7 @@ function openTakeOrder(table, rerender, opts = {}) {
     // what is left of the taxable base. It stays right when the rate is 0 and the discount
     // has landed on the untaxed part, which a `taxable + tax + untaxed` shape would not.
     const taxable = Math.max(0, sp.taxableBase - Math.min(d, sp.taxableBase));
-    return Math.round((sp.taxableBase + sp.nontax - d + Math.round(taxable * rate * 100) / 100) * 100) / 100;
+    return moneyRound(sp.taxableBase + sp.nontax - d + moneyRound(taxable * rate));
   };
   const estTotal = () => inr(estTotalNum());
   // May THIS person discount? Same power the table detail's − Discount button is gated by
@@ -15567,7 +15571,7 @@ function openSplitBill(total) {
 // is the point: one discount interface, not a second one that drifts.
 function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   document.querySelector(".disc-overlay")?.remove();
-  const round2 = (n) => Math.round(n * 100) / 100;
+  const round2 = moneyRound;
   const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
   const current = Number(order.discount) || 0;
   // The stored discount is a PRE-TAX rupee amount: billMath subtracts it from the subtotal
@@ -18495,10 +18499,10 @@ function bqMath(lines) {
   for (const l of lines) {
     const gross = l.qty * l.price;
     sub += gross;
-    disc += Math.round(gross * (l.disc / 100) * 100) / 100;
+    disc += moneyRound(gross * (l.disc / 100));
   }
   disc = Math.min(disc, sub);
-  const tax = Math.round((sub - disc) * tm.rate * 100) / 100;
+  const tax = moneyRound((sub - disc) * tm.rate);
   const total = Math.round(sub - disc + tax);
   const f = bqForm();
   const paid = bqOn("paysplit")

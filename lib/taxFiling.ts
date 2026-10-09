@@ -20,8 +20,10 @@
 // that row's tax, a column sums to the period's line total, and the grand total equals the
 // KPI tile.
 
+import { roundPaise } from "@/lib/tax";
 /** Round to paise. */
-const p2 = (v: number) => Math.round((Number(v) || 0) * 100) / 100;
+// the ONE rounding rule (lib/tax.ts roundPaise, item 10) — exact, as the database rounds
+const p2 = (v: number) => roundPaise(Number(v) || 0);
 
 /**
  * Split `target` across `rates` proportionally, to the paise. The LAST line absorbs the
