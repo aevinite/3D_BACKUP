@@ -116,6 +116,15 @@ export function capsForRole(role: string): Cap[] {
     // matches the Access screen without minting a dropdown that would save a key nothing reads.
     for (const n of section("mgrMenu")?.children.find((x) => x.id === "mgr_manage")?.children ?? []) {
       if (n.bind.t === "tab") add({ key: `mgrset:${n.bind.key}`, group: GROUP_MGRSET, node: n, pin: false, perPerson: false, kind: "switch" });
+      // …AND THE SWITCHES INSIDE A SECTION (sweep #10 T18, item 4). "Users — staff logins" holds
+      // three finer powers (add a login · reset a password · switch a login off, owner-approved
+      // 2026-08-20), and this loop stopped one level down, so a manager's profile listed the Users
+      // section and none of the three — the same "smaller truth than the Access screen beside it"
+      // the 2026-08-18 note above fixed for the other folders. Restaurant-wide (access_config
+      // .manage_staff.manager_opts), so READ-ONLY, like every other row in this block.
+      for (const k of n.children ?? []) {
+        if (k.bind.t === "opt") add({ key: `opt:${k.bind.id}.${k.bind.side}.${k.bind.key}`, group: GROUP_MGRSET, node: k, pin: false, perPerson: false, kind: k.choices?.length ? "value" : "switch" });
+      }
     }
     return out;
   }

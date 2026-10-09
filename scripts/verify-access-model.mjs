@@ -26,6 +26,7 @@ const {
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
   waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
   nodeExpect, expectHeader, MODULE_ALLOWED_DEFAULTS, MODULE_BAG_KEYS,
+  nodeValue, applyPatch, emptyState, NODE_BY_ID,
 } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
@@ -1023,6 +1024,129 @@ else ok("the read/write route derives every allow-list from the model");
     if (misses.length) fail(`a folder whose rows are generated has a stale description: ${misses.join("; ")}`);
     else ok(`the ${generated.length} folder(s) built from a generated list still name every row inside them`);
   }
+}
+
+// ── 51b · …AND EVERY ROW THE SENTENCE NAMES OR COUNTS MUST STILL BE INSIDE IT ───────────────
+// Check 51 asks "is every row named?". It never asked the other half — "is every name still a row?"
+// — and that is how the folder went on promising "whether they may set the printers up from their
+// own computer" for 25 days after the owner RETIRED that row (2026-09-14: "that setup will be done
+// by me only"). The commit that removed the row left the sentence, the sentence still named three
+// printing rows over a folder holding two, and every admin opening the ⓘ was told a manager could
+// be handed the printer setup. (sweep #10 T18, item 1 — a regression of ledger row P22157.)
+//
+// Two questions, both mechanical, so neither can cry wolf on good prose:
+//   · a COUNT in the sentence ("the two printing ones") must equal the rows whose id carries that word;
+//   · a phrase the owner retired must not come back in ANY row's words. The list holds exactly one
+//     phrase today; add to it the day another row is retired, in the same commit.
+{
+  const RETIRED_PHRASES = [
+    ["set the printers up", "the manager printer-setup permission (retired 2026-09-14, docs/REJECTED-IDEAS.md → Reversed)"],
+  ];
+  const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+  const probs = [];
+  const folder = NODE_BY_ID.mgr_may;
+  if (!folder) probs.push("check 51b could not find the 'Permission for manager' folder (mgr_may) — if it moved, update this guard");
+  else {
+    for (const m of folder.what.matchAll(/\bthe (one|two|three|four|five|six) (\w+?)i?n?g? ones\b/gi)) {
+      const said = WORDS[m[1].toLowerCase()], stem = m[2].toLowerCase().replace(/(ing|s)$/, "");
+      const real = folder.children.filter((c) => c.id.includes(stem)).length;
+      if (said !== real) probs.push(`"${folder.name}" says "${m[0]}" but holds ${real} row(s) whose id carries "${stem}"`);
+    }
+  }
+  for (const n of ALL_NODES) for (const [phrase, why] of RETIRED_PHRASES)
+    if ((n.what || "").toLowerCase().includes(phrase)) probs.push(`row "${n.name}" (${n.id}) still offers "${phrase}" — ${why}`);
+  if (probs.length) fail(`a folder's words name a row it no longer has: ${probs.join("; ")}`);
+  else ok("every row a folder's sentence counts or names is still inside it, and no retired permission is offered in any row's words");
+}
+
+// ── 57 · A SWITCH MUST READ BACK WHAT IT WAS JUST SET TO — THROUGH THE SCREEN'S OWN MERGE ──────
+// The Access screen repaints a tap by merging the patch into its local state (applyPatch) and
+// does NOT reload after a save that landed. So `nodeValue(applyPatch(state, nodePatch(n, v)))`
+// IS what the admin sees. For the first bag-backed module it read OFF straight after being
+// switched ON: the patch said `modules: { loyalty: true }`, the merge stored a bare boolean where
+// nodeValue reads `.allowed`, and Loyalty points painted grey over a database that said ON — seen
+// on French House's real screen before the fix. (sweep #10 T18, item 2 — ledger row P22167, green
+// on 2026-08-27, red from the day loyalty shipped, 2026-09-19.)
+//
+// Asked from BOTH starting points that occur: a restaurant with nothing stored, and one holding
+// the shape the server writes (`modules.<key> = { allowed, enabled }`, a column value, an object
+// in access_config) — because a merge can be right from empty and wrong from stored, or the reverse.
+{
+  const BOOL = new Set(["feature", "setting", "module", "moduleBag", "channel", "grant", "section", "tab", "has", "ratingsMaster"]);
+  const stored = (n, v) => {
+    const s = emptyState();
+    const b = n.bind;
+    if (b.t === "moduleBag") s.modules[b.key] = { allowed: v, enabled: true, owner_control: false };
+    return s;
+  };
+  const wrong = [];
+  for (const n of ALL_NODES) {
+    if (!BOOL.has(n.bind.t)) continue;
+    for (const v of [true, false]) for (const start of [emptyState(), stored(n, !v)]) {
+      const seen = nodeValue(n, applyPatch(start, nodePatch(n, v)));
+      if (seen !== v) wrong.push(`${n.id} set ${v ? "ON" : "OFF"} reads ${JSON.stringify(seen)}`);
+    }
+  }
+  if (wrong.length) fail(`the Access screen would show a different value from the one just saved: ${[...new Set(wrong)].join("; ")}`);
+  else ok("every switch on the Access screen reads back the value it was just set to, through the same local merge the screen paints with");
+}
+
+// ── 58 · A PERSON'S PAGE LISTS EVERY ROW THE ACCESS SCREEN HAS FOR THEIR ROLE ─────────────────
+// lib/staffCaps.ts's own rule (owner, 2026-08-18): "a person's rows are EXACTLY the rows Access has
+// for their role". It is enforced by walking folders, and a walk that stops one level too early
+// drops rows without a sound. That happened for the three switches inside Manager settings →
+// Users (add a login · reset a password · switch a login off): the Access screen showed them and
+// every manager's profile did not. (sweep #10 T18, item 4.) So the question is asked from the
+// OTHER end — every storing row in the role's section, compared with what the person page lists.
+{
+  const { capsForRole } = await import("../node_modules/.cache/staffCaps.mjs").catch(() => ({ capsForRole: null }));
+  if (!capsForRole) fail("check 58 could not load the staffCaps bundle — npm run verify:access builds it; fix the guard");
+  else {
+    const { SECTIONS, walk } = await import("../node_modules/.cache/accessTree.mjs");
+    const ROLE_OF = { mgrMenu: "manager", waiter: "tablet", ownMenu: "owner" };
+    const lost = [];
+    for (const s of SECTIONS.filter((x) => ROLE_OF[x.id])) {
+      const listed = new Set(capsForRole(ROLE_OF[s.id]).map((c) => c.node.id));
+      walk(s.children, (n) => { if (n.bind.t !== "none" && !listed.has(n.id)) lost.push(`${ROLE_OF[s.id]}: "${n.name}" (${n.id})`); });
+    }
+    if (lost.length) fail(`a row on the Access screen is missing from that role's person page: ${lost.join("; ")}`);
+    else ok("every row the Access screen shows for manager, waiter and owner is on that person's own page");
+  }
+}
+
+// ── 59 · THE TWO DOCS THAT DESCRIBE THIS SCREEN MUST DESCRIBE THIS SCREEN ─────────────────────
+// CLAUDE.md sends every session to docs/ACCESS-MODEL.md as "the spec" and to docs/STAFF-PROFILE.md
+// before touching anything about a person — so a stale line there is an instruction to rebuild the
+// past. Measured 2026-10-09: the spec's card table named an "Auto-print KOT" row five weeks after it
+// moved to the Printing menu, never listed the three floor switches or Loyalty points, and said
+// "Permission for manager" held TWO rows over a folder of four; the profile doc said a manager's
+// page has two blocks (it has three) and 7 dropdowns (8). (sweep #10 T18, item 6.) Only NUMBERS and
+// NAMES are compared — never prose — so this cannot cry wolf on good writing.
+{
+  const { SECTION_BY_ID, NODE_BY_ID: B } = await import("../node_modules/.cache/accessTree.mjs");
+  const caps = await import("../node_modules/.cache/staffCaps.mjs").catch(() => null);
+  const md = read("docs/ACCESS-MODEL.md"), sp = read("docs/STAFF-PROFILE.md");
+  const probs = [];
+  const norm = (x) => x.toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+  const t = md.match(/\| \*\*Main features\*\* \| \*\*Extra features\*\* \|\n\|---\|---\|\n\| ([^|]+) \| ([^|]+) \|/);
+  if (!t) probs.push("docs/ACCESS-MODEL.md: the Main | Extra card table is gone — if it moved, update this guard");
+  else for (const [cell, sec] of [[t[1], "main"], [t[2], "extra"]]) {
+    const said = cell.split("·").map((x) => norm(x.replace(/\(and its whole sub-tree\)/, "")));
+    const real = SECTION_BY_ID[sec].children.map((n) => norm(n.name));
+    if (said.length !== real.length || real.some((r, i) => r !== said[i])) probs.push(`the ${sec} card in docs/ACCESS-MODEL.md lists [${said.join(", ")}] but the screen has [${real.join(", ")}]`);
+  }
+  const WORD = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+  const b2 = md.match(/2\. \*\*Permission for manager\*\* — (\w+) rows/i);
+  const grants = B.mgr_may.children.filter((n) => n.bind.t === "grant").length;
+  if (!b2 || WORD[b2[1].toLowerCase()] !== grants) probs.push(`docs/ACCESS-MODEL.md B.2 says "${b2 ? b2[1] : "?"} rows"; the folder holds ${grants}`);
+  if (caps) {
+    const m = sp.match(/\*\*manager\*\* → (\w+),?/), groups = caps.capGroupsForRole("manager").length;
+    if (!m || WORD[m[1]] !== groups) probs.push(`docs/STAFF-PROFILE.md says a manager's page has "${m ? m[1] : "?"}" blocks; it has ${groups}`);
+    const f = sp.match(/manager shows (\d+) folders \/ (\d+) dropdowns/), d = caps.capKeysForRole("manager").length;
+    if (!f || +f[1] !== groups || +f[2] !== d) probs.push(`docs/STAFF-PROFILE.md says "${f ? f[0] : "?"}"; today it is ${groups} folders / ${d} dropdowns`);
+  }
+  if (probs.length) fail(`a doc that describes the Access screen describes a different one: ${probs.join("; ")}`);
+  else ok("docs/ACCESS-MODEL.md's card table and row count, and docs/STAFF-PROFILE.md's block and dropdown counts, match the screen");
 }
 
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──

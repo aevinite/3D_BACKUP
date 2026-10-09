@@ -121,10 +121,24 @@ export function completeness(s: StaffLike, opts?: { pay?: boolean }): { filled: 
 }
 
 // ── Sanitisers (every write goes through these; nothing else reaches the DB) ──
-const str = (v: unknown, max = 200): string | null => {
+// TEXT MEANS TEXT (sweep #10 T18, item 5). `String(v)` turned an object into the words
+// "[object Object]" and a list into "Surat,Pune", and both were stored as a person's name, city,
+// note or designation. No screen sends either — every field is a text box — but this file is the
+// one door to the database for these columns. A value that is not a string, a number or a boolean
+// is now not text at all: str() answers `undefined` for it, and each caller decides what that means
+// (a profile field is left as it was; a job or payment field is refused in words).
+const isText = (v: unknown): boolean => v === null || v === undefined || ["string", "number", "boolean"].includes(typeof v);
+const str = (v: unknown, max = 200): string | null | undefined => {
+  if (!isText(v)) return undefined;
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   return s ? s.slice(0, max) : null;
+};
+/** str() for a column that must not be cleared by a value that is not text — refused in words. */
+const text = (v: unknown, max: number, what: string): string | null => {
+  const s = str(v, max);
+  if (s === undefined) throw new Error(`That ${what} isn't plain text.`);
+  return s;
 };
 // THE **LAST** n DIGITS, NOT THE FIRST (sweep #7 T15, 2026-08-27). This kept `slice(0, n)`, so a
 // person typing or pasting a whole Aadhaar / PAN / account number into a field labelled
@@ -137,11 +151,34 @@ const digits = (v: unknown, n: number): string | null => {
   const s = String(v ?? "").replace(/\D/g, "");
   return s ? s.slice(-n) : null;
 };
+// A DATE HAS TO BE A DAY THAT EXISTS (sweep #10 T18, item 3). This tested the SHAPE only, so
+// "1990-02-30" and "2026-13-45" walked straight through — the same fault sweep #9 found in the pay
+// month. Where they went next depended on the field: a birth date was STORED as written (it lives in
+// jsonb, which takes any string); a joining, leaving or payment date reached Postgres, which refuses
+// it, so the whole save failed behind a sentence that never said which field was wrong. Every screen
+// uses the browser's date picker and cannot produce one; a hand-made request can, and this file's
+// contract is that nothing else reaches the database. 1900 is the floor because no living member of
+// staff was born before it, and Postgres has no year 0 at all.
+const isRealDay = (s: string): boolean => {
+  const [y, m, d] = s.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return y >= 1900 && t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+};
 const isoDate = (v: unknown): string | null => {
   const s = String(v ?? "").trim();
   if (!s) return null;
   // accept YYYY-MM-DD only (the UI sends that); anything else is dropped rather than guessed
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) && isRealDay(s) ? s : null;
+};
+// For a date that goes into a real DATE column: empty clears it, a real day is kept, anything else
+// is REFUSED in words — never cleared in silence (a typo would otherwise wipe a joining date) and
+// never passed on for the database to refuse with no field named. Both routes turn the throw into
+// a 400 carrying this sentence.
+const dateOrRefuse = (v: unknown, what: string): string | null => {
+  if (v === null || v === undefined || String(v).trim() === "") return null;
+  const d = isoDate(v);
+  if (!d) throw new Error(`That ${what} isn't a real date — use the date picker.`);
+  return d;
 };
 
 /** Merge a PARTIAL personal-details patch onto an existing profile jsonb. Unknown keys are
@@ -155,10 +192,13 @@ export function mergeProfilePatch(
   for (const k of allowed) {
     if (!(k in patch)) continue;
     const raw = patch[k];
+    if (!isText(raw)) continue;            // not text at all → leave the stored value alone (item 5)
     let v: unknown;
     if (k === "id_verified") v = raw === true;
     else if (k === "id_last4" || k === "bank_last4") v = digits(raw, 4);
-    else if (k === "dob") v = isoDate(raw);
+    // An unreadable birth date leaves the stored one ALONE (item 3): this function has no way to
+    // refuse, and dropping it here would erase a good date because of a typo. Empty still clears.
+    else if (k === "dob") { v = isoDate(raw); if (v === null && String(raw ?? "").trim() !== "") continue; }
     else if (k === "address" || k === "notes") v = str(raw, 500);
     else v = str(raw, 200);
     if (v === null || v === false) delete out[k]; else out[k] = v;
@@ -172,23 +212,23 @@ export type JobPatch = Record<string, unknown>;
  *  throws a plain Error (message is user-safe) on a bad value, so the route can 400 it. */
 export function jobPatchFrom(body: Record<string, unknown>): JobPatch {
   const out: JobPatch = {};
-  if ("joined_on" in body) out.joined_on = isoDate(body.joined_on);
-  if ("left_on" in body) out.left_on = isoDate(body.left_on);
-  if ("designation" in body) out.designation = str(body.designation, 80);
-  if ("shift_label" in body) out.shift_label = str(body.shift_label, 80);
-  if ("pay_day" in body) out.pay_day = str(body.pay_day, 40);
+  if ("joined_on" in body) out.joined_on = dateOrRefuse(body.joined_on, "joining date");
+  if ("left_on" in body) out.left_on = dateOrRefuse(body.left_on, "leaving date");
+  if ("designation" in body) out.designation = text(body.designation, 80, "designation");
+  if ("shift_label" in body) out.shift_label = text(body.shift_label, 80, "shift name");
+  if ("pay_day" in body) out.pay_day = text(body.pay_day, 40, "pay day");
   if ("employment_type" in body) {
-    const v = str(body.employment_type, 20);
+    const v = text(body.employment_type, 20, "employment type");
     if (v && !(EMPLOYMENT_TYPES as readonly string[]).includes(v)) throw new Error("Unknown employment type.");
     out.employment_type = v;
   }
   if ("pay_type" in body) {
-    const v = str(body.pay_type, 20);
+    const v = text(body.pay_type, 20, "pay type");
     if (v && !(PAY_TYPES as readonly string[]).includes(v)) throw new Error("Unknown pay type.");
     out.pay_type = v;
   }
   if ("pay_mode" in body) {
-    const v = str(body.pay_mode, 10);
+    const v = text(body.pay_mode, 10, "payment mode");
     if (v && !(PAY_MODES as readonly string[]).includes(v)) throw new Error("Unknown payment mode.");
     out.pay_mode = v;
   }
@@ -215,7 +255,7 @@ export function jobPatchFrom(body: Record<string, unknown>): JobPatch {
       const amt = Number(String(o.amount ?? "").replace(/[,\s₹]/g, ""));
       if (!Number.isFinite(amt) || amt < 0) throw new Error("An allowance/deduction amount must be a number.");
       return {
-        label: str(o.label, 60) || "Extra",
+        label: text(o.label, 60, "allowance name") || "Extra",
         kind: o.kind === "deduction" ? "deduction" : "allowance",
         amount: Math.round(amt * 100) / 100,
       };
@@ -249,11 +289,13 @@ export function paymentFrom(body: Record<string, unknown>): {
     if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) throw new Error("That pay period isn't a valid month.");
     period = `${m[1]}-${m[2]}-01`;
   }
-  const paid_on = isoDate(body.paid_on) || todayIST();
+  // No date means "today". A date that is NOT a real day is refused (item 3) — it used to become
+  // today in silence, so a payment typed for the 3rd could land on the books dated the 9th.
+  const paid_on = dateOrRefuse(body.paid_on, "payment date") || todayIST();
   // A payment can be back-dated (you paid yesterday, you type it today) but not FUTURE-dated:
   // a payment that hasn't happened yet would silently inflate "paid this month".
   if (paid_on > todayIST()) throw new Error("You can't record a payment for a future date.");
-  return { kind, amount: Math.round(amount * 100) / 100, for_period: period, mode, paid_on, note: str(body.note, 200) };
+  return { kind, amount: Math.round(amount * 100) / 100, for_period: period, mode, paid_on, note: text(body.note, 200, "note") };
 }
 
 /** Today in the restaurant's timezone (IST) as YYYY-MM-DD — the app's business day. */
