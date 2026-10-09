@@ -4401,10 +4401,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if ((addedOW.length || removedOW.length) && !owReason.note && !owReason.code) {
         return err("Say why the allergy is changing — that line is what the kitchen cooks to.", 400);
       }
-      must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).eq("restaurant_id", rid));
       // One write per distinct result, errors surfaced — lib/orderAllergies.ts (sweep #10 T30 item 16;
-      // it was one unchecked UPDATE per dish, here and in the twin route).
+      // it was one unchecked UPDATE per dish, here and in the twin route). The DISHES go first and
+      // the order's line last (item 24): the change is "old line vs new", so saving the line first
+      // would leave a retry with nothing to spread after a failed dish write.
       await spreadOrderAllergies(sb, rid, b, addedOW, removedOW);
+      must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).eq("restaurant_id", rid));
       const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : "",
         owReason.note ? `— ${owReason.note}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
       await log("editor", "order_allergies", { restaurant_id: rid, order_id: b, detail, device_id: dev });

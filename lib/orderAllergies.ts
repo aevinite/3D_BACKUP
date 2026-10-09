@@ -9,9 +9,20 @@
 // Now: one read, then ONE UPDATE PER DISTINCT RESULT (dishes that end up with the same marks are
 // written together with `.in("id", …)` — normally one or two writes for a whole ticket), and a failed
 // write THROWS with its SQLSTATE kept (lib/dbRefusal pgError), so the route answers honestly.
+//
+// TWO RULES FOUND BY ROUND 3'S OWN TEST (2026-10-09):
+//   · The route must call this BEFORE it saves the order's allergy line. The change is worked out as
+//     "old line vs new line"; if the line were saved first and a dish write then failed, the retry
+//     would see no change at all and the dishes would never be marked — a failure that only looks
+//     healed. Dishes first, line last: a retry finds the same change and finishes the job.
+//   · The dishes are read in pages of PAGE, never with one cut-off: a single `.limit(500)` would have
+//     skipped dish 501 in silence. Each page is still a bounded read (egress rule, playbook §1).
 import { pgError } from "@/lib/dbRefusal";
 
 type Item = { id: string; added_allergens?: unknown; removed_flag?: unknown };
+
+/** Dishes read per page. A guest order is capped at 200 lines; staff additions are not, hence pages. */
+export const PAGE = 500;
 
 /** What one dish's marks become after the order-level change (pure — the rule both routes share). */
 export function spreadOne(item: Item, added: unknown[], removed: unknown[]): { added_allergens: string[]; removed_flag: boolean } {
@@ -41,13 +52,19 @@ export function groupSpread(items: Item[], added: unknown[], removed: unknown[])
  * holds; every read and write is scoped to the restaurant. Returns how many writes it took.
  */
 export async function spreadOrderAllergies(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sb: any, rid: string, orderId: string, added: unknown[], removed: unknown[],
 ): Promise<number> {
   if (!added.length && !removed.length) return 0;
-  const read = await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", orderId).eq("restaurant_id", rid).limit(500);
-  if (read.error) throw pgError(read.error);
-  const groups = groupSpread((read.data || []) as Item[], added, removed);
+  const items: Item[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const read = await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", orderId).eq("restaurant_id", rid)
+      .order("id", { ascending: true }).range(from, from + PAGE - 1);
+    if (read.error) throw pgError(read.error);
+    const page = (read.data || []) as Item[];
+    items.push(...page);
+    if (page.length < PAGE) break;
+  }
+  const groups = groupSpread(items, added, removed);
   for (const g of groups) {
     const w = await sb.from("order_items").update(g.patch).in("id", g.ids).eq("restaurant_id", rid);
     if (w.error) throw pgError(w.error);

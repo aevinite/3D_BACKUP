@@ -8,7 +8,7 @@ export function world(fix = {}) {
 }
 const clone = (v) => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
 function builder(table) {
-  const st = { table, filters: [], op: "select", patch: null, cols: null, lim: null, order: null };
+  const st = { table, filters: [], op: "select", patch: null, cols: null, lim: null, order: null, rng: null };
   const match = (row) => st.filters.every(([k, c, v]) => {
     const x = row[c];
     if (k === "eq") return String(x) === String(v);
@@ -31,6 +31,7 @@ function builder(table) {
     let found = (W.FIX[table] || []).filter(match);
     if (st.order) found = [...found].sort((a, b) => (String(a[st.order.col]) < String(b[st.order.col]) ? -1 : 1) * (st.order.asc ? 1 : -1));
     if (st.lim != null) found = found.slice(0, st.lim);
+    if (st.rng) found = found.slice(st.rng[0], st.rng[1] + 1);
     if (st.op === "select") { W.READS.push({ table, cols: st.cols, filters: clone(st.filters) }); return { data: one ? (found.length === 1 ? clone(found[0]) : found.length ? clone(found[0]) : null) : clone(found), error: null, count: found.length }; }
     W.WRITES.push({ table, op: st.op, patch: clone(st.patch), filters: clone(st.filters), matched: found.length });
     if (st.op === "update") { const before = clone(found); for (const r of found) Object.assign(r, clone(st.patch)); return { data: one ? before[0] ?? null : before, error: null }; }
@@ -56,6 +57,7 @@ function builder(table) {
     gte(c, v) { st.filters.push(["gte", c, v]); return q; },
     order(col, o) { st.order = { col, asc: !(o && o.ascending === false) }; return q; },
     limit(n) { st.lim = n; return q; },
+    range(a, b) { st.rng = [a, b]; return q; },
     single() { return settle(true); }, maybeSingle() { return settle(true); },
     then(res, rej) { return settle(false).then(res, rej); },
   };
