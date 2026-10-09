@@ -1121,10 +1121,30 @@ for (const [i, rg] of RANGES.entries()) {
 }
 // Payments reconciliation — P20137–P20154.
 const PAY_BASE = 20137;
+// THE SAME MOMENT, FRESHLY COMPUTED (sweep #10 T39 item 77, 2026-10-09). Reports are served from a
+// snapshot up to ~5 min old and refreshed after the response (the owner's rule of 2026-07-25 —
+// "updated X ago" beside Refresh; lib/ownerCache.ts). The Sales rows above were read minutes before
+// this loop, both as snapshots, so 11 paid bills placed in between made Payments read ₹4,221 against
+// Sales' ₹12,180 — two different moments, not two different answers (with ?refresh=1 both said
+// ₹12,180). "Payments reconciles to Sales" is a claim about ONE moment, so both sides are recomputed
+// here (?refresh=1, what the Refresh button does) and read steadily: sales, payments, sales again,
+// judged only while revenue held still (up to 4 tries).
+const freshPair = async (rg: string) => {
+  let pay = { body: {} as Body }, sale = { body: {} as Body };
+  for (let k = 0; k < 4; k++) {
+    const s1 = await api(`type=sales&range=${rg}&rid=${RID}&refresh=1`);
+    pay = await api(`type=payments&range=${rg}&rid=${RID}&refresh=1`);
+    sale = await api(`type=sales&range=${rg}&rid=${RID}&refresh=1`);
+    if (s1.body.totals && sale.body.totals && s1.body.totals.revenue === sale.body.totals.revenue) break;
+    await page.waitForTimeout(3000);
+  }
+  return { pay: pay.body, sale: sale.body };
+};
 for (const [i, rg] of RANGES.entries()) {
-  const { body } = await api(`type=payments&range=${rg}&rid=${RID}`);
+  const fp = await freshPair(rg);
+  const body = fp.pay;
   const rows = (body.rows ?? []) as { method: string; revenue: number; orders: number }[];
-  const s = salesByRange[rg]?.totals;
+  const s = fp.sale?.totals;
   const total = rows.reduce((a, r) => a + (Number(r.revenue) || 0), 0);
   const bills = rows.reduce((a, r) => a + (Number(r.orders) || 0), 0);
   R(`P${PAY_BASE + i * 2}`, `payments ${rg}: settlement total equals the Sales report's revenue`, !!s && near(total, s.revenue, 1), `pay=${total} sales=${s?.revenue}`);
