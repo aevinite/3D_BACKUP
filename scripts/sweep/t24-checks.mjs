@@ -55,7 +55,9 @@ check("P19798", "editor: a floor write drops the shared snapshot before AND afte
 check("P19799", "editor: the after-wrapper uses finally so a throwing handler still drops it", "read invalidateFloorAfter",
   () => /function invalidateFloorAfter[\s\S]{0,500}?finally \{[\s\S]{0,200}invalidateFloor\(rid\)/.test(SRCCODE));
 check("P19800", "editor: a money-changing edit is refused while a live invoice stands", "read the invoice lock helpers + their callers",
-  () => /LOCKED_MSG = "This bill is invoiced/.test(HELPCODE) && count(SRCCODE, /LOCKED_MSG/g) >= 4);
+  // The sentence changed on 2026-09-25 (a reopen keeps the number, so "reopen it" stopped being
+  // advice that works) — the rule is the constant and its callers, not the wording.
+  () => /const LOCKED_MSG = "This was on the printed bill/.test(HELPCODE) && count(SRCCODE, /LOCKED_MSG/g) >= 4);
 check("P19801", "editor: the invoice lock is checked by ORDER and by ITEM", "read the two helpers",
   () => /async function invoiceLockedByOrder\(/.test(HELPCODE) && /async function invoiceLockedByItem\(/.test(HELPCODE));
 check("P19802", "editor: a manager may not delete a bill — cancel is the only route out (R27)", "read canDeleteBill",
@@ -114,7 +116,7 @@ check("P19823", "editor: the manager's own settings sections are refused server-
   () => /managerSettingsOff\(/.test(SRCCODE));
 check("P19880", "editor: a DB blip answers 503 and keeps the panel logged in", "read gate()",
   () => /g\.transient[\s\S]{0,220}?status: 503/.test(HELPCODE));
-check("P19884", "editor: a genuinely bad cookie answers 401", "drive it live, signed out",
+check("P19884", "editor: a genuinely bad cookie answers 401", "driven in memory, sign-in stub answering nobody (S10)",
   () => ANON["/all"] && ANON["/all"].status === 401 && /Not authorised/.test(ANON["/all"].text));
 check("P19888", "editor: a missing restaurant scope is a sentence, not a crash", "read editorScope",
   () => /return err\("No restaurant scope — open this panel from the admin console\.", 400\)/.test(HELPCODE));
@@ -138,7 +140,7 @@ check("P19936", "editor: ?as= names a person without changing who is writing", "
   () => /const person = await viewAsPerson\(req, rid, g, "manager"\)/.test(blk.whoami) && !/viewAsPerson/.test(POSTCODE));
 check("P19939", "editor: an unknown endpoint answers 404, not 500", "drive an unknown path live",
   () => needLive("unknown") || (live("unknown").status === 404 && /unknown GET endpoint/.test(live("unknown").text)));
-check("P20000", "watched running: /api/editor/all requires being signed in (401)", "driven headless against this terminal's port 4324",
+check("P20000", "watched running: /api/editor/all requires being signed in (401)", "driven in memory, sign-in stub answering nobody (S10)",
   () => ANON["/all"] && ANON["/all"].status === 401);
 check("P06459", "/owner/menu echoes ?rid= on every API call the embed makes, and the editor route re-checks it", "read editorScope",
   () => /if \(u && u\.role === "owner"\)[\s\S]{0,400}?if \(!owned\.includes\(urlRid\)\) return err\("You can only edit restaurants you own\.", 403\)/.test(HELPCODE));

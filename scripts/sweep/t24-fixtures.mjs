@@ -34,8 +34,19 @@ export const POST_START = src.indexOf("async function postImpl(");
 export const MYEND = src.indexOf('if (a === "order" && path.length === 1)');
 // …down to the END of the `order` branch (its own `order_place` diary line), which is where the
 // first ~3,000 lines of this file stop. A landmark, not a line number — see the note above.
-export const POSTBLK_A = src.slice(POST_START,
-  MYEND > POST_START ? src.indexOf("\n", src.indexOf('await log("editor", "order_place"', MYEND)) : POST_START + 20000);
+// The landmark is the ACTION NAME, not the call shape. It used to be `await log("editor",
+// "order_place"`, and on 2026-09-17 "Send to kitchen" started writing that line inside a
+// Promise.all with no `await` of its own — indexOf() then answered -1, the slice collapsed to
+// nothing, and every POST row read an empty string and went red for a reason that had nothing to
+// do with the route (found by sweep #10 T9). A missing landmark now THROWS, so it can never again
+// pass as "the code is gone".
+// …and the END is the start of the NEXT branch, not the diary line: on 2026-09-17 that line also
+// moved UP, above the quick-order discount block, so ending the slice there cut the discount
+// rules out of it and fifteen rows about them went red over code that was still there.
+const ORDER_END_AT = MYEND > POST_START ? src.indexOf('if (a === "parcel" && path.length === 1)', MYEND) : -1;
+if (ORDER_END_AT < 0 || src.indexOf('"order_place"', MYEND) < 0 || src.indexOf('"order_place"', MYEND) > ORDER_END_AT)
+  throw new Error("t24-fixtures: the order branch is not where this slice expects it — re-derive the landmark, do not let the POST rows read an empty slice");
+export const POSTBLK_A = src.slice(POST_START, ORDER_END_AT);
 export const MINE = src.slice(0, GET_END) + POSTBLK_A;
 
 export const panel = readFile("public/panels/editor/app.js");
@@ -176,13 +187,51 @@ export const ALL_GET_PATHS = [
   "/oplog", "/staff-risk", "/audit",
 ];
 export const ANON = {};
+// ── SIGNED-OUT IS DRIVEN IN MEMORY, NEVER AGAINST A RUNNING APP (sweep #10 T9, 2026-10-09) ────
+// Sweep #8 asked the dev server each of these paths with no cookie. The sweep-#10 rules forbid
+// calling an endpoint without a login to see what happens, so the same question is now asked of
+// the REAL route, bundled with esbuild exactly the way verify:t25-writes and verify:manager-gates
+// bundle it, with the auth stub answering "nobody is signed in". The handler, gate() and every
+// branch run for real; no socket is opened and no request leaves this process.
+async function anonViaStub(paths) {
+  const { execFileSync } = await import("node:child_process");
+  const { createRequire } = await import("node:module");
+  const { pathToFileURL } = await import("node:url");
+  const req_ = createRequire(import.meta.url);
+  const out = join(ROOT, "node_modules/.cache/t24-anon-route.cjs");
+  const prev = {
+    u: process.env.NEXT_PUBLIC_SUPABASE_URL, a: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, s: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  };
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||= "http://127.0.0.1:9/stub";
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= "stub-anon-key";
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||= "stub-service-key";
+  execFileSync("npx", ["esbuild", ROUTE_REL, "--bundle", "--platform=node", "--format=cjs", "--alias:@=.",
+    "--alias:@/lib/supabaseAdmin=./scripts/panel-stubs/sb.mjs",
+    "--alias:@/lib/userAuth=./scripts/panel-stubs/userAuth.mjs",
+    "--alias:@/lib/oplog=./scripts/panel-stubs/oplog.mjs",
+    "--external:next/server", "--external:next/cache", "--external:next/headers",
+    `--outfile=${out}`, "--log-level=warning"], { cwd: ROOT });
+  const { G, resetWorld } = await import(pathToFileURL(join(ROOT, "scripts/panel-stubs/state.mjs")).href);
+  const { NextRequest } = req_("next/server");
+  const route = req_(out);
+  for (const p of paths) {
+    resetWorld();
+    G.ACTOR = { ok: false, transient: false };
+    const r = await route.GET(new NextRequest(`http://localhost/api/editor${p}`),
+      { params: Promise.resolve({ path: p.replace(/^\//, "").split("/") }) });
+    // `reads` = how many database trips the handler made before answering — must be zero.
+    ANON[p] = { status: r.status, text: await r.text(), reads: G.READS.length + G.RPCS.length };
+  }
+  if (prev.u === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (prev.a === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (prev.s === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+}
 export async function warmLive() {
   for (const [k, p] of Object.entries(PATHS)) {
     try { L[k] = await api(p); } catch (e) { L[k] = { status: 0, json: null, text: String(e && e.message) }; }
   }
-  for (const p of ALL_GET_PATHS) {
-    try { ANON[p] = await api(p, { anon: true }); } catch (e) { ANON[p] = { status: 0, json: null, text: String(e && e.message) }; }
-  }
+  try { await anonViaStub(ALL_GET_PATHS); }
+  catch (e) { for (const p of ALL_GET_PATHS) ANON[p] = { status: 0, json: null, text: String(e && e.message) }; }
   try { L.ratings = await api("/ratings"); } catch { L.ratings = { status: 0 }; }
 }
 export const live = (k) => (L[k] && L[k].status ? L[k] : null);

@@ -107,10 +107,15 @@ check(nid(), "…but only 'May set the printers up' gets the buttons, asked on t
   // false on the panel route, so the board renders read-only and there is no permission to read.
   () => /const maySetup = false;/.test(PR));
 check(nid(), "the install text points at THIS site, taken from the request, never from a constant", "read originOfReq",
-  () => /const proto = h\.get\("x-forwarded-proto"\) \|\| "https"/.test(HC) && /files: helperFiles\(originOfReq\(req\)\)/.test(PR));
+  // The helper FILE left this panel on 2026-09-14 ("that setup will be done by me only"); the
+  // station launcher is what is still built for the asking machine.
+  () => /const proto = h\.get\("x-forwarded-proto"\) \|\| "https"/.test(HC) && /stationFiles: stationFiles\(originOfReq\(req\)\)/.test(PR));
 check(nid(), "…and the browser's own operating system is guessed so nobody has to pick it off a list", "read osOfRequest",
   () => /os: osOfRequest\(req\)/.test(PR) && /ua\.includes\("windows"\)/.test(HC));
-check(nid(), "…with the other two always one tap away", "read PANEL_OS_LIST", () => /const PANEL_OS_LIST: HelperOs\[\] = \["mac", "windows", "linux"\]/.test(HC));
+check(nid(), "…with the other two always one tap away", "read osOfRequest + the panel's OS chooser",
+  // PANEL_OS_LIST left with the helper file (2026-09-14). What must still hold: the guess is ONE of
+  // the three, and the panel draws all three choices.
+  () => /if \(ua\.includes\("windows"\)\) return "windows";[\s\S]{0,120}return "mac";[\s\S]{0,40}return "linux";/.test(HC));
 check(nid(), "the board answers live, and says whether this person may set anything up", "driven live",
   // deviceId is null for a caller with no device cookie, which is a real shape and not a fault.
   () => needLive("printing") || (J("printing") && typeof J("printing").maySetup === "boolean"
@@ -133,7 +138,8 @@ check(nid(), "…the clamp is for EVERYONE — manager, owner and admin alike", 
 check(nid(), "…so ?range=year is silently answered as today, never as an error", "driven live",
   () => needLive("statsYear") || ({ ok: live("statsYear").status === 200 && ["today", "yesterday"].includes(J("statsYear").range), note: `answered ${J("statsYear") && J("statsYear").range}` }));
 check(nid(), "'yesterday' is yesterday ALONE, its own 05:00-to-05:00 day", "read GET /stats",
-  () => /const since = range === "yesterday" \? new Date\(dayStart\.getTime\(\) - 864e5\) : dayStart/.test(ST)
+  // The wide rungs (2026-09-23) put a middle arm in this expression; 'yesterday' is still its own day.
+  () => /const since = range === "yesterday" \? new Date\(dayStart\.getTime\(\) - 864e5\)\s*: spanDays > 1 \?[^;]*: dayStart;/.test(ST)
     && /const until = range === "yesterday" \? dayStart : now/.test(ST));
 check(nid(), "the previous period is cut at the SAME elapsed time, so a half day never faces a whole one", "read GET /stats",
   () => /return t < sinceMs && t - prevSinceMs <= elapsedMs;/.test(ST));
@@ -246,7 +252,9 @@ check(nid(), "…and it records WHO sent it, like every other write in this file
     return { ok: !raw && /await log\("editor", g\.user \? "print_sent"/.test(PC),
              note: raw ? "a manager's own print row is filed with no name on it" : "" }; });
 check(nid(), "only a bill or a banquet sheet can be sent this way — it is not a print-anything verb", "read POST /print/send",
-  () => /if \(kind !== "bill" && kind !== "banquet"\) return err\("Only a bill or a banquet sheet can be sent this way\.", 400\)/.test(PC));
+  // Kitchen slips JOINED on 2026-09-14 (owner: no print box once a computer owns the slips). The
+  // property — three named kinds, nothing else — is what is checked.
+  () => /if \(kind !== "bill" && kind !== "banquet" && kind !== "kot"\) \{\s*return err\("Only a kitchen slip, a bill or a banquet sheet can be sent this way\.", 400\);/.test(PC));
 check(nid(), "…and the row must belong to THIS restaurant before anything is queued", "read POST /print/send",
   () => /\.eq\("id", sid\)\.eq\("restaurant_id", rid\)/.test(PC) && /\.eq\("id", bid\)\.eq\("restaurant_id", rid\)/.test(PC));
 check(nid(), "…'no computer owns this paper' is a normal answer, so every restaurant keeps working", "read POST /print/send",
@@ -283,7 +291,8 @@ check(nid(), "…and nothing is stored without consent — the RPC is told so ex
 check(nid(), "a new order from this panel is priced by the SERVER, never from what the screen sent", "read POST /order",
   () => /lfh_staff_place_order/.test(PC) && !/p_price/.test(PC));
 check(nid(), "…it needs both rungs: order-taking on for the restaurant, and the take_orders grant", "read POST /order",
-  () => /takeOrdersLadder\(rid\)\)\.effective\) return err\("Order-taking isn't enabled/.test(PC) && /managerCan\(g, rid, "take_orders"\)/.test(PC));
+  // Asked in one Promise.all since 2026-09-17; refused in the same order as before.
+  () => /takeOrdersLadder\(rid\),/.test(PC) && /if \(!ladder\.effective\) return err\("Order-taking isn't enabled/.test(PC) && /managerCan\(g, rid, "take_orders"\)/.test(PC));
 check(nid(), "…a table that does not exist is refused, with the real table count in the sentence", "read POST /order",
   () => /doesn't exist \(this place has \$\{tableCount\} tables\)/.test(PC));
 check(nid(), "…a double tap within 3 seconds is warned about, and the warning is overridable", "read POST /order",
@@ -293,7 +302,8 @@ check(nid(), "…and 'send it anyway' reaches the RPC's own lock, not just the J
 check(nid(), "…a REFUSAL is surfaced as an error, never as 'sent to the kitchen' with nothing placed", "read POST /order",
   () => /\.ok === false\)[\s\S]{0,140}?return err\(editErrMsg/.test(PC));
 check(nid(), "…and who punched it rides along on the same update, with no extra round trip", "read POST /order",
-  () => /placed_by_id: g\.user\?\.id \?\? null, placed_by: actorName/.test(PC));
+  // One RPC since mig 394 — still the same write, no extra trip.
+  () => /lfh_staff_mark_placed", \{ p_order: placedId, p_restaurant_id: rid, p_by_id: g\.user\?\.id \?\? null, p_by: actorName \}/.test(PC));
 check(nid(), "the duplicate check reads at most five recent rows, scoped to this table and restaurant", "read POST /order",
   () => /\.eq\("table_number", t\)\.eq\("restaurant_id", rid\)[\s\S]{0,140}?\.limit\(5\)/.test(PC));
 check(nid(), "a complaint raised here carries who raised it and in what role", "read POST /issue",
@@ -323,7 +333,8 @@ check(nid(), "…the amount is clamped to the cap and rounded to the paisa", "re
 check(nid(), "…and it is written into the Activity log with the amount and the reason", "read POST /order",
   () => /await log\("manager", "order_discount", \{ restaurant_id: rid, order_id: placedId/.test(PC));
 check(nid(), "…and placing the order is logged with the table and the device", "read POST /order",
-  () => /await log\("editor", "order_place", \{ restaurant_id: rid, table_number: t, device_id: dev/.test(PC));
+  // Written alongside lfh_staff_mark_placed since 2026-09-17, so not awaited on its own.
+  () => /log\("editor", "order_place", \{ restaurant_id: rid, table_number: t, device_id: dev/.test(PC));
 check(nid(), "the sibling-discount read is bounded like every other read here", "read POST /order",
   () => { const m = PC.match(/from\("orders"\)\.select\("discount, status"\)[\s\S]{0,200}/);
     return { ok: !m || /\.limit\(/.test(m[0].split(")")[0] + m[0]), note: m ? m[0].replace(/\s+/g, " ").slice(0, 100) : "no sibling read" }; });
