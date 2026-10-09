@@ -3374,11 +3374,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     const overwrite = await expectClash(req, rid);
     if (overwrite) return clashJson(overwrite);
 
-    // customer-capture — save the guest's name+number at bill time, with consent
-    // (Customer CRM, mig 212). DPDP: the RPC stores NOTHING without consent. Records
-    // one visit for the table's session (idempotent), links devices, bumps the
-    // returning count. Gated by the "customers" entitlement (default on). Called once
-    // after the bill closes; a failure never blocks the settle that already happened.
     // ── table-sections — set ONE waiter's tables (waiter sections, mig 222) ────
     // Body: { user_id, tables: number[] }. The whole set is replaced, so the client can
     // send the result of a tick/untick without any merge logic. Same ladder as the GET.
@@ -3420,6 +3415,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, user: row });
     }
 
+    // customer-capture — save the guest's name+number at bill time, with consent
+    // (Customer CRM, mig 212). DPDP: the RPC stores NOTHING without consent. Records
+    // one visit for the table's session (idempotent), links devices, bumps the
+    // returning count. Gated by the "customers" entitlement (default on). Called once
+    // after the bill closes; a failure never blocks the settle that already happened.
     if (a === "customer-capture") {
       const tRaw = String(body?.table || "").trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
