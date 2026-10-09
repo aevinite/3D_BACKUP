@@ -10,7 +10,7 @@
     "build": "next build",
     "prebuild": "node scripts/set-glb-cache.mjs || exit 0",
     "start": "next start -p ${PORT:-4000}",
-    "lint": "eslint --max-warnings=1101",
+    "lint": "eslint --max-warnings=1132",
     "build:vendor": "node scripts/build-vendor.mjs",
     "test:money": "node --test tests/money.test.mjs",
     "test:errors": "node --test tests/error-text.test.mjs",

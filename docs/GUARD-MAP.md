@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **225** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **226** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 197 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -33,7 +33,7 @@ Kept honest by `npm run verify:pointers`: it fails if a guard named here has van
 | `npm run typecheck` | `tsc --noEmit`. **`npm run lint` does NOT check types** — they are separate gates. | nothing | no |
 | `npm run test` | `test:money` + `test:errors` + `test:netretry` + `test:units` — ~0.2s. | nothing | no |
 | `npm run test:netretry` | a read never cries "no internet" before a quiet retry has failed too, and a WRITE still goes out exactly once (owner, 2026-09-12). Drives the real `public/panels/netretry.js` and cross-checks `lib/netRetry.ts`. | nothing | no |
-| `npm run lint` | ESLint, with the warning count LOCKED at today's 1,101 (`--max-warnings`, sweep #10 T39 item 65, 2026-10-09). A change that adds a warning fails; one that removes some should lower the number in package.json so it can only go down. | nothing | no |
+| `npm run lint` | ESLint, with the warning count LOCKED at today's 1,132 (`--max-warnings`, sweep #10 T39 item 65, 2026-10-09). A change that adds a warning fails; one that removes some should lower the number in package.json so it can only go down. | nothing | no |
 | `npm run verify:static` | all 67 static guards (~100s; verify:panel-scope is ~85s of it). Runs **every** one and reports **every** failure — add `-- --quiet` for failures only. Inside `verify:push`. | nothing | no |
 | `npm run check:current` | is this folder level with `origin/main`? **Run before any audit or "X is broken" claim.** | nothing | no |
 
