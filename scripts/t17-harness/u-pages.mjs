@@ -1,0 +1,120 @@
+// SWEEP #10 T17 ROUND 5 — part of verify:t17-signin (scripts/verify-t17-signin.mjs). HERMETIC: every row this suite
+// touches — staff_users, staff_actions, rate_limit_events, login_throttle, fail_count, restaurants — lives in the in-memory
+// stub (./sb.mjs) and is wiped by world() before each check, so no wrong password here ever reaches a database, a limit
+// counter or the owner's phone (any fetch a check has not replaced is refused).
+import { G, world, person, sign, t, save, quiet, RID_A, RID_B, ADMIN_PW, R, go } from "./r5lib.mjs";
+const { renderToString } = await import("react-dom/server"); const { createElement: h } = await import("react");
+const PA = await import("@/lib/panelAccess.ts"); const PG = await import("@/lib/panelGate.ts"); const UA = await import("@/lib/userAuth.ts");
+const ONLY = process.env.R5_ONLY || ""; const want = (f) => !ONLY || ONLY === f;
+const html = (el) => renderToString(el);
+const text = (s) => s.replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ");
+const page = async (mod, props) => { const r = await go(() => mod.default(props)); if (r.v) return { el: r.v, html: html(r.v) }; return r; };
+if (want("app/login/LoginForm.tsx")) { const f = "app/login/LoginForm.tsx"; const LF = (await import("@/app/login/LoginForm.tsx")).default;
+  const a = html(h(LF, { next: "" }));
+  t(f, "the plain card renders 'Aevidine' and 'Restaurant OS · staff sign in'", /<h1[^>]*>Aevidine<\/h1>/.test(a) && /Restaurant OS · staff sign in/.test(a));
+  t(f, "with no notice, no notice box is drawn", !/role="status"/.test(a));
+  const b = html(h(LF, { next: "", restaurantSlug: "fh", restaurantName: "French House", notice: PG.DOOR_OFF }));
+  t(f, "a restaurant's card shows its name and 'Staff sign in' (not the platform line)", /<h1[^>]*>French House<\/h1>/.test(b) && /Staff sign in/.test(b) && !/Restaurant OS/.test(b));
+  t(f, "items 30/33: a notice is drawn as a status box with exactly the server's sentence", /role="status"[^>]*>This restaurant is switched off right now\. Ask Aevidine to turn it back on\.<\/div>/.test(b));
+  t(f, "…and it is drawn ABOVE the Username box", b.indexOf('role="status"') < b.indexOf('for="lfh-login-username"'));
+  const evil = html(h(LF, { next: "", notice: "<img src=x onerror=alert(1)>" }));
+  t(f, "a notice is always drawn as text (any angle brackets come out escaped)", !evil.includes("<img") && evil.includes("&lt;img"));
+  t(f, "Sign in starts switched off (nothing typed yet)", /<button type="submit" disabled=""/.test(a));
+  t(f, "the password box starts hidden and the toggle says Show", /id="lfh-login-password" type="password"/.test(a) && />Show</.test(a));
+  t(f, "the two labels are tied to their boxes", /for="lfh-login-username"/.test(a) && /id="lfh-login-username"/.test(a) && /for="lfh-login-password"/.test(a) && /id="lfh-login-password"/.test(a));
+  t(f, "the focus-ring rule is on the page", /\.lfh-signin input:focus-visible\{box-shadow:0 0 0 3px rgba\(91,140,255,\.55\)/.test(a));
+  t(f, "the bot trap is drawn LAST inside the form", (() => { const form = a.slice(a.indexOf("<form"), a.indexOf("</form>")); const ins = [...form.matchAll(/<input[^>]*>/g)].map((m) => m[0]); return ins.length >= 3 && !/lfh-login-/.test(ins.at(-1)); })());
+  t(f, "'No account? Your manager or admin sets one up for you.' is under the button", /No account\? Your manager or admin sets one up for you\./.test(a));
+}
+if (want("app/login/page.tsx")) { const f = "app/login/page.tsx"; const LP = await import("@/app/login/page.tsx");
+  const sp = (o) => ({ searchParams: Promise.resolve(o) });
+  world({}); R.cookies = {};
+  const p0 = await page(LP, sp({}));
+  t(f, "signed out: the card is shown, with no notice", !!p0.html && /Restaurant OS · staff sign in/.test(p0.html) && !/role="status"/.test(p0.html));
+  for (const [why, msg] of [["off", PG.DOOR_OFF], ["gone", PG.DOOR_GONE]]) { const p = await page(LP, sp({ why })); t(f, `?why=${why} shows the fixed sentence “${msg.slice(0, 30)}…”`, text(p.html).includes(msg)); }
+  const pj = await page(LP, sp({ why: "<b>hi</b>" }));
+  t(f, "any OTHER ?why= shows nothing (the address can never put words on the page)", !/role="status"/.test(pj.html) && !pj.html.includes("hi</b>"));
+  const m = await person({ role: "manager" });
+  world({ staff_users: [m], restaurants: [{ id: RID_A, deleted_at: null, active: true }] }); PA.forgetRestaurant(RID_A); R.cookies = { lfh_user: sign(m) };
+  t(f, "signed in to a live restaurant: straight to the panel", (await page(LP, sp({}))).redirect === "/manager");
+  world({ staff_users: [m], restaurants: [{ id: RID_A, deleted_at: "2026-10-01T00:00:00Z", active: false }] }); PA.forgetRestaurant(RID_A);
+  const pg = await page(LP, sp({ next: "/manager" }));
+  t(f, "item 33: signed in but the restaurant is BINNED — the card stays and says why (no redirect, so no loop)", !pg.redirect && text(pg.html).includes(PG.DOOR_GONE));
+  world({ staff_users: [m], restaurants: [{ id: RID_A, deleted_at: null, active: false }] }); PA.forgetRestaurant(RID_A);
+  const po = await page(LP, sp({}));
+  t(f, "item 30: signed in but the restaurant is SWITCHED OFF — the card stays and says so", !po.redirect && text(po.html).includes(PG.DOOR_OFF));
+  PA.forgetRestaurant(RID_A);
+  const o = await person({ role: "owner" });
+  world({ staff_users: [o], restaurant_owners: [], restaurants: [] }); PA.forgetRestaurant("z", [o.id]); R.cookies = { lfh_user: sign(o) };
+  const pn = await page(LP, sp({}));
+  t(f, "item 33: an owner whose every restaurant is gone stays on the card with the owner sentence (the /owner ↔ /login loop is gone)", !pn.redirect && text(pn.html).includes(PG.DOOR_NO_OWNED));
+  world({ staff_users: [o], restaurant_owners: [{ user_id: o.id, restaurant_id: RID_A }], restaurants: [{ id: RID_A, deleted_at: null, active: false }] }); PA.forgetRestaurant("z", [o.id]);
+  t(f, "item 30: an owner of a SUSPENDED restaurant is sent to their cockpit as usual", (await page(LP, sp({}))).redirect === "/owner");
+  world({ staff_users: [m] }); G.FAIL["staff_users"] = "error"; R.cookies = { lfh_user: sign(m) };
+  const pe = await quiet(() => page(LP, sp({})));
+  t(f, "when the database cannot say who this is, the card is shown (and the server log says why)", !!pe.v?.html && pe.logs.some((l) => /couldn't check for an existing session/.test(l)));
+  const k = await person({ role: "kitchen" }); world({ staff_users: [k], restaurants: [{ id: RID_A, deleted_at: null, active: true }] }); PA.forgetRestaurant(RID_A); R.cookies = { lfh_user: sign(k) };
+  t(f, "a signed-in kitchen goes to /kitchen", (await page(LP, sp({}))).redirect === "/kitchen");
+  R.cookies = {};
+}
+if (want("app/r/[restaurant]/login/page.tsx")) { const f = "app/r/[restaurant]/login/page.tsx"; const RP = await import("@/app/r/[restaurant]/login/page.tsx");
+  const P = (slug, sp = {}) => ({ params: Promise.resolve({ restaurant: slug }), searchParams: Promise.resolve(sp) });
+  world({ restaurants: [{ id: RID_A, slug: "r5-p-1", name: "French House", active: true, deleted_at: null }] }); R.cookies = {};
+  const a = await page(RP, P("r5-p-1"));
+  t(f, "a restaurant's door shows its own name and no notice", /<h1[^>]*>French House<\/h1>/.test(a.html) && !/role="status"/.test(a.html));
+  world({ restaurants: [{ id: RID_A, slug: "r5-p-2", name: "French House", active: false, deleted_at: null }] });
+  const b = await page(RP, P("r5-p-2"));
+  t(f, "item 30: a SWITCHED-OFF restaurant's door says so before anyone types", text(b.html).includes(PG.DOOR_OFF));
+  const m = await person({ role: "manager" });
+  world({ restaurants: [{ id: RID_A, slug: "r5-p-3", name: "FH", active: false, deleted_at: null }], staff_users: [m] }); R.cookies = { lfh_user: sign(m) };
+  const c = await page(RP, P("r5-p-3"));
+  t(f, "item 30: its own signed-in manager is NOT sent into the panel (no loop) — the card says it is switched off", !c.redirect && text(c.html).includes(PG.DOOR_OFF));
+  world({ restaurants: [{ id: RID_A, slug: "r5-p-4", name: "FH", active: true, deleted_at: null }], staff_users: [m] });
+  t(f, "a signed-in manager of a live restaurant goes to that restaurant's own manager address", (await page(RP, P("r5-p-4"))).redirect === "/r/r5-p-4/manager");
+  const mb = await person({ role: "manager", restaurant_id: RID_B });
+  world({ restaurants: [{ id: RID_A, slug: "r5-p-5", name: "FH", active: true, deleted_at: null }], staff_users: [mb] }); R.cookies = { lfh_user: sign(mb) };
+  t(f, "a manager of ANOTHER restaurant sees this restaurant's card (never sent into their own panel from here)", !!(await page(RP, P("r5-p-5"))).html);
+  world({ restaurants: [], slug_redirects: [{ old_slug: "r5-old-p", new_slug: "r5-new-p" }] }); R.cookies = {};
+  t(f, "an old address forwards to the new one, keeping ?next encoded", (await page(RP, P("r5-old-p", { next: "/r/r5-new-p/kitchen?x=1&y=2" }))).redirect === "/r/r5-new-p/login?next=%2Fr%2Fr5-new-p%2Fkitchen%3Fx%3D1%26y%3D2");
+  t(f, "…and without a ?next adds none", (await page(RP, P("r5-old-p"))).redirect === "/r/r5-new-p/login");
+  world({ restaurants: [], slug_redirects: [] });
+  t(f, "an address for no restaurant is 'not found'", (await page(RP, P("r5-nowhere"))).notFound === true);
+  world({ restaurants: [{ id: RID_A, slug: "r5-p-6", name: "A & B <Bistro>", active: true, deleted_at: null }] });
+  const e = await page(RP, P("r5-p-6"));
+  t(f, "a restaurant name with & and < is shown as text, escaped", e.html.includes("A &amp; B &lt;Bistro&gt;"));
+}
+if (want("app/staff-login/page.tsx")) { const f = "app/staff-login/page.tsx"; const SP = await import("@/app/staff-login/page.tsx");
+  const P = (sp) => ({ searchParams: Promise.resolve(sp) });
+  world({ login_throttle: [] }); R.headers = { "x-forwarded-for": "5.5.5.5" };
+  const a = await page(SP, P({}));
+  t(f, "the admin door shows the password card for an address that is not blocked", /admin console/.test(a.html) && /type="password"/.test(a.html) && !/You’re blocked/.test(a.html));
+  t(f, "…its hidden 'next' is the console by default", /name="next" value="\/aevinite"/.test(a.html));
+  t(f, "…a given next is carried in the hidden field", /name="next" value="\/aevinite\/owners"/.test((await page(SP, P({ next: "/aevinite/owners" }))).html));
+  world({ login_throttle: [{ key: "admin:5.5.5.5", locked_until: new Date(Date.now() + 200 * 365 * 864e5).toISOString() }] });
+  t(f, "a BLOCKED address gets the blocked screen even without ?blocked=1", /You’re blocked/.test((await page(SP, P({}))).html));
+  world({ login_throttle: [] });
+  t(f, "?blocked=1 shows the blocked screen", /You’re blocked/.test((await page(SP, P({ blocked: "1" }))).html));
+  t(f, "?blocked=yes (anything but 1) does not", !/You’re blocked/.test((await page(SP, P({ blocked: "yes" }))).html));
+  t(f, "?locked=1 opens with the 'too many wrong tries' line", /Too many wrong tries/.test((await page(SP, P({ locked: "1" }))).html));
+  t(f, "?bad=1 opens with 'Wrong password — try again.'", /Wrong password — try again\./.test((await page(SP, P({ bad: "1" }))).html));
+  t(f, "both ?locked=1 and ?bad=1: the lock message wins", /Too many wrong tries/.test((await page(SP, P({ locked: "1", bad: "1" }))).html) && !/Wrong password/.test((await page(SP, P({ locked: "1", bad: "1" }))).html));
+  R.headers = {};
+}
+if (want("app/staff-login/LoginForm.tsx")) { const f = "app/staff-login/LoginForm.tsx"; const SF = (await import("@/app/staff-login/LoginForm.tsx")).default;
+  const a = html(h(SF, { next: "/aevinite", initialError: null }));
+  t(f, "the admin card works without JavaScript: a real form that posts to /api/staff-login", (() => { const tag = a.match(/<form[^>]*>/)[0]; return /method="POST"/.test(tag) && /action="\/api\/staff-login"/.test(tag); })());
+  t(f, "…with the password named 'password' and the bot fields inside the form", /name="password"/.test(a) && a.indexOf("lfh_hp_ref") > a.indexOf("<form") && a.indexOf("lfh_hp_ref") < a.indexOf("</form>"));
+  t(f, "the Enter button starts usable and says 'Enter'", /<button type="submit"[^>]*>Enter<\/button>/.test(a) && !/<button type="submit" disabled=""/.test(a));
+  t(f, "a 'wrong' error with 1 try left reads '1 attempt left' (singular)", /1 attempt left before a temporary lock\./.test(text(html(h(SF, { next: "/x", initialError: { kind: "wrong", attemptsLeft: 1 } })).replace(/<!-- -->/g, ""))));
+  t(f, "a 'wrong' error with no count shows no count line", !/attempts? left/.test(html(h(SF, { next: "/x", initialError: { kind: "wrong" } }))));
+  t(f, "the lock message is drawn in amber", /color:#fbbf24[^"]*">Too many wrong tries/.test(html(h(SF, { next: "/x", initialError: { kind: "locked" } }))));
+  t(f, "the brand mark has its name for screen readers", /<img[^>]*alt="Aevidine"/.test(a));
+}
+if (want("app/staff-login/BlockedView.tsx")) { const f = "app/staff-login/BlockedView.tsx"; const BV = (await import("@/app/staff-login/BlockedView.tsx")).default;
+  const a = html(h(BV));
+  t(f, "before the status arrives, the blocked screen offers Retry and Request unblock", />Retry</.test(a.replace(/<!-- -->/g, "")) && />Request unblock</.test(a));
+  t(f, "…and says 'up to 3 requests a day' without a count it does not know yet", /You can send up to 3 requests a day\.?</.test(a.replace(/<!-- -->/g, "")) && !/left today/.test(a));
+  t(f, "the note box allows typing (not out of requests yet)", /<textarea(?![^>]*disabled)/.test(a));
+  t(f, "the ban icon is hidden from screen readers (the words carry the meaning)", /<i class="fas fa-ban" aria-hidden="true"/.test(a));
+}
+save((process.env.T17_SAVE || "") + "/U-pages.json");

@@ -251,7 +251,8 @@
     "verify:server-only-tables": "node scripts/verify-server-only-tables.mjs",
     "verify:tax-rate-is-a-rate": "node scripts/verify-tax-rate-is-a-rate.mjs",
     "verify:invoice-is-final": "node scripts/verify-invoice-is-final.mjs",
-    "verify:sentry-privacy": "node --experimental-strip-types --no-warnings scripts/verify-sentry-privacy.mjs"
+    "verify:sentry-privacy": "node --experimental-strip-types --no-warnings scripts/verify-sentry-privacy.mjs",
+    "verify:t17-signin": "node scripts/verify-t17-signin.mjs"
   },
   "overrides": {
     "browserslist": "^4.28.8"
