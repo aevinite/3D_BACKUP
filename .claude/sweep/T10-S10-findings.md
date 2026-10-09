@@ -56,3 +56,35 @@ the file (lines ~3,442–end on 2026-10-09). Ledger: `LEDGER/T10-S10.md`. Each i
 - **Fix:** restaurant named in all four. Guard: `verify:t10-writes` (item 7, 3 checks, sabotaged red).
 - **Not mine, same shape:** `lib/removalAudit.ts` (bill read by session id) and `lib/sessionClose.ts`
   (close writes by session id after its ownership check).
+
+## 8 · Lifting a ban that was already lifted still wrote "unbanned"
+
+- **Where:** Manager panel → a table's guests / Audit & logs → Users → Unblock.
+- **Fix:** an already-lifted ban answers 404 and writes nothing; the read names `id, phone`, not `*`.
+  Guard: `verify:t10-writes` (item 8).
+
+## 9 · The printer-problem "resolve" door had no caller
+
+- **Where:** backend only (the floor's printer strip was removed 2026-08-31; its wiring 2026-09-03).
+- **Fix:** removed with an obituary; problems still close on the next good print. Guard: `verify:t10-writes`.
+
+## 10 · Five doors handed the database's own words to the screen
+
+- **Where:** customer save after a bill · pay-later "add a person" (two doors) · 🚩 raise an issue ·
+  un-paying a split bill.
+- **Fix:** the real error goes to the server log; the person reads one sentence. The complaint form's
+  own sentences still pass through. Guard: `verify:t10-writes` (item 10).
+
+## 11 · The invoice door's comment claimed a switch that does not exist
+
+- **Where:** backend only. `print_invoice` is always on for a manager since 2026-08-01; the comment
+  said the Access row "genuinely bites". Comment corrected; guard asserts both the words and the code.
+
+## Seen, outside this boundary (for its owner)
+
+- Manager panel on a 360px phone → Tables: every tile shows "🪑 4 / F…" and **no table number**
+  (P179909). `public/panels/editor` floor styling.
+- `lib/removalAudit.ts` reads the bill by session id alone; `lib/sessionClose.ts` closes by session id
+  alone after its ownership check (block A's named exemptions).
+- The waiter tablet's and the kitchen's `orders/:id/accept`, and the tablet's `items/:id/status`, can
+  revive a cancelled ticket the same way item 1 fixed here.
