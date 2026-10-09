@@ -381,6 +381,10 @@ export async function POST(req: NextRequest) {
     if (!r) return bad("Restaurant not found.", 404);
     const { error } = await sb.from("restaurants").update({ active }).eq("id", rid);
     if (error) return adminFail(active ? "reactivating this restaurant" : "suspending this restaurant", error, { action: "save" });
+    // A suspension stops the restaurant's staff apps (item 30). Their gates remember a restaurant's state for 30 seconds
+    // (lib/panelAccess), so without this the stop — or the restart — would land up to 30 seconds late on this server
+    // (sweep #10 T17 round 6, item 38). Same call the bin and the restore already make.
+    forgetRestaurant(rid, await ownersOf(rid));
     await logAction("admin", active ? "restaurant_reactivate" : "restaurant_suspend", { restaurant_id: rid, actor: "admin", detail: `${r.name} ${active ? "reactivated" : "suspended"}` });
     return ok({ ok: true, active });
   }
