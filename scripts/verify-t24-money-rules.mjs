@@ -259,6 +259,9 @@ eq("sameValue compares lists as SETS", cc.sameValue(["nuts", "dairy"], ["dairy",
 eq("sameValue tells two different lists apart", cc.sameValue(["nuts"], ["dairy"]), false);
 eq("sameValue compares objects by CONTENT", cc.sameValue({ t1: "Patio", t2: "Bar" }, { t2: "Bar", t1: "Patio" }), true);
 eq("sameValue tells two different rename maps apart", cc.sameValue({ t1: "Patio" }, { t1: "Terrace" }), false);
+// item 12 (sweep #10 T30): a LIST of objects is compared by content, not as "[object Object]" items.
+eq("sameValue tells two different lists of OBJECTS apart", cc.sameValue([{ label: "CGST", rate: 2.5 }], [{ label: "CGST", rate: 9 }]), false);
+eq("…and a list of objects in another order, keys in another order, is the same", cc.sameValue([{ a: 1, b: 2 }, { c: 3 }], [{ c: 3 }, { b: 2, a: 1 }]), true);
 eq("sameValue treats null/absent and {} as the same, so an unset column invents no clash", cc.sameValue(null, {}), true);
 eq("isPlainObject rejects arrays", cc.isPlainObject([1, 2]), false);
 eq("isPlainObject accepts an object", cc.isPlainObject({ a: 1 }), true);

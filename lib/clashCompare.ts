@@ -45,7 +45,13 @@ export const isPlainObject = (v: unknown): boolean => !!v && typeof v === "objec
 export function sameValue(a: unknown, b: unknown): boolean {
   const norm = (v: unknown) => (v == null ? "" : String(v).trim());
   if (Array.isArray(a) || Array.isArray(b)) {
-    const arr = (v: unknown) => (Array.isArray(v) ? v.map((x) => norm(x).toLowerCase()).filter(Boolean).sort() : []);
+    // A LIST OF OBJECTS IS COMPARED BY CONTENT TOO (sweep #10 T30, item 12, 2026-10-09). Each item
+    // went through `norm`, so every object became the literal "[object Object]" and two different
+    // lists of the same length compared EQUAL — the object case above, one level down. No screen sent
+    // such a list yet (the manager panel deliberately skips arrays), so nothing was unprotected; this
+    // is so the first one that does is protected. Text items keep their trim + case-insensitive rule.
+    const item = (x: unknown) => (x !== null && typeof x === "object" ? stableJson(x) : norm(x).toLowerCase());
+    const arr = (v: unknown) => (Array.isArray(v) ? v.map(item).filter(Boolean).sort() : []);
     const x = arr(a), y = arr(b);
     return x.length === y.length && x.every((v, i) => v === y[i]);
   }

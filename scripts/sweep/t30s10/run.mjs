@@ -728,8 +728,8 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
     for (let i = 0; i < 3000; i++) { const a = pick(vals), b = pick(vals); if (cc.sameValue(a, b) !== cc.sameValue(b, a)) return { ok: false, note: `${JSON.stringify(a)} / ${JSON.stringify(b)}` }; } return true;
   });
   G("sameValue is reflexive for every kind of value a column can hold", "real function", () => [null, 0, "x", true, ["a", "b"], { a: { b: [1] } }, "", []].every((v) => cc.sameValue(v, v)));
-  G("a top-level list of OBJECTS compares as '[object Object]' items — latent, no live call site sends one (Part 4)", "real function",
-    () => ({ ok: true, note: cc.sameValue([{ a: 1 }], [{ a: 2 }]) ? "two different object lists compare EQUAL — public/panels/editor/app.js deliberately sends no arrays, so nothing is unprotected today" : "compares by content" }));
+  G("a top-level list of OBJECTS compares by content, not as '[object Object]' items (item 12)", "real function",
+    () => !cc.sameValue([{ a: 1 }], [{ a: 2 }]) && cc.sameValue([{ a: 1 }, { b: 2 }], [{ b: 2 }, { a: 1 }]));
   G("lib/clashCompare.ts has no imports", "read the file", () => !/^\s*import\s/m.test(SRC[F]));
   G("lib/clash.ts is its only consumer in app/ lib/ components/", "grep", () => { const im = tsFiles.filter((f) => /@\/lib\/clashCompare/.test(read(f))); return { ok: im.length === 1 && im[0] === "lib/clash.ts", note: im.join(", ") }; });
 }
