@@ -59,7 +59,8 @@ for (const [ep, key] of [["banquet/items", "bqItems"], ["banquet/bills", "bqBill
 check(nid(), "the banquet bill list is searched on the SERVER, so a search never pulls the whole ledger", "read GET /banquet/bills",
   () => /sel\.or\(`cust_name\.ilike/.test(B("banquet/bills")));
 check(nid(), "…through safeSearch, so a customer called \"Sharma, R\" searches for what was typed", "read GET /banquet/bills",
-  () => /safeSearch\(new URL\(req\.url\)\.searchParams\.get\("q"\), 40\)/.test(B("banquet/bills")));
+  // safeSearch was renamed searchTerm (lib/searchText.ts) — same job, same caps.
+  () => /searchTerm\(new URL\(req\.url\)\.searchParams\.get\("q"\), 40\)/.test(B("banquet/bills")));
 check(nid(), "…and its row cap is bounded at 100 however big a ?limit= is typed", "read GET /banquet/bills",
   () => /Math\.min\(100, Math\.max\(1, Number\(new URL\(req\.url\)\.searchParams\.get\("limit"\)\) \|\| 40\)\)/.test(B("banquet/bills")));
 check(nid(), "one banquet bill is fetched by id AND restaurant, never by id alone", "read GET /banquet/bill",
@@ -85,7 +86,7 @@ check(nid(), "…driven live it answers people, a total and today's collection",
     : Array.isArray(J("khata").customers) && typeof J("khata").total === "number" && typeof J("khata").collectedToday === "number"));
 check(nid(), "the person picker is capped at 8 rows, which is what the sheet shows", "read GET /khata/customers",
   () => /\.limit\(8\)/.test(B("khata/customers")));
-check(nid(), "…and its search also goes through safeSearch", "read GET /khata/customers", () => /safeSearch\(new URL\(req\.url\)\.searchParams\.get\("q"\), 60\)/.test(B("khata/customers")));
+check(nid(), "…and its search also goes through safeSearch", "read GET /khata/customers", () => /searchTerm\(new URL\(req\.url\)\.searchParams\.get\("q"\), 60\)/.test(B("khata/customers")));
 
 // ── onhouse ────────────────────────────────────────────────────────────────────────────────────
 check(nid(), "the On-the-house report needs the Dashboard permission, because that is where it lives", "read GET /onhouse",

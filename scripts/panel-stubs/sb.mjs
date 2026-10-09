@@ -31,7 +31,12 @@ function builder(table) {
     gte(col, val) { st.filters.push({ kind: "gte", col, val }); return api; },
     lt(col, val) { st.filters.push({ kind: "lt", col, val }); return api; },
     or() { return api; }, ilike() { return api; }, contains() { return api; },
-    order() { return api; }, limit() { return api; }, range() { return api; },
+    order() { return api; }, limit() { return api; },
+    // OPT-IN PAGING (sweep #10 T9, 2026-10-09). range() used to be a no-op, so a handler that pages
+    // "until a short page" (the Z-report, the GST report, the dashboard) was handed the SAME rows
+    // on every page and looped to its safety cap. A guard sets G.HONOUR_RANGE = true to get real
+    // offsets; nothing changes for a guard that does not.
+    range(a, b) { st.range = [a, b]; return api; },
     single() { return settle(true); },
     maybeSingle() { return settle(true); },
     then(res, rej) { return settle(false).then(res, rej); },
@@ -67,7 +72,8 @@ function builder(table) {
     // a real delete answers [{...}] and a delete that matched nothing answers [] with no error.
     // The old shape made the stub unable to tell those two apart, so any guard checking "did this
     // delete actually remove anything" read as a refusal on a delete that worked.
-    const src = st.op === "select" ? found : st.op === "delete" ? found : (G.FIX[st.table] || []).filter(match);
+    let src = st.op === "select" ? found : st.op === "delete" ? found : (G.FIX[st.table] || []).filter(match);
+    if (G.HONOUR_RANGE && st.range && st.op === "select") src = src.slice(st.range[0], st.range[1] + 1);
     return Promise.resolve({ data: one ? (src[0] ? clone(src[0]) : null) : clone(src), error: null, count: src.length });
   }
   return api;

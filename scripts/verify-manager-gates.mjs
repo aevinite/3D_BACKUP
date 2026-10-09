@@ -211,6 +211,104 @@ await call("POST", "orders/o1/tip", { body: { amount: 500000 } });
   w && w.patch.tip === 100000 ? ok("a mis-typed tip is CAPPED before it reaches the database", "₹100000") : bad("the cap did not reach the write", JSON.stringify(w && w.patch));
 }
 
+// ── S10-T9 item 1 · the "Sections" Settings switch is refused, not only hidden ───────────────
+// Access → Manager settings → "Sections — who serves which table" promises that switching it off
+// makes its endpoints refuse. Until 2026-10-09 neither table-sections endpoint read it. Both doors
+// are driven, for the person the switch is about (a manager) and the two it is not (owner, admin).
+console.log("\nS10-T9 item 1 · GET/POST /table-sections and the Sections switch");
+const SECTIONS_OFF = { menus: { mgrset: { access: false } } };
+const SECTION_BODY = { body: { user_id: "w1", tables: [1, 2] } };
+world({}, { accessConfig: SECTIONS_OFF });
+await refused("a manager whose Sections section is switched off — reading the rota", "GET", "table-sections", {}, /waiter sections aren't part of this restaurant's manager panel/i);
+world({}, { accessConfig: SECTIONS_OFF });
+await refused("…and saving one waiter's tables", "POST", "table-sections", SECTION_BODY, /waiter sections aren't part of this restaurant's manager panel/i);
+{
+  const w = G.WRITES.filter((x) => x.table === "staff_users");
+  w.length === 0 ? ok("…and nothing was written to the waiter's row") : bad("the refused save still wrote staff_users", JSON.stringify(w));
+}
+world({}, { accessConfig: { menus: { mgrset: { access: true, tables: false } } } });
+G.FIX.staff_users = [{ id: "w1", restaurant_id: RID, role: "tablet", name: "Waiter One", username: "w1" }];
+await allowed("a manager who HAS the section (another section off) still reads the rota", "GET", "table-sections", {});
+world({}, { accessConfig: { menus: { mgrset: { access: true } } } });
+G.FIX.staff_users = [{ id: "w1", restaurant_id: RID, role: "tablet", name: "Waiter One", username: "w1" }];
+await allowed("…and saves it", "POST", "table-sections", SECTION_BODY);
+world({}, { accessConfig: SECTIONS_OFF });
+actAs("owner");
+await allowed("the OWNER is not who the switch describes", "GET", "table-sections", {});
+world({}, { accessConfig: SECTIONS_OFF });
+actAs("admin");
+await allowed("…and neither is the admin console", "GET", "table-sections", {});
+
+// ── S10-T9 item 2 · the On-the-house report reaches only as far as the dashboard does ────────
+// It sits behind view_dashboard, and the owner's 2026-09-23 rule is that this permission reaches
+// exactly as far as Access → Dashboard → "How far back it reaches" says. One no-charge bill from
+// this morning and one from ten days ago; the panel asks for ?days=30, as it always has.
+console.log("\nS10-T9 item 2 · GET /onhouse and the dashboard reach");
+{
+  const fresh = new Date().toISOString();
+  const old = new Date(Date.now() - 10 * 864e5).toISOString();
+  const COMPED = [
+    { id: "oh1", restaurant_id: RID, session_id: "s-today", table_number: "4", subtotal: 400, tax: 20, total: 420, items: [{ qty: 2 }], paid_at: fresh, payment_method: "On the house", payment_status: "paid", payment_note: "" },
+    { id: "oh2", restaurant_id: RID, session_id: "s-old", table_number: "9", subtotal: 900, tax: 45, total: 945, items: [{ qty: 1 }], paid_at: old, payment_method: "On the house", payment_status: "paid", payment_note: "" },
+  ];
+  const reachWorld = (range) => world({ view_dashboard: true }, { orders: COMPED, accessConfig: range ? { view_dashboard: { manager_opts: { range } } } : {} });
+  const asked = async () => { const r = await call("GET", "onhouse", { query: "?days=30" }); return r; };
+
+  reachWorld("today");
+  let r = await asked();
+  r.status === 200 && r.count === 1 && r.bills?.[0]?.table_number === "4" && r.days === 1 && r.windowLabel === "today"
+    ? ok("a today-only reach is answered with TODAY's no-charge bills, however many days are asked for", `${r.count} bill · ${r.windowLabel}`)
+    : bad("a today-only reach still lists older no-charge bills", JSON.stringify({ status: r.status, count: r.count, days: r.days, label: r.windowLabel }));
+  reachWorld(null);
+  r = await asked();
+  r.count === 1 && r.days === 1 ? ok("…and an UNSET reach means today, the same default /stats uses") : bad("an unset reach reached further than today", JSON.stringify({ count: r.count, days: r.days }));
+  reachWorld("last30");
+  r = await asked();
+  r.count === 2 && r.days === 30 && r.windowLabel === "the last 30 days"
+    ? ok("a 30-day reach still gets the whole thirty days", `${r.count} bills`)
+    : bad("a 30-day reach lost bills it is entitled to", JSON.stringify({ count: r.count, days: r.days, label: r.windowLabel }));
+  reachWorld("today");
+  actAs("admin");
+  r = await asked();
+  r.count === 1 ? ok("…and the clamp is for everyone, the admin console included — like /stats") : bad("the admin was handed a wider window than the screen offers", `${r.count}`);
+  // The card must print the server's window, not a constant of its own.
+  const panelSrc = (await import("node:fs")).readFileSync(join(ROOT, "public/panels/editor/app.js"), "utf8");
+  /oh\.windowLabel/.test(panelSrc) && !/Last 30 days: <b>/.test(panelSrc)
+    ? ok("the Pay later card prints the window the server answered, not a hard-coded \"Last 30 days\"")
+    : bad("the On-the-house card still hard-codes its window");
+}
+
+// ── S10-T9 item 3 · the dish-photo door obeys the Edit-menu switch like every editor door ────
+// Switched off, the menu editor is a read-only Viewer for everyone below the admin (owner,
+// 2026-08-02). The dish SAVE was refused; the photo UPLOAD was not, and stored the file anyway.
+console.log("\nS10-T9 item 3 · POST /dish-photo and the Edit-menu switch");
+{
+  const photoReq = () => {
+    const fd = new FormData();
+    fd.append("file", new File([new Uint8Array(8)], "dish.png", { type: "image/png" }));
+    return new NextRequest("http://localhost/api/editor/dish-photo", { method: "POST", headers: { cookie: "aevidine_admin_rid=" + RID }, body: fd });
+  };
+  const send = async () => { const r = await route.POST(photoReq(), ctx("dish-photo")); let j = {}; try { j = await r.clone().json(); } catch {} return { status: r.status, ...j }; };
+  const EDITOR_OFF = { menus: { manager: { editor: false } } };
+  for (const who of ["manager", "owner"]) {
+    world({}, { accessConfig: EDITOR_OFF });
+    actAs(who);
+    let r;
+    try { r = await send(); } catch (e) { r = { status: 0, error: `the upload went ahead and reached storage (${e.message})` }; }
+    r.status === 403 && /menu editor isn't part of this restaurant's manager panel/.test(String(r.error || ""))
+      ? ok(`${who === "owner" ? "an" : "a"} ${who} with Edit menu switched off cannot upload a dish photo`, `403 "${r.error}"`)
+      : bad(`${who === "owner" ? "an" : "a"} ${who} with Edit menu switched off still reached the photo upload`, `${r.status} ${r.error || ""}`);
+  }
+  // …and with the switch ON the door is not refused by the tab (it reaches its own checks).
+  world({}, {});
+  const fd = new FormData();
+  const r = await route.POST(new NextRequest("http://localhost/api/editor/dish-photo", { method: "POST", headers: { cookie: "aevidine_admin_rid=" + RID }, body: fd }), ctx("dish-photo"));
+  const j = await r.json().catch(() => ({}));
+  r.status === 400 && /No photo was attached/.test(String(j.error || ""))
+    ? ok("with Edit menu ON the photo door is reached (and asks for a file)", `400 "${j.error}"`)
+    : bad("with Edit menu ON the photo door was refused", `${r.status} ${j.error}`);
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });

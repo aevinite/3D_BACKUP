@@ -187,8 +187,12 @@ check(nid(), "the 'owes ₹x' tag the PICKER shows equals what the Pay Later boo
     return { ok: off.length === 0, note: off.length ? off.join(" · ") : `${book.length} people, every one agreeing` };
   });
 check(nid(), "orders.net_amount is still the one stored definition of a bill's net", "one read-only SQL statement",
-  async () => { const r = await sql(`SELECT count(*)::int n FROM orders WHERE net_amount IS DISTINCT FROM (total - disc_gross)`);
-    return { ok: Number(r[0].n) === 0, note: `${r[0].n} orders out of step` }; });
+  // The column's OWN definition is round(total − disc_gross, 2) floored at 0, so comparing it to the
+  // un-rounded difference counted every fractional-paisa discount as "out of step" (82 rows on
+  // 2026-10-09 — all of them correct). The property is that the stored net IS that definition.
+  async () => { const r = await sql(`SELECT is_generated, generation_expression FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='net_amount'`);
+    const g = r[0] || {};
+    return { ok: g.is_generated === "ALWAYS" && /round\(\(total - disc_gross\), 2\)/.test(String(g.generation_expression)), note: `${g.is_generated} · ${g.generation_expression}` }; });
 check(nid(), "verify:one-number's allowance for this route covers only the LIVE-bill path its reason names", "read the guard's allow-list beside every line in this route that grosses a discount",
   async () => {
     const { readFileSync } = await import("node:fs");

@@ -4225,15 +4225,20 @@ function ordersKhataHtml() {
       ? `<div class="empty">No one matches “${esc(state.khataSearch)}”.</div>`
       : `<div class="empty">No pay-later bills right now. Settle a table with 📒 <b>Pay Later</b> and it lands here.</div>`);
   const head = summary + searchBar;
-  // On-the-house report (last 30 days) + the "show in main lists" toggle. Report data
+  // On-the-house report (as far back as the dashboard reaches) + the "show in main lists" toggle. Report data
   // needs the dashboard power; the card explains itself when that's off.
   const oh = state.onhouseReport;
   const showOnHouse = lsGet("lfh_show_onhouse", "1") !== "0";
+  // The window is the SERVER's answer (sweep #10 T9, 2026-10-09): /onhouse reaches only as far as
+  // the dashboard reach the admin set, so "Last 30 days" printed over a today-only answer would have
+  // been a sentence the numbers under it contradicted.
+  const ohWin = (oh && oh.windowLabel) || "the last 30 days";
+  const ohWinCap = ohWin.charAt(0).toUpperCase() + ohWin.slice(1);
   const ohRows = oh && oh.bills && oh.bills.length
     ? `<table class="khata-oh-table"><tr><th>When</th><th>Table</th><th>Items</th><th>Would-be amount</th></tr>
        ${oh.bills.map((bl) => `<tr><td>${esc(fmtDate(bl.paid_at))}</td><td>T${esc(String(bl.table_number || "?"))}</td><td>${bl.items || "—"}</td><td class="khata-strike">${inr(bl.would_be)}</td></tr>`).join("")}</table>
-       <div class="muted small" style="margin-top:8px">Last 30 days: <b>${oh.count} bill${oh.count === 1 ? "" : "s"} · ${inr(oh.total)}</b> given on the house.</div>`
-    : `<div class="muted small">${oh ? "No on-the-house bills in the last 30 days." : "The on-the-house report needs the dashboard permission."}</div>`;
+       <div class="muted small" style="margin-top:8px">${esc(ohWinCap)}: <b>${oh.count} bill${oh.count === 1 ? "" : "s"} · ${inr(oh.total)}</b> given on the house.</div>`
+    : `<div class="muted small">${oh ? `No on-the-house bills ${ohWin === "today" ? "today" : `in ${esc(ohWin)}`}.` : "The on-the-house report needs the dashboard permission."}</div>`;
   const ohCard = `<div class="card khata-oh">
     <h3>🏠 On the house <span class="sub">· no-charge bills</span></h3>
     ${ohRows}

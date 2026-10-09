@@ -167,7 +167,8 @@ check(nid(), "…and the day rows add back to the month", "driven live, the arit
     const j = J("gst"); const s = Math.round(j.days.reduce((a, d) => a + d.gross, 0) * 100) / 100;
     return { ok: Math.abs(s - j.totals.gross) < 0.5, note: `days ${s} vs month ${j.totals.gross}` }; });
 check(nid(), "…and the note says out loud what the filing does and does not include", "driven live",
-  () => needLive("gst") || (typeof J("gst").note === "string" && /Paid dine-in bills only/.test(J("gst").note)));
+  // Since 2026-09-23 the window is said in words ("Paid dine-in bills for today …").
+  () => needLive("gst") || (typeof J("gst").note === "string" && /^Paid dine-in bills for .+excludes Zomato\/Swiggy/.test(J("gst").note)));
 check(nid(), "the filing the SCREEN gets agrees with the month re-computed at each order's own rate", "drive GET /gst-report for a month that carries more than one rate, then redo it in SQL",
   async () => {
     // The month picked is the one this restaurant's rows actually mix rates in — otherwise the
@@ -180,6 +181,30 @@ check(nid(), "the filing the SCREEN gets agrees with the month re-computed at ea
     const mon = pick[0].mon;
     const r = await F.api(`/gst-report?month=${mon}`);
     if (r.status !== 200) return { ok: false, note: `the filing answered ${r.status}` };
+    // ── THE FILING REACHES AS FAR AS THE DASHBOARD SINCE 2026-09-23 ─────────────────────────
+    // On a restaurant whose manager reach is shorter than 30 days a month cannot be asked for at
+    // all: the answer is the reach's own window. Then the SAME per-own-rate arithmetic is redone
+    // for THAT window (the 05:00-IST business days it states), so the row keeps proving the rule
+    // instead of comparing today's window against a whole month.
+    if (r.json.monthMode === false) {
+      const days = { today: 1, today_yesterday: 2, last7: 7, last30: 30 }[r.json.reach] || 1;
+      const IST = 5.5 * 3600e3, FIVE = 5 * 3600e3;
+      const bizIdx = Math.floor((Date.now() + IST - FIVE) / 864e5);
+      const startIso = new Date(bizIdx * 864e5 + FIVE - IST - (days - 1) * 864e5).toISOString();
+      const w = await sql(`
+        WITH o AS (
+          SELECT coalesce(o.session_id::text, 'solo:' || o.id::text) AS bill,
+                 coalesce(o.tax_rate, (SELECT lfh_effective_tax_rate('${FRENCH_HOUSE}'))) AS own_rate,
+                 coalesce(o.taxable_base, o.subtotal, 0) AS base, coalesce(o.discount, 0) AS disc
+            FROM orders o
+           WHERE o.restaurant_id = '${FRENCH_HOUSE}' AND o.payment_status = 'paid' AND o.status <> 'cancelled'
+             AND o.created_at >= '${startIso}' AND o.created_at < now()),
+        per_rate AS (SELECT bill, own_rate, sum(base) AS base, sum(disc) AS disc FROM o GROUP BY 1,2)
+        SELECT coalesce(round(sum(round(greatest(base - least(disc, base), 0) * own_rate, 2)), 2), 0) AS tax FROM per_rate`);
+      const got = Number(r.json.totals.tax), expect = Number(w[0].tax);
+      return { ok: Math.abs(got - expect) < 1.0,
+               note: `reach ${r.json.reach} — asked for ${mon}, answered ${r.json.windowLabel}: the filing says \u20b9${got}, each order's own rate over that window says \u20b9${expect}` };
+    }
     const want = await sql(`
       WITH o AS (
         SELECT coalesce(o.session_id::text, 'solo:' || o.id::text) AS bill,

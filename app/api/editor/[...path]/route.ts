@@ -275,7 +275,12 @@ const TAB_PATHS: { tab: ManagerTabKey; test: (p: string, method: string) => bool
   // SERVED, removing a dish a guest cancelled, and fixing a quantity — the floor, refused with
   // "the menu editor isn't part of this restaurant's manager panel". Nothing about the guest's food
   // belongs to the menu-editor switch, so the order-item actions are excluded by name.
-  { tab: "editor", test: (p) => /^(categories|filters)(\/|$)/.test(p) || (/^items(\/|$)/.test(p) && !ORDER_ITEM_ACTION.test(p)) },
+  // `dish-photo` JOINED THIS ROW on 2026-10-09 (sweep #10 T9, item 3). It is the menu editor's own
+  // door — the Image card of the dish form — but it was missing here, so with Edit menu switched off
+  // (the read-only Viewer for everyone below the admin, owner 2026-08-02) the dish SAVE was refused
+  // while the photo upload still accepted the file and wrote it into the restaurant's public
+  // storage folder. tabGate runs before the upload is dispatched, so naming it here is the whole fix.
+  { tab: "editor", test: (p) => /^(categories|filters|dish-photo)(\/|$)/.test(p) || (/^items(\/|$)/.test(p) && !ORDER_ITEM_ACTION.test(p)) },
 ];
 async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[], method = "GET"): Promise<NextResponse | null> {
   if (!g.user) return null;                         // admin super-user keeps every tab
@@ -298,6 +303,26 @@ async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[
   const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the Audit & logs tab" };
   return err(`${LABEL[hit.tab]} isn't part of this restaurant's manager panel.`, 403);
 }
+
+// ── A SWITCHED-OFF SETTINGS SECTION IS REFUSED, NOT ONLY HIDDEN (sweep #10 T9, 2026-10-09) ────
+// Access → Manager settings lists three sections a manager can be given — Tables, Users and
+// Sections ("who serves which table") — and the screen promises, for each: *"Switch one off and it
+// is gone from their sidebar — and its endpoints refuse, so it is not reachable by typing a URL
+// either."* Tables is refused at the settings save (below) and Users in /api/owner/staff. Sections
+// was refused NOWHERE: its two endpoints (GET and POST `table-sections`) asked only the
+// table_assign power, so a manager whose Sections section the admin had switched off still read
+// every waiter's tables and could rewrite them, from a stale tab or a typed URL — the hidden card
+// was the only guard, which is the one shape this access model exists to remove.
+//
+// A real MANAGER only, exactly like the Tables refusal: the owner and the admin console are not
+// whom these switches describe. A failed read of the restaurant row leaves the section ON, also
+// like Tables — a hide switch is never the thing that stops a working floor on a database blip.
+async function managerSectionOff(g: { user: StaffUser | null }, rid: string, key: "access"): Promise<boolean> {
+  if (!g.user || g.user.role !== "manager") return false;
+  const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config;
+  return managerSettingsOff(cfg).includes(key);
+}
+const SECTIONS_OFF_MSG = "Waiter sections aren't part of this restaurant's manager panel.";
 
 // ── The nine parts of "Edit the menu" ─────────────────────────────────────────────
 // Access → Manager's menu → Edit menu (Editor) lists nine sub-options, and the owner's
@@ -841,6 +866,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // module effective AND — for a manager — the granted power.
     if (p === "table-sections") {
       if (!(await managerCan(g, rid, "table_assign"))) return permDenied("give waiters their own tables");
+      if (await managerSectionOff(g, rid, "access")) return err(SECTIONS_OFF_MSG, 403);
       const [staff, settings] = await Promise.all([
         sb.from("staff_users").select("id, username, name, role, active, assigned_tables")
           .eq("restaurant_id", rid).eq("role", "tablet").is("deleted_at", null)
@@ -1211,8 +1237,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "onhouse") {
       if (g.user && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
-      const days = Math.min(Math.max(Math.round(Number(new URL(req.url).searchParams.get("days"))) || 30, 1), 365);
-      const since = new Date(Date.now() - days * 86400000).toISOString();
+      // ── IT REACHES AS FAR AS THE DASHBOARD DOES, AND NO FURTHER (sweep #10 T9, 2026-10-09) ──────
+      // This report sits behind the dashboard's own permission, and on 2026-09-23 the owner ruled
+      // what that permission reaches: *"why does it take the GST report of the month? The manager
+      // has only access today."* /stats, /staff-risk and /gst-report were clamped to the Access
+      // screen's "How far back it reaches" that day. This one was missed — it kept answering the
+      // panel's `?days=30` (and up to 365), so a manager whose dashboard reaches TODAY was still
+      // shown thirty days of no-charge bills: when, which table, how much, on the Pay later screen.
+      //
+      // Clamped HERE, for everyone, exactly as /stats is — a wider number in the URL is answered
+      // with the reach, never with an error. The window is whole 05:00-IST business days, the same
+      // boundary the dashboard and the day-close sheet draw, and its plain name rides back so the
+      // card says what it is showing instead of a hard-coded "30 days".
+      const ohReach = dashboardReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+      const asked = Math.min(Math.max(Math.round(Number(new URL(req.url).searchParams.get("days"))) || 30, 1), 365);
+      const days = Math.min(asked, reachDays(ohReach));
+      const since = new Date(new Date(businessDayStartIso()).getTime() - (days - 1) * 864e5).toISOString();
+      const windowLabel = days === 1 ? "today" : days === 2 ? "today and yesterday" : `the last ${days} days`;
       const rows = must(await sb.from("orders")
         .select("id,session_id,table_number,subtotal,tax,total,items,paid_at,payment_note")
         .eq("restaurant_id", rid).eq("payment_method", ON_THE_HOUSE_METHOD).eq("payment_status", "paid")
@@ -1228,7 +1269,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         bills.set(key, bl);
       }
       const list = [...bills.values()];
-      return ok({ bills: list, count: list.length, total: Math.round(list.reduce((s, bl) => s + bl.would_be, 0) * 100) / 100 });
+      return ok({ bills: list, count: list.length, total: Math.round(list.reduce((s, bl) => s + bl.would_be, 0) * 100) / 100, days, windowLabel, reach: ohReach });
     }
 
     if (p === "all") {
@@ -3313,6 +3354,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // stable, and an empty list is a legitimate "this waiter serves nothing yet".
     if (a === "table-sections") {
       if (!(await managerCan(g, rid, "table_assign"))) return permDenied("give waiters their own tables");
+      if (await managerSectionOff(g, rid, "access")) return err(SECTIONS_OFF_MSG, 403);
       const uid = String(body?.user_id || "").trim();
       if (!uid) return err("Which person? — user_id is required.");
       const cnt = Number((await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle()).data?.table_count) || 12;

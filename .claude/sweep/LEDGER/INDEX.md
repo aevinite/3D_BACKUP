@@ -61,7 +61,7 @@ terminals' rows — keep both sides.
 | T6 | `P175001`–`P176000` | Manager panel — editor/app.js, part 1 of 3 | ⏳ not run yet | — | — | — | — |
 | T7 | `P176001`–`P177000` | Manager panel — editor/app.js, part 2 of 3 | ⏳ not run yet | — | — | — | — |
 | T8 | `P177001`–`P178000` | Manager panel — editor/app.js part 3 of 3, the host page and inventory | ⏳ not run yet | — | — | — | — |
-| T9 | `P178001`–`P179000` | The manager panel's server route, part 1 of 2 | ⏳ not run yet | — | — | — | — |
+| T9 | `P178001`–`P179000` | The manager panel's server route, part 1 of 2 | `T9-S10.md` | 562 | 560 | 3 | 3 |
 | T10 | `P179001`–`P180000` | The manager panel's server route, part 2 of 2 | ⏳ not run yet | — | — | — | — |
 | T11 | `P180001`–`P181000` | The kitchen screen | ⏳ not run yet | — | — | — | — |
 | T12 | `P181001`–`P182000` | The waiter tablet screen | ⏳ not run yet | — | — | — | — |

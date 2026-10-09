@@ -15,11 +15,11 @@ const count = (t, re) => (t.match(re) || []).length;
 // ── A1 · DOES EVERY ONE OF THESE NEED A LOGIN? (28 endpoints, driven signed OUT) ───────────────
 
 for (const p of ALL_GET_PATHS) {
-  check(nid(), `signed out, GET /api/editor${p} answers "please log in" and no data`, "driven live with no cookie",
+  check(nid(), `signed out, GET /api/editor${p} answers "please log in" and no data`, "driven in memory: the real route bundled, sign-in stub answering nobody (S10 — never a signed-out call to a running app)",
     () => {
       const r = ANON[p];
-      if (!r || !r.status) return "skip: no answer from this terminal's dev server";
-      return { ok: r.status === 401 && /Not authorised/.test(r.text), note: `status ${r.status}` };
+      if (!r || !r.status) return "skip: the bundled route could not be built";
+      return { ok: r.status === 401 && /Not authorised/.test(r.text) && r.reads === 0, note: `status ${r.status} · ${r.reads} database trips` };
     });
 }
 
@@ -88,16 +88,28 @@ const BY_TABLE = (() => {
   }
   return out.sort((a, b) => (a.table < b.table ? -1 : a.table > b.table ? 1 : a.n - b.n));
 })();
+// ── RE-LOCKED 2026-10-09 (sweep #10 T9) — every move traced to a deliberate commit ──────────────
+//   deletion_audit 2→3  madeAnswers(), "only food that was made is a loss" (2026-09-25)
+//   print_jobs     2→3  print/send queues a KITCHEN SLIP too (2026-09-14)
+//   restaurants    9→12 the GST report reads the dashboard reach (2026-09-23); the Sections switch
+//                       and the On-the-house reach are read (sweep #10 T9 items 1 and 2, 2026-10-09)
+//   sessions      13→14 invoiceLockedByOrder reads invoice_at — a reopen keeps the number (2026-09-25)
+//   orders        18→17, order_items 3→2  "Send to kitchen" collapsed three writes into one RPC
+//                                         (mig 394, 2026-09-17)
+// The ledger's OWN ids did not move: since this re-lock, results are written back into
+// T24-S8.md by each row's wording (scripts/sweep/t9s10/t24-writeback.mjs), because every id after
+// this generated block shifts whenever a count does. The rows for the two statements that left are
+// marked retired there; the rows for the four that arrived are new checks in T9-S10.md.
 const TABLE_COUNTS = {
   aggregator_orders: 7, app_config: 1, banquet_bills: 3, banquet_items: 1,
   bill_chain: 1, blocklist: 1, categories: 1, customers: 1,
-  daily_counters: 1, deletion_audit: 2, feedback: 1, filters: 1,
-  issues: 1, khata_customers: 1, menu_items: 2, order_items: 3,
-  orders: 18, print_jobs: 2, printer_events: 1, restaurants: 9,
-  session_members: 4, session_payments: 2, sessions: 13, settings: 11,
+  daily_counters: 1, deletion_audit: 3, feedback: 1, filters: 1,
+  issues: 1, khata_customers: 1, menu_items: 2, order_items: 2,
+  orders: 17, print_jobs: 3, printer_events: 1, restaurants: 12,
+  session_members: 4, session_payments: 2, sessions: 14, settings: 11,
   staff_actions: 2, staff_users: 2, table_merges: 2, waiter_calls: 2,
 };
-check(nid(), "this half still holds exactly 96 database statements, and the same number of them per table",
+check(nid(), "this half still holds exactly 100 database statements, and the same number of them per table",
   "bracket-matched every sb.from(...) chain in the half, then counted by table",
   () => {
     const got = {};
@@ -105,7 +117,7 @@ check(nid(), "this half still holds exactly 96 database statements, and the same
     const moved = [...new Set([...Object.keys(TABLE_COUNTS), ...Object.keys(got)])]
       .filter((t) => (TABLE_COUNTS[t] || 0) !== (got[t] || 0))
       .map((t) => `${t} ${TABLE_COUNTS[t] || 0}→${got[t] || 0}`);
-    return { ok: CH.length === 96 && moved.length === 0,
+    return { ok: CH.length === 100 && moved.length === 0,
              note: moved.length ? moved.join(", ") : `${CH.length} statements across ${Object.keys(got).length} tables` };
   });
 
