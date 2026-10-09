@@ -107,7 +107,11 @@ const cleanup = async () => {
   try { await db(`print_jobs?restaurant_id=eq.${RID}`, { method: "DELETE" }); } catch {}
   for (const id of made.orders) {
     try { await db(`orders?id=eq.${id}`, { method: "DELETE" }); }
-    catch { try { await db(`orders?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ deleted_at: new Date().toISOString() }) }); } catch {} }
+    catch {
+      // Cancelled, then removed — a test order was never a sale (verify:test-safety §17, 2026-10-09).
+      try { await db(`orders?id=eq.${id}&payment_status=neq.paid`, { method: "PATCH", body: JSON.stringify({ status: "cancelled", cancelled_at: new Date().toISOString() }) }); } catch {}
+      try { await db(`orders?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ deleted_at: new Date().toISOString() }) }); } catch {}
+    }
   }
   try { await db(`orders?restaurant_id=eq.${RID}`, { method: "DELETE" }); } catch {}
   for (const id of made.agents) { try { await db(`print_agents?id=eq.${id}`, { method: "DELETE" }); } catch {} }
