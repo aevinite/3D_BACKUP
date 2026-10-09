@@ -4274,10 +4274,24 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // the impossible amount; this is the guard behind it.
       const discRate = effectiveTaxRate(await taxSettings(rid));
       const discBase = discountBaseOf(cur as OrderMoney, discRate);
+      // The bill's own orders, read ONCE — the cap below and the whole-bill clamp further down both
+      // need them. A solo order (no session) has no siblings and keeps its own base.
+      const sib = cur.session_id
+        ? ((must(await sb.from("orders").select("subtotal, taxable_base, mrp_amount, status").eq("session_id", cur.session_id).eq("restaurant_id", rid).limit(500)) || []) as (OrderMoney & { status?: string })[])
+        : [];
+      const billBase = sib.reduce((acc, o) => acc + (o.status === "cancelled" ? 0 : discountBaseOf(o, discRate)), 0);
       // Per-role %-cap (owner 2026-07-24): refuse a discount over this actor's configured limit
       // (non-breaking — no cap → no block). Admin (g.user null) is uncapped.
+      //
+      // MEASURED AGAINST WHAT THE DISCOUNT IS ON (sweep #10 T10, item 4). On a table the amount is a
+      // WHOLE-BILL discount — it goes to lfh_staff_bill_discount and is split across every order — so
+      // the limit is a share of the bill. It was measured against the ONE order whose id the panel
+      // sent (the bill's first ticket), while the Discount screen measures it against the whole bill
+      // (openDiscountModal → capBase). On a two-ticket bill at a 10% restaurant (Saffron Street,
+      // Copper Kettle), ₹100 off a ₹1,000 bill whose first ticket was ₹200 was offered by the screen
+      // and refused here as "over your 10% limit". A solo order is still measured against itself.
       { const cap = await discountCapPct(rid, discountRole(g.user?.role));
-        if (Number.isFinite(raw) && overDiscountCap(Math.max(raw, 0), discBase, cap)) return err(`That discount is over your ${cap}% limit — ask the owner.`, 403); }
+        if (Number.isFinite(raw) && overDiscountCap(Math.max(raw, 0), cur.session_id ? billBase : discBase, cap)) return err(`That discount is over your ${cap}% limit — ask the owner.`, 403); }
       const note = String((body && body.note) || "").slice(0, 200) || null;
       // WHOLE-BILL (session) discount path — the FIX for the "discount shrinks when marked paid"
       // bug (2026-07-08). A table's discount is conceptually on the whole BILL, but the manager
@@ -4310,9 +4324,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // predates the split and would let a discount eat an MRP line. Clamping here, before
         // the RPC, is what keeps the cap true for the whole bill; on a bill with nothing
         // untaxed the two numbers are identical, so no existing restaurant sees a change.
-        const sib = (must(await sb.from("orders").select("subtotal, taxable_base, mrp_amount, status").eq("session_id", cur.session_id).eq("restaurant_id", rid)) || []) as
-          (OrderMoney & { status?: string })[];
-        const billBase = sib.reduce((acc, o) => acc + (o.status === "cancelled" ? 0 : discountBaseOf(o, discRate)), 0);
+        // (`sib` and `billBase` are read once, above the cap check — item 4.)
         const amount = Number.isFinite(raw) ? Math.round(Math.min(Math.max(raw, 0), billBase) * 100) / 100 : 0;
         const res = must(await sb.rpc("lfh_staff_bill_discount", { p_session: cur.session_id, p_amount: amount, p_note: note }));
         await log("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `bill discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
