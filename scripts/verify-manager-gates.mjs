@@ -424,6 +424,22 @@ for (const ep of ["zreport", "gst-report"]) {
   else bad(`${ep}: the Billing name was not used`, JSON.stringify(r.restaurant));
 }
 
+// ── S10-T9 item 12 · the Bills record's two follow-up reads name their restaurant ─────────────
+// They were keyed on session ids alone (safe by construction, but the rule is: every read names its
+// restaurant and its bound). Driven: a guest row of ANOTHER restaurant on the same session id must
+// not become this bill's customer name.
+console.log("\nS10-T9 item 12 · the Bills record's session and guest reads are restaurant-scoped");
+{
+  world({}, {});
+  G.FIX.orders = [{ id: "o1", restaurant_id: RID, session_id: "s5", created_at: new Date().toISOString(), deleted_at: null }];
+  G.FIX.sessions = [{ id: "s5", restaurant_id: "rest-2", bill_no: 999 }];
+  G.FIX.session_members = [{ session_id: "s5", restaurant_id: "rest-2", name: "Not theirs", role: "owner" }];
+  const r = await call("GET", "orders", { query: "?bills=1" });
+  const o = (r.rows || [])[0] || {};
+  if (o.bill_no === undefined && o.customer_name === undefined) ok("another restaurant's session and guest rows never decorate this restaurant's bill");
+  else bad("another restaurant's session or guest row reached this bill", JSON.stringify({ bill_no: o.bill_no, name: o.customer_name }));
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });

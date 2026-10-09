@@ -1568,8 +1568,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const [sessQ, memQ, chainQ, payQ] = await Promise.all([
           // `invoice_reopen_count` (mig 407) rides along so a bill that is LIVE again can still
           // show it was reopened — invoice_voided only covers the state while it is on the floor.
-          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,invoice_reopen_count,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
-          sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
+          // Both scoped to THIS restaurant and capped (sweep #10 T9, item 12). They were keyed on the ids
+          // alone — safe by construction, because `sids` came from a restaurant-scoped orders read, but
+          // the rule here is that every read names its restaurant and its bound, so that no future change
+          // to how `sids` is built can quietly widen them. The round-2 query audit found these two.
+          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,invoice_reopen_count,bill_no,cust_name,cust_phone,bill_printed_at").eq("restaurant_id", rid).in("id", sids).limit(sids.length),
+          sb.from("session_members").select("session_id,name,role").eq("restaurant_id", rid).in("session_id", sids).eq("role", "owner").limit(2000),
           // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
           // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
           // SERVER read of just these sessions, never something a client could ask for. Only the
