@@ -99,24 +99,19 @@ for (const [name, status, body, want] of cases) {
     order_id: "o-1", pin: "4321", setup_code: "ABCD", token: "tkn", reset: 2,
   }) : null;
   const text = JSON.stringify(kept);
-  kept && !/s3cret-pw|pw-a|pw-b|4321|ABCD|tkn/.test(text)
-    ? ok("a stored reply drops every password, PIN, setup code and token — at the top AND inside a list")
-    : bad("a stored reply still keeps a secret", text);
-  kept && kept.order_id === "o-1" && kept.username === "asha" && kept.reset === 2 && kept.logins.length === 2 && kept.logins[0].username === "a"
-    ? ok("…while keeping what a duplicate is for: the ids, the names and the counts")
-    : bad("the redaction removed fields a duplicate needs", text);
-  typeof withoutSecrets === "function" && withoutSecrets(null) === null && withoutSecrets("fine") === "fine"
-    ? ok("…and a body-less or plain-text reply passes through unchanged")
-    : bad("withoutSecrets changes a reply that has no fields");
+  if (kept && !/s3cret-pw|pw-a|pw-b|4321|ABCD|tkn/.test(text)) ok("a stored reply drops every password, PIN, setup code and token — at the top AND inside a list");
+  else bad("a stored reply still keeps a secret", text);
+  if (kept && kept.order_id === "o-1" && kept.username === "asha" && kept.reset === 2 && kept.logins.length === 2 && kept.logins[0].username === "a") ok("…while keeping what a duplicate is for: the ids, the names and the counts");
+  else bad("the redaction removed fields a duplicate needs", text);
+  if (typeof withoutSecrets === "function" && withoutSecrets(null) === null && withoutSecrets("fine") === "fine") ok("…and a body-less or plain-text reply passes through unchanged");
+  else bad("withoutSecrets changes a reply that has no fields");
 }
 {
   const src = readFileSync(join(ROOT, "lib/idempotency.ts"), "utf8");
-  /finish\(actionId, didSomething\(res\.status, body\), withoutSecrets\(body\)\)/.test(src)
-    ? ok("lib/idempotency.ts stores the reply only after withoutSecrets()")
-    : bad("lib/idempotency.ts stores the reply without removing its secrets");
-  /withoutSecrets\(claim\.result\)/.test(src)
-    ? ok("…and strips them again before echoing a stored reply (rows written before the rule)")
-    : bad("a stored reply is echoed without removing secrets an older row may still hold");
+  if (/finish\(actionId, didSomething\(res\.status, body\), withoutSecrets\(body\)\)/.test(src)) ok("lib/idempotency.ts stores the reply only after withoutSecrets()");
+  else bad("lib/idempotency.ts stores the reply without removing its secrets");
+  if (/withoutSecrets\(claim\.result\)/.test(src)) ok("…and strips them again before echoing a stored reply (rows written before the rule)");
+  else bad("a stored reply is echoed without removing secrets an older row may still hold");
 }
 
 // ── 2. the guard heals rows written before the rule existed ─────────────────────────────────
