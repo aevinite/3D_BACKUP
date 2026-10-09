@@ -256,8 +256,13 @@ L("whoami says this is a manager, not the admin", "/whoami", async (j) => ({ ok:
 L("the day-close sheet's issued count is the bill counter's", "/zreport", async (j) => { const d = await one(`select coalesce((select n from daily_counters where restaurant_id='${FH}' and key='bill' and day=(now() at time zone 'Asia/Kolkata' - interval '5 hours')::date),0) n`); return { ok: j.numbering?.issued === d.n, note: `${j.numbering?.issued} vs ${d.n}` }; });
 L("the sheet's 'on nothing at all' list is exactly the numbers no row in the database carries", "/zreport", async (j) => {
   const d = await sql(`with c as (select coalesce((select n from daily_counters where restaurant_id='${FH}' and key='bill' and day=(now() at time zone 'Asia/Kolkata' - interval '5 hours')::date),0) n)
-    select g::int no from c, generate_series(1, c.n) g where not exists (select 1 from sessions s where s.restaurant_id='${FH}' and s.bill_no=g and s.created_at > now() - interval '3 days')
-      and not exists (select 1 from aggregator_orders a where a.restaurant_id='${FH}' and a.bill_no=g and a.created_at > now() - interval '3 days') order by 1`);
+    -- Bill numbers RESTART every business day, so only rows of TODAY's day count — the sheet's own two
+    -- doors: a session created today, or one carrying one of today's orders (round 2: a three-day window
+    -- matched yesterday's #15 and called today's honest gap a false one).
+    , s as (select id, bill_no from sessions where restaurant_id='${FH}' and bill_no is not null
+              and (created_at >= '${startIso()}' or id in (select session_id from orders where restaurant_id='${FH}' and created_at >= '${startIso()}')))
+    select g::int no from c, generate_series(1, c.n) g where not exists (select 1 from s where s.bill_no=g)
+      and not exists (select 1 from aggregator_orders a where a.restaurant_id='${FH}' and a.bill_no=g and a.created_at >= '${startIso()}') order by 1`);
   const want = d.map((x) => x.no); return { ok: JSON.stringify(j.numbering?.unaccounted) === JSON.stringify(want), note: `sheet ${JSON.stringify(j.numbering?.unaccounted)} · database ${JSON.stringify(want)} (test cleanup leaves these — the sheet is honest)` }; });
 L("the sheet's live order count is the database's", "/zreport", async (j) => { const d = await one(`select count(*)::int n from orders where restaurant_id='${FH}' and created_at >= '${startIso()}' and status <> 'cancelled'`); return { ok: Math.abs(j.dineIn?.orderCount - d.n) <= 1, note: `${j.dineIn?.orderCount} vs ${d.n} (±1 for an order landing mid-check)` }; });
 L("invoices generated today match", "/zreport", async (j) => { const d = await one(`select count(*)::int n from sessions where restaurant_id='${FH}' and invoice_at >= '${startIso()}'`); return { ok: j.invoicesGenerated === d.n, note: `${j.invoicesGenerated} vs ${d.n}` }; });
