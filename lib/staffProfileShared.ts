@@ -121,10 +121,24 @@ export function completeness(s: StaffLike, opts?: { pay?: boolean }): { filled: 
 }
 
 // ── Sanitisers (every write goes through these; nothing else reaches the DB) ──
-const str = (v: unknown, max = 200): string | null => {
+// TEXT MEANS TEXT (sweep #10 T18, item 5). `String(v)` turned an object into the words
+// "[object Object]" and a list into "Surat,Pune", and both were stored as a person's name, city,
+// note or designation. No screen sends either — every field is a text box — but this file is the
+// one door to the database for these columns. A value that is not a string, a number or a boolean
+// is now not text at all: str() answers `undefined` for it, and each caller decides what that means
+// (a profile field is left as it was; a job or payment field is refused in words).
+const isText = (v: unknown): boolean => v === null || v === undefined || ["string", "number", "boolean"].includes(typeof v);
+const str = (v: unknown, max = 200): string | null | undefined => {
+  if (!isText(v)) return undefined;
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   return s ? s.slice(0, max) : null;
+};
+/** str() for a column that must not be cleared by a value that is not text — refused in words. */
+const text = (v: unknown, max: number, what: string): string | null => {
+  const s = str(v, max);
+  if (s === undefined) throw new Error(`That ${what} isn't plain text.`);
+  return s;
 };
 // THE **LAST** n DIGITS, NOT THE FIRST (sweep #7 T15, 2026-08-27). This kept `slice(0, n)`, so a
 // person typing or pasting a whole Aadhaar / PAN / account number into a field labelled
@@ -178,6 +192,7 @@ export function mergeProfilePatch(
   for (const k of allowed) {
     if (!(k in patch)) continue;
     const raw = patch[k];
+    if (!isText(raw)) continue;            // not text at all → leave the stored value alone (item 5)
     let v: unknown;
     if (k === "id_verified") v = raw === true;
     else if (k === "id_last4" || k === "bank_last4") v = digits(raw, 4);
@@ -199,21 +214,21 @@ export function jobPatchFrom(body: Record<string, unknown>): JobPatch {
   const out: JobPatch = {};
   if ("joined_on" in body) out.joined_on = dateOrRefuse(body.joined_on, "joining date");
   if ("left_on" in body) out.left_on = dateOrRefuse(body.left_on, "leaving date");
-  if ("designation" in body) out.designation = str(body.designation, 80);
-  if ("shift_label" in body) out.shift_label = str(body.shift_label, 80);
-  if ("pay_day" in body) out.pay_day = str(body.pay_day, 40);
+  if ("designation" in body) out.designation = text(body.designation, 80, "designation");
+  if ("shift_label" in body) out.shift_label = text(body.shift_label, 80, "shift name");
+  if ("pay_day" in body) out.pay_day = text(body.pay_day, 40, "pay day");
   if ("employment_type" in body) {
-    const v = str(body.employment_type, 20);
+    const v = text(body.employment_type, 20, "employment type");
     if (v && !(EMPLOYMENT_TYPES as readonly string[]).includes(v)) throw new Error("Unknown employment type.");
     out.employment_type = v;
   }
   if ("pay_type" in body) {
-    const v = str(body.pay_type, 20);
+    const v = text(body.pay_type, 20, "pay type");
     if (v && !(PAY_TYPES as readonly string[]).includes(v)) throw new Error("Unknown pay type.");
     out.pay_type = v;
   }
   if ("pay_mode" in body) {
-    const v = str(body.pay_mode, 10);
+    const v = text(body.pay_mode, 10, "payment mode");
     if (v && !(PAY_MODES as readonly string[]).includes(v)) throw new Error("Unknown payment mode.");
     out.pay_mode = v;
   }
@@ -240,7 +255,7 @@ export function jobPatchFrom(body: Record<string, unknown>): JobPatch {
       const amt = Number(String(o.amount ?? "").replace(/[,\s₹]/g, ""));
       if (!Number.isFinite(amt) || amt < 0) throw new Error("An allowance/deduction amount must be a number.");
       return {
-        label: str(o.label, 60) || "Extra",
+        label: text(o.label, 60, "allowance name") || "Extra",
         kind: o.kind === "deduction" ? "deduction" : "allowance",
         amount: Math.round(amt * 100) / 100,
       };
@@ -280,7 +295,7 @@ export function paymentFrom(body: Record<string, unknown>): {
   // A payment can be back-dated (you paid yesterday, you type it today) but not FUTURE-dated:
   // a payment that hasn't happened yet would silently inflate "paid this month".
   if (paid_on > todayIST()) throw new Error("You can't record a payment for a future date.");
-  return { kind, amount: Math.round(amount * 100) / 100, for_period: period, mode, paid_on, note: str(body.note, 200) };
+  return { kind, amount: Math.round(amount * 100) / 100, for_period: period, mode, paid_on, note: text(body.note, 200, "note") };
 }
 
 /** Today in the restaurant's timezone (IST) as YYYY-MM-DD — the app's business day. */
