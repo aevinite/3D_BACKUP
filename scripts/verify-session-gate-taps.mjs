@@ -275,7 +275,8 @@ if (process.argv.includes("--self-test")) {
     writeFileSync(tablePath, bent);
     const before = console.log; console.log = () => {};
     let n; try { n = run(src); } finally { console.log = before; writeFileSync(tablePath, tableSrc); }
-    n > 0 ? console.log(`  ✓ ${what} → ${n} check(s) red`) : (console.log(`  ✗ ${what} → still green`), bad++);
+    if (n > 0) console.log(`  ✓ ${what} → ${n} check(s) red`);
+    else { console.log(`  ✗ ${what} → still green`); bad++; }
   }
   for (const [what, bend] of [
     ["the mid-meal block made permanent again", (t) => t.replace(" && !foodIsStale", "")],
@@ -289,7 +290,8 @@ if (process.argv.includes("--self-test")) {
     const before = console.log; console.log = () => {};
     let n;
     try { n = run(src); } finally { console.log = before; writeFileSync(cardPath, cardSrc); }
-    n > 0 ? console.log(`  ✓ ${what} → ${n} check(s) red`) : (console.log(`  ✗ ${what} → still green, so this guard would not catch it`), bad++);
+    if (n > 0) console.log(`  ✓ ${what} → ${n} check(s) red`);
+    else { console.log(`  ✗ ${what} → still green, so this guard would not catch it`); bad++; }
   }
   const sabotage = [
     ["the name screen set on a closed sheet", (s) => s.replace('setNote(""); setOpen(true); setStep("nickname");', 'setNote(""); setStep("nickname");')],
@@ -308,7 +310,8 @@ if (process.argv.includes("--self-test")) {
     const before = console.log; console.log = () => {};
     const n = run(bent);
     console.log = before;
-    n > 0 ? console.log(`  ✓ ${what} → ${n} check(s) red`) : (console.log(`  ✗ ${what} → still green, so this guard would not catch it`), bad++);
+    if (n > 0) console.log(`  ✓ ${what} → ${n} check(s) red`);
+    else { console.log(`  ✗ ${what} → still green, so this guard would not catch it`); bad++; }
   }
   run(src); // leave the real result printed last
 }

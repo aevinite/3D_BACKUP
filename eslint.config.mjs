@@ -88,6 +88,19 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-explicit-any": "off",
     },
   },
+  {
+    // THE TEST SCRIPTS' OWN SHORTHAND (sweep #10 T39 item 66, 2026-10-09). The guards under scripts/,
+    // tests/ and .github/scripts record a result with `ok ? pass(...) : fail(...)` and
+    // `cond && note(...)` — a statement that IS the side effect. 638 of the project's 1,131 warnings
+    // were this one shape, every one of them doing real work, so they buried the warnings that matter.
+    // The rule's own options exist for exactly this; they do not hide an expression that does nothing
+    // (a bare `x;` or `a + b;` still warns). App code under app/, components/ and lib/ keeps the
+    // strict default.
+    files: ["scripts/**", "tests/**", ".github/scripts/**"],
+    rules: {
+      "@typescript-eslint/no-unused-expressions": ["warn", { allowTernary: true, allowShortCircuit: true, allowTaggedTemplates: true }],
+    },
+  },
 ]);
 
 export default eslintConfig;

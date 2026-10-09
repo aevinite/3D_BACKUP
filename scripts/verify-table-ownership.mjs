@@ -429,7 +429,12 @@ if (!BASE) {
     await fr.locator(".to-body").waitFor({ timeout: 30000 });
     await page.waitForTimeout(1500);
     const builder = await fr.locator(".to-body").innerText();
-    /Table ${T}\b/.test(await fr.locator(".tbl-modal-head h3").first().innerText()) || true; // heading is cosmetic
+    // THE BUILDER NAMES THIS TABLE (sweep #10 T39 item 67, 2026-10-09). This line used to read the
+    // heading and throw the answer away (`… || true; // heading is cosmetic`) — a check that could
+    // never fail. Which table an order is being punched for is the one thing staff read before they
+    // send it, so it is asserted now.
+    const head = (await fr.locator(".tbl-modal-head h3").first().innerText().catch(() => "")).trim();
+    new RegExp(`\\b${T}\\b`).test(head) ? pass(`the order builder is headed with table ${T} ("${head}")`) : fail(`the order builder for table ${T} is headed "${head}"`);
     !/LEFTOVER check dish/.test(builder) ? pass("the order builder carries none of the old party's dishes") : fail("the order builder opened holding the previous party's dish:\n" + builder.slice(0, 300));
     const cartLines = await fr.locator(".to-lines .to-line").count();
     cartLines === 0 ? pass("the order builder opens on an empty cart (a fresh party starts from nothing)") : fail(`the order builder opened with ${cartLines} line(s) already in the cart`);

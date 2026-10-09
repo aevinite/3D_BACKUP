@@ -146,7 +146,8 @@ if (process.argv.includes("--self-test")) {
     writeFileSync(p, bent);
     const before = console.log; console.log = () => {};
     let n; try { n = run(); } finally { console.log = before; writeFileSync(p, src); }
-    n > 0 ? console.log(`  ✓ ${what} → ${n} check(s) red`) : (console.log(`  ✗ ${what} → still green, so this guard would not catch it`), bad++);
+    if (n > 0) console.log(`  ✓ ${what} → ${n} check(s) red`);
+    else { console.log(`  ✗ ${what} → still green, so this guard would not catch it`); bad++; }
   }
   bad += run();
 }

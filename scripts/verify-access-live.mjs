@@ -63,7 +63,10 @@ const rests = await (await netFetch(B + "/api/admin/restaurants", { headers: H }
 const list = Array.isArray(rests) ? rests : rests.restaurants || [];
 const fh = list.find((x) => x.slug === "french-house");
 let pass = 0, fail = 0;
-const ck = (n, ok, got) => { ok ? (pass++, console.log("  PASS " + n)) : (fail++, console.log("  FAIL " + n + " · got: " + JSON.stringify(got))); };
+const ck = (n, ok, got) => {
+  if (ok) { pass++; console.log("  PASS " + n); }
+  else { fail++; console.log("  FAIL " + n + " · got: " + JSON.stringify(got)); }
+};
 
 
 // ── PUT EVERYTHING BACK, EVEN IF THIS SCRIPT DIES ────────────────────────────────────────────

@@ -211,7 +211,6 @@ R("P03833", "🖨 Print this / again is wired and calls print()", () =>
   withDoc("bill", bill(), {}, async ({ page }) => {
     const fired = await page.evaluate(() => {
       let n = 0; window.print = () => { n++; };
-      document.querySelector(".bar button")?.parentElement; // touch the bar
       const b = [...document.querySelectorAll(".bar button")].find((x) => /Print/.test(x.textContent || ""));
       b?.click(); return { n, found: !!b };
     });
