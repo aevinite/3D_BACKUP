@@ -307,6 +307,22 @@ console.log("\nS10-T9 item 3 · POST /dish-photo and the Edit-menu switch");
   else bad("with Edit menu ON the photo door was refused", `${r.status} ${j.error}`);
 }
 
+// ── S10-T9 item 5 · the repeat-customer lookup obeys the Customer directory switch ──────────
+console.log("\nS10-T9 item 5 · GET /customer-recognize and the Customer directory switch");
+{
+  world({});
+  G.FIX.restaurants[0].owner_entitlements = { customers: false };
+  G.RPC_ANSWERS.lfh_recognize_customer = { known: true, name: "Ravi", visits: 3 };
+  let r = await call("GET", "customer-recognize", { query: "?phone=9876543210" });
+  if (r.known === false && !G.RPCS.some((c) => c.name === "lfh_recognize_customer")) ok("with the directory OFF the pay sheet is told 'not known', and the lookup is never run");
+  else bad("with the directory OFF a saved customer was still recognised", JSON.stringify(r));
+  world({});
+  G.RPC_ANSWERS.lfh_recognize_customer = { known: true, name: "Ravi", visits: 3 };
+  r = await call("GET", "customer-recognize", { query: "?phone=9876543210" });
+  if (r.known === true && r.name === "Ravi") ok("…and with it ON (the default) a returning guest is still greeted");
+  else bad("with the directory ON a returning guest was not recognised", JSON.stringify(r));
+}
+
 // ── the neighbours must be unchanged ────────────────────────────────────────────────────────
 console.log("\nRegression · the gates that were already there still behave");
 world({ give_discounts: false }, { sessions: OPEN_SESSION, orders: UNPAID });

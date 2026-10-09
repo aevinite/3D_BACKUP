@@ -849,6 +849,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "customer-recognize") {
       const phone = (new URL(req.url).searchParams.get("phone") || "").trim().slice(0, 20);
       if (!phone) return ok({ known: false });
+      // ── THE CUSTOMER DIRECTORY SWITCH COVERS LOOKING A GUEST UP, NOT ONLY SAVING ONE ──────────
+      // (sweep #10 T9, item 5, 2026-10-09.) POST customer-capture refuses when the admin has the
+      // directory off; this read did not ask, so the pay sheet still greeted "✨ Repeat customer ·
+      // <name>" out of names saved before the switch went off. Answered as "not known" rather than
+      // refused: the sheet then simply shows nothing, which is what an absent feature looks like.
+      if (!(await getOwnerEntitlements(rid)).customers) return ok({ known: false });
       const { data, error } = await sb.rpc("lfh_recognize_customer", { p_phone: phone, p_restaurant_id: rid });
       if (error) throw new Error(error.message);
       return ok(data || { known: false });
