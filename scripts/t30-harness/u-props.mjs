@@ -327,3 +327,21 @@ t("item 27: …and the manager route does the same — the parts are undone befo
 world({ session_payments: [{ id: "L1", session_id: "s1", restaurant_id: "R", amount: 100, reversed_at: null, created_at: "2026-10-09T10:00:00Z" }] }); W.FAIL["session_payments:select"] = "nodata";
 { const r = await PS.reverseSplitLegs(sb, { rid: "R", sessionId: "s1", since: "2026-10-09T09:00:00Z" });
   t("item 27: a read that answers with neither rows nor an error is no parts — { 0, 0 }, nothing written (only a real error throws)", r.reversed === 0 && r.amount === 0 && W.WRITES.length === 0, JSON.stringify(r)); }
+
+// ═══ appended in round 3: EVERY code lib/dbRefusal knows, one at a time ═══════════════════════════
+// The property rows above sample codes at random; this walks the two lists themselves, read from the
+// file, so a code added later gets its own check and a code someone deletes from a list turns one red.
+{ const RT = __rf(__j(__root, "lib/dbRefusal.ts"), "utf8");
+  const listOf = (name) => [...RT.slice(RT.indexOf(`const ${name} = new Set([`), RT.indexOf("]);", RT.indexOf(`const ${name} = new Set([`))).matchAll(/"([0-9A-Z]{5})"/g)].map((m) => m[1]);
+  const REF = listOf("REFUSAL_CODES"), UNR = listOf("UNREACHABLE_CODES");
+  t(`the file's two code lists were read: ${REF.length} "the value was refused" codes and ${UNR.length} "the database didn't answer" codes`, REF.length >= 13 && UNR.length >= 15, `${REF.length} / ${UNR.length}`);
+  for (const code of REF) {
+    const e = { code, message: "x" }; const own = /^LFH/.test(code);
+    t(`code ${code} → ${own ? "409 with its own sentence" : "400 (the value was refused)"}, a sentence a person can read, and never "the database didn't answer"`,
+      DB.refusalStatus(e) === (own ? 409 : 400) && !DB.isDbUnreachable(e) && DB.refusalMessage(e).length > 10 && DB.refusalMessage(e) !== "x", `${DB.refusalStatus(e)} · ${DB.refusalMessage(e)}`);
+  }
+  for (const code of UNR) {
+    const e = { code, message: "x" };
+    t(`code ${code} → 503 and the busy sentence (the screen waits and retries; it never says the value was wrong)`, DB.refusalStatus(e) === 503 && DB.refusalMessage(e) === DB.BUSY_MESSAGE && !DB.isDataRefusal(e), `${DB.refusalStatus(e)}`);
+  }
+}

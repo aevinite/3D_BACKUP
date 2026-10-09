@@ -291,6 +291,17 @@ for (const g of GROUPS) {
   }
 }
 
+// ═══ J · per NAMED restaurant (appended — ids above stay put): each one's own settings row is what lfh_split_items_tax reads, so each is
+// asked separately (200 random carts each) — a restaurant whose row drifts from the shared shape shows.
+for (const r of RESTS.filter((x) => x.has_settings && !/^zz|^t28-|^hi$/.test(x.slug))) {
+  const R = gen(9100 + RESTS.indexOf(r)); const carts = Array.from({ length: 200 }, () => Array.from({ length: int(R, 1, 8) }, () => lineOf(R)));
+  const rows = await sql(`select c.n, lfh_split_items_tax(c.cart, ${lit(r.id)}::uuid) s from jsonb_array_elements(${lit(JSON.stringify(carts))}::jsonb) with ordinality c(cart, n)`);
+  const s = settingsOf(r); let bad = null;
+  for (const row of rows) { const db = typeof row.s === "string" ? JSON.parse(row.s) : row.s; const b = T.splitBill(carts[Number(row.n) - 1], s, 0);
+    if (P(b.taxableBase) !== P(db.taxable_base) || P(b.nontaxAmount) !== P(db.nontax_amount) || P(b.mrpAmount) !== P(db.mrp_amount)) { bad = `cart ${row.n}: app ${b.taxableBase}/${b.nontaxAmount}/${b.mrpAmount} vs db ${db.taxable_base}/${db.nontax_amount}/${db.mrp_amount}`; break; } }
+  await check("lib/tax.ts", `${r.slug}: its OWN settings give the same taxable / untaxed / MRP split in the app and the database, on 200 random carts`, () => (rows.length === 200 && !bad) || bad || `${rows.length} rows`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 if (ARGV.includes("--ledger")) {
   const esc = (x) => String(x).replace(/\|/g, "\\|").replace(/\n/g, " ");
