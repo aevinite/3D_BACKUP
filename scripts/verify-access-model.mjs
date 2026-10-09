@@ -26,7 +26,7 @@ const {
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
   waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
   nodeExpect, expectHeader, MODULE_ALLOWED_DEFAULTS, MODULE_BAG_KEYS,
-  NODE_BY_ID,
+  nodeValue, applyPatch, emptyState, NODE_BY_ID,
 } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
@@ -1057,6 +1057,38 @@ else ok("the read/write route derives every allow-list from the model");
     if ((n.what || "").toLowerCase().includes(phrase)) probs.push(`row "${n.name}" (${n.id}) still offers "${phrase}" — ${why}`);
   if (probs.length) fail(`a folder's words name a row it no longer has: ${probs.join("; ")}`);
   else ok("every row a folder's sentence counts or names is still inside it, and no retired permission is offered in any row's words");
+}
+
+// ── 57 · A SWITCH MUST READ BACK WHAT IT WAS JUST SET TO — THROUGH THE SCREEN'S OWN MERGE ──────
+// The Access screen repaints a tap by merging the patch into its local state (applyPatch) and
+// does NOT reload after a save that landed. So `nodeValue(applyPatch(state, nodePatch(n, v)))`
+// IS what the admin sees. For the first bag-backed module it read OFF straight after being
+// switched ON: the patch said `modules: { loyalty: true }`, the merge stored a bare boolean where
+// nodeValue reads `.allowed`, and Loyalty points painted grey over a database that said ON — seen
+// on French House's real screen before the fix. (sweep #10 T18, item 2 — ledger row P22167, green
+// on 2026-08-27, red from the day loyalty shipped, 2026-09-19.)
+//
+// Asked from BOTH starting points that occur: a restaurant with nothing stored, and one holding
+// the shape the server writes (`modules.<key> = { allowed, enabled }`, a column value, an object
+// in access_config) — because a merge can be right from empty and wrong from stored, or the reverse.
+{
+  const BOOL = new Set(["feature", "setting", "module", "moduleBag", "channel", "grant", "section", "tab", "has", "ratingsMaster"]);
+  const stored = (n, v) => {
+    const s = emptyState();
+    const b = n.bind;
+    if (b.t === "moduleBag") s.modules[b.key] = { allowed: v, enabled: true, owner_control: false };
+    return s;
+  };
+  const wrong = [];
+  for (const n of ALL_NODES) {
+    if (!BOOL.has(n.bind.t)) continue;
+    for (const v of [true, false]) for (const start of [emptyState(), stored(n, !v)]) {
+      const seen = nodeValue(n, applyPatch(start, nodePatch(n, v)));
+      if (seen !== v) wrong.push(`${n.id} set ${v ? "ON" : "OFF"} reads ${JSON.stringify(seen)}`);
+    }
+  }
+  if (wrong.length) fail(`the Access screen would show a different value from the one just saved: ${[...new Set(wrong)].join("; ")}`);
+  else ok("every switch on the Access screen reads back the value it was just set to, through the same local merge the screen paints with");
 }
 
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──

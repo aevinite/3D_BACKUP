@@ -1680,6 +1680,14 @@ export function applyPatch(s: TreeState, p: TreePatch): TreeState {
     const next: Record<string, any> = { ...cur };
     for (const kk of Object.keys(src)) {
       const val = src[kk];
+      // A BAG MODULE IS AN ENTRY, NOT A BOOLEAN (sweep #10 T18, item 2). The patch carries a bare
+      // on/off (`modules: { loyalty: true }`) while the state — and nodeValue — hold the entry
+      // `{ allowed, enabled }`. Merged as-is, the state got `loyalty: true`, nodeValue read
+      // `true.allowed` as "nothing stored", and the Access screen painted Loyalty points OFF the
+      // instant it was tapped ON: the database said ON, the switch said OFF, until a reload. This is
+      // the server's own merge (app/api/admin/restaurants/access-tree → `{ ...prev, allowed: v,
+      // enabled: true }`), so the instant repaint and the saved row are one rule.
+      if (k === "modules" && typeof val === "boolean") { next[kk] = { ...(cur[kk] || {}), allowed: val, enabled: true }; continue; }
       next[kk] = val && typeof val === "object" && !Array.isArray(val)
         ? deepMerge(cur[kk] || {}, val)
         : val;
