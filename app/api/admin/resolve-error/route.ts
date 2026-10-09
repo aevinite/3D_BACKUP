@@ -61,7 +61,16 @@ export async function POST(req: NextRequest) {
   // still an OPEN report, and "all" means all. The screen carries the honesty half — the confirm
   // says it will also clear the waiting ones and how many. Do not add a snooze filter here.
   if (body.all === true) {
-    const scope = typeof body.restaurant_id === "string" && UUID.test(body.restaurant_id) ? body.restaurant_id : null;
+    // A BAD SCOPE IS REFUSED, NEVER WIDENED (sweep #10 T39 item 78, 2026-10-09). A restaurant_id that
+    // is present but not a real id used to become `null` — "all restaurants" — so a garbled scope on a
+    // one-restaurant "Resolve all" cleared EVERY restaurant's open problems. An admin write whose input
+    // is wrong must fail closed (verify:admin-refusals rule 1). Only an ABSENT restaurant_id means all
+    // restaurants; the Repair screen sends either a real id or none, so nothing it does changes.
+    const rawScope = body.restaurant_id;
+    if (rawScope !== undefined && rawScope !== null && rawScope !== "" && !(typeof rawScope === "string" && UUID.test(rawScope))) {
+      return NextResponse.json({ error: "That restaurant id isn't valid — nothing was cleared." }, { status: 400 });
+    }
+    const scope = typeof rawScope === "string" && UUID.test(rawScope) ? rawScope : null;
     let upd = sb.from("staff_actions")
       .update(snoozeUntil ? { snoozed_until: snoozeUntil } : { resolved_at: new Date().toISOString() })
       .eq("level", "error")
