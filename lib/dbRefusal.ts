@@ -39,6 +39,8 @@ const REFUSAL_CODES = new Set([
   "LFH01", // the invoice is locked — the bill is settled and cannot be reopened
   "LFH02", // a credit note bigger than the bill total
   "LFH03", // reopening a bill was asked for without a reason (mig 286's guard, coded in mig 300)
+           //   …and ALSO, from lfh_reopen_table (mig 365): "another party is sitting at that table"
+  "LFH04", // reopening a table whose every KOT was cancelled — there is no sale to reopen (mig 365)
   "22001", // string too long
   "22003", // number out of range
   "22007", // invalid date/time format
@@ -70,7 +72,17 @@ const OWN_CODE_TEXT: Record<string, string> = {
   // what to do. The manager panel asks for a reason before calling; this sentence is for every
   // other caller 286 was written to cover (the Repair Kit, a script, a future panel).
   LFH03: "Say why this bill is being reopened — a reason is required.",
+  // Registered 2026-10-09 (sweep #10 T30, item 13). The manager route already answers this one itself;
+  // this is for every other door, which would otherwise have turned it into a 500 the outbox retries.
+  LFH04: "Every KOT on this bill was cancelled, so there is no sale to reopen.",
 };
+
+// LFH03 CARRIES TWO MEANINGS (item 13). Migration 365 reused it in lfh_reopen_table for "another
+// party is sitting at that table", while migration 300 had already given it to "a reason is
+// required". The code alone cannot tell them apart, so the message decides: telling a manager to
+// "say why" when the real answer is "free the table first" sends them the wrong way.
+const LFH03_TABLE_BUSY = /another party is sitting/i;
+const LFH03_TABLE_BUSY_TEXT = "Someone else is sitting at that table — it has to be free before this bill can come back to it.";
 /** Our own refusal code, if this error carries one (mig 278). Null for anything else. */
 export function ownRefusalCode(e: unknown): string | null {
   const c = (e as { code?: unknown } | null)?.code;
@@ -276,6 +288,7 @@ export function refusalMessage(e: unknown): string {
   // One of OUR codes (mig 278) → its own sentence, never the raw `lfh: invoice locked — …` prose,
   // which was written for the error log and not for a waiter mid-service.
   const own = ownRefusalCode(e);
+  if (own === "LFH03" && LFH03_TABLE_BUSY.test(raw)) return LFH03_TABLE_BUSY_TEXT;
   if (own) return OWN_CODE_TEXT[own];
   if (!isDataRefusal(e)) return raw;
   for (const name of Object.keys(PLAIN)) if (raw.includes(name)) return PLAIN[name];

@@ -698,6 +698,23 @@ head("8. the two docs I own tell the truth about the code they name");
 }
 
 
+// ── every refusal code the database raises has a sentence (sweep #10 T30, item 13, 2026-10-09) ──
+// lib/dbRefusal.ts registers our own SQLSTATEs so ANY door answers a 409 with words instead of a 500
+// the outbox would retry for ever. LFH04 (mig 365) was raised and never registered; LFH03 carries two
+// meanings and was always told as "say why". Both are executed here against the real file.
+{
+  const { readdirSync: rd } = await import("node:fs");
+  const dbr = await import("@/lib/dbRefusal.ts");
+  const raised = [...new Set(rd(join(root, "supabase/migrations")).filter((f) => f.endsWith(".sql"))
+    .flatMap((f) => [...read(`supabase/migrations/${f}`).matchAll(/errcode\s*=\s*'(LFH\d\d)'/gi)].map((m) => m[1].toUpperCase())))].sort();
+  const unregistered = raised.filter((c) => dbr.refusalStatus({ code: c, message: "x" }) !== 409 || dbr.ownRefusalCode({ code: c }) !== c);
+  check(`every own refusal code the migrations raise (${raised.join(", ")}) answers 409 with its own sentence`, raised.length >= 4 && !unregistered.length, unregistered);
+  check("LFH03 from the reopen ('another party is sitting') says the table must be free — not 'say why'",
+    /has to be free/.test(dbr.refusalMessage({ code: "LFH03", message: "lfh: another party is sitting at that table — it has to be free" })));
+  check("…and LFH03 for a missing reason still asks for the reason",
+    /reason is required/.test(dbr.refusalMessage({ code: "LFH03", message: "lfh: a reason is required to reopen" })));
+}
+
 // ── the clash gate looks rows up by a column that EXISTS (sweep #10 T30, item 9, 2026-10-09) ──
 // categories and filters have no `id` (their key is restaurant + slug) and table_tags has none
 // either, yet all three were listed as "id": the lookup errored and failed open, and the editor sent
