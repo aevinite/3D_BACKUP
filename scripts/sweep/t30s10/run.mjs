@@ -1116,7 +1116,8 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
     Q("lib/clash.ts", `${f.replace(/^app\/api\//, "/api/").replace(/\/route\.ts$/, "")} hands the clash gate a restaurant it resolved itself (rid, or the row's own restaurant_id) — never one from the header`, "read the call", () =>
       [...src.matchAll(/expectClash\(req, ([^)]*)\)/g)].every((m) => /^(rid|String\(\w+(\.\w+)*\.restaurant_id \|\| ""\)?)$/.test(m[1].trim())));
   }
-  for (const [where, re] of [["the whole-bill discount", /overDiscountCap\(rawDisc, base, cap\)/], ["the parcel discount", /overDiscountCap\(rawPDisc, parcelDiscBase, pcap\)/], ["the per-line discount", /overDiscountCap\(Math\.max\(raw, 0\), discBase, cap\)/]]) {
+  // (re-stated 2026-10-10: T10 item 4 measures the per-line cap against the whole bill when there is one)
+  for (const [where, re] of [["the whole-bill discount", /overDiscountCap\(rawDisc, base, cap\)/], ["the parcel discount", /overDiscountCap\(rawPDisc, parcelDiscBase, pcap\)/], ["the per-line discount", /overDiscountCap\(Math\.max\(raw, 0\), (?:cur\.session_id \? billBase : )?discBase, cap\)/]]) {
     Q("lib/discountCap.ts", `the manager route checks the cap on ${where} with the signed-in person's role`, "read the editor route", () => re.test(ED) && /discountCapPct\(rid, discountRole\(g\.user\?\.role\)\)/.test(ED));
   }
   const pmSites = [...(ED + "\n" + TB).matchAll(/PAYMENT_METHODS(?: as readonly string\[\])?\)?\.(includes|find)\(/g)].length;
