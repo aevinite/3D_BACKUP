@@ -290,8 +290,8 @@ function readable(col: string): string {
     discount_note: "the discount note",
     title: "the name",
     price: "the price",
-    sold_out: "the sold-out mark",
-    available: "whether it's available",
+    // `sold_out` and `available` used to sit here: no comparable table has either column (a dish's
+    // sold-out state is a tag), so they were names for fields nothing can send. Removed 2026-10-09.
     status: "the status",
     payment_status: "the payment status",
     table_count: "the number of tables",

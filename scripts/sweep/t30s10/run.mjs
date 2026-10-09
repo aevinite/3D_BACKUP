@@ -259,9 +259,7 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
   A("splitBill: a price written '₹1,250.50' is read as 1250.5", "real function", () => tx.splitBill([{ price: "₹1,250.50", qty: 1 }], { tax_rate: 0.05 }).taxableBase === 1250.5);
   A("splitBill: qty '3' (a string) multiplies like 3", "real function", () => tx.splitBill([{ price: "10", qty: "3" }], { price_tax_mode: "composition" }).subtotal === 30);
   A("splitBill(null) does not throw and returns zeros", "real function", () => { const b = tx.splitBill(null, null); return b.total === 0 && b.subtotal === 0; });
-  A("maxDiscount equals splitBill(lines, s, 0).discountBase on random bills", "real function", () => many(() => {
-    const l = lines(3); const s = pick([{ tax_rate: 0.05 }, { price_tax_mode: "composition" }]); return tx.maxDiscount(l, s) === tx.splitBill(l, s, 0).discountBase || "differs";
-  }));
+  A("maxDiscount is gone (item 14) — the discount ceiling has one name, splitBill's discountBase", "module exports", () => typeof tx.maxDiscount === "undefined" && tx.splitBill([{ price: "100" }], { tax_rate: 0.05 }, 0).discountBase === 100);
   A("effectiveTaxPct never shows float dust for any rate 0.25–28% in 0.25 steps", "real function", () => {
     for (let p = 0.25; p <= 28; p += 0.25) { const v = tx.effectiveTaxPct({ tax_rate: p / 100 }); if (String(v).length > 5) return { ok: false, note: `${p} → ${v}` }; } return true;
   });
@@ -680,8 +678,7 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
     const r = await sql(`select distinct column_name c from information_schema.columns where table_schema='public' and table_name in (${Object.keys(comparable).map((t) => `'${t}'`).join(",")})`);
     const cols = new Set(r.map((x) => x.c)); const sub = ["notes", "id_type", "id_number"];
     const off = names.filter((nm) => !cols.has(nm) && !sub.includes(nm));
-    // sold_out / available: plain-words labels for fields no comparable table has — dead, harmless (Part 4).
-    return { ok: off.every((nm) => ["sold_out", "available"].includes(nm)), note: off.length ? `labels for no column (dead, harmless): ${off.join(", ")}` : `${names.length} names` };
+        return { ok: !off.length, note: off.length ? `labels for no column: ${off.join(", ")}` : `${names.length} names, every one a real column` };
   });
   Fc("QUIET_COLUMNS covers the money columns a panel sends an expectation for", "read the file", () => ["discount", "price", "payment_status", "total"].every((c) => new RegExp(`QUIET_COLUMNS = new Set\\(\\[[^\\]]*"${c}"`).test(S)));
   Fc("a field name with punctuation (a quote, a space, a comma) is dropped before it reaches the select", "the regex, executed", () => {
@@ -731,8 +728,8 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
     for (let i = 0; i < 3000; i++) { const a = pick(vals), b = pick(vals); if (cc.sameValue(a, b) !== cc.sameValue(b, a)) return { ok: false, note: `${JSON.stringify(a)} / ${JSON.stringify(b)}` }; } return true;
   });
   G("sameValue is reflexive for every kind of value a column can hold", "real function", () => [null, 0, "x", true, ["a", "b"], { a: { b: [1] } }, "", []].every((v) => cc.sameValue(v, v)));
-  G("a top-level list of OBJECTS compares as '[object Object]' items — latent, no live call site sends one (Part 4)", "real function",
-    () => ({ ok: true, note: cc.sameValue([{ a: 1 }], [{ a: 2 }]) ? "two different object lists compare EQUAL — public/panels/editor/app.js deliberately sends no arrays, so nothing is unprotected today" : "compares by content" }));
+  G("a top-level list of OBJECTS compares by content, not as '[object Object]' items (item 12)", "real function",
+    () => !cc.sameValue([{ a: 1 }], [{ a: 2 }]) && cc.sameValue([{ a: 1 }, { b: 2 }], [{ b: 2 }, { a: 1 }]));
   G("lib/clashCompare.ts has no imports", "read the file", () => !/^\s*import\s/m.test(SRC[F]));
   G("lib/clash.ts is its only consumer in app/ lib/ components/", "grep", () => { const im = tsFiles.filter((f) => /@\/lib\/clashCompare/.test(read(f))); return { ok: im.length === 1 && im[0] === "lib/clash.ts", note: im.join(", ") }; });
 }
@@ -845,8 +842,8 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
   J("slowerThan lists only the reads over the threshold", "real class", () => { const s = new rg.ReadSet("x", [{ name: "a", data: [], error: null, count: null, ms: 900, retried: false }, { name: "b", data: [], error: null, count: null, ms: 10, retried: false }]); return s.slowerThan(500).map((x) => x.name).join() === "a"; });
   J("rd() does NOT retry a refusal (a CHECK violation is not transient)", "real function, stand-in", async () => { let calls = 0; await rg.rd("a", async () => (calls++, { data: null, error: { code: "23514", message: "violates check constraint" } })); return calls === 1; });
   J("rd() gives a transient failure at most ONE retry", "real function, stand-in", async () => { let calls = 0; await rg.rd("a", async () => (calls++, { data: null, error: { message: "fetch failed", code: "ECONNRESET" } })); return calls <= 2; });
-  J("keepWhatAnswered: one of three failing keeps two, says one is missing, not allFailed", "real function", () => { const r = rg.keepWhatAnswered([{ error: null }, { error: "x" }, { error: null }]); return r.ok.length === 2 && r.missing === 1 && !r.allFailed && r.firstError === "x"; });
-  J("keepWhatAnswered([]) is not 'all failed'", "real function", () => rg.keepWhatAnswered([]).allFailed === false);
+  J("keepWhatAnswered is gone (item 14) — nothing ever imported it", "module exports", () => typeof rg.keepWhatAnswered === "undefined");
+  J("…and no route reaches for it", "grep", () => !tsFiles.some((f) => f !== "lib/readGuard.ts" && /\bkeepWhatAnswered\b/.test(read(f))));
   J("the owner routes read through ReadSet / rd()", "grep app/api/owner", () => { const f = tsFiles.filter((p) => /^app\/api\/owner\//.test(p)); const users = f.filter((p) => /ReadSet|\brd\(/.test(read(p))); return { ok: users.length >= 7, note: `${users.length} of ${f.length} owner routes — the rest check .error by hand (an older improvement, Part 3)` }; });
   J("readGuard itself never builds a response (it only logs)", "read the file", () => !/NextResponse|new Response\(/.test(SRC[F]));
 }
@@ -1069,7 +1066,7 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
   P("lib/clash.ts", "the panel dispatchers sign the person in (requireRole) before the clash gate", "read the routes", () => [ED, TB, KT].every((s) => /requireRole\(/.test(s)));
   P("lib/idempotency.ts", "every wrapped /api/admin route checks tokenIsValid inside its handler", "read each route", () => { const r = tsFiles.filter((f) => /^app\/api\/admin\//.test(f) && /withIdempotency\(/.test(read(f))); const bad = r.filter((f) => !/tokenIsValid/.test(read(f))); return { ok: !bad.length, note: `${r.length} wrapped admin routes${bad.length ? "; no gate: " + bad.join(", ") : ""}` }; });
   P("lib/idempotency.ts", "every wrapped /api/owner route uses ownerScope", "read each route", () => { const r = tsFiles.filter((f) => /^app\/api\/owner\//.test(f) && /withIdempotency\(/.test(read(f))); return { ok: r.every((f) => /ownerScope/.test(read(f))), note: r.join(", ") }; });
-  P("lib/idempotency.ts", "a stored reply is answered before the route's own sign-in check — and holds no secret since item 7 (the rest is a Part-4 decision)", "read the wrapper", () => ({ ok: /if \(claim\.state === "done"\)/.test(SRC["lib/idempotency.ts"]) && /withoutSecrets\(claim\.result\)/.test(SRC["lib/idempotency.ts"]), note: "recorded: the id is a random UUID only the device that minted it holds" }));
+  P("lib/idempotency.ts", "a stored reply is answered before the route's own sign-in check — it holds no secret (item 7) and is repeated only to whoever made it (item 11)", "read the wrapper", () => /if \(claim\.state === "done"\)/.test(SRC["lib/idempotency.ts"]) && /const stored = replyFor\(claim\.result, by\)/.test(SRC["lib/idempotency.ts"]) && /keptReply\(body, by\)/.test(SRC["lib/idempotency.ts"]));
   P("lib/paySplit.ts", "settleBillInParts scopes every read and write by the caller's restaurant", "read the file", () => { const S = SRC["lib/paySplit.ts"]; const froms = (S.match(/sb\.from\("/g) || []).length; const scoped = (S.match(/\.eq\("restaurant_id", rid\)|restaurant_id: rid/g) || []).length; return { ok: scoped >= froms, note: `${froms} queries, ${scoped} restaurant scopes` }; });
   P("lib/discountCap.ts", "the cap is read for the signed-in restaurant, never one named in the request", "read the call sites", () => !/discountCapPct\((body|req)/.test(ED + TB));
   P("lib/tax.ts", "every settings select that feeds the tax helpers is scoped to one restaurant", "grep", () => { const off = tsFiles.filter((f) => /select\(TAX_SETTINGS_COLUMNS\)/.test(read(f)) && !/select\(TAX_SETTINGS_COLUMNS\)\.eq\("restaurant_id", \w+\)/.test(read(f))); return { ok: !off.length, note: off.join(", ") || "all scoped" }; });

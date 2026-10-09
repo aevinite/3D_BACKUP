@@ -83,7 +83,7 @@ const BILLDOC = (await import("@/public/panels/billdoc.js")).default;
 head("1. lib/tax.ts — ONE source of truth for a restaurant's rate");
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 const { effectiveTaxRate, effectiveTaxPct, taxComponents, priceTaxMode, itemTaxModesAllowed,
-        resolveTaxMode, isMrpDish, splitBill, maxDiscount, TAX_SETTINGS_COLUMNS } = tax;
+        resolveTaxMode, isMrpDish, splitBill, TAX_SETTINGS_COLUMNS } = tax;
 
 eq("composition ⇒ the effective rate is exactly 0, not a hidden 5%",
   effectiveTaxRate({ price_tax_mode: "composition", tax_rate: 0.05 }), 0);
@@ -182,7 +182,8 @@ eq("an 'exempt' line lands in nontaxAmount and never in taxableBase",
   eq("the identity subtotal − discount + tax === total holds", Math.round((s.subtotal - s.discount + s.tax) * 100) / 100, s.total);
   eq("a discount above the cap is clamped to the cap, never applied beyond it", splitBill(lines, S5, 5000).discount, 1000);
   eq("a negative discount is clamped to zero", splitBill(lines, S5, -50).discount, 0);
-  eq("maxDiscount() === splitBill(lines, settings, 0).discountBase", maxDiscount(lines, S5), splitBill(lines, S5, 0).discountBase);
+  // maxDiscount() was a one-line alias nothing called — removed 2026-10-09 (sweep #10 T30 item 14).
+  eq("maxDiscount() is gone, so there is ONE name for the discount ceiling (splitBill's discountBase)", typeof tax.maxDiscount, "undefined");
 }
 {
   // A mixed bill: taxed food + tax-inclusive drinks + a sealed MRP bottle, at an awkward rate.
@@ -258,6 +259,9 @@ eq("sameValue compares lists as SETS", cc.sameValue(["nuts", "dairy"], ["dairy",
 eq("sameValue tells two different lists apart", cc.sameValue(["nuts"], ["dairy"]), false);
 eq("sameValue compares objects by CONTENT", cc.sameValue({ t1: "Patio", t2: "Bar" }, { t2: "Bar", t1: "Patio" }), true);
 eq("sameValue tells two different rename maps apart", cc.sameValue({ t1: "Patio" }, { t1: "Terrace" }), false);
+// item 12 (sweep #10 T30): a LIST of objects is compared by content, not as "[object Object]" items.
+eq("sameValue tells two different lists of OBJECTS apart", cc.sameValue([{ label: "CGST", rate: 2.5 }], [{ label: "CGST", rate: 9 }]), false);
+eq("…and a list of objects in another order, keys in another order, is the same", cc.sameValue([{ a: 1, b: 2 }, { c: 3 }], [{ c: 3 }, { b: 2, a: 1 }]), true);
 eq("sameValue treats null/absent and {} as the same, so an unset column invents no clash", cc.sameValue(null, {}), true);
 eq("isPlainObject rejects arrays", cc.isPlainObject([1, 2]), false);
 eq("isPlainObject accepts an object", cc.isPlainObject({ a: 1 }), true);
@@ -693,6 +697,23 @@ head("8. the two docs I own tell the truth about the code they name");
     /docs\/SECURITY-CHECKLIST\.md/.test(playbook));
 }
 
+
+// ── every refusal code the database raises has a sentence (sweep #10 T30, item 13, 2026-10-09) ──
+// lib/dbRefusal.ts registers our own SQLSTATEs so ANY door answers a 409 with words instead of a 500
+// the outbox would retry for ever. LFH04 (mig 365) was raised and never registered; LFH03 carries two
+// meanings and was always told as "say why". Both are executed here against the real file.
+{
+  const { readdirSync: rd } = await import("node:fs");
+  const dbr = await import("@/lib/dbRefusal.ts");
+  const raised = [...new Set(rd(join(root, "supabase/migrations")).filter((f) => f.endsWith(".sql"))
+    .flatMap((f) => [...read(`supabase/migrations/${f}`).matchAll(/errcode\s*=\s*'(LFH\d\d)'/gi)].map((m) => m[1].toUpperCase())))].sort();
+  const unregistered = raised.filter((c) => dbr.refusalStatus({ code: c, message: "x" }) !== 409 || dbr.ownRefusalCode({ code: c }) !== c);
+  check(`every own refusal code the migrations raise (${raised.join(", ")}) answers 409 with its own sentence`, raised.length >= 4 && !unregistered.length, unregistered);
+  check("LFH03 from the reopen ('another party is sitting') says the table must be free — not 'say why'",
+    /has to be free/.test(dbr.refusalMessage({ code: "LFH03", message: "lfh: another party is sitting at that table — it has to be free" })));
+  check("…and LFH03 for a missing reason still asks for the reason",
+    /reason is required/.test(dbr.refusalMessage({ code: "LFH03", message: "lfh: a reason is required to reopen" })));
+}
 
 // ── the clash gate looks rows up by a column that EXISTS (sweep #10 T30, item 9, 2026-10-09) ──
 // categories and filters have no `id` (their key is restaurant + slug) and table_tags has none

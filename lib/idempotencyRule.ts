@@ -51,3 +51,28 @@ export function withoutSecrets(v: unknown, depth = 0): unknown {
   }
   return out;
 }
+
+// ── A STORED REPLY IS ONLY REPEATED TO WHOEVER MADE IT (sweep #10 T30, item 11, 2026-10-09) ────────
+// A duplicate is answered from the stored copy BEFORE the route's own sign-in check runs — that is
+// what makes "at most once" work for an offline replay. Since item 7 the copy holds no secret, but it
+// still holds whatever else the reply carried (an order id, a count), and it was handed to anyone who
+// presented the same action id. So the copy now carries an opaque stamp of who made it (`__by` — the
+// panel plus the sign-in cookies, hashed in lib/idempotency.ts), and a duplicate from anyone else is
+// CONFIRMED (ok + duplicate) but not REPEATED. The action still runs at most once either way.
+export const CALLER_KEY = "__by";
+
+/** What to KEEP for a completed action: its reply without secrets, stamped with who made it. */
+export function keptReply(body: unknown, by: string): Record<string, unknown> {
+  const kept = withoutSecrets(body);
+  const base = kept && typeof kept === "object" && !Array.isArray(kept) ? (kept as Record<string, unknown>) : {};
+  return { ...base, [CALLER_KEY]: by };
+}
+
+/** What to REPEAT to a duplicate: the stored reply minus its stamp — or nothing, if someone else made it. */
+export function replyFor(stored: unknown, by: string): Record<string, unknown> {
+  const kept = withoutSecrets(stored);
+  if (!kept || typeof kept !== "object" || Array.isArray(kept)) return {};
+  const { [CALLER_KEY]: who, ...rest } = kept as Record<string, unknown>;
+  if (typeof who === "string" && who !== by) return {};
+  return rest;
+}

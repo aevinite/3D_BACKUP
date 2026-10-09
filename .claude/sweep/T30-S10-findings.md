@@ -24,3 +24,18 @@ improvement was built — they were listed in the chat report.
 - 26 more "function beside a migration number" pointers outside this territory do not resolve (`scripts/verify-money-pointers.mjs`'s check 1 logic, run repo-wide).
 - The dev database holds a scratch schema `wt767` (orders / order_items copies, no RLS, no guest grant) and five "T28 item 16 probe" restaurants.
 - Aevinite → Billing & plans on a phone truncates restaurant names to 3–4 letters.
+
+## Round 2 (owner, 2026-10-09 — "do all within your boundaries", then "500 to 1000 … zero error")
+
+| # | what | where a person meets it | guard |
+|---|---|---|---|
+| 11 | a stored "already done" reply was repeated to anyone presenting the same action id — now only to whoever made it | backend only, nothing on screen | `verify:order-retry` 1c · `verify:t30-money` |
+| 12 | a list of objects compared equal to any other list of the same length | backend only (no screen sends one yet) | `verify:t24-money-rules` · `verify:t30-money` |
+| 13 | LFH04 had no sentence; LFH03 told a busy-table refusal as "say why" | manager → reopen a settled bill, from any door other than the manager route | `verify:t24-money-rules` |
+| 14 | three pieces of unused money code (maxDiscount, keepWhatAnswered, two dead labels) | backend only | `verify:t24-money-rules` · t34 P104916 |
+| 22 | the short rupee label printed "₹1000" for ₹999.50–₹999.99 | owner → dashboard / charts, any figure just under ₹1,000 | `test:units` (lib/money.test.mjs) |
+| 23 | Pay in parts' two-paise tolerance answered differently on different bills (₹525.02 accepted, ₹200.02 refused) | manager / waiter → Pay in parts, parts 2 paise over | `verify:split-payment` · `verify:t30-money` |
+
+Measured: 603 harness checks · 100% of lines and branches in all 13 code files (10 branches proven
+unreachable) · 384 mutants: 362 caught, 22 proven equivalent, 0 unexplained. Items 15–18 and 21 were
+left: their files belong to other terminals (the owner routes, the manager route, a new migration).

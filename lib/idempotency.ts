@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 // The "was anything actually changed?" rule lives in its own import-free file so the guard
 // (scripts/verify-order-retry.mjs) can execute the REAL rule instead of a copy. See it for why.
-import { didSomething, storedIsRefusal, withoutSecrets } from "@/lib/idempotencyRule";
+import { didSomething, storedIsRefusal, keptReply, replyFor } from "@/lib/idempotencyRule";
 
 // A claimed-but-not-completed row older than this is treated as a crashed attempt
 // and allowed to run again (otherwise a server crash mid-write would wedge that
@@ -97,6 +97,17 @@ async function finish(actionId: string, ok: boolean, result?: unknown): Promise<
   }
 }
 
+// WHO MADE THIS ACTION — an opaque stamp, never a credential (item 11). The panel plus the two sign-in
+// cookies the app issues (lfh_staff_auth = the Aevidine admin, lfh_user = a staff member or owner —
+// lib/staffAuth AUTH_COOKIE and lib/userAuth USER_COOKIE; verify:order-retry checks the names still
+// match). Hashed, and only compared, so nothing about a session is stored. A guest carries neither
+// cookie, so every guest's stamp is the same and their offline replays keep echoing the order id.
+async function callerKey(req: NextRequest, panel: string): Promise<string> {
+  const parts = [panel, req.cookies.get("lfh_staff_auth")?.value || "", req.cookies.get("lfh_user")?.value || ""].join("|");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
 // Wrap a route handler so any request carrying an X-LFH-Action-Id header runs at
 // most once. Requests without the header (the guest app, curl, older clients) are
 // passed straight through unchanged.
@@ -109,14 +120,15 @@ export function withIdempotency<C>(
     if (!actionId) return fn(req, ctx);
 
     maybePrune(); // fire-and-forget; never awaited, never able to affect this write
+    const by = await callerKey(req, panel);
     const claim = await begin(actionId, panel);
     if (claim.state === "done") {
       // Echo the original result (order_id etc.) alongside the duplicate flag so the
       // client can still track an order whose first reply was lost.
-      // withoutSecrets() again on the way OUT: a row stored before the rule existed may still hold
-      // a password, and a duplicate must never be the thing that hands it back.
-      const kept = withoutSecrets(claim.result);
-      const stored = (kept && typeof kept === "object" && !Array.isArray(kept)) ? kept as Record<string, unknown> : {};
+      // replyFor() strips secrets again on the way OUT (a row stored before item 7 may still hold a
+      // password) and repeats the reply only to whoever made it (item 11) — anyone else is told the
+      // action is done, without its contents.
+      const stored = replyFor(claim.result, by);
       return NextResponse.json({ ok: true, ...stored, duplicate: true });
     }
     if (claim.state === "processing") return NextResponse.json({ error: "sync_in_progress", retry: true }, { status: 409 });
@@ -132,9 +144,9 @@ export function withIdempotency<C>(
     // caller) to store for future duplicates.
     let body: unknown = null;
     try { body = await res.clone().json(); } catch { /* non-JSON response → store nothing */ }
-    // The reply is KEPT without its secrets (idempotencyRule.withoutSecrets): the caller still gets
+    // The reply is KEPT without its secrets and stamped with who made it (idempotencyRule.keptReply): the caller still gets
     // the full original response below — only the copy stored for a duplicate loses them.
-    await finish(actionId, didSomething(res.status, body), withoutSecrets(body));
+    await finish(actionId, didSomething(res.status, body), keptReply(body, by));
     return res;
   };
 }

@@ -1,0 +1,35 @@
+// lib/clashCompare.ts — every branch.
+import { suite } from "./lib.mjs";
+const t = suite("lib/clashCompare.ts", 168421, 40);
+const C = await import("@/lib/clashCompare.ts");
+t("stableJson(null) and stableJson(undefined) are the empty string", C.stableJson(null) === "" && C.stableJson(undefined) === "");
+t("stableJson of a number / boolean / padded string is its trimmed text", C.stableJson(5) === "5" && C.stableJson(true) === "true" && C.stableJson("  a ") === "a");
+t("stableJson of an array keeps ORDER (a list inside an object is not a set)", C.stableJson([2, 1]) === "[2,1]");
+t("stableJson of an object sorts its keys", C.stableJson({ b: 1, a: 2 }) === '{"a":2,"b":1}');
+t("stableJson of an array nested 8 deep stops with […] (a cycle can never hang a write)", (() => { let a = [1]; for (let i = 0; i < 8; i++) a = [a]; return C.stableJson(a).includes("[…]"); })());
+t("stableJson of an object nested 8 deep stops with {…}", (() => { let o = { v: 1 }; for (let i = 0; i < 8; i++) o = { o }; return C.stableJson(o).includes("{…}"); })());
+t("stableJson of a self-referencing object returns (depth limit)", (() => { const o = { a: 1 }; o.me = o; return typeof C.stableJson(o) === "string"; })());
+t("stableJson keeps null inside an object as an empty value, so {a:null} = {a:undefined}", C.stableJson({ a: null }) === C.stableJson({ a: undefined }));
+t("isPlainObject: {} true; [], null, undefined, 0, 'x' false", C.isPlainObject({}) && ![[], null, undefined, 0, "x"].some((v) => C.isPlainObject(v)));
+t("sameValue: text trimmed ('mild ' = 'mild')", C.sameValue("mild ", "mild"));
+t("sameValue: text is case-sensitive ('Mild' ≠ 'mild')", !C.sameValue("Mild", "mild"));
+t("sameValue: null = undefined = '' (never set)", C.sameValue(null, undefined) && C.sameValue(null, ""));
+t("sameValue: 0 ≠ null (a ₹0 discount is a real value)", !C.sameValue(0, null));
+t("sameValue: false ≠ null ('off' is a value)", !C.sameValue(false, null));
+t("sameValue: 50 = '50'", C.sameValue(50, "50"));
+t("sameValue: lists are sets ('nuts,dairy' = 'dairy,nuts')", C.sameValue(["nuts", "dairy"], ["dairy", "nuts"]));
+t("sameValue: lists are case-insensitive for text ('Nuts' = 'nuts')", C.sameValue(["Nuts"], ["nuts"]));
+t("sameValue: a list with an extra item is different", !C.sameValue(["a"], ["a", "b"]));
+t("sameValue: a list and null — [] = null, ['a'] ≠ null", C.sameValue([], null) && !C.sameValue(["a"], null));
+t("sameValue: a list compared with a non-list treats the non-list as empty", C.sameValue([], "x") && !C.sameValue(["x"], "x"));
+t("sameValue: blank list items are ignored (['a', ''] = ['a'])", C.sameValue(["a", ""], ["a"]));
+t("sameValue (item 12): a list of OBJECTS is compared by content", !C.sameValue([{ a: 1 }], [{ a: 2 }]) && C.sameValue([{ a: 1, b: 2 }], [{ b: 2, a: 1 }]));
+t("sameValue (item 12): an object item and a text item never collide", !C.sameValue([{ a: 1 }], ['{"a":1}'.toLowerCase() + "x"]));
+t("sameValue: objects by content regardless of key order", C.sameValue({ a: 1, b: { c: 2 } }, { b: { c: 2 }, a: 1 }));
+t("sameValue: an object and null — {} = null, {a:1} ≠ null", C.sameValue({}, null) && C.sameValue(null, {}) && !C.sameValue({ a: 1 }, null));
+t("sameValue: an object vs a string is a change", !C.sameValue({ a: 1 }, "a"));
+// round-2 mutation survivors, closed — the depth limit is exactly 6, not 5
+const nest = (leaf, n) => { let v = leaf; for (let i = 0; i < n; i++) v = { k: v }; return v; };
+t("sameValue: a list that is the 6th level down is still compared (different → different)", !C.sameValue(nest([1], 6), nest([2], 6)));
+t("sameValue: an object that is the 6th level down is still compared", !C.sameValue(nest({ g: 1 }, 6), nest({ g: 2 }, 6)));
+t("sameValue: past the limit (7th level) the difference is not seen — fails OPEN by design", C.sameValue(nest({ g: 1 }, 7), nest({ g: 2 }, 7)));

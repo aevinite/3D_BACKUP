@@ -56,6 +56,10 @@ export function compactINR(value: number): string {
     : a >= LAKH ? `${oneDp(a / LAKH)}L`
     : dp(a / THOUSAND) >= 100 ? `${oneDp(a / LAKH)}L`
     : a >= THOUSAND ? `${oneDp(a / THOUSAND)}k`
+    // …and the same rule at the BOTTOM bucket (sweep #10 T30 round 2, 2026-10-09): ₹999.50–₹999.99
+    // rounded to a whole rupee is 1,000, which printed "₹1000" — the only four-digit plain figure the
+    // function could ever produce, beside every other thousand reading "₹1k".
+    : Math.round(a) >= THOUSAND ? "1k"
     : Math.round(a).toString();
   return `${neg ? "−" : ""}₹${body}`;
 }

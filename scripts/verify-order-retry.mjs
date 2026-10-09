@@ -65,11 +65,11 @@ const OUT = join(ROOT, "node_modules/.cache/verify-order-retry-idem.mjs");
 // half-installed checkout, no network), a thrown exception would fail the hook and block the edit
 // with a stack trace — punishing a person for an unrelated problem. Go quiet instead; a normal
 // `npm run verify:order-retry` still reports it loudly.
-let didSomething, withoutSecrets;
+let didSomething, withoutSecrets, keptReply, replyFor;
 try {
   execFileSync("npx", ["esbuild", "lib/idempotencyRule.ts", "--bundle", "--platform=node", "--format=esm",
     "--alias:@=.", `--outfile=${OUT}`, "--log-level=warning"], { cwd: ROOT, stdio: HOOK ? "ignore" : "inherit" });
-  ({ didSomething, withoutSecrets } = await import(pathToFileURL(OUT).href));
+  ({ didSomething, withoutSecrets, keptReply, replyFor } = await import(pathToFileURL(OUT).href));
 } catch (e) {
   if (HOOK) process.exit(0);
   throw e;
@@ -108,10 +108,29 @@ for (const [name, status, body, want] of cases) {
 }
 {
   const src = readFileSync(join(ROOT, "lib/idempotency.ts"), "utf8");
-  if (/finish\(actionId, didSomething\(res\.status, body\), withoutSecrets\(body\)\)/.test(src)) ok("lib/idempotency.ts stores the reply only after withoutSecrets()");
+  if (/finish\(actionId, didSomething\(res\.status, body\), keptReply\(body, by\)\)/.test(src)) ok("lib/idempotency.ts stores the reply only through keptReply() — no secrets, stamped with who made it");
   else bad("lib/idempotency.ts stores the reply without removing its secrets");
-  if (/withoutSecrets\(claim\.result\)/.test(src)) ok("…and strips them again before echoing a stored reply (rows written before the rule)");
+  if (/const stored = replyFor\(claim\.result, by\)/.test(src)) ok("…and echoes a stored reply only through replyFor() (secrets stripped again, and only to whoever made it)");
   else bad("a stored reply is echoed without removing secrets an older row may still hold");
+}
+
+// ── 1c. a stored reply is repeated only to whoever made it (sweep #10 T30, item 11) ─────────────
+{
+  const have = typeof keptReply === "function" && typeof replyFor === "function";
+  const kept = have ? keptReply({ ok: true, order_id: "o-9", password: "pw" }, "me") : null;
+  if (have && kept.__by === "me" && kept.order_id === "o-9" && !("password" in kept)) ok("keptReply stamps who made it and still drops the password");
+  else bad("keptReply does not stamp the caller (or keeps a secret)", JSON.stringify(kept));
+  if (have && replyFor(kept, "me").order_id === "o-9" && !("__by" in replyFor(kept, "me"))) ok("…the same caller gets its reply back (the order id an offline replay needs), without the stamp");
+  else bad("the caller who made the action no longer gets its own reply back");
+  if (have && JSON.stringify(replyFor(kept, "someone-else")) === "{}") ok("…anyone else is told it is done, but not what it said");
+  else bad("a stored reply is repeated to a caller who did not make it");
+  if (have && replyFor({ ok: true, order_id: "old" }, "me").order_id === "old") ok("…a row stored before the stamp existed still echoes (nothing already queued is broken)");
+  else bad("rows written before the stamp existed stopped echoing");
+  const src = readFileSync(join(ROOT, "lib/idempotency.ts"), "utf8");
+  const names = readFileSync(join(ROOT, "lib/staffAuth.ts"), "utf8") + readFileSync(join(ROOT, "lib/userAuth.ts"), "utf8");
+  if (/AUTH_COOKIE = "lfh_staff_auth"/.test(names) && /USER_COOKIE = "lfh_user"/.test(names) && /cookies\.get\("lfh_staff_auth"\)/.test(src) && /cookies\.get\("lfh_user"\)/.test(src))
+    ok("the stamp reads the two sign-in cookies the app really issues (lfh_staff_auth, lfh_user)");
+  else bad("the stamp's cookie names no longer match lib/staffAuth / lib/userAuth");
 }
 
 // ── 2. the guard heals rows written before the rule existed ─────────────────────────────────
