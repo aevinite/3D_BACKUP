@@ -158,6 +158,30 @@ await M("scripts/sweep/t39s10/run-all.mjs", "the run-everything tool records the
 await M("scripts/sweep/t39s10/round2-mutations.mjs", "this tool refuses to break files in the shared folder", "--root …/backup_Menu", () =>
   red(run("node", ["scripts/sweep/t39s10/round2-mutations.mjs", "--root", "/Users/aevinite/Documents/Projects/backup_Menu", "--out", "/tmp/zz"]), /refusing/));
 
+// ── WITH THE APP RUNNING (--live <base>): the rules this round moved from "sent" to "read" ──────
+// verify:staff-accounts reads its four refusals from the code (item 53); verify:guest reads the Back
+// rule (item 54). The app at <base> runs the REAL code; the guard reads THIS copy's files, so a break
+// here is seen by the guard and never served to anyone.
+const LIVE = argv.includes("--live") ? argv[argv.indexOf("--live") + 1] : "";
+if (LIVE) {
+  const live = (args) => run("npm", ["run", "-s", ...args, "--", "--base", LIVE]);
+  for (const [file, from, to, what, want] of [
+    ["app/api/admin/users/route.ts", 'return bad("unauthorized", 401);', 'return bad("unauthorized", 403);', "the admin 'add staff' refusal answering 403 instead of 401", /add staff/],
+    ["app/api/panel-login/route.ts", "status: r.transient || r.unavailable ? 503 : 401", "status: r.transient || r.unavailable ? 503 : 400", "a wrong password answered 400 instead of 401", /wrong password is refused/],
+    ["lib/userAuth.ts", "const MAX_FAILS = 5;", "const MAX_FAILS = 6;", "the lock after 6 wrong tries instead of 5", /locks after 5/],
+    ["app/api/kitchen/[...path]/route.ts", "async function postImpl(req: NextRequest, ctx: Ctx) {\n", "async function postImpl(req: NextRequest, ctx: Ctx) {\n  const zzEarly = 1;\n", "a kitchen handler that does something before its sign-in gate", /kitchen sign-in/],
+  ]) {
+    await M(file, `verify:staff-accounts goes red on ${what}`, `break ${file}, run the guard (it reads this copy)`, () => {
+      sub(file, from, to);
+      try { return red(live(["verify:staff-accounts"]), want); } finally { restore(file); }
+    });
+  }
+  await M("components/MenuView.tsx", "verify:guest P15611 goes red when the menu stops remembering where the dish sat (item 54)", "drop `off` from the saved value", () => {
+    sub("components/MenuView.tsx", "JSON.stringify({ y: Math.round(el.scrollTop), id, off })", "JSON.stringify({ y: Math.round(el.scrollTop), id })");
+    try { return red(live(["verify:guest"]), /P15611/); } finally { restore("components/MenuView.tsx"); }
+  });
+}
+
 // nothing left broken: the copy matches its commit again
 const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=all", "--", ".", ":!node_modules", ":!.env.local"], { cwd: ROOT, encoding: "utf8" }).trim();
 rows.push({ band: "J", file: "(the throwaway copy)", check: "every break was undone — the copy matches its commit again", how: "git status --porcelain", result: dirty ? "❌" : "✅", note: dirty.slice(0, 200) || "clean" });
