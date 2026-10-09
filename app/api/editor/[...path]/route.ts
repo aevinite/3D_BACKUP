@@ -5730,14 +5730,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
-    // printer-events/:id/resolve — the manager says the printer problem is handled.
-    // (The other resolver is automatic: any successful kitchen print closes all open events.)
-    if (a === "printer-events" && c === "resolve") {
-      must(await sb.from("printer_events").update({ status: "resolved", resolved_at: nowIso() })
-        .eq("id", b).eq("restaurant_id", rid).eq("status", "open"));
-      await log("editor", "printer_problem_resolved", { detail: b, device_id: dev, restaurant_id: rid });
-      return ok({ ok: true });
-    }
+    // ── printer-events/:id/resolve IS GONE (sweep #10 T10, item 9) ──────────────────────────────
+    // Its only caller was the floor's printer-trouble strip ("✓ Resolved"), which the owner had taken
+    // off the floor on 2026-08-31; the strip's last wiring was deleted on 2026-09-03 (4a82272b) and
+    // this door was left with no screen. It wrote "printer_problem_resolved" into the Activity log
+    // whether or not an open problem matched. A problem is still closed — automatically, by the next
+    // successful print (lib/printQueue → finishKotJob) — so nothing a restaurant relies on goes with
+    // it. Old log rows keep their wording. Guarded by scripts/verify-t10-manager-writes.mjs.
 
     // generic upsert: POST /:kind  (items | categories | filters | settings)
     if (path.length === 1) {
