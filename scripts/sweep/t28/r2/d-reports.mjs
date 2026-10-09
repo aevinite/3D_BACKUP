@@ -196,8 +196,19 @@ row(S("cancelled money is reported apart from revenue, never inside it"), "compa
   return x.j.totals.cancelledValue >= 0 || `cancelledValue=${x.j.totals.cancelledValue}`;
 });
 row(S("the payments report's money matches the sales report's revenue for the same window"), "compare type=payments with type=sales", async (c) => {
-  const p = await GET(c.O, `/api/owner/reports?type=payments&range=30d&rid=${FH}`);
-  const s = await GET(c.O, `/api/owner/reports?type=sales&range=30d&rid=${FH}`);
+  // A STEADY READ (sweep #10 T39 item 76, 2026-10-09). The two reports are two requests; on a shared
+  // dev database other sessions' tests place paid orders on French House between them, and this went
+  // red once in the full run while, read again quietly, both said ₹21,588 to the paisa. So: sales,
+  // payments, sales again — and judge only a pair taken while the money did not move (up to 4 tries).
+  // A gap that survives a steady read is a real one and still fails below.
+  let p, s;
+  for (let i = 0; i < 4; i++) {
+    const s1 = await GET(c.O, `/api/owner/reports?type=sales&range=30d&rid=${FH}`);
+    p = await GET(c.O, `/api/owner/reports?type=payments&range=30d&rid=${FH}`);
+    s = await GET(c.O, `/api/owner/reports?type=sales&range=30d&rid=${FH}`);
+    if (s1.j?.totals && s.j?.totals && s1.j.totals.revenue === s.j.totals.revenue) break;
+    await new Promise((r) => setTimeout(r, 3000));
+  }
   if (!s.j?.totals || !Array.isArray(p.j?.rows)) return `payments=${p.status} sales=${s.status}`;
   const sum = Math.round((p.j.rows || []).reduce((a, x) => a + x.revenue, 0) * 100) / 100;
   const rev = Math.round(s.j.totals.revenue * 100) / 100;
