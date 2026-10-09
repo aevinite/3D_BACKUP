@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// verify:t10-writes — sweep #10 T10, items 2–6, on the manager route's second half.
+// verify:t10-writes — sweep #10 T10, items 2–7, on the manager route's second half.
 //
 // Each check DRIVES the real route (bundled with esbuild, called in memory against
 // scripts/panel-stubs — terminal 9's harness) and reads what the handler WROTE. Every refusal has
@@ -12,6 +12,7 @@
 //   4  a whole-bill discount's %-limit is a share of the BILL, not of the bill's first ticket.
 //   5  the bill-printed comment no longer says a second copy is branded (R37/R38).
 //   6  a tip on a ticket that has gone is refused, not reported as saved.
+//   7  handling a rating and clearing a table name the restaurant in every WHERE clause, not only the id.
 import { readFileSync } from "node:fs";
 import { world, call } from "./sweep/t9s10/lib.mjs";
 
@@ -23,7 +24,7 @@ const RID = "rest-1";
 const route = readFileSync(new URL("../app/api/editor/[...path]/route.ts", import.meta.url), "utf8");
 const code = route.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-console.log("verify:t10-writes — the manager route's second half, items 2–6");
+console.log("verify:t10-writes — the manager route's second half, items 2–7");
 
 // ── 2 ─────────────────────────────────────────────────────────────────────────────────────
 {
@@ -113,6 +114,30 @@ const twoTicketBill = () => world({
   const r = await call("POST", "orders/o1/tip", { body: { amount: 50 } });
   t(r.status === 200 && G.FIX.orders[0].tip === 50 && G.LOGS.some((l) => l.action === "order_tip"),
     "item 6 · …and a tip on a real ticket is still saved and logged", `item 6 · a real tip answered ${r.status}, tip ${G.FIX.orders[0].tip}`);
+}
+
+// ── 7 ─────────────────────────────────────────────────────────────────────────────────────
+// Every statement these two doors send names the restaurant in its WHERE clause.
+const named = (G, table) => G.SCOPE_LOG.filter((s) => s.table === table).every((s) => s.filters.some((f) => f.col === "restaurant_id" && f.val === RID));
+{
+  const G = await world({ fix: { feedback: [{ id: "f1", restaurant_id: RID }, { id: "f2", restaurant_id: "rest-2" }] } });
+  G.SCOPE_LOG.length = 0;
+  const r = await call("POST", "ratings/ack", { body: { id: "f1", acknowledged: true } });
+  t(r.status === 200 && G.FIX.feedback[0].acknowledged === true && named(G, "feedback"),
+    "item 7 · handling a rating reads and writes it with the restaurant in the WHERE clause", `item 7 · ratings/ack answered ${r.status}, scoped=${named(G, "feedback")}`);
+  const r2 = await call("POST", "ratings/ack", { body: { id: "f2", acknowledged: true } });
+  t(r2.status === 404 && G.FIX.feedback[1].acknowledged === undefined,
+    "item 7 · …and a rating that is not this restaurant's is simply not found, and untouched", `item 7 · another restaurant's rating answered ${r2.status}`);
+}
+{
+  const G = await world({ perms: { void_bills: true }, fix: {
+    sessions: [{ id: "s1", restaurant_id: RID, table_number: "4", status: "open" }],
+    orders: [{ id: "o1", restaurant_id: RID, session_id: "s1", table_number: "4", status: "served", payment_status: "paid", archived: false }],
+    session_members: [{ id: "m1", restaurant_id: RID, session_id: "s1", removed: false }] } });
+  G.SCOPE_LOG.length = 0;
+  const r = await call("POST", "tables/4/restart", { body: {} });
+  t(r.status === 200 && G.FIX.sessions[0].status === "closed" && G.FIX.session_members[0].removed === true && named(G, "sessions") && named(G, "session_members"),
+    "item 7 · clearing a table's round closes its party with the restaurant named on both writes", `item 7 · restart answered ${r.status}`);
 }
 
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);

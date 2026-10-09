@@ -46,3 +46,13 @@ the file (lines ~3,442–end on 2026-10-09). Ledger: `LEDGER/T10-S10.md`. Each i
 
 - **Where:** Manager panel → a table → 💳 Mark paid → tip.
 - **Fix:** zero-row match answers 404 (the waiter twin's words). Guard: `verify:t10-writes`.
+
+## 7 · Four statements found their row by id alone
+
+- **Where:** backend only, nothing on screen (Ratings → ✓ Handled; Tables → clear the round).
+- **What was wrong:** the rating read compared restaurant_id after fetching by id, its update and the
+  two closing writes of `tables/:t/restart` used the id alone. Correct today (each id came from a
+  scoped read) but the WHERE clause is the only scope the service-role client has.
+- **Fix:** restaurant named in all four. Guard: `verify:t10-writes` (item 7, 3 checks, sabotaged red).
+- **Not mine, same shape:** `lib/removalAudit.ts` (bill read by session id) and `lib/sessionClose.ts`
+  (close writes by session id after its ownership check).

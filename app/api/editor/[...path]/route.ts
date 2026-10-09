@@ -3849,15 +3849,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (hasAck && typeof rb.acknowledged !== "boolean") return err("acknowledged must be true/false", 400);
       const hasNote = "note" in (rb || {});
       if (hasNote && typeof rb.note !== "string") return err("note must be text", 400);
-      const row = (await sb.from("feedback").select("id, restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
+      // THE RESTAURANT IS IN THE WHERE CLAUSE, NOT COMPARED AFTERWARDS (sweep #10 T10, item 7). This read
+      // found the rating by id ALONE and then compared its restaurant_id, and the update below wrote by
+      // id alone — correct, because the compare came first, but the service-role client skips the
+      // database's own row rules, so the WHERE clause is the only scope there is (verify:scoped-reads).
+      // Another restaurant's rating now simply is not found, which is also what it should look like.
+      const row = (await sb.from("feedback").select("id").eq("id", id).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
       if (!row) return err("not found", 404);
-      if (row.restaurant_id !== rid) return err("forbidden", 403);
       const who = g.user?.name || g.user?.username || "Manager";
       const patch: Record<string, unknown> = {};
       if (hasAck) { patch.acknowledged = rb.acknowledged; patch.acknowledged_at = rb.acknowledged ? new Date().toISOString() : null; patch.acknowledged_by = rb.acknowledged ? who : null; }
       if (hasNote) patch.staff_note = (rb.note as string).trim() || null;
       if (!Object.keys(patch).length) return err("nothing to update", 400);
-      const upd = await sb.from("feedback").update(patch).eq("id", id);
+      const upd = await sb.from("feedback").update(patch).eq("id", id).eq("restaurant_id", rid);
       if (upd.error) throw new Error(upd.error.message);
       return ok({ ok: true });
     }
@@ -5209,13 +5213,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       let q = sb.from("orders").update({ status: "served", archived: true, archived_at: nowIso() }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
       const rows = must(await q.select());
-      if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("removed", false).select());
+      // Both closing writes name the restaurant as well as the session they found (sweep #10 T10, item 7):
+      // the session id came from a restaurant-scoped read, but the WHERE clause is the only scope there is.
+      if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("restaurant_id", rid).eq("removed", false).select());
       await clearTableSignals(rid, t); // the B12 fix — no ghost waiter-call bell on the emptied table
       // NO FRESH EMPTY PARTY (owner, 2026-08-01). This line used to open a new session so the
       // table stayed "open, waiting for guests" — a state no screen can show since open/close was
       // removed, which is exactly how he found table 30 reading Free on the floor and open in the
       // database. The party now ENDS with its round: the table is free, on both sides.
-      if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso(), last_activity_at: nowIso() }).eq("id", openSess.id).select());
+      if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso(), last_activity_at: nowIso() }).eq("id", openSess.id).eq("restaurant_id", rid).select());
       await log("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} ${rows.length === 1 ? "order" : "orders"} cleared`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
