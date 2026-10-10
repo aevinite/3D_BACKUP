@@ -1538,8 +1538,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS); the perm
       // gate above is a FEATURE gate, not a tenant one, so a foreign ?rid= must still be blocked.
-      const cur = must(await sb.from("orders").select("total, subtotal, taxable_base, session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("total, subtotal, taxable_base, session_id, payment_status, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't there anymore — refresh.", 404);
+      // A SETTLED OR CANCELLED TICKET IS NOT DISCOUNTED (sweep #10 T13, item 5). Every other money edit
+      // on this panel refuses a paid bill — dish delete, quantity, add-a-dish all answer "Won't change a
+      // PAID bill — mark it unpaid first" from their database function — and the manager's discount only
+      // ever spreads across a bill's UNPAID tickets (lfh_staff_bill_discount). This one wrote straight
+      // onto whatever ticket it was handed, so money already collected could be marked down after the
+      // fact and the day's takings stopped matching what was paid. Same sentences, same statuses.
+      if (cur.payment_status === "paid") return err(editErrMsg("order_paid"), 409);
+      if (cur.status === "cancelled") return err(editErrMsg("order_cancelled"), 409);
       // Per-ticket and whole-bill discount are mutually exclusive (the whole-bill discount
       // owns every ticket's discount via the split) — so block a single-ticket discount while
       // a bill discount is active, or the two would fight / double-count. (mig 143)

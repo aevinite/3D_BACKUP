@@ -219,5 +219,20 @@ for (const [path, body, want, what] of GONE_DOORS) {
   else bad(`a failed lookup answered ${r.status} with ${G.WRITES.length} write(s)`);
 }
 
+// ── 5. A PAID OR CANCELLED TICKET IS NOT DISCOUNTED FROM THE HANDHELD (item 5) ─────────────────────
+console.log("\n5. a settled or cancelled ticket cannot be discounted from the handheld");
+for (const [o, what] of [[{ payment_status: "paid", status: "served" }, "a PAID ticket"], [{ status: "cancelled", payment_status: "pending" }, "a CANCELLED ticket"]]) {
+  const G = await world({ settings: { discount_cap_tablet: null }, fix: { orders: [{ id: "o7", restaurant_id: RID, table_number: "7", session_id: null, subtotal: 400, taxable_base: 400, total: 420, discount: 0, ...o }] } });
+  const r = await call("POST", "orders/o7/discount", { body: { amount: 10 } });
+  if (r.status === 409 && writesOn(G, "orders").length === 0 && !G.RPCS.some((x) => x.name === "lfh_record_removal")) ok(`a discount on ${what} is refused (409), nothing written, no audit row`);
+  else bad(`a discount on ${what} answered ${r.status} with ${writesOn(G, "orders").length} write(s)`);
+}
+{
+  const G = await world({ fix: { orders: [{ id: "o8", restaurant_id: RID, table_number: "7", session_id: null, subtotal: 400, taxable_base: 400, total: 420, discount: 0, status: "served", payment_status: "pending" }] } });
+  const r = await call("POST", "orders/o8/discount", { body: { amount: 10 } });
+  if (r.status === 200 && G.FIX.orders[0].discount === 10) ok("an UNPAID ticket is still discounted (200, ₹10 written)");
+  else bad(`an unpaid ticket's discount answered ${r.status}, discount ${G.FIX.orders[0].discount}`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
