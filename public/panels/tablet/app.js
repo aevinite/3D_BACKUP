@@ -801,6 +801,12 @@ function orderTaxSplit(o) {
 
 function effRate() {
   const s = state.data.settings || {};
+  // ONE RATE RULE (sweep #10 T30 round 4, item 28, 2026-10-10). This panel kept its own copy of the
+  // rate and it never learnt the composition scheme: a restaurant that may not charge GST got 5%
+  // here — its due, its pre-tax base and the discount maths — while the screen, the paper and the
+  // database all said 0. The shared bill file's taxModel is the rule the manager panel already uses.
+  if (typeof LFH_BILLDOC !== "undefined" && LFH_BILLDOC.taxModel) return LFH_BILLDOC.taxModel(s).rate;
+  if (String(s.price_tax_mode || "") === "composition") return 0;   // the same answer, before billdoc.js has loaded
   const comps = Array.isArray(s.tax_components)
     ? s.tax_components.map((c) => ({ label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 })).filter((c) => c.label && c.rate > 0)
     : [];
