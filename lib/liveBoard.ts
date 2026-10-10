@@ -16,6 +16,9 @@ import { businessDayStartIso } from "@/lib/businessDay";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 // The SHARED bounded fan-out. See the note on pageBoard below for why the paging helper is NOT shared.
 import { mapLimit } from "@/lib/mapLimit";
+// Errors keep their SQLSTATE (pgError) so the kitchen/tablet routes answer a timeout as "busy — retrying"
+// and a refused value as a refusal, not as an unknown crash (sweep #10 T13 round 2, item 26's twin).
+import { pgError } from "@/lib/dbRefusal";
 
 // We only touch id / created_at / session_id here; the rest of the row passes
 // through untouched, hence the index signature.
@@ -94,12 +97,12 @@ const KITCHEN_ACTIVE_STATUSES = ["received", "preparing"];
 const PAGE = 1000;
 const MAX_PAGES = 20;
 async function pageBoard<T>(
-  makePage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  makePage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string } | null }>,
 ): Promise<T[]> {
   const all: T[] = [];
   for (let p = 0; p < MAX_PAGES; p++) {
     const { data, error } = await makePage(p * PAGE, p * PAGE + PAGE - 1);
-    if (error) throw new Error(error.message);
+    if (error) throw pgError(error);
     const rows = data ?? [];
     all.push(...rows);
     if (rows.length < PAGE) return all;
@@ -171,7 +174,7 @@ export async function liveOrdersAndItems(
   // stragglers off the board with nobody told. 2,000 is far past any real floor.
   const openRes = await sb.from("sessions").select("id")
     .eq("status", "open").eq("restaurant_id", restaurantId).lt("created_at", since).limit(2000);
-  if (openRes.error) throw new Error(openRes.error.message);
+  if (openRes.error) throw pgError(openRes.error);
   const openIds = (openRes.data ?? []).map((s) => s.id as string);
 
   // Orders: today's, PLUS any belonging to a still-open session (matches the brain).

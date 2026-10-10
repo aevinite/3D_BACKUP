@@ -431,8 +431,8 @@ addStatic("The shared board · it returns TODAY's orders PLUS every order on a s
 addStatic("The shared board · that second pass only reaches back BEFORE the rollover (no double counting)", () => /\.lt\("created_at", since\)\.in\("session_id", ids\)/.test(C.blib));
 addStatic("The shared board · the open-session list itself is bounded, so overnight tables cannot vanish silently", () => /\.eq\("status", "open"\)[\s\S]{0,120}\.limit\(2000\)/.test(C.blib));
 addStatic("The shared board · the open-session read is scoped to the restaurant", () => /sessions"\)\.select\("id"\)[\s\S]{0,160}\.eq\("restaurant_id", restaurantId\)/.test(C.blib));
-addStatic("The shared board · a failed open-session read throws instead of quietly answering 'no tables'", () => /if \(openRes\.error\) throw new Error\(openRes\.error\.message\)/.test(C.blib));
-addStatic("The shared board · a failed page throws too — a short board is never passed off as the whole one", () => /if \(error\) throw new Error\(error\.message\)/.test(C.blib));
+addStatic("The shared board · a failed open-session read throws instead of quietly answering 'no tables'", () => /if \(openRes\.error\) throw (?:new Error\(openRes\.error\.message\)|pgError\(openRes\.error\))/.test(C.blib)); // pgError since T13 round 2
+addStatic("The shared board · a failed page throws too — a short board is never passed off as the whole one", () => /if \(error\) throw (?:new Error\(error\.message\)|pgError\(error\))/.test(C.blib)); // pgError since T13 round 2 (it keeps the SQLSTATE) — still a throw
 addStatic("The shared board · it walks past PostgREST's 1000-row cap instead of stopping at it", () => /const PAGE = 1000/.test(C.blib) && /\.range\(from, to\)/.test(C.blib));
 addStatic("The shared board · paging stops at the first short page, not after a fixed number", () => /if \(rows\.length < PAGE\) return all/.test(C.blib));
 addStatic("The shared board · a runaway is logged, never silently truncated", () => /console\.error\(`liveBoard: pageBoard hit MAX_PAGES/.test(C.blib));
