@@ -162,6 +162,14 @@ database, unread. See `docs/REJECTED-IDEAS.md` R27 before ever re-adding it.
 - **Never hardcode a tax rate** — always `lib/tax.ts` / `lfh_effective_tax_rate`. Standard dine-in is
   5% (no ITC); **18% only** for restaurants inside hotels with room tariff ≥ ₹7,500/night; alcohol
   ⇒ 18% and composition scheme unavailable.
+- **Round money ONCE, exactly, the same everywhere** (sweep #10 T30 round 4, items 10 and 28, 2026-10-10).
+  Every amount multiplied or divided by a rate is rounded to the paisa by one rule — exact, half away
+  from zero, which is what the database's `round()` does: `lib/tax.ts` `roundPaise` (the server and
+  React), `public/panels/billdoc.js` `moneyRound` (the panels and the paper) and `lib/taxFiling.ts`'s own
+  copy (that file imports nothing). `Math.round(x * 100) / 100` rounds the FLOAT and was a paisa off on
+  about one bill in 1,200, against the database. Never write a new one; `node scripts/verify-money-round-twins.mjs`
+  (in verify:static) fails if a copy drifts or a money × rate is rounded the float way anywhere. The
+  RATE is one rule too — the waiter tablet's own copy charged a composition-scheme restaurant 5%.
 - **Real GSTIN on any tax invoice** — remove the placeholder GSTIN before any tenant files a real bill.
 - **e-invoice / IRN is B2B only, turnover > ₹5 cr** — never stamp it on an ordinary diner bill.
 - **Reconcile to the rupee** — Z-report / dashboards must include voids and deleted bills (our past
