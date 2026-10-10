@@ -198,12 +198,27 @@ function quotedStrings(src) {
     if (before.slice(t).includes("}")) return false;              // that try already closed
     return /\}\s*catch\s*(?:\([^)]*\)\s*)?\{\s*return\s+true/.test(line.slice(at));
   };
+  // …AND THE THIRD SPELLING: AN EXPLAINED LIST (sweep #10 T18, item 22, 2026-10-10). verify:every-script
+  // keeps its own EXPLAINED_MISSING table — one `{ paths: [ … ], why: "…" }` entry per file that names a
+  // path meant NOT to exist, each with its reason. Those entries are the obituaries in list form, and this
+  // check called them rot, which refused every save under scripts/ in every session. Recognised on the
+  // same narrow terms: the path must sit inside the `paths: [ … ]` of an entry whose `why:` is on the
+  // same line. A path anywhere else on the line is still checked.
+  const explainedList = (line, at) => {
+    const open = line.lastIndexOf("paths: [", at);
+    if (open === -1) return false;
+    // The list's own closing bracket is the one followed by `, why:` — a path may itself hold a `]`
+    // ("app/api/print-station/[file]/route.ts"), so the first `]` is not the end of the list.
+    const end = line.slice(open).match(/\]\s*,\s*why:\s*["'`]/);
+    return !!end && open + end.index > at;
+  };
   const bad = [];
   for (const f of scriptFiles) {
     const seen = new Set();
     for (const [ln, line] of codeLines(read(f))) {
       for (const m of line.matchAll(RX)) {
         const rel = m[1];
+        if (explainedList(line, m.index)) continue;
         // "this file must NOT exist" — an obituary, not a stale pointer. Judged from the text
         // immediately before the path, so it cannot swallow an unrelated read later on the line.
         if (OBITUARY.test(line.slice(0, m.index))) continue;
