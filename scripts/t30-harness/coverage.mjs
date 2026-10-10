@@ -4,8 +4,8 @@
 // branch coverage and every line / branch that never executed. --strict exits 1 unless every file is
 // at 100% lines and 100% branches (the bar for "every bit of my files ran").
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, rmSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { root } from "./hooks.mjs";
 const FILES = ["lib/tax.ts", "lib/taxFiling.ts", "lib/paySplit.ts", "lib/payments.ts", "lib/discountCap.ts", "lib/clash.ts", "lib/clashCompare.ts", "lib/idempotency.ts", "lib/idempotencyRule.ts", "lib/dbRefusal.ts", "lib/readGuard.ts", "lib/money.ts", "lib/money.mjs", "lib/orderAllergies.ts"];
 // Branches PROVEN unreachable, each by its own check in ./u-proofs.mjs (which fails the suite if the
@@ -21,10 +21,13 @@ const UNREACHABLE = {
 };
 const lineText = (f, n) => (readFileSync(join(root, f), "utf8").split("\n")[n - 1] || "");
 const out = join(root, "node_modules/.cache/t30-cov.info");
+// A fresh `npm ci` has no node_modules/.cache, and the coverage reporter exits with status 7 when its
+// destination folder is missing — which read as "the suite itself failed" (round 5).
+mkdirSync(dirname(out), { recursive: true });
 try {
   execFileSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--import", "./scripts/t30-harness/hooks.mjs", "--experimental-test-coverage",
-    "--test-reporter=lcov", `--test-reporter-destination=${out}`, "--test-reporter=dot", "--test-reporter-destination=stdout", "--test", "scripts/t30-harness/cov.test.mjs"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
-} catch (e) { console.log(String(e.stdout || "").slice(-600)); console.log("the suite itself failed — fix that first"); process.exit(2); }
+    "--test-reporter=lcov", `--test-reporter-destination=${out}`, "--test-reporter=dot", "--test-reporter-destination=stdout", "--test", "scripts/t30-harness/cov.test.mjs"], { cwd: root, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26, env: { ...process.env, T30_COVERAGE: "1" } });
+} catch (e) { console.log(String(e.stdout || "").slice(-600)); console.log(`the suite itself failed — fix that first (${e.code || e.status || e.message})`); process.exit(2); }
 const info = readFileSync(out, "utf8").split("end_of_record");
 let allFull = true;
 for (const f of FILES) {

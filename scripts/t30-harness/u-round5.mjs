@@ -18,7 +18,9 @@ const codeOf = (s) => s.replace(/(^|[^:\\])\/\/[^\n]*/g, (m, p) => p).replace(/\
 
 // lint, once for every file (the project's own ESLint config), read as JSON
 let LINT = {};
-if (!process.env.T30_MUTATING) {
+// (skipped while mutating or measuring coverage: lint is not the code under test there, and it is slow)
+const LINT_ON = !process.env.T30_MUTATING && !process.env.T30_COVERAGE;
+if (LINT_ON) {
   try { const out = execFileSync(join(root, "node_modules/.bin/eslint"), ["-f", "json", ...FILES, ...TESTS], { cwd: root, encoding: "utf8", maxBuffer: 1 << 26 });
     for (const f of JSON.parse(out)) LINT[f.filePath.replace(root + "/", "")] = f.messages.map((m) => `${m.line}:${m.ruleId || m.message}`);
   } catch (e) { const out = e.stdout || "[]"; for (const f of JSON.parse(out)) LINT[f.filePath.replace(root + "/", "")] = f.messages.map((m) => `${m.line}:${m.ruleId || m.message}`); }
@@ -53,7 +55,7 @@ const dupBodies = (code) => {
 
 for (const f of FILES) {
   const s = src(f), code = codeOf(s);
-  if (!process.env.T30_MUTATING) t(`${f}: the project's lint finds nothing in it — no unused variable, import or eslint-disable that disables nothing`, (LINT[f] || []).length === 0, (LINT[f] || []).join(", "));
+  if (LINT_ON) t(`${f}: the project's lint finds nothing in it — no unused variable, import or eslint-disable that disables nothing`, (LINT[f] || []).length === 0, (LINT[f] || []).join(", "));
   t(`${f}: no TODO / FIXME / XXX / HACK left in it`, !/\b(TODO|FIXME|XXX|HACK)\b/.test(s));
   // CODE, not prose: a commented assignment, a statement that ends like one, or a call on sb / await. (A
   // usage example in a header, indented as one, is documentation; "// function could ever produce" is a sentence.)
@@ -69,7 +71,7 @@ for (const f of FILES) {
   const loops = loopsWithDb(code).filter((l) => !(DB_LOOPS[f] || []).some((re) => re.test(l)));
   t(`${f}: no database call inside a loop, except the named bounded ones`, !loops.length, loops.join(" · "));
 }
-for (const f of TESTS) if (!process.env.T30_MUTATING) t(`${f}: the project's lint finds nothing in this test file`, (LINT[f] || []).length === 0, (LINT[f] || []).join(", "));
+for (const f of TESTS) if (LINT_ON) t(`${f}: the project's lint finds nothing in this test file`, (LINT[f] || []).length === 0, (LINT[f] || []).join(", "));
 t("every allowed database loop still exists where it is named (an allowance for a loop that has gone is dead weight)", Object.entries(DB_LOOPS).every(([f, res]) => res.every((re) => re.test(src(f)))));
 
 // ── item 30: Pay in parts sends its two independent reads together, and still checks each ──
@@ -93,3 +95,24 @@ t("item 30: lib/paySplit.ts no longer carries the two eslint-disable lines that 
 { const D = src("docs/COMPLIANCE-GUARDRAILS.md");
   t("item 31: docs/COMPLIANCE-GUARDRAILS.md §3 states the one exact rounding rule and names its three copies", /\*\*Round money ONCE, exactly, the same everywhere\*\*/.test(D) && /`roundPaise`/.test(D) && /`moneyRound`/.test(D) && /lib\/taxFiling\.ts`'s own/.test(D));
   t("item 31: …and the guard that keeps the copies equal, which exists and is in verify:static", /node scripts\/verify-money-round-twins\.mjs/.test(D) && /\["verify-money-round-twins\.mjs",/.test(src("scripts/verify-static.mjs"))); }
+
+// ── item 32: the guest's other-currency display rounds by the same exact rule ──
+{ const MJ = await import("@/lib/money.mjs"); const TX = await import("@/lib/tax.ts");
+  let s = 31, bad = null; const rnd = () => (s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296;
+  for (let i = 0; i < 200000 && !bad; i++) { const x = (rnd() - 0.2) * (i % 2 ? 1e3 : 1e5) * rnd(); if (MJ.snapToStep(x, 0.01) !== TX.roundPaise(x)) bad = `${x}`; }
+  t("item 32: snapToStep to the cent IS the bill's exact rule (lib/tax.ts roundPaise) — 200,000 amounts", !bad, bad || "");
+  t("item 32: the cases it used to get a cent wrong — 5% of 0.70 is 0.04, 18% of 1.25 is 0.23, 1.005 is 1.01", MJ.minorRound(0.7 * 0.05, 0.01) === 0.04 && MJ.minorRound(1.25 * 0.18, 0.01) === 0.23 && MJ.snapToStep(1.005, 0.01) === 1.01);
+  let rupee = null; const oldRupee = (v) => Math.round(Math.round(v) * 1e6) / 1e6;
+  for (let p = 1; p <= 300000 && !rupee; p++) for (const r of [0.05, 0.12, 0.18, 0.28]) { const v = (p / 100) * r; if (MJ.minorRound(v, 1) !== oldRupee(v)) { rupee = `₹${p / 100} at ${r}`; break; } }
+  t("item 32: a rupee guest sees EXACTLY what they saw before — whole-rupee tax unchanged on every base to ₹3,000 at 5/12/18/28%", !rupee, rupee || "");
+  t("item 32: snapToStep keeps its contract — no usable step → 0, a negative rounds half away from zero, and nothing is −0", MJ.snapToStep(5, 0) === 0 && MJ.snapToStep(5, NaN) === 0 && MJ.snapToStep(-0.035, 0.01) === -0.04 && Object.is(MJ.snapToStep(-0.001, 0.01), 0) && MJ.snapToStep(545.0001, 10) === 550);
+  t("item 32: verify-money-round-twins checks snapToStep as the fourth copy", /lib\/money\.mjs snapToStep \(the guest's other-currency display\)/.test(src("scripts/verify-money-round-twins.mjs"))); }
+
+// ── item 33: the order-totals test compares against the database with the app's rule and the real rate ──
+{ const OT = src("tests/order-totals.e2e.mjs"), OTC = codeOf(OT);   // OTC: code only — the file's own comment quotes the old line
+  t("item 33: tests/order-totals.e2e.mjs rounds its expectation by the app's one rule (roundPaise), not the float way", /import \{ roundPaise \} from "\.\.\/lib\/tax\.ts";/.test(OT) && /const tax = roundPaise\(sub \* rate\);/.test(OT) && !/Math\.round\(sub \* 0\.05 \* 100\) \/ 100/.test(OTC));
+  t("item 33: …takes the restaurant's rate from the database (lfh_effective_tax_rate), never a typed 5%", /rpc\/lfh_effective_tax_rate/.test(OT) && !/\* 0\.05\b/.test(OTC));
+  t("item 33: …and prices eight carts, not one, with an option group on half of them", /for \(let c = 0; c < 8; c\+\+\)/.test(OT) && /withOpts\.length && c % 2 === 0/.test(OT)); }
+
+// ── item 34: the coverage run works on a fresh install (it needed a folder that `npm ci` does not make) ──
+t("item 34: coverage.mjs creates node_modules/.cache before its reporter writes there (a fresh install has no such folder)", /mkdirSync\(dirname\(out\), \{ recursive: true \}\);/.test(src("scripts/t30-harness/coverage.mjs")) && src("scripts/t30-harness/coverage.mjs").indexOf("mkdirSync(dirname(out)") < src("scripts/t30-harness/coverage.mjs").indexOf("execFileSync(process.execPath"));
