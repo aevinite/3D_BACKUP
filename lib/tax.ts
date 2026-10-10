@@ -10,6 +10,33 @@
 // order totals all derive their tax from this one rule, so a bill can never show four
 // different totals (the "cosmetic multi-tax" bug, 2026-07-04).
 
+/**
+ * roundPaise — ONE rounding to the paisa, the same answer the database gives (sweep #10 T30 round 4,
+ * item 10, 2026-10-10).
+ *
+ * WHY. `Math.round(x * 100) / 100` rounds the FLOAT, and a float can sit a hair under a half paisa
+ * the decimal value is exactly at: 5% of ₹0.70 is 3.5 paise, but 0.7 × 0.05 × 100 is
+ * 3.4999999999999996, so the app said ₹0.03 where Postgres's numeric `round()` says ₹0.04. Measured
+ * over every amount to ₹10,000: 818 in a million differ at 5% tax on top, 3,656 at 18%, 21,699 at 12%
+ * tax-inside — and a bill whose tax the database wrote (an untaxed line on it) printed a paisa off.
+ *
+ * HOW. Snap the scaled value to 15 significant digits first (that is far finer than any real money
+ * fraction and far coarser than float noise), then round the MAGNITUDE half up — half away from
+ * zero, which is what Postgres does for a negative amount too.
+ *
+ * HOME: here, in lib/tax.ts, because this file imports nothing (it runs in a browser bundle, the server
+ * and a plain guard alike) and every money file already imports it.
+ * TWIN: public/panels/billdoc.js `moneyRound` is the same function for the panels (no imports there).
+ * `node scripts/verify-money-round-twins.mjs` runs both over millions of inputs and fails if they
+ * ever differ. Change one, change both.
+ */
+export function roundPaise(n: number): number {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return x;
+  const r = Math.round(Number((Math.abs(x) * 100).toPrecision(15)));
+  return r === 0 ? 0 : (x < 0 ? -r : r) / 100;
+}
+
 type TaxSettings = { tax_components?: unknown; tax_rate?: unknown } | null | undefined;
 
 /** Named components with a real label + a positive rate — the only ones that count. */
@@ -154,7 +181,7 @@ type SplitLine = { price?: unknown; qty?: unknown; tax_mode?: unknown; is_mrp?: 
  *  a normal item that simply carries no GST, and staff may absolutely discount it. */
 function discountBaseOf(taxableBase: number, nontaxAmount: number, mrpAmount: number, rate: number): number {
   if (rate > 0) return taxableBase;
-  return Math.max(0, Math.round((taxableBase + nontaxAmount - mrpAmount) * 100) / 100);
+  return Math.max(0, roundPaise(taxableBase + nontaxAmount - mrpAmount));
 }
 
 /** The ONE place three behaviours turn into money on the client. Rounding is PER LINE, to
@@ -169,29 +196,29 @@ export function splitBill(lines: SplitLine[], raw: ModeSettings, discount = 0): 
   for (const ln of lines || []) {
     const unit = parseFloat(String(ln?.price ?? "").replace(/[^0-9.]/g, "")) || 0;
     const qty = Math.max(1, parseInt(String(ln?.qty ?? "1"), 10) || 1);
-    const amt = Math.round(unit * qty * 100) / 100;
+    const amt = roundPaise(unit * qty);
     const mode = String(ln?.tax_mode ?? "excl");
     if (ln?.is_mrp) { hasMrp = true; mrpAmount += amt; }
     if (mode === "exempt") nontaxAmount += amt;
-    else if (mode === "incl") taxableBase += Math.round((amt / (1 + rate)) * 100) / 100;
+    else if (mode === "incl") taxableBase += roundPaise(amt / (1 + rate));
     else taxableBase += amt;
   }
 
-  taxableBase = Math.round(taxableBase * 100) / 100;
-  nontaxAmount = Math.round(nontaxAmount * 100) / 100;
-  mrpAmount = Math.round(mrpAmount * 100) / 100;
+  taxableBase = roundPaise(taxableBase);
+  nontaxAmount = roundPaise(nontaxAmount);
+  mrpAmount = roundPaise(mrpAmount);
 
   const discountBase = discountBaseOf(taxableBase, nontaxAmount, mrpAmount, rate);
   const disc = Math.min(Math.max(0, Number(discount) || 0), discountBase);
-  const subtotal = Math.round((taxableBase + nontaxAmount) * 100) / 100;
+  const subtotal = roundPaise(taxableBase + nontaxAmount);
 
   // With no tax the discount can come off any unlocked line, so it reduces the bill directly.
   // With tax it must come off the taxable part, which is what keeps the due identity true.
-  const taxable = rate > 0 ? Math.round((taxableBase - disc) * 100) / 100 : taxableBase;
-  const tax = Math.round(taxable * rate * 100) / 100;
+  const taxable = rate > 0 ? roundPaise(taxableBase - disc) : taxableBase;
+  const tax = roundPaise(taxable * rate);
   const total = rate > 0
-    ? Math.round((taxable + tax + nontaxAmount) * 100) / 100
-    : Math.round((subtotal - disc) * 100) / 100;
+    ? roundPaise(taxable + tax + nontaxAmount)
+    : roundPaise(subtotal - disc);
 
   return {
     taxableBase, nontaxAmount, mrpAmount, subtotal, discountBase, discount: disc,

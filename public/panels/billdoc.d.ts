@@ -238,6 +238,8 @@ export function taxModel(settings: Record<string, unknown>): TaxModel;
 /** A bill's figures. Discount BEFORE tax, tax on the TAXABLE BASE (not the subtotal), at the rate
  *  the order was actually charged at (orders.tax_rate, mig 284). */
 export function billMoney(orders: Record<string, unknown>[], settings: Record<string, unknown>): BillMoney;
+/** ONE rounding to the paisa, exact like the database (item 10). Twin of lib/tax.ts roundPaise. */
+export function moneyRound(n: number): number;
 /** THE rate ONE order was charged at — the single definition, shared by the printed bill and by
  *  settling a bill in parts (`lib/paySplit.ts`), because it existed twice and had drifted.
  *

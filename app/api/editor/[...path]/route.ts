@@ -765,7 +765,7 @@ function discountBaseOf(o: OrderMoney, rate: number): number {
 // the day-close miss the sum of its own bills.
 type BillTaxRow = OrderMoney & { discount?: number | null; tax_rate?: number | null };
 function billTaxOf(g: BillTaxRow[], settingsRate: number): { disc: number; taxable: number; tax: number } {
-  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const r2 = BILLDOC.moneyRound;   // the ONE rounding rule (item 10) — the paper's own; verify:audit runs this function with BILLDOC alone
   const rateOf = (o: BillTaxRow) => BILLDOC.orderTaxRate(o, settingsRate);
   // Capped exactly the way every discount door caps it, each order at its OWN rate.
   const cap = g.reduce((a, o) => a + discountBaseOf(o, rateOf(o)), 0);

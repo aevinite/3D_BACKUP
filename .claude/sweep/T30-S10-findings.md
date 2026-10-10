@@ -79,3 +79,33 @@ into `shots.mjs` and was committed unnoticed; it ran once at the 1 AM restart. I
 - Two French House orders of 2026-08-05 say "cash" in lower case — written the morning the method check
   landed (51afda30); every path checks it now. A database rule on the column would catch any future slip,
   but would also break the film seeder's next run.
+
+## Round 4 (owner, 2026-10-10 — "do all the things you have listed", then "500 to 1000 … replan whole test … I want zero error")
+
+| # | what | where a person meets it | guard |
+|---|---|---|---|
+| 10 | the app rounded money the float way, the database exactly — 818 amounts in a million differed at 5%, 3,656 at 18% (round 3's open decision; the owner said yes to the shared bill file) | every bill on every screen and on paper — a paisa, on a bill with an untaxed line | `verify-money-round-twins` (in verify:static) · parity P167532–P167535 now green |
+| 11 | a bill could be stored as paid by any spelling — the database now refuses all but the app's six (mig 417) | backend only, nothing on screen | u-round4 · parity "method refused / accepted" probes |
+| 12 | the owner-film history seeder took discounts off twice and paid dine-in bills by "Swiggy"; seeder fixed, 2,730 dev rows repaired, roll-ups refreshed | owner → Dashboard / Reports on the film restaurants | parity r4 "film" rows |
+| 13 | six aevidine demo bills stamped 0% while charging 5% — re-stamped | owner → an old aevidine bill reprinted | parity "demo stamps" |
+| 14 | a test rig's ₹1,449 of payment parts left standing on three cancelled bills — reversed with a reason | manager → French House, 29 Aug cash | parity "rig parts" |
+| 15 | four idle French House tables left open by tests — closed through the manager's own path | backend only | — |
+| 16 | the guest menu read every reviewer's device id to find its own review — now lfh_dish_reviews answers "mine" (mig 418) | guest → a dish page → Reviews | parity r4 "reviews" (118 dishes) · live P1667xx |
+| 28 | the waiter tablet charged a composition-scheme restaurant 5% in its own sums (found by this round's test) | waiter → a bill's due / discount at a composition restaurant | u-round4 P166012–P166015 |
+| 29 | REGRESSION of item 16: the guest menu's ratings vanished — the ratings view runs with the guest's rights (mig 419; caught by reading the dish-page screenshot: "20 reviews" on a dish with 28) | guest → the menu's dish cards and the dish page's star count | parity "as the guest role" (118 rows) · live counts · shots |
+
+Measured: 988 harness checks · 100% of lines and branches in all 14 files · 154 breaks of the three changed files:
+146 caught, 8 proven equivalent, 0 unexplained · 439 app-vs-database checks · 171 driven on :4430 · 39 screens.
+516 new ledger rows, 1,557 earlier rows re-run — the ledger is 2,158 rows, all ✅.
+
+**Also corrected in round 4 (my own, before it shipped):** item 10's first shape made lib/taxFiling.ts import lib/tax,
+breaking its rule that it imports nothing (ten scripts load it with plain node) — it now carries its own copy of the
+rule, proven equal by verify-money-round-twins. And parity.mjs's ids were positions, not permanent ids: item 11's new
+constraint moved every later row; each row is now keyed by its subject (parity-ids.json, seeded from the round-3 ledger).
+
+## Noticed outside this territory in round 4 (left for their owners)
+
+- `scripts/sweep/t18s10/rerun2.mjs:358` (T18) names `app/api/print/[...path]/route.ts`, which does not exist — the
+  edit hook's verify-guards-alive flags it on every write in the shared folder.
+- If a platform channel is wanted in the owner films, it belongs in `aggregator_orders` (lfh_platform_insert), not
+  in how a dine-in table paid.

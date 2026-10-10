@@ -113,3 +113,13 @@ if (!process.env.T30_MUTATING) {
       const a = await run(C0), b = await run(m); if (a !== b) { same = false; at = JSON.stringify(tn); break; } }
     t("lib/clash.ts:353 (names && → ||) is equivalent — every odd table_names shape still reads the same sentence (a throw is caught and falls back to 'Table N')", same, at); }
 }
+// (appended, round 4) roundPaise (lib/tax.ts) and taxFiling's own copy — `x < 0` → `x <= 0` can only differ at x = 0, and
+// there the line has already answered 0 (`r === 0 ? 0 : …`), so both copies agree everywhere (round 4).
+if (!process.env.T30_MUTATING) {
+  const ins = [0, -0, 1e-12, -1e-12, 0.004, -0.004, 0.005, -0.005]; let sd = 3; const rnd = () => (sd = (Math.imul(sd, 1103515245) + 12345) >>> 0) / 4294967296;
+  for (let i = 0; i < 200000; i++) ins.push((rnd() - 0.5) * (i % 2 ? 1e3 : 1e7));
+  { const orig = await import("@/lib/tax.ts"); const m = await twinOA("lib/tax.ts", "(x < 0 ? -r : r)", "(x <= 0 ? -r : r)"); const bad = ins.find((x) => !Object.is(orig.roundPaise(x), m.roundPaise(x)));
+    t(`lib/tax.ts:${twinOA.at} (x < 0 → x <= 0 in roundPaise) is equivalent — the two differ only at 0, which the line has already answered (${ins.length.toLocaleString("en-IN")} inputs incl. ±0)`, bad === undefined, String(bad)); }
+  { const orig = await import("@/lib/taxFiling.ts"); const m = await twinOA("lib/taxFiling.ts", "(x < 0 ? -r : r)", "(x <= 0 ? -r : r)"); const bad = ins.find((x) => !Object.is(orig.netSalesOf({ subtotal: x, discount: 0 }), m.netSalesOf({ subtotal: x, discount: 0 })));
+    t(`lib/taxFiling.ts:${twinOA.at} (the same break in its own copy of the rule) is equivalent on the same inputs`, bad === undefined, String(bad)); }
+}

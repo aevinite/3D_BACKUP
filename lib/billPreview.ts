@@ -21,7 +21,7 @@ import BILLDOC from "@/public/panels/billdoc.js";
 // The tax rules live in ONE file (lib/tax.ts), which is the TypeScript half of migration 270's
 // SQL. This preview must not re-derive any of them: a sample bill that disagrees with the real
 // one is worse than no sample at all, because it gets approved.
-import { effectiveTaxPct, isMrpDish, itemTaxModesAllowed, priceTaxMode, resolveTaxMode, splitBill } from "@/lib/tax";
+import { effectiveTaxPct, isMrpDish, itemTaxModesAllowed, priceTaxMode, resolveTaxMode, roundPaise, splitBill } from "@/lib/tax";
 
 export type BillMode = "bill" | "parcel" | "kot";
 
@@ -162,7 +162,7 @@ export function billPreviewHtml(settingsIn: Settings, mode: BillMode, restaurant
   // Subtotal under that column does not equal it (the rows said ₹1,300 and the subtotal ₹1,238).
   // Worked out here the same way and in the same order as billData, because a preview that
   // disagrees with the printer is the one fault this file exists to prevent.
-  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const r2 = roundPaise;   // the ONE rounding rule, the same as billdoc.js moneyRound (item 10)
   const amountOf = (l: { qty?: number; price?: number }) => r2((Number(l.price) || 0) * Math.max(1, Number(l.qty) || 1));
   const grossTaxed = r2(lines.filter((l) => l.tax_mode !== "exempt").reduce((a, l) => a + amountOf(l), 0));
   const netIncl = r2(lines.filter((l) => l.tax_mode === "incl")

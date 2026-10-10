@@ -224,6 +224,47 @@ try {
     R3("lib/taxFiling.ts", `GST report "${range}": the filing table's grand total is the tax tile rounded to the rupee, and its rows add up to it`, f.total === Math.round(Number(tt.tax) || 0) && f.rows.reduce((a, r) => a + r.tax, 0) === f.total, `filing ${f.total} · tile ${tt.tax}`);
     R3("lib/taxFiling.ts", `GST report "${range}": every row's CGST + SGST equals that row, and the columns add up to the grand total — none negative`, f.rows.every((r) => cents(r.parts.reduce((a, x) => a + x, 0)) === cents(r.tax) && r.parts.every((x) => x >= 0)) && cents(f.columnTotals.reduce((a, x) => a + x, 0)) === cents(f.total), `${f.rows.length} rows`);
   }
+
+  // ── ROUND 4 (P166701+): items 10 and 16 driven on the real pages ─────────────────────────────────
+  let m4 = 166701; const R4 = (file, what, ok, note) => rec(`P${m4++}`, file, what, ok, note);
+  const DISHES = (await sql(`select r2.slug rest, r.item_slug slug, (select comment from reviews x where x.restaurant_id = r.restaurant_id and x.item_slug = r.item_slug and coalesce(x.comment,'') <> '' order by created_at desc limit 1) newest
+    from reviews r join restaurants r2 on r2.id = r.restaurant_id where r2.slug in ('french-house', 'aevidine') group by 1, 2, r.restaurant_id order by count(*) desc, 2 limit 20`));
+  const guest = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const visit = async (path) => {
+    const page = await guest.newPage(); const seenR = [];
+    page.on("response", async (r) => { const u = r.url(); if (/rest\/v1\/(rpc\/lfh_dish_reviews|reviews\b)/.test(u)) seenR.push({ rpc: /rpc\/lfh_dish_reviews/.test(u), status: r.status(), body: await r.text().catch(() => "") }); });
+    await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 120000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    const text = await page.evaluate(() => document.body.innerText).catch(() => ""); await page.close();
+    return { seenR, text };
+  };
+  for (const d of DISHES) {
+    const v = await visit(`/r/${d.rest}/item/${d.slug}`);
+    const okCall = v.seenR.length >= 1 && v.seenR.every((x) => x.rpc && x.status === 200 && !/device_id|"device/i.test(x.body));
+    R4("lib/menu.ts", `${d.rest} · ${d.slug}: the dish page reads its reviews through lfh_dish_reviews (200), never the table, and no reply carries a device id`, okCall, `${v.seenR.length} call(s)`);
+    R4("lib/menu.ts", `${d.rest} · ${d.slug}: …and the newest review is on the page`, !d.newest || v.text.includes(String(d.newest).slice(0, 30)), String(d.newest || "").slice(0, 40));
+    // (item 29) the count beside the stars is the REAL count — mig 418 had emptied the ratings view for guests
+    const real = Number((await sql(`select count(*) n from reviews where item_slug = '${d.slug}' and restaurant_id = (select id from restaurants where slug = '${d.rest}')`))[0].n);
+    R4("lib/menu.ts", `${d.rest} · ${d.slug}: …and the count beside the stars is the real one (${real}), not just the 20 the page fetched`, new RegExp(`\\(${real} reviews?\\)`).test(v.text), (v.text.match(/\(\d+ reviews?\)/) || ["no count shown"])[0]);
+  }
+  for (const d of DISHES.filter((x) => x.rest === "french-house").slice(0, 3)) {
+    const v = await visit(`/item/${d.slug}`);
+    R4("lib/menu.ts", `the plain /item/${d.slug} door (restaurant #1's own) reads its reviews the same way — lfh_dish_reviews, no device id`, v.seenR.length >= 1 && v.seenR.every((x) => x.rpc && x.status === 200 && !/device/i.test(x.body)), `${v.seenR.length} call(s)`);
+  }
+  await guest.close();
+  // the panels, live: the one exact rounding is what the real manager and tablet pages run
+  for (const [ctx, path, who] of [[mgr, "/manager", "manager panel"], [tab, "/tablet", "waiter tablet"]]) {
+    const page = await ctx.newPage(); await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 120000 }).catch(() => {}); await page.waitForTimeout(2500);
+    let got = null;
+    for (const f of page.frames()) { try { const r = await f.evaluate(() => (typeof moneyRound === "function" && typeof LFH_BILLDOC !== "undefined") ? { a: moneyRound(0.7 * 0.05), b: moneyRound(1.005), c: LFH_BILLDOC.moneyRound(-0.035), d: LFH_BILLDOC.taxModel({ price_tax_mode: "composition", tax_rate: 0.05 }).rate } : null); if (r) { got = r; break; } } catch { /* another frame */ } }
+    await page.close();
+    R4("public/panels/billdoc.js", `the real ${who} runs the one exact rounding: 5% of ₹0.70 is ₹0.04, ₹1.005 is ₹1.01, −0.035 is −0.04 (the database's answers)`, !!got && got.a === 0.04 && got.b === 1.01 && got.c === -0.04, JSON.stringify(got));
+    R4("public/panels/billdoc.js", `…and the ${who}'s shared rate rule gives a composition-scheme restaurant 0%`, !!got && got.d === 0, JSON.stringify(got));
+  }
+  { const page = await tab.newPage(); await page.goto(BASE + "/tablet", { waitUntil: "networkidle", timeout: 120000 }).catch(() => {}); await page.waitForTimeout(2500);
+    let r = null; for (const f of page.frames()) { try { r = await f.evaluate(() => typeof effRate === "function" ? { now: effRate(), comp: (() => { const keep = state.data.settings; state.data.settings = { ...keep, price_tax_mode: "composition" }; const v = effRate(); state.data.settings = keep; return v; })() } : null); if (r) break; } catch { /* next */ } }
+    await page.close();
+    R4("public/panels/tablet/app.js", "item 28, live: the real tablet's rate is French House's 5% — and 0% the moment its settings say composition", !!r && r.now === 0.05 && r.comp === 0, JSON.stringify(r)); }
 } finally {
   await cleanupAllergy().catch(() => {});
   if (mgrCtx) await restoreFloor(mgrCtx).catch(() => {});

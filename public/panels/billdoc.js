@@ -39,6 +39,22 @@
   var inr = function (v) { return "₹" + Math.round(parseFloat(v) || 0).toLocaleString("en-IN"); };
   var pn = function (v) { return Math.round(Number(v) || 0).toLocaleString("en-IN"); };
 
+  /* moneyRound(n) — ONE rounding to the paisa, the same answer the database gives (sweep #10 T30
+     round 4, item 10, 2026-10-10, the owner's yes). `Math.round(x * 100) / 100` rounds the FLOAT, and a
+     float can sit a hair under a half paisa the decimal value is exactly at: 5% of ₹0.70 is 3.5 paise,
+     but 0.7 × 0.05 × 100 is 3.4999999999999996, so the paper said ₹0.03 where Postgres says ₹0.04 —
+     818 amounts in a million at 5%, 3,656 at 18%, 21,699 at 12% tax-inside. Snap the scaled value to
+     15 significant digits (far finer than money, far coarser than float noise), then round the
+     MAGNITUDE half up, as Postgres does for a negative amount too.
+     TWIN: lib/tax.ts roundPaise is the same function for the server and React (this file takes no
+     imports). scripts/verify-money-round-twins.mjs runs both and fails if they ever differ. */
+  function moneyRound(n) {
+    var x = Number(n);
+    if (!isFinite(x)) return x;
+    var r = Math.round(Number((Math.abs(x) * 100).toPrecision(15)));
+    return r === 0 ? 0 : (x < 0 ? -r : r) / 100;
+  }
+
   /* phone10(raw) — ONE definition of "which guest is this number?", for the panels AND the server.
      (T11, sweep #8, 2026-09-07, on the owner's word: a number written "0091 98765 43210" is the
      same guest.)
@@ -104,7 +120,7 @@
      is not a small tip, it is a part payment, and the app has a separate thing for that. */
   function tipFromPaid(due, paid) {
     var d = Number(due) || 0, p = Number(paid) || 0;
-    return Math.max(0, Math.round((p - d) * 100) / 100);
+    return Math.max(0, moneyRound(p - d));
   }
   /* A tip written as a percentage of the bill it sits on. Same rounding rule as discPct so the two
      read alike: whole numbers clean ("10%"), anything else one decimal. "" when there is nothing
@@ -160,7 +176,7 @@
     var exact = list.map(function (c) { return taxWhole * ((Number(c.rate) || 0) / sum); });
     var needPaise = whole.some(function (amt, i) { return amt <= 0 && exact[i] > 0; });
     if (needPaise) {
-      var p2 = function (n) { return Math.round((Number(n) || 0) * 100) / 100; };
+      var p2 = function (n) { return moneyRound(Number(n) || 0); };
       var pRun = 0;
       return list.map(function (c, i) {
         var amt = i === list.length - 1 ? p2(taxWhole - pRun) : p2(exact[i]);
@@ -397,7 +413,7 @@
         // inr() ROUNDS, so a paise row printed through it would say ₹1 on both halves and foot to
         // ₹2 — the fault this fix exists to avoid, reintroduced one line later. A row only prints
         // paise when splitTax says it must (see its note on the ₹0 component).
-        var shown = c.paise ? "₹" + (Math.round((Number(c.amt) || 0) * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : inr(c.amt);
+        var shown = c.paise ? "₹" + (moneyRound(Number(c.amt) || 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : inr(c.amt);
         /* THE RATE WAS PRINTED RAW, and it is on a tax invoice. `c.rate` went straight into the
            string, so a component with no rate configured printed "CGST undefined% ₹0" and a NaN one
            "CGST NaN% ₹0" — beside a figure the same row had already sanitised to ₹0 through inr().
@@ -1366,11 +1382,11 @@
     (orders || []).filter(Boolean).filter(function (x) { return x.status !== "cancelled" && !x.deleted_at; }).forEach(function (o) {
       (Array.isArray(o.items) ? o.items : []).forEach(function (i) {
         if (!i || !i.is_mrp || i.tax_mode !== "incl") return;
-        var amt = Math.round((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1) * 100) / 100;
-        inside += amt - Math.round((amt / (1 + rate)) * 100) / 100;
+        var amt = moneyRound((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1));
+        inside += amt - moneyRound(amt / (1 + rate));
       });
     });
-    return Math.round(inside * 100) / 100;
+    return moneyRound(inside);
   }
 
   /* financialYear / invFmt: the FY of the INVOICE'S OWN date, never "today" — reprinting a March
@@ -1463,7 +1479,7 @@
        error. Same rule, same reason, one level higher. */
     var live = (orders || []).filter(Boolean).filter(function (o) { return o.status !== "cancelled" && !o.deleted_at; });
     var tm = taxModel(settings);
-    var r2 = function (n) { return Math.round(n * 100) / 100; };
+    var r2 = moneyRound;   // the ONE rounding rule (item 10) — exact, as the database rounds
     // THE RATE EACH ORDER WAS ACTUALLY CHARGED AT (orders.tax_rate, mig 284), per order — not one
     // rate borrowed from whichever order happened to come first (2026-08-05). Taking `find(> 0)`
     // for the whole bill re-taxed every other order at that rate, so a banquet at 18% sharing a
@@ -1694,14 +1710,14 @@
     // The food row as the paper shows it. Without inside tax this is exactly what it always was
     // (subtotal less whatever the MRP row states separately) — which matters for a COMPOSITION
     // restaurant, where every line is exempt so there is no taxable base to read instead.
-    var foodShown = hasInside ? m.grossTaxed : Math.round((m.subtotal - mrpPart(m)) * 100) / 100;
-    var subtotalShown = Math.round((foodShown + mrpPart(m)) * 100) / 100;
+    var foodShown = hasInside ? m.grossTaxed : moneyRound(m.subtotal - mrpPart(m));
+    var subtotalShown = moneyRound(foodShown + mrpPart(m));
     // The discount as the PAPER must state it, so the column closes: what is shown at the top, less
     // the tax that is genuinely added, less the untaxed pile, must leave the TOTAL. On an ordinary
     // bill this is exactly m.disc; on a tax-inside bill it is that discount grossed up, which is what
     // a guest sees come off a price that already contained its tax.
     var discShown = m.disc > 0
-      ? Math.max(0, Math.round((foodShown + m.taxAdded + mrpPart(m) - m.total) * 100) / 100)
+      ? Math.max(0, moneyRound(foodShown + m.taxAdded + mrpPart(m) - m.total))
       : 0;
     // One tax line per RATE when a bill carries more than one (a banquet at 18% beside 5% food):
     // naming a single percentage there would put the right rupees under a rate nobody was charged.
@@ -1829,7 +1845,7 @@
   }
 
   // The banquet sheet's own money formatters: 2dp with Indian grouping, and whole numbers.
-  var bq2 = function (n) { return (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var bq2 = function (n) { return (moneyRound(Number(n) || 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
   var bq0 = function (n) { return Math.round(Number(n) || 0).toLocaleString("en-IN"); };
   // ONE RULE FOR A PERCENTAGE, the same one the money box has always used: no decimal on a whole
   // rate, one where it is needed. 5 → "5", 2.5 → "2.5", never "2.50".
@@ -1984,8 +2000,8 @@ function banquetDocHtml(a) {
   const sub = Number(b.subtotal) || 0, disc = Number(b.discount) || 0;
   const taxAmt = Number(b.tax) || 0, total = Number(b.total) || 0;
   const recv = Number(b.received) || 0;
-  const bal = Math.round((total - recv) * 100) / 100;
-  const taxable = Math.round((sub - disc) * 100) / 100;
+  const bal = moneyRound(total - recv);
+  const taxable = moneyRound(sub - disc);
   // Owner 2026-07-31: "whatever is in the bill I have sent you of banquet, it should be
   // like that" — a banquet bill ALWAYS prints as a tax invoice with the per-line taxable
   // value + CGST/SGST columns. The receiver's GSTIN line only shows when there is one.
@@ -2032,9 +2048,9 @@ function banquetDocHtml(a) {
     const rateSum = comps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
     let run = 0;
     taxRows = comps.map((c, i) => {
-      const amt = i === comps.length - 1 ? Math.round((taxAmt - run) * 100) / 100
-        : Math.round(taxAmt * ((Number(c.rate) || 0) / rateSum) * 100) / 100;
-      run = Math.round((run + amt) * 100) / 100;
+      const amt = i === comps.length - 1 ? moneyRound(taxAmt - run)
+        : moneyRound(taxAmt * ((Number(c.rate) || 0) / rateSum));
+      run = moneyRound(run + amt);
       return { label: c.label, rate: Number(c.rate) || 0, amt };
     });
   }
@@ -2044,7 +2060,7 @@ function banquetDocHtml(a) {
   });
   // per-line taxable value: the bill's discount spread pro-rata so the column foots
   const grossAll = L.reduce((a, l) => a + l.gross, 0) || 1;
-  L.forEach((l) => { l.taxable = Math.round((l.gross - disc * (l.gross / grossAll)) * 100) / 100; });
+  L.forEach((l) => { l.taxable = moneyRound(l.gross - disc * (l.gross / grossAll)); });
   /* …AND THE COLUMN FOOTS TO THE BILL, NOT JUST TO ITSELF (2026-08-11, T7 improvement I8).
      Two sources of truth meet on this sheet: the item TABLE adds up the LINES, while the money box
      on the right prints the totals STORED on the bill (b.subtotal / b.discount). They agree today,
@@ -2076,7 +2092,7 @@ function banquetDocHtml(a) {
      nothing. An OVER-shoot (the lines adding to less than the bill) still lands on the last line
      exactly as before, because growing a line cannot make it negative. */
   if (L.length) {
-    const r2b = (n) => Math.round(n * 100) / 100;
+    const r2b = (n) => moneyRound(n);
     const sumTaxable = L.reduce((a, l) => a + l.taxable, 0);
     let drift = r2b(taxable - sumTaxable);
     if (drift > 0) {
@@ -2104,7 +2120,7 @@ function banquetDocHtml(a) {
      tax columns add up to the summary". So the columns are allocated the same way splitTax does it
      for the thermal bill: round every cell except the LAST, and give the last the remainder. */
   const colTax = taxRows.map((c) => {
-    const r2c = (n) => Math.round(n * 100) / 100;
+    const r2c = (n) => moneyRound(n);
     const target = r2c(Number(c.amt) || 0);
     // Every cell pro-rata off its own line's taxable value…
     const cells = L.map((l) => r2c(Math.max(0, l.taxable) * ((Number(c.rate) || 0) / 100)));
@@ -2181,7 +2197,7 @@ function banquetDocHtml(a) {
   money.push(`<div class="ms"><span>Subtotal</span><i>${bq2(sub)}</i></div>`);
   if (disc > 0) money.push(`<div class="ms"><span>Discount</span><i>− ${bq2(disc)}</i></div><div class="ms"><span>Taxable value</span><i>${bq2(taxable)}</i></div>`);
   taxRows.forEach((c) => money.push(`<div class="ms"><span>${esc(c.label)} ${c.rate}%</span><i>${bq2(c.amt)}</i></div>`));
-  const roundOff = Math.round((total - (taxable + taxAmt)) * 100) / 100;
+  const roundOff = moneyRound(total - (taxable + taxAmt));
   if (roundOff) money.push(`<div class="ms"><span>Round off</span><i>${(roundOff > 0 ? "+" : "") + bq2(roundOff)}</i></div>`);
   money.push(`<div class="ms tot"><span>INVOICE TOTAL</span><i>${bq2(total)}</i></div>`);
   if (recv > 0) {
@@ -2319,6 +2335,7 @@ ${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
     taxModel: taxModel,
     orderTaxRate: orderTaxRate,
     billMoney: billMoney,
+    moneyRound: moneyRound,
     billData: billData,
     banquetDocHtml: banquetDocHtml,
     bqPaper: bqPaper,

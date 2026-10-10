@@ -51,7 +51,9 @@ const taxedSettings = (R) => { let s; do s = settingsOf(R); while (T.effectiveTa
 const priceOf = (R) => pick(R, [() => paise(R, 2000), () => int(R, 1, 2000), () => String(int(R, 1, 2000)), () => "₹" + paise(R, 2000).toFixed(2), () => `${int(R, 1, 99)}.99`, () => `₹${int(R, 1, 9)},${String(int(R, 0, 999)).padStart(3, "0")}`])();
 const lineOf = (R, mode) => ({ price: priceOf(R), qty: R() < 0.2 ? String(int(R, 1, 6)) : int(R, 1, 6), tax_mode: mode ?? pick(R, ["excl", "incl", "exempt", "excl", undefined]), is_mrp: R() < 0.15 });
 const linesOf = (R, k = int(R, 0, 9), mode) => Array.from({ length: k }, () => lineOf(R, mode));
-const amtOf = (ln) => Math.round((parseFloat(String(ln.price).replace(/[^0-9.]/g, "")) || 0) * Math.max(1, parseInt(String(ln.qty), 10) || 1) * 100) / 100;
+// (re-stated in round 4, item 10: every expected figure here is rounded by the ONE exact rule, lib/tax.ts roundPaise)
+const RP = T.roundPaise;
+const amtOf = (ln) => RP((parseFloat(String(ln.price).replace(/[^0-9.]/g, "")) || 0) * Math.max(1, parseInt(String(ln.qty), 10) || 1));
 const billCase = (R) => { const s = settingsOf(R); const lines = linesOf(R); const d = R() < 0.4 ? 0 : R() < 0.7 ? paise(R, 500) : paise(R, 30000); return { s, lines, d }; };
 
 // ═══ lib/tax.ts · splitBill — the ONE place a cart turns into money on a screen ═════════════════════
@@ -66,7 +68,7 @@ await prop("splitBill: a discount within the base is applied exactly as asked; o
   const b = T.splitBill(lines, s, d); return d <= b.discountBase ? b.discount === d : b.discount === b.discountBase; });
 await prop("splitBill: a negative, blank or nonsense discount is read as no discount", 5000, (R) => ({ s: settingsOf(R), lines: linesOf(R, int(R, 1, 6)), d: pick(R, [-1, -500, NaN, "abc", null, undefined, ""]) }), ({ s, lines, d }) => T.splitBill(lines, s, d).discount === 0);
 await prop("splitBill: when tax applies, the discount comes off the TAXABLE part (taxable = base − discount)", 20000, billCase, ({ s, lines, d }) => { const b = T.splitBill(lines, s, d); return b.rate === 0 || eqp(b.taxable, b.taxableBase - b.discount); });
-await prop("splitBill: the tax is the taxable amount × the rate, rounded once to the paisa", 20000, billCase, ({ s, lines, d }) => { const b = T.splitBill(lines, s, d); return eqp(b.tax, b.taxable * b.rate); });
+await prop("splitBill: the tax is the taxable amount × the rate, rounded once to the paisa", 20000, billCase, ({ s, lines, d }) => { const b = T.splitBill(lines, s, d); return b.tax === RP(b.taxable * b.rate) || `${b.tax} vs ${RP(b.taxable * b.rate)}`; });
 await prop("splitBill: at a 0% rate there is no tax at all", 10000, (R) => { const c = billCase(R); c.s = { ...c.s, price_tax_mode: "composition" }; return c; }, ({ s, lines, d }) => { const b = T.splitBill(lines, s, d); return b.tax === 0 && b.rate === 0 && b.composition === true; });
 await prop("splitBill: the discount base is the taxable base when tax applies, else everything but the locked MRP part", 20000, billCase, ({ s, lines, d }) => {
   const b = T.splitBill(lines, s, d); return b.rate > 0 ? b.discountBase === b.taxableBase : eqp(b.discountBase, Math.max(0, b.taxableBase + b.nontaxAmount - b.mrpAmount)); });
@@ -80,7 +82,7 @@ await prop("splitBill: an untaxed (exempt) line lands in the untaxed figure, who
 await prop("splitBill: a tax-on-top line adds its whole amount to the taxable base", 10000, (R) => ({ ...billCase(R), x: lineOf(R, "excl") }), ({ s, lines, d, x }) => {
   const a = T.splitBill(lines, s, d), b = T.splitBill([...lines, x], s, d); return eqp(b.taxableBase - a.taxableBase, amtOf(x)) && eqp(b.nontaxAmount, a.nontaxAmount); });
 await prop("splitBill: a tax-inside line adds amount ÷ (1 + rate), rounded per line, to the taxable base", 10000, (R) => ({ ...billCase(R), x: lineOf(R, "incl") }), ({ s, lines, d, x }) => {
-  const a = T.splitBill(lines, s, d), b = T.splitBill([...lines, x], s, d); return eqp(b.taxableBase - a.taxableBase, Math.round((amtOf(x) / (1 + a.rate)) * 100) / 100); });
+  const a = T.splitBill(lines, s, d), b = T.splitBill([...lines, x], s, d); return eqp(b.taxableBase - a.taxableBase, RP(amtOf(x) / (1 + a.rate))); });
 await prop("splitBill: one tax-inside dish, no discount — the guest pays its printed price, give or take one paisa", 20000, (R) => ({ s: taxedSettings(R), x: lineOf(R, "incl") }), ({ s, x }) => {
   const b = T.splitBill([x], s, 0); return Math.abs(P(b.total) - P(amtOf(x))) <= 1 || `${b.total} for a ${amtOf(x)} dish`; });
 await prop("splitBill: a whole cart of tax-inside dishes stays within half a paisa per dish of the printed prices (+1)", 10000, (R) => ({ s: taxedSettings(R), lines: linesOf(R, int(R, 1, 12), "incl") }), ({ s, lines }) => {
@@ -89,7 +91,7 @@ await prop("splitBill: adding any dish never makes the bill smaller (no discount
 await prop("splitBill: a bigger discount never makes the bill bigger", 10000, (R) => ({ ...billCase(R), d2: paise(R, 5000) }), ({ s, lines, d, d2 }) => {
   const lo = Math.min(d, d2), hi = Math.max(d, d2); return T.splitBill(lines, s, hi).total <= T.splitBill(lines, s, lo).total; });
 await prop("splitBill: tax-on-top dishes, no discount — total = base + base × rate, exactly", 10000, (R) => ({ s: settingsOf(R), lines: linesOf(R, int(R, 1, 10), "excl").map((l) => ({ ...l, is_mrp: false })) }), ({ s, lines }) => {
-  const b = T.splitBill(lines, s, 0); const base = r2(lines.reduce((a, l) => a + amtOf(l), 0)); return eqp(b.taxableBase, base) && eqp(b.total, base + r2(base * b.rate)); });
+  const b = T.splitBill(lines, s, 0); const base = r2(lines.reduce((a, l) => a + amtOf(l), 0)); return eqp(b.taxableBase, base) && eqp(b.total, base + RP(base * b.rate)); });
 await prop("splitBill: a hole or junk in the cart (null, {}, text, a NaN price) never throws and counts as ₹0 × 1", 5000, (R) => ({ s: settingsOf(R), lines: [...linesOf(R, int(R, 0, 4)), pick(R, [null, {}, "x", { price: NaN }, { price: "free", qty: "lots" }, { qty: -4 }])] }), ({ s, lines }) => {
   const clean = lines.filter((l) => l && typeof l === "object" && Number.isFinite(parseFloat(String(l.price ?? "").replace(/[^0-9.]/g, ""))));
   return eqp(T.splitBill(lines, s, 0).total, T.splitBill(clean, s, 0).total); });
@@ -295,8 +297,8 @@ await prop("displayAmount = the converted amount snapped to the step; minorRound
 // ═══ appended in round 3 after coverage: item 26's fallback, exactly ═══════════════════════════════
 t("splitTax item 26: rates 6/6/9/3 on ₹0.02 → 0.01 + 0 + 0.01 + 0 (largest remainder), never a −0.01 line", JSON.stringify(F.splitTax([6, 6, 9, 3], 0.02)) === "[0.01,0,0.01,0]", JSON.stringify(F.splitTax([6, 6, 9, 3], 0.02)));
 t("splitTax item 26: a nonsense rate inside such a split counts as 0% and the parts still add up, none negative", (() => { const p = F.splitTax([6, 6, "x", 9, 3], 0.02); return P(p.reduce((a, x) => a + x, 0)) === 2 && p.every((x) => x >= 0) && p[2] === 0; })(), JSON.stringify(F.splitTax([6, 6, "x", 9, 3], 0.02)));
-t("splitTax item 26: every split that was already right is unchanged — CGST/SGST on every paisa from ₹0 to ₹3,000 at 2.5/2.5 and 9/9 matches the old rule", (() => {
-  const old = (rates, target) => { const sum = rates.reduce((a, r) => a + r, 0); let run = 0; return rates.map((r, i) => { const amt = i === rates.length - 1 ? r2(target - run) : r2(target * (r / sum)); run = r2(run + amt); return amt; }); };
+t("splitTax item 26: every split that was already right is unchanged — CGST/SGST on every paisa from ₹0 to ₹3,000 at 2.5/2.5 and 9/9 matches the last-line rule (re-stated round 4: that rule now rounds exactly, item 10)", (() => {
+  const old = (rates, target) => { const sum = rates.reduce((a, r) => a + r, 0); let run = 0; return rates.map((r, i) => { const amt = i === rates.length - 1 ? RP(target - run) : RP(target * (r / sum)); run = RP(run + amt); return amt; }); };
   for (const rates of [[2.5, 2.5], [9, 9], [6, 6], [2.5, 2.5, 1]]) for (let p = 0; p <= 300000; p++) if (F.splitTax(rates, p / 100).join() !== old(rates, p / 100).join() && old(rates, p / 100).every((x) => x >= 0)) return false; return true; })());
 await prop("splitTax: a negative target (a refund) never gets a line pointing the other way, and still adds up exactly", 30000, (R) => ({ rates: ratesOf(R), target: -pick(R, [int(R, 1, 5) / 100, paise(R, 3), int(R, 1, 50000)]) }), ({ rates, target }) => {
   const p = F.splitTax(rates, target); return (p.every((x) => x <= 0) && eqp(p.reduce((a, x) => a + x, 0), target)) || JSON.stringify(p); });
@@ -345,3 +347,12 @@ world({ session_payments: [{ id: "L1", session_id: "s1", restaurant_id: "R", amo
     t(`code ${code} → 503 and the busy sentence (the screen waits and retries; it never says the value was wrong)`, DB.refusalStatus(e) === 503 && DB.refusalMessage(e) === DB.BUSY_MESSAGE && !DB.isDataRefusal(e), `${DB.refusalStatus(e)}`);
   }
 }
+
+// ═══ appended in round 4: item 10 — the ONE exact rounding rule ════════════════════════════════════
+await prop("roundPaise rounds to the paisa exactly as the database does (half away from zero), on random amounts × every real rate", 50000, (R) => ({ g: int(R, -1000000, 1000000), bp: pick(R, [500, 1200, 1800, 2800, 250, 1250]) }), ({ g, bp }) => {
+  const exact = (num, den) => { const neg = num < 0; const a = Math.abs(num); const q = Math.floor(a / den), r = a - q * den; const v = 2 * r >= den ? q + 1 : q; return neg ? -v : v; };
+  return Math.round(RP((g / 100) * (bp / 10000)) * 100) === exact(g * bp, 10000) || `₹${g / 100} at ${bp / 100}%`; });
+await prop("splitBill's figures are the same whether rounded by roundPaise or by the panels' moneyRound (the twins never differ on a bill)", 20000, billCase, ({ s, lines, d }) => {
+  const b = T.splitBill(lines, s, d); return ["taxableBase", "nontaxAmount", "subtotal", "taxable", "tax", "total"].every((k) => BILLDOC.moneyRound(b[k]) === b[k] && RP(b[k]) === b[k]); });
+t("roundPaise: the cases that started item 10 — 5% of ₹0.70 is ₹0.04, ₹1.005 is ₹1.01, −0.035 is −0.04, NaN stays NaN", RP(0.7 * 0.05) === 0.04 && RP(1.005) === 1.01 && RP(-0.035) === -0.04 && Number.isNaN(RP(NaN)) && RP(-0.001) === 0 && Object.is(RP(-0.001), 0));
+t("item 10: 5% tax on a ₹230.10 bill is ₹11.51 on the screen, the paper and Pay in parts — the database's answer", T.splitBill([{ price: 230.1, qty: 1, tax_mode: "excl" }], { tax_rate: 0.05 }, 0).tax === 11.51 && BILLDOC.billMoney([{ status: "served", subtotal: 230.1, taxable_base: 230.1, nontax_amount: 0, discount: 0, tax_rate: 0.05, items: [] }], { tax_rate: 0.05 }).tax === 11.51);

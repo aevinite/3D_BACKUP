@@ -48,6 +48,7 @@ const GUARDS = [
   ["verify-board-sig.mjs", "the kitchen/tablet board still repaints on a real change"],
   ["verify-audit-coverage.mjs", "every change that lowers a bill leaves a record"],
   ["verify-order-retry.mjs", "a refused order is still placeable"],
+  ["verify-money-round-twins.mjs", "one exact rounding to the paisa, the same in the app, the panels and the database"],
   ["verify-print-format.mjs", "the bill and the kitchen ticket live in ONE file"],
   ["verify-menu-parts.mjs", "each Edit-the-menu switch reaches real code"],
   ["verify-merge-party.mjs", "a merged party is one bill everywhere"],

@@ -173,7 +173,11 @@ world({ sessions: [{ id: "s-new", restaurant_id: RID, table_number: "5", status:
 world({ staff_users: [{ id: "u1", restaurant_id: RID, profile: null }] });
 { const c = await ex(EX({ table: "staff_users", id: "u1", fields: { "profile.notes": "x" } })); t("expectClash: a jsonb column that is NULL compares its sub-key as absent → clash 'it now says nothing'", c && /it now says nothing\.$/.test(c.plain), c && c.plain); }
 world({ sessions: [{ id: "s-new", restaurant_id: RID, table_number: "6", status: "open", created_at: ago(5000) }], settings: [] });
-t("replayClash: when the moved party's own table cannot be told, the whole check is 'couldn't tell' → null (even if the destination has a new party)", (await rp(R(60000), "sessions", "ghost", "shift", { to: "6" })) === null);
+// RE-STATED 2026-10-10 (round 4): T13's item 4 (lib/tableOfAction.ts "THREE ANSWERS, NOT TWO") made a row
+// that does not exist GONE — nothing of its own to protect — instead of "couldn't tell". So a replayed move
+// whose party has vanished is judged by its destination; only a FAILED read is still "couldn't tell".
+{ const c = await rp(R(60000), "sessions", "ghost", "shift", { to: "6" });
+  t("replayClash: when the moved party is GONE, the destination still decides — a new party sat there since → refused, in plain words", !!c && c.code === "clash_new_party" && /^Table 6 has a different party now/.test(c.plain), c && c.plain); }
 world({ sessions: [{ id: "s-old", restaurant_id: RID, table_number: "5", status: "closed", created_at: ago(9e6), closed_at: ago(8e6) }, { id: "s-new", restaurant_id: RID, table_number: "5", status: "open", created_at: ago(5000) }], settings: [] });
 { const c = await rp(R(60000), "tables", "5", "pay", {}); t("replayClash: with an old closed party AND a new one, it judges against the NEWEST (the new party refuses)", c && c.code === "clash_new_party");
   t("…every replay refusal is not retryable (new party)", c && c.retryable === false); }
@@ -198,3 +202,6 @@ t("expectClash: a composite 'where' given as null → null, never a crash", awai
     world({ sessions: [{ id: "s", restaurant_id: RID, table_number: "5", status: "closed", created_at: new Date(q - 9e6).toISOString(), closed_at: new Date(q).toISOString() }], settings: [] });
     t("replayClash: a table closed at the SAME millisecond as the change → allowed (closed is not 'after')", (await C.replayClash(req({ "x-lfh-replay": "1", "x-lfh-queued-at": new Date(q).toISOString() }), RID, "tables", "5", "pay", {})) === null);
   } finally { Date.now = realNow; } }
+// (appended, round 4) …and when the READ of the moved party fails, it is still "couldn't tell" → null
+world({ sessions: [{ id: "s-new", restaurant_id: RID, table_number: "6", status: "open", created_at: ago(5000) }], settings: [] }); W.FAIL_NTH["sessions:select"] = { at: 1, mode: { code: "57014", message: "timeout" } };
+t("replayClash: when the read of the moved party FAILS, the check is 'couldn't tell' → null (a blip is never read as gone)", (await rp(R(60000), "sessions", "ghost", "shift", { to: "6" })) === null);

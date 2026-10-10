@@ -809,20 +809,20 @@ export async function getMenuItemByModelFolder(folder: string, restaurantId: str
 }
 
 // The newest real reviews for one dish (capped at 20), reshaped to the
-// { name, rating, text } shape the dish page renders.
-export async function getItemReviews(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<{ name: string; rating: number; text: string; deviceId?: string }[]> {
+// { name, rating, text, mine } shape the dish page renders.
+//
+// WHICH ONE IS MINE — NOT EVERYONE'S DEVICE ID (sweep #10 T30 round 4, item 16, mig 418). This used to
+// read the table directly and hand the page every reviewer's device id, only so it could drop the
+// diner's own older review when they re-rate. lfh_dish_reviews answers that question itself: each row
+// says `mine` for the device the caller passes, and no device id ever leaves the database.
+export async function getItemReviews(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID, deviceId: string | null = null): Promise<{ name: string; rating: number; text: string; mine: boolean }[]> {
   // Answers [] on a database error today, so a page that has no restaurant yet gets the same answer.
   if (!knownRestaurant(restaurantId)) return [];
-  const { data, error } = await supabase
-    .from("reviews")
-    .select("name, stars, comment, device_id, created_at")
-    .eq("item_slug", slug)
-    .eq("restaurant_id", restaurantId)
-    .order("created_at", { ascending: false })
-    .limit(20);
+  const { data, error } = await supabase.rpc("lfh_dish_reviews", { p_slug: slug, p_restaurant_id: restaurantId, p_device: deviceId });
   // Reviews failing to load must never break the dish page — show none instead.
   if (error) return [];
-  return (data ?? []).map((r) => ({ name: r.name || "Guest", rating: r.stars, text: r.comment || "", deviceId: r.device_id }));
+  return ((data ?? []) as { name: string | null; stars: number; comment: string | null; mine: boolean }[])
+    .map((r) => ({ name: r.name || "Guest", rating: r.stars, text: r.comment || "", mine: r.mine === true }));
 }
 
 // Save (or update) this device's rating for a dish. The server function

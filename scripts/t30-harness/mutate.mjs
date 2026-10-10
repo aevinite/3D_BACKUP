@@ -49,6 +49,7 @@ const EQUIVALENT = [
   ["lib/money.ts", /a >= (CRORE|LAKH|THOUSAND) \?/, />= → >/], ["lib/money.ts", /if \(!Number\.isFinite\(min\)/, /./], ["lib/money.ts", /t <= max \+ step \* 1e-9/, /./],
   ["lib/money.mjs", /Math\.abs\(frac - 0\.99\) < 0\.07/, /./],
   ["lib/orderAllergies.ts", /\.order\("id", \{ ascending: true \}\)\.range/, /true → false/],
+  ["lib/tax.ts", /return r === 0 \? 0 : \(x < 0 \? -r : r\) \/ 100;/, /< → <=/], ["lib/taxFiling.ts", /return r === 0 \? 0 : \(x < 0 \? -r : r\) \/ 100;/, /< → <=/],
 ];
 const isEquivalent = (r) => EQUIVALENT.some(([f, line, op]) => f === r.f && line.test(r.text) && op.test(r.name));
 const originals = new Map(FILES.map((f) => [f, readFileSync(join(root, f), "utf8")]));

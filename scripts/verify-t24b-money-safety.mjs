@@ -87,7 +87,10 @@ let seed = 20260827;
 const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 const reseed = (n) => { seed = n; };
 const pick = (a) => a[Math.floor(rnd() * a.length)];
-const r2 = (n) => Math.round(n * 100) / 100;
+// The app's own rounding (re-stated 2026-10-10, sweep #10 T30 item 10): money is rounded to the paisa
+// EXACTLY, the way the database does, by lib/tax.ts roundPaise. A float r2 here would expect the old
+// answer on the half-paisa cases item 10 corrected.
+const r2 = tax.roundPaise;
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 head("A · P26601–P26690 — one part of a split may be a TAB, and a tab is not money");
