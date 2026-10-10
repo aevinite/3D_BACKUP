@@ -88,7 +88,7 @@ P("P110018", "the empty state SAYS something rather than leaving a blank box", h
 P("P110019", "each live order names its status in words, not a code", has(C_CART, /STATUS_COPY\[o\.status\]/) && has(C_CART, /cp\.label/) && has(C_CART, /cp\.sub/));
 P("P110020", "…with the step dots only when the status is a real step", has(C_CART, /stepIndex >= 0 && \(/));
 P("P110021", "…and the table number only when there is one", has(C_CART, /\{o\.tableNumber && <span className="live-order-table"/));
-P("P110022", "…and its item list only when it has items", has(C_CART, /\{o\.items && o\.items\.length > 0 && \(/));
+P("P110022", "…and its item list only when it has items", has(C_CART, /o\.items && o\.items\.length > 0 (?:&& \(|\? \()/)  /* re-stated 2026-10-10: the #1427 basket uses a ternary */);
 P("P110023", "a live order's total goes through the USD→display converter, not the raw number", has(C_CART, /live-order-total[\s\S]{0,80}showPrice\(o\.total\)/));
 P("P110024", "'Wrong table? Fix it' appears only while the order is still early", has(C_CART, /\{\(o\.status === "received" \|\| o\.status === "preparing"\) && \(/));
 P("P110025", "…so a SERVED order's table can no longer be moved (the kitchen already sent it)", !has(C_CART, /o\.status === "served"[\s\S]{0,120}live-order-fixlink/));
@@ -143,7 +143,8 @@ P("P110069", "…the box is emptied after adding, ready for the next one", has(C
 P("P110070", "…Enter does not submit anything else", has(C_CART, /e\.preventDefault\(\);/));
 P("P110071", "…and the typed value is length-capped, so one field cannot carry an essay", has(C_CART, /maxLength=\{80\}/));
 P("P110072", "the section explains that a tap applies to the WHOLE order, not one dish", has(C_CART, /removed from <b>all the dishes<\/b>/));
-P("P110073", "a dish that conflicts with an avoided allergen is flagged on its own line", has(C_CART, /\{features\.allergies && c\.length > 0 && \(/));
+// RE-STATED 2026-10-10 (sweep #10 T39 Band L): the own-line flag became the red-ringed allergen dot on the dish's line (#1427, the owner's d4 pick).
+P("P110073", "a dish that conflicts with an avoided allergen is flagged on its own line", has(C_CART, /allergen-dot \$\{declared\.includes\(a\) \? "flag" : ""\}/));
 P("P110074", "…and the whole order gets one summary warning, with no repeats", has(C_CART, /orderDeclaredHits = \[\.\.\.new Set\(cart\.flatMap/));
 P("P110075", "…which only renders when something actually conflicts", has(C_CART, /\{orderDeclaredHits\.length > 0 && \(/));
 P("P110076", "the per-dish allergen dots are hidden when the feature is off", has(C_CART, /\{features\.allergies && itemAllergens\(item\.id\)\.length > 0 && \(/));
@@ -179,14 +180,18 @@ P("P110101", "an empty basket says so instead of rendering a blank box", has(C_C
 P("P110102", "…and everything below the list is hidden when there is nothing in it", has(C_CART, /\{cart\.length > 0 && \(/));
 P("P110103", "each line's key includes its options signature, so two of one dish stay apart", has(C_CART, /key=\{`\$\{item\.id\}-\$\{item\.sig \|\| ""\}-\$\{idx\}`\}/));
 P("P110104", "a SOLD-OUT line wears a badge in the basket", has(C_CART, /\{isSoldOut\(item\.id\) && \(/) && has(C_CART, /Sold out/));
-P("P110105", "chosen options are listed under the dish name", has(C_CART, /\{item\.options && item\.options\.length > 0 && \(/));
-P("P110106", "…removed allergens are shown, and marked apart in red", has(C_CART, /\{item\.removed && item\.removed\.length > 0 && \(/));
+P("P110105", "chosen options are listed under the dish name", has(C_CART, /item\.options && item\.options\.length > 0/));
+P("P110106", "…removed allergens are shown, and marked apart in red", has(C_CART, /item\.removed && item\.removed\.length > 0[\s\S]{0,200}guest-ink-bad/));
 P("P110107", "…and each is named in words, not by its slug", has(C_CART, /item\.removed\.map\(\(r\) => allergenLabel\(r\)\.toLowerCase\(\)\)/));
-P("P110108", "a kitchen note is shown in quotes, so it reads as the diner's own words", has(C_CART, /\{item\.note && <div className="cart-item-opts">“\{item\.note\}”/));
+P("P110108", "a kitchen note is shown in quotes, so it reads as the diner's own words", has(C_CART, /item\.note[\s\S]{0,120}(?:“|&ldquo;)\{item\.note\}(?:”|&rdquo;)/));
 P("P110109", "the − and + buttons are 32px, the floor this product uses for adjacent taps", has(C_CART, /width: "32px", height: "32px"/));
 P("P110110", "…and each names its dish for a screen reader, not just '+'", has(C_CART, /aria-label=\{`Decrease \$\{item\.title\}`\}/) && has(C_CART, /aria-label=\{`Increase \$\{item\.title\}`\}/));
 P("P110111", "the remove button names its dish too", has(C_CART, /aria-label=\{`Remove \$\{item\.title\}`\}/));
-P("P110112", "…and has real padding, so it is not an 18px icon to hit", has(C_CART, /remove-item"[\s\S]{0,160}padding: "8px"/));
+// RE-STATED 2026-10-10 (sweep #10 T39 Band L): #1427 shrank this to padding 6px around a 16px icon — a 28px target, under the usual
+// 44px. It still has padding, which is what this row asks; the size is reported to the owner as a
+// finding (T39-S10-findings.md), not changed here — the guest screen is not this sweep's, and it is
+// the layout he picked.
+P("P110112", "…and has real padding, so it is not an 18px icon to hit", has(C_CART, /remove-item"[\s\S]{0,160}padding: "(?:[6-9]|\d\d)px"/));
 P("P110113", "Edit is offered on every dish still on the menu, not only customisable ones", has(C_CART, /const canEdit = \(id: string\) => !!menuItems\.find\(\(m\) => m\.id === id\)/));
 P("P110114", "…and hidden for a dish that has left it, where the popup would have nothing to open", has(C_CART, /\{canEdit\(item\.id\) && \(/));
 P("P110115", "editing re-opens the popup PRE-FILLED with what the line already holds", has(C_CART, /preselect: \{ options: it\.options, removed: it\.removed, note: it\.note, qty: it\.qty \}/));
@@ -354,7 +359,7 @@ P("P110254", "…and a dish whose CATEGORY is off is unreachable by its own URL 
 P("P110255", "…while a null category set hides nothing, which is the safe direction", has(C_MENU, /liveCats &&/));
 P("P110256", "SOLD OUT is a tag, not a column, so it rides the editor's existing plumbing", has(C_MENU, /export const SOLD_OUT_TAG = "sold-out"/));
 P("P110257", "…and a sold-out dish is still SHOWN, wearing its badge", !has(C_MENU, /includes\(SOLD_OUT_TAG\)\)[\s\S]{0,40}return null/));
-P("P110258", "the dish page no longer pulls twenty review rows on every open", !has(C_MENU, /getMenuItem[\s\S]{0,600}from\("reviews"\)/));
+P("P110258", "the dish page no longer pulls twenty review rows on every open", !/from\("reviews"\)/.test(C_MENU.slice(C_MENU.indexOf("export async function getMenuItem("), C_MENU.indexOf("export async function getMenuItemByModelFolder(")))  /* re-stated 2026-10-10: the old 600-character window ran into the NEXT function, whose own reviews read is a different, capped query */);
 P("P110259", "the review list read is column-listed and capped", has(C_MENU, /\.select\("name, stars, comment, device_id, created_at"\)[\s\S]{0,200}\.limit\(20\)/));
 P("P110260", "the categories read is capped as well", has(C_MENU, /from\("categories"\)[\s\S]{0,200}\.limit\(300\)/));
 P("P110261", "settings are cached per restaurant with a short TTL", has(C_MENU, /const SETTINGS_TTL_MS = 8000/));

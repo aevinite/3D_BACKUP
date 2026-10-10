@@ -94,7 +94,8 @@ P("P57226", "the step dots render", renders(liveTab, "ot-steps"));
 P("P57227", "…only for a status that is ON the happy path", /\{stepIndex >= 0 && \(/.test(liveTab));
 P("P57228", "…so a cancelled order draws no progress bar", /const stepIndex = STEPS\.indexOf\(o\.status\);/.test(liveTab));
 P("P57229", "…and each dot knows whether it is done and whether it is the current one", /i <= stepIndex \? "done" : ""\} \$\{i === stepIndex \? "active" : ""\}/.test(liveTab));
-P("P57230", "the dishes on the order are listed when there are any", /\{o\.items && o\.items\.length > 0 && \(/.test(liveTab));
+// RE-STATED 2026-10-10 (sweep #10 T39 Band L): the basket redesign (#1427, the layout the owner picked) turned these `&&` blocks into a ternary.
+P("P57230", "the dishes on the order are listed when there are any", /o\.items && o\.items\.length > 0 (?:&& \(|\? \()/.test(liveTab));
 P("P57231", "…in the same 'title ×qty' shape the tracker uses", /\$\{it\.title\} ×\$\{it\.qty\}/.test(liveTab));
 P("P57232", "…inside their own element", renders(liveTab, "live-order-items"));
 P("P57233", "the order's total is printed", renders(liveTab, "live-order-total"));
@@ -186,7 +187,9 @@ P("P57310", "a conflict between the basket and the avoid list is warned about on
 P("P57311", "…listing every avoided allergen actually in the basket, without repeats", /const orderDeclaredHits = \[\.\.\.new Set\(cart\.flatMap\(\(it\) => conflicts\(it\.id\)\)\)\]/.test(C));
 P("P57312", "…and only when there is one", /\{orderDeclaredHits\.length > 0 && \(/.test(C));
 P("P57313", "each line also shows which of ITS allergens the diner avoids", /const conflicts = \(id: string\) => itemAllergens\(id\)\.filter\(\(a\) => declared\.includes\(a\)\)/.test(C));
-P("P57314", "…as a per-line warning", renders(C, "cart-item-warn"));
+// RE-STATED 2026-10-10 (sweep #10 T39 Band L): the per-line warning became the avoided allergen's red-ringed dot — "one less line per dish", the
+// thinness the owner picked from d4 (#1427). The class it used to render is gone from the screen.
+P("P57314", "…as a per-line warning", renders(C, "cart-item-allergens") && /allergen-dot \$\{declared\.includes\(a\) \? "flag" : ""\}/.test(C));
 P("P57315", "…and the dish's own allergens as dots", renders(C, "cart-item-allergens"));
 P("P57316", "…with the avoided ones flagged", /allergen-dot \$\{declared\.includes\(a\) \? "flag" : ""\}/.test(C));
 
@@ -294,7 +297,7 @@ P("P57410", "…and a line wears its own Sold out badge", /Sold out\s*\n?\s*<\/s
 P("P57411", "a line's chosen options are printed, when there are any", renders(C, "cart-item-opts"));
 P("P57412", "…as their labels, joined, not as an object", /item\.options\.map\(\(o\) => o\.label\)\.join\(", "\)/.test(C));
 P("P57413", "removed allergens are printed as 'No milk', in red", /No \{item\.removed\.map\(\(r\) => allergenLabel\(r\)\.toLowerCase\(\)\)\.join\(", "\)\}/.test(C));
-P("P57414", "a kitchen note is printed in quotes, so it reads as the diner's words", /“\{item\.note\}”/.test(C));
+P("P57414", "a kitchen note is printed in quotes, so it reads as the diner's words", /“\{item\.note\}”|&ldquo;\{item\.note\}&rdquo;/.test(C));
 P("P57415", "each line's price is its own value, not a share of the total", /\{fmtDisp\(lineDisp\(item\)\)\}/.test(C));
 P("P57416", "…where lineDisp snaps the base and minor-rounds the add-ons, matching the popup", /const lineDisp = \(it: CartItem\) =>[\s\S]{0,200}unitDisplay\(parseFloat\(it\.price\)/.test(C));
 P("P57417", "…times the quantity, so the lines sum to what is printed", /currency \|\| undefined\) \* it\.qty/.test(C));
