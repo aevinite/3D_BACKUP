@@ -30,7 +30,6 @@ import { isRestaurantId } from "@/lib/ownerScope";
 import { BUSY_MESSAGE } from "@/lib/dbRefusal";
 import { managerSettingsOff, type MgrStaffPower } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
-import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 import { capsForRole, capGroupsForRole, capVisible, roleDefault, effectiveCap } from "@/lib/staffCaps";
 import { accessStateFor } from "@/lib/accessState";
 import { newWaiterTables } from "@/lib/tableAssign";
@@ -42,18 +41,8 @@ import {
   payAccessWith, todayIST, payHistoryBlocksDelete, PAY_HISTORY_DELETE_MESSAGE, type PayAccess,
 } from "@/lib/staffProfile";
 
-// GAP-B (owner ceiling): a tablet cap gated by an admin module may only be granted to a
-// waiter if that module is EFFECTIVE for the restaurant. The money caps (discount/mark_paid/
-// invoice) have no module gate. Keys with no entry here = ungated. Used for the OWNER actor
-// only; the admin super-user is unrestricted.
-const CAP_MODULE_GATE: Record<string, (rid: string) => Promise<{ effective: boolean }>> = {
-  tablet_banquet: banquetLadder,
-  tablet_table_tags: tableTagsLadder,
-  tablet_khata: khataLadder,
-  tablet_table_ops: tableOpsLadder,
-  tablet_take_orders: takeOrdersLadder,
-  tablet_parcel: parcelLadder,
-};
+// CAP_MODULE_GATE (the OWNER's grant ceiling for waiter caps) left on 2026-10-10 with the owner-grant
+// branch it served (sweep #10 T18, item 16): only the admin may write a permission now.
 
 import { withIdempotency } from "@/lib/idempotency";
 import { expectClash, clashJson } from "@/lib/clash";
@@ -1158,6 +1147,12 @@ async function patchImpl(req: NextRequest): Promise<Response> {
   // (inherits the restaurant-wide tri-state). Keys/values are strictly validated so a
   // buggy client can never write junk into the JSONB.
   if (action === "set_permissions") {
+    // ONLY THE ADMIN HOLDS PERMISSIONS (sweep #10 T18, item 16 — MY CALL on the owner's written rule:
+    // "the owner panel and the manager panel configure none", docs/ACCESS-MODEL.md). The owner cockpit's
+    // copy of a profile now shows these rows read-only (ownerProfileHost `can.permissions: false`); this
+    // is the server half, so hiding the dropdown is not the only guard. The admin acting through this
+    // console keeps the power. To hand it back to owners, flip both together.
+    if (s.actor !== "admin") return bad("Permissions are set by Aevidine, on Access & permissions — they can't be changed from here.", 403);
     // Per-user override keys come in TWO families, both stored in staff_users.permissions:
     //   • TABLET caps (tablet_*) — the waiter rung, tri-state on|pin|off; enforced by
     //     tabletPerm (keep in lockstep with TABLET_PERM_KEYS in the tablet route).
@@ -1174,8 +1169,6 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     // both routes from the same list is what makes those two screens impossible to disagree again.
     const roleCaps = capsForRole(u.role).filter((c) => c.perPerson);
     const capByKey = new Map(roleCaps.map((c) => [c.key, c]));
-    // Which family a key belongs to still decides the extra rules below.
-    const isTabletKey = (k: string) => k.startsWith("tablet_") || k.startsWith("cap:");
     const patch = body?.permissions;
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions object.");
     const merged: Record<string, string> = { ...(u.permissions && typeof u.permissions === "object" ? u.permissions : {}) };
@@ -1189,46 +1182,17 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     for (const [k, v] of Object.entries(patch)) {
       const cap = capByKey.get(k);
       if (!cap) return bad(`"${k}" isn't a permission a ${u.role} has.`);
-      const isTablet = isTabletKey(k);
       if (v === null || v === "" || v === "default") { delete merged[k]; noted.push(`${k}→default`); continue; }
       // The PIN state exists only where the row itself offers it (money rows) — the model says
       // which, so a floor row can't be set to "pin" and silently behave as "on".
       const modes = cap.pin ? ["on", "pin", "off"] : ["on", "off"];
       if (!modes.includes(String(v))) return bad(`"${k}" can only be set to ${modes.join(", ")} — or left unset, to go back to the default.`);
-      // Least-privilege (audit 2026-07-07): a MANAGER may REDUCE a junior's power (off) or
-      // reset it to default, but may NOT GRANT (on/pin) — only the owner/admin grants powers.
-      if (s.actor === "manager" && (v === "on" || v === "pin"))
-        return bad("Only the owner can grant extra powers to staff.", 403);
-      // Owner actor granting on/pin: role-relevance + the admin ceiling. Server-refused, not
-      // just hidden. Admin super-user is unrestricted (skips this whole block).
-      if (s.actor === "owner" && (v === "on" || v === "pin")) {
-        if (isTablet) {
-          if (u.role !== "tablet")
-            return bad("These per-user caps apply to waiter (tablet) accounts only.", 400);
-          const gate = CAP_MODULE_GATE[k];
-          if (gate && !(await gate(u.restaurant_id)).effective)
-            return bad("That feature isn't enabled for this restaurant by the admin — you can't grant it.", 403);
-        } else { // manager-power override
-          if (u.role !== "manager")
-            return bad("These per-person powers apply to manager accounts.", 400);
-          // The admin's "may this restaurant have this power at all" rung is
-          // access_config[flag].on — the Feature half of the row on the Access screen — and
-          // managerCan() enforces it on every request this override could ever affect. It used to
-          // be checked here as powerEntitled(power_<flag>), a key nothing has been able to write
-          // since the old ladder went, so the refusal could never fire. (sweep T6, 2026-08-06)
-          // FAIL CLOSED (T9 finding F9). This read's error was ignored, so `feat` came back null on a
-          // blip, `feat?.[k]?.on === false` was false, and the grant went through — for a feature the
-          // admin had switched OFF for that restaurant. A permission is the last thing that may be
-          // handed out because a query happened to fail.
-          const featRead = await rd("feature_gate", () =>
-            sb.from("restaurants").select("access_config").eq("id", u.restaurant_id).maybeSingle());
-          if (featRead.error) return cantCheckPower();
-          const feat = (featRead.data as { access_config?: unknown } | null)?.access_config as
-            Record<string, { on?: boolean }> | null;
-          if (feat?.[k]?.on === false)
-            return bad("That feature is switched off for this restaurant by the admin — you can't grant it.", 403);
-        }
-      }
+      // THE MANAGER-MAY-ONLY-REDUCE AND OWNER-GRANT BRANCHES LIVED HERE until 2026-10-10 (sweep #10
+      // T18, item 16): a manager could switch a junior's power off, an owner could grant one within the
+      // admin's ceiling. Both are unreachable now that only the admin may write here (the refusal at the
+      // top of this action), and the admin was always unrestricted. Deleted rather than left as code that
+      // looks like a live rule — "a new way replaces the old one". The admin's ceiling is still enforced
+      // where it matters: managerCan() and tabletPerm() check the Feature half on every request.
       merged[k] = String(v); noted.push(`${k}→${v}`);
     }
     if (!noted.length) return bad("Nothing to change.");

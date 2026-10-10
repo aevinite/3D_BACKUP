@@ -1280,6 +1280,26 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("the delivery channels and the Ratings master refuse a second admin's stale tap, and never a first save");
 }
 
+// ── 67 · ONLY THE ADMIN CHANGES ONE PERSON'S PERMISSIONS ─────────────────────────────────────────
+// The owner's rule: "only the admin holds permissions — the owner panel and the manager panel configure
+// none" (docs/ACCESS-MODEL.md, docs/CLAUDE-DETAIL.md). The owner cockpit's copy of a staff profile still
+// offered live per-person dropdowns, and /api/owner/staff let an owner grant and a manager reduce
+// (sweep #10 T18, item 16 — MY CALL on the written rule). Both halves are checked: the owner host shows
+// the rows read-only, and the route refuses set_permissions from anyone but the admin, FIRST.
+{
+  const host = read("components/owner/ownerProfileHost.ts");
+  const route = read("app/api/owner/staff/route.ts");
+  const prof = read("components/admin/StaffProfile.tsx");
+  const at = route.indexOf('if (action === "set_permissions") {');
+  const first = route.slice(at, at + 1400).split("\n").filter((l) => !/^\s*\/\//.test(l)).slice(1, 3).join("\n");
+  const probs = [];
+  if (!/permissions: false/.test(host)) probs.push("the owner's profile host does not set can.permissions: false");
+  if (at < 0 || !/if \(s\.actor !== "admin"\) return bad\(/.test(first)) probs.push("/api/owner/staff set_permissions does not refuse a non-admin before anything else");
+  if (!/cap\.perPerson && editable \?/.test(prof)) probs.push("StaffProfile draws a permission dropdown without asking whether this console may edit");
+  if (probs.length) fail(`an owner or a manager could change a person's permissions: ${probs.join("; ")}`);
+  else ok("only the admin can change one person's permissions — the owner's copy is read-only and the route refuses everyone else");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27

@@ -87,6 +87,11 @@ export type ProfileHost = {
     visitAsPerson: boolean;
     /** link out to /aevinite → Access & permissions (admin console only) */
     accessLink: boolean;
+    /** change ONE person's permission rows (admin console only). The owner's standing rule: "only the
+     *  admin holds permissions — the owner panel and the manager panel configure none"
+     *  (docs/ACCESS-MODEL.md). The owner cockpit embeds this same profile, so it shows the rows
+     *  read-only. (sweep #10 T18, item 16 — MY CALL, on the rule as written.) */
+    permissions: boolean;
     /** read this person's password back (admin console only — /api/admin/reveal/password).
      *  Least privilege, per the module checklist: the owner cockpit embeds this same profile and
      *  must NOT gain a way to read its staff's passwords just because the admin has one. */
@@ -150,7 +155,7 @@ const adminHost = (userId: string): ProfileHost => ({
     const j = await r.json().catch(() => ({}));
     return { ok: r.ok, error: j.error };
   },
-  can: { pin: true, signIn: true, role: true, visitAsPerson: true, accessLink: true, showPassword: true },
+  can: { pin: true, signIn: true, role: true, visitAsPerson: true, accessLink: true, showPassword: true, permissions: true },
 });
 
 const HostCtx = createContext<ProfileHost | null>(null);
@@ -294,7 +299,7 @@ export default function StaffProfile({ userId, onClose, onChanged, host }: {
             <div className="stp-body">
               <Rail d={d} patch={patch} reload={load} flash={flash} onChanged={onChanged} />
               <main className="stp-main">
-                <Permissions d={d} tree={tree} patch={patch} reload={load} flash={flash} />
+                <Permissions d={d} tree={tree} patch={patch} reload={load} flash={flash} editable={hostRef.can.permissions} />
                 <Personal d={d} patch={patch} reload={load} flash={flash} onChanged={onChanged} />
                 <Emergency d={d} patch={patch} reload={load} flash={flash} />
                 <Job d={d} patch={patch} reload={load} flash={flash} />
@@ -537,7 +542,7 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
 }
 
 // ── ② PERMISSIONS — the dropdown block ───────────────────────────────────────
-function Permissions({ d, tree, patch, reload, flash }: Kit & { tree: TreeState | null }) {
+function Permissions({ d, tree, patch, reload, flash, editable }: Kit & { tree: TreeState | null; editable: boolean }) {
   const p = d.person;
   // Only the rows this RESTAURANT can offer (owner, 2026-08-02): a row whose FEATURE is off is
   // not shown at all — "it should not even be seen there" — and a group emptied that way folds
@@ -608,12 +613,20 @@ function Permissions({ d, tree, patch, reload, flash }: Kit & { tree: TreeState 
 
       {open ? (
         <div className="stp-fold-body">
-          <p className="stp-permnote">
-            <b>Default</b> means this person follows what every {ROLE_LABEL[p.role].toLowerCase()} at{" "}
-            {d.restaurant?.name || "this restaurant"} gets — the bracket shows what that is, and it&apos;s set on{" "}
-            <a href={`/aevinite/access?rid=${p.restaurant_id}`}>Access &amp; permissions</a>. Choosing On or Off
-            applies to this person alone and takes effect on their next tap, with no re-login.
-          </p>
+          {editable ? (
+            <p className="stp-permnote">
+              <b>Default</b> means this person follows what every {ROLE_LABEL[p.role].toLowerCase()} at{" "}
+              {d.restaurant?.name || "this restaurant"} gets — the bracket shows what that is, and it&apos;s set on{" "}
+              <a href={`/aevinite/access?rid=${p.restaurant_id}`}>Access &amp; permissions</a>. Choosing On or Off
+              applies to this person alone and takes effect on their next tap, with no re-login.
+            </p>
+          ) : (
+            <p className="stp-permnote">
+              What {shortName(p.name || p.username)} may do at {d.restaurant?.name || "this restaurant"}, row by row.
+              These are set by Aevidine — for the whole restaurant, or for this one person — so they are
+              shown here to read, not to change.
+            </p>
+          )}
           {groups.map((g) => (
             <div className="stp-permgrp" key={g.group}>
               <div className="stp-permgrp-h">
@@ -624,7 +637,7 @@ function Permissions({ d, tree, patch, reload, flash }: Kit & { tree: TreeState 
                 <i>{g.caps.length} {g.caps.length === 1 ? "setting" : "settings"}</i>
               </div>
               {g.caps.map((cap) => (
-                <PermRow key={cap.key} cap={cap} tree={tree} perms={perms} onSet={set} />
+                <PermRow key={cap.key} cap={cap} tree={tree} perms={perms} onSet={set} editable={editable} />
               ))}
             </div>
           ))}
@@ -634,8 +647,8 @@ function Permissions({ d, tree, patch, reload, flash }: Kit & { tree: TreeState 
   );
 }
 
-function PermRow({ cap, tree, perms, onSet }: {
-  cap: Cap; tree: TreeState | null; perms: Record<string, string>; onSet: (c: Cap, v: CapValue) => void;
+function PermRow({ cap, tree, perms, onSet, editable }: {
+  cap: Cap; tree: TreeState | null; perms: Record<string, string>; onSet: (c: Cap, v: CapValue) => void; editable: boolean;
 }) {
   const def = roleDefault(cap, tree);
   const own = (cap.perPerson ? perms[cap.key] : undefined) as CapValue | undefined;
@@ -665,7 +678,7 @@ function PermRow({ cap, tree, perms, onSet }: {
             <span className="stp-chip mut">{roleValueLabel(cap, tree) ?? "…"}</span>
             <span className="hint">set for the restaurant</span>
           </div>
-        ) : cap.perPerson ? (
+        ) : cap.perPerson && editable ? (
           <select className="stp-sel" value={value} onChange={(e) => onSet(cap, e.target.value as CapValue)} aria-label={cap.node.name}>
             {capStates(cap.pin).map((s) => (
               <option key={s} value={s}>
@@ -677,8 +690,8 @@ function PermRow({ cap, tree, perms, onSet }: {
           // Restaurant-wide row (an owner's pages, a manager's sub-options): show the truth, don't
           // offer a switch that would save nothing. The note above says where it is set.
           <div className="stp-fixed">
-            <span className={`stp-chip ${eff === "on" ? "ok" : "bad"}`}>{eff ? STATE_LABEL[eff] : "—"}</span>
-            <span className="hint">set for the restaurant</span>
+            <span className={`stp-chip ${eff === "on" ? "ok" : eff === "pin" ? "warn" : "bad"}`}>{eff ? STATE_LABEL[eff] : "—"}</span>
+            <span className="hint">{value !== "default" ? "set for this person" : "set for the restaurant"}</span>
           </div>
         )}
         {cap.kind === "value" ? null : (
