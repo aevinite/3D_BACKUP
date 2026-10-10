@@ -1858,3 +1858,12 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 
 - [x] **Every file in scripts/, tests/, .github/ has its own check** — verify:every-script (640+ files), in CI; items 79–87 fixed. VERIFIED live (PR #1472).
 - [x] **The basket's 🗑 is a 44×44 tap target and looks exactly as before** (finding 88) — same icon, colour and place; seen at 390px light + dark and 1280px. VERIFIED live on backup (PR #1482): 44×44, row 32px, an edge tap removes the dish.
+
+## 2026-10-10 — sweep #10 T18 round 2 (owner: "fix all the problems that you have listed … 500 to 1000 … check every single bit … I want zero error in my code")
+
+- [x] **Every round-1 problem fixed, inside and outside the territory** — items 7–27 (21 fixes, one commit each, each with a guard). VERIFIED live on backup (PR #1484): the 26 driven checks pass against https://3-d-backup.vercel.app.
+- [x] **Delivery apps' API keys no longer reach the browser** (item 24) — Admin → Access → Extra → Delivery apps shows only the masked hint. VERIFIED live.
+- [x] **Only the admin holds permissions** (item 16, MY CALL on the written rule) — Owner → Staff → a person → Permissions is read-only, "set by Aevidine"; owner/manager saves refused. VERIFIED live. Lever: `permissions: true` in ownerProfileHost + drop the route refusal.
+- [x] **Move, merge & split ON for every restaurant except Aangan** (item 9, "this is test site … do as you want"). VERIFIED live.
+- [x] **603 new checks, zero errors, every bit measured** — coverage 1,275/1,276 lines (every unreached arm pinned by an invariant row); three mutation passes 712 → 146 → 46 → 36 (all 36 equivalent, reasons in `scripts/sweep/t18s10/r2/equivalent.json`); all 960 round-1 rows re-run green.
+- [ ] **Two spec lines genuinely unbuilt** (not faults): reset a staff PIN; a waiter's own-profile sections — `docs/ACCESS-REDESIGN-SPEC.md`, waiting on the owner.
