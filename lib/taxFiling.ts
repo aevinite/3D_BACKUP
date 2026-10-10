@@ -20,10 +20,16 @@
 // that row's tax, a column sums to the period's line total, and the grand total equals the
 // KPI tile.
 
-import { roundPaise } from "@/lib/tax";
 /** Round to paise. */
-// the ONE rounding rule (lib/tax.ts roundPaise, item 10) — exact, as the database rounds
-const p2 = (v: number) => roundPaise(Number(v) || 0);
+// Round to paise — the ONE exact rule (sweep #10 T30 round 4, item 10), the same as lib/tax.ts roundPaise
+// and billdoc.js moneyRound. Written out here, not imported, because this file IMPORTS NOTHING on
+// purpose: ten scripts load it with plain node, where an "@/" path does not resolve.
+// scripts/verify-money-round-twins.mjs proves the three copies give the same answer.
+const p2 = (v: number) => {
+  const x = Number(v) || 0;
+  const r = Math.round(Number((Math.abs(x) * 100).toPrecision(15)));
+  return r === 0 ? 0 : (x < 0 ? -r : r) / 100;
+};
 
 /**
  * Split `target` across `rates` proportionally, to the paise. The LAST line absorbs the

@@ -36,6 +36,12 @@ check(typeof roundPaise === "function" && typeof BILLDOC.moneyRound === "functio
   for (let i = 0; i < 2000000; i++) inputs.push((rnd() - 0.3) * (i % 3 === 0 ? 100 : i % 3 === 1 ? 1e4 : 1e7) * (i % 7 === 0 ? 1 : rnd()));
   for (const x of inputs) { const a = roundPaise(x), b = BILLDOC.moneyRound(x); if (!(Object.is(a, b) || (Number.isNaN(a) && Number.isNaN(b)))) { bad = `${x}: ${a} vs ${b}`; break; } }
   check(!bad, `the two copies give the same answer on ${inputs.length.toLocaleString("en-IN")} inputs (incl. negatives, halves, NaN, ±∞)`, `the copies differ — ${bad}`); }
+// …and the THIRD copy: lib/taxFiling.ts imports nothing (plain-node scripts load it), so it writes the rule
+// out as its own p2. netSalesOf({ subtotal: x, discount: 0 }) is exactly p2(x), so it is checked through that.
+{ const TF = await import(pathToFileURL(join(root, "lib/taxFiling.ts")).href); let s = 11, bad = null; const rnd = () => (s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296;
+  for (let i = 0; i < 1000000 && !bad; i++) { const x = (rnd() - 0.3) * (i % 2 ? 1e4 : 1e7) * rnd(); if (TF.netSalesOf({ subtotal: x, discount: 0 }) !== roundPaise(x)) bad = `${x}: ${TF.netSalesOf({ subtotal: x, discount: 0 })} vs ${roundPaise(x)}`; }
+  for (const x of [0.005, -0.005, 1.005, 0.7 * 0.05, 0.145, -0.035]) if (!bad && TF.netSalesOf({ subtotal: x, discount: 0 }) !== roundPaise(x)) bad = `${x}`;
+  check(!bad && !/^\s*import\s/m.test(read("lib/taxFiling.ts")), "lib/taxFiling.ts's own copy (it imports nothing, on purpose) gives the same answer on 1,000,006 inputs", `taxFiling's copy differs — ${bad || "or it imports something"}`); }
 
 // 2 — both equal the database's exact rounding, for every amount, at every rate
 const exactAdd = (g, bp) => { const num = g * bp, q = Math.floor(num / 10000), r = num - q * 10000; return 2 * r >= 10000 ? q + 1 : q; };

@@ -61,7 +61,7 @@ for (const [p, re, what] of [
   ["lib/tax.ts", /taxableBase \+= roundPaise\(amt \/ \(1 \+ rate\)\);/, "splitBill's tax-inside net"],
   ["lib/tax.ts", /const amt = roundPaise\(unit \* qty\);/, "splitBill's line amount (₹1.005 × 1 is ₹1.01, as the database says)"],
   ["lib/paySplit.ts", /const r2 = roundPaise;/, "Pay in parts' due"],
-  ["lib/taxFiling.ts", /const p2 = \(v: number\) => roundPaise\(Number\(v\) \|\| 0\);/, "the GST filing's split"],
+  ["lib/taxFiling.ts", /const p2 = \(v: number\) => \{\n  const x = Number\(v\) \|\| 0;\n  const r = Math\.round\(Number\(\(Math\.abs\(x\) \* 100\)\.toPrecision\(15\)\)\);/, "the GST filing's split (its own copy — taxFiling imports nothing; verify-money-round-twins proves it)"],
   ["lib/billPreview.ts", /const r2 = roundPaise;/, "the bill preview's tax-inside net"],
   ["app/api/editor/[...path]/route.ts", /const r2 = BILLDOC\.moneyRound;/, "the manager route's billTaxOf (run by verify:audit with BILLDOC alone)"],
   ["app/api/inventory/[...path]/route.ts", /const amount = roundPaise\(qty \* rate\);/, "an inventory purchase line"],

@@ -390,8 +390,7 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
   B("exemptIsMaterial is false for a composition restaurant (no rate)", "real function", () => tf.exemptIsMaterial({ tax: 0, subtotal: 1000, discount: 0, paidOrders: 1 }, null) === false);
   B("taxableFor prints net sales when nothing exempt is material, tax÷rate when something is", "real function",
     () => tf.taxableFor({ tax: 49.9, subtotal: 1000, discount: 0 }, 5, false) === 1000 && tf.taxableFor({ tax: 40, subtotal: 1000, discount: 0 }, 5, true) === 800);
-  // re-stated 2026-10-10 (item 10): it now imports the ONE rounding rule from lib/tax.ts, which itself imports nothing
-  B("lib/taxFiling.ts imports nothing but lib/tax.ts — itself import-free (the reports route, the page and the exporter all bundle it)", "read the file", () => [...SRC[F].matchAll(/^\s*import\s.*from\s+"([^"]+)"/gm)].every((m) => m[1] === "@/lib/tax") && !/^\s*import\s/m.test(read("lib/tax.ts")));
+  B("lib/taxFiling.ts has no imports (the reports route, the page and the exporter all bundle it)", "read the file", () => !/^\s*import\s/m.test(SRC[F]));
   B("exactly one definition of splitTax exists in app/ lib/ components/", "grep", () => { const d = tsFiles.filter((f) => /function splitTax\s*\(/.test(read(f))); return { ok: d.length === 1 && d[0] === F, note: d.join(", ") }; });
   B("exactly one definition of allocateWhole exists", "grep", () => tsFiles.filter((f) => /function allocateWhole\s*\(/.test(read(f))).length === 1);
   B("the screen, the route and the exporter all take their filing split from lib/taxFiling", "grep importers", () => { const im = importers(F); return { ok: im.length >= 2, note: im.join(", ") }; });
