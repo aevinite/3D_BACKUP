@@ -3,8 +3,10 @@
 // of the join-a-table gate, which sweep 6 only ever shot in one.
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 const BASE = process.env.T3_BASE || "http://localhost:4203";
-const OUT = process.env.T3_SHOTS || "/Users/aevinite/Documents/Projects/wt-s7-t3/.claude/sweep/shots/T3";
+// Was the sweep-#7 worktree's own folder (wt-s7-t3), long removed (sweep #10 T39 item 87).
+const OUT = process.env.T3_SHOTS || fileURLToPath(new URL("../../../.claude/sweep/shots/T3", import.meta.url));
 mkdirSync(OUT, { recursive: true });
 const A35 = { viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
 const b = await chromium.launch();

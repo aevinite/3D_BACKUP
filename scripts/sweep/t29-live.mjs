@@ -11,13 +11,20 @@
 //   npm run dev  (PORT=4429)   then   node scripts/sweep/t29-live.mjs
 import { chromium } from "playwright";
 import { requireAppUp } from "./appUp.mjs";
+import { mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Exits 2 with a plain sentence when nothing is answering, instead of a stack trace — the rule
 // verify:guards-alive enforces, and the reason nobody should have to know which script words it
 // which way. Defaults to this terminal's own port; `--base <url>` overrides it.
 if (!process.argv.some((a) => a === "--base")) process.argv.push("--base", "http://localhost:4429");
 const BASE = await requireAppUp(process.argv);
-const SHOT = "/Users/aevinite/Documents/Projects/wt-s9-t29/.claude/sweep/shots/S9-T29";
+// The shots went to the sweep-#9 worktree's own folder, which was removed when that sweep ended — so
+// from then on the first screenshot threw ENOENT and no row after it ever ran (sweep #10 T39 item 87).
+// Now: this checkout's own (git-ignored) shots folder, created if missing.
+const SHOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".claude", "sweep", "shots", "S9-T29");
+mkdirSync(SHOT, { recursive: true });
 const LEAK = /-->|\$\{|\bundefined\b|\bNaN\b|\[object Object\]/;
 const out = [];
 const rec = (id, what, ok, detail) => { out.push({ id, ok }); console.log(`  ${ok ? "✓" : "✗"} ${id}  ${what}${detail ? " — " + detail : ""}`); };

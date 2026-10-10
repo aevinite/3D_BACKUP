@@ -6,13 +6,18 @@
 import { chk, skip, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
 import { openWith, closeBrowser, BASE, idFor } from "./r2lib.mjs";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+// REPO ROOT, NOT A WORKTREE (sweep #10 T39 item 87): this file named the sweep-#8 worktree
+// wt-s8-t13 by its absolute path; that folder was removed when the sweep ended, so every read threw
+// ENOENT before the first check ran. It now reads the checkout it lives in.
+const ROOT_DIR = fileURLToPath(new URL("../../../", import.meta.url));
 
 const id = idFor(67581);
 let n = 1;
 const EXPECT_ROWS = 71;
 const argOnly = process.argv.find((x) => x.startsWith("--only="));
 if (argOnly) setOnly(argOnly.slice(7).split(","));
-const src = (p) => readFileSync("/Users/aevinite/Documents/Projects/wt-s8-t13/" + p, "utf8");
+const src = (p) => readFileSync(ROOT_DIR + p, "utf8");
 const page = src("app/owner/page.tsx");
 
 // ══ 1 · the instant-paint saved copy ══════════════════════════════════════════════════════════

@@ -66,6 +66,8 @@ const EXPLAINED_MISSING = {
   "scripts/verify-kitchen-screen.mjs": { paths: ["./sweep/t9/"], why: "a folder prefix — the file name is built at run time (./sweep/t9/<module>.mjs)" },
   "scripts/verify-print-helper.mjs": { paths: ["app/pair/page.tsx", "app/api/pair/route.ts"], why: "asserts the retired pairing route is GONE" },
 };
+// …and this file, whose list above names every one of those paths.
+EXPLAINED_MISSING["scripts/verify-every-script.mjs"] = { paths: Object.values(EXPLAINED_MISSING).flatMap((e) => e.paths), why: "its own list of paths that are meant not to exist" };
 // Files that WRITE and name no clean-up — each one read on 2026-10-10, with why that is right. A
 // file NOT listed here that writes and names no clean-up is still a ❌. Two kinds:
 //   · a TOOL whose whole job is to change data, run by hand on purpose (a seed, a migration, a
@@ -167,6 +169,11 @@ for (const f of files) {
       if (own.length) issues.push("uses names it never defines: " + [...new Set(own)].slice(0, 6).join(", "));
       if (pageNames.length) notes.push(`uses ${pageNames.length} name(s) of the page it drives, inside browser-side code — e.g. ${pageNames.slice(0, 3).join(", ")}`);
     }
+    // A sweep worktree is TEMPORARY — removed when its sweep ends. A tool that names one by its
+    // absolute path works for a week and then throws ENOENT before its first check: six did
+    // (wt-s7-t3, wt-s8-t13, wt-s9-t29 — sweep #10 T39 item 87). Read the checkout the file lives in.
+    const worktrees = [...new Set([...code.matchAll(/["'`]\/Users\/[^"'`]*\/Projects\/(wt-[\w-]+)/g)].map((m) => m[1]))];
+    if (worktrees.length) issues.push("names a temporary worktree folder by its full path: " + worktrees.join(", "));
     if ((warn[f] || []).length) issues.push(`${warn[f].length} lint warning(s): ${warn[f].slice(0, 3).join(", ")}`);
     // A release, parity or schema-compare tool reads the client stack's keys ON PURPOSE — it is run by
     // hand, asked-first, never by a sweep. Anything else that reads them is a ❌.
