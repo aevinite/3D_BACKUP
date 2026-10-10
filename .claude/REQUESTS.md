@@ -1857,4 +1857,4 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 ## 2026-10-10 — sweep #10 T39 round 3 (owner: "every single bit of area"; then "you can do the bin button big, but … it should look as professional aesthetic as it is right now")
 
 - [x] **Every file in scripts/, tests/, .github/ has its own check** — verify:every-script (640+ files), in CI; items 79–87 fixed. VERIFIED live (PR #1472).
-- [ ] **The basket's 🗑 is a 44×44 tap target and looks exactly as before** (finding 88) — same icon, colour and place; seen at 390px light + dark and 1280px against the live backup. Built; verify live.
+- [x] **The basket's 🗑 is a 44×44 tap target and looks exactly as before** (finding 88) — same icon, colour and place; seen at 390px light + dark and 1280px. VERIFIED live on backup (PR #1482): 44×44, row 32px, an edge tap removes the dish.
