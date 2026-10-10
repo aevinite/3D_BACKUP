@@ -89,7 +89,11 @@ export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [
 export type OwnerEntitlements = Record<string, boolean>;
 
 // Merge a raw JSONB value over the all-on defaults (absent/non-boolean = ON). Only the
-// BOOLEAN entitlement keys — the depth_<flag> strings are read separately (featureDepth).
+// BOOLEAN entitlement keys are read. A few old restaurants still carry `depth_<flag>` strings from the
+// retired 4-rung ladder ("tablet" etc.); NOTHING reads them — this line used to say they were "read
+// separately (featureDepth)", a function that no longer exists (sweep #10 T18, item 11). They are
+// skipped here because they are not booleans, and left in the row because deleting stored history
+// is not this helper's job.
 export function mergeOwnerEntitlements(raw: unknown): OwnerEntitlements {
   const out: OwnerEntitlements = {};
   for (const k of OWNER_ENTITLEMENT_KEYS) out[k] = true;

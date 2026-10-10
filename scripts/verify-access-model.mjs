@@ -1204,6 +1204,21 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("a key hint is never the key: short keys show only dots, and the reader uses the one builder");
 }
 
+// ── 63 · THE OLD depth_* ENTITLEMENT STRINGS ARE READ BY NOTHING — AND THE NOTE SAYS SO ──────────
+// lib/ownerEntitlements.ts once claimed they were "read separately (featureDepth)" — a function that
+// had been deleted (sweep #10 T18, item 11). The note now says nothing reads them. If code ever starts
+// reading `depth_*` again, this goes red so the note (and the merge that skips them) move with it.
+{
+  const files = [];
+  const walkDir = (d) => { for (const e of readdirSync(join(root, d), { withFileTypes: true })) { const p = `${d}/${e.name}`; if (e.isDirectory()) { if (e.name !== "node_modules") walkDir(p); } else if (/\.(tsx?|mjs|js)$/.test(e.name)) files.push(p); } };
+  for (const d of ["app", "lib", "components"]) walkDir(d);
+  const readers = files.filter((f) => read(f).split("\n").some((l) => !/^\s*(\/\/|\*)/.test(l) && /depth_|featureDepth/.test(l)));
+  const note = read("lib/ownerEntitlements.ts");
+  if (readers.length) fail(`code reads the old depth_* entitlement strings again (${readers.join(", ")}) — update the note in lib/ownerEntitlements.ts`);
+  else if (/read separately \(featureDepth\)/.test(note)) fail("lib/ownerEntitlements.ts still points at featureDepth(), which does not exist");
+  else ok("nothing reads the old depth_* entitlement strings, and lib/ownerEntitlements.ts says exactly that");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27
