@@ -130,3 +130,12 @@ t("item 34: coverage.mjs creates node_modules/.cache before its reporter writes 
   t("item 36: netSalesOf / taxableValue / taxableFor of a missing row are 0, and exemptIsMaterial of missing totals is false", TF.netSalesOf(null) === 0 && TF.taxableValue(null, 5) === 0 && TF.taxableFor(null, 5, true) === 0 && TF.exemptIsMaterial(null, 5) === false);
   const f = TF.buildFiling([{ t: 105 }, null, { t: 52.5 }], [{ label: "CGST", rate: 2.5 }, null, { label: "SGST", rate: 2.5 }], (r) => r.t);
   t("item 36: buildFiling with a missing row and a missing tax line keeps every row in place (the hole is ₹0) and still adds up", f.rows.length === 3 && f.rows[1].tax === 0 && f.total === 158 && f.rows.reduce((a, r) => a + r.tax, 0) === 158 && f.rows.every((r) => Math.round(r.parts.reduce((a, x) => a + x, 0) * 100) === r.tax * 100), JSON.stringify(f.rows.map((r) => r.parts))); }
+
+// ── item 37: a harness row names a code line by where its text IS, never by a number typed once ──
+// Round 5 found seven typed line numbers in the proof and equivalence rows; four had drifted (clash.ts "262" was at 236,
+// paySplit "265–266" at 275, "396" at 411, idempotency "92" at 94 and "41" at 43), and another terminal's comment above
+// clash.ts:215 crashed the equivalence suite outright. Each is now found by its text, and a text that is gone fails.
+{ const { readdirSync } = await import("node:fs"); const dir = join(root, "scripts/t30-harness"); const typed = [];
+  for (const f of readdirSync(dir).filter((x) => /^u-.*\.mjs$/.test(x))) readFileSync(join(dir, f), "utf8").split("\n").forEach((l, i) => { if (/["`]lib\/[A-Za-z]+\.(ts|mjs):[0-9]/.test(l)) typed.push(`${f}:${i + 1}`); });
+  const seesOne = /["`]lib\/[A-Za-z]+\.(ts|mjs):[0-9]/.test('t("lib/clash.ts:' + "262 — describe()"); // built in two halves so this line is not itself a hit
+  t("item 37: no harness row names a code line by a typed number (scripts/t30-harness/u-*.mjs) — and the scan recognises one", !typed.length && seesOne, typed.length ? `typed: ${typed.join(", ")}` : "the scan no longer sees a typed label"); }
