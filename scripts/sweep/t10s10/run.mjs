@@ -7,7 +7,7 @@ import { runAll } from "./lib.mjs";
 
 const argv = process.argv.slice(2);
 const pick = argv.includes("--block") ? argv[argv.indexOf("--block") + 1].split(",") : null;
-for (const b of ["g", "a", "b", "c", "d", "e", "f", "r3"]) {
+for (const b of ["g", "a", "b", "c", "d", "e", "f", "r3", "r4"]) {
   if (pick && !pick.includes(b)) continue;
   try { await import(`./new-${b}.mjs`); } catch (e) { if (!/Cannot find module/.test(String(e && e.message))) throw e; }
 }

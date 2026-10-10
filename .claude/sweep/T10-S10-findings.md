@@ -113,3 +113,14 @@ Guards: `verify:voided-stays` (25), `verify:t10-writes` (30), `verify:bill-repri
 | 20 | Editor → a dish → Price · a parcel's open price · ⚡ QO/P · + Add a dish | a price typed with a minus sign was saved as POSITIVE ("-5" → ₹5; an open price "-50" charged ₹50) — the cleaning stripped "-" before the `n < 0` test. Refused out loud on all four doors. Guard: `verify:t10-writes` (37), each refusal sabotaged → red. Seen on :4410. |
 
 Measured: 1,632 of 1,633 lines run; 1,189 of 1,218 mutants caught (all 305 restaurant / permission / on-off ones); the 29 left are recorded equivalents. 8 lines can never run (listed in the ledger). Outside the boundary: `lfh_price_order` strips "-" itself (a migration) and the waiter tablet's open-price twin.
+
+# Round 4 (2026-10-11) — "do 3,4,5,6"
+
+| # | what | where |
+|---|---|---|
+| 3 | the waiter tablet refuses a minus-sign price on a table order, a parcel and an added dish | Waiter tablet → a "Set price" dish |
+| 4 | five lines nothing could reach removed (obituaries left); the three permission backstops KEPT on purpose | backend only, nothing on screen |
+| 5 | the restaurant's name on its own line under "Manager" on a phone — whole, a real "…" only for a very long name | Manager panel → top bar → phone |
+| 6 | admin printing board: readable status words (fill red, 12px), computer names wrap; the sweep's test banquet bill kept inside a manager's reach. The round-3 "about 40 reds" were mostly my own run at 127.0.0.1 — the sweep signs in at localhost | Admin console → Printing → Every restaurant |
+
+Guards: `verify:t10-writes` (47, items 3/4/5 each sabotaged → red) · `verify:printing-sweep` 487 / 0 / 4 skipped.

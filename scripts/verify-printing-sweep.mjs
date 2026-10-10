@@ -652,6 +652,13 @@ if (!browser) {
       }) });
     } catch { bq = null; }
   }
+  // KEEP THE FIXTURE INSIDE A MANAGER'S REACH (sweep #10 T10 round 4, item 6). A manager may send only
+  // a banquet bill issued in their Bills window (today, or today + yesterday — lib/billsReach), which
+  // is deliberate. This fixture is made ONCE and reused, so from its second day on the server answered
+  // "That banquet bill isn't on this restaurant's list" — correctly — and two phases read that as a
+  // printing fault. It is the sweep's own VOIDED row ("never a real function"), not a sale, so its
+  // date is simply brought to now; the product rule is left exactly as it is.
+  if (bq) { try { await db(`banquet_bills?id=eq.${bq.id}&restaurant_id=eq.${RID}&remark=eq.${encodeURIComponent(SWEEP_BILL)}`, { method: "PATCH", body: JSON.stringify({ issued_at: new Date().toISOString() }) }); } catch { /* the phases below say what is missing */ } }
   BQ_BILL_ID = bq ? bq.id : null;
   // The two sheets the document can be, and the restaurant setting that chooses between them.
   const SHEETS = [["A5 (the restaurant's default)", "a5", 148, 210], ["A4 (the restaurant chose the big sheet)", "a4", 210, 297]];

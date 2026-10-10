@@ -472,10 +472,8 @@ row("…a test page to a printer this computer does not have is refused", async 
 row("…from a browser that is not a set-up computer, the test page says to set it up first", async () => {
   const { r } = await run(PRINT({}, { mut: (G) => { G.FIX.print_agents[0].owner_device = "another"; } }), "POST", "printing/test", { printer: "EPSON" });
   return { ok: r.status === 400 && /Set this computer up first/.test(r.text), note: `${r.status}` }; });
-row("[read] 'Unknown printing request' can never be reached — the only way in is `test`, and both test branches return first", async () => {
-  const { src } = await import("./lib.mjs"); const i = src.indexOf('    if (a === "printing") {'); const t = src.slice(i, src.indexOf('return err("Unknown printing request.", 404);', i) + 50);
-  return { ok: /if \(b0 !== "test"\) return permDenied/.test(t) && /if \(b === "test" && isRoutableKind/.test(t) && /if \(b === "test"\) \{/.test(t), note: "unreachable by construction — dead, not a fault (listed for the owner)" }; },
-  "SRC · the printing branch, read");
+row("[removed · round 4 item 4] 'Unknown printing request' and its `if (b === \"test\")` wrapper are gone — only `test` gets that far, so the test page now runs straight", async () => { const { src } = await import("./lib.mjs");
+  return { ok: !/Unknown printing request\./.test(src.replace(/\/\/.*$/gm, "")) && /if \(b0 !== "test"\) return permDenied/.test(src) && /const mine = await agentForDevice\(rid, dv\);/.test(src), note: "the line is gone; the refusal that made it dead still stands" }; }, "SRC · the removed line and the refusal in front of it");
 row("'print here instead' on a counter the admin named takes the printer and logs it", async () => {
   const { G, r } = await run(PRINT(SCREEN_MGR), "POST", "print-station/take", {});
   return { ok: r.status === 200 && r.json.ok === true && logged(G, "print_station_take").length === 1, note: `${r.status} ${r.text.slice(0, 80)}` }; });
@@ -1295,8 +1293,8 @@ row("…and the same dish with the same allergy line twice is stopped; a differe
 row("a discount power switched off WHILE the order was being placed: the order stands, the discount is refused", async () => {
   const { G, r } = await run({ rpc: { lfh_price_order: { ok: false } }, rpcImpl: { lfh_staff_place_order: () => { SG.FIX.restaurants[0].access_config = { give_discounts: { on: false } }; return { ok: true, order_id: ID.order2 }; } } }, "POST", "order", { table: "4", items: [{ id: "dal" }], discount: 10 });
   return { ok: r.status === 403 && /give discounts/.test(r.text) && rpc(G, "lfh_staff_place_order").length === 1 && !rpc(G, "lfh_staff_bill_discount").length, note: `${r.status}` }; });
-row("[unreachable · listed] the parcel's 'no valid dishes' refusal: an empty list is refused earlier ('items required') and every dish is either added or refused by name, so nothing reaches it empty", async () => { const { src } = await import("./lib.mjs");
-  return { ok: /if \(!Array\.isArray\(items\) \|\| !items\.length\) return err\("items required"\);/.test(src) && /if \(!d\) return err\(editErrMsg\("unknown_item"\), 400\);/.test(src) && /if \(!picked\.length\) return err\("no valid dishes", 400\);/.test(src), note: "dead by construction — not a fault (listed for the owner)" }; }, "SRC · the line and the two that make it unreachable");
+row("[removed · round 4 item 4] the parcel's 'no valid dishes' line is gone — an empty list is still refused ('items required') and every unknown dish by name", async () => { const { src } = await import("./lib.mjs");
+  return { ok: !/return err\("no valid dishes"/.test(src) && /if \(!Array\.isArray\(items\) \|\| !items\.length\) return err\("items required"\);/.test(src) && /if \(!d\) return err\(editErrMsg\("unknown_item"\), 400\);/.test(src), note: "removed; the two refusals that made it dead still stand" }; }, "SRC · the removed line and the two refusals in front of it");
 row("a parcel keeps its allergy list on the parcel; a database answer shaped as a list is understood", async () => {
   const { G, r } = await run({ rpc: { lfh_platform_insert: [{ id: ID.plat }] } }, "POST", "parcel", { items: [{ id: "dal", qty: 1 }], allergies: ["Nuts", 7] });
   const p = (G.FIX.aggregator_orders.find((x) => x.id === ID.plat) || {}).payload || {}; return { ok: r.status === 200 && JSON.stringify(p.allergies) === '["Nuts","7"]', note: JSON.stringify(p.allergies) }; });
@@ -1406,8 +1404,8 @@ row("the admin console setting tables per row is kept within the picker's range"
 row("un-paying a ticket with NO table still reverses its capture (blank table, its session)", async () => {
   const { G } = await run({ mut: (G) => { Object.assign(ord(G), { payment_status: "paid", paid_at: ago(2), table_number: null }); } }, "PATCH", `orders/${ID.order}`, { payment_status: "pending", revert_reason: "wrong ticket" });
   const c = rpc(G, "lfh_uncapture_customer")[0]; return { ok: c && c.args.p_table === "" && c.args.p_session === ID.sess, note: c ? JSON.stringify(c.args) : "" }; });
-row("[unreachable · listed] the cancel line's '(was marked paid)': a PAID ticket is refused a cancel before that line ('mark it unpaid first'), so the words can never be written", async () => { const { src } = await import("./lib.mjs");
-  return { ok: /if \(patch\.status === "cancelled" && cur\.payment_status === "paid"\)\s*return err\("Can't cancel a paid order/.test(src) && /\(was marked paid\)/.test(src), note: "dead by construction — not a fault (listed for the owner)" }; }, "SRC · the line and the refusal that makes it unreachable");
+row("[removed · round 4 item 4] the cancel line no longer carries the dead '(was marked paid)' — a PAID ticket is still refused a cancel first", async () => { const { src } = await import("./lib.mjs");
+  return { ok: /if \(patch\.status === "cancelled" && cur\.payment_status === "paid"\)\s*return err\("Can't cancel a paid order/.test(src) && /log\("editor", "order_cancel", \{[^}]*detail: "cancelled", device_id/.test(src), note: "removed; the refusal that made it dead still stands" }; }, "SRC · the cancel line and the refusal in front of it");
 row("…and that refusal holds for the admin console too — a paid sale is never cancelled straight off", async () => {
   const { r } = await run({ who: "admin", mut: (G) => { Object.assign(ord(G), { payment_status: "paid" }); } }, "PATCH", `orders/${ID.order}`, { status: "cancelled" }); return { ok: r.status === 409 && /mark it unpaid/.test(r.text), note: `${r.status}` }; });
 row("deleting a dish whose name is blank records it by its id", async () => {

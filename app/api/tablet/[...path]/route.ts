@@ -1223,6 +1223,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tn = Number(t);
       if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
       if (!itemsOk) return err("items required");
+      // A MINUS SIGN IS REFUSED, NOT STRIPPED (sweep #10 T10 round 4, item 3 — the tablet twin of the
+      // manager panel's item 20). The database pricer removes every non-digit, so an open price typed
+      // "-50" was charged ₹50. The pricer itself is a migration away; this door refuses it first.
+      if (items.some((i: any) => i && i.price != null && /-/.test(String(i.price)))) return err("A price can't be negative — check the prices you typed.", 400);
       // Double-tap guard: refuse an IDENTICAL order for the same table within 3s
       // (prevents a fat-fingered "Send" / a network retry from issuing two KOTs). The
       // window used to be 8s, which wrongly blocked a LEGITIMATE second identical order
@@ -1354,6 +1358,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // read the (empty) DB price. A missing/zero price on an open-price line is refused.
         let price: number;
         if (d.open_price) {
+          // A minus sign is refused, not stripped (T10 round 4, item 3): "-50" was charged as ₹50.
+          if (/-/.test(String(it?.price ?? ""))) return err(`A price can't be negative — check the price for "${d.title}".`, 400);
           price = Math.max(0, Math.min(100000, Number(String(it?.price ?? "").replace(/[^0-9.]/g, "")) || 0));
           if (price <= 0) return err(`Enter a price for "${d.title}".`, 400);
           price = Math.round(price * 100) / 100;
@@ -2198,6 +2204,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "add-item") {
       const dishId = String(body?.dishId || body?.id || "").trim();
       if (!dishId) return err("dish required");
+      if (body?.price != null && /-/.test(String(body.price))) return err("A price can't be negative — check the price you typed.", 400); // T10 round 4, item 3
       const line = {
         id: dishId,
         qty: Math.max(1, Math.round(Number(body?.qty) || 1)),

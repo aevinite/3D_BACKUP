@@ -3736,7 +3736,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Titles/prices are resolved SERVER-SIDE (never trust the client cart); total is the
     // item subtotal, matching how every other platform order stores `total`.
     if (a === "parcel" && path.length === 1) {
-      if (!(await parcelLadder(rid)).effective) return err("Parcel orders aren't switched on for this restaurant.", 403);
+      // "Parcel orders aren't switched on for this restaurant" WAS HERE. The parcel ladder has been
+      // permanent since 2026-08-03 (lib/tableTags → ALWAYS_ON), so it could never be said to anyone;
+      // removed on the owner's "do 3,4,5,6" (sweep #10 T10 round 4, item 4, 2026-10-11).
       if (!(await managerCan(g, rid, "parcel"))) return permDenied("take parcel / takeaway orders");
       const { items, customer, phone, note, allergies, paid, method } = body || {};
       if (!Array.isArray(items) || !items.length) return err("items required");
@@ -3788,7 +3790,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         picked.push(line);
         total += price * qty;
       }
-      if (!picked.length) return err("no valid dishes", 400);
+      // "no valid dishes" WAS HERE: an empty list is refused as "items required" and every dish above is
+      // either added or refused BY NAME, so the list can never be empty here (T10 round 4, item 4).
       total = Math.round(total * 100) / 100;
       // THE RECORD MUST EQUAL THE PAPER (fixed 2026-08-02). A parcel was stored at the item
       // subtotal with no tax, while the bill handed to the customer runs through the same
@@ -3911,7 +3914,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // (admin/owner pass via managerCan's higher-view bypass). Marked payload.demo so a later real
     // integration can tell demo orders apart.
     if (a === "platform" && b === "test") {
-      if (g.user && !(await platformLadder(rid)).effective) return err("The Platform board isn't enabled for this restaurant.", 403);
+      // "The Platform board isn't enabled for this restaurant" WAS HERE too — the same permanent ladder
+      // as the board's own copy, which T9 removed (item 8). Removed (T10 round 4, item 4, 2026-10-11).
       // Simulate is a DEMO/representation tool, NOT an operational action — restrict it to the
       // admin (g.user === null) and the owner. Real floor staff must never be able to add fake
       // orders to live revenue (the reason the old "test order" button was removed). The manager
@@ -5643,7 +5647,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       //
       // Nothing is minted and nothing is recorded as a sale — see the rule written out in full over
       // lib/printDocs → testBand. The only record is this diary line.
-      if (b === "test" && isRoutableKind((body as Record<string, unknown>)?.sample)) {
+      if (isRoutableKind((body as Record<string, unknown>)?.sample)) {
         const sk = (body as Record<string, unknown>).sample as RoutableKind;
         // NOTHING RUNNING MEANS NOTHING TO TEST — the same refusal as the admin console's, from the
         // same one function. While printing is off the poll answers 204 for every kind, so a sample
@@ -5670,23 +5674,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
 
       // ── a test page on one of THIS computer's printers ────────────────────────────────────────
-      if (b === "test") {
-        const mine = await agentForDevice(rid, dv);
-        if (!mine) return err("Set this computer up first.", 400);
-        const printer = String((body as Record<string, unknown>)?.printer || "");
-        if (!mine.printers.some((x) => x.name === printer)) return err("This computer has no printer by that name.", 400);
-        const q = await queueJob(rid, "test", { by: g.user?.name || g.user?.username || "manager" },
-          { requestedBy: "test page", agentId: mine.id, printer });
-        if ("error" in q) return err("Could not send the test page.", 500);
-        await logAction("editor", "print_test", {
-          restaurant_id: rid, device_id: dv,
-          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-          detail: `test page to ${printer}`,
-        });
-        return ok({ queued: true, note: mine.connected ? `Sent to ${printer}.` : `Saved — it prints as soon as this computer's helper is running.` });
-      }
-
-      return err("Unknown printing request.", 404);
+      // (Only "test" reaches this point — every other verb was refused above — so the old
+      // `if (b === "test")` wrapper and the "Unknown printing request" line after it could never
+      // run. Both removed: T10 round 4, item 4, 2026-10-11.)
+      const mine = await agentForDevice(rid, dv);
+      if (!mine) return err("Set this computer up first.", 400);
+      const printer = String((body as Record<string, unknown>)?.printer || "");
+      if (!mine.printers.some((x) => x.name === printer)) return err("This computer has no printer by that name.", 400);
+      const q = await queueJob(rid, "test", { by: g.user?.name || g.user?.username || "manager" },
+        { requestedBy: "test page", agentId: mine.id, printer });
+      if ("error" in q) return err("Could not send the test page.", 500);
+      await logAction("editor", "print_test", {
+        restaurant_id: rid, device_id: dv,
+        ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+        detail: `test page to ${printer}`,
+      });
+      return ok({ queued: true, note: mine.connected ? `Sent to ${printer}.` : `Saved — it prints as soon as this computer's helper is running.` });
     }
 
     // ── print-station/take · /release — "print HERE instead" from the counter screen (mig 338) ──
@@ -6553,7 +6556,8 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // does not restrict it. Un-cancelling is logged too, so a cancel/restore pair can't be used
       // to move a bill in and out of the takings unobserved. (docs/COMPLIANCE-GUARDRAILS.md §3)
       if (patch.status === "cancelled" && cur.status !== "cancelled") {
-        await log("editor", "order_cancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: `cancelled${cur.payment_status === "paid" ? " (was marked paid)" : ""}`, device_id: deviceIdFrom(req) });
+        await log("editor", "order_cancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: "cancelled", device_id: deviceIdFrom(req) });
+        // ("(was marked paid)" was dropped from that line: a PAID ticket is refused a cancel above — T10 round 4, item 4.)
         // …and the AUDIT row, written HERE rather than by the browser afterwards (2026-08-02).
         // It used to be app.js's job (POST /audit after the action), which meant the waiter panel
         // recorded nothing and any future caller would record nothing. The reason the panel asked

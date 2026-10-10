@@ -828,7 +828,10 @@ async function loadAll() {
   const rr = data.restaurant || {};
   const restName = (rr.logo_text || (rr.name && rr.name.en) || rr.name_en || (state.data.settings || {}).restaurant_name || "").replace(/\*/g, "");
   const brandEl = document.getElementById("brandRest");
-  if (brandEl) brandEl.textContent = restName ? "· " + restName : "";
+  // The name alone — the "· " in front of it is drawn by the stylesheet (.brand-rest::before), so the
+  // phone layout, which puts the name on its own line under "Manager", can leave it off (sweep #10 T10
+  // round 4, item 5: "little French house" was cut to "little French hous" on a phone).
+  if (brandEl) brandEl.textContent = restName;
   syncBanquetTab(); // Banquet tab follows the admin entitlement (mig 130)
   syncPlatformTab(); // Platform tab follows the platform/parcel modules (mig 209)
   syncInventoryTab(); // Inventory tab follows the inventory module (mig 221)

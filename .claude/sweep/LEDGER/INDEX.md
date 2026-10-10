@@ -62,7 +62,7 @@ terminals' rows — keep both sides.
 | T7 | `P176001`–`P177000` | Manager panel — editor/app.js, part 2 of 3 | ⏳ not run yet | — | — | — | — |
 | T8 | `P177001`–`P178000` | Manager panel — editor/app.js part 3 of 3, the host page and inventory | ⏳ not run yet | — | — | — | — |
 | T9 | `P178001`–`P179000` | The manager panel's server route, part 1 of 2 | `T9-S10.md` | 840 | 838 | 12 | 12 |
-| T10 | `P179001`–`P180000` + `P211001`–`P211999` (round 3, claimed on `main` before a row was written — above every claim in this table) | The manager panel's server route, part 2 of 2 | `T10-S10.md` | 1062 | 1062 | 15 | 15 |
+| T10 | `P179001`–`P180000` + `P211001`–`P211999` (round 3, claimed on `main` before a row was written — above every claim in this table) | The manager panel's server route, part 2 of 2 | `T10-S10.md` | 1084 | 1084 | 19 | 19 |
 | T11 | `P180001`–`P181000` | The kitchen screen | ⏳ not run yet | — | — | — | — |
 | T12 | `P181001`–`P182000` | The waiter tablet screen | ⏳ not run yet | — | — | — | — |
 | T13 | `P182001`–`P183000` + `P169001`–`P169999` (round 2, the last unclaimed block of the planning gap — claimed on `main` before a row was written; owner asked 2026-10-11 for 500–1000 more, "every single bit") | The waiter tablet's server route, and the shared floor logic | `T13-S10.md` | 527 | 527 | 7 | 7 |
