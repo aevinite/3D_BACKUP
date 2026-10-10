@@ -716,6 +716,28 @@ for (const rel of PART_A) {
   else fail("printing: the overview's restaurants read lost its deleted_at test — every binned and purged restaurant gets a row on the board (rule 11)");
 }
 
+// ── RULE 12 — A CACHE'S THROW IS CAUGHT, AND A NUMBER FROM THE ADDRESS IS A WHOLE ONE (S10 T28, items 5–6)
+//
+// cachedOwnerPayload hands a compute() throw to its caller by design. A route that does not catch it
+// answers a bare 500 with no body, and the console prints "Request failed (500)" — Platform analytics
+// did exactly that on any failed read until 2026-10-10. And a page size read with Number() alone let
+// `?per=33.3` through as a fractional range: the change log answered EMPTY with a 200, the ledger a
+// "try again" 500. Both are checked on every admin route, so a new one is covered the day it lands.
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  if (/cachedOwnerPayload\s*\(/.test(src)) {
+    const at = src.search(/cachedOwnerPayload\s*\(/);
+    // Inside a try: the nearest `try {` before the call has no `catch` between it and the call.
+    const tryAt = src.lastIndexOf("try {", at);
+    const inside = tryAt >= 0 && src.indexOf("catch", tryAt) > at;
+    if (inside) ok(`${rel} catches the snapshot cache's throw and answers in words`);
+    else fail(`${rel} calls cachedOwnerPayload outside a try — a failed compute answers a bare 500 the console prints as "Request failed (500)" (rule 12)`);
+  }
+  const bare = [...src.matchAll(/Math\.(?:min|max)\([^;\n]*?\bNumber\(\s*(?:url\.)?(?:searchParams|sp|req\.nextUrl\.searchParams)\.get\(/g)]
+    .filter((m) => !/Math\.trunc\(\s*Number\(/.test(m[0]));
+  if (bare.length) fail(`${rel} clamps a number from the address without Math.trunc — a decimal reaches PostgREST as a fractional limit/range (rule 12)`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {
