@@ -4507,16 +4507,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // bill). Server-authoritative. A RE-issue (after a void) carries a reason and is REFUSED
     // once the bill is settled (mig 189 enforces both — the invoice locks at settlement).
     if (a === "sessions" && c === "invoice") {
-      // "Generate bills" is NOT a switch any more, and this line does not refuse anyone today
-      // (corrected by sweep #10 T10, item 11 — the comment said the opposite). The owner took
-      // take_orders / mark_paid / print_invoice / table_tags / table_ops out of the grant list on
-      // 2026-08-01 ("how the floor RUNS; a restaurant that switched them off could not trade"), so
-      // managerGrantValue() answers ON for print_invoice permanently and a stored
-      // manager_permissions.print_invoice is ignored — exactly the mark_paid case written out at the
-      // on-the-house gate. It is a guard in waiting, kept so that if a row ever returns every bill
-      // door honours it the same day. What actually decides who may issue a number is the manager
-      // gate itself, the customer rule below and lfh_generate_invoice's own refusals.
-      if (!(await managerCan(g, rid, "print_invoice"))) return permDenied("generate bills");
+      // REJECTED (owner, 2026-10-10) — docs/REJECTED-IDEAS.md → R63: there is NO switch that stops a
+      // manager generating or printing a bill, and there must not be one. *"manager will always have
+      // option to print bill … there should [not] be option to turn on and off."* A `managerCan(…,
+      // "print_invoice")` line sat here as a "guard in waiting" for a row that might return; it could
+      // never refuse anyone (print_invoice left the grant list on 2026-08-01) and it invited exactly
+      // that row back, so it is gone. Who may issue a number is decided by the manager gate itself,
+      // the customer rule below and lfh_generate_invoice's own refusals.
       // lfh_generate_invoice has no tenant param — confirm the session is THIS restaurant's
       // first (service-role bypasses RLS; a foreign session id must not get an invoice).
       const ownsGen = must(await sb.from("sessions").select("id, table_number, bill_no").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
