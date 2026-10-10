@@ -251,8 +251,11 @@ P("P56858", "correcting an order's table carries one too", /const signal = order
 P("P56859", "…and reports failure as a plain false the caller already words", /return !error && Array\.isArray\(data\) && data\.length > 0;/.test(M));
 P("P56860", "a guest reads only their OWN order's status, through a definer function", /\.rpc\("get_order_status", \{ order_id: id \}\)/.test(M));
 P("P56861", "…and an unknown order comes back null, not as a crash", /if \(error \|\| !Array\.isArray\(data\) \|\| data\.length === 0\) return null;/.test(M));
-P("P56862", "reviews are read scoped to the restaurant AND the dish", /\.eq\("item_slug", slug\)[\s\S]{0,120}\.eq\("restaurant_id", restaurantId\)/.test(M));
-P("P56863", "…newest first, and capped at twenty", /\.order\("created_at", \{ ascending: false \}\)\s*\n?\s*\.limit\(20\)/.test(M));
+// RE-STATED 2026-10-10: sweep #10 T30 round 4 (item 16, mig 418) moved the review read into
+// lfh_dish_reviews, so no reviewer's device id leaves the database; the scope, order and cap live there.
+const MIG418 = read("supabase/migrations/418_a_dish_page_learns_which_review_is_mine_not_every_device_id.sql");
+P("P56862", "reviews are read scoped to the restaurant AND the dish", /rpc\("lfh_dish_reviews", \{ p_slug: slug, p_restaurant_id: restaurantId/.test(M) && /WHERE r\.item_slug = p_slug AND r\.restaurant_id = p_restaurant_id/.test(MIG418));
+P("P56863", "…newest first, and capped at twenty", /ORDER BY r\.created_at DESC\s+LIMIT 20;/.test(MIG418));
 P("P56864", "…and a failure shows no reviews rather than breaking the dish page", /if \(error\) return \[\];/.test(M));
 // s8 self-correction: the sentence wraps across two comment lines. Asserted on the CODE instead —
 // getMenuItem fetches three things and none of them is the reviews table.

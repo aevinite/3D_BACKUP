@@ -317,12 +317,15 @@ P("P57426", "the backdrop closes everything when tapped", /className="overlay ac
 P("P57427", "a guest can read ONE order's status, and only through a definer function", /export async function getOrderStatus/.test(M));
 P("P57428", "…and it hands back camelCase, so no caller learns the column names", /return \{ status: row\.status, tableNumber: row\.table_number, createdAt: row\.created_at \}/.test(M));
 P("P57429", "…and an error and an unknown order are the same answer: null", /if \(error \|\| !Array\.isArray\(data\) \|\| data\.length === 0\) return null;/.test(M));
-P("P57430", "one dish's reviews are read newest-first and capped", /export async function getItemReviews/.test(M) && /\.limit\(20\)/.test(M));
+// RE-STATED 2026-10-10: sweep #10 T30 round 4 (item 16, mig 418) moved the review read into
+// lfh_dish_reviews, so no reviewer's device id leaves the database; the scope, order and cap live there.
+const MIG418 = read("supabase/migrations/418_a_dish_page_learns_which_review_is_mine_not_every_device_id.sql");
+P("P57430", "one dish's reviews are read newest-first and capped", /export async function getItemReviews/.test(M) && /ORDER BY r\.created_at DESC\s+LIMIT 20;/.test(MIG418));
 P("P57431", "…scoped to the dish AND the restaurant", /\.eq\("item_slug", slug\)/.test(M) && /\.eq\("restaurant_id", restaurantId\)/.test(M));
-P("P57432", "…with a column list, never select *", /\.select\("name, stars, comment, device_id, created_at"\)/.test(M));
+P("P57432", "…with a column list, never select *", /RETURNS TABLE \(name text, stars integer, comment text, created_at timestamptz, mine boolean\)/.test(MIG418) && !/SELECT \*/.test(MIG418));
 P("P57433", "…a nameless review reads as 'Guest', never as blank", /name: r\.name \|\| "Guest"/.test(M));
 P("P57434", "…an empty comment reads as empty, not as 'null'", /text: r\.comment \|\| ""/.test(M));
-P("P57435", "…and the device id rides along, so this phone can replace its own", /deviceId: r\.device_id/.test(M));
+P("P57435", "…and the device id rides along, so this phone can replace its own", /mine: r\.mine === true/.test(M) && /r\.device_id = p_device\) AS mine/.test(MIG418));  /* the phone learns `mine`, never a device id */
 P("P57436", "…and a failure shows no reviews rather than breaking the dish page", /if \(error\) return \[\];/.test(M));
 P("P57437", "submitting a review goes through a validating definer function", /export async function submitReview/.test(M) && /\.rpc\("lfh_submit_review"/.test(M));
 P("P57438", "…which upserts, so re-rating never duplicates", /validates stars\/device\/dish and upserts/.test(M));
