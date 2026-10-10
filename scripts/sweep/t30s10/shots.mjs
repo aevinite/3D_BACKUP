@@ -17,7 +17,7 @@ const browser = await chromium.launch();
 const results = [];
 async function shoot(role, path, vpName, skin, name, mustSee) {
   const ctx = await browser.newContext(VP[vpName]);
-  if (role === "admin") await ctx.addCookies([adminCookie(BASE)]); else await loginAs(ctx, role, BASE);
+  if (role === "admin") await ctx.addCookies([adminCookie(BASE)]); else if (role !== "guest") await loginAs(ctx, role, BASE);
   if (skin) await ctx.addCookies([{ name: "aevidine_skin", value: skin, url: BASE }]);
   const page = await ctx.newPage();
   const errs = []; page.on("pageerror", (e) => errs.push(String(e.message).slice(0, 120)));
@@ -56,6 +56,13 @@ for (const vp of ["desktop", "a35"]) {
 }
 for (const vp of ["ipad", "a35"]) await shoot("tablet", "/tablet", vp, null, "r3-tablet-floor", null);
 await shoot("admin", "/aevinite/restaurants", "desktop", null, "r3-admin-restaurants", /restaurant/i);
+// round 4 (items 10, 16, 28): the dish page's reviews now come through lfh_dish_reviews; the panels and
+// the admin's GST example round by the one exact rule.
+for (const vp of ["desktop", "a35"]) for (const [rest, slug] of [["french-house", "truffle-and-wild-mushroom-pizza"], ["aevidine", "ranch-pickled-veggies"]])
+  await shoot("guest", `/r/${rest}/item/${slug}`, vp, null, `r4-dish-reviews-${rest}`, /review/i);
+await shoot("admin", "/aevinite/access?rid=00000000-0000-0000-0000-000000000001", "desktop", null, "r4-admin-access", /access|permission|billing/i);
+for (const vp of ["ipad", "a35"]) await shoot("tablet", "/tablet", vp, null, "r4-tablet-floor", null);
+for (const vp of ["desktop", "a35"]) await shoot("manager", "/manager", vp, null, "r4-manager-floor", null);
 // (A busy-table block — one real order placed, photographed and cancelled — was REMOVED: the owner
 // rejected that step on 2026-10-09. Item 17's column list is checked by verify-t24-money-rules --db.)
 await browser.close();

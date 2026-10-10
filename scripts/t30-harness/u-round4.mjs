@@ -144,3 +144,11 @@ t("item 10: verify-money-round-twins is in the static-guard list CI runs", /\["v
     for (let w = 0; w <= 20000 && !bad; w++) { const parts = BILLDOC.splitTax(w, cs); const sum = parts.reduce((a, x) => a + Number(x.amt), 0);
       if (Math.round(sum * 100) !== w * 100 || parts.some((x) => Number(x.amt) < 0) || (w > 0 && parts.some((x) => Number(x.amt) === 0))) bad = `₹${w}: ${parts.map((x) => x.amt).join(" + ")}`; }
     t(`the printed bill's tax split at ${comps.join(" + ")}%: every whole-rupee tax ₹0–₹20,000 splits into lines that add up exactly, none negative, none ₹0 when tax was charged`, !bad, bad || ""); } }
+
+// ── item 29 (a regression of item 16): the ratings view keeps working for the guest menu ──
+{ const M419 = src("supabase/migrations/419_the_ratings_view_reads_three_review_columns_and_never_the_device.sql");
+  const grant = (M419.match(/GRANT SELECT \(([^)]*)\) ON public\.reviews TO anon, authenticated;/) || [, ""])[1].split(",").map((x) => x.trim()).sort().join(",");
+  t("item 29: migration 419 gives the guest keys back exactly item_slug, stars and restaurant_id — the three columns item_ratings reads", grant === "item_slug,restaurant_id,stars", grant);
+  t("item 29: …never the device id, the name or the comment, and never the whole table", !/GRANT SELECT ON public\.reviews\b/.test(M419) && !/device_id|\bname\b|comment/.test((M419.match(/GRANT SELECT \([^)]*\)/) || [""])[0]));
+  t("item 29: …with the one row policy that column grant needs, created only if missing, and saying what it is for", /CREATE POLICY guest_reads_ratings_columns_only ON public\.reviews FOR SELECT TO anon, authenticated USING \(true\);/.test(M419) && /IF NOT EXISTS \(SELECT 1 FROM pg_policies/.test(M419) && /COMMENT ON POLICY guest_reads_ratings_columns_only/.test(M419));
+  t("item 29: verify:grants names the reviews read policy and what it may see", /reviews: "ONLY item_slug, stars and restaurant_id are granted \(mig 419\)/.test(src("scripts/verify-db-grants.mjs"))); }

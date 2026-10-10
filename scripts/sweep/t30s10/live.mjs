@@ -243,6 +243,9 @@ try {
     const okCall = v.seenR.length >= 1 && v.seenR.every((x) => x.rpc && x.status === 200 && !/device_id|"device/i.test(x.body));
     R4("lib/menu.ts", `${d.rest} · ${d.slug}: the dish page reads its reviews through lfh_dish_reviews (200), never the table, and no reply carries a device id`, okCall, `${v.seenR.length} call(s)`);
     R4("lib/menu.ts", `${d.rest} · ${d.slug}: …and the newest review is on the page`, !d.newest || v.text.includes(String(d.newest).slice(0, 30)), String(d.newest || "").slice(0, 40));
+    // (item 29) the count beside the stars is the REAL count — mig 418 had emptied the ratings view for guests
+    const real = Number((await sql(`select count(*) n from reviews where item_slug = '${d.slug}' and restaurant_id = (select id from restaurants where slug = '${d.rest}')`))[0].n);
+    R4("lib/menu.ts", `${d.rest} · ${d.slug}: …and the count beside the stars is the real one (${real}), not just the 20 the page fetched`, new RegExp(`\\(${real} reviews?\\)`).test(v.text), (v.text.match(/\(\d+ reviews?\)/) || ["no count shown"])[0]);
   }
   for (const d of DISHES.filter((x) => x.rest === "french-house").slice(0, 3)) {
     const v = await visit(`/item/${d.slug}`);

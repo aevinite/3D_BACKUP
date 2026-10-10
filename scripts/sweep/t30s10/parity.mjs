@@ -399,11 +399,32 @@ for (const d of RV) {
 }
 { const g = await sql(`select has_table_privilege('anon','public.reviews','select') a, has_table_privilege('authenticated','public.reviews','select') u, has_table_privilege('service_role','public.reviews','select') svc,
     has_function_privilege('anon','public.lfh_dish_reviews(text,uuid,text)','execute') fa, has_function_privilege('public','public.lfh_dish_reviews(text,uuid,text)','execute') fp,
-    (select count(*) from pg_policies where schemaname = 'public' and tablename = 'reviews') pol,
+    (select string_agg(policyname, ',') from pg_policies where schemaname = 'public' and tablename = 'reviews') pol,
     (select proconfig::text from pg_proc where proname = 'lfh_dish_reviews') cfg`);
   await check("lib/menu.ts", "the guest and signed-in keys can NOT read the reviews table directly; the server key still can (the owner and manager screens)", () => (g[0].a === false && g[0].u === false && g[0].svc === true) || JSON.stringify(g[0]), "r4|reviews-table-closed");
-  await check("lib/menu.ts", "…the guest key may run lfh_dish_reviews, it is not left open to PUBLIC, it has a fixed search_path, and the old read policy is gone", () => (g[0].fa === true && g[0].fp === false && /search_path=public/.test(g[0].cfg || "") && Number(g[0].pol) === 0) || JSON.stringify(g[0]), "r4|reviews-function-grants"); }
+  // (re-stated with item 29: mig 419 adds back ONE read policy, for the three ratings columns only)
+  await check("lib/menu.ts", "…the guest key may run lfh_dish_reviews, it is not left open to PUBLIC, it has a fixed search_path, and the only read policy left is the ratings-columns one (the old whole-table one is gone)", () => (g[0].fa === true && g[0].fp === false && /search_path=public/.test(g[0].cfg || "") && g[0].pol === "guest_reads_ratings_columns_only") || JSON.stringify(g[0]), "r4|reviews-function-grants"); }
 await check("lib/menu.ts", `all ${RV.length} reviewed dishes were checked (each slug exists at two restaurants, so each answer proves it is scoped to ITS restaurant)`, () => RV.length >= 100 || `${RV.length}`, "r4|reviews-count");
+
+// ── M2 · item 29 (a regression of item 16, caught by a screenshot): the guest menu's ratings ──
+// The item_ratings view runs with the ASKING key's rights, so it is asked here AS the guest key would
+// ask it — inside a transaction that only reads (SET LOCAL ROLE lasts until the COMMIT).
+const asGuest = async (select) => {
+  if (!/^\s*select\b/i.test(select)) throw new Error("asGuest: one SELECT only");
+  const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, { method: "POST", headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ query: `BEGIN; SET LOCAL ROLE anon; ${select}; COMMIT;` }) });
+  const t = await r.text(); if (!r.ok) throw new Error(`as guest: ${t.slice(0, 160)}`); return JSON.parse(t);
+};
+{ const guestRatings = await asGuest(`SELECT restaurant_id::text rid, item_slug, review_count, avg_rating::text avg FROM public.item_ratings WHERE restaurant_id IN (${[...new Set(RV.map((d) => lit(d.rid)))].join(", ")})`).catch((e) => ({ error: e.message }));
+  const truth = await sql(`select restaurant_id::text rid, item_slug, count(*)::int n, round(avg(stars), 1)::text avg from reviews where restaurant_id in (select id from restaurants where slug in ('french-house', 'aevidine')) group by 1, 2`);
+  const G = Array.isArray(guestRatings) ? new Map(guestRatings.map((x) => [`${x.rid}|${x.item_slug}`, x])) : new Map();
+  await check("lib/menu.ts", "the guest menu's ratings view ANSWERS for the guest key (it runs with the asker's rights — mig 418 had silently emptied it)", () => (Array.isArray(guestRatings) && guestRatings.length > 0) || JSON.stringify(guestRatings).slice(0, 160), "r4|ratings-answer-guest");
+  for (const d of RV) {
+    const tr = truth.find((x) => x.rid === d.rid && x.item_slug === d.slug); const g = G.get(`${d.rid}|${d.slug}`);
+    await check("lib/menu.ts", `${d.rest} · ${d.slug}: the dish card's rating, as the guest menu reads it, is the real count and average of its reviews`, () => (!!g && !!tr && Number(g.review_count) === tr.n && g.avg === tr.avg) || `guest ${g ? `${g.review_count} @ ${g.avg}` : "nothing"} vs real ${tr ? `${tr.n} @ ${tr.avg}` : "?"}`, `r4|rating|${d.rest}|${d.slug}`);
+  }
+  const col = await sql(`select ${["item_slug", "stars", "restaurant_id", "device_id", "name", "comment", "created_at", "id"].map((c) => `has_column_privilege('anon','public.reviews','${c}','select') "${c}"`).join(", ")}`);
+  const c = col[0];
+  await check("lib/menu.ts", "the guest key may read exactly the three review columns the ratings need (dish, stars, restaurant) — never the device id, the name, the comment, the date or the row id", () => (c.item_slug && c.stars && c.restaurant_id && !c.device_id && !c.name && !c.comment && !c.created_at && !c.id) || JSON.stringify(c), "r4|reviews-columns"); }
 
 // ── N · the data repairs of items 12–15 hold ──
 const N = (await sql(`select

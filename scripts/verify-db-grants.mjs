@@ -403,7 +403,7 @@ async function checkDb(label, env) {
     menu_items: "the guest menu itself",
     restaurants: "tenant resolution from a slug; narrowed to 11 guest-facing COLUMNS — F9 narrowing was REVERTED by mig 274; see mig 281 for why",
     settings: "the guest's live settings subscription (mig 013); narrowed to 20 guest-facing COLUMNS — F9 narrowing was REVERTED by mig 274; see mig 281 for why",
-    // (reviews LEFT in mig 418: a dish page reads them through lfh_dish_reviews, which never returns a device id)
+    reviews: "ONLY item_slug, stars and restaurant_id are granted (mig 419) — what the item_ratings view counts for the guest menu; the device id, name and comment never (they reach a page through lfh_dish_reviews, mig 418)",
     realtime_events: "breadcrumbs; each panel/guest filters to its own restaurant via topic_rid",
   };
   // 6b. THE GUEST READ IS DELIBERATELY *NOT* CHECKED BY COLUMN HERE — read this before adding it.
