@@ -5572,17 +5572,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, attempts: r.attempts });
     }
 
-    // ── SETTING THE PRINTERS UP, FROM THE COMPUTER THAT HAS THEM (mig 367) ──────────────────────
-    //
-    // Every SETUP verb that used to live below is deleted (owner, 2026-09-14); only the test print
-    // remains, and the refusal above catches anything else that arrives at this path.
-    // The screen hides the buttons too, but that is decoration: this is the gate.
-    //
-    // AND EVERY VERB IS SCOPED TO THIS BROWSER'S OWN COMPUTER. A person with the permission can set
-    // up the machine they are sitting at and route paper to it; they cannot rename, re-code or
-    // remove another restaurant's machine, or another machine in their own restaurant. Anything
-    // wider than "this computer" stays with the admin, which is what the owner asked for — the
-    // device does the setting up, Aevidine keeps the whole board.
     // ── EMPTY THE QUEUE THAT HAS PILED UP (owner, 2026-09-13) ───────────────────────────────────
     //
     // Deliberately ABOVE the print_setup gate: this is its own permission (accessTree → print_clear,
@@ -5618,41 +5607,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     if (a === "printing") {
-      // ── EVERY SETUP VERB IS CLOSED HERE (owner, 2026-09-14: "that setup will be done by me only") ──
-      // The panel's Printing section no longer draws any of these controls — and a screen hiding a
-      // button has never been the gate in this product, so the door is shut on the server. The one
-      // verb that is NOT setup keeps working: `queue/clear` is `print_clear`, a different amount of
-      // trust that he asked for by name on 2026-09-13, and it is handled ABOVE this line.
-      //
-      // The `test` verb is allowed through: a test print changes nothing — no route, no switch, no
-      // row — and seeing whether the printer is alive is the whole point of the status screen.
-      // ── ONLY THE TEST PRINT LIVES HERE NOW (owner, 2026-09-14) ─────────────────────────────
-      // `setup-code`, `this-computer`, `unlink` and `route` were DELETED from this block, not left
-      // behind a refusal: a verb that still mints a printing credential, or still rewrites which
-      // printer gets which paper, is a door — and a door nobody can currently open is still a door.
-      // All four live on /aevinite/printing. His ruling: **"That setup will be done by me only."**
-      //
-      // The refusal stays anyway, for anything that arrives at this path that is not the test — a
-      // stale tab, a replayed outbox write, a future verb somebody adds here by habit.
+      // ── ONLY THE TEST PRINT LIVES HERE (owner, 2026-09-14: "that setup will be done by me only") ──
+      // `setup-code`, `this-computer`, `unlink`, `route` and `mode` were deleted; all printer setup is on
+      // /aevinite/printing. `queue/clear` (print_clear) is handled above. Anything else that arrives at
+      // this path — a stale tab, a replayed outbox write — is refused below.
       const b0 = String(path[1] || "");
       if (b0 !== "test") return permDenied("set the printers up — Aevidine does that");
       const dv = deviceIdFrom(req);
-
-
       if (!dv) return err("This browser has no device id yet — reload the page and try again.", 400);
-
-
-
-// ── THE "mode" VERB IS GONE HERE TOO (owner, 2026-08-31) ─────────────────────────────────
-      // Same reason as the admin console: there is no mechanism left to choose. A manager who wants
-      // the slips on their own screen names themselves on the kitchen-slip line below ("a screen"),
-      // which is the same act with one fewer step and no stored copy to contradict it.
-
-            // ── who prints one kind of paper ──────────────────────────────────────────────────────────
-      // One line at a time, and only three answers: this computer, a screen, or nobody. A screen
-      // route from here always means THIS panel and THIS person — narrowing it to somebody else's
-      // screen is an admin act, and letting a manager do it from their own settings would be a way
-      // to move another person's paper without telling them.
 
       // ── A REAL SAMPLE OF A REAL DOCUMENT, ON THE ROUTE THAT PRINTS IT (owner, 2026-09-14) ─────
       //
