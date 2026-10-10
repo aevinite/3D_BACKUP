@@ -2634,7 +2634,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, platform_channels`).eq("restaurant_id", rid).maybeSingle(),
         // Upper bound too: on "yesterday" today's orders are somebody else's day, and leaving
         // them out is fewer rows read as well as the right answer (egress rule).
-        sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).lt("created_at", until.toISOString()).limit(5000),
+        // `demo` = payload.demo, the "add a demo platform order" tool's mark — read so the channel split
+        // below can leave those out, exactly as the owner's Delivery apps card does (mig 420).
+        sb.from("aggregator_orders").select("source,total,status,created_at,demo:payload->>demo").eq("restaurant_id", rid).gte("created_at", since.toISOString()).lt("created_at", until.toISOString()).limit(5000),
       ]);
       // Page through EVERY order in the window. A single .limit(50000) is silently capped by
       // PostgREST's db-max-rows (~1000), so on a busy restaurant the dashboard read only the newest
@@ -2862,12 +2864,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       }
       // Channel split for the WHOLE range: dine-in from the same orders rows, the
       // three platform channels from the one scoped aggregator query above.
-      const platRows = (must(platRangeQ) || []) as { source: string; total: number; status: string }[];
+      const platRows = (must(platRangeQ) || []) as { source: string; total: number; status: string; demo?: string | null }[];
       const channels: Record<string, { rev: number; count: number }> = {
         dinein: { rev: 0, count: 0 }, zomato: { rev: 0, count: 0 }, swiggy: { rev: 0, count: 0 }, takeaway: { rev: 0, count: 0 }, parcel: { rev: 0, count: 0 },
       };
       for (const pr of platRows) {
         if (pr.status === "cancelled" || pr.status === "rejected") continue;
+        // A DEMO ORDER IS NOT A SALE (owner, 2026-10-11). The demo tool's own guard says "real floor
+        // staff must never be able to add fake orders to live revenue" — yet this split counted them,
+        // so a restaurant shown the board read its demo order as Zomato money. The owner's Delivery
+        // apps card (lfh_owner_channel_sales, mig 420) leaves them out too, so the two panels agree.
+        if (pr.demo === "true") continue;
         const ch = channels[pr.source] || (channels[pr.source] = { rev: 0, count: 0 });
         ch.rev += Number(pr.total) || 0; ch.count++;
       }
