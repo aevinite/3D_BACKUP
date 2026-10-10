@@ -1420,7 +1420,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         picked.push(line);
         total += price * qty;
       }
-      if (!picked.length) return err("no valid dishes", 400);
+      // (An `if (!picked.length) return err("no valid dishes")` stood here and could never fire: an empty
+      //  list is refused above, and every line either refuses or is added. Removed in round 2, item 25.)
       total = Math.round(total * 100) / 100;
       // THE RECORD MUST EQUAL THE PAPER (fixed 2026-08-02). A parcel was stored at the item
       // subtotal with no tax, while the bill handed to the customer runs through the same

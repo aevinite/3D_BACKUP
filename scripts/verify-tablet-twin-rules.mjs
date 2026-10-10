@@ -401,6 +401,11 @@ console.log("\n12. no dead gate, no optional scope, no read whose answer nothing
   else bad("parcelEffectiveFromRow is back — a gate that can never fire");
   if (/const stampEdited = async \(orderId: string \| null \| undefined, rid: string\)/.test(t) && !/if \(rid\) q = q\.eq/.test(t)) ok("stampEdited REQUIRES the restaurant (no unscoped fallback)");
   else bad("stampEdited's restaurant is optional again");
+  if (!/if \(!picked\.length\) return err\(/.test(t)) ok("parcel carries no unreachable 'no valid dishes' refusal (item 25)");
+  else bad("parcel's unreachable 'no valid dishes' refusal is back");
+  const cwSrc = readFileSync(new URL("../lib/cancelWatch.ts", import.meta.url), "utf8");
+  if (!/count === 1 \?/.test(cwSrc)) ok("the cancellation alert has no '1 bill' arm it can never reach (it sends at 5 or more)");
+  else bad("the cancellation alert's unreachable singular arm is back");
   const G = await world({ ents: { customers: true }, fix: { table_merges: [] } });
   const r = await call("POST", "tables/3/loyalty", { body: { phone: "9876543210" } });
   if (r.status === 200 && !G.SCOPE_LOG.some((q) => q.table === "table_merges")) ok("the points balance asks no table question (the merged-parent read whose answer nothing used is gone)");
