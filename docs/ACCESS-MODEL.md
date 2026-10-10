@@ -19,6 +19,10 @@ Three consequences, applied everywhere:
 2. **No greyed-out ghosts.** If a role can never reach a thing, that thing is **absent** from
    that role's screen — not shown disabled with a tooltip. (Killed: the manager's
    Billing / Kitchen / Dining-sessions rail stubs and the "Defaults for everyone" card.)
+   **Widened by the owner, 2026-10-11 (R67):** the same holds for ONE PERSON — a waiter or a
+   manager sees only what they have been given. No locked control, no "you don't have that power",
+   no "turned off for you", no "ask the admin / owner only". Greyed means a STATE ("nothing to split
+   yet"), never a missing power. The admin's X-ray view is Aevidine looking and is not covered.
 3. **The admin owns every switch.** Owners and managers configure nothing about permissions.
 
 ## Where the switches live

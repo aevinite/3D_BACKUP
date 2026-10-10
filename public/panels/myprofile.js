@@ -15,6 +15,9 @@
        still to recover. The owner can switch this off per person (can_see_own_pay).
      • their job as read-only facts (joined, designation, shift, weekly off).
    Nothing is compulsory: the header shows "5 of 8 filled" and every field can be left blank.
+   REJECTED (owner, 2026-10-11) — docs/REJECTED-IDEAS.md → R68: this page does NOT hold the
+   waiter's section ("who serves which table"); that stays on Manager settings → Sections. And
+   REJECTED (owner, 2026-10-11) — R67: it never lists a permission, given or not given.
    Registered with LFH_BACK so the phone's back button closes THIS layer, not the site.
    ══════════════════════════════════════════════════════════════════════════════ */
 (function () {

@@ -2032,18 +2032,39 @@ function tableSeatingCardHtml(s) {
   // says WHO to ask rather than pretending it is a permission somebody could be granted.
   // `isAdmin`, not `higherView`: an OWNER is on the wrong side of this line too.
   const canEdit = !!(typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO.isAdmin);
-  const ro = canEdit ? "" : " readonly disabled";
-  const roStyle = canEdit ? "" : "opacity:.6;cursor:not-allowed;";
+  // REJECTED (owner, 2026-10-11) — docs/REJECTED-IDEAS.md → R67: a manager is never shown a power
+  // they don't have. This card used to draw every box greyed out under "🔒 Set by the admin … Ask the
+  // admin if a table needs renaming" for everyone but the admin — telling a manager what was being
+  // kept from them. Now everyone else sees the floor's names and seats as plain facts, with no box,
+  // no lock and no "ask". The admin's typeable card below is unchanged.
+  if (!canEdit) {
+    let facts = "";
+    for (let i = 1; i <= n; i++) {
+      const nm = String(names[String(i)] ?? "").trim();
+      facts += `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--panel-2)">
+        <span style="font-weight:700;font-size:13px;min-width:26px">T${i}</span>
+        <span style="flex:1;min-width:0;overflow-wrap:anywhere;font-size:13px">${nm ? esc(nm) : ""}</span>
+        <span class="muted" style="font-size:12.5px;white-space:nowrap"><i class="fas fa-chair" aria-hidden="true"></i> ${esc(seats[String(i)] ?? floorSeatsDefault(s))}</span>
+      </div>`;
+    }
+    return `<div class="card"><h3>Table setting</h3>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+        Each table's name and how many people sit there — shown on every tile. Bills &amp; QR codes
+        keep the number.
+      </p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;max-height:70vh;overflow-y:auto;padding-right:4px;scrollbar-width:thin">${facts}</div>
+    </div>`;
+  }
   let cells = "";
   for (let i = 1; i <= n; i++) {
     // Name (mig 131, display-only) + seat count (mig 111) per table — one cell each.
     cells += `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;background:var(--panel-2)">
       <span style="font-weight:700;font-size:13px;min-width:26px">T${i}</span>
-      <input type="text" maxlength="24" data-path="table_names.${i}" value="${esc(names[String(i)] ?? "")}" placeholder="Name"${ro}
+      <input type="text" maxlength="24" data-path="table_names.${i}" value="${esc(names[String(i)] ?? "")}" placeholder="Name"
         title='A display name for this table (e.g. "Banquet") — bills and QR codes keep the number'
-        style="flex:1;min-width:0;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);${roStyle}"/>
-      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? floorSeatsDefault(s))}" title="Seats"${ro}
-        style="width:56px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);${roStyle}"/>
+        style="flex:1;min-width:0;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
+      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? floorSeatsDefault(s))}" title="Seats"
+        style="width:56px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
     </div>`;
   }
   return `<div class="card"><h3>Table setting</h3>
@@ -2053,11 +2074,6 @@ function tableSeatingCardHtml(s) {
       people can sit there — shown next to the chair icon on every tile. A table you leave
       alone uses the restaurant's default number of seats.
     </p>
-    ${canEdit ? "" : `<p style="margin:-8px 0 16px;padding:9px 11px;border-radius:9px;background:rgba(245,158,11,.12);
-      border:1px solid rgba(245,158,11,.4);color:var(--text);font-size:12.5px;line-height:1.5">
-      🔒 <b>Set by the admin.</b> Table names and seats are part of how your floor was set up —
-      they are printed on tickets and quoted back on every screen, so they are not changed during
-      service. Ask the admin if a table needs renaming.</p>`}
     <!-- NO fixed max-height (T11 desktop sweep 2026-08-05). It was 340px with overflow-y:auto, so
          with 30 tables the card showed T1-T24, SLICED the T25-T28 row in half at its bottom edge and
          put T29/T30 outside the box — with no scrollbar drawn, so nothing said there was more below
@@ -7618,11 +7634,15 @@ function renderEditor() {
   if (visibleSecs.length && !visibleSecs.some((x) => x.id === state.settingsSection)) state.settingsSection = visibleSecs[0].id;
   const secTitle = (visibleSecs.find((x) => x.id === state.settingsSection) || visibleSecs[0] || { title: "Settings" }).title;
   const title = isGeneral ? secTitle : (state.isNew ? `New ${TAB_LABEL[state.tab]}` : recLabel(state.sel));
+  // REJECTED (owner, 2026-10-11) — docs/REJECTED-IDEAS.md → R67: no control a manager cannot use. On
+  // Settings → Tables a real manager has nothing to save (the table count and QR cards are hidden from
+  // them, names & seats are plain facts), so the Save button there would only ever do nothing.
+  const noSave = isGeneral && state.settingsSection === "tables" && !(typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO.higherView);
   ed.innerHTML = `
     <div class="ed-head">
       <h2>${esc(title)} ${(!isGeneral && !state.isNew) ? `<span class="sub">· ${esc(recKey(state.sel) || "")}</span>` : ""}</h2>
       ${(isGeneral || state.isNew) ? "" : '<button class="btn danger" id="delBtn">Delete</button>'}
-      <button class="btn primary" id="saveBtn">Save</button>
+      ${noSave ? "" : '<button class="btn primary" id="saveBtn">Save</button>'}
     </div>
     ${body}`;
   bindEditor();
@@ -7690,7 +7710,8 @@ function autoKeyFrom(path, ed) {
 
 function bindEditor() {
   const ed = $("#editor");
-  $("#saveBtn").onclick = save;
+  // Absent on a page with nothing to save (Settings → Tables for a manager — R67), so guarded.
+  { const sb2 = $("#saveBtn"); if (sb2) sb2.onclick = save; }
   const del = $("#delBtn");
   if (del) del.onclick = removeRecord;
 
@@ -8450,7 +8471,7 @@ const OP_ACTION_LABELS = {
   expense_add: "Recorded an expense", expense_void: "Voided an expense",
   // ── people ────────────────────────────────────────────────────────────────
   staff_create: "Added a staff member", staff_delete: "Deleted a staff member", staff_disable: "Disabled a staff member",
-  staff_reset_password: "Reset a staff password", staff_set_role: "Changed a staff role",
+  staff_reset_password: "Reset a staff password", staff_set_pin: "Reset a manager PIN", staff_set_role: "Changed a staff role",
   staff_set_permissions: "Changed permissions", staff_profile_edit: "Edited a staff profile",
   staff_job_edit: "Edited job details", staff_payment: "Recorded a staff payment",
   staff_payment_void: "Voided a staff payment", staff_own_pay_visibility: "Changed pay visibility",
@@ -8506,6 +8527,17 @@ function retentionControl(which) {
   // No answer yet (an old cached app.js against a new server, or whoami still in flight) →
   // show the READ-ONLY form. Never offer a control we cannot prove is allowed.
   if (!R || R.canEdit !== true) {
+    // ⚠️ REVERSED FOR A MANAGER (owner, 2026-10-11): the 2026-08-21 rule above put "🔒 set by
+    // Aevidine" / "owner only" on a MANAGER's header. REJECTED (owner, 2026-10-11) —
+    // docs/REJECTED-IDEAS.md → R67: a manager is never told what they may not change ("we will only
+    // show them what they got and other will be non existing for them"). A manager sees how long logs
+    // are kept, as a fact, and nothing about who may change it. The OWNER (higherView) still sees
+    // Aevidine's lock — the rule is about waiters and managers.
+    if (!(typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO.higherView)) {
+      return `<span class="ret-ctl ret-ctl-ro" title="Logs older than this are deleted automatically by a once-a-day cleanup. Your bills are never touched.">
+        <i class="fas fa-clock-rotate-left"></i> Logs kept for <b>${esc(label)}</b>
+      </span>`;
+    }
     const locked = !!(R && R.locked);
     const why = locked
       ? "Aevidine set this for every restaurant. You can see it, but only Aevidine can change it."
@@ -14170,9 +14202,12 @@ function openKotColumns(t, sess) {
     // rule for every feature"). This row used to render GREY with the chip "not enabled" whenever
     // the module was off for the restaurant, which is an advert for something nobody can switch on
     // from here. It now follows the same shape "Split the bill" already used: the row EXISTS only
-    // when the module does. The greyed state still means what it always meant — the module is on
-    // and this PERSON has not been given the power — which is the X-ray convention and stays.
-    ...(tableTagsOn() ? [{ id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "you don't have that power" }] : []),
+    // when the module does — and, since 2026-10-11 (R67, below), only for someone who may use it.
+    // REJECTED (owner, 2026-10-11) — docs/REJECTED-IDEAS.md → R67: the row EXISTS only for someone
+    // who may use it. It used to stay on the list greyed with "you don't have that power" for a manager
+    // who hadn't been given it. tagActionAllowed() is already false when the module is off and always
+    // true for the admin's X-ray view, so this one test covers both.
+    ...(tagActionAllowed("table_tags") ? [{ id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: true, why: "" }] : []),
     // A MERGED PARTY DOES NOT SHIFT (mig 264): moving it would renumber the child's orders —
     // the numbers an unmerge needs to be exact — and strand the merge record. The server
     // refuses too ('party_merged'); this row says why instead of offering a dead end.
@@ -14508,9 +14543,12 @@ function openKotMenu(t, sess) {
     // rule for every feature"). This row used to render GREY with the chip "not enabled" whenever
     // the module was off for the restaurant, which is an advert for something nobody can switch on
     // from here. It now follows the same shape "Split the bill" already used: the row EXISTS only
-    // when the module does. The greyed state still means what it always meant — the module is on
-    // and this PERSON has not been given the power — which is the X-ray convention and stays.
-    ...(tableTagsOn() ? [{ id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "you don't have that power" }] : []),
+    // when the module does — and, since 2026-10-11 (R67, below), only for someone who may use it.
+    // REJECTED (owner, 2026-10-11) — docs/REJECTED-IDEAS.md → R67: the row EXISTS only for someone
+    // who may use it. It used to stay on the list greyed with "you don't have that power" for a manager
+    // who hadn't been given it. tagActionAllowed() is already false when the module is off and always
+    // true for the admin's X-ray view, so this one test covers both.
+    ...(tagActionAllowed("table_tags") ? [{ id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: true, why: "" }] : []),
     // A merged party doesn't shift (mig 264) — same rule as the desktop columns above.
     { id: "shift", icon: "⇄", label: "Change table", sub: "Party, orders & bill move to a free table", on: liveHere && !mergeGroupLabel(t), why: mergeGroupLabel(t) ? "unmerge first" : "table is free" },
     { id: "merge", icon: "🪢", label: "Merge tables", sub: bill.total > 0 ? `One table, one bill · this side ${inr(bill.total)}` : "Join another party — one table, one bill",
@@ -18311,7 +18349,8 @@ window.addEventListener("beforeunload", (e) => { if (editorDirty()) { e.preventD
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
-    if (state.sel) save();
+    // …only where there is a Save button: a page with nothing to save has none (R67).
+    if (state.sel && document.getElementById("saveBtn")) save();
     return;
   }
   // Power-user shortcuts — desktop only, and ONLY when you're not typing in a field or a
@@ -19344,16 +19383,14 @@ function xraySettingUrl(flag) {
   body.menu-readonly #saveBtn,
   body.menu-readonly #delBtn,
   body.menu-readonly .bulkbar { display: none !important; }
-  body.menu-readonly #editor [data-action] { pointer-events: none !important; opacity: .55; }
+  /* REJECTED (owner, 2026-10-11) — docs/REJECTED-IDEAS.md → R67: a manager is never shown a power
+     they don't have. View-only used to put a "👁 View only — … for you" banner over the
+     editor and leave its buttons greyed out at half strength. Now the buttons are not
+     there at all, the boxes read as plain values, and the tab simply says "👁 View menu". */
+  body.menu-readonly #editor [data-action] { display: none !important; }
   body.menu-readonly #editor input:disabled,
   body.menu-readonly #editor select:disabled,
-  body.menu-readonly #editor textarea:disabled { opacity: .9; cursor: not-allowed; }
-  body.menu-readonly #editor::before {
-    content: "👁  View only — menu editing is turned off for you";
-    display: block; margin: 0 0 12px; padding: 8px 12px; border-radius: 10px;
-    background: color-mix(in srgb, #d97706 12%, var(--panel, #fff));
-    border: 1px solid color-mix(in srgb, #d97706 40%, transparent);
-    color: #b45309; font-weight: 700; font-size: 12.5px; }
+  body.menu-readonly #editor textarea:disabled { opacity: 1; cursor: default; }
   /* Layout-preview embed (admin → Tables per row): the admin is judging tile SIZE, so
      show the live floor and nothing else — no brand bar, no tabs, no admin ribbon, and
      no side rail stealing the width the tiles are being measured in. Read-only by

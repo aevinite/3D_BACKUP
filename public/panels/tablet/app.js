@@ -2875,8 +2875,11 @@ function renderKotMenu(t, s) {
     // Splitting is a per-restaurant switch and it starts OFF (owner, 2026-08-01, mig 248 —
     // Settings → Bill in the manager panel). It also sits LAST, matching the manager's list: the
     // waiter and the manager must not be offered a different set of operations for one table.
-    (splitBillOn()
-      ? row("split", "🍴", "Split the bill", "Equal, a custom amount, by dish or by kitchen ticket — each part pays its own way", tshow("tablet_mark_paid") && splittable.length > 0)
+    // REJECTED (owner, 2026-10-11) — docs/REJECTED-IDEAS.md → R67: a waiter who may not take payment
+    // doesn't get this row at all. It used to sit here GREYED for them — a power on show that they
+    // don't have. Greyed now means only "nothing on this table to split yet".
+    (splitBillOn() && tshow("tablet_mark_paid")
+      ? row("split", "🍴", "Split the bill", "Equal, a custom amount, by dish or by kitchen ticket — each part pays its own way", splittable.length > 0)
       : "") +
     // 🖨 LAST, matching the manager's own list — the waiter and the manager must not be offered a
     // different set of operations for one table (owner's item 15, 2026-09-03). Enabled only when

@@ -1536,6 +1536,61 @@ else ok("the read/write route derives every allow-list from the model");
   else ok(`both of lib/accessState.ts's ${reads.length} reads fail closed, so a database blip can never read as "this restaurant is at its defaults"`);
 }
 
+// ── check 72 — A WAITER OR MANAGER NEVER SEES A POWER THEY WEREN'T GIVEN (owner, 2026-10-11, R67) ──
+// "we will only show them wht they got and other will be non existing for them". Five places broke
+// docs/ACCESS-MODEL.md consequence 2 for ONE person: the Tables card's greyed boxes + "Ask the admin",
+// menu view-only's "turned off for you" banner, the KOT lists' greyed "Table type — you don't have that
+// power", the retention header's "owner only" for a manager, and the tablet's greyed "Split the bill".
+// The wording is refused anywhere in either panel's CODE (comments are where the history is kept).
+{
+  const code = (f) => read(f).split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const ed = code("public/panels/editor/app.js"), tb = code("public/panels/tablet/app.js");
+  const banned = [/turned off for you/i, /have that power/i, /Set by the admin/, /Ask the admin/i, /isn't part of your (?:staff )?access/i];
+  const hits = [];
+  for (const [name, src] of [["editor", ed], ["tablet", tb]]) for (const re of banned) if (re.test(src)) hits.push(`${name}: ${re}`);
+  // the two rows that used to stay on the list greyed must now be CONDITIONAL on the power
+  const tagRows = (ed.match(/\.\.\.\(tagActionAllowed\("table_tags"\) \? \[\{ id: "type"/g) || []).length;
+  const split = /splitBillOn\(\) && tshow\("tablet_mark_paid"\)\s*\n?\s*\? row\("split"/.test(tb);
+  const ret = /if \(!\(typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO\.higherView\)\) \{\s*\n\s*return `<span class="ret-ctl ret-ctl-ro"[^`]*`/.test(ed)
+    && !/ret-by/.test((ed.match(/if \(!\(typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO\.higherView\)\) \{[\s\S]*?\n    \}/) || [""])[0]);
+  const tables = /if \(!canEdit\) \{[\s\S]{0,1600}?return `<div class="card"><h3>Table setting<\/h3>/.test(ed)
+    && !/readonly disabled|cursor:not-allowed/.test((ed.match(/function tableSeatingCardHtml[\s\S]*?\n}/) || [""])[0]);
+  const noSave = /const noSave = isGeneral && state\.settingsSection === "tables" && !\(typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO\.higherView\);/.test(ed)
+    && /\$\{noSave \? "" : '<button class="btn primary" id="saveBtn">Save<\/button>'\}/.test(ed);
+  if (hits.length) fail(`a panel tells a waiter or manager about a power they don't have (R67): ${hits.join(" · ")}`);
+  else if (!noSave) fail(`Settings → Tables must draw no Save button for a real manager — there is nothing on it they can save (R67)`);
+  else if (tagRows !== 2) fail(`the KOT "Table type" row must exist only for someone who may use it, in BOTH lists (found ${tagRows} of 2) — R67`);
+  else if (!split) fail(`the tablet's "Split the bill" row must not exist for a waiter who may not take payment (R67)`);
+  else if (!ret) fail(`a manager's log-retention header must state the window and nothing about who may change it (R67)`);
+  else if (!tables) fail(`the Tables card must show a non-admin plain facts — no greyed boxes (R67)`);
+  else ok(`a waiter or manager sees only what they have been given — none of ${banned.length} "you can't" phrasings in either panel, and the 4 rows/cards that used to grey out are absent or plain (R67)`);
+}
+
+// ── check 73 — THE OWNER CAN RESET A MANAGER'S PIN, AND ONLY SET IT (owner, 2026-10-11, "do 1") ──
+// Only a MANAGER has a PIN (lib/managerPin.ts). Reset = a new 4–8 digits from Owner → Staff → a
+// manager. Never a clear from the owner side: with no manager PIN the tablet stops asking for one.
+{
+  const route = read("app/api/owner/staff/route.ts"), host = read("components/owner/ownerProfileHost.ts"), prof = read("components/admin/StaffProfile.tsx");
+  const at = route.indexOf('if (action === "set_pin") {');
+  const body = at > 0 ? route.slice(at, at + 900) : "";
+  const order = [
+    'if (u.role !== "manager") return bad("Only a manager has a PIN.")',
+    'if (body?.clear === true) return bad(',
+    'if (!/^\\d{4,8}$/.test(pin)) return bad("PIN must be 4–8 digits.")',
+    'pin_hash: await hashSecret(pin)',
+    '"staff_set_pin"',
+  ].map((x) => body.indexOf(x));
+  const hostOk = /can: \{ pin: true, pinClear: false,/.test(host);
+  const clearGated = /p\.hasPin && host\.can\.pinClear \? <button[\s\S]{0,90}?savePin\(true\)/.test(prof);
+  const below = route.indexOf("assignableFor(s.actor).includes(u.role)") > 0 && route.indexOf("assignableFor(s.actor).includes(u.role)") < at;
+  if (at < 0) fail("the owner route has no set_pin action — Owner → Staff → a manager → Reset manager PIN has nothing behind it");
+  else if (order.some((i) => i < 0) || order.some((v, i) => i && v < order[i - 1])) fail(`the owner's set_pin must refuse a non-manager, refuse a clear, check the digits, store a HASH, then log — in that order (got ${order.join(",")})`);
+  else if (!below) fail("set_pin must sit below the hierarchy check, so a manager can never reach another manager's PIN");
+  else if (!hostOk) fail("the owner cockpit must offer the PIN (pin: true) and never the clear (pinClear: false)");
+  else if (!clearGated) fail(`StaffProfile's "Clear it" must be drawn only when host.can.pinClear`);
+  else ok("the owner can reset a manager's PIN — manager only, hashed, logged, below the hierarchy check — and cannot remove one");
+}
+
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);
 console.log(fails.length
