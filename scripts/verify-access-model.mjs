@@ -1321,6 +1321,12 @@ else ok("the read/write route derives every allow-list from the model");
   else if (Number(m[1]) !== real)
     fail(`CLAUDE.md says ${m[1]} outstanding owner asks on the Access screen and docs/ACCESS-REDESIGN-SPEC.md really has ${real} — every session starts from that number, so it sends them hunting for work that is already done (or hides work that is not)`);
   else ok(`CLAUDE.md's count of outstanding owner asks is right (${real})`);
+  // …and the spec's OWN header says the same number (sweep #10 T18, item 17). It is the first line a
+  // reader sees; it went from 13 to 12 to 9 by hand and nothing checked it.
+  const h = spec.match(/\*\*(\d+)\*\* of the lines below are still `\u2610`/);
+  if (!h) fail("docs/ACCESS-REDESIGN-SPEC.md's header no longer states its open count — put it back, or change this check");
+  else if (Number(h[1]) !== real) fail(`docs/ACCESS-REDESIGN-SPEC.md's header says ${h[1]} open, its own command counts ${real}`);
+  else ok(`docs/ACCESS-REDESIGN-SPEC.md's header count is its own count (${real})`);
 }
 
 // ── 55 · A NEW RESTAURANT MUST BE BORN THE WAY THE SCREEN SAYS IT IS ───────
