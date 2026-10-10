@@ -17,10 +17,10 @@
 // per-side discount caps) live in restaurants.access_config (mig 180); their
 // enforcement is a later, reviewed migration.
 
-export type Kind = "switch" | "ladder";
-export type SubOpt = { id: string; name: string; adminOnly?: boolean; def?: boolean; what?: string };
+type Kind = "switch" | "ladder";
+type SubOpt = { id: string; name: string; adminOnly?: boolean; def?: boolean; what?: string };
 
-export type Perm = {
+type Perm = {
   id: string;
   group: string;
   kind: Kind;
@@ -60,19 +60,9 @@ export type Perm = {
                                // non-breaking flags — view_logs); every other power reads absent as OFF
 };
 
-export const GROUPS: { id: string; name: string; blurb: string; icon: string }[] = [
-  { id: "guest", name: "Guest experience", blurb: "What a diner sees on the menu. Admin switches these on for the restaurant.", icon: "cutlery" },
-  { id: "menu", name: "The menu", blurb: "Who may change dishes, prices and categories.", icon: "book" },
-  { id: "money", name: "Bills & money", blurb: "Every action that can move money.", icon: "receipt" },
-  { id: "floor", name: "Tables & floor", blurb: "Taking orders and moving parties around the floor.", icon: "grip" },
-  { id: "kitchen", name: "Kitchen & printing", blurb: "Who prints this restaurant's paper, and on which printer (the admin decides; the setup itself is on Printing).", icon: "fire" },
-  { id: "banquet", name: "Banquet & events", blurb: "Per-plate event billing. A special feature the admin switches on.", icon: "sparkles" },
-  // ONE NAME (owner, 2026-09-23: "inventory management, call it inventory management only") — see lib/accessTree.ts.
-  { id: "inventory", name: "Inventory management", blurb: "Stock, purchases, counting, waste and the expense book. A special feature the admin switches on.", icon: "box" },
-  { id: "reports", name: "Reports & insights", blurb: "Numbers, ratings and the activity log.", icon: "chart" },
-  { id: "staff", name: "Staff & settings", blurb: "Managing people and the restaurant's own settings.", icon: "users" },
-  { id: "panels", name: "Staff apps", blurb: "Which of the four staff apps this restaurant has. Off refuses the login.", icon: "grid" },
-];
+// `GROUPS` (the retired panel's ten group cards — names, blurbs, icons) LEFT on 2026-10-10 (sweep #10
+// T18, item 7). Nothing had rendered it since the 4-rung panel was retired on 2026-07-31; the `group`
+// field on each permission below is still a plain label for the readers of PERMISSIONS.
 
 const ON = true;
 
@@ -365,21 +355,14 @@ export const PERMISSIONS: Perm[] = [
   // ──────────────────────── OWNER PANEL SECTIONS (admin switch) ─────────────
 ];
 
-export const PERM_BY_ID: Record<string, Perm> = Object.fromEntries(PERMISSIONS.map((p) => [p.id, p]));
-// …and by the manager-power FLAG. Most permissions happen to use the same string for both, so
-// callers holding a flag used to look it up in PERM_BY_ID and get away with it — until a
-// permission whose id differs from its power arrived and rendered as "see_staff_pay" in the
-// owner's Powers list (caught in the 2026-07-30 sweep). Look powers up here.
-export const PERM_BY_POWER: Record<string, Perm> = Object.fromEntries(
-  PERMISSIONS.filter((p) => p.power).map((p) => [p.power as string, p]));
-export const GROUP_BY_ID = Object.fromEntries(GROUPS.map((g) => [g.id, g]));
-export const permsOf = (gid: string) => PERMISSIONS.filter((p) => p.group === gid);
-
-export const maxReach = (p: Perm) => (p.ownerOnly ? 1 : p.waiter ? 3 : 2);
-
-// Manager powers that DON'T exist in the legacy flag list yet — the read/write
-// route stores them, but their server enforcement is a later reviewed step.
-export const NEW_POWER_FLAGS = PERMISSIONS.filter((p) => p.isNew && p.power).map((p) => p.power!) as string[];
+// ── WHAT LEFT THIS FILE ON 2026-10-10 (sweep #10 T18, item 7) ───────────────────────────────────
+// PERM_BY_ID · PERM_BY_POWER · GROUP_BY_ID · permsOf · maxReach · NEW_POWER_FLAGS — and, further down,
+// the AccessState type with allowed() · tabletValue() · reachLevel() · subState(). They were the 4-rung
+// ladder panel's DISPLAY helpers. That panel was retired on 2026-07-31; sweep #9 (P105050) measured that
+// no file imported any of them, and they still answered questions about a `power_<flag>` rung nothing can
+// write any more. A helper that answers a retired question is a trap for the next reader, so they are
+// gone rather than kept "just in case". What survives is the enforcement wiring below, which six files
+// import. The 4-rung ladder itself is history: docs/ACCESS-LADDER.md.
 
 // ── DERIVED WIRING LISTS (2026-07-26) — the routes import THESE instead of keeping
 // hand-typed copies, so adding a feature above wires the whole ladder in one place.
@@ -407,59 +390,8 @@ export const MODULE_DEFS: ModuleDef[] = PERMISSIONS.reduce<ModuleDef[]>((acc, p)
   return acc;
 }, []);
 
-// ── the live server state the panel reads (mirrors the extended access route) ─
-export type AccessState = {
-  features: Record<string, boolean>;     // settings.features
-  panels: Record<string, boolean>;       // manager/kitchen/tablet/owner
-  owner: Record<string, boolean>;        // owner_entitlements (sections + power_<flag>)
-  manager: Record<string, boolean>;      // manager_permissions
-  tablet: Record<string, string>;        // settings.tablet_<x>  off|on|pin
-  modules: Record<string, { allowed: boolean; control: boolean; enabled: boolean }>;
-  adminSwitches: Record<string, boolean>; // auto_print_kot_allowed …
-  config: Record<string, any>;            // restaurants.access_config (granular extras)
-};
-
-const powerKey = (flag: string) => `power_${flag}`;
-
 // The canonical module name a permission's ladder columns live under
 // (e.g. "table_tags" from "table_tags_allowed"), or "" for a plain power.
 export function moduleKey(p: Perm): string {
   return p.module ? p.module.allowed.replace("_allowed", "") : "";
-}
-
-// Is a ladder power ALLOWED for the restaurant at all (the admin rung)?
-//  • module-backed → its <x>_allowed column (state.modules[key].allowed)
-//  • plain power    → owner_entitlements.power_<flag>, where ABSENT means allowed
-export function allowed(p: Perm, s: AccessState): boolean {
-  if (p.module) return !!s.modules[moduleKey(p)]?.allowed;
-  if (p.section) return s.owner[p.section] !== false;   // the owner-panel section IS the owner gate (absent = on)
-  if (p.power) return s.owner[powerKey(p.power)] !== false;
-  return true;
-}
-
-// The tablet rung's tri-state ("off"|"on"|"pin"): a real settings column for the
-// existing caps, or access_config[id].tablet for the new ones (void/revert).
-export function tabletValue(p: Perm, s: AccessState): string {
-  if (p.tabletNew) return String(s.config?.[p.id]?.tablet || p.tabletDefault || "off");
-  if (p.tablet) return s.tablet[p.tablet] || "off";
-  return "off";
-}
-
-// The reach level (0 off · 1 owner · 2 +manager · 3 +tablet) computed from live state.
-export function reachLevel(p: Perm, s: AccessState): number {
-  if (p.kind !== "ladder") return 0;
-  if (!allowed(p, s)) return 0;
-  let lvl = 1;                                        // admin-allowed ⇒ owner has it
-  if (p.fixedTop) lvl = 2;                             // mark_paid / invoice: owner+manager always
-  // absentOn (view_logs): an ABSENT grant means ON — display must match what canViewLogs
-  // enforces, or the panel shows "Owner only" while managers genuinely have the log.
-  else if (p.power && (p.absentOn ? s.manager[p.power] !== false : !!s.manager[p.power])) lvl = 2;
-  if (lvl >= 2 && p.waiter && tabletValue(p, s) !== "off") lvl = 3;
-  return lvl;
-}
-
-export function subState(p: Perm, side: "owner" | "manager" | "waiter", s: AccessState): Record<string, boolean> {
-  const cfg = s.config?.[p.id];
-  const key = side === "owner" ? "owner_opts" : side === "manager" ? "manager_opts" : "waiter_opts";
-  return (cfg && cfg[key]) || {};
 }

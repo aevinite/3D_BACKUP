@@ -1149,6 +1149,26 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("docs/ACCESS-MODEL.md's card table and row count, and docs/STAFF-PROFILE.md's block and dropdown counts, match the screen");
 }
 
+// ── 60 · lib/accessModel.ts EXPORTS ONLY WHAT REAL CODE IMPORTS ─────────────────────────────────
+// The file survives as enforcement wiring only (see its header). Sixteen display helpers of the
+// retired 4-rung panel sat in it for ten weeks with no importer, still answering questions about a
+// `power_<flag>` rung nothing can write — sweep #9 measured it (P105050), sweep #10 T18 item 7 removed
+// them. This keeps the next one from settling in: every exported VALUE (types are exempt — they are
+// shapes, not answers) must be imported by name by a file in app/, lib/ or components/.
+{
+  const src = read("lib/accessModel.ts");
+  const exported = [...src.matchAll(/^export (?:const|function) (\w+)/gm)].map((m) => m[1]);
+  const corpus = [];
+  const walkDir = (d) => { for (const e of readdirSync(join(root, d), { withFileTypes: true })) { const p = `${d}/${e.name}`; if (e.isDirectory()) { if (e.name !== "node_modules") walkDir(p); } else if (/\.(tsx?|mjs|js)$/.test(e.name) && p !== "lib/accessModel.ts") corpus.push(read(p)); } };
+  for (const d of ["app", "lib", "components"]) walkDir(d);
+  const used = new Set();
+  for (const f of corpus) for (const m of f.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']@\/lib\/accessModel["']/g)) for (const x of m[1].split(",")) used.add(x.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]);
+  const dead = exported.filter((x) => !used.has(x));
+  if (!exported.length) fail("check 60 found no exports in lib/accessModel.ts — the guard has lost its subject");
+  else if (dead.length) fail(`lib/accessModel.ts exports what nothing imports: ${dead.join(", ")} — delete it, or import it where it is needed`);
+  else ok(`all ${exported.length} values lib/accessModel.ts exports are imported by real code`);
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27
