@@ -494,10 +494,19 @@ export async function PATCH(req: NextRequest) {
   // `restaurant_id` rides along for the clash gate below: a `staff_users` row is scoped by its
   // anchor restaurant, and an owner's anchor is the only restaurant key their row has (lib/ownerHome
   // explains why that column exists at all). One more column on a read already being made.
-  const ownerQ = await sb.from("staff_users").select("id, name, username, role, restaurant_id").eq("id", ownerId).limit(1);
+  const ownerQ = await sb.from("staff_users").select("id, name, username, role, restaurant_id, deleted_at").eq("id", ownerId).limit(1);
   if (ownerQ.error) return adminFail("this owner", ownerQ.error, { action: "load" });
   const owner = ownerQ.data?.[0];
   if (!owner || owner.role !== "owner") return bad("That user isn't an owner.", 404);
+  // ── AN OWNER IN THE RECYCLE BIN IS CHANGED FROM THE RECYCLE BIN ONLY (S10 T28, item 3) ───────
+  // Nothing here looked at `deleted_at`, so an Owners page left open in a second tab — showing the
+  // owner as merely suspended, from before they were binned — could still press Restore (set_active),
+  // reset their password, rename them or attach a restaurant. The worst of those breaks the promise
+  // restore_owner makes: a binned owner comes back SUSPENDED "so they can't silently sign in". With
+  // `active` already flipped from the stale tab, the restore handed back a working login nobody had
+  // switched on. The Owners list never shows a binned owner, so no current screen sends this; the
+  // refusal is for the stale one, and it says where to go instead.
+  if (owner.deleted_at) return bad("That owner is in the recycle bin — restore them from the recycle bin first.", 409);
   const who = owner.name || owner.username;
 
   if (action === "attach") {
