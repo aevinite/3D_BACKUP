@@ -10,7 +10,7 @@
 //   GET    → { restaurants:[{id,name,slug,accentColor,managerPermissions}], staff:[…] }
 //   POST   → create {name, role(manager|kitchen|tablet), restaurant_id, password?}
 //            (password returned ONCE; stored hashed). Owners can't mint other owners.
-//   PATCH  → {id, action}: reset_password | set_active | set_role | edit  (staff must be in scope)
+//   PATCH  → {id, action}: reset_password | set_pin | set_active | set_role | edit  (staff must be in scope)
 //   DELETE → ?id=<uuid>  (staff must be in scope)
 //
 // Every staff row is created/looked-up WITH its restaurant_id, so one restaurant's
@@ -18,7 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { USER_COOKIE, userFromCookie, normalizeLoginName, type Role } from "@/lib/userAuth";
+import { USER_COOKIE, userFromCookie, normalizeLoginName, hashSecret, type Role } from "@/lib/userAuth";
 import { passwordFields } from "@/lib/passwordVault";
 import { logAction } from "@/lib/oplog";
 // MANAGER_POWER_FLAGS is deliberately NOT imported here any more: the per-person allow-list is
@@ -1083,6 +1083,27 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     if (error) return bad("Couldn't reset the password — please try again.", 500);
     await logAction(logPanel(s), "staff_reset_password", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `reset "${u.username}"` });
     return ok({ ok: true, password });
+  }
+  // RESET A MANAGER'S PIN (owner, 2026-10-11 — "do 1", the ☐ "Reset a staff PIN" line of
+  // docs/ACCESS-REDESIGN-SPEC.md). Only a MANAGER has a PIN (the code they type on the waiter tablet
+  // to approve a gated action — lib/managerPin.ts), and a manager can only manage the logins BELOW
+  // them, which have none — so this can never be a manager-panel action: the hierarchy check above
+  // already keeps every manager off another manager's row. The OWNER is who a manager goes to when
+  // they forget it; until today only Aevidine could set it.
+  //
+  // SET, NEVER CLEAR, from here. Until some manager of a restaurant has a PIN the tablet's PIN gates
+  // stay OPEN (anyManagerHasPin — the bootstrap rule), so removing the last one would quietly turn
+  // every "On + manager PIN" row into plain "On". Changing it keeps a PIN in place at every moment.
+  // Clearing stays with the admin's console (/api/admin/users set_pin { clear }).
+  if (action === "set_pin") {
+    if (u.role !== "manager") return bad("Only a manager has a PIN.");
+    if (body?.clear === true) return bad("A PIN can be changed here, not removed — without one the tablet would stop asking for it. Ask Aevidine to remove it.", 403);
+    const pin = String(body?.pin ?? "").trim();
+    if (!/^\d{4,8}$/.test(pin)) return bad("PIN must be 4–8 digits.");
+    const { error } = await sb.from("staff_users").update({ pin_hash: await hashSecret(pin) }).eq("id", id);
+    if (error) return bad("Couldn't save the PIN — please try again.", 500);
+    await logAction(logPanel(s), "staff_set_pin", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `reset the manager PIN for "${u.username}"` });
+    return ok({ ok: true });
   }
   if (action === "set_active") {
     // Must be a REAL boolean — the old `!!body?.active` silently coerced junk (e.g.

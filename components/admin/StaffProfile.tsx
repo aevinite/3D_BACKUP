@@ -53,7 +53,8 @@ import {
 //   write             PATCH /api/admin/users           PATCH /api/owner/staff  (some actions
 //                                                      renamed — the host translates)
 //   photo             /api/admin/users/photo           — not offered
-//   PIN / signing-in  yes (admin owns those)           — not offered
+//   manager PIN       set · change · clear              reset (set a new one) — never clear
+//   signing-in        yes (admin owns those)            — not offered
 //   remove a login    yes                              yes (refused when pay history exists)
 //
 // So the component takes a HOST: four functions plus a capability set. Everything about the
@@ -77,8 +78,12 @@ export type ProfileHost = {
    *  (T13 handoff H3, 2026-08-19.) Absent/false = a modal, which is what every other host is. */
   pageHosted?: boolean;
   can: {
-    /** set or clear someone's manager PIN */
+    /** set a manager's PIN — the owner can too, so a manager who forgot theirs isn't stuck
+     *  waiting for Aevidine (owner, 2026-10-11, "do 1"). */
     pin: boolean;
+    /** REMOVE a manager's PIN (admin console only). With no manager PIN at all a restaurant's tablet
+     *  stops asking for one (lib/managerPin.ts anyManagerHasPin), so only the admin may do it. */
+    pinClear: boolean;
     /** the "signing in" card (may they reset their own password / set their own PIN) */
     signIn: boolean;
     /** change someone's role */
@@ -155,7 +160,7 @@ const adminHost = (userId: string): ProfileHost => ({
     const j = await r.json().catch(() => ({}));
     return { ok: r.ok, error: j.error };
   },
-  can: { pin: true, signIn: true, role: true, visitAsPerson: true, accessLink: true, showPassword: true, permissions: true },
+  can: { pin: true, pinClear: true, signIn: true, role: true, visitAsPerson: true, accessLink: true, showPassword: true, permissions: true },
 });
 
 const HostCtx = createContext<ProfileHost | null>(null);
@@ -477,20 +482,24 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
         </div>
       ) : null}
 
-      {/* A manager's PIN is Aevidine's to set (the owner cockpit has no route for it), so the
-          control appears only where it works. The PIN's STATE is still visible to everyone —
-          the "PIN set" chip in the rail above. */}
+      {/* A MANAGER'S PIN — the code they type on the waiter tablet to approve. Aevidine and the
+          owner can both set a new one (owner, 2026-10-11: "do 1" — the spec's "Reset a staff PIN");
+          only Aevidine can remove it (`can.pinClear`), because a restaurant with no manager PIN
+          has a tablet that stops asking. The PIN's STATE is visible to everyone — the "PIN set"
+          chip in the rail above. */}
       {p.role === "manager" && host.can.pin ? (
         <>
-          <button className="stp-btn" onClick={() => setPinOpen((o) => !o)}>🔑 {p.hasPin ? "Change" : "Set"} manager PIN</button>
+          <button className="stp-btn" onClick={() => setPinOpen((o) => !o)}>🔑 {p.hasPin ? "Reset" : "Set"} manager PIN</button>
           {pinOpen ? (
             <div className="stp-pop">
               <input className="stp-in" value={pin} inputMode="numeric" maxLength={8}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} placeholder="4–8 digits" />
               <div className="stp-pop-row">
                 <button className="stp-btn pri sm" disabled={!/^\d{4,8}$/.test(pin)} onClick={() => savePin(false)}>Save PIN</button>
-                {p.hasPin ? <button className="stp-btn sm" onClick={() => savePin(true)}>Clear it</button> : null}
+                {p.hasPin && host.can.pinClear ? <button className="stp-btn sm" onClick={() => savePin(true)}>Clear it</button> : null}
               </div>
+              <div className="stp-hint">They type this on the waiter tablet to approve. Tell them the new one
+                {p.can_self_set_pin ? <> — they can change it from their own profile</> : null}.</div>
             </div>
           ) : null}
         </>

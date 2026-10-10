@@ -216,7 +216,7 @@ export const ACT_LABEL: Record<string, string> = {
   expense_add: "Recorded an expense", expense_void: "Voided an expense",
   // ── people ────────────────────────────────────────────────────────────────
   staff_create: "Added a staff member", staff_delete: "Deleted a staff member", staff_disable: "Disabled a staff member",
-  staff_reset_password: "Reset a staff password", staff_set_role: "Changed a staff role",
+  staff_reset_password: "Reset a staff password", staff_set_pin: "Reset a manager PIN", staff_set_role: "Changed a staff role",
   staff_set_permissions: "Changed permissions", staff_profile_edit: "Edited a staff profile",
   staff_job_edit: "Edited job details", staff_payment: "Recorded a staff payment",
   staff_payment_void: "Voided a staff payment", staff_own_pay_visibility: "Changed pay visibility",
