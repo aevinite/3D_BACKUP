@@ -681,10 +681,15 @@ R("P28832", "tests/order-totals.e2e.mjs", "clears up what it made — it makes n
         return { ok: !off.length, note: off.length ? `labels for no column: ${off.join(", ")}` : `${names.length} names, every one a real column` };
   });
   Fc("QUIET_COLUMNS covers the money columns a panel sends an expectation for", "read the file", () => ["discount", "price", "payment_status", "total"].every((c) => new RegExp(`QUIET_COLUMNS = new Set\\(\\[[^\\]]*"${c}"`).test(S)));
-  Fc("a field name with punctuation (a quote, a space, a comma) is dropped before it reaches the select", "the regex, executed", () => {
-    const re = /^[a-z_][a-z0-9_]*(\.[a-zA-Z0-9_-]+)?$/; return re.test("note") && re.test("profile.notes") && !["note,id", "note id", "x'--", "NOTE", "a.b.c", "1x"].some((k) => re.test(k));
+  // The rule is READ OUT OF THE FILE and executed — never a copy typed here. (Round 5: the copy said one sub-key
+  // level and refused "a.b.c"; lib/clash.ts had moved to two levels for T18's item 15, so these rows were testing
+  // a rule the app no longer runs.)
+  const fieldRule = (() => { const m = [...S.matchAll(/\.filter\(\(c\) => (\/\^[^\n]*?\$\/)\.test\(c\)\)/g)]; return m.length === 1 ? new RegExp(m[0][1].slice(1, -1)) : null; })();
+  Fc("a field name with punctuation (a quote, a space, a comma) is dropped before it reaches the select", "the file's own regex, executed", () => {
+    const re = fieldRule; if (!re) return false;
+    return ["note", "profile.notes", "platform_channels.zomato.on"].every((k) => re.test(k)) && !["note,id", "note id", "x'--", "NOTE", "a.b.c.d", "1x", "a..b", "a.b c"].some((k) => re.test(k));
   });
-  Fc("…and the regex in the file is exactly that one", "read the file", () => S.includes("/^[a-z_][a-z0-9_]*(\\.[a-zA-Z0-9_-]+)?$/"));
+  Fc("…and that regex is the ONE field filter in the file, anchored at both ends, one character class per level", "read the file", () => !!fieldRule && /^\^\[a-z_\]\[a-z0-9_\]\*\(\\\.\[a-zA-Z0-9_-\]\+\)\{0,2\}\$$/.test(fieldRule.source));
   Fc("only an aged change (20 s+) is judged as a replay — a live write pays no extra query", "read the file", () => /REPLAY_MIN_AGE_MS = 20_000/.test(S) && /if \(!markers\) return null; \/\/ live write/.test(S));
   Fc("replayClash reads ONE session row per table (newest first, limit 1, restaurant-scoped)", "read the file", () => /\.eq\("restaurant_id", rid\)\.eq\("table_number", t\)\s*\.order\("created_at", \{ ascending: false \}\)\.limit\(1\)/.test(S));
   Fc("the table's NAME is read only on the refusal path", "read the file", () => (S.match(/await tableLabel\(rid, t\)/g) || []).length === 3);

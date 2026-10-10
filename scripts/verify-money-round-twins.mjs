@@ -43,6 +43,13 @@ check(typeof roundPaise === "function" && typeof BILLDOC.moneyRound === "functio
   for (const x of [0.005, -0.005, 1.005, 0.7 * 0.05, 0.145, -0.035]) if (!bad && TF.netSalesOf({ subtotal: x, discount: 0 }) !== roundPaise(x)) bad = `${x}`;
   check(!bad && !/^\s*import\s/m.test(read("lib/taxFiling.ts")), "lib/taxFiling.ts's own copy (it imports nothing, on purpose) gives the same answer on 1,000,006 inputs", `taxFiling's copy differs — ${bad || "or it imports something"}`); }
 
+// …and the FOURTH: lib/money.mjs snapToStep, the guest's display rounding in another currency (item 32).
+// To the cent it must be the same rule.
+{ const MJ = await import(pathToFileURL(join(root, "lib/money.mjs")).href); let s = 23, bad = null; const rnd = () => (s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296;
+  for (let i = 0; i < 1000000 && !bad; i++) { const x = (rnd() - 0.3) * (i % 2 ? 1e4 : 1e6) * rnd(); if (MJ.snapToStep(x, 0.01) !== roundPaise(x)) bad = `${x}: ${MJ.snapToStep(x, 0.01)} vs ${roundPaise(x)}`; }
+  for (const x of [0.7 * 0.05, 1.25 * 0.18, 1.005, -0.035, 0]) if (!bad && MJ.snapToStep(x, 0.01) !== roundPaise(x)) bad = `${x}`;
+  check(!bad, "lib/money.mjs snapToStep (the guest's other-currency display) rounds to the cent by the same rule, on 1,000,005 inputs", `snapToStep differs — ${bad}`); }
+
 // 2 — both equal the database's exact rounding, for every amount, at every rate
 const exactAdd = (g, bp) => { const num = g * bp, q = Math.floor(num / 10000), r = num - q * 10000; return 2 * r >= 10000 ? q + 1 : q; };
 const exactIncl = (g, bp) => { const num = g * 10000, den = 10000 + bp, q = Math.floor(num / den), r = num - q * den; return 2 * r >= den ? q + 1 : q; };

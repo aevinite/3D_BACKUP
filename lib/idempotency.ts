@@ -33,7 +33,9 @@ type Claim = { state: ClaimState; result?: unknown };
 
 async function begin(actionId: string, panel: string): Promise<Claim> {
   try {
-    const ins = await sb.from("action_idempotency").insert({ action_id: actionId, panel }).select("action_id");
+    // No .select() after the insert (sweep #10 T30 round 5, item 35): only the ERROR is read here, so asking
+    // the database to send the new row back cost a payload on every tapped save for nothing.
+    const ins = await sb.from("action_idempotency").insert({ action_id: actionId, panel });
     if (!ins.error) return { state: "fresh" }; // we claimed it first → run the write
     // Unique-violation → someone already claimed this action_id.
     if ((ins.error as { code?: string }).code === "23505") {

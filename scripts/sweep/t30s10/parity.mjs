@@ -17,7 +17,7 @@
 // READ-ONLY: SELECTs on the dev project only (refused on any other). Nothing is written anywhere.
 //   H. every saved order re-computed from its own dishes; I. every bill settled in parts vs its paper.
 // Ids P167501–P167700 (claimed on main, 2026-10-09). APPEND ONLY; never renumber.
-import { readFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -70,7 +70,9 @@ const check = async (file, what, fn, key = keyOf(file, what)) => {
   let id = IDS[key];
   // round 3's block (P167501–P167700) is closed; a subject first seen in round 4 or later takes the next id
   // from this terminal's round-4 block, P166301–P166600 (claimed on main, PR #1470).
-  if (!id) { const used = new Set(Object.values(IDS)); let n = 166301; while (used.has(`P${n}`)) n++; if (n > 166600) { id = "P—"; unassigned.push(key + " (block full)"); } else { id = `P${n}`; IDS[key] = id; unassigned.push(key); } }
+  // (round 5 on: new subjects take P210801–P210900 of this terminal's round-5 block, PR #1479 — the harness's
+  // round-5 suites own P210001–P210700; the first try here started at P210501 and collided with u-round5b)
+  if (!id) { const used = new Set(Object.values(IDS)); let n = 210801; while (used.has(`P${n}`)) n++; if (n > 210900) { id = "P—"; unassigned.push(key + " (block full)"); } else { id = `P${n}`; IDS[key] = id; unassigned.push(key); } }
   let res; NOTE = ""; try { res = await fn(); } catch (e) { res = "threw: " + (e && e.message); }
   ROWS.push({ id, key, file, what, ok: res === true, skip: typeof res === "string" && res.startsWith("skip:"), note: res === true ? NOTE.slice(0, 220) : String(res).slice(0, 220) });
 };
@@ -446,6 +448,55 @@ await check("lib/payments.ts", "before item 11: no bill says \"cash\" in lower c
     await check("lib/tax.ts", `item 12 · ${f.slug}: its ${f.disc} discounted film bills now count ONCE in the owner's revenue (total − disc_gross = (subtotal − discount) × (1 + rate))`, () => Math.abs(P(rev[0].a) - P(rev[0].b)) <= Number(f.disc) || `${rev[0].a} vs ${rev[0].b}`, `r4|film-revenue|${f.slug}`);
   } }
 
+// ═══════════════════════════ ROUND 5 (2026-10-10) — how the database really runs each query ═══════════════════════════
+// The planner is asked how it WOULD run each query shape the 14 files make (EXPLAIN without ANALYZE runs
+// nothing), with real French House values. On a table big enough for it to matter, a plan that reads the
+// whole table is the "unoptimized" this round hunts.
+const explain = async (q) => { const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, { method: "POST", headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ query: `EXPLAIN (FORMAT JSON) ${q}` }) });
+  const t = await r.text(); if (!r.ok) throw new Error(t.slice(0, 160)); const j = JSON.parse(t); return j[0]["QUERY PLAN"][0].Plan; };
+const nodesOf = (p, out = []) => { out.push(p); for (const c of p.Plans || []) nodesOf(c, out); return out; };
+// A plan reads the whole table when it scans the table itself, OR walks a whole index with only a Filter
+// and no Index Cond — that second kind still says "Index Only Scan", and on 2026-10-10 it was found that a
+// Seq-Scan-only check passed `orders where total = 123.45`, which walks every row of an index to find it.
+const wholeReads = (plan, table) => nodesOf(plan).filter((n) => n["Relation Name"] === table && (n["Node Type"] === "Seq Scan" || (/^Index (Only )?Scan$/.test(n["Node Type"]) && !n["Index Cond"]))).map((n) => `${n["Node Type"]}${n["Index Name"] ? ` of ${n["Index Name"]}` : ""}`);
+const SIZE = Object.fromEntries((await sql(`select relname, reltuples::bigint n from pg_class c join pg_namespace s on s.oid = c.relnamespace where s.nspname = 'public' and c.relkind = 'r'`)).map((x) => [x.relname, Number(x.n)]));
+for (const q of REC ? REC.queries.filter((x) => x.filters.length) : []) {
+  const cols = q.filters; const key = `r5|plan|${q.table}|${q.op}|${cols.join(",")}`;
+  await check("lib (the 14 money files, as recorded)", `${q.table} ${q.op} by ${cols.join(" + ")}: the database's planner uses an index, not a read of the whole table (${(SIZE[q.table] ?? 0).toLocaleString("en-IN")} rows)`, async () => {
+    const sample = (await sql(`select ${cols.map((c) => `${c}::text as "${c}"`).join(", ")} from public.${q.table} where ${cols.includes("restaurant_id") ? `restaurant_id = '${FH}'` : "true"} and ${cols.map((c) => `${c} is not null`).join(" and ")} limit 1`))[0];
+    if (!sample) return (SIZE[q.table] ?? 0) < 2000 || "no sample row to plan with";
+    const where = cols.map((c) => `${c} = ${lit(sample[c])}`).join(" and ");
+    const plan = await explain(`select 1 from public.${q.table} where ${where}`);
+    const whole = wholeReads(plan, q.table);
+    return (!whole.length || (SIZE[q.table] ?? 0) < 2000) || `reads all of ${q.table}: ${whole.join(", ")}`;
+  }, key);
+}
+{ const known = await explain(`select 1 from public.orders where (total + 1)::int = 7`), keyed = await explain(`select 1 from public.orders where id = '${FH}'`);
+  await check("scripts/sweep/t30s10/parity.mjs", "the whole-read rule really sees one: an unindexable filter on orders is flagged, a lookup by id is not", () => (wholeReads(known, "orders").length > 0 && wholeReads(keyed, "orders").length === 0) || `known ${JSON.stringify(wholeReads(known, "orders"))} · keyed ${JSON.stringify(wholeReads(keyed, "orders"))}`, "r5|plan|rule-sees-one"); }
+await check("lib (the 14 money files, as recorded)", "the planner was really asked — the recording found query shapes and the biggest tables have thousands of rows", () => (REC && REC.queries.length >= 20 && (SIZE.orders || 0) > 10000) || `${REC && REC.queries.length} shapes, orders ${SIZE.orders}`, "r5|plan|asked");
+// the new reviews function and the guest ratings view, planned too
+{ const pr = await explain(`select * from public.reviews r where r.item_slug = 'truffle-and-wild-mushroom-pizza' and r.restaurant_id = '${FH}' order by r.created_at desc limit 20`);
+  await check("lib/menu.ts", "lfh_dish_reviews' query (one dish of one restaurant, newest 20) does not read the whole reviews table", () => !wholeReads(pr, "reviews").length || (SIZE.reviews || 0) < 2000 || wholeReads(pr, "reviews").join(", "), "r5|plan|dish-reviews"); }
+
+// migrations 415–419 are live exactly as their files say
+{ const C = await sql(`select conname, convalidated v, pg_get_constraintdef(oid) d from pg_constraint where conname in ('settings_tax_rate_is_a_rate', 'orders_payment_method_is_known')`);
+  const byN = Object.fromEntries(C.map((x) => [x.conname, x]));
+  await check("supabase/migrations/415_a_restaurant_tax_rate_must_be_a_rate.sql", "migration 415 is live: settings_tax_rate_is_a_rate allows 0 to 0.5 and is validated", () => (byN.settings_tax_rate_is_a_rate?.v === true && /0\.5/.test(byN.settings_tax_rate_is_a_rate?.d || "")) || JSON.stringify(byN.settings_tax_rate_is_a_rate), "r5|mig|415");
+  const G = await sql(`select count(*) n from information_schema.role_table_grants where table_schema = 'public' and grantee in ('anon', 'authenticated') and table_name in ('deletion_audit', 'table_merges')`);
+  await check("supabase/migrations/416_the_last_seven_tables_lose_their_unused_guest_write_grants.sql", "migration 416 is live: the guest and signed-in keys hold nothing on deletion_audit or table_merges", () => Number(G[0].n) === 0 || `${G[0].n} grants`, "r5|mig|416");
+  await check("supabase/migrations/417_a_bill_is_paid_by_a_method_the_app_knows.sql", "migration 417 is live: orders_payment_method_is_known lists exactly the six methods, validated", () => (byN.orders_payment_method_is_known?.v === true && ["UPI", "Cash", "Card", "Other", "Split", "On the house"].every((m) => (byN.orders_payment_method_is_known?.d || "").includes(`'${m}'`))) || JSON.stringify(byN.orders_payment_method_is_known), "r5|mig|417");
+  const F = await sql(`select prosecdef, provolatile, proconfig::text cfg, pg_get_function_result(oid) res from pg_proc where proname = 'lfh_dish_reviews'`);
+  await check("supabase/migrations/418_a_dish_page_learns_which_review_is_mine_not_every_device_id.sql", "migration 418 is live: lfh_dish_reviews is SECURITY DEFINER, STABLE, with a fixed search_path, and returns no device id", () => (F[0]?.prosecdef === true && F[0]?.provolatile === "s" && /search_path=public/.test(F[0]?.cfg || "") && !/device/.test(F[0]?.res || "")) || JSON.stringify(F[0]), "r5|mig|418");
+  const P = await sql(`select policyname, roles::text r from pg_policies where schemaname = 'public' and tablename = 'reviews'`);
+  await check("supabase/migrations/419_the_ratings_view_reads_three_review_columns_and_never_the_device.sql", "migration 419 is live: the one reviews policy is guest_reads_ratings_columns_only, for the guest and signed-in keys", () => (P.length === 1 && P[0].policyname === "guest_reads_ratings_columns_only" && /anon/.test(P[0].r) && /authenticated/.test(P[0].r)) || JSON.stringify(P), "r5|mig|419"); }
+
+// No id here may sit inside a block a harness suite hands out — `suite(name, first, size)` in each
+// scripts/t30-harness/u-*.mjs. (Round 5's first allocation started at P210501, inside u-round5b's
+// P210301–P210700, and 28 numbers meant two different checks until the ledger merge noticed.)
+{ const H = join(root, "scripts/t30-harness"); const blocks = [];
+  for (const f of readdirSync(H).filter((x) => /^u-.*\.mjs$/.test(x))) for (const m of readFileSync(join(H, f), "utf8").matchAll(/\bsuite\("[^"]*",\s*(\d+),\s*(\d+)\)/g)) blocks.push([f, Number(m[1]), Number(m[1]) + Number(m[2]) - 1]);
+  const inside = Object.values(IDS).map((v) => Number(v.slice(1))).flatMap((n) => blocks.filter(([, a, b]) => n >= a && n <= b).map(([f]) => `P${n} (${f})`));
+  await check("scripts/sweep/t30s10/parity.mjs", "no id here is one a harness suite hands out (each suite's block is read from its own suite(…) line)", () => (blocks.length >= 20 && !inside.length) || (blocks.length < 20 ? `only ${blocks.length} suite blocks found — the reader is not seeing them` : `inside a harness block: ${inside.slice(0, 6).join(" · ")}`), "parity|ids-clear-of-harness"); }
 await check("scripts/sweep/t30s10/parity.mjs", "every row has a PERMANENT id — none is new to parity-ids.json (a new subject is given one with --assign-ids)", () => !unassigned.length || `new: ${unassigned.join(" · ")}`, "parity|ids");
 if (ARGV.includes("--assign-ids") && unassigned.length) { (await import("node:fs")).writeFileSync(IDFILE, JSON.stringify(IDS, null, 1) + "\n"); console.log(`assigned ${unassigned.length} new id(s) in parity-ids.json`); }
 
