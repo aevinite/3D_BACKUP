@@ -645,8 +645,10 @@ check("the comparator has NO imports, so a guard can run the rule that actually 
 // ── the gate around the comparator ─────────────────────────────────────────────────────────────
 check("only an allow-listed table may be compared at all", /const COMPARABLE_TABLES: Record<string, string> = \{/.test(srcClash));
 check("a composite key may only use the columns named for that table", /const COMPOSITE_KEYS: Record<string, string\[\]> = \{/.test(srcClash));
+// (2026-10-10, sweep #10 T30: follows lib/clash.ts's deliberate move to TWO sub-key levels — T18 item 15, so a
+// delivery channel's `.on` can be compared without the API key beside it. Still anchored, still one character class.)
 check("every field name is checked against a strict pattern before it reaches a query",
-  /\/\^\[a-z_\]\[a-z0-9_\]\*\(\\\.\[a-zA-Z0-9_-\]\+\)\?\$\//.test(srcClash));
+  /\/\^\[a-z_\]\[a-z0-9_\]\*\(\\\.\[a-zA-Z0-9_-\]\+\)\{0,2\}\$\//.test(srcClash));
 check("at most eight fields are compared at a time", /\.slice\(0, 8\)/.test(srcClash));
 check("the two tables whose own id IS the restaurant answer 'nothing to compare' for anyone else's id",
   /if \(TENANT_ROW_TABLES\.has\(table\) && id !== rid\) return null/.test(srcClash));

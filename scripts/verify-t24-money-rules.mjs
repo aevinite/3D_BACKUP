@@ -499,8 +499,10 @@ head("7. lib/clash.ts + lib/idempotency.ts + lib/userAuth.ts + lib/rateLimit.ts 
   check("the comparison table list is an allowlist, not whatever the screen names",
     /const COMPARABLE_TABLES: Record<string, string> = \{/.test(s));
   check("a composite key may only use its own whitelisted columns", /const COMPOSITE_KEYS: Record<string, string\[\]> = \{/.test(s));
+  // (2026-10-10, sweep #10 T30: follows lib/clash.ts's deliberate move to TWO sub-key levels — T18 item 15, so a
+  // delivery channel's `.on` can be compared without the API key beside it. Still anchored, still one character class.)
   check("field names are validated before they reach the select",
-    /\/\^\[a-z_\]\[a-z0-9_\]\*\(\\\.\[a-zA-Z0-9_-\]\+\)\?\$\//.test(s));
+    /\/\^\[a-z_\]\[a-z0-9_\]\*\(\\\.\[a-zA-Z0-9_-\]\+\)\{0,2\}\$\//.test(s));
   check("the rows whose own id IS the tenant key refuse a foreign id outright",
     /if \(TENANT_ROW_TABLES\.has\(table\) && id !== rid\) return null;/.test(s));
   check("every other comparison is scoped to this restaurant",
