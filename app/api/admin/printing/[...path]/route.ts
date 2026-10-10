@@ -88,8 +88,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       // being the whole platform, which is the exact fault being fixed, moved to a different number.
       // The comment above the batch is right that four whole-platform reads beat an N+1 loop; paging
       // keeps that (no extra round trip below a thousand restaurants) and removes the silent cut.
+      // LIVE RESTAURANTS ONLY (S10 T28, item 4). This read had no `deleted_at` test, so every
+      // restaurant in the recycle bin — and every one purged from it — got a row on the board, "no
+      // computer · printing off", indistinguishable from a live shop with a dead printer. Measured on
+      // the dev database the day this was fixed: 293 rows for 11 live restaurants. Every other admin
+      // board reads this table with `.is("deleted_at", null)`, and the act-as door says a binned
+      // restaurant "stays out of every list". The page already falls back to the overview when a
+      // ?rid= matches nothing here, so a bookmark to a binned restaurant lands somewhere sensible.
       pageAll<{ id: string; name: string; slug: string }>("restaurants", (from, to) =>
-        sb.from("restaurants").select("id, name, slug").order("name").range(from, to)),
+        sb.from("restaurants").select("id, name, slug").is("deleted_at", null).order("name").range(from, to)),
       // ── PAGED FOR THE SAME REASON THE LIST ABOVE IS (T26 sweep #9, item 10, owner picked it
       //    2026-09-16) ────────────────────────────────────────────────────────────────────────────
       // The restaurants read was moved onto pageAll on 2026-08-31 because "a ceiling of any size is
@@ -348,7 +355,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     if (rowQ.error) return adminFail("that computer", rowQ.error, { action: "load" });
     const row = rowQ.data as { id: string; name: string } | null;
     if (!row) return err("No such computer.", 404);
-    await sb.from("print_agents").update({ revoked_at: new Date().toISOString() }).eq("id", row.id).eq("restaurant_id", rid);
+    // CHECKED (S10 T28, item 2). This write's answer was thrown away, so a refusal still cleared the
+    // computer's printing lines, wrote "can no longer print" to the diary and replied ok — while the
+    // machine itself stayed registered and kept its access. Removing a computer is the one thing on
+    // this board that ends a machine's right to fetch tickets, so it either happens or says it did not.
+    const rev = await sb.from("print_agents").update({ revoked_at: new Date().toISOString() })
+      .eq("id", row.id).eq("restaurant_id", rid).is("revoked_at", null).select("id");
+    if (rev.error) return adminFail("that computer", rev.error, { action: "save" });
+    if (!rev.data?.length) return err("That computer was already removed — refresh the page.", 404);
     // Any route pointing at it is emptied in the same breath — a route naming a machine that can no
     // longer print would leave paper silently unprinted, and an EMPTY line at least says so on the
     // screen ("Kitchen slips: no printer chosen").
@@ -359,8 +373,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       // BACKUP of this line" any more — there is no backup (owner, 2026-08-30).
       if (routes[k].agent === row.id) patch[k] = null;
     }
-    if (Object.keys(patch).length) await writeRoutes(rid, patch);
-    await logAction("admin", "print_helper_removed", { restaurant_id: rid, detail: `“${row.name}” can no longer print` });
+    // …and the clearing is checked too: writeRoutes answers `{ error }` rather than throwing, and a
+    // line still naming a removed machine is exactly the silent unprinted paper the note above means.
+    let linesLeft: string[] = [];
+    if (Object.keys(patch).length) {
+      const cleared = await writeRoutes(rid, patch);
+      if ("error" in cleared) { console.error("[admin/printing] computer removed but its lines were not cleared:", cleared.error); linesLeft = Object.keys(patch); }
+    }
+    await logAction("admin", "print_helper_removed", { restaurant_id: rid, detail: `“${row.name}” can no longer print${linesLeft.length ? ` — but its printing lines could not be cleared (${linesLeft.map((k) => KIND_LABEL[k as RoutableKind] || k).join(", ")})` : ""}` });
+    if (linesLeft.length) {
+      return NextResponse.json({
+        ok: true, routesCleared: [], linesLeft,
+        warning: `“${row.name}” was removed, but its printing lines could not be cleared — choose a new printer for ${linesLeft.map((k) => KIND_LABEL[k as RoutableKind] || k).join(", ")}.`,
+      });
+    }
     return NextResponse.json({ ok: true, routesCleared: Object.keys(patch) });
   }
 

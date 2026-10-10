@@ -250,7 +250,10 @@ export async function POST(req: NextRequest) {
     if (!e) return err("that alert no longer exists", 404);
     if (e.key !== "admin_login") return err("clearing a lockout only applies to admin-login alerts");
     if (e.subject) await throttleUnblock(`admin:${e.subject}`);
-    await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId);
+    // Same rule as the block path above: the lockout is what mattered and it has been lifted, so a
+    // failure to mark the alert handled is reported, not fatal — but it is no longer thrown away unread.
+    const markC = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId);
+    if (markC.error) console.error("[admin/rate-limits] cleared the lockout but couldn't clear its alert:", markC.error.message);
     await logAction("admin", "admin_lockout_clear", { level: "info", detail: `admin-login lockout cleared for ${e.subject_label || e.subject}` });
     return NextResponse.json({ ok: true });
   }

@@ -32,7 +32,12 @@ export async function POST(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
-  const on = body?.on === true;
+  // ON OR OFF MUST BE SAID (S10 T28, item 7). `on` was read as `body?.on === true`, so an empty or
+  // unreadable body meant OFF — and with no restaurant_id that wrote the flagship row and logged
+  // "admin put the guest menu back online" for a request that asked for nothing. Taking every guest
+  // menu offline or online is the one switch here; it moves only when the request says which way.
+  if (typeof body?.on !== "boolean") return NextResponse.json({ error: "Say whether the menu should be on or off." }, { status: 400 });
+  const on = body.on === true;
   const rid = typeof body?.restaurant_id === "string" ? body.restaurant_id : null;
   if (rid && !isUuid(rid)) return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
   const r = rid

@@ -671,6 +671,86 @@ for (const rel of PART_A) {
   else fail(`${rel} compares bill_no/invoice_no to a typed number with no range check — anything past 2147483647 answers with a refusal instead of "no bills" (rule 9)`);
 }
 
+// ── RULE 10 — A WRITE IS NEVER AWAITED AND THEN IGNORED (S10 T28, items 1 and 2, 2026-10-10) ───
+//
+// Rules 5 and 7 watch a write that ASKS which row it touched. This one watches the write that asks
+// nothing at all: `await sb.from(x).update(...)` as a bare statement, its answer thrown away. Two of
+// them sat on the strongest actions in the console — deleting/restoring an order-less bill, and
+// unlinking a print computer — and each replied ok and wrote its diary line while the database had
+// refused it. A write that is genuinely best-effort must still be ASSIGNED and its error looked at
+// (logged), so "tolerated" is a decision on the page and not an accident. `writeRoutes` answers
+// `{ error }` instead of throwing, so a bare `await writeRoutes(` is the same shape.
+//
+// PENDING, NOT EXEMPT: app/api/admin/restaurants/route.ts is sweep-#10 T29's file and still carries
+// three. They are listed by COUNT so a fourth fails at once, and so the list empties the day T29
+// fixes them (then this entry must be deleted, or rule 10 reports the stale allowance).
+const BARE_WRITE = /^\s*(?:if\s*\([^)]*\)\s*)?await\s+(?:(?:sb|supabaseAdmin)\s*\.\s*from\([^)]*\)\s*\.(?:update|insert|upsert|delete)\(|writeRoutes\()/gm;
+const BARE_PENDING = { "app/api/admin/restaurants/route.ts": 3 };
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  const n = [...src.matchAll(BARE_WRITE)].length;
+  const allowed = BARE_PENDING[rel] || 0;
+  if (n === 0 && allowed) fail(`${rel} no longer has its ${allowed} pending bare write(s) — delete its BARE_PENDING entry so rule 10 covers it fully`);
+  else if (n <= allowed) ok(`${rel} ${allowed ? `has only its ${allowed} known pending bare write(s) (T29's)` : "never awaits a write and ignores its answer"}`);
+  else fail(`${rel} awaits ${n - allowed} write(s) and throws the answer away — a refusal would still reply ok and log the change (rule 10)`);
+}
+
+// ── RULE 11 — THREE SPECIFIC PROMISES, PINNED (S10 T28, items 1, 3 and 4, 2026-10-10) ──────────────
+{
+  const bills = strip(readFileSync(join(root, "app/api/admin/bills/route.ts"), "utf8"));
+  // item 1: the admin delete catches softDeleteOrders' throw and records what did go.
+  if (/try\s*\{\s*res\s*=\s*await\s+softDeleteOrders\(/.test(bills) && /partial:\s*true/.test(bills)) ok("bills: a thrown delete is caught, answered in words, and what went is still on the Removals record");
+  else fail("bills: softDeleteOrders is called without a catch, or the catch no longer records the orders that did go (rule 11)");
+  const owners = strip(readFileSync(join(root, "app/api/admin/owners/route.ts"), "utf8"));
+  // item 3: PATCH refuses an owner in the recycle bin before any action branch.
+  const patchAt = owners.search(/export\s+async\s+function\s+PATCH\b/);
+  const patchBody = patchAt >= 0 ? owners.slice(patchAt) : "";
+  const refuseAt = patchBody.search(/if\s*\(\s*owner\.deleted_at\s*\)\s*return\s+bad\(/);
+  const firstAction = patchBody.search(/if\s*\(\s*action\s*===/);
+  if (refuseAt > 0 && firstAction > 0 && refuseAt < firstAction) ok("owners: PATCH refuses an owner in the recycle bin before any action can change them");
+  else fail("owners: PATCH no longer refuses a binned owner before its actions — a stale tab can switch a binned owner back on (rule 11)");
+  const printing = strip(readFileSync(join(root, "app/api/admin/printing/[...path]/route.ts"), "utf8"));
+  // item 4: the Printing overview lists live restaurants only.
+  const ov = printing.slice(printing.indexOf('seg[0] === "overview"'), printing.indexOf('seg[0] === "overview"') + 1500);
+  if (/pageAll[\s\S]{0,120}?\("restaurants"[\s\S]{0,200}?\.is\(\s*["']deleted_at["']\s*,\s*null\s*\)/.test(ov)) ok("printing: the overview reads live restaurants only, so the recycle bin stays off the board");
+  else fail("printing: the overview's restaurants read lost its deleted_at test — every binned and purged restaurant gets a row on the board (rule 11)");
+}
+
+// ── RULE 12 — A CACHE'S THROW IS CAUGHT, AND A NUMBER FROM THE ADDRESS IS A WHOLE ONE (S10 T28, items 5–6)
+//
+// cachedOwnerPayload hands a compute() throw to its caller by design. A route that does not catch it
+// answers a bare 500 with no body, and the console prints "Request failed (500)" — Platform analytics
+// did exactly that on any failed read until 2026-10-10. And a page size read with Number() alone let
+// `?per=33.3` through as a fractional range: the change log answered EMPTY with a 200, the ledger a
+// "try again" 500. Both are checked on every admin route, so a new one is covered the day it lands.
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  if (/cachedOwnerPayload\s*\(/.test(src)) {
+    const at = src.search(/cachedOwnerPayload\s*\(/);
+    // Inside a try: the nearest `try {` before the call has no `catch` between it and the call.
+    const tryAt = src.lastIndexOf("try {", at);
+    const inside = tryAt >= 0 && src.indexOf("catch", tryAt) > at;
+    if (inside) ok(`${rel} catches the snapshot cache's throw and answers in words`);
+    else fail(`${rel} calls cachedOwnerPayload outside a try — a failed compute answers a bare 500 the console prints as "Request failed (500)" (rule 12)`);
+  }
+  const bare = [...src.matchAll(/Math\.(?:min|max)\([^;\n]*?\bNumber\(\s*(?:url\.)?(?:searchParams|sp|req\.nextUrl\.searchParams)\.get\(/g)]
+    .filter((m) => !/Math\.trunc\(\s*Number\(/.test(m[0]));
+  if (bare.length) fail(`${rel} clamps a number from the address without Math.trunc — a decimal reaches PostgREST as a fractional limit/range (rule 12)`);
+}
+
+// ── RULE 13 — A SWITCH MOVES ONLY WHEN TOLD WHICH WAY; A DATE MUST EXIST (S10 T28, items 7–8) ───
+{
+  const mt = strip(readFileSync(join(root, "app/api/admin/maintenance/route.ts"), "utf8"));
+  const postAt = mt.search(/export\s+async\s+function\s+POST\b/);
+  const post = postAt >= 0 ? mt.slice(postAt) : "";
+  if (/typeof\s+body\?\.on\s*!==\s*"boolean"/.test(post) && post.search(/typeof\s+body\?\.on/) < post.search(/\.update\(/)) ok("maintenance: POST refuses a request that does not say on or off, before any write");
+  else fail("maintenance: POST no longer refuses a missing `on` — an empty body switches the flagship menu online and logs it (rule 13)");
+  const bl = strip(readFileSync(join(root, "app/api/admin/billing/route.ts"), "utf8"));
+  const usesRound = /toISOString\(\)\.slice\(0,\s*10\)\s*===\s*t/.test(bl) && (bl.match(/realDate\(/g) || []).length >= 2;
+  if (usesRound && !/Number\.isNaN\(Date\.parse\(paidOn\)\)/.test(bl)) ok("billing: every typed date is round-tripped, so 31 February is refused in words");
+  else fail("billing: a typed date is checked by shape + Date.parse only — 2026-02-31 reaches Postgres and answers 'try again' (rule 13)");
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {

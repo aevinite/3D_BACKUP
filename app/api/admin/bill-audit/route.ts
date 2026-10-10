@@ -72,8 +72,11 @@ export async function GET(req: NextRequest) {
 
   // One page, newest first. `per` is clamped so a hand-typed URL cannot ask for the whole log in
   // one read, and `page` is 1-based because that is what the numbers on screen say.
-  const per = Math.min(200, Math.max(20, Number(url.searchParams.get("per")) || PER_PAGE));
-  const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+  // WHOLE NUMBERS (S10 T28, item 6). `?per=33.3` became a fractional range and the read quietly came
+  // back EMPTY with a 200 — the change log saying "no bill changes" while there were 54 — and a
+  // fractional page did the same arithmetic. Truncated before the clamps; junk still falls back.
+  const per = Math.min(200, Math.max(20, Math.trunc(Number(url.searchParams.get("per"))) || PER_PAGE));
+  const page = Math.min(1_000_000, Math.max(1, Math.trunc(Number(url.searchParams.get("page"))) || 1));
   const wantCount = url.searchParams.get("count") === "1";
   const offset = (page - 1) * per;
 
