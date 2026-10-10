@@ -1239,6 +1239,18 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("a failed owner-entitlement read answers closed, so a blip never ignores an OFF switch");
 }
 
+// ── 65 · "VIEW AS THIS PERSON" NEEDS A RESTAURANT, AND ASKS FOR ONE BEFORE READING ANYBODY ────────
+// lib/viewAsPerson.ts answers the admin's ?as=<person> pin. With an empty restaurant id its own
+// comparison `(u.restaurant_id || "") !== rid` would MATCH a person who has no restaurant, so the helper
+// refuses an empty restaurant itself rather than trusting four callers to (sweep #10 T18, item 14).
+{
+  const src = read("lib/viewAsPerson.ts");
+  const body = src.slice(src.indexOf("export async function viewAsPerson"));
+  const lock = body.indexOf("if (!rid) return null;"), readAt = body.indexOf("personById(id)");
+  if (lock < 0 || readAt < 0 || lock > readAt) fail("viewAsPerson() reads a person before refusing an empty restaurant id");
+  else ok("viewAsPerson() refuses an empty restaurant before it reads anybody");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27

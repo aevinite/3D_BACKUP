@@ -76,6 +76,10 @@ export async function viewAsPerson(
   role: Role,
 ): Promise<StaffUser | null> {
   if (g.user) return null;                                  // a real login is nobody's periscope
+  // No restaurant, no pin (sweep #10 T18, item 14). All four callers refuse an empty restaurant first;
+  // this is the helper's own lock, because `(u.restaurant_id || "") !== rid` would otherwise MATCH a
+  // person with no restaurant against an empty one.
+  if (!rid) return null;
   const id = req.nextUrl.searchParams.get("as");
   if (!isPersonId(id)) return null;                         // no pin → no read at all
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value))) return null; // admin only
