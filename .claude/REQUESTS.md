@@ -1856,10 +1856,10 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 
 ## 2026-10-11 — sweep #10 T10 round 4 (owner: "do 3,4,5,6")
 
-- [ ] **Waiter tablet refuses a minus-sign price** (item 3) — table order, parcel, + add a dish. Built; verify live.
-- [ ] **Five lines that could never run removed** (item 4) — the three permission backstops kept on purpose. Built; verify live.
-- [ ] **A restaurant's name shown whole on a phone** (item 5) — on its own line under "Manager". Built; verify live.
-- [ ] **Printing: the admin board's status words readable; the printing sweep green** (item 6) — 487 / 0 failed / 4 skipped. Built; verify live.
+- [x] **Waiter tablet refuses a minus-sign price** (item 3) — table order, parcel, + add a dish. Verified live on backup (PR #1495): "-50" answered 400 "A price can't be negative".
+- [x] **Five lines that could never run removed** (item 4) — the three permission backstops kept on purpose. Live on backup (PR #1495); verify:live 13/13.
+- [x] **A restaurant's name shown whole on a phone** (item 5) — on its own line under "Manager". Verified live on backup: "little French house" whole, nothing hidden.
+- [x] **Printing: the admin board's status words readable; the printing sweep green** (item 6) — 487 / 0 failed / 4 skipped. Verified live on backup: "1 STUCK"/"ASLEEP" 12px white on #d92d20.
 
 ## 2026-10-10 — sweep #10 T10 round 3 ("do the retest now" — every bit, zero errors)
 
