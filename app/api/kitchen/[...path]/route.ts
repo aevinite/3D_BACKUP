@@ -568,8 +568,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // .eq(restaurant_id, rid) on EVERY by-id write: sb is the service-role client (RLS
       // bypassed), so this filter is the ONLY tenant boundary — without it a stale/foreign
       // order id would be actioned across restaurants (owner's isolation concern, 2026-07-03).
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't on this restaurant's board any more.", 404);
+      if (cur.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409); // sweep #10 T10 round 2, item 12 — a cancelled ticket comes back only through Restore (the manager route's VOIDED_MSG rule)
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: the client discards the body and re-fetches the board, so we skip
       // BOTH the .select() on the update and the full-row re-read (server↔DB egress saver).
@@ -583,8 +584,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // (cooked, waiting for the waiter to carry it out). NOT served — serving is
     // the waiter's action on the tablet. Order stays "preparing" until served.
     if (a === "orders" && c === "ready") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't on this restaurant's board any more.", 404);
+      if (cur.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409); // sweep #10 T10 round 2, item 12 — a cancelled ticket comes back only through Restore (the manager route's VOIDED_MSG rule)
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
       // return=minimal: client discards the body and re-fetches the board → skip the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
@@ -608,8 +610,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // A dish that has since been SERVED is deliberately left alone: the waiter has already carried it
     // out, and un-serving it is a different, explicit action (the tablet's "↩ Send back to kitchen").
     if (a === "orders" && c === "unready") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't on this restaurant's board any more.", 404);
+      if (cur.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409); // sweep #10 T10 round 2, item 12 — a cancelled ticket comes back only through Restore (the manager route's VOIDED_MSG rule)
       const raw = Array.isArray(body?.dishes) ? body.dishes : [];
       const VALID = ["received", "preparing", "ready"];
       // Normalise + drop anything unusable, then cap: a ticket has tens of lines, never thousands.
@@ -669,6 +672,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       patch.served_at = status === "served" ? nowIso() : null;
       // Only need order_id to roll the parent up; the client discards the body → no full row.
       // Scoped by rid so a foreign dish id can't be advanced (service-role bypasses RLS).
+      // Item 12 (sweep #10 T10 round 2): ask the dish's ORDER first — this handler rewrites that order's
+      // status from its dishes below, so on a cancelled ticket it would quietly revive it.
+      { const own = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
+        if (own && own.order_id) {
+          const ord = (await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
+          if (ord && ord.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409);
+        } }
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id"));
       const item = updated[0];
       // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS (sweep 2026-08-04). The update is scoped by

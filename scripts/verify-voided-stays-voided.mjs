@@ -13,6 +13,10 @@
 // says. The second half proves the gate is not refusing everything: the same doors still work on a
 // live ticket, and Restore still works on a cancelled one.
 import { world, call } from "./sweep/t9s10/lib.mjs";
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 let pass = 0, fail = 0;
 const ok = (m) => { pass++; console.log(`  ✓ ${m}`); };
@@ -83,6 +87,51 @@ for (const [verb, path, body, what] of DOORS) {
   if (r.status === 404 && G.WRITES.length === 0) ok("a dish that is gone still answers 404, and nothing is written");
   else bad(`a gone dish answered ${r.status} with ${G.WRITES.length} write(s)`);
 }
+
+// ── ROUND 2 (owner, 2026-10-10 — item 12): the waiter tablet and the kitchen obey the same rule ──
+// Both routes bundled with the same stubs, driven as the admin console (no staff cookie) so their own
+// permission ladders stay out of the way — what is checked is only "does a cancelled ticket come back".
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const req = createRequire(join(ROOT, "package.json"));
+const bundle = (name) => {
+  const out = join(ROOT, `node_modules/.cache/voided-stays-${name}.cjs`);
+  execFileSync("npx", ["esbuild", `app/api/${name}/[...path]/route.ts`, "--bundle", "--platform=node", "--format=cjs", "--alias:@=.",
+    "--alias:@/lib/supabaseAdmin=./scripts/panel-stubs/sb.mjs", "--alias:@/lib/userAuth=./scripts/panel-stubs/userAuth.mjs",
+    "--alias:@/lib/oplog=./scripts/panel-stubs/oplog.mjs", "--external:next/server", "--external:next/cache", "--external:next/headers",
+    `--outfile=${out}`, "--log-level=error"], { cwd: ROOT });
+  return req(out);
+};
+const { NextRequest } = req("next/server");
+const drive = async (route, name, path, body) => {
+  const r = await route.POST(new NextRequest(`http://localhost/api/${name}/${path}`, { method: "POST",
+    headers: { "content-type": "application/json", cookie: "aevidine_admin_rid=" + RID }, body: JSON.stringify(body) }),
+    { params: Promise.resolve({ path: path.split("/") }) });
+  return { status: r.status, text: await r.text() };
+};
+const panelWorld = async (status) => {
+  const G = await world({ who: "admin", fix: {
+    orders: [{ id: "o1", restaurant_id: RID, status, cancelled_at: status === "cancelled" ? recent : null, payment_status: "pending", table_number: "4",
+      items: [{ id: "d1", status: "preparing", qty: 1 }] }],
+    order_items: [{ id: "i1", restaurant_id: RID, order_id: "o1", status: "preparing" }] } });
+  return G;
+};
+for (const [name, doors] of [
+  ["kitchen", [["orders/o1/accept", {}, "✓ Accept"], ["orders/o1/ready", {}, "ALL READY"], ["orders/o1/unready", { items: [{ id: "i1", prev: "preparing" }] }, "take back 'ready'"], ["items/i1/status", { status: "ready" }, "one dish ready"]]],
+  ["tablet", [["orders/o1/accept", {}, "✓ Accept"], ["items/i1/status", { status: "served" }, "serving one dish"]]],
+]) {
+  const route = bundle(name);
+  for (const [path, body, what] of doors) {
+    const G = await panelWorld("cancelled");
+    const r = await drive(route, name, path, body);
+    t2(r.status === 409 && /cancelled/.test(r.text) && G.FIX.orders[0].status === "cancelled" && ordersWrites(G).length === 0,
+      `${name} · ${what} on a cancelled ticket is refused and nothing changes`, `${name} · ${what} answered ${r.status}, ticket now '${G.FIX.orders[0].status}'`);
+  }
+  // …and the same panel still works on a live ticket (accept on a received one).
+  const G = await panelWorld("received");
+  const r = await drive(route, name, "orders/o1/accept", {});
+  t2(r.status === 200 && G.FIX.orders[0].status === "preparing", `${name} · a LIVE ticket is still accepted`, `${name} · a live accept answered ${r.status}`);
+}
+function t2(c, y, n) { c ? ok(y) : bad(n); }
 
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
