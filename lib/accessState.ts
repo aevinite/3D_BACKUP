@@ -67,8 +67,14 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
   const features: Record<string, boolean> = {};
   for (const k of KNOWN_FEATURES) if (k in featOverrides) features[k] = featOverrides[k] === true;
 
+  // EVERY TREE COLUMN EXCEPT platform_channels (sweep #10 T18, item 24). SETTINGS_COLUMNS lists it so
+  // the read/write route can select it, and this loop copied it whole into `settings` — so each delivery
+  // app's API key, in full, went out to the admin's browser on every load of the Access screen, and to
+  // the OWNER's browser inside a staff profile (that route strips `creds`, not this). The model never
+  // needed it here: a channel's on/off is `channels` and its key is the masked `creds` hint, both built
+  // below from the same object. Its only path out of this function is now those two.
   const settings: Record<string, unknown> = {};
-  for (const c of SETTINGS_COLUMNS) if (c in s) settings[c] = s[c];
+  for (const c of SETTINGS_COLUMNS) if (c !== "platform_channels" && c in s) settings[c] = s[c];
 
   // Only the modules this model actually offers a row for. Reading the whole bag would ship any
   // key some other screen parked in there to the browser, and nodeValue would never look at it.
