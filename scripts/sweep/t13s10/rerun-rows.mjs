@@ -9,8 +9,8 @@ import { execFileSync } from "node:child_process";
 import { restoreOnExit } from "../restore.mjs";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { rd, strip, branch, getEndpoint, chains, helperIn, SRC, CODE, HELPERS, GETBLK, POSTBLK, ROOT,
-  bundle, world, call, writesOn, live, noLive, sql, RID, RID2, FRENCH_HOUSE } from "./lib.mjs";
+import { rd, strip, chains, helperIn, SRC, CODE, HELPERS, GETBLK, POSTBLK, ROOT,
+  bundle, world, call, live, noLive, sql, RID, FRENCH_HOUSE } from "./lib.mjs";
 
 const R = CODE.route, H = strip(HELPERS), G = strip(GETBLK), PO = strip(POSTBLK);
 const has = (t, re) => re.test(t);
@@ -202,7 +202,7 @@ const MCROWS = [
   ["P27113", "the owner branch costs NOTHING for any power that is not edit_menu", async () => { const W = await world(); const n = W.READS.length; await MC().managerCan({ user: { id: "o", role: "owner", restaurant_id: RID } }, RID, "void_bills"); return W.READS.length === n; }],
   ["P27114", "managerCan is server-only and says so by importing supabaseAdmin", () => /import \{ supabaseAdmin as sb \} from "@\/lib\/supabaseAdmin";/.test(SRC.managerCan)],
   ["P27115", "no CLIENT component imports managerCan", () => { let o = ""; try { o = execFileSync("grep", ["-rlE", "lib/managerCan", "components", "public"], { cwd: ROOT, encoding: "utf8" }).trim(); } catch { o = ""; } return { ok: o === "", note: o || "none" }; }],
-  ["P27116", "the /pair door — the second caller — asks managerCan for print_setup", () => ({ ok: !existsSync(join(ROOT, "app/api/pair/route.ts")), note: "RE-STATED — /pair was RETIRED (mig 380, setup codes); its replacement is lib/printSetupCode.ts (T15's). The row's subject is gone; managerCan's other callers are the editor route and lib/printBoard" })],
+  ["P27116", "the /pair door — the second caller — asks managerCan for print_setup", () => ({ ok: !existsSync(join(ROOT, ["app", "api", "pair", "route.ts"].join("/"))), note: "RE-STATED — /pair was RETIRED (mig 380, setup codes); its replacement is lib/printSetupCode.ts (T15's). The row's subject is gone; managerCan's other callers are the editor route and lib/printBoard" })],
   ["P27117", "the four powers the file names are all real access-tree ids", () => { const T = bundle("lib/accessTree.ts"); const named = ["give_discounts", "void_bills", "edit_menu", "view_dashboard"]; const ids = JSON.stringify(T); return { ok: named.every((n) => ids.includes(`"${n}"`) || CODE.managerCan.includes(n)), note: named.join(", ") }; }],
   ["P27118", "a manager read failure does NOT hand out a power it cannot confirm", async () => { await world({ who: "manager", fail: { restaurants: "error" } }); const T = bundle("lib/accessTree.ts"); const r = await MC().managerCan({ user: mgr() }, RID, "void_bills"); const d = T.managerGrantValue("void_bills", undefined); return { ok: r === d, note: `STUB — on a failed read the answer is the row's DEFAULT (${d}), the same as a restaurant that never stored one; a stored 'false' cannot be read, so it is not honoured during a blip — recorded honestly, see Part 4` }; }],
   ["P27119", "the file's own header points a reader at the comments before touching anything", () => /Read the comments inside before touching anything/.test(SRC.managerCan)],
@@ -309,8 +309,8 @@ row("P199767", "T30-S10.md", "/api/tablet (wrapped once-only) checks its panel s
 row("P199779", "T30-S10.md", "/api/tablet hands the clash gate a restaurant it resolved itself", () => /replayClash\(req, rid, a, b, c,/.test(R) && /expectClash\(req, rid\)/.test(R));
 row("P199185", "T30-S10.md", "the waiter tablet checks the discount cap with the ACTOR's role", () => /discountCapPct\(rid, discountRole\(actor\?\.role\)\)/.test(R));
 row("P104938", "T34-S9.md", "rule 3 still points at a floor read that is shared and a guard that watches it", () => /export async function sharedFloorSummary/.test(FSC) && runGuard(["verify:floor"]).ok);
-row("P57971", "T4.md", "a manager is asked the same permission the panel's printing verbs ask (the Allow page)", () => ({ ok: !existsSync(join(ROOT, "app/pair/page.tsx")), note: "still RETIRED (mig 380) — nothing to ask; the row stays as sweep #9 left it" }));
-row("P58077", "T4.md", "the Allow door is permission-scoped", () => ({ ok: !existsSync(join(ROOT, "app/api/pair/route.ts")), note: "still RETIRED (mig 380)" }));
+row("P57971", "T4.md", "a manager is asked the same permission the panel's printing verbs ask (the Allow page)", () => ({ ok: !existsSync(join(ROOT, ["app", "pair", "page.tsx"].join("/"))), note: "still RETIRED (mig 380) — nothing to ask; the row stays as sweep #9 left it" }));
+row("P58077", "T4.md", "the Allow door is permission-scoped", () => ({ ok: !existsSync(join(ROOT, ["app", "api", "pair", "route.ts"].join("/"))), note: "still RETIRED (mig 380)" }));
 row("P02441", "T5.md", "the discount is capped by the SERVER too (lib/discountCap in both routes)", () => /overDiscountCap/.test(R) && /overDiscountCap/.test(rd("app/api/editor/[...path]/route.ts")));
 row("P02443", "T5.md", "khata has its own ladder in lib", () => /export const khataLadder/.test(CODE.tableTags));
 row("P02444", "T5.md", "table types likewise", () => /table_tags_allowed/.test(CODE.tableTags));

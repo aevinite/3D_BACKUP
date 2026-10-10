@@ -13,7 +13,6 @@ const a = process.argv;
 const onlyArg = a.find((x) => x.startsWith("--only"));
 const only = onlyArg ? (onlyArg.split("=")[1] || a[a.indexOf(onlyArg) + 1]).split(",") : null;
 const quietLog = console.error; if (!a.includes("--noisy")) { console.error = () => {}; console.warn = () => {}; }
-const origLog = console.log;
-const rows = await runAll({ ledger: a.includes("--ledger"), quiet: !a.includes("--all"), only });
+await runAll({ ledger: a.includes("--ledger"), quiet: !a.includes("--all"), only });
 console.error = quietLog;
 process.exit(0);

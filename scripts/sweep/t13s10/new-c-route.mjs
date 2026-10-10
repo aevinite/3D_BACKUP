@@ -3,7 +3,7 @@
 // by READING it (sweep #8's grid); here every row CALLS the real handler in memory and asserts the
 // status it answered and what it wrote: every permission mode for every gated action, every module
 // switched off, the admin looking in, a manager looking in, missing rows, bad input.
-import { check, world, call, writesOn, RID, RID2, CODE } from "./lib.mjs";
+import { check, world, call, RID, RID2, CODE } from "./lib.mjs";
 
 let n = 182278;
 const id = () => `P${n++}`;
@@ -169,7 +169,7 @@ check(id(), F, "a ticket discount is refused while a whole-bill discount is on",
 check(id(), F, "a body that is not JSON is read as empty, never a crash", S, async () => { await run(); const r = await call("POST", "orders/o1/tip", { body: "{not json" }); return { ok: r.status < 500, note: `${r.status}` }; });
 check(id(), F, "a missing id ('undefined' in the path) is refused before any query", S, async () => { const G = await run(); const r = await call("POST", "orders/undefined/tip", { body: {} }); return r.status === 400 && G.SCOPE_LOG.filter((q) => q.table === "orders").length === 0; });
 check(id(), F, "an unknown POST from the admin is 404", S, async () => { await run({ who: "admin" }); return (await call("POST", "nope", { body: {}, query: `?rid=${RID}` })).status === 404; });
-check(id(), F, "the admin looking at the floor prints NOTHING at the restaurant unless deliberately forced", S, async () => { const G = await world({ who: "admin", fix: { ...BASE_FIX, print_agents: [] }, settings: mods }); const r = await call("POST", "print-jobs", { body: { order_id: "o1" }, query: `?rid=${RID}` }); return { ok: r.status === 200, note: `print-jobs from the admin answered ${r.status} — it queues a KITCHEN reprint deliberately (gated like the KOT menu); the bill door is the one that needs force (verify:print-helper)` }; });
+check(id(), F, "the admin looking at the floor prints NOTHING at the restaurant unless deliberately forced", S, async () => { await world({ who: "admin", fix: { ...BASE_FIX, print_agents: [] }, settings: mods }); const r = await call("POST", "print-jobs", { body: { order_id: "o1" }, query: `?rid=${RID}` }); return { ok: r.status === 200, note: `print-jobs from the admin answered ${r.status} — it queues a KITCHEN reprint deliberately (gated like the KOT menu); the bill door is the one that needs force (verify:print-helper)` }; });
 // scope, across everything this block drove
 check(id(), F, "a broad driven pass: every statement on a restaurant's table names THIS restaurant (or a row it just read)", S, async () => {
   const G = await run();
