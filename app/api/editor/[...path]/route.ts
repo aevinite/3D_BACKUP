@@ -5480,6 +5480,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (m?.device_id) device = m.device_id;
         if (!phone && m?.phone) phone = m.phone;
       }
+      // REJECTED (owner, 2026-10-10) — docs/REJECTED-IDEAS.md → R65: the ban reason is not trimmed or
+      // capped. Offered as sweep #10 T10 item 18; he answered "dn't do 18".
       const row = must(await sb.from("blocklist").insert({ phone, table_number: table, device_id: device, member_id: memberId, reason: body.reason || "banned", restaurant_id: rid }).select())[0];
       // Kick the banned guest from their seat in the SAME request (B23) — the manager panel used to
       // do this as a separate client call, so a network blip could leave them banned-but-still-seated.
