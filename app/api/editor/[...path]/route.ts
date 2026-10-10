@@ -2319,7 +2319,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // still updates the instant its order lands.
       const { data, error } = tbl
         ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
-        : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
+        : await sharedFloorSummary(`floor:${rid}`, async () => {
+          // A failed read THROWS so the 1.5s share drops it (supabase-js resolves `{ error }`, which the
+          // share would otherwise hand every device in the window). The waiter tablet's twin got this as
+          // sweep #10 T13 item 6; the owner asked for this one too (2026-10-11).
+          const r = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null });
+          if (r.error) throw pgError(r.error);
+          return r;
+        });
       if (error) throw new Error(error.message);
       // ── PRINTER TROUBLE — ITS OWN SHARED KEY, NOT FOLDED INTO THE FLOOR READ ───────────────
       // Open printer problems + reprints nobody printed (queued/printing past 90s, or failed out
@@ -2410,9 +2417,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // exact key; the manager route was the one that didn't. Same 1.5s window, and
       // invalidateFloor() drops any key ending in the restaurant id, so a just-made merge is never
       // served stale after a write.
-      const merges = await sharedFloorSummary(`merges:${rid}`, async () => (await sb.from("table_merges")
-        .select("parent_table, child_table, merged_at, merged_by")
-        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || []);
+      const merges = await sharedFloorSummary(`merges:${rid}`, async () => {
+        const r = await sb.from("table_merges")
+          .select("parent_table, child_table, merged_at, merged_by")
+          .eq("restaurant_id", rid).is("ended_at", null).limit(200);
+        if (r.error) throw pgError(r.error);   // never share a failed read as "no joins" (T13 item 6's twin)
+        return r.data || [];
+      }).catch(() => [] as unknown[]);
       // Spread into a NEW object — `data` may BE the 1.5s shared snapshot and a handler must never
       // write into it (owner bug, 2026-08-02). `printer` lands in the same place the panel already
       // reads it from (`state.summary.printer`, editor/app.js printerAlerts), and stays absent on

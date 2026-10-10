@@ -378,5 +378,19 @@ console.log("\n10. the 'Collect later' picker and the park button can never disa
   else bad(`'off' answered ${r2.status}`);
 }
 
+// ── 11. THE MANAGER'S FLOOR NEVER SHARES A FAILED READ EITHER (round 2, item 15 — item 6's twin) ──────
+console.log("\n11. the manager floor: one failed read is not handed to every device for 1.5 s");
+{
+  const T9 = await import("./sweep/t9s10/lib.mjs");
+  const SUM = { tiles: { 1: { counts: {} } }, calls: [], requests: [], joiners: [], order_count: 0 };
+  const G = await T9.world({ fail: { "rpc:lfh_table_view_summary": "error" } });
+  await T9.call("POST", "nothing-here", { body: {} });        // drops floor:<rid> through the editor route's own copy
+  const a = await T9.call("GET", "summary");
+  delete G.FAIL; G.RPC_ANSWERS.lfh_table_view_summary = SUM;
+  const b = await T9.call("GET", "summary");
+  if (a.status >= 500 && b.status === 200) ok(`manager: the failed floor read answers ${a.status}; the very next read is fresh (200)`);
+  else bad(`manager: after a failed floor read the next answered ${b.status} — the failure was shared`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
