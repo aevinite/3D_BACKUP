@@ -61,6 +61,16 @@ const parseAmount = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+// A DATE THAT EXISTS (S10 T28, item 8). The shape test plus Date.parse let "2026-02-31" through —
+// JavaScript reads it as 3 March — and Postgres then refused it (22008, not one of the refusal codes),
+// so the admin was told "Couldn't save … Please try again" for a value that fails for ever. The round
+// trip refuses it here, with the same sentence a typed "27/08/2026" already gets.
+const realDate = (t: string): boolean => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return false;
+  const ms = Date.parse(`${t}T00:00:00Z`);
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === t;
+};
+
 type Billing = {
   restaurant_id: string; plan: string | null; status: string; amount: number | null;
   currency: string; cycle: string; started_on: string | null; next_due_on: string | null; notes: string | null;
@@ -186,7 +196,7 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     const dateOr = (v: unknown, field: string): { value: string | null } | { error: string } => {
       if (v === "" || v == null) return { value: null };
       const t = String(v);
-      return /^\d{4}-\d{2}-\d{2}$/.test(t) && !Number.isNaN(Date.parse(t))
+      return realDate(t)
         ? { value: t }
         : { error: `Enter ${field} as YYYY-MM-DD (e.g. 2026-08-19), or leave it empty.` };
     };
@@ -234,7 +244,7 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     // A DATE, not just "something". Anything non-empty used to go straight at a `date` column, so a
     // typo answered with the database's own "invalid input syntax for type date" in a red toast —
     // a sentence that names no field and tells the admin nothing to change.
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn) || Number.isNaN(Date.parse(paidOn)))
+    if (!realDate(paidOn))
       return bad("Enter the payment date as YYYY-MM-DD (e.g. 2026-08-19).");
     const row = {
       restaurant_id: rid, amount, paid_on: paidOn,
