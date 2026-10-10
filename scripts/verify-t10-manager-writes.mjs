@@ -17,6 +17,7 @@
 //  20  (round 3) a dish price with a minus sign is refused, never saved as the positive number.
 //  17  (round 2) a deleted category or tag is recorded in the Audit by its name, not its slug.
 //   3r4 (round 4) the WAITER TABLET's three typed-price doors refuse a minus sign the same way.
+//   4r4 (round 4) the two refusals behind switches that are always on are gone from this route.
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -299,6 +300,14 @@ for (const price of ["-5", "-0.5", "₹-120"]) {
       `item 3 (round 4) · …and a typed price of "50" on ${what} still goes through`, `item 3 (round 4) · tablet ${what} "50" answered ${r2.status} ${r2.text.slice(0, 80)}`);
   }
 }
+
+// ── 4 (round 4): refusals behind a switch that is always on ──────────────────────────────
+t(!/Parcel orders aren't switched on for this restaurant/.test(code) && !/The Platform board isn't enabled for this restaurant/.test(code),
+  "item 4 (round 4) · the parcel and Platform 'switched off' refusals are gone — both switches are permanently on",
+  "item 4 (round 4) · a refusal behind an always-on switch is back in the route");
+t(!/return err\("no valid dishes"/.test(code) && !/Unknown printing request/.test(code) && !/\(was marked paid\)/.test(code),
+  "item 4 (round 4) · 'no valid dishes', 'Unknown printing request' and the cancel's '(was marked paid)' — lines nothing could reach — are gone",
+  "item 4 (round 4) · a line that can never run is back");
 
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
