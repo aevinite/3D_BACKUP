@@ -61,6 +61,8 @@ await shoot("admin", "/aevinite/restaurants", "desktop", null, "r3-admin-restaur
 for (const vp of ["desktop", "a35"]) for (const [rest, slug] of [["french-house", "truffle-and-wild-mushroom-pizza"], ["aevidine", "ranch-pickled-veggies"]])
   await shoot("guest", `/r/${rest}/item/${slug}`, vp, null, `r4-dish-reviews-${rest}`, /review/i);
 await shoot("admin", "/aevinite/access?rid=00000000-0000-0000-0000-000000000001", "desktop", null, "r4-admin-access", /access|permission|billing/i);
+// item 29: every dish card's rating comes from item_ratings, which mig 418 had emptied for guests
+for (const vp of ["desktop", "a35"]) await shoot("guest", "/r/french-house/menu", vp, null, "r4-guest-menu-ratings", /\b[34]\.\d\b/);
 for (const vp of ["ipad", "a35"]) await shoot("tablet", "/tablet", vp, null, "r4-tablet-floor", null);
 for (const vp of ["desktop", "a35"]) await shoot("manager", "/manager", vp, null, "r4-manager-floor", null);
 // (A busy-table block — one real order placed, photographed and cancelled — was REMOVED: the owner
