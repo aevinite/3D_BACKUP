@@ -116,3 +116,11 @@ t("item 30: lib/paySplit.ts no longer carries the two eslint-disable lines that 
 
 // ── item 34: the coverage run works on a fresh install (it needed a folder that `npm ci` does not make) ──
 t("item 34: coverage.mjs creates node_modules/.cache before its reporter writes there (a fresh install has no such folder)", /mkdirSync\(dirname\(out\), \{ recursive: true \}\);/.test(src("scripts/t30-harness/coverage.mjs")) && src("scripts/t30-harness/coverage.mjs").indexOf("mkdirSync(dirname(out)") < src("scripts/t30-harness/coverage.mjs").indexOf("execFileSync(process.execPath"));
+
+// ── item 35: claiming a tap asks for nothing back ──
+{ const I = await import("@/lib/idempotency.ts"); const { req } = await import("./lib.mjs");
+  world({ action_idempotency: [] }); W.UNIQUE = { action_idempotency: ["action_id"] };
+  const run = I.withIdempotency(async () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } }), "editor");
+  const before = W.READS.length; await run(req({ "x-lfh-action-id": "r5-A" }, { lfh_user: "u" }), {});
+  const claims = W.WRITES.filter((w) => w.table === "action_idempotency");
+  t("item 35: a fresh tap's claim is one insert and one 'done' update — and it reads nothing back (no .select after the insert)", W.READS.length === before && claims.map((w) => w.op).join() === "insert,update" && !/\.insert\(\{ action_id: actionId, panel \}\)\.select\(/.test(src("lib/idempotency.ts")), claims.map((w) => w.op).join()); }
