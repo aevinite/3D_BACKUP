@@ -82,6 +82,16 @@ message. Improvements were not built; they are in the chat report only. Ledger: 
 | 76 | (guard) | Payments vs Sales compared across other sessions' writes | steady read |
 | 77 | (guard) | "Payments reconciles to Sales" compared two snapshots taken minutes apart | both recomputed (refresh=1) on a steady read — the owner's 5-minute snapshot rule is by design |
 | 78 | Admin → Repair → Resolve all | a garbled restaurant id cleared EVERY restaurant's open problems; the test did it every run | the route refuses a bad scope (fail closed); the test asserts the refusal and that nothing is cleared |
+| 79 | (scripts) | db-maintain, load-ramp-orders, reset-demo-history, seed-supabase called the dev-only lock without importing it — each crashed before doing anything | the import added; proved with a non-dev URL and the network blocked |
+| 80 | Admin → restaurant → Settings → table QR codes (French House, backup) | the admin settings suite renewed table 1's permanent QR code 3× per run and never put it back — a printed sticker would stop working | read before, written back after, restoreOnExit; verify:test-safety rule 18; sabotaged |
+| 81 | (guards) | t16 blocks C–G named a variable that was never declared | removed |
+| 82 | (guards) | verify:db-parity asked the client database without read-only mode — only the SQL text stood between a typo and a change | read_only:true; its 4 questions re-asked of dev; rule 19; sabotaged (its first draft passed wrongly — fixed) |
+| 83 | (lint) | the last 45 warnings in scripts/, tests/, .github/ | cleared; cap 115 → 70; sabotaged both ways |
+| 84 | (guards) | t18 rerun2 claimed to read a print route the repo never had | removed |
+| 85 | (guards) | nothing checked the ~400 files in scripts/ tests/ .github/ that no entry runs | verify:every-script, 639 files, in CI; its 3 helper packages declared; sabotaged 5 ways |
+| 86 | (guards) | 14 of T3's old code-reading checks red: 13 were the code moving on purpose (incl. the #1427 basket he picked), 1 a sloppy window | re-stated, each with why; 430 / 320 / 380 green; sabotaged |
+| 87 | (guards) | six tools named a removed sweep worktree by full path, so each crashed on its first read | read the checkout they live in; every-script refuses it; t29-live 8/8 against an app copy |
+| 88 | Guest menu → basket → the 🗑 on each dish (every restaurant) | the bin button shrank in #1427 to a 16px icon with 6px padding — a 28px target, under the usual 44px for a thumb | NOT changed: the guest screen is outside this sweep and it is the layout he picked — his decision |
 
 Not fixed, with the reason: `verify:db-parity` (reads the client stack — not run; its folder half now runs
 as verify:migration-numbers, where 388 is a listed, explained pair). Payments vs Sales: both use the same
