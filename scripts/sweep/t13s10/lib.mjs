@@ -135,7 +135,18 @@ const ALIASES = ["--alias:@=.",
   "--external:next/server", "--external:next/cache", "--external:next/headers"];
 const bundles = new Map();
 /** Bundle one repo file (route or lib) against the stubs and require it. */
+// COVERAGE MODE (round 2): the REAL source files, imported once up front through ./hooks.mjs, so V8's
+// coverage lands on the lines of the files themselves. bundle() then hands those back by name.
+const COVER = process.env.T13_COVERAGE ? new Map() : null;
+if (COVER) {
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||= "http://127.0.0.1:9/stub";
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= "stub-anon-key";
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||= "stub-service-key";
+  for (const rel of [ROUTE_REL, "lib/tableAssign.ts", "lib/payments.ts", "lib/floorSummary.ts", "lib/liveBoard.ts", "lib/cancelWatch.ts", "lib/managerCan.ts", "lib/tableOfAction.ts",
+    "lib/tableTags.ts", "lib/accessTree.ts", "lib/accessModel.ts", "lib/businessDay.ts"]) COVER.set(rel, await import(pathToFileURL(join(ROOT, rel)).href));
+}
 export function bundle(rel, extra = []) {
+  if (COVER) { if (!COVER.has(rel)) throw new Error(`coverage mode: ${rel} was not preloaded`); return COVER.get(rel); }
   const bkey = rel + "|" + extra.join(",");
   if (bundles.has(bkey)) return bundles.get(bkey);
   process.env.NEXT_PUBLIC_SUPABASE_URL ||= "http://127.0.0.1:9/stub";

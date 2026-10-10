@@ -504,5 +504,18 @@ console.log("\n16. the table slice carries the five guest columns the screen rea
   else bad(`the slice answered ${r.status} with ${(r.json && r.json.members || []).length} guest(s)`);
 }
 
+// ── 17. TABLE 0 IS NOT A TABLE — SO IT IS NOT "SOMEONE ELSE'S SECTION" EITHER (round 2, item 23) ──────
+console.log("\n17. a move to table 0 is told it isn't a valid table, not that it's outside the waiter's section");
+{
+  const { bundle } = await import("./sweep/t13s10/lib.mjs");
+  const TA = bundle("lib/tableOfAction.ts");
+  if (["0", 0, "-3", -1].every((v) => TA.normTable(v) === "") && TA.normTable("07") === "7") ok("normTable: 0 and negatives are 'not a table' (\"\"); 07 is still table 7");
+  else bad(`normTable(0) = '${TA.normTable(0)}', normTable(-3) = '${TA.normTable(-3)}'`);
+  await world({ fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open" }] } });
+  const r = await call("POST", "sessions/s1/shift", { body: { to: "0" } });
+  if (r.status === 400 && /valid table to move to/.test(r.text)) ok("moving a party to table 0 → 400 'Pick a valid table to move to'");
+  else bad(`moving to table 0 answered ${r.status} ${r.text.slice(0, 80)}`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -14,9 +14,14 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 // Table numbers are TEXT in every operational table (orders/sessions/waiter_calls/
 // requests/table_tags) but INTEGER[] on the staff row, so all comparing is done on
 // normalised STRINGS. "007" and 7 must be the same table.
+// A table is 1 or more. 0 and negatives are not tables at all (sweep #10 T13 round 2, item 23): they
+// used to come back as "0" / "-3", so moving a party to "table 0" was refused by the section gate with
+// "Table 0 isn't in your section — ask your manager to add it", sending a waiter to a manager about a
+// table that cannot exist. As "" they are "not a table number" — the section gate lets them past and
+// the action's own check answers ("Pick a valid table to move to").
 export const normTable = (v: unknown): string => {
   const n = parseInt(String(v ?? "").trim(), 10);
-  return Number.isFinite(n) ? String(n) : "";
+  return Number.isFinite(n) && n > 0 ? String(n) : "";
 };
 
 export type Affected = { tables: string[]; unknown: boolean };
