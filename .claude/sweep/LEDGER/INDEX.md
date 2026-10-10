@@ -65,7 +65,7 @@ terminals' rows — keep both sides.
 | T10 | `P179001`–`P180000` + `P211001`–`P211999` (round 3, claimed on `main` before a row was written — above every claim in this table) | The manager panel's server route, part 2 of 2 | `T10-S10.md` | 1062 | 1062 | 15 | 15 |
 | T11 | `P180001`–`P181000` | The kitchen screen | ⏳ not run yet | — | — | — | — |
 | T12 | `P181001`–`P182000` | The waiter tablet screen | ⏳ not run yet | — | — | — | — |
-| T13 | `P182001`–`P183000` | The waiter tablet's server route, and the shared floor logic | `T13-S10.md` | 527 | 527 | 7 | 7 |
+| T13 | `P182001`–`P183000` + `P169001`–`P169999` (round 2, the last unclaimed block of the planning gap — claimed on `main` before a row was written; owner asked 2026-10-11 for 500–1000 more, "every single bit") | The waiter tablet's server route, and the shared floor logic | `T13-S10.md` | 527 | 527 | 7 | 7 |
 | T14 | `P183001`–`P184000` | The bill and KOT document | ⏳ not run yet | — | — | — | — |
 | T15 | `P184001`–`P185000` | The print queue and the print helper | ⏳ not run yet | — | — | — | — |
 | T16 | `P185001`–`P186000` | Shared panel plumbing — the helpers every panel loads | ⏳ not run yet | — | — | — | — |
