@@ -151,16 +151,10 @@ const tableOpsEffectiveFromRow = (s: Record<string, unknown> | null) =>
 // _allowed side is backfilled true, so ordering stays on unless the admin turns it off.
 const takeOrdersEffectiveFromRow = (s: Record<string, unknown> | null) =>
   !!s && s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
-// PARCEL module rung (migs 197/259), from an already-fetched settings row. Its OWN columns:
-// the counter parcel is not the delivery apps — see the box at the top of lib/tableTags.ts.
-// Reading takeaway_* here (as it did between migs 235 and 259) hides the 🥡 button on every
-// restaurant that simply isn't on Zomato/Swiggy.
-// PERMANENT since 2026-08-03 (owner: "the parcel counter should not have a toggle option…
-// permanently there"). Kept as a named helper rather than deleted so every caller still reads
-// one thing, and so this comment sits where the old gate was. The parcel_* columns still exist
-// in settings and an old row may say false — reading it again would let a retired switch take a
-// live feature away. See the box at the top of lib/tableTags.ts before changing this.
-const parcelEffectiveFromRow = (_s: Record<string, unknown> | null) => true;
+// (parcelEffectiveFromRow lived here — a "rung" that answered true for every restaurant since Parcel
+//  became permanent on 2026-08-03, guarding a line that could never fire. Removed in sweep #10 T13
+//  round 2 as dead code; the box at the top of lib/tableTags.ts says why Parcel has no switch, and
+//  parcel_* is still read by nothing, which is the point.)
 // WHAT A WAITER MAY DO — one resolver, shared with the screen (2026-08-04).
 //
 // This used to read `settings[key] || "off"`, which is the bug the sweep found: a capability with
@@ -333,9 +327,11 @@ function narrowSummary(summary: Record<string, any>, limit: SectionLimit | null)
 const nowIso = () => new Date().toISOString();
 // Mark an order EDITED after placement → bumps orders.edited_at so the "✎ Edited"
 // badge shows on every panel (mirrors the manager). Best-effort; never fails the edit.
-const stampEdited = async (orderId?: string | null, rid?: string) => {
+// `rid` is REQUIRED (round 2): it was optional with an unscoped fallback no caller ever used — an
+// optional scope is one a future caller forgets (the note lib/sessionClose.ts carries for the same reason).
+const stampEdited = async (orderId: string | null | undefined, rid: string) => {
   if (!orderId) return;
-  try { let q = sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); if (rid) q = q.eq("restaurant_id", rid); await q; } catch {}
+  try { await sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId).eq("restaurant_id", rid); } catch {}
 };
 
 // Keep the SQLSTATE on the thrown error: lib/dbRefusal reads it to tell a refused VALUE (400,
@@ -740,8 +736,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         setOut.table_ops_tablet_allowed = tOpsOk;
         // Order-taking module off → the tablet's ＋Take order button hides (tri-state 'off').
         if (!takeOrdersEffectiveFromRow(setOut)) setOut.tablet_take_orders = "off";
-        // Parcel module off → the tablet's 🥡 Parcel button hides (tri-state 'off').
-        if (!parcelEffectiveFromRow(setOut)) setOut.tablet_parcel = "off";
       }
       // WAITER SECTIONS: the client MUST be told the list, not just given fewer tiles.
       // renderFloor() draws 1…table_count and treats a missing tile as an EMPTY table, so
@@ -2528,7 +2522,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "loyalty") {
       const tRaw = String(b || "").trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
-      const t = await mergeParentTable(sb, rid, tRaw);
+      // (A mergeParentTable() read sat here whose answer nothing used — the balance is the PHONE's,
+      //  not the table's. One database round trip per pay-sheet open, removed in round 2.)
       const ent = await getOwnerEntitlements(rid);
       if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
       const phone = String(body?.phone || "").slice(0, 20);

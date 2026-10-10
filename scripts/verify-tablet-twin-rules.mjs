@@ -392,5 +392,20 @@ console.log("\n11. the manager floor: one failed read is not handed to every dev
   else bad(`manager: after a failed floor read the next answered ${b.status} — the failure was shared`);
 }
 
+// ── 12. THE DEAD BITS STAY GONE (round 2, item 17) ──────────────────────────────────────────────────
+console.log("\n12. no dead gate, no optional scope, no read whose answer nothing uses");
+{
+  const { readFileSync } = await import("node:fs");
+  const t = readFileSync(new URL("../app/api/tablet/[...path]/route.ts", import.meta.url), "utf8").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+  if (!/parcelEffectiveFromRow\s*[(=]/.test(t)) ok("the always-true parcel 'rung' is gone (Parcel has no switch since 2026-08-03)");
+  else bad("parcelEffectiveFromRow is back — a gate that can never fire");
+  if (/const stampEdited = async \(orderId: string \| null \| undefined, rid: string\)/.test(t) && !/if \(rid\) q = q\.eq/.test(t)) ok("stampEdited REQUIRES the restaurant (no unscoped fallback)");
+  else bad("stampEdited's restaurant is optional again");
+  const G = await world({ ents: { customers: true }, fix: { table_merges: [] } });
+  const r = await call("POST", "tables/3/loyalty", { body: { phone: "9876543210" } });
+  if (r.status === 200 && !G.SCOPE_LOG.some((q) => q.table === "table_merges")) ok("the points balance asks no table question (the merged-parent read whose answer nothing used is gone)");
+  else bad(`the points balance answered ${r.status} and read table_merges ${G.SCOPE_LOG.filter((q) => q.table === "table_merges").length}×`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
