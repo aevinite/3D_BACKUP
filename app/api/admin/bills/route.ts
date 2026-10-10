@@ -390,7 +390,38 @@ async function postImpl(req: NextRequest) {
     if (ordersQ.error) return adminFail("this bill", ordersQ.error, { action: "save" });
     const orderRows = ordersQ.data as ({ id: string } & MoneyCols)[] | null;
     const ids = (orderRows || []).map((o) => o.id);
-    const res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason });
+    // ── A THROWN DELETE IS ANSWERED IN WORDS, AND WHAT DID GO IS STILL RECORDED (S10 T28, item 1) ──
+    // softDeleteOrders() throws when the database refuses a write, and this call had no catch — the
+    // RESTORE half below has had one since T7's F3. So a refusal answered a bare 500 the console
+    // cannot read, and worse: the throw can come AFTER the orders are stamped (the bill's own
+    // tombstone is the last write), in which case the orders were gone from the books while the loop
+    // that writes one Removals row per order never ran. On the strongest removal in the product the
+    // permanent record must never be the thing that is missing. So: catch it, find out what actually
+    // went, record exactly that, and say plainly whether to press again.
+    let res: { deleted: number };
+    try { res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason }); }
+    catch (e) {
+      console.error("[admin/bills] delete failed:", e instanceof Error ? e.message : String(e));
+      const nowGoneQ = ids.length
+        ? await sb.from("orders").select("id").eq("session_id", sessionId).in("id", ids).not("deleted_at", "is", null).limit(BILL_ORDER_CAP)
+        : null;
+      const goneIds = new Set(((nowGoneQ?.data || []) as { id: string }[]).map((o) => o.id));
+      if (nowGoneQ?.error || !goneIds.size) {
+        // Nothing went (or we cannot tell, in which case the record cannot be written either way).
+        return NextResponse.json({ error: "Couldn't delete that bill — nothing was changed. Please try again." }, { status: 500 });
+      }
+      for (const o of (orderRows || []).filter((x) => goneIds.has(x.id))) {
+        await recordRemoval({
+          rid, kind: "order_deleted", reason: { note: reason || null }, user: null,
+          orderId: o.id, sessionId, tableNumber: sess.table_number != null ? String(sess.table_number) : null,
+          amount: netAmount(o),
+          meta: { from: "admin bill ledger", orders_on_bill: (orderRows || []).length, partial: true },
+        });
+      }
+      invalidateFloor(rid);
+      await logAction("admin", "order_delete", { restaurant_id: rid, actor: "Admin", table_number: sess.table_number, detail: `admin deleted ${goneIds.size} order(s) of bill${sess.bill_no ? ` #${sess.bill_no}` : ""} — the bill itself could not be marked deleted${reason ? ` — ${reason}` : ""}` });
+      return NextResponse.json({ error: "The bill's orders were deleted, but the bill itself could not be marked deleted. Press Delete again to finish." }, { status: 500 });
+    }
     // …and into the Audit, the one place a person looks for "what was removed and why". The
     // admin's own bill ledger deleted bills with only an activity-log line, so the biggest
     // removal available anywhere in the product was missing from the Removals record
@@ -407,8 +438,16 @@ async function postImpl(req: NextRequest) {
       });
     }
     // A session with no orders won't be reached by softDeleteOrders — tombstone it directly.
+    // CHECKED, and asked which row it touched (S10 T28, item 1). This write was awaited and its answer
+    // thrown away, so a refusal still replied ok and wrote "admin deleted bill" to the Change log for a
+    // bill that was still there. And a bill that was ALREADY deleted — a second tab, a second press —
+    // matched no row and was reported as deleted again, a second removal line for one removal. The
+    // first press wins; the second is told.
     if (!ids.length) {
-      await sb.from("sessions").update({ deleted_at: new Date().toISOString(), deleted_by: "Admin", delete_reason: reason || null }).eq("id", sessionId).is("deleted_at", null);
+      const tomb = await sb.from("sessions").update({ deleted_at: new Date().toISOString(), deleted_by: "Admin", delete_reason: reason || null })
+        .eq("id", sessionId).eq("restaurant_id", rid).is("deleted_at", null).select("id");
+      if (tomb.error) return adminFail("this bill", tomb.error, { action: "save" });
+      if (!tomb.data?.length) return NextResponse.json({ error: "That bill is already deleted — refresh the page." }, { status: 409 });
     }
     invalidateFloor(rid);
     // SIGNED (owner, 2026-08-31 — item 11). `logAction` takes an actor and this route never passed
@@ -444,7 +483,19 @@ async function postImpl(req: NextRequest) {
     // Un-tombstone the session itself (covers the no-orders case + belt for the rest).
     // Scoped by restaurant like every other write on this route — rid came from this very
     // session two reads ago, so the row was already right; the missing pair was a consistency gap.
-    await sb.from("sessions").update({ deleted_at: null, deleted_by: null, deleted_by_id: null, delete_reason: null }).eq("id", sessionId).eq("restaurant_id", rid);
+    // CHECKED (S10 T28, item 1). For a bill WITH orders, restoreOrders() has already un-tombstoned
+    // the session and this is a belt, so a refusal here is only logged. For an order-less bill this
+    // write IS the restore — its answer was thrown away, so a refusal replied "restored" over a bill
+    // that still read deleted. And a bill that is not deleted at all (restored in another tab) matched
+    // nothing and was recorded as restored a second time; that one is told instead.
+    const untomb = await sb.from("sessions").update({ deleted_at: null, deleted_by: null, deleted_by_id: null, delete_reason: null })
+      .eq("id", sessionId).eq("restaurant_id", rid).not("deleted_at", "is", null).select("id");
+    if (untomb.error) {
+      if (!ids.length) return adminFail("this bill", untomb.error, { action: "save" });
+      console.error("[admin/bills] orders restored but the session belt-write failed:", untomb.error.message);
+    } else if (!ids.length && !untomb.data?.length) {
+      return NextResponse.json({ error: "That bill isn't deleted any more — refresh the page." }, { status: 409 });
+    }
     // …AND INTO THE PERMANENT AUDIT (T7 finding F4). The delete wrote one `deletion_audit` row per
     // order — a table nothing prunes — while the restore wrote only the Activity-log line below,
     // which mig 158 clears after 30 days at most. A month on, the lasting record said "removed" and
