@@ -88,8 +88,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       // being the whole platform, which is the exact fault being fixed, moved to a different number.
       // The comment above the batch is right that four whole-platform reads beat an N+1 loop; paging
       // keeps that (no extra round trip below a thousand restaurants) and removes the silent cut.
+      // LIVE RESTAURANTS ONLY (S10 T28, item 4). This read had no `deleted_at` test, so every
+      // restaurant in the recycle bin — and every one purged from it — got a row on the board, "no
+      // computer · printing off", indistinguishable from a live shop with a dead printer. Measured on
+      // the dev database the day this was fixed: 293 rows for 11 live restaurants. Every other admin
+      // board reads this table with `.is("deleted_at", null)`, and the act-as door says a binned
+      // restaurant "stays out of every list". The page already falls back to the overview when a
+      // ?rid= matches nothing here, so a bookmark to a binned restaurant lands somewhere sensible.
       pageAll<{ id: string; name: string; slug: string }>("restaurants", (from, to) =>
-        sb.from("restaurants").select("id, name, slug").order("name").range(from, to)),
+        sb.from("restaurants").select("id, name, slug").is("deleted_at", null).order("name").range(from, to)),
       // ── PAGED FOR THE SAME REASON THE LIST ABOVE IS (T26 sweep #9, item 10, owner picked it
       //    2026-09-16) ────────────────────────────────────────────────────────────────────────────
       // The restaurants read was moved onto pageAll on 2026-08-31 because "a ceiling of any size is
