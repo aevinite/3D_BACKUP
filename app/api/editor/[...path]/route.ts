@@ -6746,7 +6746,12 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       if (a === "filters" && !(await menuSubAllowed(g, rid, "manage_filters"))) return permDenied("manage filters");
       // What it was CALLED, read before it goes — an Audit row saying "dish: 7f3c-…" names
       // nothing a person recognises (2026-08-02).
-      const gonesTitle = ((await sb.from(t.name).select("title").eq(t.key, id).eq("restaurant_id", rid).maybeSingle()).data as { title?: string } | null)?.title || "";
+      // A dish has a `title`; a category or a tag has a per-language `name` and NO title column — so
+      // asking every kind for "title" made the category/tag read fail and the Audit fall back to the
+      // slug ("category: mains" for "Main course"). Fixed by sweep #10 T10 round 2, item 17.
+      const gone = (await sb.from(t.name).select(a === "items" ? "title" : "name").eq(t.key, id).eq("restaurant_id", rid).maybeSingle()).data as { title?: string; name?: unknown } | null;
+      const nm = gone && typeof gone.name === "object" && gone.name ? gone.name as Record<string, unknown> : null;
+      const gonesTitle = String(gone?.title || (nm ? (nm.en || Object.values(nm).find((v) => String(v ?? "").trim())) : gone?.name) || "").slice(0, 80);
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
       //
