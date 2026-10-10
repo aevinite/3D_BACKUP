@@ -109,6 +109,7 @@ const EXPLAINED_WRITES = {
   "scripts/verify-t24b-live.mjs": "every write is one the server refuses (400/409) — read-only by construction, as its header says",
   "scripts/sweep/t3/s9-checks.mjs": "each POST is shaped to be refused (bad table, 201 lines, no token, junk body) and asserts the refusal",
   "scripts/sweep/t27r2/d-settings.mjs": "its settings saves are undone by the harness's whole-row snapshot; table 1's QR code is put back by itself (item 80)",
+  "scripts/verify-t10-manager-writes.mjs": "hermetic — the manager and tablet routes run in-process against the in-memory stub (scripts/panel-stubs), a fresh world per check; its POSTs never leave the process",
   "scripts/t17-harness/u-close-last.mjs": "hermetic — the route runs in-process against the in-memory stub (./sb.mjs), wiped before each check",
   "scripts/t17-harness/u-close-profile.mjs": "hermetic — the route runs in-process against the in-memory stub (./sb.mjs), wiped before each check",
   "scripts/t17-harness/u-profile.mjs": "hermetic — the route runs in-process against the in-memory stub (./sb.mjs), wiped before each check",

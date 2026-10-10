@@ -16,7 +16,12 @@
 //  13  (round 2) a quick-order discount over the limit is refused before the order exists.
 //  20  (round 3) a dish price with a minus sign is refused, never saved as the positive number.
 //  17  (round 2) a deleted category or tag is recorded in the Audit by its name, not its slug.
+//   3r4 (round 4) the WAITER TABLET's three typed-price doors refuse a minus sign the same way.
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { world, call } from "./sweep/t9s10/lib.mjs";
 
 let pass = 0, fail = 0;
@@ -255,6 +260,44 @@ for (const price of ["-5", "-0.5", "₹-120"]) {
   const r2 = await call("POST", "orders/o1/add-item", { body: { dishId: "dal", price: "-50" } });
   t(r2.status === 400 && /can't be negative/.test(r2.text) && !G2.RPCS.some((c) => c.name === "lfh_staff_add_item_to_order"),
     "item 20 · adding a dish with a typed price of \"-50\" is refused, nothing added", `item 20 · add-item -50 answered ${r2.status}`);
+}
+
+// ── 3 (round 4): the waiter tablet's twins ────────────────────────────────────────────────
+// The tablet route bundled with the same stubs and driven as the admin console, so its own
+// permission ladders stay out of the way — the question is only "is a minus sign refused, and does
+// a normal typed price still go through".
+{
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const req = createRequire(join(ROOT, "package.json"));
+  const out = join(ROOT, "node_modules/.cache/t10-writes-tablet.cjs");
+  execFileSync("npx", ["esbuild", "app/api/tablet/[...path]/route.ts", "--bundle", "--platform=node", "--format=cjs", "--alias:@=.",
+    "--alias:@/lib/supabaseAdmin=./scripts/panel-stubs/sb.mjs", "--alias:@/lib/userAuth=./scripts/panel-stubs/userAuth.mjs",
+    "--alias:@/lib/oplog=./scripts/panel-stubs/oplog.mjs", "--external:next/server", "--external:next/cache", "--external:next/headers",
+    `--outfile=${out}`, "--log-level=error"], { cwd: ROOT });
+  const tablet = req(out);
+  const { NextRequest } = req("next/server");
+  const drive = async (path, body) => {
+    const r = await tablet.POST(new NextRequest(`http://localhost/api/tablet/${path}`, { method: "POST",
+      headers: { "content-type": "application/json", cookie: "aevidine_admin_rid=" + RID }, body: JSON.stringify(body) }),
+      { params: Promise.resolve({ path: path.split("/") }) });
+    return { status: r.status, text: await r.text() };
+  };
+  const OPEN = [{ id: "dal", restaurant_id: RID, slug: "dal", title: "Dal", price: "", open_price: true, tags: [], tax_mode: null }];
+  for (const [what, path, bodyOf, rpcName, extra] of [
+    ["a table order", "order", (p) => ({ table: "4", items: [{ id: "dal", qty: 1, price: p }] }), "lfh_staff_place_order", { lfh_staff_place_order: { ok: true, order_id: "o9" } }],
+    ["a parcel", "parcel", (p) => ({ items: [{ id: "dal", qty: 1, price: p }], customer: "Asha" }), "lfh_platform_insert", { lfh_platform_insert: { id: "p9" } }],
+    ["adding a dish to a ticket", "orders/o1/add-item", (p) => ({ dishId: "dal", qty: 1, price: p }), "lfh_staff_add_item_to_order", { lfh_staff_add_item_to_order: { ok: true } }],
+  ]) {
+    const fix = { menu_items: OPEN, orders: [{ id: "o1", restaurant_id: RID, status: "preparing", table_number: "4" }] };
+    let G = await world({ who: "admin", fix, rpc: extra, settings: { take_orders_allowed: true } });
+    const r = await drive(path, bodyOf("-50"));
+    t(r.status === 400 && /can't be negative/.test(r.text) && !G.RPCS.some((c) => c.name === rpcName),
+      `item 3 (round 4) · the waiter tablet refuses a typed price of "-50" on ${what}, nothing priced or sent`, `item 3 (round 4) · tablet ${what} "-50" answered ${r.status} ${r.text.slice(0, 80)}`);
+    G = await world({ who: "admin", fix, rpc: extra, settings: { take_orders_allowed: true } });
+    const r2 = await drive(path, bodyOf("50"));
+    t(r2.status === 200 && G.RPCS.some((c) => c.name === rpcName),
+      `item 3 (round 4) · …and a typed price of "50" on ${what} still goes through`, `item 3 (round 4) · tablet ${what} "50" answered ${r2.status} ${r2.text.slice(0, 80)}`);
+  }
 }
 
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
