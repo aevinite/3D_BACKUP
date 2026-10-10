@@ -17,7 +17,7 @@
 // READ-ONLY: SELECTs on the dev project only (refused on any other). Nothing is written anywhere.
 //   H. every saved order re-computed from its own dishes; I. every bill settled in parts vs its paper.
 // Ids P167501–P167700 (claimed on main, 2026-10-09). APPEND ONLY; never renumber.
-import { readFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -70,8 +70,9 @@ const check = async (file, what, fn, key = keyOf(file, what)) => {
   let id = IDS[key];
   // round 3's block (P167501–P167700) is closed; a subject first seen in round 4 or later takes the next id
   // from this terminal's round-4 block, P166301–P166600 (claimed on main, PR #1470).
-  // (round 5 on: new subjects take P210501–P210800, this terminal's round-5 block — PR #1479)
-  if (!id) { const used = new Set(Object.values(IDS)); let n = 210501; while (used.has(`P${n}`)) n++; if (n > 210800) { id = "P—"; unassigned.push(key + " (block full)"); } else { id = `P${n}`; IDS[key] = id; unassigned.push(key); } }
+  // (round 5 on: new subjects take P210801–P210900 of this terminal's round-5 block, PR #1479 — the harness's
+  // round-5 suites own P210001–P210700; the first try here started at P210501 and collided with u-round5b)
+  if (!id) { const used = new Set(Object.values(IDS)); let n = 210801; while (used.has(`P${n}`)) n++; if (n > 210900) { id = "P—"; unassigned.push(key + " (block full)"); } else { id = `P${n}`; IDS[key] = id; unassigned.push(key); } }
   let res; NOTE = ""; try { res = await fn(); } catch (e) { res = "threw: " + (e && e.message); }
   ROWS.push({ id, key, file, what, ok: res === true, skip: typeof res === "string" && res.startsWith("skip:"), note: res === true ? NOTE.slice(0, 220) : String(res).slice(0, 220) });
 };
@@ -489,6 +490,13 @@ await check("lib (the 14 money files, as recorded)", "the planner was really ask
   const P = await sql(`select policyname, roles::text r from pg_policies where schemaname = 'public' and tablename = 'reviews'`);
   await check("supabase/migrations/419_the_ratings_view_reads_three_review_columns_and_never_the_device.sql", "migration 419 is live: the one reviews policy is guest_reads_ratings_columns_only, for the guest and signed-in keys", () => (P.length === 1 && P[0].policyname === "guest_reads_ratings_columns_only" && /anon/.test(P[0].r) && /authenticated/.test(P[0].r)) || JSON.stringify(P), "r5|mig|419"); }
 
+// No id here may sit inside a block a harness suite hands out — `suite(name, first, size)` in each
+// scripts/t30-harness/u-*.mjs. (Round 5's first allocation started at P210501, inside u-round5b's
+// P210301–P210700, and 28 numbers meant two different checks until the ledger merge noticed.)
+{ const H = join(root, "scripts/t30-harness"); const blocks = [];
+  for (const f of readdirSync(H).filter((x) => /^u-.*\.mjs$/.test(x))) for (const m of readFileSync(join(H, f), "utf8").matchAll(/\bsuite\("[^"]*",\s*(\d+),\s*(\d+)\)/g)) blocks.push([f, Number(m[1]), Number(m[1]) + Number(m[2]) - 1]);
+  const inside = Object.values(IDS).map((v) => Number(v.slice(1))).flatMap((n) => blocks.filter(([, a, b]) => n >= a && n <= b).map(([f]) => `P${n} (${f})`));
+  await check("scripts/sweep/t30s10/parity.mjs", "no id here is one a harness suite hands out (each suite's block is read from its own suite(…) line)", () => (blocks.length >= 20 && !inside.length) || (blocks.length < 20 ? `only ${blocks.length} suite blocks found — the reader is not seeing them` : `inside a harness block: ${inside.slice(0, 6).join(" · ")}`), "parity|ids-clear-of-harness"); }
 await check("scripts/sweep/t30s10/parity.mjs", "every row has a PERMANENT id — none is new to parity-ids.json (a new subject is given one with --assign-ids)", () => !unassigned.length || `new: ${unassigned.join(" · ")}`, "parity|ids");
 if (ARGV.includes("--assign-ids") && unassigned.length) { (await import("node:fs")).writeFileSync(IDFILE, JSON.stringify(IDS, null, 1) + "\n"); console.log(`assigned ${unassigned.length} new id(s) in parity-ids.json`); }
 
