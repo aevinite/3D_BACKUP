@@ -14,6 +14,7 @@
 //   6  a tip on a ticket that has gone is refused, not reported as saved.
 //   7  handling a rating and clearing a table name the restaurant in every WHERE clause, not only the id.
 //  13  (round 2) a quick-order discount over the limit is refused before the order exists.
+//  20  (round 3) a dish price with a minus sign is refused, never saved as the positive number.
 //  17  (round 2) a deleted category or tag is recorded in the Audit by its name, not its slug.
 import { readFileSync } from "node:fs";
 import { world, call } from "./sweep/t9s10/lib.mjs";
@@ -223,6 +224,37 @@ for (const [amt, placed, what] of [[50, false, "₹50 off ₹200 at a 10% limit 
   const did = G.RPCS.some((c) => c.name === "lfh_staff_place_order");
   t(placed ? (r.status === 200 && did) : (r.status === 403 && !did && /Nothing was sent/.test(r.text)),
     `item 13 · ${what}`, `item 13 · ₹${amt} answered ${r.status}, order placed=${did}`);
+}
+
+// ── 20 (round 3) ──────────────────────────────────────────────────────────────────────────
+for (const price of ["-5", "-0.5", "₹-120"]) {
+  const G = await world({ who: "owner", fix: { menu_items: [{ id: "dal", restaurant_id: RID, slug: "dal", title: "Dal", price: "200", image: "", category: "" }] } });
+  const r = await call("POST", "items", { body: { id: "dal", price } });
+  t(r.status === 400 && /can't be negative/.test(r.text) && G.FIX.menu_items[0].price === "200",
+    `item 20 · a dish price typed as ${JSON.stringify(price)} is refused, the stored ₹200 untouched`, `item 20 · ${JSON.stringify(price)} answered ${r.status}, price now ${G.FIX.menu_items[0].price}`);
+}
+{
+  const G = await world({ who: "owner", fix: { menu_items: [{ id: "dal", restaurant_id: RID, slug: "dal", title: "Dal", price: "200", image: "", category: "" }] } });
+  const r = await call("POST", "items", { body: { id: "dal", price: "₹1,299.50" } });
+  t(r.status === 200 && G.FIX.menu_items[0].price === "1299.5", "item 20 · …while a real price with a ₹ sign and a comma still saves (1299.5)", `item 20 · ₹1,299.50 answered ${r.status} → ${G.FIX.menu_items[0].price}`);
+}
+
+{
+  const G = await world({ fix: { menu_items: [{ id: "dal", restaurant_id: RID, slug: "dal", title: "Dal", price: "", open_price: true, tags: [] }] } });
+  const r = await call("POST", "parcel", { body: { items: [{ id: "dal", qty: 1, price: "-50" }] } });
+  t(r.status === 400 && /can't be negative/.test(r.text) && !G.RPCS.some((c) => c.name === "lfh_platform_insert"),
+    "item 20 · a counter parcel's typed open price of \"-50\" is refused, nothing created", `item 20 · parcel -50 answered ${r.status}`);
+}
+
+{
+  const G = await world({ settings: { take_orders_allowed: true } });
+  const r = await call("POST", "order", { body: { table: "4", items: [{ id: "dal", qty: 1, price: "-50" }] } });
+  t(r.status === 400 && /can't be negative/.test(r.text) && !G.RPCS.some((c) => c.name === "lfh_staff_place_order"),
+    "item 20 · a quick order with a typed price of \"-50\" is refused before it is priced or placed", `item 20 · order -50 answered ${r.status}`);
+  const G2 = await world({ fix: { orders: [{ id: "o1", restaurant_id: RID, status: "preparing" }] } });
+  const r2 = await call("POST", "orders/o1/add-item", { body: { dishId: "dal", price: "-50" } });
+  t(r2.status === 400 && /can't be negative/.test(r2.text) && !G2.RPCS.some((c) => c.name === "lfh_staff_add_item_to_order"),
+    "item 20 · adding a dish with a typed price of \"-50\" is refused, nothing added", `item 20 · add-item -50 answered ${r2.status}`);
 }
 
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);

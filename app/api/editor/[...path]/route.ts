@@ -3600,6 +3600,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tn = Number(t);
       if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
       if (!itemsOk) return err("items required");
+      // A typed open price with a minus sign is refused here (item 20, round 3): lfh_price_order strips
+      // every non-digit, so "-50" would be priced at ₹50. The pricer itself is a database function
+      // outside this file — listed for the owner — so the manager's doors refuse it before pricing.
+      if (items.some((i: any) => i && i.price != null && /-/.test(String(i.price)))) return err("A price can't be negative — check the prices you typed.", 400);
       // Overridable double-tap guard: refuse an IDENTICAL order for the same table within
       // 3s unless confirmDuplicate:true (two guests ordering the same drink is legitimate).
       const optSig = (opts: any) => (Array.isArray(opts) && opts.length)
@@ -3764,6 +3768,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // don't read the (empty) DB price. A missing/zero price on such a line is refused.
         let price: number;
         if (d.open_price) {
+          // A minus sign is refused, not stripped — the same fault as the dish save (item 20, round 3):
+          // "-50" typed at the counter was charged as ₹50.
+          if (/-/.test(String(it?.price ?? ""))) return err(`A price can't be negative — check the price for "${d.title}".`, 400);
           price = Math.max(0, Math.min(100000, Number(String(it?.price ?? "").replace(/[^0-9.]/g, "")) || 0));
           if (price <= 0) return err(`Enter a price for "${d.title}".`, 400);
           price = Math.round(price * 100) / 100;
@@ -5087,6 +5094,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);
       const dishId = String(body?.dishId || body?.id || "").trim();
       if (!dishId) return err("dish required");
+      if (body?.price != null && /-/.test(String(body.price))) return err("A price can't be negative — check the price you typed.", 400); // item 20
       if (!(await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That order was not found.", 404); // B15 scoping
       const line = {
         id: dishId,
@@ -6123,6 +6131,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // every guest order that included it. Validate + normalise to one clean number here. Only
         // when a price is actually being set (a tag-only edit omits it, so partial saves still work).
         if ("price" in body) {
+          // A MINUS SIGN IS REFUSED, NOT STRIPPED (sweep #10 T10 round 3, item 20). The cleaning below
+          // removes every character that is not a digit or a dot — including "-" — so the `n < 0` test
+          // could never fire: "-5" was saved as ₹5, "-0.5" as ₹0.50, "₹-120" as ₹120, silently. The
+          // dish form's Price box is plain text, so a slip of the finger reached the guest menu as a
+          // different, positive price. A price with a minus anywhere is refused out loud instead.
+          if (/-/.test(String(body.price ?? ""))) return err("A price can't be negative — enter a number like 1299 or 129.99.", 400);
           const cleaned = String(body.price ?? "").replace(/[^0-9.]/g, "");
           const n = Number(cleaned);
           if (cleaned === "" || !Number.isFinite(n) || n < 0 || (cleaned.match(/\./g) || []).length > 1) {
