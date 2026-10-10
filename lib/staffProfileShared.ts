@@ -273,6 +273,9 @@ export function paymentFrom(body: Record<string, unknown>): {
   const amount = Number(String(body.amount ?? "").replace(/[,\s₹]/g, ""));
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter an amount greater than zero.");
   if (amount > 99_999_999) throw new Error("That amount looks wrong — it's too large.");
+  // GREATER THAN ZERO AFTER ROUNDING (sweep #10 T18, item 13). 0.004 passed the check above and was
+  // then stored as ₹0.00 — a payment of nothing in somebody's pay history.
+  if (Math.round(amount * 100) <= 0) throw new Error("Enter an amount greater than zero.");
   const mode = String(body.mode ?? "cash");
   if (!(PAY_MODES as readonly string[]).includes(mode)) throw new Error("Unknown payment mode.");
   // for_period is normalised to the FIRST day of the month it is for, so the monthly cost
