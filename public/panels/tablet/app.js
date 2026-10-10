@@ -817,23 +817,11 @@ function banquetRate() {
   return comps.length ? comps.reduce((a, c) => a + c.rate, 0) / 100 : effRate();
 }
 
-// "Print" the first time, "Reprint" after that (owner, 2026-08-19: "after once print the button
-// will just show reprint instead of print works same"). Same rule and same wording as the manager
-// panel's billPrintLabel — the answer comes off the BILL (sessions.bill_printed_at, mig 333), so
-// the manager printing at the till makes THIS screen say "Reprint" a minute later.
-// WORKS THE SAME: same handler, same sheet, no question asked, nothing recorded.
-// Same remembered set as the manager panel, for the same reason: a refresh landing between the
-// print and the server's stamp must never turn "Reprint" back into "Print" on a bill whose paper
-// the guest is already holding.
-const _billPrintedHere = new Set();
-function billPrintedBefore(sess, os) {
-  if (sess && sess.bill_printed_at) return true;
-  if ((os || []).some((o) => o && o.bill_printed_at)) return true;
-  const sid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
-  return !!sid && _billPrintedHere.has(sid);
-}
-function billPrintLabel(sess, os, suffix) {
-  return `<span data-bill-print-btn>🖨 ${billPrintedBefore(sess, os) ? "Reprint" : "Print"}${suffix ? " " + suffix : ""}</span>`;
+// A guest bill's button always says "Print" — the manager panel's billPrintLabel, same rule.
+// REJECTED (owner, 2026-10-10): no "Reprint" marking on the guest bill (R62) — the kitchen ticket's
+// DUPLICATE is the only reprint word in the product.
+function billPrintLabel(_sess, _os, suffix) {
+  return `<span data-bill-print-btn>🖨 Print${suffix ? " " + suffix : ""}</span>`;
 }
 
 // printTableBill(t): give the guest their bill FROM THE WAITER'S HANDHELD.
@@ -882,26 +870,7 @@ async function printTableBill(t) {
     // he removed it — a guest asking for their bill again is service, not an incident. billdoc.js
     // has no such flag any more, and scripts/verify-bill-reprint-is-silent.mjs keeps it that way.
   }));
-  // Stamp the first print, so this bill's button reads "Reprint" on EVERY panel from now on —
-  // that is the only thing the stamp does. Idempotent on the server; fire-and-forget, because a
-  // failed stamp must never stand between a guest and their bill. Nothing is written to the Audit.
-  // Remembered as printed the moment the window is written, not when the server answers.
-  if (sess.id) _billPrintedHere.add(sess.id);
-  if (sess.id && !sess.bill_printed_at) {
-    try {
-      api("POST", `/sessions/${sess.id}/bill-printed`)
-        .then(() => {
-          _billPrintedHere.add(sess.id);
-          sess.bill_printed_at = new Date().toISOString();
-          os.forEach((o) => { if (o && !o.bill_printed_at) o.bill_printed_at = sess.bill_printed_at; });
-          // Relabel the button already under the waiter's finger, without a redraw of the panel.
-          document.querySelectorAll("[data-bill-print-btn]").forEach((b) => {
-            b.textContent = b.textContent.replace(/\bPrint\b/, "Reprint");
-          });
-        })
-        .catch(() => {});
-    } catch (e) { /* offline — the paper still came out */ }
-  }
+  // No "bill printed" stamp any more (owner, 2026-10-10 — R62): it only turned the button into "Reprint".
   // Does a COMPUTER own the bills? (mig 341) Filled from the answer to /print/send itself — the tablet
   // has no printing poll of its own and does not need one: it TRIES the basket, and the server says
   // `noRoute` when no computer owns this paper, which is the same fallback the manager panel uses.
@@ -915,7 +884,7 @@ async function printTableBill(t) {
   // Any other answer (noRoute, an error, no signal) falls through to the window, exactly as before:
   // a waiter must never be left holding a guest's bill with nothing on screen.
   // sess.id, NOT `sid` — my first version reached for a variable that lives in a DIFFERENT function
-  // (billPrintedBefore's local), which parses perfectly and throws the moment a waiter presses Print.
+  // (a helper's local, since deleted), which parses perfectly and throws the moment a waiter presses Print.
   // The session is `sess` here, named twenty lines above.
   if (!sess.id) { openBillWindow(html); return; }
   api("POST", "/print/send", { kind: "bill", sessionId: sess.id })

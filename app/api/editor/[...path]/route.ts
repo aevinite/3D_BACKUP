@@ -1568,12 +1568,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // whether it's invoiced/locked (invoice lives on the session, not the order).
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
       if (sids.length) {
-        // `bill_printed_at` rides along (mig 333) so the panel knows a bill has ALREADY been on
-        // paper and can label its button "Reprint" instead of "Print". It has to come from the row,
-        // not from the device that printed: the case that matters is the manager printing at the
-        // till and a WAITER reprinting from the tablet a minute later, whose own screen would
-        // otherwise still say "Print". REJECTED (owner, 2026-08-19): this must NOT put anything on
-        // the paper or in the Audit — it changes one word on one button, nothing else.
+        // (`bill_printed_at` used to ride along here for the bill's "Reprint" button — gone, R62.)
         const [sessQ, memQ, chainQ, payQ] = await Promise.all([
           // `invoice_reopen_count` (mig 407) rides along so a bill that is LIVE again can still
           // show it was reopened — invoice_voided only covers the state while it is on the floor.
@@ -1581,7 +1576,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           // alone — safe by construction, because `sids` came from a restaurant-scoped orders read, but
           // the rule here is that every read names its restaurant and its bound, so that no future change
           // to how `sids` is built can quietly widen them. The round-2 query audit found these two.
-          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,invoice_reopen_count,bill_no,cust_name,cust_phone,bill_printed_at").eq("restaurant_id", rid).in("id", sids).limit(sids.length),
+          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,invoice_reopen_count,bill_no,cust_name,cust_phone").eq("restaurant_id", rid).in("id", sids).limit(sids.length),
           sb.from("session_members").select("session_id,name,role").eq("restaurant_id", rid).in("session_id", sids).eq("role", "owner").limit(2000),
           // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
           // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
@@ -1644,8 +1639,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             // who the BILL is made out to (captured at invoice time, mig 227). Kept apart
             // from customer_name below, which is the guest's own name on their phone.
             o.bill_cust_name = s.cust_name; o.bill_cust_phone = s.cust_phone;
-            // Has this bill already been on paper? (mig 333) — the BUTTON then says "Reprint".
-            o.bill_printed_at = s.bill_printed_at;
             // The verification line the bill prints (mig 332). Named the way billdoc's billData
             // reads them off the session, so no panel has to reshape anything.
             const ch = chainMap[o.session_id];
@@ -3981,28 +3974,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, id: b, paid: true });
     }
 
-    /* sessions/:id/bill-printed — record that this TABLE's bill went to the printer (mig 333).
-       The exact shape of platform/:id/printed below, one table across, and for the same stated
-       reason: the fact has to live on the BILL, not on the device that printed it, because the
-       manager prints at the till and a waiter may reprint from the tablet a minute later — that
-       second device has no other way to know paper already exists.
-       Stamped ONCE and never moved: the first print stays the first print. Deliberately not
-       reversible from here. Answering ok() when it is already stamped means a panel can call it
-       after every print without a guard of its own, and a retry is free.
-       WHAT IT IS FOR, AND WHAT IT IS NOT (corrected by sweep #10 T10, item 5): it ONLY lets the
-       button read "Reprint" instead of "Print". The second copy is NOT branded — the owner removed the "Reprint · Duplicate" band on
-       2026-08-19 (docs/REJECTED-IDEAS.md, the row beside R38) — and a reprint is NOT recorded
-       anywhere — R38. This comment used to promise that every later copy carries a reprint brand — the one
-       sentence most likely to make someone rebuild the band. See docs/REJECTED-IDEAS.md R38 and the row above it. */
-    if (a === "sessions" && c === "bill-printed") {
-      const owns = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
-      if (!owns) return err("That bill isn't for this restaurant.", 404);
-      if (owns.bill_printed_at) return ok({ ok: true, id: b, bill_printed_at: owns.bill_printed_at, reprint: true });
-      const at = new Date().toISOString();
-      const up = await sb.from("sessions").update({ bill_printed_at: at }).eq("id", b).eq("restaurant_id", rid);
-      if (up.error) throw new Error(up.error.message);
-      return ok({ ok: true, id: b, bill_printed_at: at, reprint: false });
-    }
+    // ── sessions/:id/bill-printed IS GONE (owner, 2026-10-10 — docs/REJECTED-IDEAS.md → R62) ──────
+    // It stamped sessions.bill_printed_at the first time a guest bill was printed, and that stamp did
+    // exactly one thing: it turned the bill's button into "Reprint". The owner removed the reprint
+    // marking from the guest bill — *"this was for kot not bill so remove the thing"* — so the stamp
+    // has no reader left (the waiter tablet's twin went in the same change). The column stays in the table, unread: dropping it would be a schema
+    // change for nothing, and an old value must not be able to bring the word back.
 
     // platform/:id/printed — record that this order's customer bill went to the printer
     // (mig 256). Together with `paid` this is what decides when a Parcel tile leaves the

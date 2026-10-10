@@ -19,7 +19,8 @@
 //   1. the BILL sheet never carries the word, even if a caller insists;
 //   2. the kitchen TICKET still does — that banner is his, from 2026-08-04, and he re-confirmed it;
 //   3. no print path asks a question, and nothing about a print reaches the Audit;
-//   4. the button says "Reprint" after the first print, on every panel that can print a bill.
+//   4. the bill's button always says "Print" — no "Reprint" word, no stamp (owner, 2026-10-10, R62:
+//      "this was for kot not bill so remove the thing" — this REVERSES part 4 as it stood on 2026-08-19).
 //
 // Reopening a bill is a DIFFERENT act and stays fully recorded — the reopen reason is still
 // required, `invoice_voided` is still audited, and the new invoice number is still logged. Part 3
@@ -64,6 +65,7 @@ const EDITOR = read("public/panels/editor/app.js");
 const TABLET = read("public/panels/tablet/app.js");
 const BILLDOC_SRC = read("public/panels/billdoc.js");
 const ROUTE = read("app/api/editor/[...path]/route.ts");
+const TROUTE = read("app/api/tablet/[...path]/route.ts");
 
 // Code only. Several checks below look for wording that these files legitimately QUOTE in their
 // REJECTED comments (that is the "write every rejection into the code" rule doing its job), so the
@@ -143,14 +145,13 @@ say("\n3. NOTHING ASKS, NOTHING IS RECORDED — but a REOPEN still is");
       ? bad(`${what} asks a question before printing`, "printing paper is not a decision — it must go straight to the printer")
       : ok(`${what} prints without asking anything`);
   });
-  // 3c. The stamp endpoint records paper, and records it NOWHERE ELSE. If a log() call ever appears
-  // inside sessions/:id/bill-printed, every reprint starts filling the Audit — the exact thing he
-  // said it must not do.
-  const stamp = ROUTE.slice(ROUTE.indexOf('if (a === "sessions" && c === "bill-printed")'));
-  const stampBody = stamp.slice(0, stamp.indexOf("\n    }") + 6);
-  stampBody && !/await log\(|recordRemoval\(/.test(stampBody)
-    ? ok("recording that a bill was printed writes nothing to the Activity log or the Audit")
-    : bad("printing a bill now writes an Audit / Activity row", 'owner 2026-08-19: "it\'s not any kind of problem which needs to be audited"');
+  // 3c. There is no "this bill was printed" stamp at all any more (R62, 2026-10-10) — so there is
+  // nothing that could start filling the Audit on a reprint. Both routes are checked.
+  [["manager route", ROUTE], ["waiter route", TROUTE]].forEach(([what, src]) => {
+    !/c === "bill-printed"/.test(src) && !/update\(\{ bill_printed_at/.test(src)
+      ? ok(`${what}: no door stamps a bill as printed`)
+      : bad(`${what}: a bill-printed stamp is back`, "R62 — the guest bill keeps no reprint marking, and nothing records a reprint");
+  });
   // 3d. …and no audit vocabulary was invented for it anywhere in the product.
   const AUDIT_WORDS = /"?bill_reprint|bill_printed"|"?invoice_reprint|reprinted the bill/i;
   [["lib/logTrail.ts", read("lib/logTrail.ts")],
@@ -177,37 +178,26 @@ say("\n3. NOTHING ASKS, NOTHING IS RECORDED — but a REOPEN still is");
     : bad("the before → after record after a reopen is gone", "owner 2026-08-05 asked for both sides of a reopen");
 }
 
-say("\n4. THE BUTTON SAYS \"REPRINT\" AFTER THE FIRST PRINT — same button, same job");
+say("\n4. THE BILL'S BUTTON ALWAYS SAYS \"PRINT\" — no reprint marking on a guest bill (owner, 2026-10-10, R62)");
 {
   [["manager panel", EDITOR], ["waiter tablet", TABLET]].forEach(([what, src]) => {
-    /function billPrintedBefore\(/.test(src) && /function billPrintLabel\(/.test(src)
-      ? ok(`${what}: one reader decides the word (billPrintedBefore / billPrintLabel)`)
-      : bad(`${what}: the print label is not read from one place`, "two readers is how one screen ends up saying Print and another Reprint for the same bill");
-    /bill_printed_at/.test(src)
-      ? ok(`${what}: the word comes off the BILL (sessions.bill_printed_at), not off this device`)
-      : bad(`${what}: nothing reads bill_printed_at`, "a device-local flag is right on the till and wrong on the tablet");
+    const i = src.indexOf("function billPrintLabel(");
+    const body = i < 0 ? "" : src.slice(i, src.indexOf("\n}", i) + 2);
+    body && !/Reprint/.test(body)
+      ? ok(`${what}: billPrintLabel always says Print`)
+      : bad(`${what}: the bill's label can say Reprint again`, "R62 — the guest bill keeps no reprint marking");
+    !/billPrintedBefore|_billPrintedHere|markBillPrintedLocally|\/bill-printed|bill_printed_at/.test(src.replace(/\/\/[^\n]*/g, ""))
+      ? ok(`${what}: nothing remembers, stamps or reads whether a bill was printed`)
+      : bad(`${what}: a "was this bill printed?" reader is back`, "R62 — remove it; the word it fed is gone");
   });
-  // Every bill-print button in the manager panel goes through the label helper. A hard-coded
-  // "🖨 Print" beside one that relabels is the inconsistency he would see first.
-  const HARDCODED = /<button[^>]*(?:data-print-group|data-print-issue|data-bp-print|data-bm-print|id="sxPrint")[^>]*>\s*🖨\s*Print/;
-  !HARDCODED.test(EDITOR)
-    ? ok("no manager-panel bill button hard-codes the word Print")
-    : bad("a bill print button still hard-codes 🖨 Print", "use billPrintLabel(sess, orders[, suffix]) so it flips with the others");
-  !/id="printBillBtn">🖨 Print/.test(TABLET)
-    ? ok("the tablet's Print bill button uses the label helper too")
-    : bad("the tablet hard-codes 🖨 Print bill", "use billPrintLabel(s, os, \"bill\")");
-  // The flip must be visible without waiting for a refresh, and must not double-apply.
-  /data-bill-print-btn/.test(EDITOR) && /data-bill-print-btn/.test(TABLET)
-    ? ok("the label flips on screen the moment the first copy is printed")
-    : bad("nothing relabels the button after printing", "the person would still read Print on a bill they just printed");
-  [["manager panel", EDITOR], ["waiter tablet", TABLET]].forEach(([what, src]) => {
-    /\\bPrint\\b\/, "Reprint"/.test(src)
-      ? ok(`${what}: the flip is word-bounded, so "Reprint" never becomes "ReReprint"`)
-      : bad(`${what}: the relabel is not word-bounded`, 'replace(/\\bPrint\\b/, "Reprint") — a bare replace hits the word inside "Reprint"');
-  });
+  // The Bills record card's own label.
+  /const printLbl = "\\u\{1F5A8\} Print";/.test(EDITOR)
+    ? ok("the Bills record's print button says Print whatever the bill's history")
+    : bad("the Bills record's print button can say Reprint", "R62");
+  // The kitchen ticket is the ONE place the reprint word lives (part 2 checks the banner itself).
 }
 
 if (fails) console.log(`\n${fails} FAILED — a reprint of a BILL is not an event (owner, 2026-08-19).`);
-else say("\nAll checks passed — a bill reprints silently, the kitchen ticket still says DUPLICATE, and a reopen is still recorded.");
+else say("\nAll checks passed — a bill reprints silently and its button always says Print, the kitchen ticket still says DUPLICATE, and a reopen is still recorded.");
 // A hook refusal is exit 2 (the harness shows it to whoever made the edit); a normal run is 1.
 process.exit(fails ? (HOOK ? 2 : 1) : 0);

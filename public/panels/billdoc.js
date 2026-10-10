@@ -768,9 +768,9 @@
    Do NOT re-add a band, a watermark, a "(copy)" suffix in the doc name, or a small-print line
    here. Bill data carries no reprint flag at all any more, for exactly that reason, and
    scripts/verify-bill-reprint-is-silent.mjs fails the build if the word comes back onto this
-   sheet. The one record of a re-print is where it belongs: sessions.bill_printed_at (mig 333,
-   re-commented by mig 339) is what makes the panels' button read 'Reprint', and reopening a bill
-   is a different act entirely — that one IS recorded in the Audit, and stays so.
+   sheet. A re-print of a BILL is recorded nowhere and marked nowhere — not even on the panels'
+   button, which always says 'Print' (owner, 2026-10-10, R62). Reopening a bill is a different act
+   entirely — that one IS recorded in the Audit, and stays so.
    The KITCHEN TICKET keeps its big DUPLICATE banner (owner, 2026-08-04, re-confirmed
    2026-08-19: "bill only keep kot banner") — a cook mistaking a duplicate for a fresh order
    cooks the food twice, which is a real kitchen fault, not a piece of paperwork.
