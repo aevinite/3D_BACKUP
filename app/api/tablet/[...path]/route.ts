@@ -584,10 +584,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // call (lib/floorSummary.ts) — several devices polling together used to queue 1,800
       // statements each and cross the statement timeout. A targeted ?table= refetch is never
       // shared, so a tile still updates the instant its order lands.
+      // A FAILED FLOOR READ IS NEVER SHARED (sweep #10 T13, item 6). supabase-js does not THROW when
+      // the database refuses or times out — it RESOLVES with `{ error }`. Handed to sharedFloorSummary as
+      // it was, that is a successful computation, so lib/floorSummary's own rule ("a failure is never
+      // cached — the entry is dropped so the next caller retries") never fired: one statement timeout
+      // was served to every device that polled in the next 1.5 s, the exact "one blip became 1.5s of
+      // failures" the file was rewritten to prevent. The compute now throws, so the share drops it and
+      // the next device asks again. pgError keeps the SQLSTATE, so a timeout still reads as "busy —
+      // retrying" (lib/panelFailure) rather than a crash.
       const { data, error } = tbl
         ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
-        : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
-      if (error) throw new Error(error.message);
+        : await sharedFloorSummary(`floor:${rid}`, async () => {
+          const r = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null });
+          if (r.error) throw pgError(r.error);
+          return r;
+        });
+      if (error) throw pgError(error);
       const shared = data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] };
       // WAITER SECTIONS (mig 222): keep only the tables this waiter was given. `limit` is
       // null — and this is a total no-op — for the admin, for a manager/owner looking in,
@@ -620,9 +632,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // allows up to 20 in a window), so one bulk change issued twenty identical reads for the
       // same handful of rows. Same 1.5s window, and invalidateFloor() drops this key too, so a
       // just-made merge is never served stale after a write.
-      const merges = await sharedFloorSummary(`merges:${rid}`, async () => (await sb.from("table_merges")
-        .select("parent_table, child_table, merged_at, merged_by")
-        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || []);
+      // Same rule for the joins (item 6): a failed read throws, so it is never shared as "no joins";
+      // this one answer falls back to [] — exactly what it always showed — and the next poll retries.
+      const merges = await sharedFloorSummary(`merges:${rid}`, async () => {
+        const r = await sb.from("table_merges")
+          .select("parent_table, child_table, merged_at, merged_by")
+          .eq("restaurant_id", rid).is("ended_at", null).limit(200);
+        if (r.error) throw pgError(r.error);
+        return r.data || [];
+      }).catch(() => [] as unknown[]);
       const summaryOut = { ...(summary as Record<string, unknown>), merges };
       // Targeted (?table=N): tile only — the panel keeps its cached agnostic bundle.
       if (tbl) return ok(summaryOut);

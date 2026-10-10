@@ -234,5 +234,31 @@ for (const [o, what] of [[{ payment_status: "paid", status: "served" }, "a PAID 
   else bad(`an unpaid ticket's discount answered ${r.status}, discount ${G.FIX.orders[0].discount}`);
 }
 
+// ── 6. A FAILED FLOOR READ IS NEVER SHARED WITH THE NEXT DEVICE (item 6) ───────────────────────────
+// supabase-js resolves `{ error }` instead of throwing, so a failed read used to be shared for 1.5s.
+console.log("\n6. one failed floor read is not handed to every device for the next 1.5 s");
+{
+  const SUMMARY = { tiles: { 1: { counts: {} } }, calls: [], requests: [], joiners: [], order_count: 0 };
+  const G = await world({ fail: { "rpc:lfh_table_view_summary": "error" } });
+  await call("POST", "nothing-here", { body: {} });          // drops floor:<rid> through the route's own copy
+  const a = await call("GET", "summary", { query: "?nomenu=1" });
+  delete G.FAIL; G.RPC_ANSWERS.lfh_table_view_summary = SUMMARY;
+  const b = await call("GET", "summary", { query: "?nomenu=1" });
+  if (a.status >= 500 && b.status === 200) ok(`the failed read answers ${a.status}, and the very next device's read is fresh (200), not the failure`);
+  else bad(`after a failed floor read the next read answered ${b.status} — the failure was shared`);
+  const c = await call("GET", "summary", { query: "?nomenu=1" });
+  if (G.RPCS.filter((x) => x.name === "lfh_table_view_summary").length === 2 && c.status === 200) ok("…and a GOOD read is still shared (the third read cost no extra computation)");
+  else bad(`a good read was not shared: ${G.RPCS.filter((x) => x.name === "lfh_table_view_summary").length} computations`);
+}
+{
+  const G = await world({ rpc: { lfh_table_view_summary: { tiles: {}, calls: [], requests: [], joiners: [] } }, fail: { "table_merges:select": "error" } });
+  await call("POST", "nothing-here", { body: {} });
+  const a = await call("GET", "summary", { query: "?table=1" });
+  delete G.FAIL; G.FIX.table_merges = [{ restaurant_id: RID, parent_table: "1", child_table: "2", ended_at: null }];
+  const b = await call("GET", "summary", { query: "?table=1" });
+  if (a.status === 200 && Array.isArray(a.json.merges) && a.json.merges.length === 0 && b.json.merges.length === 1) ok("a failed joins read degrades that ONE answer to no joins, and the next answer has the real join");
+  else bad(`joins after a failed read: first ${a.status} ${JSON.stringify(a.json && a.json.merges)}, next ${JSON.stringify(b.json && b.json.merges)}`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
