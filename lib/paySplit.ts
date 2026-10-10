@@ -116,7 +116,6 @@ export function badSplitShape(splits: unknown): string | null {
  * may mark a bill paid — this makes no permission decision of its own.
  */
 export async function settleBillInParts(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sb: any,
   opts: { rid: string; table: string; splits: SplitLeg[] },
 ): Promise<SplitResult> {
@@ -126,9 +125,16 @@ export async function settleBillInParts(
 
   // Same scoping as a normal settle: the table's OPEN session's orders (fallback:
   // its active un-archived orders), only accepted + unpaid + non-cancelled ones.
-  const sessQ = await sb.from("sessions").select("id")
-    .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
-    .order("last_activity_at", { ascending: false }).limit(1);
+  // ONE ROUND TRIP FEWER (sweep #10 T30 round 5, 2026-10-10): the settings read needs only the restaurant,
+  // so it is sent TOGETHER with the session read rather than after the orders. (A query builder is sent
+  // only when awaited — see the "unawaited builder" note — hence Promise.all, not a builder kept for later.)
+  // Each answer is still checked exactly where it was: the session's here, the settings' below.
+  const [sessQ, setQ] = await Promise.all([
+    sb.from("sessions").select("id")
+      .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
+      .order("last_activity_at", { ascending: false }).limit(1),
+    sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle(),
+  ]);
   if (sessQ.error) return busy("open session", sessQ.error);
   const openSess = sessQ.data?.[0] as { id: string } | undefined;
   // A SOFT-DELETED ORDER IS NOT PART OF THE BILL (2026-08-05) — it was neither excluded from the
@@ -166,7 +172,6 @@ export async function settleBillInParts(
   // own 18% — is not asked for at the dine-in 5%, and a rate corrected today cannot re-price a bill
   // taken this morning. `> 0` on purpose: a genuine 0 (composition) falls through to the settings,
   // which also return 0, rather than being read as "not stamped".
-  const setQ = await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle();
   if (setQ.error) return busy("settings", setQ.error);
   const set = setQ.data || {};
   const settingsRate = effectiveTaxRate(set);
@@ -386,7 +391,6 @@ export async function settleBillInParts(
  * are left standing. Returns how many were reversed, so the caller can log honestly.
  */
 export async function reverseSplitLegs(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sb: any,
   opts: { rid: string; sessionId: string; since: string; actor?: string | null; reason?: string | null },
 ): Promise<{ reversed: number; amount: number }> {
