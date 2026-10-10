@@ -536,5 +536,25 @@ console.log("\n18. a ticket with no table is never refused as 'not in your secti
   else bad(`a no-table call answered ${r2.status}`);
 }
 
+// ── 19. A DATABASE ERROR KEEPS ITS CODE, SO A TIMEOUT SAYS "BUSY" (round 2, item 26) ──────────────────
+console.log("\n19. a database timeout reads as 'busy — retrying' (503), not 'something went wrong' (500)");
+{
+  const { readFileSync } = await import("node:fs");
+  const t = readFileSync(new URL("../app/api/tablet/[...path]/route.ts", import.meta.url), "utf8").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+  const dropped = (t.match(/throw new Error\(/g) || []).length;
+  if (!dropped) ok("no branch throws `new Error(…)` — every database error keeps its SQLSTATE through pgError");
+  else bad(`${dropped} branch(es) throw new Error(…) and drop the database's error code`);
+  for (const [path, fail, what] of [["customer-recognize", "lfh_recognize_customer", "the repeat-customer lookup"], ["customer-search", "lfh_customer_phone_search", "the customer search"]]) {
+    const G = await world({ fail: { [`rpc:${fail}`]: "timeout" } });
+    const r = await call("GET", path, { query: path === "customer-search" ? "?q=987" : "?phone=98765" });
+    if (r.status === 503) ok(`${what} timing out answers 503 (the screen retries)`);
+    else bad(`${what} timing out answered ${r.status}`);
+  }
+  const G = await world({ fail: { "rpc:lfh_staff_place_order": "timeout" } });
+  const r = await call("POST", "order", { body: { table: "3", items: [{ id: "d1" }] } });
+  if (r.status === 503) ok("placing an order while the database times out answers 503 — the outbox queues it, like offline");
+  else bad(`placing an order during a timeout answered ${r.status}`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

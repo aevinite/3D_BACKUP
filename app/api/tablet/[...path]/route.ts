@@ -336,6 +336,10 @@ const stampEdited = async (orderId: string | null | undefined, rid: string) => {
 
 // Keep the SQLSTATE on the thrown error: lib/dbRefusal reads it to tell a refused VALUE (400,
 // the person must see it) from the server failing to answer (500, saved and retried).
+// EVERY database error in this file is thrown through pgError (round 2, item 26) — fourteen branches
+// used `throw new Error(error.message)`, which dropped the SQLSTATE, so a statement timeout answered a
+// generic 500 "something went wrong" instead of 503 "busy — retrying", and a row that vanished mid-write
+// was written to the Repair board as a crash. verify:tablet-twins §19 keeps it that way.
 const must = (r: any) => {
   if (r.error) throw pgError(r.error); // pgError keeps code/details/hint — see lib/dbRefusal
   return r.data;
@@ -527,7 +531,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const phone = (new URL(req.url).searchParams.get("phone") || "").trim().slice(0, 20);
       if (!phone) return ok({ known: false });
       const { data, error } = await sb.rpc("lfh_recognize_customer", { p_phone: phone, p_restaurant_id: rid });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       return ok(data || { known: false });
     }
 
@@ -545,7 +549,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const q = (new URL(req.url).searchParams.get("q") || "").replace(/\D/g, "").slice(0, 15);
       if (q.length < 3) return ok({ matches: [] });
       const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: 6 });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       return ok({ matches: Array.isArray(data) ? data : [] });
     }
 
@@ -1322,7 +1326,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // bypasses both layers for a deliberate re-send.
         p_confirm_duplicate: body?.confirmDuplicate === true,
       });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       // The RPC's atomic guard fired (a concurrent identical order beat this one): surface it
       // as the SAME overridable warning shape the client already handles (send anyway → retry
       // with confirmDuplicate:true), instead of returning it as a success.
@@ -1356,7 +1360,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         log("order_place", { table_number: t, device_id: dev, order_id: placedId ?? null }),
       ]);
       if (mark && (mark as { error?: { message?: string } }).error) {
-        throw new Error((mark as { error: { message?: string } }).error.message || "couldn't put the order on the pass");
+        throw pgError((mark as { error: unknown }).error);   // keep the SQLSTATE (item 26)
       }
       return ok(data);
     }
@@ -1458,13 +1462,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         p_phone: String(phone || "").trim().slice(0, 40) || null,
         p_items: picked, p_total: total, p_restaurant_id: rid,
       });
-      if (ins.error) throw new Error(ins.error.message);
+      if (ins.error) throw pgError(ins.error);
       const row = Array.isArray(ins.data) ? ins.data[0] : ins.data;
       const wholeNote = String(note || "").trim().slice(0, 300);
       const alg = Array.isArray(allergies) ? allergies.map((x: unknown) => String(x)).slice(0, 20) : [];
       const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg } };
       if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = payMethod; }
-      if (row?.id) { const up = await sb.from("aggregator_orders").update(patch).eq("id", row.id).eq("restaurant_id", rid); if (up.error) throw new Error(up.error.message); }
+      if (row?.id) { const up = await sb.from("aggregator_orders").update(patch).eq("id", row.id).eq("restaurant_id", rid); if (up.error) throw pgError(up.error); }
       await log("parcel_place", { device_id: dev });
       return ok({ ...row, paid: paid === true });
     }
@@ -1491,7 +1495,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const lines = Array.isArray(body?.lines) ? body.lines : [];
       if (!lines.length) return err("lines required");
       const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t || null, p_lines: lines, p_restaurant_id: rid });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       if (!(data as any)?.ok) return err(banquetErrMsg((data as any)?.reason), 400);
       await log("banquet_place", { table_number: t || null, device_id: dev, detail: `total ${(data as any)?.total}` });
       return ok(data);
@@ -1707,7 +1711,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), maxBase) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
       const { data, error } = await sb.rpc("lfh_staff_bill_discount", { p_session: b, p_amount: amount, p_note: note });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       await log("bill_discount", { detail: `whole bill ₹${amount} (session ${b})`, device_id: dev });
       if (amount > 0) await recordRemoval({
         rid, kind: "discount_given",
@@ -1843,7 +1847,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const shiftCount = Number((must(shiftSet) || {}).table_count) || 0;
       if (shiftCount > 0 && Number(to) > shiftCount) return err(`Table ${to} doesn't exist (this place has ${shiftCount} tables).`, 400);
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       // The RPC signals a refused move (target occupied / session closed / bad table) as
       // { ok:false, reason } with HTTP 200 — DON'T pass that through as success, or the
       // client's optimistic move sticks visually then silently snaps back (#1). Surface a
@@ -1882,7 +1886,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data: mg, error: mgErr } = await sb.rpc("lfh_staff_merge_tables", {
         p_session: b, p_to: to, p_rid: rid, p_actor: mergeActor, p_actor_id: mergeActorId,
       });
-      if (mgErr) throw new Error(mgErr.message);
+      if (mgErr) throw pgError(mgErr);
       if (mg && (mg as any).ok === false) {
         const reason = (mg as any).reason;
         const msg = reason === "target_not_open" ? "That table has no party — use Move table instead."
@@ -1922,7 +1926,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const pinU = pinAuth as { actor: string; actor_id: string | null } | null;
       const unmergeActor = pinU?.actor || actor?.name || actor?.username || "waiter";
       const { data: um, error: umErr } = await sb.rpc("lfh_staff_unmerge_table", { p_rid: rid, p_child: tu, p_actor: unmergeActor });
-      if (umErr) throw new Error(umErr.message);
+      if (umErr) throw pgError(umErr);
       const ur = (um || {}) as { ok?: boolean; reason?: string; parent?: string; moved?: number; kots?: string | null };
       if (ur.ok === false) {
         // Same three answers the manager gives, in the same words — one bill, one explanation.
@@ -1947,7 +1951,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tc3 = Number((mtc3.data as { table_count?: number } | null)?.table_count) || 0;
       if (tc3 > 0 && (Number(to) < 1 || Number(to) > tc3)) return err(`Table ${to} doesn't exist (this place has ${tc3} tables).`, 400);
       const { data: im, error: imErr } = await sb.rpc("lfh_staff_move_order_item", { p_item: b, p_to: to, p_rid: rid });
-      if (imErr) throw new Error(imErr.message);
+      if (imErr) throw pgError(imErr);
       if (im && (im as any).ok === false) {
         const reason = (im as any).reason;
         const msg = reason === "order_paid" ? "Won't move a dish off a PAID bill."
@@ -2133,7 +2137,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!gone) return err("That dish was already removed.", 404);
       if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       if (data && data.ok === false) {
         const reason = data.reason || "could not delete";
         const msg = reason === "order_paid" ? "Won't change a PAID bill — mark it unpaid first."
@@ -2171,7 +2175,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!wasRow) return err("That dish was already removed.", 404);
       if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await log("order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
       // Lowering takes money off the bill; raising adds money and is not a removal.
@@ -2196,7 +2200,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const ownNote = (await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
       if (!ownNote) return err(editErrMsg("item_not_found"), 404);
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await log("order_item_note", { order_id: data?.order_id, device_id: dev });
       // EDITING AFTER THE BILL IS ALLOWED, AND RECORDED (owner, 2026-08-13) — the SAME rule the
@@ -2284,7 +2288,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // After a reopen the bill takes a NEW ticket instead (a fresh order is not locked).
       if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);
       const { data, error } = await sb.rpc("lfh_staff_add_item_to_order", { p_order: b, p_items: [line] });
-      if (error) throw new Error(error.message);
+      if (error) throw pgError(error);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       // A dish ADDED by a WAITER on the tablet is already confirmed — push it straight to the
       // kitchen (received→preparing), never leave it stuck at 'received' with a dead Accept.
@@ -2365,7 +2369,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // (the old inline version here forgot the SOURCE-table breadcrumb, so the moved
       // ticket lingered on the old tile for up to 60s). Editor shares the same RPC.
       const { data: mv, error: mvErr } = await sb.rpc("lfh_staff_move_order", { p_order: b, p_to: to, p_rid: rid });
-      if (mvErr) throw new Error(mvErr.message);
+      if (mvErr) throw pgError(mvErr);
       if (mv && (mv as any).ok === false) {
         const reason = (mv as any).reason;
         if (reason === "no_order") return err("That order isn't for this restaurant.", 404);
