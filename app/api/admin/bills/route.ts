@@ -79,7 +79,10 @@ export async function GET(req: NextRequest) {
   const rid = url.searchParams.get("restaurant_id");
   const stateFilter = url.searchParams.get("state") as BillState | null;
   const trail = url.searchParams.get("trail");
-  const limit = Math.min(500, Math.max(20, Number(url.searchParams.get("limit")) || 200));
+  // WHOLE ROWS ONLY (S10 T28, item 6): `?limit=33.3` reached PostgREST as a fractional limit, which it
+  // refuses — and the ledger answered "Couldn't load the bill ledger — please try again" to a value
+  // that would fail identically for ever. Math.trunc before the clamp; a non-number still means 200.
+  const limit = Math.min(500, Math.max(20, Math.trunc(Number(url.searchParams.get("limit"))) || 200));
 
   // ── A FILTER THAT CANNOT BE HONOURED IS REFUSED, NEVER WIDENED (T26 sweep #9, 2026-09-15) ────
   // `restaurant_id` was applied as `if (rid && isUuid(rid))` in four places on this route, so a
