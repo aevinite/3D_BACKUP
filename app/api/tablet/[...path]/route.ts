@@ -22,7 +22,7 @@ import { requireRole, type StaffUser } from "@/lib/userAuth";
 // it. Now it goes into the basket for the computer the address book names, exactly like the manager's.
 import { helperFor, queueJob } from "@/lib/printHelpers";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
+import { verifyManagerPin } from "@/lib/managerPin";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 // (softDeleteOrders is no longer imported: item 3 — the waiter's delete is a cancel now, see orders/:id/delete.)
 import { watchCancellations } from "@/lib/cancelWatch";
@@ -78,9 +78,20 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 type PinGate =
   | { allow: true; managerName?: string; managerNames?: string[]; managerId?: string; managerIds?: string[]; sharedPin?: boolean }
   | { allow: false; resp: NextResponse };
+// "Has any manager of THIS restaurant set a PIN yet?" — asked here rather than through
+// lib/managerPin's anyManagerHasPin(), which answers a failed read as "no", i.e. "the PIN gate is
+// still open". That turned a database blip into a PIN-gated action going through with NO PIN — a
+// discount, a walk-out, a ban (sweep #10 T13 round 2, item 16). A failed read now throws, the
+// request answers "busy — retrying" (lib/panelFailure) and the device tries again; nothing is guessed.
+async function pinIsSetUp(rid: string): Promise<boolean> {
+  const r = await sb.from("staff_users").select("id")
+    .eq("restaurant_id", rid).eq("role", "manager").eq("active", true).not("pin_hash", "is", null).limit(1);
+  if (r.error) throw pgError(r.error);
+  return !!(r.data && r.data.length);
+}
 async function managerPinGate(req: NextRequest, body: any, rid: string): Promise<PinGate> {
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { allow: true, managerName: "admin" };
-  if (!(await anyManagerHasPin(rid))) return { allow: true }; // no manager PIN set yet for THIS restaurant → open
+  if (!(await pinIsSetUp(rid))) return { allow: true }; // no manager PIN set yet for THIS restaurant → open
   // Lock a device out after too many wrong PINs (a 4-digit PIN is otherwise guessable).
   const throttleKey = `pin:${rid}:${deviceIdFrom(req) || "nodev"}`;
   const check = await verifyManagerPin(body?.managerPin || "", rid, throttleKey);
