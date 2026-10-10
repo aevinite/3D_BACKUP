@@ -45,7 +45,7 @@ import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
-import { waiterTables, allows, blockedReason, notYoursMessage, type SectionLimit } from "@/lib/tableAssign";
+import { waiterTables, assignedOf, allows, blockedReason, notYoursMessage, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { earnOnSettle, reverseOnUnpay, loyaltyStateFor, redeemOntoBill } from "@/lib/loyalty";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
@@ -612,6 +612,33 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // safety-net). The recurring floor refresh (60s poll / ops reloads) is the common case, and
       // the dish list was ~50KB of the ~77KB payload — so this cuts that recurring egress ~2.5x. (perf 2026-07-20)
       const nomenu = new URL(req.url).searchParams.get("nomenu") === "1";
+      // THE FULL LOAD'S BATCH STARTS NOW, ALONGSIDE THE FLOOR READ (sweep #10 T13 round 2, item 21).
+      // It used to start only after the floor had been read and narrowed — and before it, the section
+      // check (lib/tableAssign waiterTables) read this restaurant's settings row a FIRST time, just for
+      // table_count, which the `select("*")` below then read again. On the read every waiter device makes
+      // every minute and on every realtime nudge, that was one database round trip too many and two
+      // waits in a row. Now: one settings read, issued in parallel, and the section is resolved from it
+      // (the SAME rule waiterTables applies — verify:tablet-twins §15 compares the two answers). A
+      // targeted ?table=N refetch does not load settings at all, so it still asks waiterTables.
+      const dishesP = tbl || nomenu
+        ? null
+        : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price,tax_mode").eq("restaurant_id", rid).order("category").limit(2000);
+      const fullP = tbl ? null : Promise.all([
+        sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order").limit(500),   // bounded like its twin — see the note on the menu-sig read above
+        // `logo_url` IS READ BY THIS PANEL AND WAS NEVER SENT (sweep #8 T10, 2026-09-03).
+        // printTableBill() in public/panels/tablet/app.js passes
+        // `state.data.restaurant.logo_url` into LFH_BILLDOC.billData as the bill's `logo`, and
+        // billdoc.js prints an <img class="logo"> whenever that is a http(s) URL. The column was
+        // simply not in this select, so the expression always evaluated to "" — every bill a
+        // WAITER printed came out with no logo while the same bill printed at the manager's till
+        // carried it (the editor route's twin of this read selects it: app/api/editor line 1137).
+        // One document, two different papers depending on which panel produced it, and the panel's
+        // own read gave no sign: an absent column is `undefined`, which its /^https?:/ test
+        // quietly rejects. Both sides of a field have to be grepped, which is what caught it.
+        // Costs one short text column on a read this panel already makes.
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, logo_url, access_config").eq("id", rid).maybeSingle(),
+      ]);
       // Whole-floor reads for the SAME restaurant inside a 1.5s window share ONE database
       // call (lib/floorSummary.ts) — several devices polling together used to queue 1,800
       // statements each and cross the statement timeout. A targeted ?table= refetch is never
@@ -640,7 +667,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // along on the targeted response too, so they must be narrowed on BOTH paths.
       // `viewer` = the real waiter, or the one the admin is looking through (?as=) — so
       // "visit their panel" shows THEIR section, which is the main thing a section is.
-      const myTables = await waiterTables(viewer, rid); // resolved ONCE for this request
+      const fullBatch = fullP ? await fullP : null;
+      const myTables: SectionLimit | null = fullBatch
+        ? (viewer && viewer.role === "tablet"
+          ? { tables: assignedOf(viewer), floor: Math.max(0, Number((fullBatch[0].data as { table_count?: unknown } | null)?.table_count) || 0) }
+          : null)
+        : await waiterTables(viewer, rid); // resolved ONCE for this request
       // NARROW A COPY, NEVER THE SHARED OBJECT (found 2026-08-02, live bug).
       // The whole-floor read is shared BY REFERENCE for 1.5s (lib/floorSummary), so
       // narrowing it in place edited the snapshot every other device was about to be
@@ -689,25 +721,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // did. (The note on the menu-sig read used to claim the categories read was "the only" read
       // in this territory that was unbounded. It was not: this one was, four lines below it.
       // Corrected there in the same pass.)
-      const dishesP = nomenu
-        ? null
-        : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price,tax_mode").eq("restaurant_id", rid).order("category").limit(2000);
-      const [settings, categories, restaurant] = await Promise.all([
-        sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
-        sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order").limit(500),   // bounded like its twin — see the note on the menu-sig read above
-        // `logo_url` IS READ BY THIS PANEL AND WAS NEVER SENT (sweep #8 T10, 2026-09-03).
-        // printTableBill() in public/panels/tablet/app.js passes
-        // `state.data.restaurant.logo_url` into LFH_BILLDOC.billData as the bill's `logo`, and
-        // billdoc.js prints an <img class="logo"> whenever that is a http(s) URL. The column was
-        // simply not in this select, so the expression always evaluated to "" — every bill a
-        // WAITER printed came out with no logo while the same bill printed at the manager's till
-        // carried it (the editor route's twin of this read selects it: app/api/editor line 1137).
-        // One document, two different papers depending on which panel produced it, and the panel's
-        // own read gave no sign: an absent column is `undefined`, which its /^https?:/ test
-        // quietly rejects. Both sides of a field have to be grepped, which is what caught it.
-        // Costs one short text column on a read this panel already makes.
-        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, logo_url, access_config").eq("id", rid).maybeSingle(),
-      ]);
+      // (The dish list and the settings / categories / restaurant batch were started at the top of this
+      //  branch — item 21 — so they ran alongside the floor read instead of after it.)
+      const [settings, categories, restaurant] = fullBatch!;
       // KOT ▾ module rung resolved server-side from the settings row itself (canonical
       // ladder, mig 177 — no extra query): when the module isn't effective the tri-state
       // ships 'off', so the client needs zero ladder logic and a stale manager grant

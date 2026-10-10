@@ -100,7 +100,11 @@ async function main() {
     // ── REGRESSION (mig 225): growing the floor must not orphan the new tables ─
     await patch("staff_users", `id=eq.${WAITER}`, { assigned_tables: ALL });
     await patch("settings", `restaurant_id=eq.${RID}`, { table_count: COUNT + 3 });
-    await new Promise((r) => setTimeout(r, 600));
+    // 1.7 s, not 0.6 s (sweep #10 T13 round 2): this PATCH goes straight to the database, so it never
+    // passes the app's write path that drops the 1.5 s shared floor (lib/floorSummary invalidateFloor).
+    // The read above may already have seeded the share; waiting past the window is the honest wait.
+    // It passed at 0.6 s only while the floor answer was slow enough to land outside the window.
+    await new Promise((r) => setTimeout(r, 1700));
     s = await (await waiter("/api/tablet/summary?nomenu=1")).json();
     const grown = Object.keys(s.tiles || {}).map(Number);
     ck(grown.includes(COUNT + 1) && grown.includes(COUNT + 3),

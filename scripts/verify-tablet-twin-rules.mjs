@@ -457,5 +457,27 @@ console.log("\n14. every write is pinned to the restaurant, and none asks back r
   else bad(`restart answered ${r.status}; ${rs.filter((q) => !q.filters.some((f) => f.col === "restaurant_id")).length} unscoped write(s)`);
 }
 
+// ── 15. ONE SETTINGS READ PER FLOOR REFRESH, AND THE SAME SECTION ANSWER AS waiterTables (item 21) ────
+console.log("\n15. a floor refresh reads the settings row once, and the section rule matches the library's");
+{
+  const { bundle } = await import("./sweep/t13s10/lib.mjs");
+  const TA = bundle("lib/tableAssign.ts");
+  const SUM = { tiles: { 1: { counts: {} }, 2: { counts: {} }, 5: { counts: {} }, 47: { counts: {} } }, calls: [], requests: [], joiners: [] };
+  const ONE_TWO = [1, 2], NO_TABLES = [];
+  for (const [who, user, label] of [["waiter", { assigned_tables: ONE_TWO }, "a waiter holding tables 1–2"], ["waiter", { assigned_tables: NO_TABLES }, "a waiter holding no tables"], ["manager", {}, "a manager looking in"], ["admin", {}, "the admin"]]) {
+    const G = await world({ who, user, rpc: { lfh_table_view_summary: SUM } });
+    await call("POST", "nothing-here", { body: {}, query: `?rid=${RID}` });
+    G.SCOPE_LOG.length = 0;
+    const r = await call("GET", "summary", { query: `?nomenu=1&rid=${RID}` });
+    const reads = G.SCOPE_LOG.filter((q) => q.table === "settings").length;
+    const lib = await TA.waiterTables(G.ACTOR.user, RID);
+    const libVisible = Object.keys(SUM.tiles).filter((t) => TA.allows(lib, t)).join(",");
+    const routeVisible = Object.keys(r.json?.tiles || {}).join(",");
+    const sameList = JSON.stringify(r.json?.my_tables ?? null) === JSON.stringify(lib ? lib.tables : null);
+    if (r.status === 200 && reads === 1 && sameList && routeVisible === libVisible) ok(`${label}: 1 settings read, sees ${routeVisible || "nothing"} — exactly what waiterTables + allows() say`);
+    else bad(`${label}: ${r.status}, ${reads} settings read(s), tiles ${routeVisible} vs library ${libVisible}, list ${JSON.stringify(r.json?.my_tables)} vs ${JSON.stringify(lib && lib.tables)}`);
+  }
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
