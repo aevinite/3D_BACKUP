@@ -170,7 +170,10 @@ export function gridRows() {
         else {
           const [, name, prop] = m;
           const code = codeOf(name);
-          if (!code) res = { ok: false, note: `branch ${name} not found in today's dispatcher` };
+          // RETIRED on purpose: sweep #10 T10 round 2 item 5 removed the bill-printed stamp (owner: "a guest
+          // bill never says Reprint"). A question about a door that no longer exists has no subject.
+          if (!code && name === "sessions/:id/bill-printed") res = { ok: true, note: "RETIRED 2026-10-10 — sweep #10 T10 round 2 item 5 removed this door on the owner's answer; the route now answers it 'unknown POST endpoint'" };
+          else if (!code) res = { ok: false, note: `branch ${name} not found in today's dispatcher` };
           else if (P[prop]) res = P[prop](code, name);
           else if (/^gated on (tablet_[a-z_]+), server-side/.test(prop)) res = gatedOn(prop.match(/tablet_[a-z_]+/)[0])(code);
           else if (/the restaurant's module rung \((\w+)\) is asked first/.test(prop)) res = ladderFirst(prop.match(/\((\w+)\)/)[1])(code);
