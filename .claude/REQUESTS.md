@@ -1856,8 +1856,8 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 
 ## 2026-10-10 — sweep #10 T10 round 3 ("do the retest now" — every bit, zero errors)
 
-- [ ] **562 new checks (P211001–P211562), all ✅; 1,189 of 1,218 deliberate code changes caught; 1,632 of 1,633 lines run.** Ledger `T10-S10.md` → Round 3.
-- [ ] **A price typed with a minus sign is refused, never saved as positive** (item 20) — Editor → dish Price, parcel open price, ⚡ QO/P, + Add a dish. Built; verify live.
+- [x] **562 new checks (P211001–P211562), all ✅; 1,189 of 1,218 deliberate code changes caught; 1,632 of 1,633 lines run.** Ledger `T10-S10.md` → Round 3.
+- [x] **A price typed with a minus sign is refused, never saved as positive** (item 20) — Editor → dish Price, parcel open price, ⚡ QO/P, + Add a dish. Verified live on backup (PR #1486): "-5" on Espresso answered 400 with the sentence, its price stayed ₹250; verify:live 13/13.
 
 ## 2026-10-10 — sweep #10 T39 round 3 (owner: "every single bit of area"; then "you can do the bin button big, but … it should look as professional aesthetic as it is right now")
 
