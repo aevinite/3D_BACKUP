@@ -152,6 +152,7 @@ Code: `public/panels/tablet/*`, `app/api/tablet/*`
 | **anything at all in `public/panels/tablet/app.js`** | `verify:tablet-taps` — it compiles the file (a stray backtick in a template literal blanks the whole panel), and holds the four bulk actions, the KOT rows, the destination pickers and the money buttons to "a tap must never vanish in silence" | nothing | no |
 | a box a waiter types **money** into — a discount, a tip, a split part | `verify:money-boxes` ← a money box the screen fills in ITSELF must not declare whole numbers only; the same rule, and the same guard, covers the manager panel's copies | nothing | no |
 | the tablet's own endpoints | `verify:tablet-parity` | `.env.local` | **YES** |
+| a money or status rule in `app/api/tablet/[...path]/route.ts` (cancel, discount, invoice lock, the floor share, who may issue an invoice), or `lib/tableOfAction.ts` | `verify:tablet-twins` ← sweep #10 T13: the real tablet route driven in memory — a cancelled ticket stays cancelled, a printed invoice locks the bill, "Delete order" cancels and never removes (R27), a gone row says it is gone, a paid ticket is not discounted, a failed floor read is not shared, a manager is answered by what the screen shows | nothing | no |
 | waiter sections | `verify:sections` | `.env.local` | **YES** |
 | the board fingerprint | `verify:board-sig` | nothing | no |
 
