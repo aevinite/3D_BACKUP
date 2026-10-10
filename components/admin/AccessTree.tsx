@@ -808,7 +808,11 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
             {collapsible ? (
               <span className={`at-tw ${expanded ? "o" : ""}`} aria-hidden="true"><Icon n="chevron" s={14} /></span>
             ) : null}
-            {node.name}
+            {/* The name is its OWN box (sweep #10 T18, item 21). As a bare text node inside this
+                wrapping flex row, a long name ("Manager settings (what manager can do)") jumped whole to
+                the next line on a phone and left the arrow alone on the first. Basis 0 keeps it on the
+                arrow's line; it wraps inside itself instead. */}
+            <span className="nm-t">{node.name}</span>
             {node.leftToBuild ? <span className="at-tag build">Left to build</span> : null}
             {node.fresh && !node.leftToBuild ? <span className="at-tag new">New</span> : null}
           </div>
@@ -1519,6 +1523,7 @@ export function TreeStyle() {
   .at-box-h { display:flex; align-items:flex-start; gap:14px; }
   .at-box-t { flex:1; min-width:0; }
   .at-box-t .nm { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:14.5px; font-weight:750; }
+  .at-box-t .nm .nm-t { flex:1 1 0; min-width:min(12ch, 100%); overflow-wrap:anywhere; }
   .at-box-t .ds { margin-top:4px; font-size:12.5px; line-height:1.55; color:var(--muted); max-width:74ch; }
   /* The divider that separates a feature from the things inside it, tinted to its own level. */
   .at-box-k { margin-top:12px; padding-top:12px; border-top:1px solid color-mix(in srgb, var(--lvl) 22%, transparent); }

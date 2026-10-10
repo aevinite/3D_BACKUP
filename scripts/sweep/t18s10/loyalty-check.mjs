@@ -1,6 +1,6 @@
-// scripts/sweep/t18s10/loyalty-probe.mjs — does the Access screen's Loyalty switch SHOW what it saved?
+// scripts/sweep/t18s10/loyalty-check.mjs — does the Access screen's Loyalty switch SHOW what it saved?
 //
-//   node scripts/sweep/t18s10/loyalty-probe.mjs [--shot <png>]
+//   node scripts/sweep/t18s10/loyalty-check.mjs [--shot <png>]
 //
 // Opens /aevinite/access for French House (the restaurant sweeps write to), taps "Loyalty points"
 // once, then reads two things: what the switch SAYS (aria-checked) and what the database HOLDS

@@ -1,0 +1,3321 @@
+{
+ "sections": [
+  {
+   "id": "main",
+   "name": "Main features",
+   "icon": "sparkles",
+   "children": [
+    "menu",
+    "qop",
+    "take_orders",
+    "table_ops",
+    "table_tags",
+    "orders_no_table",
+    "bill",
+    "tables"
+   ]
+  },
+  {
+   "id": "extra",
+   "name": "Extra features",
+   "icon": "grid",
+   "children": [
+    "khata",
+    "banquet",
+    "payroll",
+    "inventory",
+    "loyalty"
+   ]
+  },
+  {
+   "id": "mgrMenu",
+   "name": "Manager",
+   "icon": "users",
+   "children": [
+    "mgr_menu_group",
+    "mgr_may",
+    "mgr_manage"
+   ]
+  },
+  {
+   "id": "ownMenu",
+   "name": "Owner",
+   "icon": "crown",
+   "children": [
+    "own_menu_group"
+   ]
+  },
+  {
+   "id": "waiter",
+   "name": "Waiter",
+   "icon": "user",
+   "children": [
+    "wtr_money",
+    "wtr_floor"
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "id": "menu",
+   "bind": {
+    "t": "setting",
+    "key": "menu_enabled"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": true,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "dining_sessions",
+    "ratings",
+    "show_reviews",
+    "viewer3d",
+    "allergy_notes",
+    "maintenance",
+    "favourites",
+    "veg",
+    "prep_time",
+    "format",
+    "bubbles"
+   ]
+  },
+  {
+   "id": "dining_sessions",
+   "bind": {
+    "t": "setting",
+    "key": "sessions_enabled"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": "settings:sessions",
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "ratings",
+   "bind": {
+    "t": "ratingsMaster"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "ratings_mode",
+    "google_review_url"
+   ]
+  },
+  {
+   "id": "ratings_mode",
+   "bind": {
+    "t": "choice",
+    "key": "google_review_mode"
+   },
+   "featureBind": null,
+   "def": "off",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "off",
+    "google",
+    "google_after_normal"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "google_review_url",
+   "bind": {
+    "t": "text",
+    "key": "google_review_url"
+   },
+   "featureBind": null,
+   "def": "",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "show_reviews",
+   "bind": {
+    "t": "feature",
+    "key": "reviews"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "viewer3d",
+   "bind": {
+    "t": "feature",
+    "key": "model3d"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "allergy_notes",
+   "bind": {
+    "t": "feature",
+    "key": "allergies"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "allergy_other",
+    "guest_note"
+   ]
+  },
+  {
+   "id": "allergy_other",
+   "bind": {
+    "t": "feature",
+    "key": "allergy_other"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "guest_note",
+   "bind": {
+    "t": "feature",
+    "key": "guest_note"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "maintenance",
+   "bind": {
+    "t": "has",
+    "id": "maintenance",
+    "def": false
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "maintenance_who"
+   ]
+  },
+  {
+   "id": "maintenance_who",
+   "bind": {
+    "t": "opt",
+    "id": "maintenance",
+    "side": "manager",
+    "key": "who"
+   },
+   "featureBind": null,
+   "def": "owner",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "owner",
+    "owner_manager"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "favourites",
+   "bind": {
+    "t": "feature",
+    "key": "favorites"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "veg",
+   "bind": {
+    "t": "feature",
+    "key": "diet_filter"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "prep_time",
+   "bind": {
+    "t": "feature",
+    "key": "prep_time"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "format",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "menu_layout",
+    "menu_mode",
+    "menu_theme",
+    "menu_languages",
+    "menu_currencies"
+   ]
+  },
+  {
+   "id": "menu_layout",
+   "bind": {
+    "t": "choice",
+    "key": "menu_default_layout"
+   },
+   "featureBind": null,
+   "def": "grid",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "grid",
+    "list"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "menu_mode",
+   "bind": {
+    "t": "choice",
+    "key": "menu_default_mode"
+   },
+   "featureBind": null,
+   "def": "light",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "light",
+    "dark"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "menu_theme",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": "branding",
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "menu_languages",
+   "bind": {
+    "t": "list",
+    "key": "menu_languages"
+   },
+   "featureBind": null,
+   "def": [
+    "en"
+   ],
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "en",
+    "de",
+    "fr",
+    "ar",
+    "hi",
+    "ko"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": true,
+   "children": []
+  },
+  {
+   "id": "menu_currencies",
+   "bind": {
+    "t": "list",
+    "key": "menu_currencies"
+   },
+   "featureBind": null,
+   "def": [
+    "INR"
+   ],
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "INR",
+    "USD",
+    "EUR",
+    "AED",
+    "SAR",
+    "QAR"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": true,
+   "children": []
+  },
+  {
+   "id": "bubbles",
+   "bind": {
+    "t": "setting",
+    "key": "bubbles_enabled"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "qop",
+   "bind": {
+    "t": "setting",
+    "key": "qop_allowed"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "qop_tables",
+    "qop_parcel"
+   ]
+  },
+  {
+   "id": "qop_tables",
+   "bind": {
+    "t": "setting",
+    "key": "qop_tables_allowed"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "qop_parcel",
+   "bind": {
+    "t": "setting",
+    "key": "qop_parcel_allowed"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "take_orders",
+   "bind": {
+    "t": "module",
+    "key": "take_orders"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": true,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "table_ops",
+   "bind": {
+    "t": "module",
+    "key": "table_ops"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "table_tags",
+   "bind": {
+    "t": "module",
+    "key": "table_tags"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "orders_no_table",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "ch_website",
+    "ch_zomato",
+    "ch_swiggy"
+   ]
+  },
+  {
+   "id": "ch_website",
+   "bind": {
+    "t": "channel",
+    "key": "website"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "ch_website_key"
+   ]
+  },
+  {
+   "id": "ch_website_key",
+   "bind": {
+    "t": "creds",
+    "key": "website"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "ch_zomato",
+   "bind": {
+    "t": "channel",
+    "key": "zomato"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "ch_zomato_key"
+   ]
+  },
+  {
+   "id": "ch_zomato_key",
+   "bind": {
+    "t": "creds",
+    "key": "zomato"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "ch_swiggy",
+   "bind": {
+    "t": "channel",
+    "key": "swiggy"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "ch_swiggy_key"
+   ]
+  },
+  {
+   "id": "ch_swiggy_key",
+   "bind": {
+    "t": "creds",
+    "key": "swiggy"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "bill",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "price_tax_mode",
+    "item_tax_modes",
+    "bill_format",
+    "parcel_bill_format",
+    "bill_designer"
+   ]
+  },
+  {
+   "id": "price_tax_mode",
+   "bind": {
+    "t": "choice",
+    "key": "price_tax_mode"
+   },
+   "featureBind": null,
+   "def": "excl",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "excl",
+    "incl",
+    "composition"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "item_tax_modes",
+   "bind": {
+    "t": "setting",
+    "key": "item_tax_modes_allowed"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "mrp_tax_treatment"
+   ]
+  },
+  {
+   "id": "mrp_tax_treatment",
+   "bind": {
+    "t": "choice",
+    "key": "mrp_tax_treatment"
+   },
+   "featureBind": null,
+   "def": "none",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "none",
+    "inclusive"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "bill_format",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": "settings:billing",
+   "preview": "bill",
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "parcel_bill_format",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": "settings:billing",
+   "preview": "parcel",
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "bill_designer",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": true,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "tables",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "tables_list",
+    "tables_layout",
+    "tables_qr"
+   ]
+  },
+  {
+   "id": "tables_list",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": "settings:tables",
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "tables_layout",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": "settings:floor",
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "tables_qr",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": "settings:qr",
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "khata",
+   "bind": {
+    "t": "module",
+    "key": "khata"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "banquet",
+   "bind": {
+    "t": "module",
+    "key": "banquet"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "banquet_setup"
+   ]
+  },
+  {
+   "id": "banquet_setup",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": "settings:banquet",
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "payroll",
+   "bind": {
+    "t": "module",
+    "key": "payroll"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "inventory",
+   "bind": {
+    "t": "module",
+    "key": "inventory"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "inventory_in_reports"
+   ]
+  },
+  {
+   "id": "inventory_in_reports",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": true,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "loyalty",
+   "bind": {
+    "t": "moduleBag",
+    "key": "loyalty"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_menu_group",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "mgr_tab_editor",
+    "mgr_tab_ratings",
+    "mgr_tab_log",
+    "mgr_tab_dash"
+   ]
+  },
+  {
+   "id": "mgr_tab_editor",
+   "bind": {
+    "t": "grant",
+    "flag": "edit_menu"
+   },
+   "featureBind": {
+    "t": "tab",
+    "panel": "manager",
+    "key": "editor"
+   },
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "d_mgr_edit_options",
+    "d_mgr_add_dish",
+    "d_mgr_edit_dish",
+    "d_mgr_edit_price",
+    "d_mgr_delete_dish",
+    "d_mgr_mark_86",
+    "d_mgr_manage_categories",
+    "d_mgr_manage_filters",
+    "d_mgr_edit_3d"
+   ]
+  },
+  {
+   "id": "d_mgr_edit_options",
+   "bind": {
+    "t": "opt",
+    "id": "edit_menu",
+    "side": "manager",
+    "key": "edit_options"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_add_dish",
+   "bind": {
+    "t": "opt",
+    "id": "edit_menu",
+    "side": "manager",
+    "key": "add_dish"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_edit_dish",
+   "bind": {
+    "t": "opt",
+    "id": "edit_menu",
+    "side": "manager",
+    "key": "edit_dish"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_edit_price",
+   "bind": {
+    "t": "opt",
+    "id": "edit_menu",
+    "side": "manager",
+    "key": "edit_price"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_delete_dish",
+   "bind": {
+    "t": "opt",
+    "id": "edit_menu",
+    "side": "manager",
+    "key": "delete_dish"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_mark_86",
+   "bind": {
+    "t": "opt",
+    "id": "edit_menu",
+    "side": "manager",
+    "key": "mark_86"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_manage_categories",
+   "bind": {
+    "t": "opt",
+    "id": "edit_menu",
+    "side": "manager",
+    "key": "manage_categories"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_manage_filters",
+   "bind": {
+    "t": "opt",
+    "id": "edit_menu",
+    "side": "manager",
+    "key": "manage_filters"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_edit_3d",
+   "bind": {
+    "t": "opt",
+    "id": "edit_menu",
+    "side": "manager",
+    "key": "edit_3d"
+   },
+   "featureBind": null,
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_tab_ratings",
+   "bind": {
+    "t": "grant",
+    "flag": "view_ratings"
+   },
+   "featureBind": {
+    "t": "tab",
+    "panel": "manager",
+    "key": "ratings"
+   },
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_tab_log",
+   "bind": {
+    "t": "grant",
+    "flag": "view_logs"
+   },
+   "featureBind": {
+    "t": "tab",
+    "panel": "manager",
+    "key": "log"
+   },
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "d_mgr_log_removals",
+    "d_mgr_log_activity",
+    "d_mgr_log_customers"
+   ]
+  },
+  {
+   "id": "d_mgr_log_removals",
+   "bind": {
+    "t": "opt",
+    "id": "view_logs",
+    "side": "manager",
+    "key": "removals"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_log_activity",
+   "bind": {
+    "t": "opt",
+    "id": "view_logs",
+    "side": "manager",
+    "key": "activity"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_mgr_log_customers",
+   "bind": {
+    "t": "opt",
+    "id": "view_logs",
+    "side": "manager",
+    "key": "customers"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_tab_dash",
+   "bind": {
+    "t": "grant",
+    "flag": "view_dashboard"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "mgr_dash_range"
+   ]
+  },
+  {
+   "id": "mgr_dash_range",
+   "bind": {
+    "t": "opt",
+    "id": "view_dashboard",
+    "side": "manager",
+    "key": "range"
+   },
+   "featureBind": null,
+   "def": "today",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "today",
+    "today_yesterday",
+    "last7",
+    "last30"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_may",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "mgr_void_bills",
+    "mgr_give_discounts",
+    "mgr_print_here",
+    "mgr_print_clear",
+    "mgr_bills"
+   ]
+  },
+  {
+   "id": "mgr_void_bills",
+   "bind": {
+    "t": "grant",
+    "flag": "void_bills"
+   },
+   "featureBind": {
+    "t": "has",
+    "id": "void_bills"
+   },
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "mgr_bill_reopen_mins"
+   ]
+  },
+  {
+   "id": "mgr_bill_reopen_mins",
+   "bind": {
+    "t": "limit",
+    "id": "void_bills",
+    "side": "minutes"
+   },
+   "featureBind": null,
+   "def": 5,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": [
+    5,
+    10,
+    15,
+    30,
+    60
+   ],
+   "unit": " min",
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_give_discounts",
+   "bind": {
+    "t": "grant",
+    "flag": "give_discounts"
+   },
+   "featureBind": {
+    "t": "has",
+    "id": "give_discounts"
+   },
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "mgr_give_discounts_cap"
+   ]
+  },
+  {
+   "id": "mgr_give_discounts_cap",
+   "bind": {
+    "t": "limit",
+    "id": "give_discounts",
+    "side": "manager"
+   },
+   "featureBind": null,
+   "def": 50,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": [
+    5,
+    10,
+    20,
+    50,
+    100
+   ],
+   "unit": "%",
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_print_here",
+   "bind": {
+    "t": "grant",
+    "flag": "print_here"
+   },
+   "featureBind": {
+    "t": "has",
+    "id": "print_here"
+   },
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_print_clear",
+   "bind": {
+    "t": "grant",
+    "flag": "print_clear"
+   },
+   "featureBind": {
+    "t": "has",
+    "id": "print_clear"
+   },
+   "def": false,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_bills",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "mgr_bills_range"
+   ]
+  },
+  {
+   "id": "mgr_bills_range",
+   "bind": {
+    "t": "opt",
+    "id": "view_bills",
+    "side": "manager",
+    "key": "range"
+   },
+   "featureBind": null,
+   "def": "today",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": [
+    "today",
+    "today_yesterday"
+   ],
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_manage",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "mgrset_tables",
+    "mgrset_users",
+    "mgrset_access"
+   ]
+  },
+  {
+   "id": "mgrset_tables",
+   "bind": {
+    "t": "tab",
+    "panel": "mgrset",
+    "key": "tables"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgrset_users",
+   "bind": {
+    "t": "tab",
+    "panel": "mgrset",
+    "key": "users"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "mgr_users_create",
+    "mgr_users_reset_pw",
+    "mgr_users_disable"
+   ]
+  },
+  {
+   "id": "mgr_users_create",
+   "bind": {
+    "t": "opt",
+    "id": "manage_staff",
+    "side": "manager",
+    "key": "create"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_users_reset_pw",
+   "bind": {
+    "t": "opt",
+    "id": "manage_staff",
+    "side": "manager",
+    "key": "reset_pw"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgr_users_disable",
+   "bind": {
+    "t": "opt",
+    "id": "manage_staff",
+    "side": "manager",
+    "key": "disable"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "mgrset_access",
+   "bind": {
+    "t": "tab",
+    "panel": "mgrset",
+    "key": "access"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_menu_group",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "own_access",
+    "own_menu",
+    "own_reports",
+    "own_customers",
+    "own_issues",
+    "own_settings",
+    "own_ratings",
+    "own_audit",
+    "own_manager_mode"
+   ]
+  },
+  {
+   "id": "own_access",
+   "bind": {
+    "t": "section",
+    "key": "staff"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_menu",
+   "bind": {
+    "t": "section",
+    "key": "menu"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_reports",
+   "bind": {
+    "t": "section",
+    "key": "reports"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_customers",
+   "bind": {
+    "t": "section",
+    "key": "customers"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_issues",
+   "bind": {
+    "t": "section",
+    "key": "issues"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_settings",
+   "bind": {
+    "t": "section",
+    "key": "settings"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_ratings",
+   "bind": {
+    "t": "section",
+    "key": "ratings"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_audit",
+   "bind": {
+    "t": "section",
+    "key": "logs"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "d_own_log_removals",
+    "d_own_log_activity",
+    "own_logs_signins",
+    "own_logs_service",
+    "own_logs_staff_changes"
+   ]
+  },
+  {
+   "id": "d_own_log_removals",
+   "bind": {
+    "t": "opt",
+    "id": "view_logs",
+    "side": "owner",
+    "key": "removals"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "d_own_log_activity",
+   "bind": {
+    "t": "opt",
+    "id": "view_logs",
+    "side": "owner",
+    "key": "activity"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_logs_signins",
+   "bind": {
+    "t": "section",
+    "key": "logs_signins"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_logs_service",
+   "bind": {
+    "t": "section",
+    "key": "logs_service"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_logs_staff_changes",
+   "bind": {
+    "t": "section",
+    "key": "logs_staff_changes"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": true,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "own_manager_mode",
+   "bind": {
+    "t": "section",
+    "key": "manager_mode"
+   },
+   "featureBind": null,
+   "def": true,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "wtr_money",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "wtr_mark_paid",
+    "wtr_give_discounts",
+    "wtr_close_unpaid"
+   ]
+  },
+  {
+   "id": "wtr_mark_paid",
+   "bind": {
+    "t": "tablet",
+    "key": "tablet_mark_paid"
+   },
+   "featureBind": null,
+   "def": "off",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": true,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "wtr_give_discounts",
+   "bind": {
+    "t": "tablet",
+    "key": "tablet_discount"
+   },
+   "featureBind": {
+    "t": "has",
+    "id": "give_discounts"
+   },
+   "def": "off",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": true,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "wtr_give_discounts_cap"
+   ]
+  },
+  {
+   "id": "wtr_give_discounts_cap",
+   "bind": {
+    "t": "limit",
+    "id": "give_discounts",
+    "side": "waiter"
+   },
+   "featureBind": null,
+   "def": 5,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": [
+    5,
+    10,
+    20,
+    50,
+    100
+   ],
+   "unit": "%",
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "wtr_close_unpaid",
+   "bind": {
+    "t": "capTablet",
+    "id": "close_unpaid"
+   },
+   "featureBind": null,
+   "def": "pin",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": true,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "wtr_floor",
+   "bind": {
+    "t": "none"
+   },
+   "featureBind": null,
+   "def": null,
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": [
+    "wtr_take_orders",
+    "wtr_table_ops",
+    "wtr_table_tags",
+    "wtr_khata",
+    "wtr_parcel",
+    "wtr_banquet"
+   ]
+  },
+  {
+   "id": "wtr_take_orders",
+   "bind": {
+    "t": "tablet",
+    "key": "tablet_take_orders"
+   },
+   "featureBind": null,
+   "def": "on",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "wtr_table_ops",
+   "bind": {
+    "t": "tablet",
+    "key": "tablet_table_ops"
+   },
+   "featureBind": null,
+   "def": "on",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "wtr_table_tags",
+   "bind": {
+    "t": "tablet",
+    "key": "tablet_table_tags"
+   },
+   "featureBind": null,
+   "def": "on",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "wtr_khata",
+   "bind": {
+    "t": "tablet",
+    "key": "tablet_khata"
+   },
+   "featureBind": null,
+   "def": "on",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "wtr_parcel",
+   "bind": {
+    "t": "tablet",
+    "key": "tablet_parcel"
+   },
+   "featureBind": null,
+   "def": "on",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  },
+  {
+   "id": "wtr_banquet",
+   "bind": {
+    "t": "tablet",
+    "key": "tablet_banquet"
+   },
+   "featureBind": null,
+   "def": "on",
+   "leftToBuild": false,
+   "fresh": false,
+   "pin": false,
+   "confirm": false,
+   "options": null,
+   "unit": null,
+   "choices": null,
+   "panel": null,
+   "preview": null,
+   "singleOrMany": false,
+   "children": []
+  }
+ ],
+ "caps": {
+  "manager": [
+   {
+    "key": "edit_menu",
+    "node": "mgr_tab_editor",
+    "group": "Manager's menu",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "opt:edit_menu.manager.edit_options",
+    "node": "d_mgr_edit_options",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_editor"
+   },
+   {
+    "key": "opt:edit_menu.manager.add_dish",
+    "node": "d_mgr_add_dish",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_editor"
+   },
+   {
+    "key": "opt:edit_menu.manager.edit_dish",
+    "node": "d_mgr_edit_dish",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_editor"
+   },
+   {
+    "key": "opt:edit_menu.manager.edit_price",
+    "node": "d_mgr_edit_price",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_editor"
+   },
+   {
+    "key": "opt:edit_menu.manager.delete_dish",
+    "node": "d_mgr_delete_dish",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_editor"
+   },
+   {
+    "key": "opt:edit_menu.manager.mark_86",
+    "node": "d_mgr_mark_86",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_editor"
+   },
+   {
+    "key": "opt:edit_menu.manager.manage_categories",
+    "node": "d_mgr_manage_categories",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_editor"
+   },
+   {
+    "key": "opt:edit_menu.manager.manage_filters",
+    "node": "d_mgr_manage_filters",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_editor"
+   },
+   {
+    "key": "opt:edit_menu.manager.edit_3d",
+    "node": "d_mgr_edit_3d",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_editor"
+   },
+   {
+    "key": "view_ratings",
+    "node": "mgr_tab_ratings",
+    "group": "Manager's menu",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "view_logs",
+    "node": "mgr_tab_log",
+    "group": "Manager's menu",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "opt:view_logs.manager.removals",
+    "node": "d_mgr_log_removals",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_log"
+   },
+   {
+    "key": "opt:view_logs.manager.activity",
+    "node": "d_mgr_log_activity",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_log"
+   },
+   {
+    "key": "opt:view_logs.manager.customers",
+    "node": "d_mgr_log_customers",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": "mgr_tab_log"
+   },
+   {
+    "key": "view_dashboard",
+    "node": "mgr_tab_dash",
+    "group": "Manager's menu",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "opt:view_dashboard.manager.range",
+    "node": "mgr_dash_range",
+    "group": "Manager's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "value",
+    "featureFrom": null
+   },
+   {
+    "key": "void_bills",
+    "node": "mgr_void_bills",
+    "group": "Permission for manager",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "limit:void_bills.minutes",
+    "node": "mgr_bill_reopen_mins",
+    "group": "Permission for manager",
+    "perPerson": false,
+    "pin": false,
+    "kind": "value",
+    "featureFrom": "mgr_void_bills"
+   },
+   {
+    "key": "give_discounts",
+    "node": "mgr_give_discounts",
+    "group": "Permission for manager",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "limit:give_discounts.manager",
+    "node": "mgr_give_discounts_cap",
+    "group": "Permission for manager",
+    "perPerson": false,
+    "pin": false,
+    "kind": "value",
+    "featureFrom": "mgr_give_discounts"
+   },
+   {
+    "key": "print_here",
+    "node": "mgr_print_here",
+    "group": "Permission for manager",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "print_clear",
+    "node": "mgr_print_clear",
+    "group": "Permission for manager",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "opt:view_bills.manager.range",
+    "node": "mgr_bills_range",
+    "group": "Permission for manager",
+    "perPerson": false,
+    "pin": false,
+    "kind": "value",
+    "featureFrom": null
+   },
+   {
+    "key": "mgrset:tables",
+    "node": "mgrset_tables",
+    "group": "Manager settings (what manager can do)",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "mgrset:users",
+    "node": "mgrset_users",
+    "group": "Manager settings (what manager can do)",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "opt:manage_staff.manager.create",
+    "node": "mgr_users_create",
+    "group": "Manager settings (what manager can do)",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "opt:manage_staff.manager.reset_pw",
+    "node": "mgr_users_reset_pw",
+    "group": "Manager settings (what manager can do)",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "opt:manage_staff.manager.disable",
+    "node": "mgr_users_disable",
+    "group": "Manager settings (what manager can do)",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "mgrset:access",
+    "node": "mgrset_access",
+    "group": "Manager settings (what manager can do)",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   }
+  ],
+  "tablet": [
+   {
+    "key": "tablet_mark_paid",
+    "node": "wtr_mark_paid",
+    "group": "Permission for waiter",
+    "perPerson": true,
+    "pin": true,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "tablet_discount",
+    "node": "wtr_give_discounts",
+    "group": "Permission for waiter",
+    "perPerson": true,
+    "pin": true,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "limit:give_discounts.waiter",
+    "node": "wtr_give_discounts_cap",
+    "group": "Permission for waiter",
+    "perPerson": false,
+    "pin": false,
+    "kind": "value",
+    "featureFrom": "wtr_give_discounts"
+   },
+   {
+    "key": "cap:close_unpaid",
+    "node": "wtr_close_unpaid",
+    "group": "Permission for waiter",
+    "perPerson": true,
+    "pin": true,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "tablet_take_orders",
+    "node": "wtr_take_orders",
+    "group": "What a waiter can do on the floor",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "tablet_table_ops",
+    "node": "wtr_table_ops",
+    "group": "What a waiter can do on the floor",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "tablet_table_tags",
+    "node": "wtr_table_tags",
+    "group": "What a waiter can do on the floor",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "tablet_khata",
+    "node": "wtr_khata",
+    "group": "What a waiter can do on the floor",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "tablet_parcel",
+    "node": "wtr_parcel",
+    "group": "What a waiter can do on the floor",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "tablet_banquet",
+    "node": "wtr_banquet",
+    "group": "What a waiter can do on the floor",
+    "perPerson": true,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   }
+  ],
+  "owner": [
+   {
+    "key": "section:staff",
+    "node": "own_access",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:menu",
+    "node": "own_menu",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:reports",
+    "node": "own_reports",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:customers",
+    "node": "own_customers",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:issues",
+    "node": "own_issues",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:settings",
+    "node": "own_settings",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:ratings",
+    "node": "own_ratings",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:logs",
+    "node": "own_audit",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "opt:view_logs.owner.removals",
+    "node": "d_own_log_removals",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "opt:view_logs.owner.activity",
+    "node": "d_own_log_activity",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:logs_signins",
+    "node": "own_logs_signins",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:logs_service",
+    "node": "own_logs_service",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:logs_staff_changes",
+    "node": "own_logs_staff_changes",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   },
+   {
+    "key": "section:manager_mode",
+    "node": "own_manager_mode",
+    "group": "Owner's menu",
+    "perPerson": false,
+    "pin": false,
+    "kind": "switch",
+    "featureFrom": null
+   }
+  ]
+ },
+ "permissions": [
+  {
+   "id": "edit_menu",
+   "name": "Edit the menu",
+   "power": "edit_menu"
+  },
+  {
+   "id": "give_discounts",
+   "name": "Give a discount",
+   "power": "give_discounts",
+   "tablet": "tablet_discount"
+  },
+  {
+   "id": "void_bills",
+   "name": "Reopen a bill",
+   "power": "void_bills",
+   "tabletNew": true
+  },
+  {
+   "id": "mark_paid",
+   "name": "Mark a bill paid (& undo)",
+   "tablet": "tablet_mark_paid"
+  },
+  {
+   "id": "print_invoice",
+   "name": "Generate & print the invoice",
+   "tablet": "tablet_invoice"
+  },
+  {
+   "id": "khata",
+   "name": "Khata — put it on their tab",
+   "power": "khata",
+   "tablet": "tablet_khata",
+   "module": {
+    "allowed": "khata_allowed",
+    "control": "khata_owner_control",
+    "enabled": "khata_enabled"
+   },
+   "moduleLabel": "Pay later (khata)"
+  },
+  {
+   "id": "loyalty",
+   "name": "Loyalty points",
+   "power": "loyalty",
+   "module": {
+    "allowed": "loyalty",
+    "control": "loyalty",
+    "enabled": "loyalty"
+   },
+   "moduleBag": true,
+   "moduleLabel": "Loyalty points"
+  },
+  {
+   "id": "take_orders",
+   "name": "Take a new order",
+   "power": "take_orders",
+   "tablet": "tablet_take_orders",
+   "module": {
+    "allowed": "take_orders_allowed",
+    "control": "take_orders_owner_control",
+    "enabled": "take_orders_enabled"
+   },
+   "moduleLabel": "Take a new order"
+  },
+  {
+   "id": "parcel",
+   "name": "Parcel orders",
+   "power": "parcel",
+   "tablet": "tablet_parcel"
+  },
+  {
+   "id": "platform",
+   "name": "Platform board (Zomato / Swiggy)",
+   "power": "platform"
+  },
+  {
+   "id": "table_ops",
+   "name": "Table & ticket operations",
+   "power": "table_ops",
+   "tablet": "tablet_table_ops",
+   "module": {
+    "allowed": "table_ops_allowed",
+    "control": "table_ops_owner_control",
+    "enabled": "table_ops_enabled"
+   },
+   "moduleLabel": "Move, merge & split tables"
+  },
+  {
+   "id": "table_tags",
+   "name": "Table types (VIP / Family / Guest)",
+   "power": "table_tags",
+   "tablet": "tablet_table_tags",
+   "module": {
+    "allowed": "table_tags_allowed",
+    "control": "table_tags_owner_control",
+    "enabled": "table_tags_enabled"
+   },
+   "moduleLabel": "Table types (VIP / Family / Guest)"
+  },
+  {
+   "id": "table_assign",
+   "name": "Give waiters their own tables",
+   "power": "table_assign"
+  },
+  {
+   "id": "banquet",
+   "name": "Banquet & events",
+   "power": "banquet",
+   "tablet": "tablet_banquet",
+   "module": {
+    "allowed": "banquet_allowed",
+    "control": "banquet_owner_control",
+    "enabled": "banquet_enabled"
+   },
+   "moduleLabel": "Banquet billing"
+  },
+  {
+   "id": "view_dashboard",
+   "name": "Dashboard & reports",
+   "power": "view_dashboard"
+  },
+  {
+   "id": "view_ratings",
+   "name": "Guest ratings & feedback",
+   "power": "view_ratings"
+  },
+  {
+   "id": "view_logs",
+   "name": "Activity log",
+   "power": "view_logs",
+   "absentOn": true
+  },
+  {
+   "id": "manage_staff",
+   "name": "Manage staff",
+   "power": "manage_staff"
+  },
+  {
+   "id": "edit_settings",
+   "name": "Restaurant settings",
+   "power": "edit_settings"
+  },
+  {
+   "id": "staff_profiles",
+   "name": "Edit staff profiles",
+   "power": "edit_staff_profiles",
+   "absentOn": true,
+   "module": {
+    "allowed": "payroll_allowed",
+    "control": "payroll_owner_control",
+    "enabled": "payroll_enabled"
+   },
+   "moduleLabel": "Staff profiles & pay"
+  },
+  {
+   "id": "staff_pay_view",
+   "name": "See staff pay",
+   "power": "see_staff_pay",
+   "module": {
+    "allowed": "payroll_allowed",
+    "control": "payroll_owner_control",
+    "enabled": "payroll_enabled"
+   },
+   "moduleLabel": "Staff profiles & pay"
+  },
+  {
+   "id": "staff_pay_record",
+   "name": "Record a staff payment",
+   "power": "record_staff_payment",
+   "absentOn": true,
+   "module": {
+    "allowed": "payroll_allowed",
+    "control": "payroll_owner_control",
+    "enabled": "payroll_enabled"
+   },
+   "moduleLabel": "Staff profiles & pay"
+  },
+  {
+   "id": "inv_stock",
+   "name": "Run the stock register",
+   "power": "inv_stock",
+   "module": {
+    "allowed": "inventory_allowed",
+    "control": "inventory_owner_control",
+    "enabled": "inventory_enabled"
+   },
+   "moduleLabel": "Inventory management"
+  },
+  {
+   "id": "inv_expenses",
+   "name": "Record an expense",
+   "power": "inv_expenses",
+   "module": {
+    "allowed": "inventory_allowed",
+    "control": "inventory_owner_control",
+    "enabled": "inventory_enabled"
+   },
+   "moduleLabel": "Inventory management"
+  }
+ ],
+ "featureDefaults": {
+  "ratings": true,
+  "reviews": true,
+  "model3d": true,
+  "allergies": true,
+  "allergy_other": true,
+  "guest_note": true,
+  "favorites": true,
+  "waiter_calls": true,
+  "search": true,
+  "languages": true,
+  "currency": true,
+  "diet_filter": true,
+  "prep_time": false,
+  "verification": false,
+  "payments": false,
+  "aggregators": false,
+  "gst_invoice": false
+ },
+ "managerUserPowers": [
+  "create",
+  "reset_pw",
+  "disable"
+ ],
+ "managerSettings": [
+  "tables",
+  "users",
+  "access"
+ ],
+ "languages": [
+  "en",
+  "de",
+  "fr",
+  "ar",
+  "hi",
+  "ko"
+ ],
+ "currencies": [
+  "INR",
+  "USD",
+  "EUR",
+  "AED",
+  "SAR",
+  "QAR"
+ ]
+}

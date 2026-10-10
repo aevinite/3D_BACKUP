@@ -208,7 +208,8 @@ export function cleanClonedSettings(
   // states. The owner's answer was that this is wanted: a new restaurant starting as a copy of the
   // flagship's guest-menu setup is a useful starting point, and the admin changes what differs on
   // the Access screen afterwards. So do NOT add explicit defaults for these columns, and do not
-  // "fix" the drift they show against `node.def` — see docs/REJECTED-IDEAS.md R8. The tax, tablet,
+  // "fix" the drift they show against `node.def` — see docs/REJECTED-IDEAS.md R66 (it was R8 until a
+  // second idea took that number and this row was lost, 2026-08-16; restored 2026-10-10). The tax, tablet,
   // module and channel columns above are a different matter and stay explicit: those are money,
   // permissions and third-party accounts, not a look-and-feel starting point.
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a

@@ -1,6 +1,8 @@
 # Access screen — the outstanding list (owner, 2026-08-01)
 
-> ✅ **LIVE WORKING SPEC — not history.** **9** of the lines below are still `☐`. It claimed 13
+> ✅ **LIVE WORKING SPEC — not history.** **2** of the lines below are still `☐` (9 until
+> 2026-10-10, when sweep #10 T18 re-checked every one against the code and the owner's later rulings:
+> five were built, three had been overruled by him and are marked `☒ SUPERSEDED` with his words). It claimed 13
 > until 2026-08-11, and there were only ever 12 — three of those were already BUILT and still
 > marked not-started, which sends the next session to rebuild things that are already there.
 > Counted with `grep -c '^- ☐' docs/ACCESS-REDESIGN-SPEC.md`. Linked from
@@ -105,14 +107,24 @@ Manager menu diagnosis and the rest.
 A group of its own, holding what a manager may do to STAFF and to the FLOOR. Each row is a real
 permission with a real gate — no decoration.
 
-- ☐ **Create staff logins** — and it is not only waiters: a manager can create **kitchen** and
+- ☑ **Create staff logins** — and it is not only waiters: a manager can create **kitchen** and
   **tablet** logins, and SEE them.
-- ☐ **Assign tables to a waiter** (inside the create/staff group).
-- ☐ **Reset a staff password / PIN.**
-- ☐ **Delete a staff login.**
-- ☐ *(more tablet ones will follow — build the group so adding one is a line, not a redesign.)*
-- ☐ **Floor layout** — sub-option of the manager's table management.
-- ☐ **Table setting** (names & seats) — sub-option of the same.
+- ☑ **Assign tables to a waiter** (inside the create/staff group).
+  *(Built as Manager settings → "Sections — who serves which table" — the shape the owner set on
+  2026-08-02. Ticked by sweep #10 T18, 2026-10-10.)*
+- ☑ **Reset a staff password.** *(Manager settings → Users → "Reset a password", its own switch since
+  2026-08-20. Ticked 2026-10-10.)*
+- ☐ **Reset a staff PIN** from the manager panel — the PIN half of the same ask is not built: a
+  manager PIN is set only from the admin's profile.
+- ☒ **Delete a staff login.** — **SUPERSEDED by the owner, 2026-08-02:** *"it can disable the user, it
+  can't delete the user."* A manager can switch a login off; deleting stays admin-only, with no switch.
+- ☑ *(more tablet ones will follow — build the group so adding one is a line, not a redesign.)*
+  *(`MANAGER_USER_POWERS` in lib/accessTree.ts is that list: a new one is one line, and the screen,
+  the profile and the server pick it up. Ticked 2026-10-10.)*
+- ☒ **Floor layout** — sub-option of the manager's table management. — **SUPERSEDED by the owner,
+  2026-08-02:** tables per row is admin-only with NO switch — *"you cannot on it and off it"*.
+- ☑ **Table setting** (names & seats) — sub-option of the same. *(Manager settings → "Tables — name &
+  seats". Ticked 2026-10-10.)*
 
 ## K · Waiter sections move into the person
 
@@ -121,7 +133,9 @@ permission with a real gate — no decoration.
 
 ## L · The manager's Settings tab is DELETED
 
-- ☐ Remove the manager panel's **Settings** tab completely. Service mode and the bubble effect
+- ☒ Remove the manager panel's **Settings** tab completely. — **SUPERSEDED the same night (ROUND 6
+  below) and on 2026-08-02:** the tab stayed, holding only the sections a manager is given
+  (Tables · Users · Sections), each with its own switch. Service mode and the bubble effect
   are on Access now; Tables moves under the manager's table management; Sections moves into the
   user profile. Nothing is left for that tab to hold.
 

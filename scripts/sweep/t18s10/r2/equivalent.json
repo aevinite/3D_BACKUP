@@ -1,0 +1,218 @@
+[
+ {
+  "at": "lib/accessTree.ts:1268",
+  "break": "=== → !==",
+  "line": "return n.def !== undefined ? n.def : (n.bind.t === \"tablet\" || n.bind.t === \"capTablet\" ? \"off\" : false);",
+  "why": "defOfEarly fallback: every channel row declares def — pinned by an h-extra invariant row"
+ },
+ {
+  "at": "lib/staffCaps.ts:182",
+  "break": "=== → !==",
+  "line": "else if (n.bind.t === \"none\" && !n.children?.length) add({ key: `todo:${n.id}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false, kind: \"swit",
+  "why": "the todo: placeholder: no childless none row under Owner — h-extra invariant"
+ },
+ {
+  "at": "lib/accessTree.ts:1390",
+  "break": "|| → &&",
+  "line": "case \"text\":     return present(s.settings?.[b.key] as string, (d as string) || \"\");",
+  "why": "the one text row has def \"\", and \"\"||\"\" equals \"\"&&\"\" — pinned by golden.json (google_review_url def)"
+ },
+ {
+  "at": "lib/features.ts:86",
+  "break": "null → undefined",
+  "line": "} catch { return null; }",
+  "why": "null vs undefined: getFeatures only asks `if (saved)`"
+ },
+ {
+  "at": "lib/staffCaps.ts:158",
+  "break": "&& → ||",
+  "line": "walkWaiter(waiter.filter((n) => n.id !== \"wtr_money\" && n.id !== \"wtr_floor\"), GROUP_WAITER_MONEY);",
+  "why": "the leftover sweep: nothing sits outside the two folders and add() de-duplicates by key — h-extra invariant"
+ },
+ {
+  "at": "lib/ownerEntitlements.ts:158",
+  "break": "|| → &&",
+  "line": "if (error || !rows) return ALL_CLOSED();",
+  "why": "readInChunks returns rows XOR error (its type), so `error || !rows` and `error && !rows` agree"
+ },
+ {
+  "at": "lib/staffCaps.ts:154",
+  "break": "?? → ||",
+  "line": "walkWaiter(waiter.find((n) => n.id === \"wtr_money\")?.children ?? [], GROUP_WAITER_MONEY);",
+  "why": "a section/folder lookup that always finds its node — h-extra invariant rows pin each section and folder"
+ },
+ {
+  "at": "lib/staffCaps.ts:141",
+  "break": "?? → ||",
+  "line": "const waiter = section(\"waiter\")?.children ?? [];",
+  "why": "a section/folder lookup that always finds its node — h-extra invariant rows pin each section and folder"
+ },
+ {
+  "at": "lib/accessTree.ts:1268",
+  "break": "false → true",
+  "line": "return n.def !== undefined ? n.def : (n.bind.t === \"tablet\" || n.bind.t === \"capTablet\" ? \"off\" : false);",
+  "why": "defOfEarly fallback: every channel row declares def — pinned by an h-extra invariant row"
+ },
+ {
+  "at": "lib/features.ts:82",
+  "break": "null → undefined",
+  "line": "if (!raw) return null;",
+  "why": "null vs undefined: getFeatures only asks `if (saved)`"
+ },
+ {
+  "at": "lib/accessTree.ts:1645",
+  "break": "\"off\" → \"on\"",
+  "line": "return isTriState(d) ? d : \"off\";",
+  "why": "fallback after a non-tri-state default: every tablet/capTablet def is a tri-state — h-extra invariant rows"
+ },
+ {
+  "at": "lib/staffCaps.ts:150",
+  "break": "=== → !==",
+  "line": "else if (n.bind.t === \"opt\") add({ key: `opt:${n.bind.id}.${n.bind.side}.${n.bind.key}`, group, node: n, pin: false, perPerson: false, kind: n.choices",
+  "why": "the waiter walk opt branch: the Waiter section holds no opt row — h-extra invariant"
+ },
+ {
+  "at": "lib/staffProfileShared.ts:168",
+  "break": "?? → ||",
+  "line": "const s = String(v ?? \"\").trim();",
+  "why": "0/false become \"0\"/\"false\" or \"\" — both are refused as a date (null)"
+ },
+ {
+  "at": "lib/features.ts:84",
+  "break": "null → undefined",
+  "line": "if (!parsed || typeof parsed !== \"object\") return null;",
+  "why": "null vs undefined: getFeatures only asks `if (saved)`"
+ },
+ {
+  "at": "lib/staffCaps.ts:93",
+  "break": "?? → ||",
+  "line": "const mgr = section(\"mgrMenu\")?.children ?? [];",
+  "why": "a section/folder lookup that always finds its node — h-extra invariant rows pin each section and folder"
+ },
+ {
+  "at": "lib/accessTree.ts:1268",
+  "break": "\"off\" → \"on\"",
+  "line": "return n.def !== undefined ? n.def : (n.bind.t === \"tablet\" || n.bind.t === \"capTablet\" ? \"off\" : false);",
+  "why": "defOfEarly fallback: every channel row declares def — pinned by an h-extra invariant row"
+ },
+ {
+  "at": "lib/staffProfileShared.ts:273",
+  "break": "?? → ||",
+  "line": "const amount = Number(String(body.amount ?? \"\").replace(/[,\\s₹]/g, \"\"));",
+  "why": "false becomes NaN or 0 — both refused with the same greater-than-zero sentence"
+ },
+ {
+  "at": "lib/staffCaps.ts:158",
+  "break": "!== → ===",
+  "line": "walkWaiter(waiter.filter((n) => n.id !== \"wtr_money\" && n.id !== \"wtr_floor\"), GROUP_WAITER_MONEY);",
+  "why": "the leftover sweep: nothing sits outside the two folders and add() de-duplicates by key — h-extra invariant"
+ },
+ {
+  "at": "lib/viewAsPerson.ts:57",
+  "break": "null → undefined",
+  "line": "if (res.error) return null; // a blip just means \"no pin this time\" — never an error page",
+  "why": "null vs undefined / ?? vs || on a row object: the caller only asks `if (!row)`"
+ },
+ {
+  "at": "lib/staffCaps.ts:125",
+  "break": "?? → ||",
+  "line": "for (const k of n.children ?? []) {",
+  "why": "a section/folder lookup that always finds its node — h-extra invariant rows pin each section and folder"
+ },
+ {
+  "at": "lib/staffCaps.ts:155",
+  "break": "?? → ||",
+  "line": "walkWaiter(waiter.find((n) => n.id === \"wtr_floor\")?.children ?? [], GROUP_WAITER_FLOOR);",
+  "why": "a section/folder lookup that always finds its node — h-extra invariant rows pin each section and folder"
+ },
+ {
+  "at": "lib/accessTree.ts:1232",
+  "break": "=== → !==",
+  "line": "...ALL_NODES.map((n) => (n.bind.t === \"limit\" ? n.bind.id : null)),",
+  "why": "KNOWN_CONFIG_IDS: the four id lists overlap (every limit id is also an action id; only has/opt/limit/capTablet carry ids) so the set is unchanged — pinned by the KNOWN_CONFIG_IDS invariant row"
+ },
+ {
+  "at": "lib/staffCaps.ts:112",
+  "break": "?? → ||",
+  "line": "walk(mgr.find((n) => n.id === \"mgr_menu_group\")?.children ?? [], GROUP_MENUS);",
+  "why": "a section/folder lookup that always finds its node — h-extra invariant rows pin each section and folder"
+ },
+ {
+  "at": "lib/staffCaps.ts:158",
+  "break": "!== → ===",
+  "line": "walkWaiter(waiter.filter((n) => n.id !== \"wtr_money\" && n.id !== \"wtr_floor\"), GROUP_WAITER_MONEY);",
+  "why": "the leftover sweep: nothing sits outside the two folders and add() de-duplicates by key — h-extra invariant"
+ },
+ {
+  "at": "lib/viewAsPerson.ts:58",
+  "break": "?? → ||",
+  "line": "const row = (res.data?.[0] as StaffUser | undefined) ?? null;",
+  "why": "null vs undefined / ?? vs || on a row object: the caller only asks `if (!row)`"
+ },
+ {
+  "at": "lib/staffCaps.ts:150",
+  "break": "false → true",
+  "line": "else if (n.bind.t === \"opt\") add({ key: `opt:${n.bind.id}.${n.bind.side}.${n.bind.key}`, group, node: n, pin: false, perPerson: false, kind: n.choices",
+  "why": "the waiter walk opt branch: the Waiter section holds no opt row — h-extra invariant"
+ },
+ {
+  "at": "lib/staffCaps.ts:150",
+  "break": "false → true",
+  "line": "else if (n.bind.t === \"opt\") add({ key: `opt:${n.bind.id}.${n.bind.side}.${n.bind.key}`, group, node: n, pin: false, perPerson: false, kind: n.choices",
+  "why": "the waiter walk opt branch: the Waiter section holds no opt row — h-extra invariant"
+ },
+ {
+  "at": "lib/staffCaps.ts:182",
+  "break": "false → true",
+  "line": "else if (n.bind.t === \"none\" && !n.children?.length) add({ key: `todo:${n.id}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false, kind: \"swit",
+  "why": "the todo: placeholder: no childless none row under Owner — h-extra invariant"
+ },
+ {
+  "at": "lib/accessTree.ts:1628",
+  "break": "\"off\" → \"on\"",
+  "line": "return isTriState(d) ? d : \"off\";                 // nothing stored → what the screen shows",
+  "why": "fallback after a non-tri-state default: every tablet/capTablet def is a tri-state — h-extra invariant rows"
+ },
+ {
+  "at": "lib/staffCaps.ts:188",
+  "break": "?? → ||",
+  "line": "walkOwner(section(\"ownMenu\")?.children ?? []);",
+  "why": "a section/folder lookup that always finds its node — h-extra invariant rows pin each section and folder"
+ },
+ {
+  "at": "lib/accessTree.ts:1268",
+  "break": "|| → &&",
+  "line": "return n.def !== undefined ? n.def : (n.bind.t === \"tablet\" || n.bind.t === \"capTablet\" ? \"off\" : false);",
+  "why": "defOfEarly fallback: every channel row declares def — pinned by an h-extra invariant row"
+ },
+ {
+  "at": "lib/staffCaps.ts:117",
+  "break": "?? → ||",
+  "line": "for (const n of section(\"mgrMenu\")?.children.find((x) => x.id === \"mgr_manage\")?.children ?? []) {",
+  "why": "a section/folder lookup that always finds its node — h-extra invariant rows pin each section and folder"
+ },
+ {
+  "at": "lib/staffCaps.ts:113",
+  "break": "?? → ||",
+  "line": "walk(mgr.find((n) => n.id === \"mgr_may\")?.children ?? [], GROUP_MANAGE);",
+  "why": "a section/folder lookup that always finds its node — h-extra invariant rows pin each section and folder"
+ },
+ {
+  "at": "lib/staffCaps.ts:182",
+  "break": "false → true",
+  "line": "else if (n.bind.t === \"none\" && !n.children?.length) add({ key: `todo:${n.id}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false, kind: \"swit",
+  "why": "the todo: placeholder: no childless none row under Owner — h-extra invariant"
+ },
+ {
+  "at": "lib/accessTree.ts:1268",
+  "break": "=== → !==",
+  "line": "return n.def !== undefined ? n.def : (n.bind.t === \"tablet\" || n.bind.t === \"capTablet\" ? \"off\" : false);",
+  "why": "defOfEarly fallback: every channel row declares def — pinned by an h-extra invariant row"
+ },
+ {
+  "at": "lib/accessTree.ts:1229",
+  "break": "=== → !==",
+  "line": "...ALL_NODES.flatMap((n) => [n.featureBind?.t === \"has\" ? n.featureBind.id : null, n.bind.t === \"has\" ? n.bind.id : null]),",
+  "why": "KNOWN_CONFIG_IDS: the four id lists overlap (every limit id is also an action id; only has/opt/limit/capTablet carry ids) so the set is unchanged — pinned by the KNOWN_CONFIG_IDS invariant row"
+ }
+]

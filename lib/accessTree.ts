@@ -1328,6 +1328,10 @@ export type TreeState = {
   settings: Record<string, unknown>;          // plain settings columns (+ tablet_*, module cols)
   modules: Record<string, { allowed?: boolean; owner_control?: boolean; enabled?: boolean }>; // settings.modules
   channels: Record<string, boolean>;          // settings.platform_channels[k].on
+  // WHICH channels have a real stored on/off (item 15). `channels` answers OFF for "nothing stored"
+  // as well as for a stored false — right for the screen, useless for "what did I see?": a first save
+  // over a never-stored channel must not be refused as somebody else's change.
+  channelsStored: Record<string, boolean>;
   grants: Record<string, boolean>;            // restaurants.manager_permissions
   sections: Record<string, boolean>;          // restaurants.owner_entitlements
   tabs: Record<string, Record<string, boolean>>; // access_config.menus[panel][key]
@@ -1337,8 +1341,17 @@ export type TreeState = {
   creds: Record<string, string>;
 };
 
+/** The ONE way a stored channel key is described to a browser (sweep #10 T18, item 10).
+ *  "" = nothing stored. A key of 8 characters or more is "••••" + its last four, so an admin can tell
+ *  WHICH key is in place. A shorter one is just "••••": its "last four" would be most or all of it,
+ *  and a hint must never be the key. No real delivery-app key is that short; a hand-typed test value can be. */
+export function credHint(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.length) return "";
+  return raw.length >= 8 ? `••••${raw.slice(-4)}` : "••••";
+}
+
 export const emptyState = (): TreeState => ({
-  features: {}, settings: {}, modules: {}, channels: {}, grants: {}, sections: {}, tabs: {}, config: {}, creds: {},
+  features: {}, settings: {}, modules: {}, channels: {}, channelsStored: {}, grants: {}, sections: {}, tabs: {}, config: {}, creds: {},
 });
 
 export type TreePatch = Partial<{
@@ -1441,7 +1454,17 @@ export function nodeExpect(n: Node, s: TreeState, rid: string):
     case "tablet":   return at("settings", b.key, s.settings?.[b.key]);
     case "grant":    return at("restaurants", `manager_permissions.${b.flag}`, s.grants?.[b.flag]);
     case "section":  return at("restaurants", `owner_entitlements.${b.key}`, s.sections?.[b.key]);
-    default:         return null;   // creds · tab · has · capTablet · opt · limit · ratingsMaster · none
+    // A CHANNEL compares its `.on` only — two levels into platform_channels, beside an API key the
+    // browser never holds — and only when an on/off is really stored (item 15).
+    case "channel":  return s.channelsStored?.[b.key] ? at("settings", `platform_channels.${b.key}.on`, s.channels?.[b.key]) : null;
+    // The Ratings master moves TWO stored values, so it expects both — whichever are really stored.
+    case "ratingsMaster": {
+      const fields: Record<string, unknown> = {};
+      if (s.features?.ratings !== undefined) fields["features.ratings"] = s.features.ratings;
+      if (s.settings?.google_review_mode !== undefined) fields.google_review_mode = s.settings.google_review_mode;
+      return Object.keys(fields).length ? { table: "settings", id: rid, fields, label: n.name } : null;
+    }
+    default:         return null;   // creds · tab · has · capTablet · opt · limit · none
   }
 }
 
@@ -1610,6 +1633,13 @@ export function waiterConfigCapValue(id: string, accessConfig: unknown): WaiterC
   const stored = (accessConfig as any)?.[id]?.tablet;
   const node = WAITER_CAP_NODE[id];
   if (!node) return "on";
+  // THE RESTAURANT-LEVEL HALF COUNTS HERE TOO (sweep #10 T18, item 8). A waiter action stored in
+  // access_config has no settings column for resolveWaiterCaps() to switch off, so this function is
+  // the ONE place its "does this restaurant have it at all" switch can be honoured. No such row shares
+  // a Feature half today (the walk-out has none); the day one does, it is off for the gate as well as
+  // the screen, instead of off on the screen and on at the server.
+  const feat = WAITER_FEATURE_OF[`cap:${id}`];
+  if (feat && (accessConfig as any)?.[feat]?.on === false) return "off";
   if (isTriState(stored)) return stored;
   const d = defOf(node);
   return isTriState(d) ? d : "off";
@@ -1636,7 +1666,10 @@ export function resolveWaiterCaps<T extends Record<string, any> | null>(settings
   // Columns the row list expects but the select didn't return still need an answer.
   for (const key of Object.keys(WAITER_COL_NODE)) if (!(key in out)) out[key] = waiterCapValue(key, undefined);
   for (const key of WAITER_NEVER) out[key] = "off";
-  if (accessConfig !== undefined) for (const key of waiterFeatureOffCols(accessConfig)) out[key] = "off";
+  // Only real `tablet_*` columns go into a settings object (item 8): a `cap:<id>` key is not a column,
+  // and writing one here would hand the panel a key nothing reads. Those rows are resolved — Feature
+  // half included — by waiterConfigCapValue().
+  if (accessConfig !== undefined) for (const key of waiterFeatureOffCols(accessConfig)) if (key.startsWith("tablet_")) out[key] = "off";
   return out as T;
 }
 
@@ -1688,6 +1721,8 @@ export function applyPatch(s: TreeState, p: TreePatch): TreeState {
       // the server's own merge (app/api/admin/restaurants/access-tree → `{ ...prev, allowed: v,
       // enabled: true }`), so the instant repaint and the saved row are one rule.
       if (k === "modules" && typeof val === "boolean") { next[kk] = { ...(cur[kk] || {}), allowed: val, enabled: true }; continue; }
+      // A channel switch that just saved IS stored now, so the next tap may say what it saw (item 15).
+      if (k === "channels") out.channelsStored = { ...(out.channelsStored || {}), [kk]: true };
       next[kk] = val && typeof val === "object" && !Array.isArray(val)
         ? deepMerge(cur[kk] || {}, val)
         : val;

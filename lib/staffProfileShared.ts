@@ -271,7 +271,10 @@ export function paymentFrom(body: Record<string, unknown>): {
   const kind = String(body.kind ?? "salary");
   if (!isPayKind(kind)) throw new Error("Unknown payment type.");
   const amount = Number(String(body.amount ?? "").replace(/[,\s₹]/g, ""));
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter an amount greater than zero.");
+  // GREATER THAN ZERO AFTER ROUNDING (sweep #10 T18, item 13). A bare `amount <= 0` let 0.004 through,
+  // to be stored as ₹0.00 — a payment of nothing in somebody's pay history. The rounded test covers
+  // zero and every negative as well, so it is the only one.
+  if (!Number.isFinite(amount) || Math.round(amount * 100) <= 0) throw new Error("Enter an amount greater than zero.");
   if (amount > 99_999_999) throw new Error("That amount looks wrong — it's too large.");
   const mode = String(body.mode ?? "cash");
   if (!(PAY_MODES as readonly string[]).includes(mode)) throw new Error("Unknown payment mode.");

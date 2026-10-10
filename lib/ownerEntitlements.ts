@@ -61,25 +61,13 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 export { MANAGER_POWER_FLAGS };
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
-// ⚠️ RETIRED 2026-08-06 — KEPT ONLY SO THE KEY SHAPE IS STILL DOCUMENTED. NOTHING READS THESE.
-//
-// `power_<flag>` was the OLD ladder's "may the admin allow this power at all" rung. It is now
-// unwritable by any code path in the product: the one and only writer of owner_entitlements is
-// app/api/admin/restaurants/access-tree/route.ts, which allow-lists from SECTION_ENTITLEMENTS —
-// owner PAGE keys — and the New-restaurant form's copy of the old ladder went on 2026-08-06.
-// So every power_<flag> is permanently absent, every read of it was permanently "allowed", and
-// it was a SECOND cap on an idea that already has a switch: access_config[flag].on, the Feature
-// half of that row on the Access screen. Two mechanisms for one idea is what the access model
-// exists to remove, so the five readers (editor ×3, inventory, staffProfile, owner/staff) were
-// deleted and each says where the live cap lives instead.
-//
-// Do not wire this back up. If a power needs an admin-level "does this restaurant have it",
-// that is a `has` row in lib/accessTree.ts — which is switchable, visible and audited.
-export function powerEntitled(rawEntitlements: unknown, flag: string): boolean {
-  const key = powerEntitlementKey(flag);
-  const v = rawEntitlements && typeof rawEntitlements === "object" ? (rawEntitlements as Record<string, unknown>)[key] : undefined;
-  return typeof v === "boolean" ? v : true;
-}
+// powerEntitled() — the OLD ladder's "may the admin allow this power at all" check on
+// owner_entitlements.power_<flag> — LEFT on 2026-10-10 (sweep #10 T18, item 26). It had been retired
+// since 2026-08-06 and kept "only so the key shape is documented": the only writer of
+// owner_entitlements allow-lists owner PAGE keys, so every power_<flag> was permanently absent and the
+// function always said yes. The key shape is still documented by powerEntitlementKey() above, which
+// OWNER_ENTITLEMENT_KEYS uses. If a power ever needs an admin-level "does this restaurant have it",
+// that is a `has` row in lib/accessTree.ts — switchable, visible and audited.
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [
   ...OWNER_SECTION_KEYS,
@@ -89,7 +77,11 @@ export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [
 export type OwnerEntitlements = Record<string, boolean>;
 
 // Merge a raw JSONB value over the all-on defaults (absent/non-boolean = ON). Only the
-// BOOLEAN entitlement keys — the depth_<flag> strings are read separately (featureDepth).
+// BOOLEAN entitlement keys are read. A few old restaurants still carry `depth_<flag>` strings from the
+// retired 4-rung ladder ("tablet" etc.); NOTHING reads them — this line used to say they were "read
+// separately (featureDepth)", a function that no longer exists (sweep #10 T18, item 11). They are
+// skipped here because they are not booleans, and left in the row because deleting stored history
+// is not this helper's job.
 export function mergeOwnerEntitlements(raw: unknown): OwnerEntitlements {
   const out: OwnerEntitlements = {};
   for (const k of OWNER_ENTITLEMENT_KEYS) out[k] = true;
@@ -104,10 +96,23 @@ export function mergeOwnerEntitlements(raw: unknown): OwnerEntitlements {
 
 // One restaurant's merged entitlements. Small select on a rare path (panel boot /
 // settings pages), so no cache — a flipped switch takes effect on the next load.
+//
+// A FAILED READ IS NOT "EVERYTHING ON" (sweep #10 T18, item 12). This answered
+// mergeOwnerEntitlements(undefined) — every section ON — whenever the read failed, and it is not only a
+// menu: the manager and tablet routes ask it whether this restaurant has the customer directory before
+// a lookup, a loyalty spend or a "repeat customer" greeting. So one database blip quietly ignored a
+// section the admin had switched OFF, for that request. It now tries once more and then answers CLOSED,
+// exactly as entitledSubset() below already does with a failed read: the gate refuses for one request
+// ("isn't enabled"), the owner's menu hides that section for one load, and nothing switched off is
+// ever treated as on.
+const ALL_CLOSED = (): OwnerEntitlements => Object.fromEntries(OWNER_ENTITLEMENT_KEYS.map((k) => [k, false]));
 export async function getOwnerEntitlements(restaurantId: string): Promise<OwnerEntitlements> {
   if (!restaurantId) return mergeOwnerEntitlements(null);
-  const r = await sb.from("restaurants").select("owner_entitlements").eq("id", restaurantId).maybeSingle();
-  return mergeOwnerEntitlements(r.data?.owner_entitlements);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await sb.from("restaurants").select("owner_entitlements").eq("id", restaurantId).maybeSingle();
+    if (!r.error) return mergeOwnerEntitlements(r.data?.owner_entitlements);
+  }
+  return ALL_CLOSED();
 }
 
 // The subset of these restaurants still entitled to a key — how the owner APIs
@@ -146,9 +151,12 @@ export async function logViewSubset(restaurantIds: string[], part: "removals" | 
 // restaurant still has it (per-restaurant data is filtered separately by the APIs).
 export async function getOwnerEntitlementsUnion(restaurantIds: string[]): Promise<OwnerEntitlements> {
   if (!restaurantIds.length) return mergeOwnerEntitlements(null);
-  const { rows } = await readInChunks<{ owner_entitlements: unknown }>(restaurantIds, (chunk) =>
+  const { rows, error } = await readInChunks<{ owner_entitlements: unknown }>(restaurantIds, (chunk) =>
     sb.from("restaurants").select("owner_entitlements").in("id", chunk).limit(chunk.length));
-  const merged = (rows || []).map((r) => mergeOwnerEntitlements(r.owner_entitlements));
+  // Also a gate (the owner's Settings save refuses on `.settings === false`), so a failed read is
+  // CLOSED here too — it used to fall through to "no rows → every section ON" (item 12).
+  if (error || !rows) return ALL_CLOSED();
+  const merged = rows.map((r) => mergeOwnerEntitlements(r.owner_entitlements));
   const out: OwnerEntitlements = {};
   for (const k of OWNER_ENTITLEMENT_KEYS) out[k] = merged.length ? merged.some((m) => m[k]) : true;
   return out;

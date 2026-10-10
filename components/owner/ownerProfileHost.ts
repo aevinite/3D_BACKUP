@@ -94,6 +94,10 @@ export function ownerProfileHost(userId: string, scopePin: string | null, asPin:
     pageHosted: true,
     // showPassword stays FALSE here on purpose (owner, 2026-09-13). The admin console can read a
     // password back; the owner cockpit embeds this same profile and does not get that door with it.
-    can: { pin: false, signIn: false, role: false, visitAsPerson: false, accessLink: false, showPassword: false },
+    // permissions: false (sweep #10 T18, item 16 — MY CALL on the owner's written rule, "only the admin
+    // holds permissions; the owner panel and the manager panel configure none"). The rows are shown,
+    // read-only, and /api/owner/staff refuses set_permissions from an owner or a manager. To give owners
+    // per-person control back, flip this one flag and the refusal in that route together.
+    can: { pin: false, signIn: false, role: false, visitAsPerson: false, accessLink: false, showPassword: false, permissions: false },
   };
 }

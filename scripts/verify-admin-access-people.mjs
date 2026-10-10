@@ -817,7 +817,9 @@ await phase("every write in the territory that CAN be protected sends an expecta
 await phase("…and staff_users is a table the one clash gate actually knows", () =>
   ok(/staff_users: "id",/.test(NCODE.clash), "an unknown table returns null, which reads as 'nothing to protect'"));
 await phase("…and the gate understands the jsonb sub-key form these call sites use", () =>
-  ok(/const \[col, sub\] = c\.split\("\."\);/.test(NCODE.clash), "comparing the whole blob is a false-positive machine"));
+  // `[col, sub, leaf]` since 2026-10-10: one level deeper for a delivery channel's `.on` (sweep #10 T18,
+  // item 15). The sub-key form these call sites use is unchanged.
+  ok(/const \[col, sub(, leaf)?\] = c\.split\("\."\);/.test(NCODE.clash), "comparing the whole blob is a false-positive machine"));
 await phase("…and an absent key compares equal to \"\", so 'was on the default' is a real previous value", () =>
   ok(/const norm = \(v: unknown\) => \(v == null \? "" : String\(v\)\.trim\(\)\);/.test(NCODE.clashCompare), "otherwise every default row would clash with itself"));
 await phase("…and a switch is described to a person as on/off, never true/false", () =>

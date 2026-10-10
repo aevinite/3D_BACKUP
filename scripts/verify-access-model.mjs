@@ -836,7 +836,9 @@ else ok("the read/write route derives every allow-list from the model");
   // next one. A looser "id … within 900 characters … module:" scan reads across the boundary and
   // reports the module of the row BELOW (it blamed print_invoice for khata's binding while this
   // check was being written), so the guard would name the wrong row on the day it matters.
-  const anchors = [...accessModel.matchAll(/\{\s*id:\s*"([a-z0-9_]+)",\s*group:\s*"/g)];
+  // (The entry opens `{ id: "x", name: "y"` since 2026-10-10 — `group` was display data and left with
+  // the rest of it, sweep #10 T18 item 25. Same one-slice-per-permission rule.)
+  const anchors = [...accessModel.matchAll(/\{\s*id:\s*"([a-z0-9_]+)",\s*name:\s*"/g)];
   const withModule = anchors.map((a, i) => {
     const own = accessModel.slice(a.index, i + 1 < anchors.length ? anchors[i + 1].index : accessModel.length);
     const m = own.match(/\bmodule:\s*\{\s*allowed:\s*"([a-z0-9_]+)_allowed"/);
@@ -1149,6 +1151,247 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("docs/ACCESS-MODEL.md's card table and row count, and docs/STAFF-PROFILE.md's block and dropdown counts, match the screen");
 }
 
+// ── 60 · lib/accessModel.ts EXPORTS ONLY WHAT REAL CODE IMPORTS ─────────────────────────────────
+// The file survives as enforcement wiring only (see its header). Sixteen display helpers of the
+// retired 4-rung panel sat in it for ten weeks with no importer, still answering questions about a
+// `power_<flag>` rung nothing can write — sweep #9 measured it (P105050), sweep #10 T18 item 7 removed
+// them. This keeps the next one from settling in: every exported VALUE (types are exempt — they are
+// shapes, not answers) must be imported by name by a file in app/, lib/ or components/.
+{
+  // (since item 26) the same question for lib/ownerEntitlements.ts, whose retired powerEntitled() sat
+  // exported and uncalled for two months.
+  for (const [lib, spec] of [["lib/ownerEntitlements.ts", "@/lib/ownerEntitlements"]]) {
+    const ex = [...read(lib).matchAll(/^export (?:async )?(?:const|function) (\w+)/gm)].map((m) => m[1]);
+    const files = []; const wd = (d) => { for (const e of readdirSync(join(root, d), { withFileTypes: true })) { const p = `${d}/${e.name}`; if (e.isDirectory()) { if (e.name !== "node_modules") wd(p); } else if (/\.(tsx?|mjs|js)$/.test(e.name) && p !== lib) files.push(read(p)); } };
+    for (const d of ["app", "lib", "components"]) wd(d);
+    const used = new Set(); const rx = new RegExp(`import\\s*\\{([^}]+)\\}\\s*from\\s*["']${spec.replace("/", "\\/")}["']`, "g");
+    for (const f of files) for (const m of f.matchAll(rx)) for (const x of m[1].split(",")) used.add(x.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]);
+    // re-exports used inside the file itself (MANAGER_POWER_FLAGS) and helpers its own exports call count as used
+    const inner = read(lib);
+    const dead = ex.filter((x) => !used.has(x) && (inner.match(new RegExp(`\\b${x}\\b`, "g")) || []).length < 2);
+    if (dead.length) fail(`${lib} exports what nothing uses: ${dead.join(", ")}`);
+  }
+  const src = read("lib/accessModel.ts");
+  const exported = [...src.matchAll(/^export (?:const|function) (\w+)/gm)].map((m) => m[1]);
+  const corpus = [];
+  const walkDir = (d) => { for (const e of readdirSync(join(root, d), { withFileTypes: true })) { const p = `${d}/${e.name}`; if (e.isDirectory()) { if (e.name !== "node_modules") walkDir(p); } else if (/\.(tsx?|mjs|js)$/.test(e.name) && p !== "lib/accessModel.ts") corpus.push(read(p)); } };
+  for (const d of ["app", "lib", "components"]) walkDir(d);
+  const used = new Set();
+  for (const f of corpus) for (const m of f.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']@\/lib\/accessModel["']/g)) for (const x of m[1].split(",")) used.add(x.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]);
+  const dead = exported.filter((x) => !used.has(x));
+  if (!exported.length) fail("check 60 found no exports in lib/accessModel.ts — the guard has lost its subject");
+  else if (dead.length) fail(`lib/accessModel.ts exports what nothing imports: ${dead.join(", ")} — delete it, or import it where it is needed`);
+  else ok(`all ${exported.length} values lib/accessModel.ts exports are imported by real code`);
+}
+
+// ── 61 · A WAITER ACTION WITH NO COLUMN STILL OBEYS ITS RESTAURANT SWITCH ─────────────────────
+// Two halves (sweep #10 T18, item 8). resolveWaiterCaps() may only ever write real `tablet_*`
+// columns into a settings object — a `cap:<id>` key is not one, and the panel would receive a key
+// nothing reads. And waiterConfigCapValue() — the only resolver a column-less waiter action has —
+// must consult that action's Feature half, or "the restaurant does not have it" would hide the
+// button and leave the gate open. Asked against every `has` switch turned off at once.
+{
+  const T = await import("../node_modules/.cache/accessTree.mjs");
+  const allOff = Object.fromEntries(T.HAS_IDS.map((id) => [id, { on: false }]));
+  const out = T.resolveWaiterCaps({}, allOff);
+  const stray = Object.keys(out).filter((k) => !k.startsWith("tablet_"));
+  const src = read("lib/accessTree.ts");
+  const body = src.slice(src.indexOf("export function waiterConfigCapValue"), src.indexOf("export function waiterConfigCapValue") + 1200);
+  const probs = [];
+  if (stray.length) probs.push(`resolveWaiterCaps() wrote non-column keys into settings: ${stray.join(", ")}`);
+  if (!/WAITER_FEATURE_OF\[`cap:\$\{id\}`\]/.test(body)) probs.push("waiterConfigCapValue() no longer consults the row's Feature half (WAITER_FEATURE_OF[`cap:${id}`])");
+  if (probs.length) fail(probs.join("; "));
+  else ok("a waiter action with no column of its own obeys its restaurant switch, and only real tablet_* columns reach a settings object");
+}
+
+// ── 62 · A KEY HINT IS NEVER THE KEY ─────────────────────────────────────────────────────────────
+// A channel key reaches a browser only as a hint. "••••" + the last four is safe for a real key; for a
+// key of four characters it IS the key, and for six it is two thirds of it. (sweep #10 T18, item 10.)
+// The one builder is credHint() in lib/accessTree.ts, and lib/accessState.ts must use it.
+{
+  const T = await import("../node_modules/.cache/accessTree.mjs");
+  const probs = [];
+  for (const k of ["a", "abc", "abcd", "abcdef", "abcdefg"]) { const h = T.credHint(k); if (h !== "••••") probs.push(`a ${k.length}-character key hints "${h}"`); }
+  if (T.credHint("zomato-1234-ABCD") !== "••••ABCD") probs.push("a long key no longer shows its last four");
+  if (T.credHint("") !== "" || T.credHint(undefined) !== "" || T.credHint(12345678) !== "") probs.push("no key / not a string must hint \"\"");
+  if (!/credHint\(raw\)/.test(read("lib/accessState.ts"))) probs.push("lib/accessState.ts builds its hints without credHint()");
+  if (probs.length) fail(`a stored key could reach a browser through its hint: ${probs.join("; ")}`);
+  else ok("a key hint is never the key: short keys show only dots, and the reader uses the one builder");
+}
+
+// ── 63 · THE OLD depth_* ENTITLEMENT STRINGS ARE READ BY NOTHING — AND THE NOTE SAYS SO ──────────
+// lib/ownerEntitlements.ts once claimed they were "read separately (featureDepth)" — a function that
+// had been deleted (sweep #10 T18, item 11). The note now says nothing reads them. If code ever starts
+// reading `depth_*` again, this goes red so the note (and the merge that skips them) move with it.
+{
+  const files = [];
+  const walkDir = (d) => { for (const e of readdirSync(join(root, d), { withFileTypes: true })) { const p = `${d}/${e.name}`; if (e.isDirectory()) { if (e.name !== "node_modules") walkDir(p); } else if (/\.(tsx?|mjs|js)$/.test(e.name)) files.push(p); } };
+  for (const d of ["app", "lib", "components"]) walkDir(d);
+  const readers = files.filter((f) => read(f).split("\n").some((l) => !/^\s*(\/\/|\*)/.test(l) && /depth_|featureDepth/.test(l)));
+  const note = read("lib/ownerEntitlements.ts");
+  if (readers.length) fail(`code reads the old depth_* entitlement strings again (${readers.join(", ")}) — update the note in lib/ownerEntitlements.ts`);
+  else if (/read separately \(featureDepth\)/.test(note)) fail("lib/ownerEntitlements.ts still points at featureDepth(), which does not exist");
+  else ok("nothing reads the old depth_* entitlement strings, and lib/ownerEntitlements.ts says exactly that");
+}
+
+// ── 64 · A FAILED ENTITLEMENT READ NEVER OPENS A GATE ────────────────────────────────────────────
+// getOwnerEntitlements() is a GATE, not only a menu: the manager and tablet routes refuse a customer
+// lookup / loyalty spend on its `.customers`. It answered "everything ON" on a failed read, so a blip
+// ignored an admin's OFF switch for that request (sweep #10 T18, item 12). Its read must look at
+// `.error`, and the failure path must answer closed — never mergeOwnerEntitlements() of nothing.
+{
+  const src = read("lib/ownerEntitlements.ts");
+  const at = src.indexOf("export async function getOwnerEntitlements");
+  const body = src.slice(at, src.indexOf("\n}", at));
+  const probs = [];
+  if (at < 0) probs.push("getOwnerEntitlements() not found — fix this guard");
+  if (!/\.error/.test(body)) probs.push("its read never looks at .error");
+  if (!/return ALL_CLOSED\(\)/.test(body)) probs.push("a failed read does not answer closed");
+  const uat = src.indexOf("export async function getOwnerEntitlementsUnion");
+  const ubody = src.slice(uat, src.indexOf("\n}", uat));
+  if (!/if \(error \|\| !rows\) return ALL_CLOSED\(\)/.test(ubody)) probs.push("getOwnerEntitlementsUnion() answers every section ON when its read fails");
+  if (probs.length) fail(`a database blip could open an owner-section gate: ${probs.join("; ")}`);
+  else ok("a failed owner-entitlement read answers closed, so a blip never ignores an OFF switch");
+}
+
+// ── 65 · "VIEW AS THIS PERSON" NEEDS A RESTAURANT, AND ASKS FOR ONE BEFORE READING ANYBODY ────────
+// lib/viewAsPerson.ts answers the admin's ?as=<person> pin. With an empty restaurant id its own
+// comparison `(u.restaurant_id || "") !== rid` would MATCH a person who has no restaurant, so the helper
+// refuses an empty restaurant itself rather than trusting four callers to (sweep #10 T18, item 14).
+{
+  const src = read("lib/viewAsPerson.ts");
+  const body = src.slice(src.indexOf("export async function viewAsPerson"));
+  const lock = body.indexOf("if (!rid) return null;"), readAt = body.indexOf("personById(id)");
+  if (lock < 0 || readAt < 0 || lock > readAt) fail("viewAsPerson() reads a person before refusing an empty restaurant id");
+  else ok("viewAsPerson() refuses an empty restaurant before it reads anybody");
+}
+
+// ── 66 · FIRST SAVE WINS ON THE DELIVERY CHANNELS AND THE RATINGS MASTER TOO ────────────────────
+// Project rule 11: two admins tapping one switch — the second is refused and told, never silently
+// overwritten. The three channel switches and the Ratings master sent no expectation at all (sweep
+// #10 T18, item 15): a channel's on/off sits two levels deep beside a key the browser never holds, and
+// the master moves two stored values. Now: a stored channel expects `platform_channels.<k>.on`, a
+// never-stored one expects nothing (its first save must not read as a clash), the master expects each
+// of its two values that is stored, and lib/clash.ts accepts the two-level path.
+{
+  const T = await import("../node_modules/.cache/accessTree.mjs");
+  const probs = [];
+  const base = T.emptyState();
+  for (const n of ALL_NODES.filter((x) => x.bind.t === "channel")) {
+    const stored = { ...base, channels: { [n.bind.key]: true }, channelsStored: { [n.bind.key]: true } };
+    const e = T.nodeExpect(n, stored, "r");
+    if (!e || JSON.stringify(e.fields) !== JSON.stringify({ [`platform_channels.${n.bind.key}.on`]: true })) probs.push(`${n.id}: no .on expectation when stored`);
+    if (T.nodeExpect(n, { ...base, channels: { [n.bind.key]: false } }, "r") !== null) probs.push(`${n.id}: a never-stored channel sends an expectation (its first save would be refused)`);
+    const after = T.applyPatch(base, T.nodePatch(n, true));
+    if (!T.nodeExpect(n, after, "r")) probs.push(`${n.id}: after a save the next tap sends no expectation`);
+  }
+  const rm = NODE_BY_ID.ratings;
+  const e2 = T.nodeExpect(rm, { ...base, features: { ratings: false }, settings: { google_review_mode: "google" } }, "r");
+  if (!e2 || e2.fields["features.ratings"] !== false || e2.fields.google_review_mode !== "google") probs.push("the Ratings master does not expect both of its stored values");
+  if (T.nodeExpect(rm, base, "r") !== null) probs.push("the Ratings master expects something on a restaurant that stores neither value");
+  const clash = read("lib/clash.ts");
+  if (!/\(\\\.\[a-zA-Z0-9_-\]\+\)\{0,2\}/.test(clash)) probs.push("lib/clash.ts no longer accepts a two-level field path");
+  if (probs.length) fail(`a second admin's tap could silently overwrite the first: ${probs.join("; ")}`);
+  else ok("the delivery channels and the Ratings master refuse a second admin's stale tap, and never a first save");
+}
+
+// ── 67 · ONLY THE ADMIN CHANGES ONE PERSON'S PERMISSIONS ─────────────────────────────────────────
+// The owner's rule: "only the admin holds permissions — the owner panel and the manager panel configure
+// none" (docs/ACCESS-MODEL.md, docs/CLAUDE-DETAIL.md). The owner cockpit's copy of a staff profile still
+// offered live per-person dropdowns, and /api/owner/staff let an owner grant and a manager reduce
+// (sweep #10 T18, item 16 — MY CALL on the written rule). Both halves are checked: the owner host shows
+// the rows read-only, and the route refuses set_permissions from anyone but the admin, FIRST.
+{
+  const host = read("components/owner/ownerProfileHost.ts");
+  const route = read("app/api/owner/staff/route.ts");
+  const prof = read("components/admin/StaffProfile.tsx");
+  const at = route.indexOf('if (action === "set_permissions") {');
+  const first = route.slice(at, at + 1400).split("\n").filter((l) => !/^\s*\/\//.test(l)).slice(1, 3).join("\n");
+  const probs = [];
+  if (!/permissions: false/.test(host)) probs.push("the owner's profile host does not set can.permissions: false");
+  if (at < 0 || !/if \(s\.actor !== "admin"\) return bad\(/.test(first)) probs.push("/api/owner/staff set_permissions does not refuse a non-admin before anything else");
+  if (!/cap\.perPerson && editable \?/.test(prof)) probs.push("StaffProfile draws a permission dropdown without asking whether this console may edit");
+  if (probs.length) fail(`an owner or a manager could change a person's permissions: ${probs.join("; ")}`);
+  else ok("only the admin can change one person's permissions — the owner's copy is read-only and the route refuses everyone else");
+}
+
+// ── 68 · A SUB-OPTION CAN ONLY BE SAVED AS ONE OF ITS OWN VALUES ─────────────────────────────────
+// The save route held top-level choices to their list but took ANY value for an access_config
+// sub-option, so French House came to hold `true` for "Who may take the menu down" — a value with no
+// radio to show it (sweep #10 T18, item 18). Every opt row must be checked against its own values, and
+// the check must refuse rather than store.
+{
+  const r = treeRoute;
+  const at = r.indexOf("if (CONFIG_OPTS.has(`${permId}|${m[1]}|${k}`))");
+  const block = r.slice(at, at + 600);
+  const probs = [];
+  if (!/CONFIG_OPT_VALUES\.set\(/.test(r)) probs.push("the route no longer records each sub-option's legal values");
+  if (at < 0 || !/CONFIG_OPT_VALUES\.get\(/.test(block) || !/return bad\(/.test(block)) probs.push("a sub-option is stored without being checked against its own values");
+  const optChoice = ALL_NODES.filter((n) => n.bind.t === "opt" && n.choices?.length).length;
+  if (probs.length) fail(`the Access screen's save route can store a value no control can show: ${probs.join("; ")}`);
+  else ok(`every sub-option is saved only as one of its own values (${optChoice} pick-one rows, the rest on/off)`);
+}
+
+// ── 69 · NO NEVER-CALLED FUNCTION IN THE TWO ROUTES THIS MODEL FEEDS ────────────────────────────
+// app/api/owner/staff/route.ts carried capGroupsFor() — "the permission rows for one person,
+// resolved server-side" — which nothing called, reading a restaurant's whole permission state for a
+// path not in use (sweep #10 T18, item 19). A dead function in a permission route is the one that
+// makes the next reader believe it is the live path. Every top-level function declared in either
+// route must be referenced somewhere besides its own declaration.
+{
+  const dead = [];
+  for (const f of ["app/api/owner/staff/route.ts", "app/api/admin/restaurants/access-tree/route.ts"]) {
+    const src = read(f), body = src.split("\n").filter((l) => !/^\s*(\/\/|\*)/.test(l)).join("\n");
+    for (const m of body.matchAll(/^(?:async )?function (\w+)\(/gm)) {
+      const uses = body.match(new RegExp(`\\b${m[1]}\\b`, "g")) || [];
+      if (uses.length < 2) dead.push(`${f}: ${m[1]}()`);
+    }
+  }
+  if (dead.length) fail(`a function nothing calls sits in a permission route: ${dead.join("; ")}`);
+  else ok("every function in the owner staff and access-tree routes is called");
+}
+
+// ── 70 · A LONG ROW NAME STAYS ON ITS ARROW'S LINE ON A PHONE ──────────────────────────────────
+// As a bare text node in a wrapping flex row, "Manager settings (what manager can do)" jumped whole to
+// the next line at 360px and left the arrow alone above it (sweep #10 T18, item 21, seen on the
+// Samsung A35 screenshot). The name must be its own box with a zero basis, so it shares the arrow's
+// line and wraps inside itself. (The on-screen measurement lives in scripts/sweep/t18s10.)
+{
+  const tsx = read("components/admin/AccessTree.tsx");
+  const probs = [];
+  if (!/<span className="nm-t">\{node\.name\}<\/span>/.test(tsx)) probs.push("the row name is not in its own .nm-t box");
+  if (!/\.at-box-t \.nm \.nm-t \{ flex:1 1 0;/.test(tsx)) probs.push(".nm-t lost its zero flex-basis, so a long name wraps away from its arrow");
+  if (probs.length) fail(`a long row name on the Access screen leaves its arrow alone on a phone: ${probs.join("; ")}`);
+  else ok("a long Access row name shares its arrow's line and wraps inside itself");
+}
+
+// ── 71 · ONE MODULE, ONE NAME — AND lib/accessModel.ts STAYS WIRING ONLY ─────────────────────────
+// A module's label (MODULE_DEFS) is what the activity log writes when it is switched ("Table & ticket
+// operations → on", measured on French House) and what the owner's Settings lists. It said "Banquet &
+// events", "Inventory & expenses", "Table & ticket operations" while the Access screen said "Banquet
+// billing", "Inventory management" (the owner's own word, 2026-09-23), "Move, merge & split tables"
+// (sweep #10 T18, item 25). Each label must be the Access screen's module row name. And the file was
+// trimmed to enforcement wiring the same day: a display field coming back is the retired panel coming
+// back, so the type may declare only the ten fields real code reads.
+{
+  const am = read("lib/accessModel.ts");
+  const probs = [];
+  const rowName = Object.fromEntries(ALL_NODES.filter((n) => n.bind.t === "module" || n.bind.t === "moduleBag").map((n) => [n.bind.key, n.name]));
+  for (const m of am.matchAll(/module: \{ allowed: "(\w+?)(?:_allowed)?", control: "[^"]+", enabled: "[^"]+" \}(?:, moduleBag: true)?, moduleLabel: "([^"]+)"/g)) {
+    const key = m[1];
+    if (!(key in rowName)) probs.push(`module "${key}" has no row on the Access screen`);
+    else if (rowName[key] !== m[2]) probs.push(`module "${key}" is labelled "${m[2]}" but the Access screen calls it "${rowName[key]}"`);
+  }
+  const withModule = (am.match(/module: \{ allowed:/g) || []).length, labelled = (am.match(/moduleLabel: "/g) || []).length;
+  if (withModule !== labelled) probs.push(`${withModule} entries carry a module but ${labelled} carry a moduleLabel — give every module its Access-screen name`);
+  const typeBody = (am.match(/type Perm = \{([\s\S]*?)\n\};/) || [])[1] || "";
+  const fields = [...typeBody.matchAll(/^\s{2}(\w+)\??:/gm)].map((x) => x[1]).sort();
+  const WIRING = ["absentOn", "id", "isNew", "module", "moduleBag", "moduleLabel", "name", "power", "tablet", "tabletNew"];
+  if (JSON.stringify(fields) !== JSON.stringify(WIRING)) probs.push(`the Perm type declares [${fields.join(", ")}] — only the ten fields real code reads belong there`);
+  if (probs.length) fail(`lib/accessModel.ts has drifted from the Access screen or from wiring-only: ${probs.join("; ")}`);
+  else ok("every module is named as the Access screen names it, and lib/accessModel.ts holds wiring only");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27
@@ -1170,6 +1413,12 @@ else ok("the read/write route derives every allow-list from the model");
   else if (Number(m[1]) !== real)
     fail(`CLAUDE.md says ${m[1]} outstanding owner asks on the Access screen and docs/ACCESS-REDESIGN-SPEC.md really has ${real} — every session starts from that number, so it sends them hunting for work that is already done (or hides work that is not)`);
   else ok(`CLAUDE.md's count of outstanding owner asks is right (${real})`);
+  // …and the spec's OWN header says the same number (sweep #10 T18, item 17). It is the first line a
+  // reader sees; it went from 13 to 12 to 9 by hand and nothing checked it.
+  const h = spec.match(/\*\*(\d+)\*\* of the lines below are still `\u2610`/);
+  if (!h) fail("docs/ACCESS-REDESIGN-SPEC.md's header no longer states its open count — put it back, or change this check");
+  else if (Number(h[1]) !== real) fail(`docs/ACCESS-REDESIGN-SPEC.md's header says ${h[1]} open, its own command counts ${real}`);
+  else ok(`docs/ACCESS-REDESIGN-SPEC.md's header count is its own count (${real})`);
 }
 
 // ── 55 · A NEW RESTAURANT MUST BE BORN THE WAY THE SCREEN SAYS IT IS ───────

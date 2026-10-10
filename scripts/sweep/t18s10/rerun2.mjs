@@ -169,7 +169,7 @@ export async function run(x) {
   await R("P22208", "lib/accessState.ts", "a credential leaves only as a four-digit hint", () => eq(full.st.creds.zomato, "••••1234"));
   await R("P22209", "lib/accessState.ts", "an absent credential is an empty string", () => eq(full.st.creds.website, ""));
   await R("P22210", "lib/accessState.ts", "a hint for every CREDS_KEYS", () => eq(Object.keys(full.st.creds).sort(), [...T.CREDS_KEYS].sort()));
-  await R("P22211", "lib/accessState.ts", "legacy api_key still read", () => eq(full.st.creds.swiggy, "••••zz99"));
+  await R("P22211", "lib/accessState.ts", "legacy api_key still read", () => { eq(full.st.creds.swiggy, "••••"); return "EXPECTATION MOVED (item 10): the stored key is 4 characters, and a key shorter than 8 now shows no characters at all — the row proves the legacy field is still READ (it is not \"\")"; });
   await R("P22212", "lib/accessState.ts", "key wins when both stored", async () => eq((await drive({}, { platform_channels: { zomato: { key: "AAAA1111", api_key: "BBBB2222" } } })).st.creds.zomato, "••••1111"));
   await R("P22213", "lib/accessState.ts", "access_config narrowed to model ids", () => { assert(!("delete_bill" in full.st.config)); assert("maintenance" in full.st.config); });
   await R("P22214", "lib/accessState.ts", "menus carried through", () => assert("menus" in full.st.config));
@@ -183,7 +183,7 @@ export async function run(x) {
   await R("P22222", "lib/accessState.ts", "says in its own words it is NOT a gate", () => assert(/it is not a gate/.test(stateSrc)));
   await R("P22223", "lib/accessState.ts", "takes an id and answers — no permission decision", () => assert(!/tokenIsValid|requireRole|ownerScope/.test(stateSrc)));
   await R("P22224", "lib/accessState.ts", "every caller checked the caller first", () => {
-    const callers = grep("accessStateFor\\(", "app lib").filter((f) => f !== "lib/accessState.ts");
+    const callers = grep("accessStateFor\\(", "app lib").filter((f) => f !== "lib/accessState.ts" && !f.endsWith(".test.mjs"));
     eq(callers.sort(), ["app/api/admin/restaurants/access-tree/route.ts", "app/api/owner/staff/route.ts"]);
     return "access-tree: tokenIsValid then uuid check before the read · owner/staff: the person read is .in(restaurant_id, scope ids) before accessStateFor(u.restaurant_id)";
   });
@@ -444,7 +444,7 @@ export async function run(x) {
     const exp = [...modelSrc.matchAll(/^export (?:const|function|type) (\w+)/gm)].map((m) => m[1]);
     const used = new Set(); for (const f of grep("lib/accessModel[\"']", "app lib components scripts")) for (const m of src(f).matchAll(/import\s*(?:type\s*)?\{([^}]+)\}\s*from\s*["']@\/lib\/accessModel["']/g)) for (const s of m[1].split(",")) used.add(s.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]);
     const unused = exp.filter((e) => !used.has(e));
-    throw new Error(`STILL ❌ (an improvement, not a fault — listed for decision as in sweep #9): ${unused.length} exports nothing imports: ${unused.join(", ")}`);
+    eq(unused, []); return "FIXED (sweep #10 T18, items 7 · 25 · 26 + ModuleDef un-exported): every export has an importer";
   });
 
   // ═════════════ T30 (sweep #6 caches) · T23 · T23-S8 · T24 · T29 · T9 · T7 · T16 · T27-S9-R2 ═════════════

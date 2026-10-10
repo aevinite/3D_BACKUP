@@ -16,7 +16,7 @@
 //   4. the doc still explains the rule and how to add one.
 //
 // Read-only. Run it any time: `npm run verify:rejected`.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 const ROOT = process.cwd();
@@ -215,6 +215,38 @@ const byIdAll = new Map([...doc.matchAll(/^\|\s*(R\d+)\s*\|([^|]+)\|/gm)].map((m
   if (!checked) fail("no rejection comment cites its row by number", "the numbers are how a reader gets from the code to the decision");
   else if (!wrong.length) ok(`${checked} numbered citation${checked === 1 ? "" : "s"} land on a row that names their own file`);
   else fail(`${wrong.length} rejection number(s) have DRIFTED between the doc and the code`, wrong.join("\n      ") + "\n      A number that has drifted sends the next reader to somebody else's decision.");
+}
+
+// 3c · ONE NUMBER, ONE ROW · 3d · A "REJECTED" COMMENT NEVER CITES A ROW THAT IS NOT REJECTED
+// (sweep #10 T18, item 20, 2026-10-10). Two different ideas were both numbered R8 on 2026-08-11. On
+// 2026-08-16 one of them (the new restaurant inheriting the flagship's guest-menu settings) was dropped
+// from the doc, and lib/settingsClone.ts went on citing "R8" under a REJECTED (owner, 2026-08-11)
+// comment — which now led to the OTHER R8, a moot floor-chip idea in Reversed. Neither check above
+// could see it: 3b runs doc → code, and no row named settingsClone any more. The row is restored as R66.
+{
+  const all = [...doc.matchAll(/^\|\s*(R\d+)\s*\|/gm)].map((m) => m[1]);
+  const dup = [...new Set(all.filter((x, i) => all.indexOf(x) !== i))];
+  dup.length
+    ? fail(`${dup.length} rejection number(s) are used by more than one row: ${dup.join(", ")}`, "a reader following one of them lands on the wrong decision")
+    : ok(`every one of the doc's ${all.length} rejection numbers names exactly one row`);
+  const activeIds = new Set([...active.matchAll(/^\|\s*(R\d+)\s*\|/gm)].map((m) => m[1]));
+  const allIds = new Set(all);
+  const bad = [];
+  const walkDir = (d) => { for (const e of readdirSync(`${ROOT}/${d}`, { withFileTypes: true })) { const p = `${d}/${e.name}`; if (e.isDirectory()) { if (!["node_modules", ".next"].includes(e.name)) walkDir(p); } else if (/\.(tsx?|js|css|mjs)$/.test(e.name)) {
+    const lines = readFileSync(`${ROOT}/${p}`, "utf8").split("\n");
+    lines.forEach((l, i) => {
+      const window = lines.slice(Math.max(0, i - 3), i + 1).join("\n");
+      if (!/REJECTED \(owner,/.test(window)) return;
+      for (const c of l.matchAll(/REJECTED-IDEAS\.md\s*(?:→\s*)?(R\d+)/g)) {
+        if (!allIds.has(c[1])) bad.push(`${p}:${i + 1} cites ${c[1]}, which is no row at all`);
+        else if (!activeIds.has(c[1])) bad.push(`${p}:${i + 1} says REJECTED but cites ${c[1]}, which sits under Reversed`);
+      }
+    });
+  } } };
+  for (const d of ["app", "lib", "components", "public/panels"]) walkDir(d);
+  bad.length
+    ? fail(`${bad.length} REJECTED comment(s) point at a row that is not a standing rejection`, bad.join("\n      "))
+    : ok("every REJECTED comment that cites a number cites a standing rejection");
 }
 
 // 4 · the standing rule must be in CLAUDE.md too, or a new session never learns it exists

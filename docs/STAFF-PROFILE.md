@@ -45,6 +45,7 @@ place the two differ:
 | write | `PATCH /api/admin/users` | `PATCH /api/owner/staff` (actions translated, below) |
 | photo | yes | not offered — no endpoint on that side |
 | manager PIN · signing-in switches | yes | shown as FACTS, not dead toggles |
+| a person's permission rows | dropdowns (Default / On / Off / On + PIN) | **read-only** — the answer and who sets it ("only the admin holds permissions"; the route refuses an owner or manager — sweep #10 T18, 2026-10-10) |
 | "Visit their panel" (act-as) | yes | a plain link, with a title saying it opens with YOUR access |
 | "Access & permissions" link | yes | absent — it points into `/aevinite` |
 | remove the login | yes | yes (refused when pay history exists) |

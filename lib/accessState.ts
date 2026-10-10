@@ -17,7 +17,7 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import {
   SETTINGS_COLUMNS, FEATURE_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS,
-  SECTION_ENTITLEMENTS, TAB_ALLOWED, KNOWN_CONFIG_IDS, MODULE_BAG_KEYS, type TreeState,
+  SECTION_ENTITLEMENTS, TAB_ALLOWED, KNOWN_CONFIG_IDS, MODULE_BAG_KEYS, credHint, type TreeState,
 } from "@/lib/accessTree";
 
 // settings.features keys the model knows about, PLUS "ratings", which the Ratings CHOICE
@@ -67,8 +67,14 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
   const features: Record<string, boolean> = {};
   for (const k of KNOWN_FEATURES) if (k in featOverrides) features[k] = featOverrides[k] === true;
 
+  // EVERY TREE COLUMN EXCEPT platform_channels (sweep #10 T18, item 24). SETTINGS_COLUMNS lists it so
+  // the read/write route can select it, and this loop copied it whole into `settings` — so each delivery
+  // app's API key, in full, went out to the admin's browser on every load of the Access screen, and to
+  // the OWNER's browser inside a staff profile (that route strips `creds`, not this). The model never
+  // needed it here: a channel's on/off is `channels` and its key is the masked `creds` hint, both built
+  // below from the same object. Its only path out of this function is now those two.
   const settings: Record<string, unknown> = {};
-  for (const c of SETTINGS_COLUMNS) if (c in s) settings[c] = s[c];
+  for (const c of SETTINGS_COLUMNS) if (c !== "platform_channels" && c in s) settings[c] = s[c];
 
   // Only the modules this model actually offers a row for. Reading the whole bag would ship any
   // key some other screen parked in there to the browser, and nodeValue would never look at it.
@@ -78,7 +84,8 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
 
   const pc = obj(s.platform_channels);
   const channels: Record<string, boolean> = {};
-  for (const k of CHANNEL_KEYS) channels[k] = obj(pc[k]).on === true;
+  const channelsStored: Record<string, boolean> = {};
+  for (const k of CHANNEL_KEYS) { channels[k] = obj(pc[k]).on === true; channelsStored[k] = typeof obj(pc[k]).on === "boolean"; }
 
   // A channel's API key belongs to the restaurant's own Zomato/Swiggy account. It goes out ONLY
   // as a hint that says WHICH key is stored without being the key: "••••1234". The value itself
@@ -94,7 +101,7 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
   for (const k of CREDS_KEYS) {
     const cell = obj(pc[k]);
     const raw = typeof cell.key === "string" && cell.key ? cell.key : cell.api_key;
-    creds[k] = typeof raw === "string" && raw.length ? `••••${raw.slice(-4)}` : "";
+    creds[k] = credHint(raw);   // a short key is only ever "••••" — see credHint() (item 10)
   }
 
   const mp = obj(r.manager_permissions);
@@ -126,5 +133,5 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
     for (const key of TAB_ALLOWED[panel]) if (typeof stored[key] === "boolean") tabs[panel][key] = stored[key];
   }
 
-  return { features, settings, modules, channels, grants, sections, tabs, config: cfg, creds };
+  return { features, settings, modules, channels, channelsStored, grants, sections, tabs, config: cfg, creds };
 }

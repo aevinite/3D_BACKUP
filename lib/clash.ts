@@ -186,8 +186,11 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
   // on a change to any unrelated key in the same column — a false-positive machine that would teach
   // people to stop passing expectations. The staff profile keeps a person's private note and their
   // papers inside `profile`, so this is what makes those protectable at all.
+  // …and, since 2026-10-10 (sweep #10 T18, item 15), ONE level deeper: "platform_channels.zomato.on".
+  // A delivery channel's on/off sits beside that company's API key in one object, and the browser never
+  // holds the key — so the channel could only be protected by comparing `.on` alone, never the object.
   const keys = Object.keys(fields)
-    .filter((c) => /^[a-z_][a-z0-9_]*(\.[a-zA-Z0-9_-]+)?$/.test(c))
+    .filter((c) => /^[a-z_][a-z0-9_]*(\.[a-zA-Z0-9_-]+){0,2}$/.test(c))
     .slice(0, 8);
   if (!keys.length) return null;
   // Ask the database only for the real COLUMNS (dedup'd); the sub-key is read out of the object.
@@ -217,10 +220,9 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
     for (const c of keys) {
       // "profile.notes" → read `notes` out of the `profile` object. A missing object compares as
       // absent, which is correct: "it had nothing there" is a real previous value.
-      const [col, sub] = c.split(".");
-      const current = sub
-        ? ((row[col] && typeof row[col] === "object" ? (row[col] as Record<string, unknown>)[sub] : undefined))
-        : row[col];
+      const [col, sub, leaf] = c.split(".");
+      const dig = (v: unknown, k: string | undefined) => (k === undefined ? v : v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined);
+      const current = dig(dig(row[col], sub), leaf);
       if (sameValue((fields as Record<string, unknown>)[c], current)) continue;
       const what = want?.label || readable(sub || col);
       // QUOTING THE CURRENT VALUE IS THE USEFUL PART — but this gate deliberately runs once at
