@@ -18,6 +18,7 @@
 //  17  (round 2) a deleted category or tag is recorded in the Audit by its name, not its slug.
 //   3r4 (round 4) the WAITER TABLET's three typed-price doors refuse a minus sign the same way.
 //   4r4 (round 4) the two refusals behind switches that are always on are gone from this route.
+//   5r4 (round 4) on a phone the restaurant's name sits on its own line under "Manager", never cut.
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -308,6 +309,21 @@ t(!/Parcel orders aren't switched on for this restaurant/.test(code) && !/The Pl
 t(!/return err\("no valid dishes"/.test(code) && !/Unknown printing request/.test(code) && !/\(was marked paid\)/.test(code),
   "item 4 (round 4) · 'no valid dishes', 'Unknown printing request' and the cancel's '(was marked paid)' — lines nothing could reach — are gone",
   "item 4 (round 4) · a line that can never run is back");
+
+// ── 5 (round 4): the restaurant's name on a phone ─────────────────────────────────────────
+// Measured on a 360px touch phone before and after (ledger round 4): one line cut "little French house"
+// to "little French hous"; two lines show it whole. These read the three pieces that make that so.
+{
+  const css = readFileSync(new URL("../public/panels/editor/style.css", import.meta.url), "utf8");
+  const app = readFileSync(new URL("../public/panels/editor/app.js", import.meta.url), "utf8");
+  const phone = (css.match(/@media \(pointer: coarse\) and \(max-width: 599px\) and \(max-height: 1149px\) \{[\s\S]*?#brandRest::before \{ content: none; \}/) || [""])[0];
+  t(/body:not\(\.floor-preview\) \.brand \{ display: flex; flex-direction: column;/.test(phone) && /#brandRest \{[^}]*max-width: 100%;[^}]*text-overflow: ellipsis/.test(phone),
+    "item 5 (round 4) · on a phone 'Manager' and the restaurant's name stack, and the name has the slot's full width (a real '…' only if even that runs out)",
+    "item 5 (round 4) · the phone top bar is back to one line — the restaurant's name will be cut again");
+  t(/\.brand-rest:not\(:empty\)::before \{ content: "· "; \}/.test(css) && /brandEl\.textContent = restName;/.test(app),
+    "item 5 (round 4) · the '·' before the name is drawn by the stylesheet, so desktop keeps it and the phone's second line drops it",
+    "item 5 (round 4) · the '·' is back in the name's text — the phone's second line would start with it");
+}
 
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
