@@ -50,7 +50,7 @@ const SCREENS = existsSync(arg("--screens", "")) ? JSON.parse(readFileSync(arg("
 const all = [];
 (function walk(d) { for (const e of readdirSync(d)) { const p = join(d, e); if (statSync(p).isDirectory()) walk(p); else if (e === "route.ts") all.push(relative(ROOT, p)); } })(join(ROOT, "app/api/admin"));
 const FILES = all.sort().slice(0, 26);
-const short = (rel) => rel.replace("app/api/admin/", "").replace("/route.ts", "");
+
 const R = Runner(197001);
 const add = (blk, rel, what, how, fn) => R.add(blk, `${rel} — ${what}`, how, fn);
 
