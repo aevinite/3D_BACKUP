@@ -135,17 +135,18 @@ const ALIASES = ["--alias:@=.",
   "--external:next/server", "--external:next/cache", "--external:next/headers"];
 const bundles = new Map();
 /** Bundle one repo file (route or lib) against the stubs and require it. */
-export function bundle(rel) {
-  if (bundles.has(rel)) return bundles.get(rel);
+export function bundle(rel, extra = []) {
+  const bkey = rel + "|" + extra.join(",");
+  if (bundles.has(bkey)) return bundles.get(bkey);
   process.env.NEXT_PUBLIC_SUPABASE_URL ||= "http://127.0.0.1:9/stub";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= "stub-anon-key";
   process.env.SUPABASE_SERVICE_ROLE_KEY ||= "stub-service-key";
   mkdirSync(CACHE, { recursive: true });
-  const out = join(CACHE, `t13s10-${rel.replace(/[^A-Za-z0-9]+/g, "_")}.cjs`);
-  execFileSync("npx", ["esbuild", rel, "--bundle", "--platform=node", "--format=cjs", ...ALIASES,
+  const out = join(CACHE, `t13s10-${(rel + (extra.length ? "-x" + extra.length : "")).replace(/[^A-Za-z0-9]+/g, "_")}.cjs`);
+  execFileSync("npx", ["esbuild", rel, "--bundle", "--platform=node", "--format=cjs", ...extra, ...ALIASES,
     `--outfile=${out}`, "--log-level=error"], { cwd: ROOT });
   const mod = require_(out);
-  bundles.set(rel, mod);
+  bundles.set(bkey, mod);
   return mod;
 }
 let _G = null, _reset = null;

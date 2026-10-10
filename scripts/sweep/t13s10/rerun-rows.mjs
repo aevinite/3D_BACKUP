@@ -116,7 +116,7 @@ const RP = [
   ["P64482", "the admin bypass records no manager, because no PIN was typed", /if \(!g\.allow \|\| !g\.managerName \|\| g\.managerName === "admin"\) return null;/],
   ["P64483", "a waiter's own override beats the restaurant-wide setting", /const override = \(user\?\.permissions \?\? \{\}\)\[key\];\s*let mode: WaiterCap;\s*if \(isPermMode\(override\)\) mode = override as WaiterCap;/],
   ["P64484", "…and is re-read from the database on every request", /const s = await sb\.from\("settings"\)\.select\(key\)\.eq\("restaurant_id", rid\)\.maybeSingle\(\);/],
-  ["P64485", "a capability with no row on the Access screen resolves through ONE shared answer", /mode = waiterCapValue\(key,/],
+  ["P64485", "a capability with no row on the Access screen resolves through ONE shared answer", /waiterCapValue\(key, stored\)/],
   ["P64486", "the never-list is scoped to a TABLET account, not to the URL", /if \(user\.role === "tablet" && WAITER_NEVER\.includes\(key\)\)/],
   ["P64487", "the restaurant-level FEATURE half beats anything one person was given", /const feat = WAITER_FEATURE_OF\[key\];\s*if \(feat\) \{[\s\S]{0,260}if \(cfg\?\.\[feat\]\?\.on === false\) return \{ allow: false/],
   ["P64488", "the walk-out cap has its own Access row, not the reopen row's", /waiterConfigCapValue\("close_unpaid", cfg\)/],

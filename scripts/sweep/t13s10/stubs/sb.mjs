@@ -103,7 +103,10 @@ function builder(table) {
     // a real delete answers [{...}] and a delete that matched nothing answers [] with no error.
     // The old shape made the stub unable to tell those two apart, so any guard checking "did this
     // delete actually remove anything" read as a refusal on a delete that worked.
-    let src = st.op === "select" ? found : st.op === "delete" ? found : (G.FIX[st.table] || []).filter(match);
+    // T13's one behavioural difference from the shared stub: an UPDATE's returning select hands back the
+    // rows it CHANGED (as PostgREST does), not a re-filter after the change — otherwise a settle filtered
+    // `.neq("payment_status","paid")` that sets payment_status = 'paid' always looked like it matched nothing.
+    let src = st.op === "select" ? found : st.op === "delete" ? found : st.op === "update" ? found : (G.FIX[st.table] || []).filter(match);
     if (G.HONOUR_RANGE && st.range && st.op === "select") src = src.slice(st.range[0], st.range[1] + 1);
     if (G.HONOUR_LIMIT && typeof st.limit === "number" && st.op === "select") src = src.slice(0, Math.max(0, st.limit));
     return Promise.resolve({ data: one ? (src[0] ? clone(src[0]) : null) : clone(src), error: null, count: src.length });

@@ -65,7 +65,7 @@ terminals' rows — keep both sides.
 | T10 | `P179001`–`P180000` | The manager panel's server route, part 2 of 2 | `T10-S10.md` | 500 | 500 | 14 | 14 |
 | T11 | `P180001`–`P181000` | The kitchen screen | ⏳ not run yet | — | — | — | — |
 | T12 | `P181001`–`P182000` | The waiter tablet screen | ⏳ not run yet | — | — | — | — |
-| T13 | `P182001`–`P183000` | The waiter tablet's server route, and the shared floor logic | ⏳ not run yet | — | — | — | — |
+| T13 | `P182001`–`P183000` | The waiter tablet's server route, and the shared floor logic | `T13-S10.md` | 527 | 527 | 7 | 7 |
 | T14 | `P183001`–`P184000` | The bill and KOT document | ⏳ not run yet | — | — | — | — |
 | T15 | `P184001`–`P185000` | The print queue and the print helper | ⏳ not run yet | — | — | — | — |
 | T16 | `P185001`–`P186000` | Shared panel plumbing — the helpers every panel loads | ⏳ not run yet | — | — | — | — |
