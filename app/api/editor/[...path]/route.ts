@@ -3621,6 +3621,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           return NextResponse.json({ error: "This looks identical to an order you just sent.", duplicateWarning: true }, { status: 409 });
         }
       }
+      // ── A QUICK-ORDER DISCOUNT IS JUDGED BEFORE THE ORDER EXISTS (sweep #10 T10 round 2, item 13) ──
+      // The power and the role's %-cap used to be checked only AFTER lfh_staff_place_order had run, so a
+      // refused discount answered 403 for an order that was already on the kitchen's screen — the panel
+      // handed the cart back as "not sent", and sending it again put the same food in twice. The rule
+      // for the parcel two branches down — "a request that is going to be refused must be refused before
+      // it creates anything" — now holds here too. The figures come from lfh_price_order, the SAME
+      // read-only pricer the order is placed with, so the base is the one the order will carry. It is
+      // asked only when a discount was typed; the check after placing stays as the backstop.
+      { const preDisc = Number(body?.discount);
+        if (Number.isFinite(preDisc) && preDisc > 0) {
+          if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
+          const priced = (await sb.rpc("lfh_price_order", { p_items: items, p_restaurant_id: rid })).data as
+            (OrderMoney & { ok?: boolean }) | null;
+          if (priced && priced.ok !== false) {
+            const preBase = discountBaseOf(priced, effectiveTaxRate(await taxSettings(rid)));
+            const preCap = await discountCapPct(rid, discountRole(g.user?.role));
+            if (overDiscountCap(preDisc, preBase, preCap)) return err(`That discount is over your ${preCap}% limit — ask the owner. Nothing was sent.`, 403);
+          }
+        } }
       const { data, error } = await sb.rpc("lfh_staff_place_order", {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
         p_restaurant_id: rid,
