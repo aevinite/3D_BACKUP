@@ -5326,6 +5326,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tagRow = tagRows.find((r) => r.tag && COMP_TAGS.includes(r.tag)) || null;
       if (!tagRow) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
       const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
+      // REJECTED (owner, 2026-10-10) — docs/REJECTED-IDEAS.md → R64: no `.limit()` on a read that is
+      // already ONE table's or one party's live orders (this one, its khata and restart twins, and
+      // the filter-delete tag read). *"we don't need this don't suggest it … i mean the necessary
+      // one"* — a row cap belongs on a list that can grow, not on every read.
       let oq = sb.from("orders").select("id,subtotal,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
       oq = openSess ? oq.eq("session_id", openSess.id) : oq.eq("table_number", t);
       const orders = must(await oq) as { id: string; subtotal: number; status: string; payment_status: string }[];

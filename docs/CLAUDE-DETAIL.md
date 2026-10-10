@@ -365,7 +365,8 @@ without being reminded.** When you add anything, wire ALL of these that apply:
    whole-board PostgREST reads).** A new feature may NOT reintroduce a whole-board read.
    See `docs/SAAS-EFFICIENCY-PLAYBOOK.md` for the full pattern. Before merging, confirm ALL:
    - **Scoped read:** every query has `.eq("restaurant_id", rid)`, an explicit column list
-     (never `.select("*")` on a hot/polled path), and a `.limit()`. No read-all-then-filter-in-JS.
+     (never `.select("*")` on a hot/polled path), and a `.limit()` on any list that can grow — not on a
+     read already bounded to one row, table or party (owner, 2026-10-10, R64). No read-all-then-filter-in-JS.
    - **Targeted breadcrumb:** if a new table drives a live panel, add an `rt_emit` trigger that
      carries `table_number` when the change is scopable to ONE table (so the manager's
      `pollTables` refetches just that table); leave `table_number` NULL when it can't be scoped

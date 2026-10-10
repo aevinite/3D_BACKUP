@@ -82,7 +82,8 @@ far more in normal use (a real table has 1–3 orders, not the stress test's 19)
 
 A new feature may **never** reintroduce a whole-board read. Before merging confirm ALL:
 - **Scoped read:** `.eq("restaurant_id", rid)` + explicit column list (no `.select("*")` on
-  a hot/polled path) + `.limit()`. No read-all-then-filter-in-JS.
+  a hot/polled path) + a `.limit()` on any list that can grow — not on a read already bounded to one
+  row, table or party (owner, 2026-10-10, REJECTED-IDEAS R64). No read-all-then-filter-in-JS.
 - **Targeted breadcrumb:** new live table → `rt_emit` trigger carrying `table_number` when
   scopable (NULL when not → safe full reload). Column-scoped trigger → watch every rendered column.
 - **Per-table fetch + merge** dedup'd by **row id** (never table_number alone).

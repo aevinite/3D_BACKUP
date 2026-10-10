@@ -131,7 +131,8 @@ built to switch to subdomains by config, not rewrite. Redis/queues/replicas are 
 6. Render nothing when the flag/permission is off.
 7. Great, beginner-simple UI/UX.
 8. Register every new popup/drawer in the back-button manager (rule below).
-9. **Egress-safe (NON-NEGOTIABLE):** scoped read with column list + `.limit()`, targeted `rt_emit`
+9. **Egress-safe (NON-NEGOTIABLE):** scoped read with column list + `.limit()` on a list that can grow
+   (not on one row/table/party — R64), targeted `rt_emit`
    breadcrumb, per-table fetch + merge dedup'd by row id, no poll faster than the 60s backstop.
    Playbook: `docs/SAAS-EFFICIENCY-PLAYBOOK.md`.
 10. **Works offline:** screen opens/reads offline (add the API family to `public/sw.js` →
