@@ -68,7 +68,9 @@ const seen = new Set(); const unassigned = [];
 const check = async (file, what, fn, key = keyOf(file, what)) => {
   if (seen.has(key)) throw new Error(`two rows share the key ${key}`); seen.add(key);
   let id = IDS[key];
-  if (!id) { const used = new Set(Object.values(IDS)); let n = 167654; while (used.has(`P${n}`)) n++; if (n > 167700) { id = "P—"; unassigned.push(key + " (block full)"); } else { id = `P${n}`; IDS[key] = id; unassigned.push(key); } }
+  // round 3's block (P167501–P167700) is closed; a subject first seen in round 4 or later takes the next id
+  // from this terminal's round-4 block, P166301–P166600 (claimed on main, PR #1470).
+  if (!id) { const used = new Set(Object.values(IDS)); let n = 166301; while (used.has(`P${n}`)) n++; if (n > 166600) { id = "P—"; unassigned.push(key + " (block full)"); } else { id = `P${n}`; IDS[key] = id; unassigned.push(key); } }
   let res; NOTE = ""; try { res = await fn(); } catch (e) { res = "threw: " + (e && e.message); }
   ROWS.push({ id, key, file, what, ok: res === true, skip: typeof res === "string" && res.startsWith("skip:"), note: res === true ? NOTE.slice(0, 220) : String(res).slice(0, 220) });
 };
@@ -322,6 +324,106 @@ for (const r of RESTS.filter((x) => x.has_settings && !/^zz|^t28-|^hi$/.test(x.s
     if (P(b.taxableBase) !== P(db.taxable_base) || P(b.nontaxAmount) !== P(db.nontax_amount) || P(b.mrpAmount) !== P(db.mrp_amount)) { bad = `cart ${row.n}: app ${b.taxableBase}/${b.nontaxAmount}/${b.mrpAmount} vs db ${db.taxable_base}/${db.nontax_amount}/${db.mrp_amount}`; break; } }
   await check("lib/tax.ts", `${r.slug}: its OWN settings give the same taxable / untaxed / MRP split in the app and the database, on 200 random carts`, () => (rows.length === 200 && !bad) || bad || `${rows.length} rows`, `lib/tax.ts|own-settings-split|${r.slug}`);
 }
+
+// ═══════════════════════════ ROUND 4 (2026-10-10) — items 10–16 against the database ═══════════════════════════
+// PROBE: a write the database must REFUSE or ACCEPT, tried inside a DO block that always ends by raising its
+// own exception — so whatever the answer, NOTHING is ever committed. Dev project only (as every call here).
+const probe = async (body) => {
+  const q = `DO $probe$ BEGIN ${body}; RAISE EXCEPTION 'T30-PROBE-ROLLBACK'; END $probe$;`;
+  const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, { method: "POST", headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ query: q }) });
+  const t = await r.text(); return { accepted: /T30-PROBE-ROLLBACK/.test(t), text: t.slice(0, 240) };
+};
+const TF4 = await imp("lib/taxFiling.ts");
+const BD4 = (await imp("public/panels/billdoc.js")).default;
+
+// ── K · whole bills: the printed bill (billMoney) = the database's own sums, at every rate ──
+for (const bp of [500, 1200, 1800, 2800, 250, 1250]) {
+  const rate = bp / 10000; const R = gen(7700 + bp);
+  const bills = Array.from({ length: 1500 }, () => { const base = int(R, 1, 2000000), nontax = R() < 0.3 ? int(R, 1, 50000) : 0, disc = R() < 0.4 ? int(R, 0, base) : 0; return [base, nontax, disc]; });
+  const rows = await sql(`select n, round((b - d) / 100.0 * ${rate}, 2)::text tax, round((b + x - d) / 100.0 + round((b - d) / 100.0 * ${rate}, 2), 2)::text total
+    from unnest(array[${bills.map((v) => v[0]).join(",")}]::bigint[], array[${bills.map((v) => v[1]).join(",")}]::bigint[], array[${bills.map((v) => v[2]).join(",")}]::bigint[]) with ordinality u(b, x, d, n)`);
+  let tbad = null, obad = null;
+  for (const r of rows) {
+    const [b, x, d] = bills[Number(r.n) - 1];
+    const m = BD4.billMoney([{ status: "served", subtotal: (b + x) / 100, taxable_base: b / 100, nontax_amount: x / 100, mrp_amount: 0, discount: d / 100, tax_rate: rate, items: [] }], { tax_rate: rate });
+    if (!tbad && P(m.tax) !== P(r.tax)) tbad = `₹${b / 100} − ₹${d / 100}: paper ${m.tax} vs db ${r.tax}`;
+    if (!obad && P(m.total) !== P(r.total)) obad = `paper ${m.total} vs db ${r.total}`;
+  }
+  await check("public/panels/billdoc.js", `whole bills at ${bp / 100}%: the printed bill's tax = the database's round((base − discount) × rate), on 1,500 random bills`, () => !tbad || tbad, `r4|whole-bill-tax|${bp}`);
+  await check("public/panels/billdoc.js", `whole bills at ${bp / 100}%: …and the printed bill's total = the database's, to the paisa`, () => !obad || obad, `r4|whole-bill-total|${bp}`);
+}
+// the GST report (lib/taxFiling) and the printed bill (billdoc) split a whole-rupee tax into CGST / SGST the same way
+{ let bad = null; for (let w = 0; w <= 20000 && !bad; w++) for (const comps of [[2.5, 2.5], [9, 9], [6, 6]]) {
+    const a = TF4.splitTax(comps, w), b = BD4.splitTax(w, comps.map((r, i) => ({ label: i ? "SGST" : "CGST", rate: r }))).map((x) => Number(x.amt));
+    if (b.length === a.length && b.some((v, i) => P(v) !== P(a[i])) && a.every((v) => Number.isInteger(v))) bad = `₹${w} at ${comps}: report ${a} vs paper ${b}`; }
+  await check("lib/taxFiling.ts", "a whole-rupee tax (₹0–₹20,000) splits into the same CGST and SGST on the GST report and on the printed bill", () => !bad || bad, "r4|report-vs-paper-split"); }
+// the trigger path: an order with an untaxed line has its tax written by the DATABASE — it must equal the screen's
+for (const [k, r] of SHAPES.entries()) {
+  const s = settingsOf(r); const R = gen(8800 + k);
+  const carts = Array.from({ length: 300 }, () => [...Array.from({ length: int(R, 1, 5) }, () => ({ ...lineOf(R), tax_mode: pick(R, ["excl", "incl"]) })), { ...lineOf(R), tax_mode: "exempt" }]);
+  const rows = await sql(`select c.n, (lfh_split_items_tax(c.cart, ${lit(r.id)}::uuid)->>'taxable_base')::numeric * (lfh_split_items_tax(c.cart, ${lit(r.id)}::uuid)->>'rate')::numeric b, round((lfh_split_items_tax(c.cart, ${lit(r.id)}::uuid)->>'taxable_base')::numeric * (lfh_split_items_tax(c.cart, ${lit(r.id)}::uuid)->>'rate')::numeric, 2)::text tax from jsonb_array_elements(${lit(JSON.stringify(carts))}::jsonb) with ordinality c(cart, n)`);
+  const bad = rows.find((row) => P(T.splitBill(carts[Number(row.n) - 1], s, 0).tax) !== P(row.tax));
+  await check("lib/tax.ts", `${r.slug}'s set-up: an order with an untaxed line gets its tax from the database trigger — and it equals the screen's tax, on 300 random carts`, () => !bad || `cart ${bad.n}: screen ${T.splitBill(carts[Number(bad.n) - 1], s, 0).tax} vs db ${bad.tax}`, `r4|trigger-tax|${r.slug}`);
+}
+
+// ── L · item 11: the database itself refuses a made-up payment method (probes always roll back) ──
+const FH = "00000000-0000-0000-0000-000000000001";   // French House — the restaurant this sweep writes to
+const PROBE_ORDER = (await sql(`select id from orders where restaurant_id = '${FH}' and archived and status <> 'cancelled' order by created_at limit 1`))[0]?.id;
+const PROBE_BEFORE = PROBE_ORDER ? JSON.stringify((await sql(`select payment_method, payment_status, total, updated_flag from (select payment_method, payment_status, total, 1 updated_flag from orders where id = '${PROBE_ORDER}') x`))[0]) : null;
+for (const v of ["Swiggy", "Zomato", "Website", "cash", "UPI ", "", "Pay later", "card", "Bitcoin"]) {
+  const r = PROBE_ORDER ? await probe(`UPDATE public.orders SET payment_method = ${lit(v)} WHERE id = '${PROBE_ORDER}'`) : { accepted: true, text: "no order" };
+  await check("lib/payments.ts", `the database REFUSES a bill paid by ${JSON.stringify(v)} (orders_payment_method_is_known) — tried, and rolled back`, () => (!r.accepted && /orders_payment_method_is_known/.test(r.text)) || r.text, `r4|method-refused|${v}`);
+}
+for (const v of ["UPI", "Cash", "Card", "Other", "Split", "On the house", null]) {
+  const r = PROBE_ORDER ? await probe(`UPDATE public.orders SET payment_method = ${v == null ? "NULL" : lit(v)} WHERE id = '${PROBE_ORDER}'`) : { accepted: false, text: "no order" };
+  await check("lib/payments.ts", `…and ACCEPTS ${v == null ? "no method (an unpaid bill)" : JSON.stringify(v)} — tried, and rolled back`, () => r.accepted || r.text, `r4|method-accepted|${v}`);
+}
+{ const after = PROBE_ORDER ? JSON.stringify((await sql(`select payment_method, payment_status, total, updated_flag from (select payment_method, payment_status, total, 1 updated_flag from orders where id = '${PROBE_ORDER}') x`))[0]) : null;
+  await check("lib/payments.ts", "every probe above was rolled back — the order the probes used is exactly as it was", () => (!!PROBE_BEFORE && after === PROBE_BEFORE) || `${PROBE_BEFORE} → ${after}`, "r4|probes-rolled-back"); }
+{ const c = await sql(`select convalidated v from pg_constraint where conname = 'orders_payment_method_is_known'`);
+  await check("lib/payments.ts", "the rule is VALIDATED on dev — every bill ever stored already obeys it", () => c[0]?.v === true, "r4|method-rule-validated"); }
+
+// ── M · item 16: each reviewed dish, at each restaurant, through lfh_dish_reviews ──
+const RV = await sql(`with d as (select distinct restaurant_id, item_slug from reviews where restaurant_id in (select id from restaurants where slug !~ '^zz'))
+  select rs.slug rest, d.item_slug slug, d.restaurant_id rid,
+    (select json_agg(x) from (select name, stars, comment, created_at, mine from lfh_dish_reviews(d.item_slug, d.restaurant_id, (select device_id from reviews r where r.restaurant_id = d.restaurant_id and r.item_slug = d.item_slug order by created_at desc limit 1))) x) fn,
+    (select json_agg(x) from (select name, stars, comment, created_at from reviews r where r.restaurant_id = d.restaurant_id and r.item_slug = d.item_slug order by created_at desc limit 20) x) direct,
+    (select count(*) from lfh_dish_reviews(d.item_slug, d.restaurant_id, null) where mine) mine_null
+  from d join restaurants rs on rs.id = d.restaurant_id order by 1, 2`);
+for (const d of RV) {
+  const fn = (typeof d.fn === "string" ? JSON.parse(d.fn) : d.fn) || [], dir = (typeof d.direct === "string" ? JSON.parse(d.direct) : d.direct) || [];
+  const same = fn.length === dir.length && fn.every((x, i) => x.name === dir[i].name && x.stars === dir[i].stars && x.comment === dir[i].comment && x.created_at === dir[i].created_at);
+  const mine = fn.filter((x) => x.mine);
+  await check("lib/menu.ts", `${d.rest} · ${d.slug}: the dish page gets exactly this restaurant's newest ${fn.length} review(s), newest first; one reviewer's device marks exactly their review as mine, and no device id comes back`,
+    () => (same && fn.length <= 20 && mine.length === 1 && mine[0].created_at === dir[0].created_at && Number(d.mine_null) === 0 && fn.every((x) => !("device_id" in x))) || `same ${same}, ${fn.length} rows, ${mine.length} mine, ${d.mine_null} mine with no device`, `r4|reviews|${d.rest}|${d.slug}`);
+}
+{ const g = await sql(`select has_table_privilege('anon','public.reviews','select') a, has_table_privilege('authenticated','public.reviews','select') u, has_table_privilege('service_role','public.reviews','select') svc,
+    has_function_privilege('anon','public.lfh_dish_reviews(text,uuid,text)','execute') fa, has_function_privilege('public','public.lfh_dish_reviews(text,uuid,text)','execute') fp,
+    (select count(*) from pg_policies where schemaname = 'public' and tablename = 'reviews') pol,
+    (select proconfig::text from pg_proc where proname = 'lfh_dish_reviews') cfg`);
+  await check("lib/menu.ts", "the guest and signed-in keys can NOT read the reviews table directly; the server key still can (the owner and manager screens)", () => (g[0].a === false && g[0].u === false && g[0].svc === true) || JSON.stringify(g[0]), "r4|reviews-table-closed");
+  await check("lib/menu.ts", "…the guest key may run lfh_dish_reviews, it is not left open to PUBLIC, it has a fixed search_path, and the old read policy is gone", () => (g[0].fa === true && g[0].fp === false && /search_path=public/.test(g[0].cfg || "") && Number(g[0].pol) === 0) || JSON.stringify(g[0]), "r4|reviews-function-grants"); }
+await check("lib/menu.ts", `all ${RV.length} reviewed dishes were checked (each slug exists at two restaurants, so each answer proves it is scoped to ITS restaurant)`, () => RV.length >= 100 || `${RV.length}`, "r4|reviews-count");
+
+// ── N · the data repairs of items 12–15 hold ──
+const N = (await sql(`select
+  (select count(*) from orders where placed_by = 'film-history' and status <> 'cancelled' and (total <> round(subtotal + tax, 2) or taxable_base <> subtotal or tax <> round(taxable_base * tax_rate, 2))) film_off,
+  (select count(*) from orders where payment_method in ('Swiggy','Zomato','Website')) platform,
+  (select count(*) from orders where restaurant_id = '00000000-0000-0000-0000-0000000000a1' and created_at = '2024-01-01 04:00:00+00' and tax_rate = 0 and tax > 0) stamps,
+  (select count(*) from session_payments where reversed_by like 'T30 sweep%' and reversed_reason is not null) reversed,
+  (select coalesce(sum(amount), 0) from session_payments where reversed_by like 'T30 sweep%')::text reversed_amt,
+  (select count(*) from orders where payment_method = 'cash') lower_cash,
+  (select count(*) from orders where tax_rate = 0 and tax > 0 and status <> 'cancelled') zero_taxed`))[0];
+await check("lib/tax.ts", "item 12: every film-history bill now stores total = subtotal + tax with the whole subtotal as its base — the app's own shape", () => Number(N.film_off) === 0 || `${N.film_off} rows off`, "r4|film-shape");
+await check("lib/payments.ts", "item 12: no bill anywhere is paid by Swiggy / Zomato / Website", () => Number(N.platform) === 0 || `${N.platform}`, "r4|film-methods");
+await check("lib/tax.ts", "item 13: no aevidine 2024 demo order is stamped 0% while charging tax — and no order anywhere is", () => (Number(N.stamps) === 0 && Number(N.zero_taxed) === 0) || `${N.stamps} / ${N.zero_taxed}`, "r4|demo-stamps");
+await check("lib/paySplit.ts", "item 14: the test rig's 10 payment parts (₹1,449) are reversed, each with its reason", () => (Number(N.reversed) === 10 && P(N.reversed_amt) === 144900) || `${N.reversed} parts ₹${N.reversed_amt}`, "r4|rig-parts");
+await check("lib/payments.ts", "before item 11: no bill says \"cash\" in lower case", () => Number(N.lower_cash) === 0 || `${N.lower_cash}`, "r4|lower-cash");
+{ const film = await sql(`select r.slug, count(*) n, count(*) filter (where o.discount > 0) disc from orders o join restaurants r on r.id = o.restaurant_id where o.placed_by = 'film-history' and o.status <> 'cancelled' group by 1 order by 1`);
+  for (const f of film) {
+    const rev = await sql(`select coalesce(sum(total - disc_gross), 0)::text a, coalesce(sum(round((subtotal - discount) * (1 + tax_rate), 2)), 0)::text b from orders where placed_by = 'film-history' and status <> 'cancelled' and restaurant_id = (select id from restaurants where slug = ${lit(f.slug)}) and discount > 0`);
+    await check("lib/tax.ts", `item 12 · ${f.slug}: its ${f.disc} discounted film bills now count ONCE in the owner's revenue (total − disc_gross = (subtotal − discount) × (1 + rate))`, () => Math.abs(P(rev[0].a) - P(rev[0].b)) <= Number(f.disc) || `${rev[0].a} vs ${rev[0].b}`, `r4|film-revenue|${f.slug}`);
+  } }
 
 await check("scripts/sweep/t30s10/parity.mjs", "every row has a PERMANENT id — none is new to parity-ids.json (a new subject is given one with --assign-ids)", () => !unassigned.length || `new: ${unassigned.join(" · ")}`, "parity|ids");
 if (ARGV.includes("--assign-ids") && unassigned.length) { (await import("node:fs")).writeFileSync(IDFILE, JSON.stringify(IDS, null, 1) + "\n"); console.log(`assigned ${unassigned.length} new id(s) in parity-ids.json`); }

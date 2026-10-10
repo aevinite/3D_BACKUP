@@ -1,7 +1,7 @@
 // Round 4 (owner, 2026-10-10: "do all the things you have listed") — items 10–16, checked from the real
 // files with the in-memory database. APPEND ONLY; ids are permanent.
 import { suite } from "./lib.mjs";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { root } from "./hooks.mjs";
 const t = suite("round 4 (items 10–16)", 166001, 200);
@@ -53,3 +53,50 @@ prop("item 10: the waiter tablet's rate (effRate) = lib/tax.ts effectiveTaxRate 
 // ── item 28 (found by the check above): the tablet's rate knows the composition scheme ──
 t("item 28: a composition-scheme restaurant's rate on the waiter tablet is 0 — with billdoc.js loaded AND before it has", TBF(BILLDOC, { data: { settings: { price_tax_mode: "composition", tax_rate: 0.05 } } }).effRate() === 0 && TBF(undefined, { data: { settings: { price_tax_mode: "composition", tax_rate: 0.05 } } }).effRate() === 0);
 prop("item 28: …and before billdoc.js has loaded, the tablet's fallback still agrees with lib/tax.ts on every set-up", 20000, setOf, (s) => { const r = TBF(undefined, { data: { settings: s } }).effRate(); return r === T.effectiveTaxRate(s) || `${r} vs ${T.effectiveTaxRate(s)}`; });
+
+// ── item 10: each of the 18 places a money × rate was rounded the float way, now on the one rule ──
+const SITE = (p, re) => re.test(src(p));
+for (const [p, re, what] of [
+  ["lib/tax.ts", /const tax = roundPaise\(taxable \* rate\);/, "splitBill's tax"],
+  ["lib/tax.ts", /taxableBase \+= roundPaise\(amt \/ \(1 \+ rate\)\);/, "splitBill's tax-inside net"],
+  ["lib/tax.ts", /const amt = roundPaise\(unit \* qty\);/, "splitBill's line amount (₹1.005 × 1 is ₹1.01, as the database says)"],
+  ["lib/paySplit.ts", /const r2 = roundPaise;/, "Pay in parts' due"],
+  ["lib/taxFiling.ts", /const p2 = \(v: number\) => roundPaise\(Number\(v\) \|\| 0\);/, "the GST filing's split"],
+  ["lib/billPreview.ts", /const r2 = roundPaise;/, "the bill preview's tax-inside net"],
+  ["app/api/editor/[...path]/route.ts", /const r2 = BILLDOC\.moneyRound;/, "the manager route's billTaxOf (run by verify:audit with BILLDOC alone)"],
+  ["app/api/inventory/[...path]/route.ts", /const amount = roundPaise\(qty \* rate\);/, "an inventory purchase line"],
+  ["components/admin/RestaurantSettings.tsx", /const egNet = roundPaise\(EG \/ \(1 \+ gstRate\)\);/, "the admin's GST example"],
+  ["public/panels/billdoc.js", /var r2 = moneyRound;/, "the printed bill's money (billMoney)"],
+  ["public/panels/billdoc.js", /inside \+= amt - moneyRound\(amt \/ \(1 \+ rate\)\);/, "the tax inside an MRP line"],
+  ["public/panels/billdoc.js", /: moneyRound\(taxAmt \* \(\(Number\(c\.rate\) \|\| 0\) \/ rateSum\)\);/, "the banquet bill's CGST / SGST split"],
+  ["public/panels/editor/app.js", /taxableBase \+= moneyRound\(amt \/ \(1 \+ rate\)\);/, "the manager's quick-order cart split"],
+  ["public/panels/editor/app.js", /return moneyRound\(sp\.taxableBase \+ sp\.nontax - d \+ moneyRound\(taxable \* rate\)\);/, "the parcel's 'pay now' estimate"],
+  ["public/panels/editor/app.js", /const tax = moneyRound\(\(sub - disc\) \* tm\.rate\);/, "the banquet quick bill's tax"],
+  ["public/panels/editor/app.js", /const tm = taxModel\(s\);\n  const r2 = moneyRound;/, "the per-dish GST example in Edit menu"],
+  ["public/panels/tablet/app.js", /else if \(mode === "incl"\) base \+= moneyRound\(amt \/ \(1 \+ rate\)\);/, "the tablet's order split"],
+  ["public/panels/tablet/app.js", /const round2 = moneyRound;\n  const rate = effRate\(\);\n  const due = round2\(/, "the tablet's bill due"],
+]) t(`item 10: ${what} rounds by the one exact rule (${p})`, SITE(p, re));
+t("item 10: billdoc.js exports moneyRound and its type file declares it", typeof BILLDOC.moneyRound === "function" && /export function moneyRound\(n: number\): number;/.test(src("public/panels/billdoc.d.ts")));
+t("item 10: lib/tax.ts still imports nothing (it runs in a browser bundle, the server and a plain guard alike) — roundPaise lives in it", !/^\s*import\s/m.test(src("lib/tax.ts")) && /export function roundPaise\(n: number\): number/.test(src("lib/tax.ts")));
+t("item 10: verify-money-round-twins is in the static-guard list CI runs", /\["verify-money-round-twins\.mjs",/.test(src("scripts/verify-static.mjs")));
+
+// ── item 16: a dish page learns which review is mine ──
+{ const M418 = src("supabase/migrations/418_a_dish_page_learns_which_review_is_mine_not_every_device_id.sql");
+  const MENU = src("lib/menu.ts"), ITEM = src("app/item/[slug]/ItemClient.tsx");
+  t("item 16: migration 418's function returns name, stars, comment, created_at and mine — and no device id", /RETURNS TABLE \(name text, stars integer, comment text, created_at timestamptz, mine boolean\)/.test(M418));
+  t("item 16: …it is SECURITY DEFINER, STABLE, with a fixed search_path, scoped to one dish of one restaurant, newest 20", /LANGUAGE sql STABLE SECURITY DEFINER\s*\nSET search_path TO 'public'/.test(M418) && /WHERE r\.item_slug = p_slug AND r\.restaurant_id = p_restaurant_id/.test(M418) && /ORDER BY r\.created_at DESC\s*\n\s*LIMIT 20;/.test(M418));
+  t("item 16: …'mine' is true only for a real device id the caller passed (never for a blank one)", /\(p_device IS NOT NULL AND p_device <> '' AND r\.device_id = p_device\) AS mine/.test(M418));
+  t("item 16: …it is not left PUBLIC-executable by default: revoked from PUBLIC, granted to the guest, signed-in and server keys", /REVOKE ALL ON FUNCTION public\.lfh_dish_reviews\(text, uuid, text\) FROM PUBLIC;/.test(M418) && /GRANT EXECUTE ON FUNCTION public\.lfh_dish_reviews\(text, uuid, text\) TO anon, authenticated, service_role;/.test(M418));
+  t("item 16: …and the table's direct guest read and its policy are gone", /DROP POLICY IF EXISTS public_read_reviews ON public\.reviews;/.test(M418) && /REVOKE SELECT ON public\.reviews FROM anon, authenticated;/.test(M418));
+  t("item 16: lib/menu.ts asks lfh_dish_reviews and never reads the reviews table itself", /supabase\.rpc\("lfh_dish_reviews", \{ p_slug: slug, p_restaurant_id: restaurantId, p_device: deviceId \}\)/.test(MENU) && !/\.from\("reviews"\)/.test(MENU));
+  t("item 16: the dish page passes its own device id and drops its own older review by 'mine', holding nobody's device id", /getItemReviews\(item\.slug, restaurantId, getDeviceId\(\)\)/.test(ITEM) && /localReviews\.filter\(\(r\) => !r\.mine\)/.test(ITEM) && !/deviceId\?: string\}\[\]>/.test(ITEM));
+  const files = []; (function w(d) { for (const e of readdirSync(join(root, d))) { const q = join(d, e); if (statSync(join(root, q)).isDirectory()) w(q); else if (/\.(ts|tsx|js|mjs)$/.test(e)) files.push(q); } })("app"); (function w(d) { for (const e of readdirSync(join(root, d))) { const q = join(d, e); if (statSync(join(root, q)).isDirectory()) w(q); else if (/\.(ts|tsx|js|mjs)$/.test(e)) files.push(q); } })("components");
+  const direct = files.filter((f) => !f.startsWith("app/api/") && /\.from\(["']reviews["']\)/.test(src(f)));
+  t("item 16: no page or component reads the reviews table directly (only server routes, with the server key)", !direct.length, direct.join(", "));
+  t("item 16: verify:grants knows the new function and that only four tables are guest-readable now", /lfh_dish_reviews: +"/.test(src("scripts/verify-db-grants.mjs")) && /const GUEST_READABLE = \["categories", "filters", "menu_items", "realtime_events"\];/.test(src("scripts/verify-db-grants.mjs"))); }
+
+// ── item 12: the film seeder writes bills the way the app does (the file lives outside git) ──
+{ const SEEDER = "/Users/aevinite/Documents/Projects/backup_Menu/brag-output/ownerfilm/prep-history.mjs";
+  const S = existsSync(SEEDER) ? readFileSync(SEEDER, "utf8") : "";
+  t("item 12: the film seeder pays dine-in bills by UPI / Cash / Card only — no platform name", !!S && !/\["(Swiggy|Zomato|Website)",/.test(S) && (S.match(/methods: \[\["UPI", \d+\], \["Cash", \d+\], \["Card", \d+\]\]/g) || []).length === 3, S ? "" : "the seeder file is not on this machine");
+  t("item 12: …and stores total = subtotal + tax with the taxable base the whole subtotal (the discount apart)", !!S && /const taxable = subtotal;/.test(S) && /const total = \+\(subtotal \+ tax\)\.toFixed\(2\);/.test(S)); }
