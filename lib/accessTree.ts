@@ -1337,6 +1337,15 @@ export type TreeState = {
   creds: Record<string, string>;
 };
 
+/** The ONE way a stored channel key is described to a browser (sweep #10 T18, item 10).
+ *  "" = nothing stored. A key of 8 characters or more is "••••" + its last four, so an admin can tell
+ *  WHICH key is in place. A shorter one is just "••••": its "last four" would be most or all of it,
+ *  and a hint must never be the key. No real delivery-app key is that short; a hand-typed test value can be. */
+export function credHint(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.length) return "";
+  return raw.length >= 8 ? `••••${raw.slice(-4)}` : "••••";
+}
+
 export const emptyState = (): TreeState => ({
   features: {}, settings: {}, modules: {}, channels: {}, grants: {}, sections: {}, tabs: {}, config: {}, creds: {},
 });

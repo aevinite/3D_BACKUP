@@ -17,7 +17,7 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import {
   SETTINGS_COLUMNS, FEATURE_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS,
-  SECTION_ENTITLEMENTS, TAB_ALLOWED, KNOWN_CONFIG_IDS, MODULE_BAG_KEYS, type TreeState,
+  SECTION_ENTITLEMENTS, TAB_ALLOWED, KNOWN_CONFIG_IDS, MODULE_BAG_KEYS, credHint, type TreeState,
 } from "@/lib/accessTree";
 
 // settings.features keys the model knows about, PLUS "ratings", which the Ratings CHOICE
@@ -94,7 +94,7 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
   for (const k of CREDS_KEYS) {
     const cell = obj(pc[k]);
     const raw = typeof cell.key === "string" && cell.key ? cell.key : cell.api_key;
-    creds[k] = typeof raw === "string" && raw.length ? `••••${raw.slice(-4)}` : "";
+    creds[k] = credHint(raw);   // a short key is only ever "••••" — see credHint() (item 10)
   }
 
   const mp = obj(r.manager_permissions);

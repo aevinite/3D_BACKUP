@@ -1189,6 +1189,21 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("a waiter action with no column of its own obeys its restaurant switch, and only real tablet_* columns reach a settings object");
 }
 
+// ── 62 · A KEY HINT IS NEVER THE KEY ─────────────────────────────────────────────────────────────
+// A channel key reaches a browser only as a hint. "••••" + the last four is safe for a real key; for a
+// key of four characters it IS the key, and for six it is two thirds of it. (sweep #10 T18, item 10.)
+// The one builder is credHint() in lib/accessTree.ts, and lib/accessState.ts must use it.
+{
+  const T = await import("../node_modules/.cache/accessTree.mjs");
+  const probs = [];
+  for (const k of ["a", "abc", "abcd", "abcdef", "abcdefg"]) { const h = T.credHint(k); if (h !== "••••") probs.push(`a ${k.length}-character key hints "${h}"`); }
+  if (T.credHint("zomato-1234-ABCD") !== "••••ABCD") probs.push("a long key no longer shows its last four");
+  if (T.credHint("") !== "" || T.credHint(undefined) !== "" || T.credHint(12345678) !== "") probs.push("no key / not a string must hint \"\"");
+  if (!/credHint\(raw\)/.test(read("lib/accessState.ts"))) probs.push("lib/accessState.ts builds its hints without credHint()");
+  if (probs.length) fail(`a stored key could reach a browser through its hint: ${probs.join("; ")}`);
+  else ok("a key hint is never the key: short keys show only dots, and the reader uses the one builder");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27
