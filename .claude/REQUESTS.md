@@ -1853,3 +1853,8 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [ ] **Waiter tablet + kitchen can't revive a cancelled ticket** (item 12) · **quick-order discount judged before placing** (13) · **deleted category named in the Audit** (17) · **shared helpers name the restaurant** (15) · **leftover printer comments deleted** (16). Built; verify live.
 - [x] **Phone tiles show no table number** (19) — NOT a fault: the first screenshot had touch off; a real A35 shows every number.
 - [ ] **A 500–1000 phase re-test of the whole boundary at 6:00 AM, zero errors** — scheduled after this ships.
+
+## 2026-10-10 — sweep #10 T39 round 3 (owner: "every single bit of area"; then "you can do the bin button big, but … it should look as professional aesthetic as it is right now")
+
+- [x] **Every file in scripts/, tests/, .github/ has its own check** — verify:every-script (640+ files), in CI; items 79–87 fixed. VERIFIED live (PR #1472).
+- [ ] **The basket's 🗑 is a 44×44 tap target and looks exactly as before** (finding 88) — same icon, colour and place; seen at 390px light + dark and 1280px against the live backup. Built; verify live.

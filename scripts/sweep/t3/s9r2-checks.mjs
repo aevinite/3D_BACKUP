@@ -187,11 +187,10 @@ P("P110108", "a kitchen note is shown in quotes, so it reads as the diner's own 
 P("P110109", "the − and + buttons are 32px, the floor this product uses for adjacent taps", has(C_CART, /width: "32px", height: "32px"/));
 P("P110110", "…and each names its dish for a screen reader, not just '+'", has(C_CART, /aria-label=\{`Decrease \$\{item\.title\}`\}/) && has(C_CART, /aria-label=\{`Increase \$\{item\.title\}`\}/));
 P("P110111", "the remove button names its dish too", has(C_CART, /aria-label=\{`Remove \$\{item\.title\}`\}/));
-// RE-STATED 2026-10-10 (sweep #10 T39 Band L): #1427 shrank this to padding 6px around a 16px icon — a 28px target, under the usual
-// 44px. It still has padding, which is what this row asks; the size is reported to the owner as a
-// finding (T39-S10-findings.md), not changed here — the guest screen is not this sweep's, and it is
-// the layout he picked.
-P("P110112", "…and has real padding, so it is not an 18px icon to hit", has(C_CART, /remove-item"[\s\S]{0,160}padding: "(?:[6-9]|\d\d)px"/));
+// RE-STATED 2026-10-10: #1427 had shrunk this to a 28px target (finding 88); the owner then said yes
+// to a bigger one "as professional aesthetic as it is right now". The tap area is now a 44×44 box in
+// app/globals.css around the same 16px icon — so the row reads the stylesheet, not an inline padding.
+P("P110112", "…and has real padding, so it is not an 18px icon to hit", /\.cart-item-controls \.remove-item \{[^}]*width: 44px; height: 44px/.test(read("app/globals.css")) && has(C_CART, /className="remove-item"/));
 P("P110113", "Edit is offered on every dish still on the menu, not only customisable ones", has(C_CART, /const canEdit = \(id: string\) => !!menuItems\.find\(\(m\) => m\.id === id\)/));
 P("P110114", "…and hidden for a dish that has left it, where the popup would have nothing to open", has(C_CART, /\{canEdit\(item\.id\) && \(/));
 P("P110115", "editing re-opens the popup PRE-FILLED with what the line already holds", has(C_CART, /preselect: \{ options: it\.options, removed: it\.removed, note: it\.note, qty: it\.qty \}/));
@@ -360,7 +359,11 @@ P("P110255", "…while a null category set hides nothing, which is the safe dire
 P("P110256", "SOLD OUT is a tag, not a column, so it rides the editor's existing plumbing", has(C_MENU, /export const SOLD_OUT_TAG = "sold-out"/));
 P("P110257", "…and a sold-out dish is still SHOWN, wearing its badge", !has(C_MENU, /includes\(SOLD_OUT_TAG\)\)[\s\S]{0,40}return null/));
 P("P110258", "the dish page no longer pulls twenty review rows on every open", !/from\("reviews"\)/.test(C_MENU.slice(C_MENU.indexOf("export async function getMenuItem("), C_MENU.indexOf("export async function getMenuItemByModelFolder(")))  /* re-stated 2026-10-10: the old 600-character window ran into the NEXT function, whose own reviews read is a different, capped query */);
-P("P110259", "the review list read is column-listed and capped", has(C_MENU, /\.select\("name, stars, comment, device_id, created_at"\)[\s\S]{0,200}\.limit\(20\)/));
+// RE-STATED 2026-10-10: sweep #10 T30 round 4 (item 16, mig 418) moved this read into
+// lfh_dish_reviews so no reviewer's device id leaves the database. The columns and the cap of 20 now
+// live in that function; the page calls it and reads the table no more.
+P("P110259", "the review list read is column-listed and capped", has(C_MENU, /rpc\("lfh_dish_reviews"/) && !/from\("reviews"\)\s*\.select/.test(C_MENU)
+  && /RETURNS TABLE \(name text, stars integer, comment text, created_at timestamptz, mine boolean\)[\s\S]{0,600}LIMIT 20;/.test(read("supabase/migrations/418_a_dish_page_learns_which_review_is_mine_not_every_device_id.sql")));
 P("P110260", "the categories read is capped as well", has(C_MENU, /from\("categories"\)[\s\S]{0,200}\.limit\(300\)/));
 P("P110261", "settings are cached per restaurant with a short TTL", has(C_MENU, /const SETTINGS_TTL_MS = 8000/));
 P("P110262", "…simultaneous callers share ONE request", has(C_MENU, /const settingsInflight = new Map<string, Promise<Settings>>\(\)/));

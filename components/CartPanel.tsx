@@ -1206,7 +1206,11 @@ export default function CartPanel() {
                         <i className="fas fa-pen"></i> Edit
                       </button>
                     )}
-                    <button type="button" className="remove-item" aria-label={`Remove ${item.title}`} onClick={() => removeFromCart(idx)} style={{ background: "transparent", border: "none", padding: "6px" }}>
+                    {/* The bin's TAP AREA is 44×44 (owner, 2026-10-10: "you can do the bin button big, but … it
+                        should look as professional aesthetic as it is right now"). The icon, its colour and
+                        its place are unchanged — the box is sized and centred in globals.css, with negative
+                        margins so the row is no taller and the icon sits exactly where it sat. */}
+                    <button type="button" className="remove-item" aria-label={`Remove ${item.title}`} onClick={() => removeFromCart(idx)}>
                       <i className="fas fa-trash" style={{ fontSize: "16px" }}></i>
                     </button>
                   </div>

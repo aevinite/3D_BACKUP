@@ -1966,7 +1966,20 @@ body.menu-frost .nav {
 /* Details span to the right edge so a long note wraps instead of being cut. */
 .cart-item-details { grid-column: 2 / 4; grid-row: 2; }
 .cart-item-controls { grid-column: 2 / 4; grid-row: 3; display: flex; align-items: center; gap: 7px; margin-top: 7px; }
-.cart-item-controls .remove-item { margin-left: auto; }
+/* THE BIN: a 44×44 tap area around the same 16px icon (owner, 2026-10-10). It was 28×28 (6px padding).
+   The negative margins hand the extra 16px back, so the controls row stays 32px tall (the − / + size)
+   and the icon's centre stays where it was (1px further right is the most the list's padding allows). The right-hand 8px lands in
+   .cart-list's own 8px padding-right, so nothing clips it and nothing scrolls sideways. */
+.cart-item-controls .remove-item {
+  margin: -6px -8px -6px auto;
+  width: 44px; height: 44px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none;
+  /* 12px, not 50%: a browser does not count the cut-off corners of a circle as part of the button,
+     so a round box would have been a 44px circle, not a 44px square. It only shows as the focus ring. */
+  border-radius: 12px;
+  -webkit-tap-highlight-color: transparent;
+}
 .cart-item-name { font-weight: 700; color: var(--text); font-size: 14.5px; line-height: 1.25; }
 .cart-item-price {
   /* grid-row 1 = the SAME row as the dish name. This is the whole fix: the price can no longer
@@ -1980,10 +1993,15 @@ body.menu-frost .nav {
   font-feature-settings: 'tnum' 1;
   letter-spacing: -0.01em;
 }
-.remove-item { 
-  color: #ef4444; cursor: pointer; padding: 8px; transition: all 0.3s;
+.remove-item {
+  color: #ef4444; cursor: pointer; padding: 8px; transition: transform 0.2s ease-out;
 }
-.remove-item:hover { transform: scale(1.2); }
+/* Grow on hover only where there IS a hover (a mouse): on a phone a tap left it stuck at 1.2×. */
+@media (hover: hover) { .remove-item:hover { transform: scale(1.2); } }
+/* A press answers at once — the bin dips under the thumb the instant it lands, not on release. */
+.remove-item:active { transform: scale(0.88); transition-duration: 0.08s; }
+.remove-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+@media (prefers-reduced-motion: reduce) { .remove-item, .remove-item:active { transition: none; } }
 .cart-total { 
   display: flex; justify-content: space-between; margin-bottom: 24px; font-size: 17px;
   align-items: center;
