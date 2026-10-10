@@ -836,7 +836,9 @@ else ok("the read/write route derives every allow-list from the model");
   // next one. A looser "id … within 900 characters … module:" scan reads across the boundary and
   // reports the module of the row BELOW (it blamed print_invoice for khata's binding while this
   // check was being written), so the guard would name the wrong row on the day it matters.
-  const anchors = [...accessModel.matchAll(/\{\s*id:\s*"([a-z0-9_]+)",\s*group:\s*"/g)];
+  // (The entry opens `{ id: "x", name: "y"` since 2026-10-10 — `group` was display data and left with
+  // the rest of it, sweep #10 T18 item 25. Same one-slice-per-permission rule.)
+  const anchors = [...accessModel.matchAll(/\{\s*id:\s*"([a-z0-9_]+)",\s*name:\s*"/g)];
   const withModule = anchors.map((a, i) => {
     const own = accessModel.slice(a.index, i + 1 < anchors.length ? anchors[i + 1].index : accessModel.length);
     const m = own.match(/\bmodule:\s*\{\s*allowed:\s*"([a-z0-9_]+)_allowed"/);
@@ -1348,6 +1350,33 @@ else ok("the read/write route derives every allow-list from the model");
   if (!/\.at-box-t \.nm \.nm-t \{ flex:1 1 0;/.test(tsx)) probs.push(".nm-t lost its zero flex-basis, so a long name wraps away from its arrow");
   if (probs.length) fail(`a long row name on the Access screen leaves its arrow alone on a phone: ${probs.join("; ")}`);
   else ok("a long Access row name shares its arrow's line and wraps inside itself");
+}
+
+// ── 71 · ONE MODULE, ONE NAME — AND lib/accessModel.ts STAYS WIRING ONLY ─────────────────────────
+// A module's label (MODULE_DEFS) is what the activity log writes when it is switched ("Table & ticket
+// operations → on", measured on French House) and what the owner's Settings lists. It said "Banquet &
+// events", "Inventory & expenses", "Table & ticket operations" while the Access screen said "Banquet
+// billing", "Inventory management" (the owner's own word, 2026-09-23), "Move, merge & split tables"
+// (sweep #10 T18, item 25). Each label must be the Access screen's module row name. And the file was
+// trimmed to enforcement wiring the same day: a display field coming back is the retired panel coming
+// back, so the type may declare only the ten fields real code reads.
+{
+  const am = read("lib/accessModel.ts");
+  const probs = [];
+  const rowName = Object.fromEntries(ALL_NODES.filter((n) => n.bind.t === "module" || n.bind.t === "moduleBag").map((n) => [n.bind.key, n.name]));
+  for (const m of am.matchAll(/module: \{ allowed: "(\w+?)(?:_allowed)?", control: "[^"]+", enabled: "[^"]+" \}(?:, moduleBag: true)?, moduleLabel: "([^"]+)"/g)) {
+    const key = m[1];
+    if (!(key in rowName)) probs.push(`module "${key}" has no row on the Access screen`);
+    else if (rowName[key] !== m[2]) probs.push(`module "${key}" is labelled "${m[2]}" but the Access screen calls it "${rowName[key]}"`);
+  }
+  const withModule = (am.match(/module: \{ allowed:/g) || []).length, labelled = (am.match(/moduleLabel: "/g) || []).length;
+  if (withModule !== labelled) probs.push(`${withModule} entries carry a module but ${labelled} carry a moduleLabel — give every module its Access-screen name`);
+  const typeBody = (am.match(/type Perm = \{([\s\S]*?)\n\};/) || [])[1] || "";
+  const fields = [...typeBody.matchAll(/^\s{2}(\w+)\??:/gm)].map((x) => x[1]).sort();
+  const WIRING = ["absentOn", "id", "isNew", "module", "moduleBag", "moduleLabel", "name", "power", "tablet", "tabletNew"];
+  if (JSON.stringify(fields) !== JSON.stringify(WIRING)) probs.push(`the Perm type declares [${fields.join(", ")}] — only the ten fields real code reads belong there`);
+  if (probs.length) fail(`lib/accessModel.ts has drifted from the Access screen or from wiring-only: ${probs.join("; ")}`);
+  else ok("every module is named as the Access screen names it, and lib/accessModel.ts holds wiring only");
 }
 
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
