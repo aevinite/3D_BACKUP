@@ -1219,6 +1219,26 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("nothing reads the old depth_* entitlement strings, and lib/ownerEntitlements.ts says exactly that");
 }
 
+// ── 64 · A FAILED ENTITLEMENT READ NEVER OPENS A GATE ────────────────────────────────────────────
+// getOwnerEntitlements() is a GATE, not only a menu: the manager and tablet routes refuse a customer
+// lookup / loyalty spend on its `.customers`. It answered "everything ON" on a failed read, so a blip
+// ignored an admin's OFF switch for that request (sweep #10 T18, item 12). Its read must look at
+// `.error`, and the failure path must answer closed — never mergeOwnerEntitlements() of nothing.
+{
+  const src = read("lib/ownerEntitlements.ts");
+  const at = src.indexOf("export async function getOwnerEntitlements");
+  const body = src.slice(at, src.indexOf("\n}", at));
+  const probs = [];
+  if (at < 0) probs.push("getOwnerEntitlements() not found — fix this guard");
+  if (!/\.error/.test(body)) probs.push("its read never looks at .error");
+  if (!/return ALL_CLOSED\(\)/.test(body)) probs.push("a failed read does not answer closed");
+  const uat = src.indexOf("export async function getOwnerEntitlementsUnion");
+  const ubody = src.slice(uat, src.indexOf("\n}", uat));
+  if (!/if \(error \|\| !rows\) return ALL_CLOSED\(\)/.test(ubody)) probs.push("getOwnerEntitlementsUnion() answers every section ON when its read fails");
+  if (probs.length) fail(`a database blip could open an owner-section gate: ${probs.join("; ")}`);
+  else ok("a failed owner-entitlement read answers closed, so a blip never ignores an OFF switch");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27

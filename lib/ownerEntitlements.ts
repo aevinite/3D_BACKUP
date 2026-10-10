@@ -108,10 +108,23 @@ export function mergeOwnerEntitlements(raw: unknown): OwnerEntitlements {
 
 // One restaurant's merged entitlements. Small select on a rare path (panel boot /
 // settings pages), so no cache — a flipped switch takes effect on the next load.
+//
+// A FAILED READ IS NOT "EVERYTHING ON" (sweep #10 T18, item 12). This answered
+// mergeOwnerEntitlements(undefined) — every section ON — whenever the read failed, and it is not only a
+// menu: the manager and tablet routes ask it whether this restaurant has the customer directory before
+// a lookup, a loyalty spend or a "repeat customer" greeting. So one database blip quietly ignored a
+// section the admin had switched OFF, for that request. It now tries once more and then answers CLOSED,
+// exactly as entitledSubset() below already does with a failed read: the gate refuses for one request
+// ("isn't enabled"), the owner's menu hides that section for one load, and nothing switched off is
+// ever treated as on.
+const ALL_CLOSED = (): OwnerEntitlements => Object.fromEntries(OWNER_ENTITLEMENT_KEYS.map((k) => [k, false]));
 export async function getOwnerEntitlements(restaurantId: string): Promise<OwnerEntitlements> {
   if (!restaurantId) return mergeOwnerEntitlements(null);
-  const r = await sb.from("restaurants").select("owner_entitlements").eq("id", restaurantId).maybeSingle();
-  return mergeOwnerEntitlements(r.data?.owner_entitlements);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await sb.from("restaurants").select("owner_entitlements").eq("id", restaurantId).maybeSingle();
+    if (!r.error) return mergeOwnerEntitlements(r.data?.owner_entitlements);
+  }
+  return ALL_CLOSED();
 }
 
 // The subset of these restaurants still entitled to a key — how the owner APIs
@@ -150,9 +163,12 @@ export async function logViewSubset(restaurantIds: string[], part: "removals" | 
 // restaurant still has it (per-restaurant data is filtered separately by the APIs).
 export async function getOwnerEntitlementsUnion(restaurantIds: string[]): Promise<OwnerEntitlements> {
   if (!restaurantIds.length) return mergeOwnerEntitlements(null);
-  const { rows } = await readInChunks<{ owner_entitlements: unknown }>(restaurantIds, (chunk) =>
+  const { rows, error } = await readInChunks<{ owner_entitlements: unknown }>(restaurantIds, (chunk) =>
     sb.from("restaurants").select("owner_entitlements").in("id", chunk).limit(chunk.length));
-  const merged = (rows || []).map((r) => mergeOwnerEntitlements(r.owner_entitlements));
+  // Also a gate (the owner's Settings save refuses on `.settings === false`), so a failed read is
+  // CLOSED here too — it used to fall through to "no rows → every section ON" (item 12).
+  if (error || !rows) return ALL_CLOSED();
+  const merged = rows.map((r) => mergeOwnerEntitlements(r.owner_entitlements));
   const out: OwnerEntitlements = {};
   for (const k of OWNER_ENTITLEMENT_KEYS) out[k] = merged.length ? merged.some((m) => m[k]) : true;
   return out;
