@@ -58,8 +58,11 @@ if (mod) {
   // There is more than one shared read per restaurant now (`floor:<rid>` and `merges:<rid>`),
   // so a write has to drop ALL of them. Naming keys one by one is a list somebody forgets to
   // extend, and the symptom would be a just-made merge showing on one device and not another.
+  // BOTH halves, not either (sweep #10 T13 round 2, item 14). As an OR this passed on the loop's mere
+  // presence: a loop that dropped only `floor:` keys still contained `for (const k of [...inflight.keys()])`
+  // and was waved through, and a just-made merge would then show on one device and not another.
   check("a write drops EVERY shared read for that restaurant, not just the floor",
-    /endsWith\(suffix\)/.test(mod) || /for \(const k of \[\.\.\.inflight\.keys\(\)\]\)/.test(mod),
+    /const suffix = `:\$\{restaurantId\}`;/.test(mod) && /for \(const k of \[\.\.\.inflight\.keys\(\)\]\) if \(k\.endsWith\(suffix\)\) inflight\.delete\(k\);/.test(mod),
     /endsWith\(suffix\)/.test(mod) ? "" : "invalidateFloor must clear every key ending in `:<restaurantId>`");
 }
 
