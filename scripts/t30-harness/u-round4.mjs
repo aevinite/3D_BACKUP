@@ -100,3 +100,47 @@ t("item 10: verify-money-round-twins is in the static-guard list CI runs", /\["v
   const S = existsSync(SEEDER) ? readFileSync(SEEDER, "utf8") : "";
   t("item 12: the film seeder pays dine-in bills by UPI / Cash / Card only — no platform name", !!S && !/\["(Swiggy|Zomato|Website)",/.test(S) && (S.match(/methods: \[\["UPI", \d+\], \["Cash", \d+\], \["Card", \d+\]\]/g) || []).length === 3, S ? "" : "the seeder file is not on this machine");
   t("item 12: …and stores total = subtotal + tax with the taxable base the whole subtotal (the discount apart)", !!S && /const taxable = subtotal;/.test(S) && /const total = \+\(subtotal \+ tax\)\.toFixed\(2\);/.test(S)); }
+
+// ── item 10, configuration by configuration: every tax set-up a restaurant can choose (72), the four
+//    copies of the bill rule — lib/tax.ts, the manager cart, the waiter tablet, the printed bill — agree ──
+{ const RATES = [["CGST 2.5 + SGST 2.5", { tax_components: COMPS[1] }], ["CGST 9 + SGST 9", { tax_components: COMPS[2] }], ["IGST 28", { tax_components: COMPS[3] }], ["VAT 12.5", { tax_components: COMPS[4] }], ["a typed 12%", { tax_rate: 0.12, tax_components: [] }], ["nothing set (5%)", { tax_rate: null, tax_components: [] }]];
+  const E = EDF(BILLDOC, { data: { settings: {} } });
+  for (const pm of ["excl", "incl", "composition"]) for (const allowed of [false, true]) for (const mt of ["inclusive", "none"]) for (const [rl, rs] of RATES) {
+    const s = { ...rs, price_tax_mode: pm, item_tax_modes_allowed: allowed, mrp_tax_treatment: mt }; const R = gen(5000 + pm.length * 97 + (allowed ? 7 : 0) + mt.length * 13 + rl.length);
+    let bad = null;
+    for (let i = 0; i < 300 && !bad; i++) {
+      const lines = Array.from({ length: int(R, 1, 7) }, () => dishLine(R));
+      const resolved = lines.map((l) => ({ ...l, tax_mode: T.resolveTaxMode(l.tax_mode, s), is_mrp: T.isMrpDish(l.tax_mode, s) }));
+      const b = T.splitBill(resolved, s, 0); const p = E.splitCartLines(lines, s);
+      const tb = TBF(BILLDOC, { data: { settings: s } }); const o = tb.orderTaxSplit({ items: resolved, total: 0 });
+      const m = BILLDOC.billMoney([{ status: "served", subtotal: b.subtotal, taxable_base: b.taxableBase, nontax_amount: b.nontaxAmount, mrp_amount: b.mrpAmount, discount: 0, tax_rate: b.rate, items: resolved }], s);
+      if (p.taxableBase !== b.taxableBase || p.nontax !== b.nontaxAmount || p.mrpAmount !== b.mrpAmount) bad = `manager cart ${p.taxableBase}/${p.nontax} vs ${b.taxableBase}/${b.nontaxAmount}`;
+      else if (o.base !== b.taxableBase || o.nontax !== b.nontaxAmount || tb.effRate() !== b.rate) bad = `tablet ${o.base}/${o.nontax} @${tb.effRate()} vs ${b.taxableBase}/${b.nontaxAmount} @${b.rate}`;
+      else if (m.total !== b.total || m.tax !== b.tax || BILLDOC.taxModel(s).rate !== b.rate) bad = `paper ${m.total}/${m.tax} vs screen ${b.total}/${b.tax}`;
+    }
+    t(`set-up "${pm}, per-dish modes ${allowed ? "on" : "off"}, MRP ${mt}, ${rl}": the screen, the manager cart, the tablet and the printed bill give the same figures on 300 random carts`, !bad, bad || "");
+  } }
+
+// ── the printed bill's own money (billdoc.js — item 10 moved every figure in it onto the one rule) ──
+{ const billOf = (R) => { const s = { tax_rate: pick(R, [0.05, 0.12, 0.18]), tax_components: pick(R, [COMPS[1], COMPS[2], []]) };
+    const orders = Array.from({ length: int(R, 1, 4) }, () => { const lines = Array.from({ length: int(R, 1, 5) }, () => ({ title: "Dish " + int(R, 1, 50), price: (int(R, 100, 300000) / 100).toFixed(2), qty: int(R, 1, 3), tax_mode: pick(R, ["excl", "excl", "incl", "exempt"]) }));
+      const b = T.splitBill(lines, s, 0); const d = R() < 0.4 ? Math.min(b.discountBase, int(R, 0, 50000) / 100) : 0;
+      return { status: "served", subtotal: b.subtotal, taxable_base: b.taxableBase, nontax_amount: b.nontaxAmount, mrp_amount: 0, discount: d, tax_rate: b.rate, items: lines }; });
+    return { s, orders }; };
+  prop("the printed bill: total = subtotal − discount + tax, every figure a whole number of paise, for multi-ticket bills", 10000, billOf, ({ s, orders }) => {
+    const m = BILLDOC.billMoney(orders, s); const w = (x) => Math.abs(x * 100 - Math.round(x * 100)) < 1e-6;
+    return (BILLDOC.moneyRound(m.subtotal - m.disc + m.tax) === m.total && [m.subtotal, m.disc, m.tax, m.total, m.taxable].every(w)) || `${m.subtotal} − ${m.disc} + ${m.tax} ≠ ${m.total}`; });
+  prop("the printed bill's tax = the tax of each rate's taxable slice, each rounded once by the one rule", 10000, billOf, ({ s, orders }) => {
+    const m = BILLDOC.billMoney(orders, s); const want = m.rateRows.reduce((a, r) => BILLDOC.moneyRound(a + BILLDOC.moneyRound(r.taxable * r.rate)), 0);
+    return m.tax === want || `${m.tax} vs ${want}`; });
+  prop("the paper's rows (billRows) add up: subtotal − discount + tax + untaxed + round-off = the total printed", 10000, billOf, ({ s, orders }) => {
+    const d = BILLDOC.billData({ settings: s, orders, restaurant: {} }); const r = BILLDOC.billRows(d);
+    return Math.round((r.subtotal - r.discount + r.tax + r.nontax + r.roundOff) * 100) === Math.round(r.total * 100) || JSON.stringify(r); });
+  prop("the paper's CGST / SGST lines add up to the tax it prints", 10000, billOf, ({ s, orders }) => {
+    const d = BILLDOC.billData({ settings: s, orders, restaurant: {} }); const r = BILLDOC.billRows(d); const lines = (d.taxRows || []).reduce((a, x) => a + Number(x.amt || 0), 0);
+    return !(d.taxRows || []).length || Math.round(lines * 100) === Math.round(r.tax * 100) || `${lines} vs ${r.tax}`; });
+  for (const comps of [[2.5, 2.5], [9, 9], [6, 6], [2.5, 2.5, 1]]) {
+    let bad = null; const cs = comps.map((r, i) => ({ label: ["CGST", "SGST", "Cess"][i], rate: r }));
+    for (let w = 0; w <= 20000 && !bad; w++) { const parts = BILLDOC.splitTax(w, cs); const sum = parts.reduce((a, x) => a + Number(x.amt), 0);
+      if (Math.round(sum * 100) !== w * 100 || parts.some((x) => Number(x.amt) < 0) || (w > 0 && parts.some((x) => Number(x.amt) === 0))) bad = `₹${w}: ${parts.map((x) => x.amt).join(" + ")}`; }
+    t(`the printed bill's tax split at ${comps.join(" + ")}%: every whole-rupee tax ₹0–₹20,000 splits into lines that add up exactly, none negative, none ₹0 when tax was charged`, !bad, bad || ""); } }
