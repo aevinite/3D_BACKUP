@@ -8,6 +8,11 @@
 import { chk, report, setOnly, writeLedger, executedIds } from "./lib.mjs";
 import { openWith, closeBrowser, screenText, setRange, patchJson, ESTATE, BASE } from "./r2lib.mjs";
 import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+// REPO ROOT, NOT A WORKTREE (sweep #10 T39 item 87): this file named the sweep-#8 worktree
+// wt-s8-t13 by its absolute path; that folder was removed when the sweep ended, so every read threw
+// ENOENT before the first check ran. It now reads the checkout it lives in.
+const ROOT_DIR = fileURLToPath(new URL("../../../", import.meta.url));
 
 const EXPECT_ROWS = 198;
 const argOnly = process.argv.find((x) => x.startsWith("--only="));
@@ -23,7 +28,7 @@ const nextId = () => {
   if (v > CLAIMED.to) throw new Error("this band has run past both of its ranges");
   return `P${v}`;
 };
-const src = (p) => readFileSync("/Users/aevinite/Documents/Projects/wt-s8-t13/" + p, "utf8");
+const src = (p) => readFileSync(ROOT_DIR + p, "utf8");
 const page = src("app/owner/page.tsx");
 const analytics = src("app/api/owner/analytics/route.ts");
 const overview = src("app/api/owner/overview/route.ts");
@@ -125,7 +130,7 @@ const RPCS = [
   ["lfh_staff_pay_expense", analytics, "staff pay as an expense"],
 ];
 const migrations = (() => {
-  const dir = "/Users/aevinite/Documents/Projects/wt-s8-t13/supabase/migrations/";
+  const dir = ROOT_DIR + "supabase/migrations/";
   return readdirSync(dir).filter((f) => f.endsWith(".sql")).map((f) => ({ f, t: readFileSync(dir + f, "utf8") }));
 })();
 for (const [rpc, file, what] of RPCS) {

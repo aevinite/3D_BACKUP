@@ -429,5 +429,5 @@ for (const b of bad) console.log(`  ${b.res} ${b.id} — ${b.what}${b.note ? `  
 try {
   const { writeFileSync: __w, mkdirSync: __m } = await import("node:fs");
   __m(".claude/sweep/t16-rows", { recursive: true });
-  __w(".claude/sweep/t16-rows/C.json", JSON.stringify(rows ?? results, null, 1));
+  __w(".claude/sweep/t16-rows/C.json", JSON.stringify(rows, null, 1));
 } catch (e) { console.error("could not write rows:", e.message); }

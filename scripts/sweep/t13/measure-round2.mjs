@@ -2,7 +2,12 @@
 // Round 1 filed 557 checks. This asks: of everything my territory names, and of every WAY a check
 // can be made, what did round 1 not reach?
 import { readFileSync } from "node:fs";
-const W = "/Users/aevinite/Documents/Projects/wt-s8-t13/";
+import { fileURLToPath } from "node:url";
+// REPO ROOT, NOT A WORKTREE (sweep #10 T39 item 87): this file named the sweep-#8 worktree
+// wt-s8-t13 by its absolute path; that folder was removed when the sweep ended, so every read threw
+// ENOENT before the first check ran. It now reads the checkout it lives in.
+const ROOT_DIR = fileURLToPath(new URL("../../../", import.meta.url));
+const W = ROOT_DIR;
 const LED = W + ".claude/sweep/LEDGER/";
 
 // ── 1 · what did round 1 actually DO, by kind? ───────────────────────────────────────────────

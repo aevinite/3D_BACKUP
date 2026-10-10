@@ -2,8 +2,8 @@
 // touches — staff_users, staff_actions, rate_limit_events, login_throttle, fail_count, restaurants — lives in the in-memory
 // stub (./sb.mjs) and is wiped by world() before each check, so no wrong password here ever reaches a database, a limit
 // counter or the owner's phone (any fetch a check has not replaced is refused).
-import { G, world, person, sign, req, t, save, quiet, RID_A, RID_B, randomUUID } from "./r5lib.mjs";
-const f = "app/api/panel-profile/route.ts"; const PP = await import("@/app/api/panel-profile/route.ts"); const UA = await import("@/lib/userAuth.ts");
+import { G, world, person, sign, req, t, save, quiet, RID_A, randomUUID } from "./r5lib.mjs";
+const f = "app/api/panel-profile/route.ts"; const PP = await import("@/app/api/panel-profile/route.ts"); await import("@/lib/userAuth.ts");
 process.env.CREDENTIAL_VAULT_KEY = "r5-vault-key-0123456789abcdef";
 const body = async (res) => { try { return await res.clone().json(); } catch { return null; } };
 const logs = (a) => (G.FIX.staff_actions || []).filter((r) => !a || r.action === a);

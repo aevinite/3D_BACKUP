@@ -13,12 +13,17 @@ import { adminCookie } from "../login.mjs";
 import { closeBrowser, screenText, pageErrors, BASE, idFor } from "./r2lib.mjs";
 import { stripComments } from "./lib.mjs";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+// REPO ROOT, NOT A WORKTREE (sweep #10 T39 item 87): this file named the sweep-#8 worktree
+// wt-s8-t13 by its absolute path; that folder was removed when the sweep ended, so every read threw
+// ENOENT before the first check ran. It now reads the checkout it lives in.
+const ROOT_DIR = fileURLToPath(new URL("../../../", import.meta.url));
 
 // The act-as cookie NAME comes from the app, never from memory: it is `aevidine_admin_rid`, and
 // the first version of this band invented `lfh_admin_act`, so the admin never actually entered a
 // restaurant and every row below was quietly measuring a signed-out session.
 const ADMIN_ACT_COOKIE = (/export const ADMIN_ACT_COOKIE = "([^"]+)"/.exec(
-  readFileSync("/Users/aevinite/Documents/Projects/wt-s8-t13/lib/panelScope.ts", "utf8")) || [])[1];
+  readFileSync(ROOT_DIR + "lib/panelScope.ts", "utf8")) || [])[1];
 if (!ADMIN_ACT_COOKIE) throw new Error("could not read ADMIN_ACT_COOKIE from lib/panelScope.ts");
 
 const id = idFor(67471);
@@ -29,7 +34,7 @@ if (argOnly) setOnly(argOnly.slice(7).split(","));
 
 const RID1 = "00000000-0000-0000-0000-000000000001";   // My Little French House
 const RID2 = "00000000-0000-0000-0000-000000000002";   // Pizza Palace
-const src = (p) => readFileSync("/Users/aevinite/Documents/Projects/wt-s8-t13/" + p, "utf8");
+const src = (p) => readFileSync(ROOT_DIR + p, "utf8");
 
 const browser = await chromium.launch();
 

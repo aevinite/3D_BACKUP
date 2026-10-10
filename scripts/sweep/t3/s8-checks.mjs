@@ -142,7 +142,8 @@ P("P56764", "a 5xx is counted and bounded, not marked permanently failed at once
 P("P56765", "all three counters are PERSISTED, so a reload cannot reset them", /await persist\(item\); idx\+\+; continue;/.test(flush));
 P("P56766", "genuinely offline mid-loop stops the round and keeps the queue", /if \(isOffline\(\)\) break;/.test(flush));
 P("P56767", "a table that moved on while offline is surfaced in the server's own plain words", /j\?\.clash\?\.plain/.test(flush));
-P("P56768", "a delivered call is removed rather than left to send twice", /if \(res\.ok && j\?\.ok && \(isCall\(item\) \|\| isLeave\(item\)\)\) \{ progressed = true; await removeItem\(item\.id\)/.test(flush));
+// RE-STATED 2026-10-10 (sweep #10 T39 Band L): a rate-limited answer now goes to "failed" first (lib/guestOutbox.ts); a delivered call is still removed.
+P("P56768", "a delivered call is removed rather than left to send twice", /if \(res\.ok && j\?\.ok && \(isCall\(item\) \|\| isLeave\(item\)\)\) \{[\s\S]{0,400}?progressed = true; await removeItem\(item\.id\)/.test(flush));
 P("P56769", "a delivered ORDER is recorded into the tracker before it is removed", /recordActive\(item, j\.order_id as string\); await removeItem\(item\.id\)/.test(flush));
 P("P56770", "a duplicate that says ok:false is a refusal, not a placed order", /if \(j\.ok === false\) \{ await moveToFailed/.test(flush));
 P("P56771", "a duplicate that says ok:true is tracked under the ORIGINAL order id", /if \(j\.order_id\) recordActive\(item, j\.order_id as string\);/.test(flush));
@@ -362,7 +363,8 @@ P("P56952", "…and one real answer resets the counter", /nullCounts\.current\[o
 P("P56953", "a status toast fires once per status, not on every poll", /if \(lastStatus\.current\[o\.id\] !== res\.status\)/.test(poll));
 P("P56954", "…and tapping it opens the live-status tab, not the bill", /event: "lfh:show-previous-orders"/.test(T));
 P("P56955", "a cancellation is toasted as an error, not as good news", /variant: res\.status === "cancelled" \? "error" : "success"/.test(poll));
-P("P56956", "an in-flight round bails cleanly on unmount", /if \(cancelled\) continue;/.test(poll));
+// RE-STATED 2026-10-10 (sweep #10 T39 Band L): `continue` became `break` on purpose — an unmounted tracker made one request per remaining order.
+P("P56956", "an in-flight round bails cleanly on unmount", /if \(cancelled\) (?:continue|break);/.test(poll));
 P("P56957", "realtime drives the refetch and the timer is only a backstop", /const iv = setInterval\(poll, RT_BACKUP_MS\)/.test(T));
 P("P56958", "…at 60s, never a fast poll", /export const RT_BACKUP_MS = 60 \* 1000;/.test(F.status));
 P("P56959", "the breadcrumb listener is removed on teardown", /window\.removeEventListener\("lfh:rt-tick", onTick\)/.test(T));
@@ -413,7 +415,7 @@ P("P56997", "a placed order drops the shared floor snapshot", /invalidateFloor\(
 P("P56998", "…but a refusal does not, because it changed nothing", /\.ok !== false\) invalidateFloor\(rid\)/.test(PL));
 P("P56999", "the QR path REFUSES an unknown restaurant rather than guessing #1", /if \(!publicRid\) return NextResponse\.json\(\{ ok: false, reason: "unknown_restaurant" \}, \{ status: 400 \}\)/.test(PL));
 P("P57000", "…and the id must be a real uuid, not any string", /const isUuid = /.test(PL));
-P("P57001", "a table the restaurant does not have is refused", /const offPlan = await offPlanTable\(publicRid, b\.table\)/.test(PL));
+P("P57001", "a table the restaurant does not have is refused", /const offPlan = await offPlanTable\(publicRid, b\.table(?:, \{ strict: true \})?\)/.test(PL)  /* re-stated 2026-10-10: the strict option (a guest is locked to a floor table) */);
 P("P57002", "…as a CODE, so the client owns the wording", /reason: "off_plan_table"/.test(PL));
 P("P57003", "the QR path checks the table has not moved on since the order was saved", /await replayClash\(req, publicRid, "order", undefined, undefined, \{ table: b\.table \}\)/.test(PL));
 P("P57004", "…and the session path deliberately does not (the RPC answers that itself)", /session path above doesn't need it/.test(PL));
@@ -432,7 +434,7 @@ P("P57015", "…and an ordinary online call with no timestamp still goes straigh
 P("P57016", "the note is length-capped before it reaches the database", /String\(b\.reason \|\| ""\)\.slice\(0, 200\)/.test(CW));
 P("P57017", "the session path needs a token", /if \(!b\.token\) return NextResponse\.json\(\{ ok: false, reason: "invalid_token" \}/.test(CW));
 P("P57018", "the QR path refuses an unknown restaurant rather than guessing #1", /if \(!rid\) return NextResponse\.json\(\{ ok: false, reason: "unknown_restaurant" \}/.test(CW));
-P("P57019", "…and a table the restaurant does not have", /if \(await offPlanTable\(rid, b\.table\)\) return NextResponse\.json\(\{ ok: false, reason: "off_plan_table" \}/.test(CW));
+P("P57019", "…and a table the restaurant does not have", /if \(await offPlanTable\(rid, b\.table(?:, \{ strict: true \})?\)\) return NextResponse\.json\(\{ ok: false, reason: "off_plan_table" \}/.test(CW));
 P("P57020", "a database that will not answer is BUSY here too", /function busy\(\): Response/.test(CW));
 P("P57021", "…with the same server-set, jittered wait", /const retryAfter = 20 \+ Math\.floor\(Math\.random\(\) \* 25\);/.test(CW));
 P("P57022", "the floor snapshot is dropped only when a call really landed", /function callLanded\(data: unknown\): boolean/.test(CW));

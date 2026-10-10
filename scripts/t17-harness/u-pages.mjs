@@ -2,9 +2,9 @@
 // touches — staff_users, staff_actions, rate_limit_events, login_throttle, fail_count, restaurants — lives in the in-memory
 // stub (./sb.mjs) and is wiped by world() before each check, so no wrong password here ever reaches a database, a limit
 // counter or the owner's phone (any fetch a check has not replaced is refused).
-import { G, world, person, sign, t, save, quiet, RID_A, RID_B, ADMIN_PW, R, go } from "./r5lib.mjs";
+import { G, world, person, sign, t, save, quiet, RID_A, RID_B, R, go } from "./r5lib.mjs";
 const { renderToString } = await import("react-dom/server"); const { createElement: h } = await import("react");
-const PA = await import("@/lib/panelAccess.ts"); const PG = await import("@/lib/panelGate.ts"); const UA = await import("@/lib/userAuth.ts");
+const PA = await import("@/lib/panelAccess.ts"); const PG = await import("@/lib/panelGate.ts"); await import("@/lib/userAuth.ts");
 const ONLY = process.env.R5_ONLY || ""; const want = (f) => !ONLY || ONLY === f;
 const html = (el) => renderToString(el);
 const text = (s) => s.replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ");

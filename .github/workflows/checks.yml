@@ -67,6 +67,13 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run -s lint
 
+      # Every file under scripts/, tests/ and .github/ — 638 of them on 2026-10-10 — loads, imports and
+      # names only files that exist, defines every name it uses, and names a clean-up if it writes
+      # data. Reads only; no network (sweep #10 T39 item 85).
+      - name: every script
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run -s verify:every-script
+
       # money rounding, error classification, and the brandText/brandTheme/starterMenu units.
       # Not the e2e (test:totals) — that one reads the real database.
       - name: unit tests

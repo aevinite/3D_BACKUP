@@ -207,7 +207,11 @@ const q = async (env, sql) => {
   const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
     method: "POST",
     headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ query: sql }),
+    // read_only: the database itself refuses any change in this request. This tool asks the CLIENT
+    // stack's database too, and every question in it is a SELECT — so a typo here can never become a
+    // write on a paying restaurant (sweep #10 T39 item 82; compare-schemas and verify-db-grants
+    // already asked this way).
+    body: JSON.stringify({ query: sql, read_only: true }),
   });
   if (!r.ok) throw new Error(`${ref.slice(0, 6)}…: ${(await r.text()).slice(0, 200)}`);
   return r.json();

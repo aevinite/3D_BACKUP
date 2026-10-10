@@ -3,13 +3,11 @@
 // scoped by restaurant_id, and bounded.
 import { check, nid, F } from "./t24-run.mjs";
 
-const { src, HELPERS, GETBLK, POSTBLK_A, chains, endpointBlock, ALL_GET_PATHS, ANON, L, live, needLive, J } = F;
+const { src, HELPERS, GETBLK, POSTBLK_A, chains, ALL_GET_PATHS, ANON, live } = F;
 const code = (t) => t.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 const MINE = HELPERS + GETBLK + POSTBLK_A;
 const MC = code(MINE);
 const HC = code(HELPERS);
-const GC = code(GETBLK);
-const PC = code(POSTBLK_A);
 const count = (t, re) => (t.match(re) || []).length;
 
 // ── A1 · DOES EVERY ONE OF THESE NEED A LOGIN? (28 endpoints, driven signed OUT) ───────────────

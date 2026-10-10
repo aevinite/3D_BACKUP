@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **232** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **233** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 197 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -33,7 +33,7 @@ Kept honest by `npm run verify:pointers`: it fails if a guard named here has van
 | `npm run typecheck` | `tsc --noEmit`. **`npm run lint` does NOT check types** — they are separate gates. | nothing | no |
 | `npm run test` | `test:money` + `test:errors` + `test:netretry` + `test:units` — ~0.2s. | nothing | no |
 | `npm run test:netretry` | a read never cries "no internet" before a quiet retry has failed too, and a WRITE still goes out exactly once (owner, 2026-09-12). Drives the real `public/panels/netretry.js` and cross-checks `lib/netRetry.ts`. | nothing | no |
-| `npm run lint` | ESLint, with the warning count LOCKED at 115 (was 1,132; sweep #10 T39 item 66 cleared 1,061 in scripts/, tests/, .github/ — every one left is outside that area or in a file another session was editing) (`--max-warnings`, sweep #10 T39 item 65, 2026-10-09). A change that adds a warning fails; one that removes some should lower the number in package.json so it can only go down. | nothing | no |
+| `npm run lint` | ESLint, with the warning count LOCKED at 70 (was 1,132; sweep #10 T39 items 66 and 83 cleared every one in scripts/, tests/, .github/ — all 70 left are in the app's own app/, components/, lib/) (`--max-warnings`, sweep #10 T39 item 65, 2026-10-09). A change that adds a warning fails; one that removes some should lower the number in package.json so it can only go down. | nothing | no |
 | `npm run verify:static` | all 67 static guards (~100s; verify:panel-scope is ~85s of it). Runs **every** one and reports **every** failure — add `-- --quiet` for failures only. Inside `verify:push`. | nothing | no |
 | `npm run check:current` | is this folder level with `origin/main`? **Run before any audit or "X is broken" claim.** | nothing | no |
 
@@ -271,6 +271,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | the guest's table sheet — a screen set on a closed sheet, a padded table number, a refusal only one skin can read | `verify:session-gate` | nothing | no |
 | every guest screen waits until it knows WHICH restaurant it is on (nobody reads #1's settings for a diner somewhere else) | `verify:guest-restaurant` | nothing | no |
 | realtime breadcrumbs (`lfh_rt_emit`) | `verify:realtime` | `.env.local` | **YES** |
+| **added or changed any file under `scripts/`, `tests/` or `.github/`** | `verify:every-script` ← every one of those files (638 on 2026-10-10) loads, imports and names only files that exist, defines every name it uses, carries no lint warning, and names a clean-up if it writes data — sweep #10 T39 item 85; runs in CI | nothing | no |
 | anything at all, before a release | `verify:db-parity` ← the two databases must agree | `.env.local` | no |
 | **added a migration, or wondered whether an old one still holds** | `verify:migration-truth` ← a migration file is a promise ("after this ran, these objects exist") and nothing checked it object by object: 384 files, 1,104 declared functions, views, indexes and columns, each looked up in the live database. `verify:grants` asks WHO may run a function, `verify:db-parity` compares the two databases to each other — this one asks the plainest question, is the thing still there. Reads only. | `.env.local` | no |
 | **applied ONE migration by hand** (`scripts/run-migration.mjs`) | `verify:run-alone` ← that script's header promises "CREATE OR REPLACE / IF NOT EXISTS are safe to re-run", and for a file whose objects a LATER migration removed it is not. Running 005/015/036 alone once re-created 7 pre-tenancy overloads (5 anon-callable) and reverted 5 function bodies. Also checks no table went back to guessing the restaurant, and that the issued-bill lock has not drifted | `.env.local` | no |
