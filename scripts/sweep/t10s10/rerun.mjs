@@ -57,8 +57,12 @@ check("P04891", "`orders/:id/serve-all` refuses a CANCELLED ticket", "STUB: serv
     const r = await call("POST", "orders/o1/serve-all", { body: {} }); return { ok: r.status === 409 && G.FIX.orders[0].status === "cancelled", note: `${r.status}` }; });
 check("P04892", "`orders/:id/allergies` 404s when the order is gone", "STUB",
   async () => { await world(); const r = await call("POST", "orders/o-gone/allergies", { body: { allergies: ["nuts"], reason_note: "x" } }); return { ok: r.status === 404, note: `${r.status}` }; });
-check("P04893", "`orders/:id/allergies` stamps `edited_at` and the per-dish ＋/✎− marks", "read the branch",
-  () => { const t = B('a === "orders" && c === "allergies"'); return /edited_at: nowIso\(\)/.test(t) && /added_allergens/.test(t) && /removed_flag/.test(t); });
+check("P04893", "`orders/:id/allergies` stamps `edited_at` and the per-dish ＋/✎− marks", "STUB: add an allergen to the order (the marking moved to lib/orderAllergies.ts — T30 item 16)",
+  async () => { const G = await world({ fix: { orders: [{ id: "o1", restaurant_id: "rest-1", allergies: [] }],
+      order_items: [{ id: "i1", restaurant_id: "rest-1", order_id: "o1", added_allergens: [], removed_flag: false }] } });
+    const r = await call("POST", "orders/o1/allergies", { body: { allergies: ["peanuts"], reason_note: "guest told us" } });
+    const it = G.FIX.order_items[0], o = G.FIX.orders[0];
+    return { ok: r.status === 200 && !!o.edited_at && (it.added_allergens || []).includes("peanuts"), note: `${r.status} · dish marks ${JSON.stringify(it.added_allergens)} · edited_at ${!!o.edited_at}` }; });
 check("P04894", "`items/:id/delete` confirms the dish is this restaurant's first", "STUB: delete a dish that is not this restaurant's",
   async () => { const G = await world({ fix: { order_items: [{ id: "i1", restaurant_id: "rest-2", order_id: "o9" }] } });
     const r = await call("POST", "items/i1/delete", { body: {} }); return { ok: r.status === 404 && !G.RPCS.some((c) => c.name === "lfh_delete_order_item"), note: `${r.status}` }; });

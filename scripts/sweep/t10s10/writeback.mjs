@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { ROOT } from "./lib.mjs";
 
 const DIR = join(ROOT, ".claude/sweep/LEDGER");
-const STAMP = "↻ S10-T10 re-run 2026-10-09";
+const STAMP = process.env.T10_STAMP || "↻ S10-T10 re-run 2026-10-09"; // round 3 passes its own date
 const results = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const want = new Map(results.map((r) => [r.id, r]));
 const done = new Set();

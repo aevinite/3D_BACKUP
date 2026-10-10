@@ -5,7 +5,15 @@
 //   P179727          the data: which restaurants give managers a discount limit below 100% (item 4)
 import { check, sql, MC } from "./lib.mjs";
 
-const FNS = [...new Set([...MC.matchAll(/sb\.rpc\("([a-z_0-9]+)"/g)].map((m) => m[1]))].sort();
+// FROZEN to the 25 the route called on 2026-10-09, so each keeps its own id. A function the route
+// starts calling later gets a NEW id in a later block (round 3: lfh_price_order → P211xxx), never a
+// slot in this list — sorting a grown list would hand every later id to a different function.
+const FNS = ["lfh_banquet_bill_create","lfh_banquet_place_order","lfh_cancel_classify","lfh_capture_customer","lfh_delete_order_item",
+  "lfh_generate_invoice","lfh_issue_credit_note","lfh_platform_insert","lfh_platform_set_status","lfh_record_removal","lfh_reopen_table",
+  "lfh_staff_add_item_to_order","lfh_staff_bill_discount","lfh_staff_edit_item_note","lfh_staff_edit_item_qty","lfh_staff_mark_placed",
+  "lfh_staff_merge_tables","lfh_staff_move_order","lfh_staff_move_order_item","lfh_staff_open_table","lfh_staff_place_order",
+  "lfh_staff_shift_table","lfh_staff_unmerge_table","lfh_uncapture_customer","lfh_void_invoice"];
+export const CALLED_NOW = [...new Set([...MC.matchAll(/sb\.rpc\("([a-z_0-9]+)"/g)].map((m) => m[1]))].sort();
 let acl = null;
 const acls = async () => {
   if (!acl) {
@@ -23,7 +31,6 @@ for (const fn of FNS.slice(0, 25)) {
       const open = /(^|,)=X|anon=|authenticated=|PUBLIC/.test(a);
       return { ok: !open && /service_role=X/.test(a), note: a || "(default ACL — PUBLIC may execute)" }; }, "`supabase/migrations/` (the function) · called from `app/api/editor/[...path]/route.ts`");
 }
-if (FNS.length !== 25) check("P179799", `the route calls ${FNS.length} functions, not 25 — this block must be re-cut`, "SRC", () => false);
 check("P179726", "the data: orders that carry a cancel time while no longer cancelled — the shape item 1's doors leave behind", "DB · count, dev, with how fast each was made",
   async () => { const rows = await sql(`select r.slug, (extract(epoch from (o.cancelled_at - o.created_at)) < 60) rig from orders o join restaurants r on r.id = o.restaurant_id where o.cancelled_at is not null and o.status <> 'cancelled' limit 200`);
     const rig = rows.filter((r) => r.rig).length;

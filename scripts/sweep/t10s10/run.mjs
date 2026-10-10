@@ -6,10 +6,13 @@
 import { runAll } from "./lib.mjs";
 
 const argv = process.argv.slice(2);
-const pick = argv.includes("--block") ? argv[argv.indexOf("--block") + 1] : null;
-for (const b of ["g", "a", "b", "c", "d", "e", "f"]) {
-  if (pick && pick !== b) continue;
+const pick = argv.includes("--block") ? argv[argv.indexOf("--block") + 1].split(",") : null;
+for (const b of ["g", "a", "b", "c", "d", "e", "f", "r3"]) {
+  if (pick && !pick.includes(b)) continue;
   try { await import(`./new-${b}.mjs`); } catch (e) { if (!/Cannot find module/.test(String(e && e.message))) throw e; }
 }
-await runAll({ ledger: argv.includes("--ledger"), quiet: argv.includes("--quiet"),
+const rows = await runAll({ ledger: argv.includes("--ledger"), quiet: argv.includes("--quiet"), bail: argv.includes("--bail"),
   only: argv.includes("--only") ? argv[argv.indexOf("--only") + 1] : null });
+// A red check must FAIL the process — the mutation runner reads only the exit code. (Round 3 found
+// this missing: 533 planted breaks all read as "survived" while their checks were in fact red.)
+process.exitCode = rows.some((r) => r.mark === "❌") ? 1 : 0;
