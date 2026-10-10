@@ -321,5 +321,62 @@ console.log("\n8. a printed bill cannot be comped or paid down with points after
   else bad("manager: spending points no longer asks the invoice lock");
 }
 
+// ── 9. A FAILED PERMISSION READ IS "BUSY", NEVER A GUESS (round 2, item 12) ──────────────────────────
+console.log("\n9. a database blip during a permission check neither grants nor refuses — it says busy");
+{
+  const FIXO = { orders: [{ id: "o1", restaurant_id: RID, table_number: "3", status: "served", payment_status: "pending", subtotal: 400, taxable_base: 400, discount: 0 }] };
+  {
+    const G = await world({ fix: FIXO, fail: { "settings:select": "error" } });
+    const r = await call("POST", "orders/o1/discount", { body: { amount: 10 } });
+    if (r.status >= 500 && !G.WRITES.some((w) => w.table === "orders" && w.matched)) ok(`waiter: the switch could not be read → ${r.status} (retry), no discount written`);
+    else bad(`waiter: a failed switch read answered ${r.status} with ${G.WRITES.filter((w) => w.matched).length} write(s)`);
+  }
+  {
+    const G = await world({ fix: FIXO, settings: { tablet_discount: "pin" } });
+    G.FIX.staff_users = [{ id: "m", restaurant_id: RID, role: "manager", active: true, pin_hash: "plain:1234" }];
+    G.FAIL = { "staff_users:select": "error" };
+    const r = await call("POST", "orders/o1/discount", { body: { amount: 10 } });
+    if (r.status >= 500 && !G.WRITES.some((w) => w.table === "orders" && w.matched)) ok(`waiter: on PIN, "has any manager set a PIN?" could not be read → ${r.status}, NOT let through without a PIN`);
+    else bad(`waiter: a failed PIN-setup read answered ${r.status} — a PIN-gated discount went through`);
+  }
+  {
+    const G = await world({ fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open" }] }, fail: { "restaurants:select": "error" } });
+    const r = await call("POST", "sessions/s1/close", { body: { force: true } });
+    if (r.status >= 500 && !G.WRITES.some((w) => w.matched)) ok(`waiter: the walk-out switch could not be read → ${r.status}, the table stays open`);
+    else bad(`waiter: a failed walk-out read answered ${r.status}`);
+  }
+  {
+    const { bundle } = await import("./sweep/t13s10/lib.mjs");
+    const MC = bundle("lib/managerCan.ts");
+    await world({ who: "manager", accessConfig: { give_discounts: { on: false } }, fail: { restaurants: "error" } });
+    let threw = false; try { await MC.managerCan({ user: { id: "m", role: "manager", restaurant_id: RID, permissions: {} } }, RID, "give_discounts"); } catch { threw = true; }
+    if (threw) ok("manager: managerCan THROWS on a failed read (the caller answers busy) instead of handing out the default");
+    else bad("manager: managerCan answered a failed read with a guess");
+    let threw2 = false; try { await MC.managerCan({ user: { id: "o", role: "owner", restaurant_id: RID, permissions: {} } }, RID, "edit_menu"); } catch { threw2 = true; }
+    if (threw2) ok("owner: the edit-menu cascade throws too (a retry, never a fail-open guess)");
+    else bad("owner: the edit-menu read still fails open");
+  }
+  {
+    const G = await world({ fix: FIXO });
+    const r = await call("POST", "orders/o1/discount", { body: { amount: 10 } });
+    if (r.status === 200 && G.FIX.orders[0].discount === 10) ok("…and with the database answering, the same discount goes through (200)");
+    else bad(`a healthy discount answered ${r.status}`);
+  }
+}
+
+// ── 10. THE KHATA PICKER ASKS THE SAME QUESTION AS THE PARK (round 2, item 9) ────────────────────────
+console.log("\n10. the 'Collect later' picker and the park button can never disagree");
+{
+  const K = { khata_customers: [{ id: "k1", restaurant_id: RID, name: "Ravi", phone: "1", created_at: recent }] };
+  const G = await world({ fix: K, settings: { khata_allowed: true, tablet_khata: null } });
+  const r = await call("GET", "khata/customers", { query: "?q=ra" });
+  if (r.status === 200 && r.json.customers.length === 1) ok("an UNSET waiter khata switch reads as its default (on): the picker answers, like the park");
+  else bad(`an unset khata switch: the picker answered ${r.status}`);
+  G.FIX.settings[0].tablet_khata = "off";
+  const r2 = await call("GET", "khata/customers", { query: "?q=ra" });
+  if (r2.status === 403) ok("…and 'off' still refuses the picker");
+  else bad(`'off' answered ${r2.status}`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

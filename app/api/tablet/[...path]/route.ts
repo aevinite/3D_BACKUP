@@ -189,16 +189,32 @@ async function tabletPerm(key: string, req: NextRequest, body: any, rid: string,
   if (user.role === "tablet" && WAITER_NEVER.includes(key)) {
     return { allow: false, resp: NextResponse.json({ error: key === "tablet_invoice" ? "Only a manager can issue the invoice." : "A waiter can't do this — ask a manager.", disabled: true }, { status: 403 }) };
   }
+  const mode = await tabletMode(key, rid, user);
+  if (mode === "feature-off") return { allow: false, resp: NextResponse.json({ error: "This isn't part of this restaurant — ask a manager.", disabled: true }, { status: 403 }) };
+  if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for you — ask a manager.", disabled: true }, { status: 403 }) };
+  if (mode === "pin") return managerPinGate(req, body, rid);
+  return { allow: true }; // 'on'
+}
+// THE ONE ANSWER to "what may this person do with <key> on the tablet?" — the restaurant's Feature
+// half, then their own override, then the stored tri-state through the shared resolver. tabletPerm()
+// adds the PIN step on top; the khata picker's READ asks it without one (sweep #10 T13 round 2, item 9:
+// that read used to resolve with its own `settings.tablet_khata || "off"`, the exact rule the note
+// above tabletPerm retired). A FAILED read throws (item 12): a blip answers "busy — retrying", never
+// a default that might hand out what the admin switched off.
+async function tabletMode(key: string, rid: string, user: StaffUser): Promise<WaiterCap | "feature-off"> {
   const feat = WAITER_FEATURE_OF[key];
   if (feat) {
-    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as Record<string, { on?: boolean }> | null;
-    if (cfg?.[feat]?.on === false) return { allow: false, resp: NextResponse.json({ error: "This isn't part of this restaurant — ask a manager.", disabled: true }, { status: 403 }) };
+    const r = await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle();
+    if (r.error) throw pgError(r.error);
+    const cfg = (r.data as { access_config?: Record<string, { on?: boolean }> | null } | null)?.access_config;
+    if (cfg?.[feat]?.on === false) return "feature-off";
   }
-  const override = (user?.permissions ?? {})[key];
+  const override = (user.permissions ?? {})[key];
   let mode: WaiterCap;
   if (isPermMode(override)) mode = override as WaiterCap;
   else {
     const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
+    if (s.error) throw pgError(s.error);
     const stored = (s.data as Record<string, string> | null)?.[key];
     // A MANAGER OR OWNER IS ANSWERED BY WHAT THEY ARE SHOWN (sweep #10 T13, item 7). waiterCapValue()
     // applies the waiter's never-list ("a waiter never issues the invoice") to EVERYONE, so the line
@@ -211,9 +227,7 @@ async function tabletPerm(key: string, req: NextRequest, body: any, rid: string,
       ? (isPermMode(stored) ? stored : "off")
       : waiterCapValue(key, stored);
   }
-  if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for you — ask a manager.", disabled: true }, { status: 403 }) };
-  if (mode === "pin") return managerPinGate(req, body, rid);
-  return { allow: true }; // 'on'
+  return mode;
 }
 // WAITER_FEATURE_OF now comes from lib/accessTree (imported above), DERIVED from the rows' own
 // `featureBind`. It was a hand-typed map here covering exactly one column — which was correct for
@@ -235,8 +249,9 @@ async function closeUnpaidGate(req: NextRequest, body: any, rid: string, user: S
   let mode: WaiterCap;
   if (isPermMode(own)) mode = own as WaiterCap;
   else {
-    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config;
-    mode = waiterConfigCapValue("close_unpaid", cfg);
+    const r = await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle();
+    if (r.error) throw pgError(r.error);   // item 12 — a blip is "busy", never the default
+    mode = waiterConfigCapValue("close_unpaid", (r.data as { access_config?: unknown } | null)?.access_config);
   }
   if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "Closing an unpaid table isn't enabled on the tablet — ask a manager.", disabled: true }, { status: 403 }) };
   if (mode === "on") return { allow: true };
@@ -756,11 +771,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // park action itself re-runs the full tri-state gate incl. PIN mode).
     if (path.join("/") === "khata/customers") {
       if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
-      const kperm = (g.user?.permissions ?? {})[`tablet_khata`];
-      let kmode: string;
-      if (kperm === "on" || kperm === "pin" || kperm === "off") kmode = kperm;
-      else kmode = String(((await sb.from("settings").select("tablet_khata").eq("restaurant_id", rid).maybeSingle()).data as Record<string, string> | null)?.tablet_khata || "off");
-      if (kmode === "off" && g.user) return err("This isn't enabled for you — ask a manager.", 403);
+      // Item 9 — the same resolver the park action uses (tabletMode), so the picker and the park can
+      // never disagree. 'pin' may READ the list: the PIN guards the park itself.
+      if (g.user) { const km = await tabletMode("tablet_khata", rid, g.user); if (km !== "on" && km !== "pin") return err("This isn't enabled for you — ask a manager.", 403); }
       const q = searchTerm(new URL(req.url).searchParams.get("q"), 60);
       let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
       if (q.kind === "term") sel = sel.or(`name.ilike.%${q.term}%,phone.ilike.%${q.term}%`);
