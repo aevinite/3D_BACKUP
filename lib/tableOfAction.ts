@@ -33,44 +33,73 @@ export type Affected = { tables: string[]; unknown: boolean };
 // every other caller short-circuits in waiterTables() before we get here.
 const NO_TABLE: Affected = { tables: [], unknown: false };
 
-async function tableOfSession(rid: string, id: string): Promise<string | null> {
-  const { data } = await sb.from("sessions").select("table_number")
+// ── THREE ANSWERS, NOT TWO (sweep #10 T13, item 4) ───────────────────────────────────────────
+// Each lookup below answers one of:
+//   · a table number  — the row exists here and names its table;
+//   · `null`          — COULDN'T TELL: the row exists but carries no table, or the read failed;
+//   · GONE            — there is no such row in this restaurant at all.
+// The last two used to be the same `null`, so a waiter tapping a call, a dish or a guest that had
+// been cleared a second earlier on another device (the stale tile every busy floor has) was refused
+// by the section gate with "That table isn't in your section — ask your manager to add it". Sections
+// are always on for a waiter (owner, 2026-07-30), so EVERY one of the route's own "that's no longer
+// on the board — refresh" answers was unreachable for the person most likely to need it, and the one
+// they got sent them to a manager for nothing. A row that does not exist has no table to protect:
+// the action's own restaurant-scoped read answers it, with its own 404. A FAILED read is still
+// "couldn't tell", and still refused — a blip must never read as "allowed".
+const GONE = Symbol("no such row");
+type Lookup = string | null | typeof GONE;
+
+async function tableOfSession(rid: string, id: string): Promise<Lookup> {
+  const { data, error } = await sb.from("sessions").select("table_number")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  return data?.table_number ? normTable(data.table_number) : null;
+  if (error) return null;
+  if (!data) return GONE;
+  return data.table_number ? normTable(data.table_number) : null;
 }
 
-async function tableOfOrder(rid: string, id: string): Promise<string | null> {
-  const { data } = await sb.from("orders").select("table_number")
+async function tableOfOrder(rid: string, id: string): Promise<Lookup> {
+  const { data, error } = await sb.from("orders").select("table_number")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  return data?.table_number ? normTable(data.table_number) : null;
+  if (error) return null;
+  if (!data) return GONE;
+  return data.table_number ? normTable(data.table_number) : null;
 }
+
+// A parent row that has vanished under a child that still exists is "couldn't tell", not GONE: the
+// child is still there to be written to, so its table must be known.
+const parentOf = (v: Lookup): string | null => (v === GONE ? null : v);
 
 // order_items carries NO table_number (mig 014) — the reliable join is
 // order_id → orders.table_number. session_id exists too but is null when the
 // restaurant runs with dining sessions off, so it is only the fallback.
-async function tableOfItem(rid: string, id: string): Promise<string | null> {
-  const { data } = await sb
+async function tableOfItem(rid: string, id: string): Promise<Lookup> {
+  const { data, error } = await sb
     .from("order_items").select("order_id, session_id")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  if (!data) return null;
-  if (data.order_id) return await tableOfOrder(rid, data.order_id);
-  if (data.session_id) return await tableOfSession(rid, data.session_id);
+  if (error) return null;
+  if (!data) return GONE;
+  if (data.order_id) return parentOf(await tableOfOrder(rid, data.order_id));
+  if (data.session_id) return parentOf(await tableOfSession(rid, data.session_id));
   return null;
 }
 
 async function tableOfSimple(
   rid: string, table: "waiter_calls" | "requests", id: string,
-): Promise<string | null> {
-  const { data } = await sb.from(table).select("table_number")
+): Promise<Lookup> {
+  const { data, error } = await sb.from(table).select("table_number")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  return data?.table_number ? normTable(data.table_number) : null;
+  if (error) return null;
+  if (!data) return GONE;
+  return data.table_number ? normTable(data.table_number) : null;
 }
 
-async function tableOfMember(rid: string, id: string): Promise<string | null> {
-  const { data } = await sb
+async function tableOfMember(rid: string, id: string): Promise<Lookup> {
+  const { data, error } = await sb
     .from("session_members").select("session_id")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  return data?.session_id ? await tableOfSession(rid, data.session_id) : null;
+  if (error) return null;
+  if (!data) return GONE;
+  return data.session_id ? parentOf(await tableOfSession(rid, data.session_id)) : null;
 }
 
 /**
@@ -95,8 +124,9 @@ export async function affectedTables(
   // takes that path rather than guessing.
   if (!rid) return { tables: [], unknown: true };
   const bod = body || {};
-  const push = async (v: string | null): Promise<Affected> =>
-    v ? { tables: [v], unknown: false } : { tables: [], unknown: true };
+  // GONE → nothing to protect (see "THREE ANSWERS" above); null → couldn't tell → refuse.
+  const push = async (v: Lookup): Promise<Affected> =>
+    v === GONE ? { tables: [], unknown: false } : v ? { tables: [v], unknown: false } : { tables: [], unknown: true };
 
   // Actions with no table at all — a takeaway parcel, a standalone banquet bill, a
   // restaurant-wide floor complaint. Never restricted by a section.

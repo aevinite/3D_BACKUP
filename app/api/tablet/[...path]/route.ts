@@ -24,7 +24,8 @@ import { helperFor, queueJob } from "@/lib/printHelpers";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
-import { softDeleteOrders } from "@/lib/softDelete";
+// (softDeleteOrders is no longer imported: item 3 — the waiter's delete is a cancel now, see orders/:id/delete.)
+import { watchCancellations } from "@/lib/cancelWatch";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { mergeParentTable } from "@/lib/tableMerge";
 import { rateAllowed } from "@/lib/rateLimit";
@@ -187,7 +188,17 @@ async function tabletPerm(key: string, req: NextRequest, body: any, rid: string,
   if (isPermMode(override)) mode = override as WaiterCap;
   else {
     const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
-    mode = waiterCapValue(key, (s.data as Record<string, string> | null)?.[key]);
+    const stored = (s.data as Record<string, string> | null)?.[key];
+    // A MANAGER OR OWNER IS ANSWERED BY WHAT THEY ARE SHOWN (sweep #10 T13, item 7). waiterCapValue()
+    // applies the waiter's never-list ("a waiter never issues the invoice") to EVERYONE, so the line
+    // above that scopes the never-list to a TABLET account was undone one step later: a manager on
+    // this panel was shown the stored "🧾 Generate invoice" (overlayUserPerms keeps their own reach),
+    // and the tap answered "This isn't enabled for you — ask a manager". Five restaurants store it 'on'
+    // today, French House among them. For a non-waiter a never-list key now reads the stored value —
+    // exactly what overlayUserPerms shows them — and anything unset stays off.
+    mode = user.role !== "tablet" && WAITER_NEVER.includes(key)
+      ? (isPermMode(stored) ? stored : "off")
+      : waiterCapValue(key, stored);
   }
   if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for you — ask a manager.", disabled: true }, { status: 403 }) };
   if (mode === "pin") return managerPinGate(req, body, rid);
@@ -343,6 +354,63 @@ const editErrMsg = (reason?: string) =>
   // mig 215: an open-price dish reached the server with no price typed on the line.
   : reason === "price_required" ? "That dish needs a price typed in before it can be added."
   : (reason || "Couldn't edit the order.");
+
+// ── A CANCELLED TICKET STAYS CANCELLED UNTIL SOMEBODY RESTORES IT (sweep #10 T13, item 1) ───────
+// There is ONE way back from a cancel, and it is on the manager panel: Restore (PATCH /orders/:id →
+// 'received' on /api/editor — a 30-minute window, and `order_uncancel` in the Activity log). The
+// waiter's handheld has no restore of its own, so every door here that would move a cancelled
+// ticket's status refuses instead: orders/:id/accept, items/:id/status (both recompute the ticket's
+// status), and orders/:id/serve-all (refused since 2026-08-04, in its own words). Word for word the
+// manager route's sentence, so one refusal reads the same whichever panel produced it.
+// docs/COMPLIANCE-GUARDRAILS.md §3: a cancel/restore pair must never move a sale unobserved.
+// Guarded by scripts/verify-tablet-twin-rules.mjs (npm run verify:tablet-twins).
+const VOIDED_MSG = "That ticket was cancelled — restore it first if it should go back to the kitchen.";
+
+// ── ONCE THE INVOICE IS PRINTED, NOTHING COMES OFF THE BILL — FROM THE HANDHELD TOO (item 2) ──────
+// The owner's rule 10 (docs/COMPLIANCE-GUARDRAILS.md §3.0b, 2026-08-26): *"whenever the invoice has
+// been printed … after [that] you won't be able to delete the thing."* The paper the guest is holding
+// and the record must never disagree. It is enforced IN THE ROUTE, not the database — none of the
+// edit functions (lfh_delete_order_item, lfh_staff_edit_item_qty, lfh_staff_add_item_to_order,
+// lfh_staff_bill_discount) looks at the invoice — and it was only ever written into the MANAGER's
+// route. So a manager printed the invoice at the till, and a waiter could then take a dish off it,
+// halve a quantity, add a dish to a printed ticket or discount it from the handheld, and the guest's
+// paper no longer matched the books.
+//
+// These two are a BYTE-FOR-BYTE COPY of the manager route's helpers (app/api/editor/[...path]/route.ts
+// → invoiceLockedByOrder / invoiceLockedByItem, and LOCKED_MSG), on purpose: one rule, one meaning of
+// "invoiced". A live invoice locks the whole bill; a REOPENED one (mig 407 keeps the number) locks
+// only the tickets that were already on the paper, and frees what was punched afterwards (owner,
+// 2026-09-25). A missing timestamp means LOCKED. `npm run verify:tablet-twins` fails if this copy and
+// the manager's ever stop being identical.
+const LOCKED_MSG = "This was on the printed bill, so it can't be taken off. Reopen the bill to add to it, or issue a credit note to correct it.";
+async function invoiceLockedByOrder(orderId: string, rid: string): Promise<boolean> {
+  const o = (await sb.from("orders").select("session_id,created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { session_id?: string; created_at?: string | null } | null;
+  if (!o?.session_id) return false;
+  const s = (await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
+  if (!s || s.invoice_no == null) return false;
+  if (!s.invoice_voided) return true;
+  if (!s.invoice_at || !o.created_at) return true;
+  return new Date(o.created_at).getTime() <= new Date(s.invoice_at).getTime();
+}
+async function invoiceLockedByItem(itemId: string, rid: string): Promise<boolean> {
+  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string } | null;
+  return it?.order_id ? invoiceLockedByOrder(it.order_id, rid) : false;
+}
+// The WHOLE-BILL discount names a session, not an order, and spreads across every unpaid ticket on it
+// (lfh_staff_bill_discount). So it is locked when ANY of those tickets is — the same per-ticket answer
+// as above, asked of each. The manager's twin asks it of the ticket its panel sends, which is the
+// bill's first; asking every one is the same answer on a live invoice and the honest one on a reopen.
+// Two scoped reads at most (the session, then — only for a reopened bill — its live tickets' times),
+// never one pair per ticket.
+async function invoiceLockedBySession(sessionId: string, rid: string): Promise<boolean> {
+  const s = (await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
+  if (!s || s.invoice_no == null) return false;
+  if (!s.invoice_voided) return true;
+  const live = ((await sb.from("orders").select("created_at").eq("session_id", sessionId).eq("restaurant_id", rid)
+    .neq("status", "cancelled").neq("payment_status", "paid").limit(200)).data || []) as { created_at?: string | null }[];
+  const cut = s.invoice_at ? new Date(s.invoice_at).getTime() : NaN;
+  return live.some((o) => !o.created_at || !Number.isFinite(cut) || new Date(o.created_at).getTime() <= cut);
+}
 
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
@@ -526,10 +594,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // call (lib/floorSummary.ts) — several devices polling together used to queue 1,800
       // statements each and cross the statement timeout. A targeted ?table= refetch is never
       // shared, so a tile still updates the instant its order lands.
+      // A FAILED FLOOR READ IS NEVER SHARED (sweep #10 T13, item 6). supabase-js does not THROW when
+      // the database refuses or times out — it RESOLVES with `{ error }`. Handed to sharedFloorSummary as
+      // it was, that is a successful computation, so lib/floorSummary's own rule ("a failure is never
+      // cached — the entry is dropped so the next caller retries") never fired: one statement timeout
+      // was served to every device that polled in the next 1.5 s, the exact "one blip became 1.5s of
+      // failures" the file was rewritten to prevent. The compute now throws, so the share drops it and
+      // the next device asks again. pgError keeps the SQLSTATE, so a timeout still reads as "busy —
+      // retrying" (lib/panelFailure) rather than a crash.
       const { data, error } = tbl
         ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
-        : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
-      if (error) throw new Error(error.message);
+        : await sharedFloorSummary(`floor:${rid}`, async () => {
+          const r = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null });
+          if (r.error) throw pgError(r.error);
+          return r;
+        });
+      if (error) throw pgError(error);
       const shared = data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] };
       // WAITER SECTIONS (mig 222): keep only the tables this waiter was given. `limit` is
       // null — and this is a total no-op — for the admin, for a manager/owner looking in,
@@ -562,9 +642,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // allows up to 20 in a window), so one bulk change issued twenty identical reads for the
       // same handful of rows. Same 1.5s window, and invalidateFloor() drops this key too, so a
       // just-made merge is never served stale after a write.
-      const merges = await sharedFloorSummary(`merges:${rid}`, async () => (await sb.from("table_merges")
-        .select("parent_table, child_table, merged_at, merged_by")
-        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || []);
+      // Same rule for the joins (item 6): a failed read throws, so it is never shared as "no joins";
+      // this one answer falls back to [] — exactly what it always showed — and the next poll retries.
+      const merges = await sharedFloorSummary(`merges:${rid}`, async () => {
+        const r = await sb.from("table_merges")
+          .select("parent_table, child_table, merged_at, merged_by")
+          .eq("restaurant_id", rid).is("ended_at", null).limit(200);
+        if (r.error) throw pgError(r.error);
+        return r.data || [];
+      }).catch(() => [] as unknown[]);
       const summaryOut = { ...(summary as Record<string, unknown>), merges };
       // Targeted (?table=N): tile only — the panel keeps its cached agnostic bundle.
       if (tbl) return ok(summaryOut);
@@ -1477,10 +1563,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // 0..order total, money-safe. Mirrors the editor endpoint. (owner, 2026-06-17)
     if (a === "orders" && c === "discount") {
       const g = recordPin(await tabletPerm("tablet_discount", req, body, rid, actor)); if (!g.allow) return g.resp; // off/pin/on per settings
+      if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS); the perm
       // gate above is a FEATURE gate, not a tenant one, so a foreign ?rid= must still be blocked.
-      const cur = must(await sb.from("orders").select("total, subtotal, taxable_base, session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("total, subtotal, taxable_base, session_id, payment_status, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't there anymore — refresh.", 404);
+      // A SETTLED OR CANCELLED TICKET IS NOT DISCOUNTED (sweep #10 T13, item 5). Every other money edit
+      // on this panel refuses a paid bill — dish delete, quantity, add-a-dish all answer "Won't change a
+      // PAID bill — mark it unpaid first" from their database function — and the manager's discount only
+      // ever spreads across a bill's UNPAID tickets (lfh_staff_bill_discount). This one wrote straight
+      // onto whatever ticket it was handed, so money already collected could be marked down after the
+      // fact and the day's takings stopped matching what was paid. Same sentences, same statuses.
+      if (cur.payment_status === "paid") return err(editErrMsg("order_paid"), 409);
+      if (cur.status === "cancelled") return err(editErrMsg("order_cancelled"), 409);
       // Per-ticket and whole-bill discount are mutually exclusive (the whole-bill discount
       // owns every ticket's discount via the split) — so block a single-ticket discount while
       // a bill discount is active, or the two would fight / double-count. (mig 143)
@@ -1524,6 +1619,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // same as the per-ticket discount (off/on/pin). (mig 143)
     if (a === "sessions" && c === "bill-discount") {
       const g = recordPin(await tabletPerm("tablet_discount", req, body, rid, actor)); if (!g.allow) return g.resp;
+      if (await invoiceLockedBySession(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       const sess = must(await sb.from("sessions").select("id, discount").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!sess) return err("That table isn't there anymore — refresh.", 404);
       // Reciprocal of the per-ticket guard above: the two discounts are mutually exclusive (the
@@ -1808,6 +1904,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "status") {
       const status = body && body.status;
       if (!["received", "preparing", "ready", "served"].includes(status)) return err("invalid status");
+      // A CANCELLED TICKET STAYS CANCELLED (sweep #10 T13, item 1). This handler rewrites the
+      // order's status from its dishes below, so a dish tapped on a ticket a colleague had just
+      // cancelled turned the whole ticket back into 'preparing' or 'served' — back on the bill, back
+      // in the kitchen, and nothing in the Activity log. The manager's twin was given exactly this
+      // refusal as sweep #10 T10 item 1; the waiter's handheld, the screen most often left showing a
+      // stale tile, was not. Asked first, before anything is written. See VOIDED_MSG near the top of the file.
+      const owner = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
+      if (!owner) return err("That dish isn't on this restaurant's board any more — refresh and try again.", 404);
+      if (owner.order_id) {
+        const ord = (await sb.from("orders").select("status").eq("id", owner.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
+        if (ord?.status === "cancelled") return err(VOIDED_MSG, 409);
+      }
       const patch: any = { status };
       // Serving stamps served_at; sending a dish BACK (undo a mis-tap) must clear it
       // again, or the row keeps a stale "served at" time (owner undo bar, 2026-07-22).
@@ -1815,13 +1923,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Only order_id + session_id are needed below; the client discards the body → no full row.
       // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
       // this is the only tenant boundary — stops a foreign dish/order id being advanced.
-      // Item 12 (sweep #10 T10 round 2): ask the dish's ORDER first — this handler rewrites that order's
-      // status from its dishes below, so on a cancelled ticket it would quietly revive it.
-      { const own = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
-        if (own && own.order_id) {
-          const ord = (await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
-          if (ord && ord.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409);
-        } }
+      // (Item 12 of sweep #10 T10 round 2 added this same ask here in parallel; the one above is kept.)
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id, session_id"));
       const item = updated[0];
       // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS (sweep 2026-08-05). The update is scoped by
@@ -1849,9 +1951,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // orders/:id/accept — accept a (often phone/online) order: everything not yet
     // served → preparing, so it shows up on the kitchen pass. Mirrors the kitchen.
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("items, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't there anymore — refresh.", 404);
-      if (cur.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409); // sweep #10 T10 round 2, item 12 — a cancelled ticket comes back only through Restore (the manager route's VOIDED_MSG rule)
+      // A cancelled ticket comes back only through Restore (see VOIDED_MSG) — accepting writes
+      // 'preparing' unconditionally, so a stale tile's ✓ Accept revived it. Closed in parallel by
+      // sweep #10 T10 round 2 item 12 and T13 item 1; one refusal kept.
+      if (cur.status === "cancelled") return err(VOIDED_MSG, 409);
       const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: client re-fetches → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
@@ -1961,6 +2066,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const gone = (await sb.from("order_items").select("id, title, qty, unit_price, order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
         { id: string; title: string | null; qty: number | null; unit_price: number | null; order_id: string | null } | null;
       if (!gone) return err("That dish was already removed.", 404);
+      if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) {
@@ -1998,6 +2104,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const wasRow = (await sb.from("order_items").select("id, title, qty, unit_price").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
         { id: string; title: string | null; qty: number | null; unit_price: number | null } | null;
       if (!wasRow) return err("That dish was already removed.", 404);
+      if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -2107,6 +2214,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // read below is already rid-scoped, but it runs AFTER the dish has been added.)
       const ownAdd = (await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
       if (!ownAdd) return err(editErrMsg("order_not_found"), 404);
+      // Item 2 — a dish ADDED to a printed ticket changes that ticket's total on paper the guest holds.
+      // After a reopen the bill takes a NEW ticket instead (a fresh order is not locked).
+      if (await invoiceLockedByOrder(b, rid)) return err(LOCKED_MSG, 409);
       const { data, error } = await sb.rpc("lfh_staff_add_item_to_order", { p_order: b, p_items: [line] });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -2126,28 +2236,48 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(data);
     }
 
-    // orders/:id/delete — remove a WHOLE order (and its dishes). Refuses a PAID
-    // order (it's a financial record); otherwise SOFT-deletes it (mig 188): the row
-    // is stamped deleted, never erased, so the bill is retained for tax/audit and
-    // still shows as a tombstone in the admin ledger. Never a real SQL DELETE.
+    // orders/:id/delete — the waiter's "🗑 Delete order". It CANCELS the ticket; it never removes it.
+    //
+    // ── NOBODY AT THE RESTAURANT REMOVES A BILL — THE WAITER INCLUDED (sweep #10 T13, item 3) ──────
+    // The owner's rule, R27 (2026-08-16, re-confirmed 2026-08-21) and docs/COMPLIANCE-GUARDRAILS.md
+    // §3.0 rule 4: *"I don't want to give permission to the restaurant owner to delete the bill because
+    // he will fake the bill and delete the bill."* Cancel is the only route out of a bill for anyone
+    // at the restaurant — a ₹0 sale that stays visible with its reason, its person and its time. The
+    // manager's route enforces it (canDeleteBill() is true for the Aevidine console only); THIS branch
+    // predated the rule and was never brought under it. It soft-deleted the ticket — and, when the
+    // ticket was the bill's only one, the bill's session with it — so any waiter on the floor could take
+    // a sale out of every report with one tap, which neither the manager nor the owner can do.
+    //
+    // The tap keeps working; what it does is the manager's CANCEL, word for word in effect: status
+    // 'cancelled' + cancelled_at, an `order_cancel` line in the Activity log, an `order_cancelled`
+    // record in Audit & logs, and the day's cancellation watch (lib/cancelWatch.ts). The ticket stays
+    // on the bill at ₹0, in the Z-report and the Cancellations report, and the manager can Restore it
+    // within 30 minutes. A paid ticket is still refused, and so is one on a printed invoice (item 2).
+    // The endpoint name stays because the panel posts to it; renaming it would strand every handheld
+    // still running the old script.
     if (a === "orders" && c === "delete") {
-      // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS) — without
-      // it a foreign order id could be touched from another restaurant. Scope the gate read.
-      const cur = must(await sb.from("orders").select("payment_status, total, session_id, table_number").eq("id", b).eq("restaurant_id", rid).single());
-      if (cur && cur.payment_status === "paid") return err("Won't delete a PAID order — mark it unpaid first.", 409);
-      const reason = String(body?.reason ?? "").trim();
-      const who = actor?.name || actor?.username || "staff";
-      await softDeleteOrders(rid, [b], { actor: who, actorId: actor?.id ?? null, reason });
-      await log("order_delete", { order_id: b, device_id: dev, detail: reason || undefined });
-      // Taking a bill out of the reports is the biggest removal there is — recorded here, from the
-      // tablet, exactly as the manager's twin records it (2026-08-03).
+      const cur = must(await sb.from("orders").select("status, payment_status, session_id, table_number").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { status?: string; payment_status?: string; session_id?: string | null; table_number?: unknown } | null;
+      if (!cur) return err("That order isn't there anymore — refresh.", 404);
+      if (cur.payment_status === "paid" && cur.status !== "cancelled") return err("Won't cancel a PAID order — mark it unpaid first.", 409);
+      // Already cancelled (a double tap, or a colleague got there first): the outcome asked for holds.
+      if (cur.status === "cancelled") return ok({ ok: true, cancelled: true });
+      if (await invoiceLockedByOrder(b, rid)) {
+        return err("This ticket was on the printed bill, so it can't be taken off. Reopen the bill to add to it, or issue a credit note if it is already settled.", 409);
+      }
+      const tableNo = cur.table_number != null ? String(cur.table_number) : null;
+      // `.neq("status","cancelled")` so two devices cancelling together write the stamp once.
+      must(await sb.from("orders").update({ status: "cancelled", cancelled_at: nowIso() })
+        .eq("id", b).eq("restaurant_id", rid).neq("status", "cancelled"));
+      await log("order_cancel", { order_id: b, table_number: tableNo, device_id: dev, detail: "cancelled from the waiter tablet" });
       await recordRemoval({
-        rid, kind: "order_deleted", reason: reasonFromBody(body), user: actor ?? null, deviceId: dev,
-        orderId: b, sessionId: cur?.session_id ?? null,
-        tableNumber: cur?.table_number != null ? String(cur.table_number) : null,
-        amount: Number(cur?.total) || 0, meta: { from: "waiter tablet" },
+        rid, kind: "order_cancelled", reason: reasonFromBody(body), user: actor ?? null, deviceId: dev,
+        orderId: b, sessionId: cur.session_id ?? null, tableNumber: tableNo,
+        meta: { was_paid: false, from: "waiter tablet" },
       });
-      return ok({ ok: true });
+      // Fire-and-forget by contract — it never throws and never blocks the cancel it watches.
+      await watchCancellations(rid);
+      return ok({ ok: true, cancelled: true });
     }
 
     // orders/:id/move — move a SINGLE order (and its dish rows) to another table's
