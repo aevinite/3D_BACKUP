@@ -123,3 +123,12 @@ if (!process.env.T30_MUTATING) {
   { const orig = await import("@/lib/taxFiling.ts"); const m = await twinOA("lib/taxFiling.ts", "(x < 0 ? -r : r)", "(x <= 0 ? -r : r)"); const bad = ins.find((x) => !Object.is(orig.netSalesOf({ subtotal: x, discount: 0 }), m.netSalesOf({ subtotal: x, discount: 0 })));
     t(`lib/taxFiling.ts:${twinOA.at} (the same break in its own copy of the rule) is equivalent on the same inputs`, bad === undefined, String(bad)); }
 }
+// (appended, round 5) lib/money.mjs snapToStep — item 32 gave it the same shape: `q < 0` → `q <= 0` can only differ at
+// q = 0, and there n = 0 and the line has already answered 0, so the broken copy agrees everywhere, at every step.
+if (!process.env.T30_MUTATING) {
+  const steps = [0.01, 0.05, 0.1, 0.5, 1, 5, 10, 100]; const xs = [0, -0, 1e-12, -1e-12, 0.004, -0.004, 0.005, -0.005, 0.025, -0.025, 2.5, -2.5]; let sd = 9;
+  const rnd = () => (sd = (Math.imul(sd, 1103515245) + 12345) >>> 0) / 4294967296; for (let i = 0; i < 50000; i++) xs.push((rnd() - 0.5) * (i % 2 ? 1e2 : 1e6));
+  const orig = await import("@/lib/money.mjs"); const m = await twinOA("lib/money.mjs", "(q < 0 ? -n : n)", "(q <= 0 ? -n : n)"); let bad;
+  for (const st of steps) { for (const x of xs) if (!Object.is(orig.snapToStep(x, st), m.snapToStep(x, st))) { bad = `${x} at step ${st}`; break; } if (bad) break; }
+  t(`lib/money.mjs:${twinOA.at} (q < 0 → q <= 0 in snapToStep) is equivalent — the two differ only at 0, which the line has already answered (${(xs.length * steps.length).toLocaleString("en-IN")} calls, 8 steps, incl. ±0)`, bad === undefined, String(bad));
+}
