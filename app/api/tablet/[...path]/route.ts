@@ -852,12 +852,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // not on this list. The settings row a few lines up deliberately keeps `*` for the opposite
         // reason — that one really is read wholesale, dozens of columns at a time.
         const SESSION_COLS = "id, table_number, status, opened_at, closed_at, bill_no, invoice_no, invoice_at, invoice_voided, discount, discount_note, cust_name, cust_phone";
+        const MEMBER_COLS = "id, session_id, name, role, approved";
         const sessions = must(await sb.from("sessions").select(SESSION_COLS).neq("status", "closed").eq("restaurant_id", rid).eq("table_number", tbl));
         const sids = (sessions || []).map((s: { id: string }) => s.id);
         const [members, calls, requests] = await Promise.all([
-          sids.length ? sb.from("session_members").select("id, session_id, phone, phone_verified, name, role, approved, location_ok, removed, joined_at, device_id, restaurant_id").eq("removed", false).eq("restaurant_id", rid).in("session_id", sids) : Promise.resolve({ data: [] }),
+          // THE FIVE COLUMNS THIS SCREEN READS, NOT TWELVE (sweep #10 T13 round 2, item 22). The list
+          // used to carry every guest's PHONE NUMBER and DEVICE ID (plus phone_verified, location_ok,
+          // joined_at, removed and restaurant_id) to every waiter's tablet on every table refresh, and
+          // public/panels/tablet/app.js reads none of them — it draws a guest's name, role and approval,
+          // and acts by member id (a ban looks the phone up server-side, from the id). A guest's number
+          // has no business on a device that never shows it. verify:tablet-twins §16 holds both sides.
+          sids.length ? sb.from("session_members").select(MEMBER_COLS).eq("removed", false).eq("restaurant_id", rid).in("session_id", sids) : Promise.resolve({ data: [] }),
           sb.from("waiter_calls").select("*").eq("resolved", false).eq("restaurant_id", rid).eq("table_number", tbl),
-          sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).eq("table_number", tbl),
+          // Named columns, not `*` (item 22): `requests` carries the asking guest's PHONE, and this screen
+          // shows only who asked (name) and what for (type) — public/panels/tablet/app.js reqRows.
+          sb.from("requests").select("id, table_number, session_id, type, name, status, created_at").eq("status", "pending").eq("restaurant_id", rid).eq("table_number", tbl),
         ]);
         return ok({
           sessions, members: must(members) || [], calls: must(calls),

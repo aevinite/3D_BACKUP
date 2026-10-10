@@ -479,5 +479,30 @@ console.log("\n15. a floor refresh reads the settings row once, and the section 
   }
 }
 
+// ── 16. A GUEST'S PHONE NUMBER NEVER RIDES TO A WAITER'S DEVICE (round 2, item 22) ───────────────────
+console.log("\n16. the table slice carries the five guest columns the screen reads — never a phone or a device id");
+{
+  const { readFileSync } = await import("node:fs");
+  const route = readFileSync(new URL("../app/api/tablet/[...path]/route.ts", import.meta.url), "utf8");
+  const panel = readFileSync(new URL("../public/panels/tablet/app.js", import.meta.url), "utf8");
+  const cols = ((route.match(/const MEMBER_COLS = "([^"]+)"/) || [])[1] || "").split(",").map((c) => c.trim());
+  if (cols.length && !cols.some((c) => /phone|device_id/.test(c))) ok(`the slice's guest columns: ${cols.join(", ")} — no phone, no device id`);
+  else bad(`the slice's guest columns carry personal data or are missing: ${cols.join(", ") || "(none found)"}`);
+  // Every field the panel reads off a guest row must be on the list (a missing column is a blank on screen).
+  const used = [...new Set([...panel.matchAll(/\bm\.(name|role|approved|session_id|id|phone|device_id|joined_at|location_ok|phone_verified)\b/g)].map((x) => x[1]))];
+  const missing = used.filter((f) => !cols.includes(f));
+  if (!missing.length) ok(`every guest field the waiter screen reads is sent (${used.join(", ")})`);
+  else bad(`the waiter screen reads guest fields the slice no longer sends: ${missing.join(", ")}`);
+  const reqSel = (route.match(/from\("requests"\)\.select\("([^"]+)"\)\.eq\("status", "pending"\)/) || [])[1] || "";
+  if (reqSel && !/phone|\*/.test(reqSel)) ok("the join-request rows are sent without the asking guest's phone");
+  else bad(`the join-request read sends: ${reqSel || "(not found — select(*)?)"}`);
+  const G = await world({ fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open" }],
+    session_members: [{ id: "m1", restaurant_id: RID, session_id: "s1", name: "Asha", role: "owner", approved: true, removed: false, phone: "9876543210", device_id: "dev-x" }] } });
+  const scope = G.SCOPE_LOG; scope.length = 0;
+  const r = await call("GET", "state", { query: "?table=3" });
+  if (r.status === 200 && (r.json.members || []).length === 1) ok("…and the slice still carries the party (one guest, Asha)");
+  else bad(`the slice answered ${r.status} with ${(r.json && r.json.members || []).length} guest(s)`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
