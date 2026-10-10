@@ -180,7 +180,9 @@ await R("P07068", "lib/accessTree.ts", "every panel value is one the type allows
   const bad = N.filter((n) => n.panel && !allowed.includes(n.panel)).map((n) => n.id); eq(bad, []); return `${allowed.length} allowed values (was nine; settings:kitchen retired 2026-09-04)`;
 });
 await R("P07069", "lib/accessTree.ts", "every preview is bill · parcel · kot", () => assert(N.filter((n) => n.preview).every((n) => ["bill", "parcel", "kot"].includes(n.preview))));
-await R("P07070", "lib/accessModel.ts", "moduleKey strips _allowed", () => { eq(M.moduleKey(M.PERM_BY_ID.khata), "khata"); eq(M.moduleKey(M.PERM_BY_ID.give_discounts), ""); });
+const PB = Object.fromEntries(M.PERMISSIONS.map((p) => [p.id, p]));
+const gone = (names, item) => () => { for (const n of names) { assert(!(n in M), `${n} still exported`); assert(!new RegExp(`function ${n}\\b|const ${n}\\b`).test(src("lib/accessModel.ts")), `${n} still defined`); } return `EXPECTATION MOVED: removed by sweep #10 T18 ${item} — nothing called it`; };
+await R("P07070", "lib/accessModel.ts", "moduleKey strips _allowed", () => { eq(M.moduleKey(PB.khata), "khata"); eq(M.moduleKey(PB.give_discounts), ""); return "PERM_BY_ID removed (item 7) — looked up from PERMISSIONS"; });
 await R("P07071", "lib/accessModel.ts", "imported only for its derived lists", () => {
   const imp = grep("from [\"']@/lib/accessModel[\"']", "app lib components").sort();
   for (const f of imp) assert(!/page\.tsx$|components\//.test(f), `rendered importer ${f}`);
@@ -195,13 +197,12 @@ await R("P07077", "lib/accessModel.ts", "bag-backed module marked bag:true; none
   const bag = M.MODULE_DEFS.filter((m) => m.bag).map((m) => m.key);
   eq(bag, ["loyalty"]); return "EXPECTATION MOVED: loyalty (2026-09-19) is the first bag-backed module, marked bag:true as the rule requires";
 });
-await R("P07078", "lib/accessModel.ts", "maxReach 1 / 3 / 2", () => { eq(M.maxReach(M.PERM_BY_ID.handle_issues), 1); eq(M.maxReach(M.PERM_BY_ID.give_discounts), 3); eq(M.maxReach(M.PERM_BY_ID.view_logs), 2); });
-const AS0 = { features: {}, panels: {}, owner: {}, manager: {}, tablet: {}, modules: {}, adminSwitches: {}, config: {} };
-await R("P07079", "lib/accessModel.ts", "allowed() treats an absent entitlement as allowed", () => eq(M.allowed(M.PERM_BY_ID.view_logs, AS0), true));
-await R("P07080", "lib/accessModel.ts", "reachLevel absentOn → 2 unless false", () => { eq(M.reachLevel(M.PERM_BY_ID.view_logs, AS0), 2); eq(M.reachLevel(M.PERM_BY_ID.view_logs, { ...AS0, manager: { view_logs: false } }), 1); });
-await R("P07081", "lib/accessModel.ts", "reachLevel fixedTop → 2 regardless of grant", () => eq(M.reachLevel(M.PERM_BY_ID.mark_paid, AS0), 2));
-await R("P07082", "lib/accessModel.ts", "tabletValue reads config for tabletNew, column otherwise", () => { eq(M.tabletValue(M.PERM_BY_ID.void_bills, AS0), "pin"); eq(M.tabletValue(M.PERM_BY_ID.give_discounts, { ...AS0, tablet: { tablet_discount: "on" } }), "on"); });
-await R("P07083", "lib/accessModel.ts", "subState {} for nothing stored", () => eq(M.subState(M.PERM_BY_ID.edit_menu, "manager", AS0), {}));
+await R("P07078", "lib/accessModel.ts", "maxReach 1 / 3 / 2", gone(["maxReach", "PERM_BY_ID"], "item 7"));
+await R("P07079", "lib/accessModel.ts", "allowed() treats an absent entitlement as allowed", gone(["allowed"], "item 7"));
+await R("P07080", "lib/accessModel.ts", "reachLevel absentOn → 2 unless false", gone(["reachLevel"], "item 7"));
+await R("P07081", "lib/accessModel.ts", "reachLevel fixedTop → 2 regardless of grant", gone(["reachLevel"], "item 7"));
+await R("P07082", "lib/accessModel.ts", "tabletValue reads config for tabletNew, column otherwise", gone(["tabletValue"], "item 7"));
+await R("P07083", "lib/accessModel.ts", "subState {} for nothing stored", gone(["subState"], "item 7"));
 await R("P07084", "lib/accessModel.ts", "no module binding whose module has no switch", () => {
   const treeModules = new Set([...T.MODULE_KEYS, ...T.MODULE_BAG_KEYS]);
   const orphan = M.MODULE_DEFS.filter((m) => !treeModules.has(m.key)).map((m) => m.key);

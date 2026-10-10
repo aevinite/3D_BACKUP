@@ -113,9 +113,12 @@ await K("docs/ACCESS-MODEL.md", "D.1 the three waiter money rows, stored where t
 await K("docs/ACCESS-MODEL.md", "D: printing an invoice is on WAITER_NEVER and has no row", node, () => { eq([...T.WAITER_NEVER], ["tablet_invoice"]); assert(!N.some((x) => x.bind.key === "tablet_invoice")); });
 await K("docs/ACCESS-MODEL.md", "D.2 the six floor rows and their columns", node, () => eq(byId.wtr_floor.children.map((x) => x.bind.key), ["tablet_take_orders", "tablet_table_ops", "tablet_table_tags", "tablet_khata", "tablet_parcel", "tablet_banquet"]));
 await K("docs/ACCESS-MODEL.md", "D: 'every one is per-person overridable' — all nine waiter switch rows are perPerson", node, () => eq(C.capKeysForRole("tablet").length, 9));
-await K("docs/ACCESS-MODEL.md", "the power_<flag> rung: nothing reads it (the doc's closing section)", "grep for a non-comment read of power_", () => { const r = grep("power_\\$\\{|powerEntitlementKey\\(", "app lib").filter((f) => f !== "lib/ownerEntitlements.ts" && /power_\$\{|powerEntitlementKey\(/.test(code(src(f)))); eq(r, ["lib/accessModel.ts"]); return "the one reader is accessModel's retired allowed() display helper, which nothing imports (P105050)"; });
+await K("docs/ACCESS-MODEL.md", "the power_<flag> rung: nothing reads it (the doc's closing section)", "grep for a non-comment read of power_", () => { const r = grep("power_\\$\\{|powerEntitlementKey\\(", "app lib").filter((f) => f !== "lib/ownerEntitlements.ts" && /power_\$\{|powerEntitlementKey\(/.test(code(src(f)))); eq(r, []); return "EXPECTATION MOVED (items 7 · 26): its last reader, accessModel's allowed(), is deleted — nothing reads power_<flag> now"; });
 await K("docs/ACCESS-MODEL.md", "'Owner panel — nothing (owners configure no permission)' holds in the code", "read app/api/owner/staff set_permissions", () => {
-  assert(!/action === "set_permissions"/.test(ownerStaff), "the OWNER route has a set_permissions handler: an owner can change a person's individual permissions — the doc's table says owners configure nothing (decision for the owner, Part 4)");
+  const at = ownerStaff.indexOf('action === "set_permissions"'); assert(at > 0);
+  const first = ownerStaff.slice(at).split("\n").slice(1).find((l) => l.trim() && !l.trim().startsWith("//")); assert(/^\s*if \(s\.actor !== "admin"\) return bad\("Permissions are set by Aevidine/.test(first), `the handler's first CODE line must refuse everyone but the admin — it is: ${first?.trim().slice(0, 80)}`);
+  assert(/permissions: false/.test(src("components/owner/ownerProfileHost.ts")));
+  return "FIXED (item 16): the owner route refuses set_permissions for anyone but the admin, and the owner's profile shows the rows read-only";
 });
 const sp = doc.profile;
 await K("docs/STAFF-PROFILE.md", "the kitchen block names PROFILE_ROLES exactly as the code has it", read, () => assert(sp.includes('PROFILE_ROLES = ["owner","manager","tablet"]') && JSON.stringify([...P.PROFILE_ROLES]).replace(/\s/g, "") === '["owner","manager","tablet"]'));
@@ -147,8 +150,8 @@ await K("docs/STAFF-PROFILE.md", "…and both answer 409", "grep the status besi
 await K("docs/STAFF-PROFILE.md", "photo: PNG/JPG/WEBP ≤ 2 MB, in the branding bucket under staff/<id>/", "read app/api/admin/users/photo/route.ts", () => { const r = src("app/api/admin/users/photo/route.ts"); assert(/2 \* 1024 \* 1024|2_?000_?000|2MB|2 MB/i.test(r)); assert(/branding/.test(r)); assert(/staff\//.test(r)); });
 await K("docs/STAFF-PROFILE.md", "the real job/pay columns it lists are the sanitiser's columns", node, () => { for (const c of [...P.JOB_COLUMNS, ...P.PAY_COLUMNS]) assert(sp.includes(`\`${c}\``), c); });
 const specOpen = (doc.spec.match(/^- ☐/gm) || []).length;
-await K("docs/ACCESS-REDESIGN-SPEC.md", "its header count equals its own command", "grep -c '^- ☐'", () => { eq(specOpen, 9); assert(/\*\*9\*\* of the lines below are still `☐`/.test(doc.spec)); });
-await K("docs/ACCESS-REDESIGN-SPEC.md", "CLAUDE.md quotes the same count", read, () => assert(/9 open `☐`/.test(src("CLAUDE.md"))));
+await K("docs/ACCESS-REDESIGN-SPEC.md", "its header count equals its own command", "grep -c '^- ☐'", () => { eq(specOpen, 2); assert(/\*\*2\*\* of the lines below are still `☐`/.test(doc.spec)); return "EXPECTATION MOVED (item 17): 9 → 2"; });
+await K("docs/ACCESS-REDESIGN-SPEC.md", "CLAUDE.md quotes the same count", read, () => assert(/2 open `☐`/.test(src("CLAUDE.md"))));
 await K("docs/ACCESS-REDESIGN-SPEC.md", "every ☑ in sections A–H names something that is really built", "spot-check the three code-checkable ones", () => { assert(byId.dining_sessions.name === "Dining session and location"); assert(byId.maintenance && byId.maintenance.def === false); assert(byId.tables_list && byId.tables_qr && byId.tables_layout); });
 await K("docs/ACCESS-REDESIGN-SPEC.md", "J · 'Reset a staff password / PIN' — still ☐ although a switch for it exists", node, () => {
   assert(!/^- ☐ \*\*Reset a staff password \/ PIN\.\*\*/m.test(doc.spec) || !byId.mgr_users_reset_pw, "built as Manager settings → Users → Reset a password (mgr_users_reset_pw), still marked not started — a decision for the owner (Part 4), the count is quoted in CLAUDE.md");
@@ -166,7 +169,7 @@ await K("docs/ACCESS-REDESIGN-SPEC.md", "L · 'the manager's Settings tab is DEL
 // ═════════════ P187061–P187100 · CODE THAT CHANGED SINCE 2026-09-01 ═════════════
 await K("lib/accessTree.ts", "Loyalty points is the one moduleBag row, in Extra features, default OFF", node, () => { eq(N.filter((x) => x.bind.t === "moduleBag").map((x) => x.id), ["loyalty"]); eq(byId.loyalty.def, false); assert(T.SECTION_BY_ID.extra.children.includes(byId.loyalty)); });
 await K("lib/accessTree.ts", "MODULE_BAG_KEYS is exactly [loyalty]", node, () => eq(T.MODULE_BAG_KEYS, ["loyalty"]));
-await K("lib/accessModel.ts", "accessModel declares loyalty with moduleBag and the key three times", node, () => { const p = M.PERM_BY_ID.loyalty; assert(p.moduleBag); eq(p.module, { allowed: "loyalty", control: "loyalty", enabled: "loyalty" }); });
+await K("lib/accessModel.ts", "accessModel declares loyalty with moduleBag and the key three times", node, () => { const p = M.PERMISSIONS.find((q) => q.id === "loyalty"); assert(p.moduleBag); eq(p.module, { allowed: "loyalty", control: "loyalty", enabled: "loyalty" }); });
 await K("lib/accessModel.ts", "MODULE_DEFS carries loyalty with bag:true and key 'loyalty'", node, () => { const m = M.MODULE_DEFS.find((x) => x.key === "loyalty"); assert(m && m.bag); });
 await K("lib/accessTree.ts", "a bag module adds NO settings column to the select", node, () => assert(!T.SETTINGS_COLUMNS.some((c) => /^loyalty/.test(c))));
 await K("lib/accessTree.ts", "MODULE_ALLOWED_DEFAULTS does not seed a loyalty column", node, () => assert(!("loyalty_allowed" in T.MODULE_ALLOWED_DEFAULTS)));

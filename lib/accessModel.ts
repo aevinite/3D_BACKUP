@@ -131,7 +131,7 @@ export const ABSENT_ON_POWERS: ReadonlySet<string> = new Set(PERMISSIONS.filter(
 // Every real tablet tri-state settings column (the waiter rung).
 export const TABLET_PERM_KEYS: readonly string[] = PERMISSIONS.filter((p) => p.tablet && !p.tabletNew).map((p) => p.tablet!);
 // One entry per MODULE (capabilities sharing columns — khata + table types — dedupe).
-export type ModuleDef = {
+type ModuleDef = {
   key: string; label: string; allowed: string; control: string; enabled: string;
   /** TRUE = this module's ladder lives in settings.modules[key] instead of three columns
    *  (mig 320). Declare `moduleBag: true` on the permission and give `module` the SAME key three
