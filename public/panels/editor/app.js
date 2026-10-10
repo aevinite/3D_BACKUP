@@ -6296,6 +6296,10 @@ async function printBill(t, sess, os, opts = {}) {
   }));
   // No "this bill was printed" stamp any more (owner, 2026-10-10 — R62): it existed only to turn the
   // button into "Reprint", and the guest bill keeps no reprint marking at all.
+  // The bill's session is still needed below — it is what the "a computer owns the bills" path sends.
+  // (It used to be declared inside the stamp block; deleting that block without this line made the
+  // helper path throw on every print — caught by verify:static before it shipped.)
+  const printedSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
 
   // ── A COMPUTER MAY OWN THIS BILL (mig 341) ────────────────────────────────────────────────────
   // When the address book names a printer for bills, the bill goes into the basket and the helper on
