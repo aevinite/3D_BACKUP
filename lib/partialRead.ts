@@ -34,6 +34,7 @@ export type PartialKey =
   | "payments" | "tips" | "staffPay" | "inventory"   // the day sheet's optional lines
   | "categories"                                     // the dashboard's revenue-by-category chart
   | "busyHours"                                      // the dashboard's day x hour heatmap
+  | "deliveryApps"                                   // the dashboard's Zomato / Swiggy / website card (mig 420)
   | "modules"                                        // the hub's payroll/inventory card probes
   // ── added by the T9 fix pass, 2026-08-12 ───────────────────────────────────────────────────────
   // Each of these names a figure that USED to be printed as a confident zero or an empty list when
@@ -64,6 +65,7 @@ const PARTIAL_LABELS: Record<PartialKey, string> = {
   payments: "how the money arrived",
   categories: "revenue by category",
   busyHours: "the busy heatmap",
+  deliveryApps: "delivery-app sales",
   tips: "tips",
   staffPay: "staff pay",
   inventory: "stock figures",

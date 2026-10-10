@@ -108,6 +108,8 @@ type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow
   // SOME of the group is still drawn — but it must say so, or a total that is too small reads as
   // fact (T9 finding F18, 2026-08-07).
   partial?: string[]; staffPay?: { paidOut: number; people: number; entries: number } | null;
+  // Delivery-app sales summed per channel over this owner's restaurants that have it ON (mig 420).
+  deliveryApps?: { channel: string; revenue: number; orders: number; restaurants: number }[] | null;
   // Food cooked and then binned, priced at what the ingredients cost (mig 337). null = the read
   // failed, which is reported rather than shown as a zero — a silent 0 would say he wasted nothing.
   foodLoss?: { amount: number; entries: number } | null };
@@ -134,12 +136,20 @@ type RestA = {
   timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
   heatmap?: HeatRow[]; records?: Records; cachedAt?: string;
+  // Delivery-app sales (owner, 2026-10-11, mig 420): one row per channel that is SWITCHED ON for
+  // this restaurant. [] = on no delivery app → no card at all. null = the read failed (see partial).
+  // Absent = an older snapshot; treated like [] — the cache key moved to v7 so that is brief.
+  deliveryApps?: { channel: string; revenue: number; orders: number }[] | null;
   // Named figures the server could NOT read (lib/partialRead) — the restaurant scope gained
   // this for the busy heatmap, which used to degrade to an empty grid in silence
   // (T5 sweep, 2026-08-11).
   partial?: string[];
 };
 type Payload = GroupA | RestA;
+// One row of the Delivery apps card (lfh_owner_channel_sales, mig 420); the group view also says how
+// many of the owner's restaurants have that app on.
+type DeliveryRow = { channel: string; revenue: number; orders: number; restaurants?: number };
+
 // ── A 200 IS NOT A PROMISE THAT THE SHAPE IS RIGHT (T13 round 2, 2026-09-05) ──────────────────
 // Every card on this page reads `p.timeseries`, `p.dishes`, `p.restaurantRevenue` by walking them.
 // Hand any of them something that is not an array and the FIRST one to run — monthCompare — throws
@@ -1538,6 +1548,35 @@ export default function OwnerDashboard() {
     return `Figures computed ${new Date(at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })} · ${timeAgo(at)}`;
   };
   const mainAge = () => ageTitle(`${scopeKey}|${globalRange}`);
+  // ── DELIVERY APPS (owner, 2026-10-11: "about the platform only when the feature is on only then") ────
+  // Drawn ONLY when at least one delivery channel is switched on: the server returns a row per ON
+  // channel and nothing for an off one (lfh_owner_channel_sales, mig 420), so an owner on no delivery
+  // app never sees this card. It is NOT added to Revenue — that stays the dine-in figure, as on the
+  // manager's Dashboard — and it is the order value the app sent, before the app's commission. Demo and
+  // cancelled orders are left out. Used by BOTH views (one restaurant's, and the group view).
+  // Its markup is built here, OUTSIDE the return, where styled-jsx never adds this page's scoped class —
+  // so the card carries `ow2-dapps`, and the .ow2-ct / .ow2-tag / .ow2-note rules below list it as a
+  // second, :global selector. (A separate component had the same problem: the first version was one,
+  // and its heading row rendered unstyled — "10 ordersThis month", no tag pill.)
+  const deliveryAppsCard = (payload?: { deliveryApps?: DeliveryRow[] | null; partial?: string[] }) => {
+    const unread = !!payload?.partial?.includes("deliveryApps");
+    const rows = payload?.deliveryApps || [];
+    if (!payload || (!rows.length && !unread)) return null;
+    const NAME: Record<string, string> = { zomato: "Zomato", swiggy: "Swiggy", website: "Your website" };
+    const total = rows.reduce((a, r) => a + r.revenue, 0), count = rows.reduce((a, r) => a + r.orders, 0);
+    const names = rows.map((r) => NAME[r.channel] || r.channel).join(", ").replace(/, ([^,]*)$/, " and $1");
+    const most = Math.max(0, ...rows.map((r) => r.restaurants || 0));
+    return (
+      <div className="adm-card ow2-dapps" style={{ marginTop: 12 }}>
+        <div className="ow2-ct"><span>Delivery apps <span className="mut">· {count ? `${inr(total)} from ${count} order${count === 1 ? "" : "s"}` : "orders from the apps that are on"}</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+        <PartialStrip keys={unread ? ["deliveryApps"] : undefined} />
+        {count
+          ? <LeaderBar showValues valueLabel="Order value" data={rows.map((r) => ({ id: r.channel, name: NAME[r.channel] || r.channel, revenue: r.revenue, orders: r.orders, accentColor: GREEN }))} />
+          : rows.length ? <div className="adm-empty">{names} {rows.length === 1 ? "is" : "are"} on — no orders from {rows.length === 1 ? "it" : "them"} in this range.</div> : null}
+        {rows.length > 0 && <div className="ow2-note">The order value each app sent, before its commission{most > 1 ? `, added up across the restaurants that have each app on` : ""}. Not included in Revenue above, which is your dine-in sales. Cancelled and demo orders are left out.</div>}
+      </div>
+    );
+  };
   /** What a card with no payload yet should say. "Loading…" is a promise, and once the server has
    *  told us this section is switched off for this restaurant the promise is false — every card
    *  said it for ever (T12 sweep, 2026-08-17). Short, because it is repeated per card. */
@@ -2057,6 +2096,8 @@ export default function OwnerDashboard() {
             </div>
           </div>
 
+          {deliveryAppsCard(pl(globalRange) as GroupA | undefined)}
+
           {highlights}
         </>
       )}
@@ -2152,6 +2193,8 @@ export default function OwnerDashboard() {
                 : (pl(globalRange) ? <div className="adm-empty">No recorded payments in this range.</div> : <div className="adm-empty">{loadNote}</div>)}
             </div>
           </div>
+
+          {deliveryAppsCard(pl(globalRange) as RestA | undefined)}
 
           {/* Records strip — the numbers worth bragging about */}
           {(recordsUnread || (records && (records.bestDay || records.starDish))) && (
@@ -2550,11 +2593,14 @@ export default function OwnerDashboard() {
            nothing, while a slot that is short brings the jump back. */
         :global(.adm-empty.ow2-chartslot) { min-height: 260px; display: grid; place-items: center; }
         :global(.ow2-stats5) > * { min-width: 0; }
-        .ow2-ct { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 800; margin-bottom: 10px; flex-wrap: wrap; }
-        .ow2-ct .mut { color: var(--muted); font-weight: 500; }
+        /* :global(.ow2-dapps …) = the Delivery apps card, built by deliveryAppsCard() OUTSIDE this return,
+           where styled-jsx never adds the scoped class (the highlights note says the same). One rule, two
+           selectors — never a copied rule that could drift. */
+        .ow2-ct, :global(.ow2-dapps .ow2-ct) { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 800; margin-bottom: 10px; flex-wrap: wrap; }
+        .ow2-ct .mut, :global(.ow2-dapps .ow2-ct .mut) { color: var(--muted); font-weight: 500; }
         /* A quiet caption under a chart, for saying what it deliberately leaves out. */
-        .ow2-note { font-size: 10.5px; color: var(--muted); margin-top: 6px; text-align: right; }
-        .ow2-tag { font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--bg); border: var(--border); border-radius: 8px; padding: 3px 9px; white-space: nowrap; }
+        .ow2-note, :global(.ow2-dapps .ow2-note) { font-size: 10.5px; color: var(--muted); margin-top: 6px; text-align: right; }
+        .ow2-tag, :global(.ow2-dapps .ow2-tag) { font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--bg); border: var(--border); border-radius: 8px; padding: 3px 9px; white-space: nowrap; }
         /* minmax(0,1fr), NOT a bare 1fr. A bare 1fr track means minmax(auto,1fr), and that
            auto floor is the item's MIN-CONTENT width — so a card holding something with an
            intrinsic minimum (the heatmap's 430px grid; the payment legend's 220px column beside

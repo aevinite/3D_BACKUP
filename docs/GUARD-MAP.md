@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **234** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **235** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 197 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -166,6 +166,7 @@ Code: `app/owner/*`, `components/owner/*`, `app/api/owner/*`, `lib/ownerCache.ts
 | a chart's shape (must never be a lonely 1-bar plot) | `verify:owner-reports` + read `components/owner/Charts.tsx` header | nothing | no |
 | the busiest-times heatmap still answers, and inside the 8s statement limit | `verify:heatmap` | `.env.local` | no |
 | revenue anywhere | `verify:one-number` ← one revenue number, checked against the database | `.env.local` | no |
+| the owner Dashboard's **Delivery apps** card, `lfh_owner_channel_sales` (mig 420), or the manager Dashboard's channel split | `verify:owner-delivery-apps` ← only channels that are ON are returned (no card for a restaurant on no delivery app), cancelled/rejected/demo orders never count, it is never added to Revenue, and the snapshot re-reads on a delivery order or a channel switch. Static by default (in `verify:static`); `-- --db` compares every switched-on channel against an independent sum on the dev database | nothing / `.env.local` | no |
 | light / dark skin, or any colour | `verify:css-tokens`, `verify:skin-ink`, `verify:dead-css` | nothing / app running | no |
 | two owners editing the same value | `verify:owner-clash` | app running | no |
 | the owner's **Menu editor**, **Team** roster or **Settings** page | `verify:owner-panel` ← every fault these three screens had was the same shape: the screen SAID something that was not what happened — a query that failed reported as "the admin switched Menu off", a first-save-wins refusal whose sentence the reload erased before it was painted, a refusal rendered 950px above a phone screen, a picker with nothing in it telling you to pick. Also pins the owner's 2026-08-18 decisions: **R36** (the owner is never shown which sections are switched OFF — only the admin knows that), the Team search, the disabled-people group, and the banner heading that names the reason instead of always crying "Something went wrong". **Section numbers 1–7 map to the seven problems**; §9 holds the three things he picked himself. | nothing | no |

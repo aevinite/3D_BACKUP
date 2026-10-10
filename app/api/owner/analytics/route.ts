@@ -3,7 +3,8 @@
 //   &rid=<uuid>              (optional: restaurant scope; omit = group scope)
 //
 // Group scope  → { scope:'group', restaurantRevenue[], timeseries[] }
-// Restaurant   → { scope:'restaurant', restaurant{}, kpis{}, timeseries[], dishes[], categories[], hourly[] }
+// Restaurant   → { scope:'restaurant', restaurant{}, kpis{}, timeseries[], dishes[], categories[], hourly[],
+//                  deliveryApps[] (one row per delivery channel that is switched on; mig 420) }
 //
 // All aggregation is server-side via the lfh_owner_* RPCs (migration 089) — one
 // round-trip per chart, tiny pre-summed rows, never order scanning in JS.
@@ -170,6 +171,27 @@ async function fpWithStaffPay(ids: string[] | null, from: string, to: string): P
   }
   const last = (q.data || [])[0] as { created_at?: string; voided_at?: string | null } | undefined;
   return `${base}|sp:${q.count ?? 0}:${last?.created_at ?? ""}:${last?.voided_at ?? ""}`;
+}
+
+// ── DELIVERY-APP SALES MOVE THE FINGERPRINT TOO (owner, 2026-10-11, mig 420) ───────────────────────────
+// The restaurant dashboard now carries a "Delivery apps" card read from aggregator_orders, which
+// neither detector above can see — so a new Zomato order, a cancelled one, or the admin switching a
+// channel on would sit behind a stale snapshot until a DINE-IN order happened to move (the staff-pay
+// bug again). aggregator_orders keeps no reliable "last changed" stamp, so the detector is the card's
+// own answer: lfh_owner_channel_sales is at most three tiny rows per restaurant through the
+// (restaurant_id, created_at) index, and it changes exactly when the card would. "Couldn't look" is a
+// value that is different every time, for the reason written on fpWithStaffPay.
+// `ids` NULL is the admin's every-restaurant view, which carries no Delivery apps card (the function
+// refuses an unscoped call by design), so there is nothing extra to watch there.
+async function fpWithChannels(ids: string[] | null, from: string, to: string): Promise<string | null> {
+  const base = await fpWithStaffPay(ids, from, to);
+  if (base === null || !ids || !ids.length) return base;
+  const ch = await sb.rpc("lfh_owner_channel_sales", { p_restaurant_id: null, p_from: from, p_to: to, p_ids: ids });
+  if (ch.error) {
+    console.error("[owner/analytics] the delivery-app change-detector could not be read:", ch.error.message);
+    return `${base}|ch:unread:${Date.now()}`;
+  }
+  return `${base}|ch:${((ch.data ?? []) as Record<string, unknown>[]).map((r) => `${r.channel}=${r.revenue}/${r.orders}`).join(",")}`;
 }
 
 // `errText` is GONE (T9 sweep, 2026-08-06). It existed to stop a thrown PostgREST object rendering
@@ -405,9 +427,11 @@ export async function GET(req: NextRequest) {
         // field-less JSON verbatim until their fingerprint happens to change (found 2026-07-26, and
         // walked into again on 2026-08-31 by adding `window` without bumping: the live check found
         // `range=today` carrying it and `range=30d`, served from a snapshot, not).
-        key: `analytics:v6:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
+        // v7 (2026-10-11): gained `deliveryApps` — the same Delivery apps card as one restaurant's view,
+        // summed per channel across this owner's restaurants.
+        key: `analytics:v7:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
         force: sp.get("refresh") === "1",
-        fingerprint: () => fpWithStaffPay(scope.all ? null : gIds, from, to),
+        fingerprint: () => fpWithChannels(scope.all ? null : gIds, from, to),
         compute: async () => {
       const allow = scope.all ? null : new Set(scope.ids);
       const pIds = scope.all ? null : scope.ids; // DB-side scope (mig 138) — no whole-platform scan
@@ -437,6 +461,10 @@ export async function GET(req: NextRequest) {
       const prevTsP = prevTsWin
         ? sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: prevTsWin.from, p_to: prevTsWin.to, p_bucket: bucket, p_ids: pIds })
         : Promise.resolve(null);
+      // Delivery-app sales across THIS owner's restaurants (mig 420) — one call, rows only for channels
+      // that are switched on. Not for the admin's every-restaurant view (pIds null): the function
+      // refuses an unscoped call by design, and the admin console has its own platform revenue pages.
+      const chP = pIds ? sb.rpc("lfh_owner_channel_sales", { p_restaurant_id: null, p_from: from, p_to: to, p_ids: pIds }) : Promise.resolve({ data: [], error: null });
       const [rev, ts, heat] = await Promise.all([
         sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: pIds }),
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket, p_ids: pIds }),
@@ -553,11 +581,23 @@ export async function GET(req: NextRequest) {
       }));
       // Together, not one after another: they are independent reads over the same id list.
       const [staffPay, foodLoss] = await Promise.all([staffPayExpense(), foodLossExpense()]);
+      // One row per channel, summed over the restaurants that have it ON; `restaurants` = how many.
+      // A failed read is null + partial (said on the card), never a confident "no channel on".
+      const ch = await chP;
+      if (ch.error) { console.error("[owner/analytics] delivery-app sales unread:", ch.error.message); partial.push("deliveryApps"); }
+      const byChannel = new Map<string, { channel: string; revenue: number; orders: number; restaurants: number }>();
+      for (const r of (ch.error ? [] : (ch.data ?? [])) as Record<string, unknown>[]) {
+        const k = String(r.channel);
+        const acc = byChannel.get(k) ?? { channel: k, revenue: 0, orders: 0, restaurants: 0 };
+        acc.revenue = num(acc.revenue + (Number(r.revenue) || 0)); acc.orders += Number(r.orders) || 0; acc.restaurants++;
+        byChannel.set(k, acc);
+      }
+      const deliveryApps = ch.error ? null : [...byChannel.values()];
       // The resolved window rides along for the same reason it does on the reports route — see the
       // long note there. `?range=custom` with unusable dates is answered as the last 30 days and
       // still labelled "custom", and without this the screen cannot say which thirty days.
       return { scope: "group", range, window: { from, to }, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev,
-        staffPay, foodLoss,
+        staffPay, foodLoss, deliveryApps,
         ...(partial.length ? { partial } : {}) };
         },
       });
@@ -588,11 +628,13 @@ export async function GET(req: NextRequest) {
       // snapshot can't serve JSON that is MISSING a field the UI now reads. Here the change is
       // the other direction — an old snapshot merely carries two extra fields nothing reads —
       // so a bump would only buy a pointless recompute for every restaurant.
-      key: `analytics:v6:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
+      // v7 (2026-10-11): the payload gained `deliveryApps`. A v6 snapshot has no such field, and the
+      // card would read that as "no channel is on" until the fingerprint happened to move.
+      key: `analytics:v7:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
       force: sp.get("refresh") === "1",
-      fingerprint: () => fpWithStaffPay([rid], from, to),
+      fingerprint: () => fpWithChannels([rid], from, to),
       compute: async () => {
-    const [meta, ts, dishes, cats, hourly, heat, pm, prevTs] = await Promise.all([
+    const [meta, ts, dishes, cats, hourly, heat, pm, prevTs, chSales] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
       sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket }),
       sb.rpc("lfh_owner_dish_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
@@ -605,6 +647,11 @@ export async function GET(req: NextRequest) {
       prevTsWin
         ? sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: prevTsWin.from, p_to: prevTsWin.to, p_bucket: bucket })
         : Promise.resolve({ data: [], error: null }),
+      // Delivery-app sales (owner, 2026-10-11, mig 420): one row per channel that is SWITCHED ON —
+      // an off channel never comes back, so an empty list means "this restaurant is on no delivery
+      // app" and the card is not drawn. Non-fatal like the heatmap: a failed read says so on its
+      // own card (`partial: deliveryApps`), it never blanks the dashboard.
+      sb.rpc("lfh_owner_channel_sales", { p_restaurant_id: rid, p_from: from, p_to: to }),
     ]);
     if (meta.error) throw meta.error;
     if (!meta.data) throw new Error("restaurant not found");
@@ -667,10 +714,13 @@ export async function GET(req: NextRequest) {
       hourly: (hourly.data ?? []).map((r: Record<string, unknown>) => ({ hour: Number(r.hour) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
       heatmap: ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({ dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
       paymentMethods: (pm.data ?? []).map((r: Record<string, unknown>) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 })),
+      // NOT part of `kpis.revenue` — that stays the dine-in figure, exactly as the manager's
+      // Dashboard keeps its headline dine-in and splits the channels beside it.
+      deliveryApps: chSales.error ? null : ((chSales.data ?? []) as Record<string, unknown>[]).map((r) => ({ channel: String(r.channel), revenue: num(r.revenue), orders: Number(r.orders) || 0 })),
       // Same rule as the group scope: an unread busy grid says so instead of drawing an empty
       // one (T5 sweep, 2026-08-11). cachedOwnerPayload refuses to STORE a payload carrying
       // `partial`, so the note can never outlive the blip.
-      ...(heat.error ? { partial: ["busyHours"] as PartialKey[] } : {}),
+      ...((heat.error || chSales.error) ? { partial: [...(heat.error ? ["busyHours"] : []), ...(chSales.error ? ["deliveryApps"] : [])] as PartialKey[] } : {}),
     };
       },
     });
