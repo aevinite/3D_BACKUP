@@ -1336,6 +1336,20 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("every function in the owner staff and access-tree routes is called");
 }
 
+// ── 70 · A LONG ROW NAME STAYS ON ITS ARROW'S LINE ON A PHONE ──────────────────────────────────
+// As a bare text node in a wrapping flex row, "Manager settings (what manager can do)" jumped whole to
+// the next line at 360px and left the arrow alone above it (sweep #10 T18, item 21, seen on the
+// Samsung A35 screenshot). The name must be its own box with a zero basis, so it shares the arrow's
+// line and wraps inside itself. (The on-screen measurement lives in scripts/sweep/t18s10.)
+{
+  const tsx = read("components/admin/AccessTree.tsx");
+  const probs = [];
+  if (!/<span className="nm-t">\{node\.name\}<\/span>/.test(tsx)) probs.push("the row name is not in its own .nm-t box");
+  if (!/\.at-box-t \.nm \.nm-t \{ flex:1 1 0;/.test(tsx)) probs.push(".nm-t lost its zero flex-basis, so a long name wraps away from its arrow");
+  if (probs.length) fail(`a long row name on the Access screen leaves its arrow alone on a phone: ${probs.join("; ")}`);
+  else ok("a long Access row name shares its arrow's line and wraps inside itself");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27
