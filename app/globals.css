@@ -4678,16 +4678,22 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-over-row .dot { width: 10px; height: 10px; border-radius: 999px; flex: 0 0 auto; }
 .adm-over-row .nm { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 0 0 auto; width: 210px; }
 .adm-over-row .nm b { font-size: 14px; font-weight: 650; }
-.adm-over-row .nm small { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The computers' names WRAP, never end in "…" (sweep #10 T10 round 4, item 6): a list like
+   "INFINITE, Sweep Machine" was cut to "…Sweep Machin" in the 210px column, so the admin could not
+   read which computer was meant. A second line costs a few pixels of height; a cut name costs the answer. */
+.adm-over-row .nm small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .adm-over-row .what { flex: 1; min-width: 0; font-size: 12.5px; color: var(--muted); }
-.adm-over-row .tag { flex: none; font-size: 11px; font-weight: 750; letter-spacing: .03em; text-transform: uppercase;
+.adm-over-row .tag { flex: none; font-size: 12px; font-weight: 750; letter-spacing: .03em; text-transform: uppercase;
   padding: 4px 9px; border-radius: 999px; white-space: nowrap; }
 .adm-over-row .go { flex: none; color: var(--muted); font-size: 15px; }
 
 /* WARN comes first in the sort, so it is also the loudest here: its own border, not just a dot. */
 .adm-over-row.warn { border-color: var(--adm-danger, #e5484d); background: color-mix(in srgb, var(--adm-danger, #e5484d) 8%, var(--card)); }
-.adm-over-row.warn .dot, .adm-over-row.warn .tag { background: var(--adm-danger, #e5484d); }
-.adm-over-row.warn .tag { color: #fff; }
+.adm-over-row.warn .dot { background: var(--adm-danger, #e5484d); }
+/* White words sit on the FILL red, the token made for exactly this (round 4, item 6). On the dark skin
+   --adm-danger is a light red (#f87171) for text, and white on it measured 2.77:1 — "1 STUCK" and
+   "ASLEEP" were the hardest words to read on the screen whose whole job is to shout them. */
+.adm-over-row.warn .tag { background: var(--adm-danger-fill, #d92d20); color: #fff; }
 .adm-over-row.todo .dot { background: var(--adm-warn, #f5a524); }
 .adm-over-row.todo .tag { background: color-mix(in srgb, var(--adm-warn, #f5a524) 20%, transparent); color: var(--adm-warn, #f5a524); }
 .adm-over-row.ok .dot { background: var(--adm-ok, #30a46c); }
