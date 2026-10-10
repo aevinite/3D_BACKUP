@@ -105,3 +105,11 @@ the file (lines ~3,442–end on 2026-10-09). Ledger: `LEDGER/T10-S10.md`. Each i
 | 19 | NOT A FAULT — my phone emulation had touch off; as a real A35 every tile shows its number (P179909 corrected) | — |
 
 Guards: `verify:voided-stays` (25), `verify:t10-writes` (30), `verify:bill-reprint-is-silent` (part 4 rewritten), `verify:scoped-reads`, `verify:rejected` — each sabotage-tested.
+
+# Round 3 (2026-10-10) — "do the retest now", every bit, zero errors
+
+| # | where | what |
+|---|---|---|
+| 20 | Editor → a dish → Price · a parcel's open price · ⚡ QO/P · + Add a dish | a price typed with a minus sign was saved as POSITIVE ("-5" → ₹5; an open price "-50" charged ₹50) — the cleaning stripped "-" before the `n < 0` test. Refused out loud on all four doors. Guard: `verify:t10-writes` (37), each refusal sabotaged → red. Seen on :4410. |
+
+Measured: 1,632 of 1,633 lines run; 1,189 of 1,218 mutants caught (all 305 restaurant / permission / on-off ones); the 29 left are recorded equivalents. 8 lines can never run (listed in the ledger). Outside the boundary: `lfh_price_order` strips "-" itself (a migration) and the waiter tablet's open-price twin.
