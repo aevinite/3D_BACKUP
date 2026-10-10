@@ -1169,6 +1169,26 @@ else ok("the read/write route derives every allow-list from the model");
   else ok(`all ${exported.length} values lib/accessModel.ts exports are imported by real code`);
 }
 
+// ── 61 · A WAITER ACTION WITH NO COLUMN STILL OBEYS ITS RESTAURANT SWITCH ─────────────────────
+// Two halves (sweep #10 T18, item 8). resolveWaiterCaps() may only ever write real `tablet_*`
+// columns into a settings object — a `cap:<id>` key is not one, and the panel would receive a key
+// nothing reads. And waiterConfigCapValue() — the only resolver a column-less waiter action has —
+// must consult that action's Feature half, or "the restaurant does not have it" would hide the
+// button and leave the gate open. Asked against every `has` switch turned off at once.
+{
+  const T = await import("../node_modules/.cache/accessTree.mjs");
+  const allOff = Object.fromEntries(T.HAS_IDS.map((id) => [id, { on: false }]));
+  const out = T.resolveWaiterCaps({}, allOff);
+  const stray = Object.keys(out).filter((k) => !k.startsWith("tablet_"));
+  const src = read("lib/accessTree.ts");
+  const body = src.slice(src.indexOf("export function waiterConfigCapValue"), src.indexOf("export function waiterConfigCapValue") + 1200);
+  const probs = [];
+  if (stray.length) probs.push(`resolveWaiterCaps() wrote non-column keys into settings: ${stray.join(", ")}`);
+  if (!/WAITER_FEATURE_OF\[`cap:\$\{id\}`\]/.test(body)) probs.push("waiterConfigCapValue() no longer consults the row's Feature half (WAITER_FEATURE_OF[`cap:${id}`])");
+  if (probs.length) fail(probs.join("; "));
+  else ok("a waiter action with no column of its own obeys its restaurant switch, and only real tablet_* columns reach a settings object");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27

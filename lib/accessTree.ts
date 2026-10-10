@@ -1610,6 +1610,13 @@ export function waiterConfigCapValue(id: string, accessConfig: unknown): WaiterC
   const stored = (accessConfig as any)?.[id]?.tablet;
   const node = WAITER_CAP_NODE[id];
   if (!node) return "on";
+  // THE RESTAURANT-LEVEL HALF COUNTS HERE TOO (sweep #10 T18, item 8). A waiter action stored in
+  // access_config has no settings column for resolveWaiterCaps() to switch off, so this function is
+  // the ONE place its "does this restaurant have it at all" switch can be honoured. No such row shares
+  // a Feature half today (the walk-out has none); the day one does, it is off for the gate as well as
+  // the screen, instead of off on the screen and on at the server.
+  const feat = WAITER_FEATURE_OF[`cap:${id}`];
+  if (feat && (accessConfig as any)?.[feat]?.on === false) return "off";
   if (isTriState(stored)) return stored;
   const d = defOf(node);
   return isTriState(d) ? d : "off";
@@ -1636,7 +1643,10 @@ export function resolveWaiterCaps<T extends Record<string, any> | null>(settings
   // Columns the row list expects but the select didn't return still need an answer.
   for (const key of Object.keys(WAITER_COL_NODE)) if (!(key in out)) out[key] = waiterCapValue(key, undefined);
   for (const key of WAITER_NEVER) out[key] = "off";
-  if (accessConfig !== undefined) for (const key of waiterFeatureOffCols(accessConfig)) out[key] = "off";
+  // Only real `tablet_*` columns go into a settings object (item 8): a `cap:<id>` key is not a column,
+  // and writing one here would hand the panel a key nothing reads. Those rows are resolved — Feature
+  // half included — by waiterConfigCapValue().
+  if (accessConfig !== undefined) for (const key of waiterFeatureOffCols(accessConfig)) if (key.startsWith("tablet_")) out[key] = "off";
   return out as T;
 }
 
