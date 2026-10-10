@@ -12,6 +12,8 @@ import { cachedOwnerPayload, ordersFingerprint, scopeKeyOf } from "@/lib/ownerCa
 // ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
 // 2026-09-01). One retry on a transient connection failure, and a failure that names WHICH read went.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -111,7 +113,13 @@ export async function GET(req: NextRequest) {
   // it did on the first attempt at this fix.
   const dayLooksRight = /^\d{4}-\d{2}-\d{2}$/.test(rawDay);
   const dayMs = dayLooksRight ? Date.parse(`${rawDay}T00:00:00Z`) : NaN;
-  const dayIsReal = Number.isFinite(dayMs) && new Date(dayMs).toISOString().slice(0, 10) === rawDay;
+  // …AND A YEAR THIS PLATFORM COULD HAVE ORDERS IN (S10 T28, item 5). `?day=0000-01-01` is a real
+  // calendar date to JavaScript, so it passed the round trip above and reached Postgres as year 0,
+  // which it refuses — a bare 500 with no words. Nothing before 2020 or after next year can hold an
+  // order here; outside that the drill is simply ignored, the same as any other junk value.
+  const dayYear = Number(rawDay.slice(0, 4));
+  const dayIsReal = Number.isFinite(dayMs) && new Date(dayMs).toISOString().slice(0, 10) === rawDay
+    && dayYear >= 2020 && dayYear <= new Date().getUTCFullYear() + 1;
   const drillDay = dayIsReal ? rawDay : "";
   const { from, to, days: windowDays } = drillDay ? { ...istDayBounds(drillDay), days: 1 } : rangeBounds(range);
   const fromIso = from.toISOString();
@@ -131,40 +139,50 @@ export async function GET(req: NextRequest) {
   // The scope is the whole platform, which the engine already has a key for (scopeKeyOf(null,
   // true, [])), and the change-detector is the same cheap orders fingerprint the owner reports
   // use — with ids = null meaning "every restaurant", so a single order anywhere refreshes it.
-  const payload = await cachedOwnerPayload({
-    // v3 → v4 (2026-09-02): `quietWindowDays` CHANGED MEANING. It used to be the span rounded to
-    // whole days — 6 before noon and 7 after it, for the same 7-day range — and it is now the
-    // range's own calendar-day count, so the card stops saying "previous 6 days" under a picker
-    // that says 7. The change-detector is an ORDERS fingerprint: it notices a new order and it
-    // cannot notice that a number now means something different. Without this bump every stored
-    // v3 snapshot would go on serving the old figure until an order happened to land in that
-    // window — hours for a 30-day window, never for an old drilled day. Exactly the v1 → v2 story
-    // below, which is why that note ends by asking for this.
-    // v2 → v3 (2026-09-01): the payload gained the "going quiet" comparison. A stored v2 snapshot
-    // has no `quiet` field at all, and the fingerprint watches ORDERS, so the new card would sit
-    // empty on every cached window until an order happened to land in it. Bumping retires them all
-    // on deploy — the same reasoning as the v1 → v2 note below.
-    // v1 → v2 (mig 348, 2026-08-20). THE VERSION IN THIS KEY IS NOT DECORATION. The change-detector
-    // is an ORDERS fingerprint: it notices a new order, and it cannot notice that the definition of
-    // the count changed. So every snapshot stored before mig 348 would have gone on serving the old
-    // inflated total — measured on the dev database straight after applying it: the cached 30-day
-    // figure read 5,948 while a fresh compute read 5,929 — until an order happened to land in that
-    // window, which for a 30-day window could be hours and for an old drilled day is never. Bumping
-    // the version retires every stale snapshot the moment this deploys. Any future change to what
-    // these numbers MEAN has to bump it again.
-    // v4 → v5 (T26 sweep #9, 2026-09-15): `busiest` CHANGED MEANING. It was the top ten; it is now
-    // every restaurant that took an order in the window (capped and counted), because the card
-    // printed "8 of 10" while forty-five had. The change-detector is an ORDERS fingerprint — it
-    // notices a new order and it cannot notice that a field now means something different — so
-    // without this bump every stored v4 snapshot would go on serving the ten-row list, and the
-    // sentence would stay wrong until an order happened to land in that window. Which for a 30-day
-    // window is hours and for an old drilled day is never. This is the fourth time that paragraph
-    // has had to be written on this line; read it before changing what any of these numbers mean.
-    key: `admin:v5:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
-    force,
-    fingerprint: () => ordersFingerprint(null, fromIso, toIso),
-    compute: () => computeAnalytics(drillDay ? "today" : range, from, to, fromIso, toIso, !!drillDay, windowDays),
-  });
+  // THE THROW IS CAUGHT HERE (S10 T28, item 5). compute() throws on purpose so nothing half-built is
+  // stored under the key — and cachedOwnerPayload hands that throw to its caller. This route never
+  // caught it, so one failed read answered a bare 500 with no body, and the console printed
+  // "Request failed (500)" on the screen the owner reads his platform's numbers from. It now answers
+  // like every other admin read: plain words on the screen, the raw text in `detail` and the log.
+  let payload: unknown;
+  try {
+    payload = await cachedOwnerPayload({
+      // v3 → v4 (2026-09-02): `quietWindowDays` CHANGED MEANING. It used to be the span rounded to
+      // whole days — 6 before noon and 7 after it, for the same 7-day range — and it is now the
+      // range's own calendar-day count, so the card stops saying "previous 6 days" under a picker
+      // that says 7. The change-detector is an ORDERS fingerprint: it notices a new order and it
+      // cannot notice that a number now means something different. Without this bump every stored
+      // v3 snapshot would go on serving the old figure until an order happened to land in that
+      // window — hours for a 30-day window, never for an old drilled day. Exactly the v1 → v2 story
+      // below, which is why that note ends by asking for this.
+      // v2 → v3 (2026-09-01): the payload gained the "going quiet" comparison. A stored v2 snapshot
+      // has no `quiet` field at all, and the fingerprint watches ORDERS, so the new card would sit
+      // empty on every cached window until an order happened to land in it. Bumping retires them all
+      // on deploy — the same reasoning as the v1 → v2 note below.
+      // v1 → v2 (mig 348, 2026-08-20). THE VERSION IN THIS KEY IS NOT DECORATION. The change-detector
+      // is an ORDERS fingerprint: it notices a new order, and it cannot notice that the definition of
+      // the count changed. So every snapshot stored before mig 348 would have gone on serving the old
+      // inflated total — measured on the dev database straight after applying it: the cached 30-day
+      // figure read 5,948 while a fresh compute read 5,929 — until an order happened to land in that
+      // window, which for a 30-day window could be hours and for an old drilled day is never. Bumping
+      // the version retires every stale snapshot the moment this deploys. Any future change to what
+      // these numbers MEAN has to bump it again.
+      // v4 → v5 (T26 sweep #9, 2026-09-15): `busiest` CHANGED MEANING. It was the top ten; it is now
+      // every restaurant that took an order in the window (capped and counted), because the card
+      // printed "8 of 10" while forty-five had. The change-detector is an ORDERS fingerprint — it
+      // notices a new order and it cannot notice that a field now means something different — so
+      // without this bump every stored v4 snapshot would go on serving the ten-row list, and the
+      // sentence would stay wrong until an order happened to land in that window. Which for a 30-day
+      // window is hours and for an old drilled day is never. This is the fourth time that paragraph
+      // has had to be written on this line; read it before changing what any of these numbers mean.
+      key: `admin:v5:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
+      force,
+      fingerprint: () => ordersFingerprint(null, fromIso, toIso),
+      compute: () => computeAnalytics(drillDay ? "today" : range, from, to, fromIso, toIso, !!drillDay, windowDays),
+    });
+  } catch (e) {
+    return adminFail("Platform analytics", e instanceof Error ? { message: e.message } : e, { action: "load" });
+  }
   return NextResponse.json(payload);
 }
 
