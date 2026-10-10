@@ -109,3 +109,39 @@ constraint moved every later row; each row is now keyed by its subject (parity-i
   edit hook's verify-guards-alive flags it on every write in the shared folder.
 - If a platform channel is wanted in the owner films, it belongs in `aggregator_orders` (lfh_platform_insert), not
   in how a dine-in table paid.
+
+## Round 5 (owner, 2026-10-10 — "do all the things that you have listed", then "500 phases to 1000 … no error … no dead code … no unoptimized thing … replan whole the test")
+
+| # | what | where a person meets it | guard |
+|---|---|---|---|
+| 30 | Pay in parts asked for the open session, waited, then asked for the tax settings — now both at once (one round trip fewer); two dead lint-silencers removed | manager / tablet → a table → Pay in parts (a little faster) | u-round5 P210131–P210134 |
+| 31 | the "round money once, exactly, the same everywhere" rule was in code but not in COMPLIANCE-GUARDRAILS | backend only, nothing on screen | u-round5 P210135–P210136 |
+| 32 | the guest's other-currency price rounded the float (5% of 0.70 → 0.03), not the number — now the same exact rule as the bill | guest → the menu in another currency | verify-money-round-twins (fourth copy, 1,000,005 inputs) |
+| 33 | the order-totals test priced with float rounding and a typed 5%; it now uses the app's rounding, the database's own rate, eight carts | backend only, nothing on screen | test:totals · u-round5 P210142–P210144 |
+| 34 | the coverage run failed on any fresh install (its cache folder did not exist) | backend only, nothing on screen | u-round5 P210145 |
+| 35 | claiming a tap asked the database to send the row back, which nothing read | backend only, nothing on screen | u-round5 P210146 |
+| 36 | one hole in the report's data (a missing row or tax line) took the whole Tax report down — now it reads as ₹0 | owner → Reports → Tax / GST | u-round5 P210147–P210148 · shots |
+| 37 | seven harness rows named code lines by typed numbers; four had drifted, and T18's comment above lib/clash.ts crashed one suite | backend only, nothing on screen | u-round5 item 37 (scan + sabotage) |
+| 38 | four checks still tested lib/clash.ts's OLD field-name rule after T18's item 15 widened it — two T24 guards red on main, one row of mine green on a stale copy | backend only, nothing on screen | the four checks themselves (sabotage: a looser rule → all four red) |
+
+Measured: 1,367 harness checks · 100% of lines and branches in all 14 files · EVERY candidate break of the 14 files,
+409: 383 caught, 26 proven equivalent, 0 unexplained — then clash.ts (67), taxFiling (38) and money.mjs (14) re-broken on
+the final code, 0 unexplained · 475 app-vs-database checks incl. the planner on all 25 query shapes · 480 re-run rows ·
+171 driven on :4430 · 39 screens. Part 4 item 10 needed nothing (T18 fixed its own script, 301eb9e8).
+
+**Also found in my own tools this round, fixed before shipping:** the planner check passed a whole-index walk; the
+comparison runner's first round-5 ids landed inside u-round5b's block; the P210 block was briefly moved to P164xxx (#1487)
+and moved back (#1489) — T39 had claimed and filed P164xxx minutes before, so T39's stands. And one of my own mistakes,
+caught and repeated cleanly: a sabotage edit of lib/clash.ts was made while the mutation run was using the same folder;
+the run restored every file itself, and it was repeated in a separate copy with the same result (67 · 62 · 5 · 0).
+
+## Noticed outside this territory in round 5 (left for their owners)
+
+- `scripts/verify-every-script.mjs:62` names four files that do not exist (lib/printPair.ts, components/AdminSwitcher.tsx,
+  app/api/print-station/[file]/route.ts, lib/printStation.ts), and `scripts/sweep/t13s10/run.mjs:18` ends on a bare
+  `process.exit()` — the edit hook's verify-guards-alive flags both on every write in the shared folder.
+- Part 4 item 11 (a platform channel in the owner films) cannot be done as data: the owner panel never reads
+  `aggregator_orders`, so platform sales would be stored but shown nowhere. It needs an owner-report feature — the
+  owner's decision.
+- T18's item 15 changed lib/clash.ts (this territory) without updating the two T24 guards that pin its field rule;
+  both were red on main until item 38.
