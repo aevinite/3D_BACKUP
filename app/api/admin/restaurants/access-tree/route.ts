@@ -38,12 +38,21 @@ const MODULE_COLS = new Set(MODULE_KEYS.flatMap((m) => [`${m}_allowed`, `${m}_en
 
 // access_config paths the tree may touch: { permId → { opts: Set<"side.key">, limits, tablet } }
 const CONFIG_OPTS = new Set<string>();   // `${id}|${side}|${key}`
+// The legal values of every access_config sub-option (sweep #10 T18, item 18). A pick-one sub-option
+// (who may take the menu down · how far back the dashboard reaches · which bills a manager sees) may
+// only hold one of its own choices; every other sub-option is an on/off. The top-level choices below
+// were always held to their list — these were not, so a hand-made request could store `true` for
+// "Who may do it" and the Access screen then showed neither choice picked.
+const CONFIG_OPT_VALUES = new Map<string, Set<string> | "bool">();
 const CONFIG_LIMITS = new Set<string>(); // `${id}|${side}`
 const CONFIG_LIMIT_MAX = new Map<string, number>(); // the biggest value that row's own dropdown offers
 const CONFIG_TABLET = new Set<string>(); // id
 for (const n of ALL_NODES) {
   const b = n.bind;
-  if (b.t === "opt") CONFIG_OPTS.add(`${b.id}|${b.side}|${b.key}`);
+  if (b.t === "opt") {
+    CONFIG_OPTS.add(`${b.id}|${b.side}|${b.key}`);
+    CONFIG_OPT_VALUES.set(`${b.id}|${b.side}|${b.key}`, n.choices?.length ? new Set(n.choices.map((c) => c.value)) : "bool");
+  }
   if (b.t === "limit") {
     CONFIG_LIMITS.add(`${b.id}|${b.side}`);
     if (n.options?.length) CONFIG_LIMIT_MAX.set(`${b.id}|${b.side}`, Math.max(...n.options));
@@ -265,7 +274,12 @@ export async function POST(req: NextRequest) {
         if (!m) continue;
         const dest = { ...obj(entry[side]) };
         for (const [k, v] of Object.entries(obj(vals)))
-          if (CONFIG_OPTS.has(`${permId}|${m[1]}|${k}`)) { dest[k] = typeof v === "boolean" ? v : String(v); cfgTook++; }
+          if (CONFIG_OPTS.has(`${permId}|${m[1]}|${k}`)) {
+            const legal = CONFIG_OPT_VALUES.get(`${permId}|${m[1]}|${k}`);
+            if (legal === "bool" ? typeof v !== "boolean" : !(legal && typeof v === "string" && legal.has(v)))
+              return bad(legal === "bool" ? `"${k}" is an on/off — send true or false.` : `"${String(v)}" isn't one of the choices for "${k}".`);
+            dest[k] = v; cfgTook++;
+          }
         entry[side] = dest;
       }
       // ONLY WRITE BACK A KEY THE MODEL KNOWS (fixed 2026-08-05). Every branch above already

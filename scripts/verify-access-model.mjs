@@ -1300,6 +1300,23 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("only the admin can change one person's permissions — the owner's copy is read-only and the route refuses everyone else");
 }
 
+// ── 68 · A SUB-OPTION CAN ONLY BE SAVED AS ONE OF ITS OWN VALUES ─────────────────────────────────
+// The save route held top-level choices to their list but took ANY value for an access_config
+// sub-option, so French House came to hold `true` for "Who may take the menu down" — a value with no
+// radio to show it (sweep #10 T18, item 18). Every opt row must be checked against its own values, and
+// the check must refuse rather than store.
+{
+  const r = treeRoute;
+  const at = r.indexOf("if (CONFIG_OPTS.has(`${permId}|${m[1]}|${k}`))");
+  const block = r.slice(at, at + 600);
+  const probs = [];
+  if (!/CONFIG_OPT_VALUES\.set\(/.test(r)) probs.push("the route no longer records each sub-option's legal values");
+  if (at < 0 || !/CONFIG_OPT_VALUES\.get\(/.test(block) || !/return bad\(/.test(block)) probs.push("a sub-option is stored without being checked against its own values");
+  const optChoice = ALL_NODES.filter((n) => n.bind.t === "opt" && n.choices?.length).length;
+  if (probs.length) fail(`the Access screen's save route can store a value no control can show: ${probs.join("; ")}`);
+  else ok(`every sub-option is saved only as one of its own values (${optChoice} pick-one rows, the rest on/off)`);
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27
