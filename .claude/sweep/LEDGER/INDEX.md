@@ -62,7 +62,7 @@ terminals' rows — keep both sides.
 | T7 | `P176001`–`P177000` | Manager panel — editor/app.js, part 2 of 3 | ⏳ not run yet | — | — | — | — |
 | T8 | `P177001`–`P178000` | Manager panel — editor/app.js part 3 of 3, the host page and inventory | ⏳ not run yet | — | — | — | — |
 | T9 | `P178001`–`P179000` | The manager panel's server route, part 1 of 2 | `T9-S10.md` | 840 | 838 | 12 | 12 |
-| T10 | `P179001`–`P180000` + `P211001`–`P211999` (round 3, claimed on `main` before a row was written — above every claim in this table) | The manager panel's server route, part 2 of 2 | `T10-S10.md` | 500 | 500 | 14 | 14 |
+| T10 | `P179001`–`P180000` + `P211001`–`P211999` (round 3, claimed on `main` before a row was written — above every claim in this table) | The manager panel's server route, part 2 of 2 | `T10-S10.md` | 1062 | 1062 | 15 | 15 |
 | T11 | `P180001`–`P181000` | The kitchen screen | ⏳ not run yet | — | — | — | — |
 | T12 | `P181001`–`P182000` | The waiter tablet screen | ⏳ not run yet | — | — | — | — |
 | T13 | `P182001`–`P183000` | The waiter tablet's server route, and the shared floor logic | `T13-S10.md` | 527 | 527 | 7 | 7 |
@@ -172,7 +172,7 @@ both the registry-correct and the cheaper side to move. T1 had no live worktree 
 
 ---
 
-**Next free ID (SWEEP #10: DO NOT CLAIM FROM THIS LINE — every terminal's block is in the sweep-#10 table above): `P210001`.** *(Moved 2026-10-08 from `P160959` by sweep #10's planning session, which pre-allocated `P170001`–`P210000` — forty blocks of 1,000 — before a single terminal started. The gap `P160959`–`P170000` is deliberate and free. Highest id on disk at the moment of moving: `P160958`.)* *(Previous mark: `P160959`.)* *(**T27 of sweep #9 took EIGHT more ids, `P160951`–`P160958`, on 2026-09-16** — the overrun on its round-2 band, claimed before a single row was written, exactly like the band itself.
+**Next free ID (SWEEP #10: DO NOT CLAIM FROM THIS LINE — every terminal's block is in the sweep-#10 table above): `P212000`.** *(Moved 2026-10-10 from `P210001` to `P212000` by sweep #10 T10 round 3, with the owner's yes — T10's round-3 block `P211001`–`P211999`, claimed on `main` first, sat above it and turned `verify:ledger-index` red.)* *(Moved 2026-10-08 from `P160959` by sweep #10's planning session, which pre-allocated `P170001`–`P210000` — forty blocks of 1,000 — before a single terminal started. The gap `P160959`–`P170000` is deliberate and free. Highest id on disk at the moment of moving: `P160958`.)* *(Previous mark: `P160959`.)* *(**T27 of sweep #9 took EIGHT more ids, `P160951`–`P160958`, on 2026-09-16** — the overrun on its round-2 band, claimed before a single row was written, exactly like the band itself.
 
 **Why there is an overrun at all, and why it is not trimmed.** The round was planned at 500 and the checks came out at **552**. Three of its nine sections are GENERATED from the source rather than typed — one phase per territory file for the sign-in-order rule, one per clamp in the settings sanitizer, one per refusal shape — so the count is whatever the territory actually has, not a number chosen in advance. **The honest fix is to widen the claim, not to trim 52 real checks to hit a round number**, which is the reasoning T17 wrote on this line on 2026-09-02 and T13 repeated on 2026-09-05 for the same shape.
 

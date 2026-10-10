@@ -19,11 +19,11 @@ function builder(table) {
   });
   const rows = () => (G.FIX[st.table] || []).filter(match);
   const api = {
-    select(_c, opts) { st.op = st.op === "select" ? "select" : st.op; if (opts && opts.head) st.head = true; return api; },
+    select(_c, opts) { st.op = st.op === "select" ? "select" : st.op; if (st.op === "select" && typeof _c === "string") st.cols = _c; if (opts && opts.head) st.head = true; return api; },
     update(p) { st.op = "update"; st.patch = p; return api; },
     insert(p) { st.op = "insert"; st.patch = p; return api; },
     delete() { st.op = "delete"; return api; },
-    upsert(p) { st.op = "upsert"; st.patch = p; return api; },
+    upsert(p, opts) { st.op = "upsert"; st.patch = p; st.onConflict = opts && opts.onConflict; return api; },
     eq(col, val) { st.filters.push({ kind: "eq", col, val }); return api; },
     neq(col, val) { st.filters.push({ kind: "neq", col, val }); return api; },
     is(col, val) { st.filters.push({ kind: "is", col, val }); return api; },
@@ -53,7 +53,7 @@ function builder(table) {
     // OPT-IN query log (sweep #10 T9 round 2): with G.SCOPE_LOG an array, every statement records its
     // table, its verb and its filters, so a check can ask "did every query on a restaurant's table say
     // WHICH restaurant?" across a whole suite. Never reset by resetWorld — the suite owns it.
-    if (Array.isArray(G.SCOPE_LOG)) G.SCOPE_LOG.push({ table: st.table, op: st.op, filters: st.filters.map((f) => ({ kind: f.kind, col: f.col, val: f.val })), patch: st.op === "insert" || st.op === "upsert" ? clone(st.patch) : undefined, where: G.SCOPE_WHERE || "" });
+    if (Array.isArray(G.SCOPE_LOG)) G.SCOPE_LOG.push({ table: st.table, op: st.op, cols: st.cols, req: G.SCOPE_REQ, filters: st.filters.map((f) => ({ kind: f.kind, col: f.col, val: f.val })), patch: st.op === "insert" || st.op === "upsert" ? clone(st.patch) : undefined, where: G.SCOPE_WHERE || "" });
     // OPT-IN FAILURES (sweep #10 T17 round 4). A guard may set G.FAIL["table:op"] (or G.FAIL["table"]) to "error" or
     // "throw", or G.FAIL_NTH["table:op"] = { at: n, mode } to fail only the n-th such call — so "the database blipped
     // on THIS read" can be proved instead of assumed. Nothing changes for a guard that sets neither.
@@ -62,6 +62,9 @@ function builder(table) {
       G.CALLS ||= {}; G.CALLS[ck] = (G.CALLS[ck] || 0) + 1;
       const nth = G.FAIL_NTH && G.FAIL_NTH[ck];
       const mode = nth && nth.at === G.CALLS[ck] ? nth.mode : G.FAIL && (G.FAIL[ck] || G.FAIL[st.table]);
+      // OPT-IN (sweep #10 T10 round 3): an OBJECT is handed back as the error itself, so a guard can
+      // give a database refusal its real code — { code: "LFH01", message: "invoice locked" }.
+      if (mode && typeof mode === "object") return Promise.resolve({ data: null, error: mode, count: null });
       if (mode === "throw") return Promise.reject(new Error("stub: " + st.table + " unreachable"));
       if (mode === "error") return Promise.resolve({ data: null, error: { message: "stub: " + st.table + " failed" }, count: null });
       // "refuse" = the database refusing the VALUE (22P02, e.g. a non-id in a uuid column) — a 4xx, never a retry.
@@ -80,7 +83,7 @@ function builder(table) {
     // Every trip is recorded, reads included — see the note on G.READS in state.mjs.
     if (st.op === "select") (G.READS ||= []).push({ table: st.table, op: "select", matched: found.length, at: (G.READS || []).length });
     if (st.op !== "select") {
-      G.WRITES.push({ table: st.table, op: st.op, patch: clone(st.patch ?? null), matched: found.length, at: G.WRITES.length });
+      G.WRITES.push({ table: st.table, op: st.op, patch: clone(st.patch ?? null), matched: found.length, at: G.WRITES.length, ...(st.onConflict ? { onConflict: st.onConflict } : {}) });
       if (st.op === "update") for (const r of found) Object.assign(r, st.patch);
       if (st.op === "insert" || st.op === "upsert") {
         const list = Array.isArray(st.patch) ? st.patch : [st.patch];
@@ -95,9 +98,21 @@ function builder(table) {
     // a real delete answers [{...}] and a delete that matched nothing answers [] with no error.
     // The old shape made the stub unable to tell those two apart, so any guard checking "did this
     // delete actually remove anything" read as a refusal on a delete that worked.
-    let src = st.op === "select" ? found : st.op === "delete" ? found : (G.FIX[st.table] || []).filter(match);
+    // OPT-IN (sweep #10 T10 round 3): G.HONOUR_UPDATE_RETURN makes `.update(…).select()` hand back the
+    // rows the update MATCHED (now patched), the way PostgREST does. Without it the stub re-reads after
+    // the write, so an update filtered on the very field it changes (`.neq("payment_status","paid")`
+    // → paid) comes back empty and looks like "somebody else got there first".
+    let src = st.op === "select" ? found : st.op === "delete" ? found
+      : (G.HONOUR_UPDATE_RETURN && st.op === "update") ? found : (G.FIX[st.table] || []).filter(match);
     if (G.HONOUR_RANGE && st.range && st.op === "select") src = src.slice(st.range[0], st.range[1] + 1);
     if (G.HONOUR_LIMIT && typeof st.limit === "number" && st.op === "select") src = src.slice(0, Math.max(0, st.limit));
+    // OPT-IN (sweep #10 T10 round 3): G.HONOUR_COLUMNS makes a select hand back ONLY the columns it named
+    // (plain names; "*", aliases and embeds are left whole), so a read that asks for the wrong column
+    // comes back without it — the way PostgREST answers.
+    if (G.HONOUR_COLUMNS && st.op === "select" && typeof st.cols === "string" && !/[*:()]/.test(st.cols)) {
+      const want = st.cols.split(",").map((c) => c.trim()).filter(Boolean);
+      src = src.map((r) => Object.fromEntries(want.filter((c) => c in r).map((c) => [c, r[c]])));
+    }
     return Promise.resolve({ data: one ? (src[0] ? clone(src[0]) : null) : clone(src), error: null, count: src.length });
   }
   return api;
@@ -119,5 +134,5 @@ export const supabaseAdmin = {
   from: (t) => builder(t),
   // A guard may hand the stub a stand-in for a real database function (G.RPC_IMPL[name] = (args) => data), so a
   // function that WRITES — like lfh_staff_login_failed (mig 411) — changes the fixture world the way the SQL does.
-  rpc: (name, args) => { G.RPCS.push({ name, args: clone(args || {}) }); const fm = G.FAIL && G.FAIL["rpc:" + name]; if (fm === "throw") return Promise.reject(new Error("stub: rpc " + name + " unreachable")); if (fm === "error") return Promise.resolve({ data: null, error: { message: "stub: rpc " + name + " failed" } }); if (G.RPC_IMPL && G.RPC_IMPL[name]) return Promise.resolve({ data: G.RPC_IMPL[name](clone(args || {})), error: null }); return Promise.resolve({ data: name in G.RPC_ANSWERS ? G.RPC_ANSWERS[name] : { ok: true }, error: null }); },
+  rpc: (name, args) => { G.RPCS.push({ name, args: clone(args || {}) }); const fm = G.FAIL && G.FAIL["rpc:" + name]; if (fm && typeof fm === "object") return Promise.resolve({ data: null, error: fm }); if (fm === "throw") return Promise.reject(new Error("stub: rpc " + name + " unreachable")); if (fm === "error") return Promise.resolve({ data: null, error: { message: "stub: rpc " + name + " failed" } }); if (G.RPC_IMPL && G.RPC_IMPL[name]) return Promise.resolve({ data: G.RPC_IMPL[name](clone(args || {})), error: null }); return Promise.resolve({ data: name in G.RPC_ANSWERS ? G.RPC_ANSWERS[name] : { ok: true }, error: null }); },
 };

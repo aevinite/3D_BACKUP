@@ -15,9 +15,18 @@
 //   · LIVE — this terminal's own dev server (port 4410, never 4000), signed in ONCE
 //
 // Never: a signed-out call to a running app, a swapped id, a write to Aangan.
-import { src, strip, chains, stubRoute, world, call, sql, rd, ROOT, RID, RID2 } from "../t9s10/lib.mjs";
+import { src, strip, chains, stubRoute, world, call as t9call, sql, rd, ROOT, RID, RID2 } from "../t9s10/lib.mjs";
+import { G as STUB_G } from "../../panel-stubs/state.mjs";
 
-export { src, strip, chains, stubRoute, world, call, sql, rd, ROOT, RID, RID2 };
+export { src, strip, chains, stubRoute, world, sql, rd, ROOT, RID, RID2 };
+/** terminal 9's call(), plus a request number on every statement it causes (G.SCOPE_REQ), so a whole-
+ *  suite audit can tell which statements one request made — round 3's audit needs it to tell the dish
+ *  save's global id lookup (a create) apart from the same shape on an edit. */
+export async function call(verb, path, opts = {}) {
+  const n = (STUB_G.SCOPE_REQ_N = (STUB_G.SCOPE_REQ_N || 0) + 1);
+  STUB_G.SCOPE_REQ = n + (opts && opts.body && opts.body.__create === true ? ":create" : "");
+  return t9call(verb, path, opts);
+}
 export const ROUTE_REL = "app/api/editor/[...path]/route.ts";
 export const lineOf = (i) => src.slice(0, i).split("\n").length;
 const must = (i, what) => { if (i < 0) throw new Error(`t10s10: landmark not found — ${what}. Re-derive it; never let a check read an empty slice.`); return i; };
@@ -45,23 +54,26 @@ export function branch(test, from = MINE) {
 
 // ── THE ID BLOCK — P179001…P180000, sweep #10 terminal 10's alone ─────────────────────────────
 export const ID_FLOOR = 179001, ID_CEILING = 180000;
+// Round 3 (2026-10-10) — claimed on main before a row was written (PR #1480).
+export const ID_FLOOR_R3 = 211001, ID_CEILING_R3 = 211999;
 const defs = [];
 /** check(id, what, how, fn) — `fn` returns true/false, {ok,note}, or "skip: …". `file` defaults
  *  to the route; pass a 5th argument to name a different subject file. */
 export const check = (id, what, how, fn, file) => defs.push({ id, what, how, fn, file });
 export const SUBJECT = "`app/api/editor/[...path]/route.ts`";
 
-export async function runAll({ ledger = false, quiet = false, only = null, allowForeign = false } = {}) {
+export async function runAll({ ledger = false, quiet = false, only = null, allowForeign = false, bail = false } = {}) {
   const seen = new Set();
   for (const d of defs) {
     if (seen.has(d.id)) throw new Error(`duplicate id ${d.id}`);
     seen.add(d.id);
     const n = Number(String(d.id).slice(1));
-    if (!allowForeign && (n < ID_FLOOR || n > ID_CEILING)) throw new Error(`${d.id} is outside this terminal's block`);
+    if (!allowForeign && !(n >= ID_FLOOR && n <= ID_CEILING) && !(n >= ID_FLOOR_R3 && n <= ID_CEILING_R3)) throw new Error(`${d.id} is outside this terminal's block`);
   }
   const rows = [];
   for (const d of defs) {
     if (only && d.id !== only) continue;
+    if (bail && rows.some((r) => r.mark === "❌")) break;   // mutation runs: the first red is enough
     let res, note = "";
     try { res = await d.fn(); } catch (e) { res = false; note = `threw: ${(e && e.message) || e}`.slice(0, 160); }
     let mark;

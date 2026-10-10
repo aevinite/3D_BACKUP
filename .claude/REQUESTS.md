@@ -1847,12 +1847,17 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 
 ## 2026-10-10 — sweep #10 T10 round 2 (owner's answers to the Part 4 list)
 
-- [ ] **The guest bill never says "Reprint"** — "this was for kot not bill so remove the thing" (reverses 2026-08-19; R62). KOT keeps DUPLICATE. Built; verify live.
-- [ ] **No on/off switch for a manager generating/printing a bill** (R63). Built; verify live.
-- [ ] **No row cap on reads that are already small; rule reworded** (R64) · **ban reason left as is** (R65). Recorded.
-- [ ] **Waiter tablet + kitchen can't revive a cancelled ticket** (item 12) · **quick-order discount judged before placing** (13) · **deleted category named in the Audit** (17) · **shared helpers name the restaurant** (15) · **leftover printer comments deleted** (16). Built; verify live.
+- [x] **The guest bill never says "Reprint"** — "this was for kot not bill so remove the thing" (reverses 2026-08-19; R62). KOT keeps DUPLICATE. Built; verified live on backup (PR #1473).
+- [x] **No on/off switch for a manager generating/printing a bill** (R63). Built; verified live on backup (PR #1473).
+- [x] **No row cap on reads that are already small; rule reworded** (R64) · **ban reason left as is** (R65). Recorded.
+- [x] **Waiter tablet + kitchen can't revive a cancelled ticket** (item 12) · **quick-order discount judged before placing** (13) · **deleted category named in the Audit** (17) · **shared helpers name the restaurant** (15) · **leftover printer comments deleted** (16). Built; verified live on backup (PR #1473).
 - [x] **Phone tiles show no table number** (19) — NOT a fault: the first screenshot had touch off; a real A35 shows every number.
-- [ ] **A 500–1000 phase re-test of the whole boundary at 6:00 AM, zero errors** — scheduled after this ships.
+- [x] **A 500–1000 phase re-test of the whole boundary, zero errors** — run NOW instead of 6:00 AM ("do the retest now remove schedule one"; the scheduled job was deleted). Round 3 below.
+
+## 2026-10-10 — sweep #10 T10 round 3 ("do the retest now" — every bit, zero errors)
+
+- [ ] **562 new checks (P211001–P211562), all ✅; 1,189 of 1,218 deliberate code changes caught; 1,632 of 1,633 lines run.** Ledger `T10-S10.md` → Round 3.
+- [ ] **A price typed with a minus sign is refused, never saved as positive** (item 20) — Editor → dish Price, parcel open price, ⚡ QO/P, + Add a dish. Built; verify live.
 
 ## 2026-10-10 — sweep #10 T39 round 3 (owner: "every single bit of area"; then "you can do the bin button big, but … it should look as professional aesthetic as it is right now")
 
