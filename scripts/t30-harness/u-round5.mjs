@@ -124,3 +124,9 @@ t("item 34: coverage.mjs creates node_modules/.cache before its reporter writes 
   const before = W.READS.length; await run(req({ "x-lfh-action-id": "r5-A" }, { lfh_user: "u" }), {});
   const claims = W.WRITES.filter((w) => w.table === "action_idempotency");
   t("item 35: a fresh tap's claim is one insert and one 'done' update — and it reads nothing back (no .select after the insert)", W.READS.length === before && claims.map((w) => w.op).join() === "insert,update" && !/\.insert\(\{ action_id: actionId, panel \}\)\.select\(/.test(src("lib/idempotency.ts")), claims.map((w) => w.op).join()); }
+
+// ── item 36: a hole in the report's data reads as ₹0, never as a crash ──
+{ const TF = await import("@/lib/taxFiling.ts");
+  t("item 36: netSalesOf / taxableValue / taxableFor of a missing row are 0, and exemptIsMaterial of missing totals is false", TF.netSalesOf(null) === 0 && TF.taxableValue(null, 5) === 0 && TF.taxableFor(null, 5, true) === 0 && TF.exemptIsMaterial(null, 5) === false);
+  const f = TF.buildFiling([{ t: 105 }, null, { t: 52.5 }], [{ label: "CGST", rate: 2.5 }, null, { label: "SGST", rate: 2.5 }], (r) => r.t);
+  t("item 36: buildFiling with a missing row and a missing tax line keeps every row in place (the hole is ₹0) and still adds up", f.rows.length === 3 && f.rows[1].tax === 0 && f.total === 158 && f.rows.reduce((a, r) => a + r.tax, 0) === 158 && f.rows.every((r) => Math.round(r.parts.reduce((a, x) => a + x, 0) * 100) === r.tax * 100), JSON.stringify(f.rows.map((r) => r.parts))); }

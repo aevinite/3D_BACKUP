@@ -96,15 +96,18 @@ export function allocateWhole(total: number, weights: number[]): number[] {
  * is no taxable supply at all — net sales is returned so the caller can label it honestly.
  * Shared so the screen, the export and the printed sheet cannot each derive it differently.
  */
+// A HOLE IN THE DATA MUST NOT COST THE REPORT (sweep #10 T30 round 5, item 36, 2026-10-10). These take
+// report rows, and a null among them threw out of the whole Tax report; billdoc.js has held the same rule
+// for the printed bill since sweep #8. A missing row reads as ₹0, exactly as a row of zeros would.
 export function taxableValue(row: { tax: number; subtotal: number; discount: number }, pct: number | null): number {
-  const net = (Number(row.subtotal) || 0) - (Number(row.discount) || 0);
+  const net = (Number(row?.subtotal) || 0) - (Number(row?.discount) || 0);
   if (!pct) return net;
-  return Math.min((Number(row.tax) || 0) / (pct / 100), net);
+  return Math.min((Number(row?.tax) || 0) / (pct / 100), net);
 }
 
 /** Net sales for one money row — the figure GST is charged on before any exempt split. */
 export const netSalesOf = (row: { subtotal: number; discount: number }): number =>
-  p2((Number(row.subtotal) || 0) - (Number(row.discount) || 0));
+  p2((Number(row?.subtotal) || 0) - (Number(row?.discount) || 0));
 
 /**
  * How big a `netSales − taxable` residue has to be before it means anything.
@@ -134,7 +137,7 @@ export function exemptIsMaterial(
 ): boolean {
   if (!pct) return false;
   const residue = Math.max(0, p2(netSalesOf(totals) - taxableValue(totals, pct)));
-  return residue > exemptTolerance(totals.paidOrders);
+  return residue > exemptTolerance(totals?.paidOrders);
 }
 
 /**
@@ -163,10 +166,10 @@ export type FilingRow<T> = { row: T; tax: number; parts: number[] };
 export function buildFiling<T>(rows: T[], lines: FilingLine[], taxOf: (row: T) => number): {
   rows: FilingRow<T>[]; columnTotals: number[]; total: number;
 } {
-  const raw = rows.map((r) => Number(taxOf(r)) || 0);
+  const raw = rows.map((r) => (r == null ? 0 : Number(taxOf(r)) || 0));   // a hole is ₹0 of tax (item 36)
   const total = Math.round(raw.reduce((a, x) => a + x, 0));
   const perRow = allocateWhole(total, raw);
-  const out = rows.map((row, i) => ({ row, tax: perRow[i], parts: splitTax(lines.map((l) => l.rate), perRow[i]) }));
+  const out = rows.map((row, i) => ({ row, tax: perRow[i], parts: splitTax(lines.map((l) => l?.rate), perRow[i]) }));
   const columnTotals = lines.map((_, j) => p2(out.reduce((a, r) => a + (r.parts[j] ?? 0), 0)));
   return { rows: out, columnTotals, total };
 }
