@@ -6,8 +6,8 @@
 //   +3  every READ on a restaurant's table names this restaurant
 // Run as a fully-granted French House manager in a world where BOTH restaurants hold the same
 // shapes of rows. A few doors are only reachable as the owner or the admin console — those are
-// driven as that person, said so in the row. Statements issued inside lib/removalAudit.ts and
-// lib/sessionClose.ts (other terminals' files) are named, with their reason, never passed silently.
+// driven as that person, said so in the row. (lib/removalAudit.ts and lib/sessionClose.ts were named
+// exemptions until round 2 scoped their statements, 2026-10-10 — now nothing is exempt but the dish id.)
 import { check, call } from "./lib.mjs";
 import { ENDPOINTS, fullWorld, TENANT_TABLES, ID } from "./endpoints.mjs";
 
@@ -24,21 +24,6 @@ const REACH = {
 // Statements that are not this file's, or that are deliberate. Keyed `label|op:table`.
 const EXEMPT = {
   "edit a dish|select:menu_items": "a dish id is the GLOBAL key: the create checks it is free for every restaurant, and the edit reads the id's owner and refuses another restaurant's dish (409)",
-  "give a discount|select:sessions": "lib/removalAudit.ts reads the bill number by session id (the session came from this restaurant's order)",
-  "remove one dish|select:sessions": "lib/removalAudit.ts — as above",
-  "cancel a ticket|select:sessions": "lib/removalAudit.ts — as above",
-  "close a table|select:sessions": "lib/removalAudit.ts — as above",
-  "close a table|select:orders": "lib/sessionClose.ts reads the party's orders by session id, after proving the session is this restaurant's",
-  "close a table|update:orders": "lib/sessionClose.ts — as above",
-  "close a table|update:sessions": "lib/sessionClose.ts — as above",
-  "close a table|update:session_members": "lib/sessionClose.ts — as above",
-  "delete one bill (admin only)|select:sessions": "lib/removalAudit.ts — as above",
-  "delete a ticket (admin only)|select:sessions": "lib/removalAudit.ts — as above",
-  "settle on the house|select:sessions": "lib/removalAudit.ts — as above",
-  "park the bill on pay-later|select:orders": "lib/sessionClose.ts — the party is closed through the shared close, after its ownership check",
-  "park the bill on pay-later|update:orders": "lib/sessionClose.ts — as above",
-  "park the bill on pay-later|update:sessions": "lib/sessionClose.ts — as above",
-  "park the bill on pay-later|update:session_members": "lib/sessionClose.ts — as above",
 };
 const scopedTo = (s, rid) => (s.op === "insert" || s.op === "upsert")
   ? (Array.isArray(s.patch) ? s.patch : [s.patch]).every((x) => x && x.restaurant_id === rid)

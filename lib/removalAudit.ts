@@ -120,8 +120,10 @@ async function snapshotOrder(rid: string, orderId: string): Promise<Record<strin
     // a bill — so resolve them into the snapshot rather than leaving a uuid nobody can use.
     let bill: Record<string, unknown> | null = null;
     if (o.session_id) {
+      // Named by restaurant as well as id (sweep #10 T10 round 2): the session id came off this
+      // restaurant's own order, but the WHERE clause is the only scope the service-role client has.
       bill = (await sb.from("sessions").select("bill_no, invoice_no, invoice_at, opened_at, cust_name, cust_phone")
-        .eq("id", String(o.session_id)).maybeSingle()).data as Record<string, unknown> | null;
+        .eq("id", String(o.session_id)).eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
     }
     const items = Array.isArray(o.items) ? (o.items as Record<string, unknown>[]) : [];
     return {

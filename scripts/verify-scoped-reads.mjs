@@ -84,13 +84,9 @@ const EXEMPT = {
   "lib/printSetupCode.ts": [
     ['.eq("id", made.id)', "updates the print_agents row this function itself just created, by its own primary key"],
   ],
-  "lib/removalAudit.ts": [
-    ['.eq("id", Stri', "reads the bill numbers of the session the caller is already acting on, to write them into the audit row"],
-  ],
-  "lib/sessionClose.ts": [
-    ['.eq("session_id", sessionId)', "the session is proved to belong to ctx.restaurantId at the top of closeSession() — required, not optional, since 2026-08-31"],
-    ['.eq("id", sessionId)', "same: the ownership check has already run for this session id"],
-  ],
+  // lib/removalAudit.ts and lib/sessionClose.ts LEFT this list on 2026-10-10 (sweep #10 T10 round 2,
+  // the owner's "you decide for good of my project"): their statements name the restaurant now, so
+  // the allowance they had would only hand cover to the next unscoped read in those files.
 };
 
 const files = readdirSync(join(ROOT, "lib")).filter((f) => /\.tsx?$/.test(f)).map((f) => `lib/${f}`);

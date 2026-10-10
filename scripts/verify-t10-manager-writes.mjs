@@ -10,9 +10,11 @@
 //   3  an OWNER's settings save cannot write a module's admin rungs (`modules`, `*_owner_control`,
 //      `*_enabled`) or the admin's delivery channels; the admin console still can.
 //   4  a whole-bill discount's %-limit is a share of the BILL, not of the bill's first ticket.
-//   5  the bill-printed comment no longer says a second copy is branded (R37/R38).
+//   5  the guest bill keeps no reprint marking: the bill-printed stamp door is gone (R62, round 2).
 //   6  a tip on a ticket that has gone is refused, not reported as saved.
 //   7  handling a rating and clearing a table name the restaurant in every WHERE clause, not only the id.
+//  13  (round 2) a quick-order discount over the limit is refused before the order exists.
+//  17  (round 2) a deleted category or tag is recorded in the Audit by its name, not its slug.
 import { readFileSync } from "node:fs";
 import { world, call } from "./sweep/t9s10/lib.mjs";
 
@@ -94,12 +96,13 @@ const twoTicketBill = () => world({
 }
 
 // ── 5 ─────────────────────────────────────────────────────────────────────────────────────
+// Round 2 (owner, 2026-10-10 — R62): the bill-printed stamp itself is gone; the comment it carried
+// went with it. verify:bill-reprint-is-silent pins the rest (label always "Print", both panels).
 {
-  const i = route.indexOf('if (a === "sessions" && c === "bill-printed")');
-  const above = route.slice(Math.max(0, i - 2200), i);
-  t(i > 0 && !/the document brands it|unbranded duplicate/.test(above) && /R38/.test(above),
-    "item 5 · the bill-printed comment no longer says a second copy is branded, and names the R38 rule",
-    "item 5 · the bill-printed comment promises a branded reprint again (R37 refused it)");
+  await world({ fix: { sessions: [{ id: "s1", restaurant_id: RID }] } });
+  const r = await call("POST", "sessions/s1/bill-printed", { body: {} });
+  t(r.status === 404 && !/c === "bill-printed"/.test(code),
+    "item 5 · the guest bill's 'printed' stamp door is gone (404) — no reprint marking on a bill (R62)", `item 5 · bill-printed answered ${r.status}`);
 }
 
 // ── 6 ─────────────────────────────────────────────────────────────────────────────────────
@@ -189,16 +192,37 @@ const noDbWords = (r) => r.status >= 400 && !/stub:/.test(r.text);
 }
 
 // ── 11 ────────────────────────────────────────────────────────────────────────────────────
-// The comment over the invoice door must say what the code does: print_invoice is not switchable.
+// Round 2 (owner, 2026-10-10 — R63): a manager can ALWAYS generate and print a bill; no switch, not even a dead one.
 {
   const i = route.indexOf('if (a === "sessions" && c === "invoice")');
   const head = route.slice(i, i + 1400);
-  t(i > 0 && !/genuinely bites/.test(head) && /NOT a switch any more/.test(head),
-    "item 11 · the invoice comment no longer claims 'Generate bills' is a live switch", "item 11 · the invoice comment claims a switch that does not exist");
+  const ci = code.indexOf('if (a === "sessions" && c === "invoice")');
+  t(i > 0 && /R63/.test(head) && !/managerCan\(g, rid, "print_invoice"\)/.test(code.slice(ci, ci + 1600)),
+    "item 11 · there is no 'Generate bills' switch on the invoice door, and the rule (R63) sits where it would go", "item 11 · a print_invoice switch is back on the invoice door (R63 refused it)");
   await world({ perms: { print_invoice: false }, fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "4", bill_no: 1 }] } });
   const r = await call("POST", "sessions/s1/invoice", { body: { cust_phone: "9876543210", cust_name: "A" } });
   t(r.status === 200, "item 11 · …and that is true: a stored print_invoice=false refuses nobody (the owner's 2026-08-01 rule)",
     `item 11 · print_invoice=false answered ${r.status} — the comment and the code disagree again`);
+}
+
+// ── 17 (round 2) ──────────────────────────────────────────────────────────────────────────
+{
+  const G = await world({ fix: { categories: [{ slug: "mains", restaurant_id: RID, name: { en: "Main course", hi: "मुख्य" } }], menu_items: [] } });
+  const r = await call("DELETE", "categories/mains", {});
+  const a = G.RPCS.find((c) => c.name === "lfh_record_removal");
+  t(r.status === 200 && a && a.args.p_item_title === "category: Main course",
+    "item 17 · deleting a category records its NAME in the Audit ('category: Main course'), not its short code", `item 17 · the Audit recorded "${a && a.args.p_item_title}"`);
+}
+
+// ── 13 (round 2) ──────────────────────────────────────────────────────────────────────────
+for (const [amt, placed, what] of [[50, false, "₹50 off ₹200 at a 10% limit is refused BEFORE the order exists — nothing reaches the kitchen"], [20, true, "…and ₹20 (10%) is placed with its discount"]]) {
+  const G = await world({ accessConfig: { give_discounts: { limit: { manager: 10 } } }, settings: { take_orders_allowed: true },
+    rpc: { lfh_price_order: { ok: true, subtotal: 200, taxable_base: 200, total: 210 }, lfh_staff_place_order: { ok: true, order_id: "o1" } },
+    fix: { orders: [{ id: "o1", restaurant_id: RID, session_id: null, subtotal: 200, taxable_base: 200, mrp_amount: 0, status: "preparing" }] } });
+  const r = await call("POST", "order", { body: { table: "4", items: [{ id: "dal", qty: 1 }], discount: amt } });
+  const did = G.RPCS.some((c) => c.name === "lfh_staff_place_order");
+  t(placed ? (r.status === 200 && did) : (r.status === 403 && !did && /Nothing was sent/.test(r.text)),
+    `item 13 · ${what}`, `item 13 · ₹${amt} answered ${r.status}, order placed=${did}`);
 }
 
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);

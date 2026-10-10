@@ -105,7 +105,7 @@ export async function closeSession(
   // unbounded read is silently capped at 1,000 — which here would mean closing a table while a
   // blocker sat past the cap, unseen.
   const blockers = must(await sb.from("orders").select("id,status,payment_status")
-    .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").limit(500));
+    .eq("session_id", sessionId).eq("restaurant_id", ctx.restaurantId).eq("archived", false).neq("status", "cancelled").limit(500));
   const block = closeBlock(blockers, force);
   if (block) return { ok: false, status: block.status, message: block.message, reason: block.reason };
 
@@ -116,10 +116,10 @@ export async function closeSession(
   // would silently stop recording walk-outs. Scoped to THIS session, never the bare table
   // number, which could hit a different party that later sat at the same table.
   const owedRows = must(await sb.from("orders").select("id,total,discount,subtotal,tax,khata_at")
-    .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid")
+    .eq("session_id", sessionId).eq("restaurant_id", ctx.restaurantId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid")
     .limit(500));
 
-  const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", sessionId).select());
+  const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", sessionId).eq("restaurant_id", ctx.restaurantId).select());
   const sess = row[0];
   if (sess) {
     if (owedRows.length) {
@@ -161,14 +161,14 @@ export async function closeSession(
     // orders (khata_at set) — a parked tab is money-to-collect-later, not a cancellation.
     // archived_at/cancelled_at start the 30-min "restore to floor" grace window (mig 112).
     must(await sb.from("orders").update({ status: "cancelled", archived: true, archived_at: nowIso(), cancelled_at: nowIso() })
-      .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid").is("khata_at", null).select());
+      .eq("session_id", sessionId).eq("restaurant_id", ctx.restaurantId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid").is("khata_at", null).select());
     must(await sb.from("orders").update({ archived: true, archived_at: nowIso() })
-      .eq("session_id", sessionId).eq("archived", false).select());
+      .eq("session_id", sessionId).eq("restaurant_id", ctx.restaurantId).eq("archived", false).select());
     // The round is over — RELEASE the head + every partner from this session, so the
     // table isn't left "connected" to the last party. A new party re-joins fresh on
     // the next open/scan. (owner, 2026-06-18)
     must(await sb.from("session_members").update({ removed: true })
-      .eq("session_id", sessionId).eq("removed", false).select());
+      .eq("session_id", sessionId).eq("restaurant_id", ctx.restaurantId).eq("removed", false).select());
     // Also clear any TABLE-scoped guest signals the close trigger misses: a waiter-call
     // left by a guest who never joined a session (session_id = NULL, from
     // lfh_call_waiter_table) is keyed to the table only, so the mig-020 close trigger

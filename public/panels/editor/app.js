@@ -3490,7 +3490,6 @@ function ordersPreviousHtml(today, previous) {
       collected, owed: Math.max(0, Math.round((m.total - collected) * 100) / 100),
       partPaid: paidOrders.length > 0 && paidOrders.length < liveOrders.length,
       parts, methods,
-      printedAt: o0.bill_printed_at || null,
       kots: g.map((o) => o.kot_no).filter((x) => x != null),
       disc: m.disc || 0,
     };
@@ -3510,7 +3509,7 @@ function ordersPreviousHtml(today, previous) {
     collected: (p.paid && p.status !== "cancelled") ? (Number(p.total) || 0) : 0,
     owed: (p.paid || p.status === "cancelled") ? 0 : (Number(p.total) || 0),
     partPaid: false, parts: [], methods: p.payment_method ? [p.payment_method] : [],
-    printedAt: p.printed_at || null, kots: p.kot_no != null ? [p.kot_no] : [], disc: Number(p.discount) || 0,
+    kots: p.kot_no != null ? [p.kot_no] : [], disc: Number(p.discount) || 0,
   });
   // When searching, union in the server-side history results (state.billHistRows) so any
   // bill INSIDE the allowed window is findable even past the local rows (owner, 2026-07-03;
@@ -3883,7 +3882,7 @@ function billPaidHtml(b, m) {
 // Only the actions this bill's state can take — never a button that would do nothing.
 function billReceiptActions(b, st) {
   const key = b.key;
-  const printLbl = b.printedAt ? "\u{1F5A8} Reprint" : "\u{1F5A8} Print";
+  const printLbl = "\u{1F5A8} Print";   // the guest bill never says "Reprint" (owner, 2026-10-10 — R62)
   const btns = [];
   if (st === "cancelled") btns.push(`<button class="ord-btn ghost" data-print-group="${esc(key)}">${printLbl}</button>`);
   else if (st === "settled" || st === "onhouse") {
@@ -6236,55 +6235,16 @@ new MutationObserver(() => {
 // combineBillLines(): one bill line per dish — shared, see /panels/billdoc.js.
 function combineBillLines(entries) { return LFH_BILLDOC.combineBillLines(entries); }
 
-// ── "Print" the first time, "Reprint" after that ────────────────────────────────────────────
-// Owner, 2026-08-19: "after once print the button will just show reprint instead of print,
-// works same". ONE reader for the whole panel, because the word has to agree on every screen
-// that can print the same bill — the Tables floor card, the bill popup, and the Bills record.
-//
-// The answer comes off the BILL (sessions.bill_printed_at, mig 333, which rides on every order
-// row), never off this device: the manager prints at the till and the waiter's tablet must read
-// "Reprint" too. WORKS THE SAME — same handler, same sheet, no extra question, and nothing
-// recorded. REJECTED (owner, 2026-08-19): do not turn this into a warning, a confirm, a badge,
-// a count, or an Audit row — "it's not any kind of problem which needs to be audited".
-// Bills this device has printed in this session, by session id. The server row is the real
-// answer, but a refresh that lands between the print and the stamp coming back would re-render
-// the button as "Print" on a bill whose paper is already in the guest's hand — which is exactly
-// the moment the word matters. So what we KNOW locally is remembered and never un-known.
-const _billPrintedHere = new Set();
-function billPrintedBefore(sess, os) {
-  if (sess && sess.bill_printed_at) return true;
-  if ((os || []).some((o) => o && o.bill_printed_at)) return true;
-  const sid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
-  return !!sid && _billPrintedHere.has(sid);
-}
-// The label a print button wears. `suffix` is the trailing word some buttons carry ("bill"),
-// so "🖨 Print bill" becomes "🖨 Reprint bill" and nothing else about the button changes.
-// data-bill-print-btn is what lets the label flip the instant paper comes out, without a
-// re-render that would rebuild the card under the finger that just tapped it.
-function billPrintLabel(sess, os, suffix) {
-  // WHICH bill this label is about, so markBillPrintedLocally relabels this button and no other
-  // (see its note). Absent for a bill with no session yet, which is right: nothing can relabel it.
-  const _lblSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean) || "";
-  return `<span data-bill-print-btn${_lblSid ? ` data-bill-print-sid="${esc(_lblSid)}"` : ""}>🖨 ${billPrintedBefore(sess, os) ? "Reprint" : "Print"}${suffix ? " " + suffix : ""}</span>`;
-}
-// First print just happened → say so on the buttons already on screen, and on the rows this
-// panel is holding, so nothing waits for the next refresh to catch up.
-function markBillPrintedLocally(sid) {
-  if (!sid) return;
-  _billPrintedHere.add(sid);
-  const at = new Date().toISOString();
-  (state.data.orders || []).forEach((o) => { if (o && o.session_id === sid && !o.bill_printed_at) o.bill_printed_at = at; });
-  ((state.board && state.board.sessions) || []).forEach((s) => { if (s && s.id === sid && !s.bill_printed_at) s.bill_printed_at = at; });
-  // ONLY THIS BILL'S BUTTON (sweep #8 T6, 2026-09-03). This relabelled EVERY print button on the
-  // page, and Bills -> Live draws one per running table: printing T5's bill turned T9's untouched
-  // "Print" into "Reprint" until the next repaint. "Reprint" is a claim about one specific bill
-  // ("paper for this one already exists"), so saying it over a bill nobody has printed is simply
-  // false -- and it is the button a manager reads to decide whether the guest already has a copy.
-  // The buttons carry the session they belong to now, so the relabel can find its own.
-  document.querySelectorAll(`[data-bill-print-btn][data-bill-print-sid="${CSS.escape(sid)}"]`).forEach((b) => {
-    // \b before Print, so a button that already reads "Reprint" is left alone.
-    b.textContent = b.textContent.replace(/\bPrint\b/, "Reprint");
-  });
+// ── A GUEST BILL'S BUTTON ALWAYS SAYS "Print" ────────────────────────────────────────────────
+// REJECTED (owner, 2026-10-10): no "Reprint" marking on the guest BILL — not on the button, not as a
+// stamp, not anywhere. *"this was for kot not bill so remove the thing"* — a second copy of the
+// kitchen ticket says DUPLICATE (billdoc.js, kept), a guest asking for their bill again gets the same
+// bill with the same button. This reverses his 2026-08-19 ask ("after once print the button will just
+// show reprint instead of print"); see docs/REJECTED-IDEAS.md → R62. The per-device "printed here" set,
+// the relabel after printing and the POST /sessions/:id/bill-printed stamp went with it.
+// `sess` / `os` stay in the signature so the nine buttons that build their label here keep one door.
+function billPrintLabel(_sess, _os, suffix) {
+  return `<span data-bill-print-btn>🖨 Print${suffix ? " " + suffix : ""}</span>`;
 }
 // The window path, kept exactly as it was, in one place — so the helper path above can fall back to
 // it without a second copy of these six lines drifting from this one.
@@ -6320,10 +6280,7 @@ async function printBill(t, sess, os, opts = {}) {
   // `reprint: printedBefore` flag was passed here 2026-08-17 → 2026-08-19 and drew a
   // "Reprint · Duplicate" band; he removed it — "I don't even want the reprinted bill shown in
   // the bill". Don't pass a reprint flag from here again; billdoc.js no longer has one.
-  // `printedBefore` still matters, for the two things he DID ask for: the button on screen reads
-  // "Reprint" once paper exists (billPrintedBefore(), used by every print button in this panel),
-  // and the first print is stamped once so every device agrees which one was the first.
-  const printedBefore = !!((sess && sess.bill_printed_at) || (os || []).some((o) => o && o.bill_printed_at));
+  // (There was a `printedBefore` here that fed the bill's "Reprint" button — gone with it, R62.)
   const money = billMath(os);
   // THE GUEST'S POINTS GO ON THE PAPER THIS PANEL PRINTS TOO (mig 401) — the twin of the same
   // three lines on the waiter tablet. A restaurant whose paper is owned by a computer gets this
@@ -6337,28 +6294,12 @@ async function printBill(t, sess, os, opts = {}) {
     logo: billLogo(), parcel: !!opts.parcel, autoPrint: true,
     loyalty,
   }));
-  // Tell the server this bill has now been on paper, so every panel's button reads "Reprint" from
-  // here on. Idempotent server-side, so calling it after every print is free and a retry is safe;
-  // fire-and-forget because a failed stamp must never stop a guest getting their bill.
-  // It writes NOTHING to the Audit, on purpose (owner, 2026-08-19: "I don't want reprinted bill
-  // shown anywhere like on audit … it's not any kind of problem which needs to be audited").
+  // No "this bill was printed" stamp any more (owner, 2026-10-10 — R62): it existed only to turn the
+  // button into "Reprint", and the guest bill keeps no reprint marking at all.
+  // The bill's session is still needed below — it is what the "a computer owns the bills" path sends.
+  // (It used to be declared inside the stamp block; deleting that block without this line made the
+  // helper path throw on every print — caught by verify:static before it shipped.)
   const printedSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
-  // Remembered the moment the paper goes out, NOT when the server answers: the window above is
-  // already written, so this bill has been printed whatever the network does next.
-  if (printedSid) _billPrintedHere.add(printedSid);
-  if (printedSid && !printedBefore) {
-    try {
-      api("POST", `/sessions/${printedSid}/bill-printed`)
-        .then(() => {
-          // Mark the rows this screen is already built from, so the button beside the person's
-          // finger flips to "Reprint" now rather than after the next refresh (owner, 2026-08-19:
-          // "after once print the button will just show reprint instead of print, works same").
-          markBillPrintedLocally(printedSid);
-          if (sess) sess.bill_printed_at = new Date().toISOString();
-        })
-        .catch(() => {});
-    } catch (e) { /* offline or blocked — the paper still came out, which is what matters */ }
-  }
 
   // ── A COMPUTER MAY OWN THIS BILL (mig 341) ────────────────────────────────────────────────────
   // When the address book names a printer for bills, the bill goes into the basket and the helper on

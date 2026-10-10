@@ -731,7 +731,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // this panel (or the shared bill document it hands rows to) reads a session column that is
         // not on this list. The settings row a few lines up deliberately keeps `*` for the opposite
         // reason — that one really is read wholesale, dozens of columns at a time.
-        const SESSION_COLS = "id, table_number, status, opened_at, closed_at, bill_no, invoice_no, invoice_at, invoice_voided, discount, discount_note, cust_name, cust_phone, bill_printed_at";
+        const SESSION_COLS = "id, table_number, status, opened_at, closed_at, bill_no, invoice_no, invoice_at, invoice_voided, discount, discount_note, cust_name, cust_phone";
         const sessions = must(await sb.from("sessions").select(SESSION_COLS).neq("status", "closed").eq("restaurant_id", rid).eq("table_number", tbl));
         const sids = (sessions || []).map((s: { id: string }) => s.id);
         const [members, calls, requests] = await Promise.all([
@@ -1584,43 +1584,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(Array.isArray(data) ? data[0] : data);
     }
 
-    // sessions/:id/bill-printed — record that this table's bill went to the printer (mig 333).
-    //
-    // THE PANEL HAS BEEN CALLING THIS SINCE THE DAY IT LEARNED TO PRINT, AND IT WAS NOT HERE
-    // (sweep #8 T10, 2026-09-03). `printTableBill()` in public/panels/tablet/app.js posts
-    // `/sessions/<id>/bill-printed` right after it opens the bill — the branch only ever existed on
-    // /api/editor, so every one of those posts fell through to "unknown POST endpoint" and the
-    // `.catch(() => {})` beside it swallowed the 404 without a word.
-    //
-    // What that cost, in the owner's own terms. His rule (2026-08-19) is *"after once print the
-    // button will just show reprint instead of print"*, and the tablet's own comment promises the
-    // fact travels: "the manager printing at the till makes THIS screen say Reprint a minute later".
-    // It only travelled ONE WAY. A waiter printing from the handheld stamped nothing, so the flag
-    // lived in `_billPrintedHere`, an in-memory Set — the label reverted to "Print" on that same
-    // tablet after a reload, and it never said "Reprint" on the manager's till or on a second
-    // waiter's device at all. A guest asking for their bill twice is service, not an incident (that
-    // is why there is no duplicate band and no audit row) — but the two panels have to agree about
-    // whether paper has already been produced, or the till reprints a bill it thinks is the first.
-    //
-    // A BYTE-FOR-BYTE TWIN of the editor's own branch, on purpose: same read, same idempotent
-    // answer when it is already stamped, same 404 wording, same one-way stamp. Two routes writing
-    // one column with two rules is how the panels start disagreeing.
-    //   · NO tri-state gate, exactly like its twin and like `print/send` above — this is a record
-    //     that paper came out, not a permission. The waiter-section gate further up already
-    //     resolved the table from the session (lib/tableOfAction line 120), and `.eq(restaurant_id)`
-    //     is the tenant boundary, since sb is service-role.
-    //   · Stamped ONCE and never moved: the first print stays the first print.
-    //   · Answering ok() when it is already stamped is what lets the panel call it after every
-    //     print with no guard of its own, and makes a retry free.
-    if (a === "sessions" && c === "bill-printed") {
-      const ownsPrint = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
-      if (!ownsPrint) return err("That bill isn't for this restaurant.", 404);
-      if (ownsPrint.bill_printed_at) return ok({ ok: true, id: b, bill_printed_at: ownsPrint.bill_printed_at, reprint: true });
-      const atPrint = new Date().toISOString();
-      const upPrint = await sb.from("sessions").update({ bill_printed_at: atPrint }).eq("id", b).eq("restaurant_id", rid);
-      if (upPrint.error) throw pgError(upPrint.error);
-      return ok({ ok: true, id: b, bill_printed_at: atPrint, reprint: false });
-    }
+    // ── sessions/:id/bill-printed IS GONE (owner, 2026-10-10 — docs/REJECTED-IDEAS.md → R62) ──────
+    // It stamped sessions.bill_printed_at the first time a guest bill was printed, and that stamp did
+    // exactly one thing: it turned the bill's button into "Reprint". The owner removed the reprint
+    // marking from the guest bill — *"this was for kot not bill so remove the thing"* — so the stamp
+    // has no reader left (the manager route's twin went in the same change). The column stays in the table, unread: dropping it would be a schema
+    // change for nothing, and an old value must not be able to bring the word back.
 
     // tables/:t/restart — clear the round off the floor but KEEP the table open:
     // every active order on the CURRENT party's session becomes served + archived
@@ -1846,6 +1815,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Only order_id + session_id are needed below; the client discards the body → no full row.
       // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
       // this is the only tenant boundary — stops a foreign dish/order id being advanced.
+      // Item 12 (sweep #10 T10 round 2): ask the dish's ORDER first — this handler rewrites that order's
+      // status from its dishes below, so on a cancelled ticket it would quietly revive it.
+      { const own = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
+        if (own && own.order_id) {
+          const ord = (await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
+          if (ord && ord.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409);
+        } }
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id, session_id"));
       const item = updated[0];
       // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS (sweep 2026-08-05). The update is scoped by
@@ -1873,8 +1849,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // orders/:id/accept — accept a (often phone/online) order: everything not yet
     // served → preparing, so it shows up on the kitchen pass. Mirrors the kitchen.
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't there anymore — refresh.", 404);
+      if (cur.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409); // sweep #10 T10 round 2, item 12 — a cancelled ticket comes back only through Restore (the manager route's VOIDED_MSG rule)
       const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: client re-fetches → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));

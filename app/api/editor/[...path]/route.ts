@@ -1568,12 +1568,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // whether it's invoiced/locked (invoice lives on the session, not the order).
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
       if (sids.length) {
-        // `bill_printed_at` rides along (mig 333) so the panel knows a bill has ALREADY been on
-        // paper and can label its button "Reprint" instead of "Print". It has to come from the row,
-        // not from the device that printed: the case that matters is the manager printing at the
-        // till and a WAITER reprinting from the tablet a minute later, whose own screen would
-        // otherwise still say "Print". REJECTED (owner, 2026-08-19): this must NOT put anything on
-        // the paper or in the Audit — it changes one word on one button, nothing else.
+        // (`bill_printed_at` used to ride along here for the bill's "Reprint" button — gone, R62.)
         const [sessQ, memQ, chainQ, payQ] = await Promise.all([
           // `invoice_reopen_count` (mig 407) rides along so a bill that is LIVE again can still
           // show it was reopened — invoice_voided only covers the state while it is on the floor.
@@ -1581,7 +1576,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           // alone — safe by construction, because `sids` came from a restaurant-scoped orders read, but
           // the rule here is that every read names its restaurant and its bound, so that no future change
           // to how `sids` is built can quietly widen them. The round-2 query audit found these two.
-          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,invoice_reopen_count,bill_no,cust_name,cust_phone,bill_printed_at").eq("restaurant_id", rid).in("id", sids).limit(sids.length),
+          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,invoice_reopen_count,bill_no,cust_name,cust_phone").eq("restaurant_id", rid).in("id", sids).limit(sids.length),
           sb.from("session_members").select("session_id,name,role").eq("restaurant_id", rid).in("session_id", sids).eq("role", "owner").limit(2000),
           // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
           // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
@@ -1644,8 +1639,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             // who the BILL is made out to (captured at invoice time, mig 227). Kept apart
             // from customer_name below, which is the guest's own name on their phone.
             o.bill_cust_name = s.cust_name; o.bill_cust_phone = s.cust_phone;
-            // Has this bill already been on paper? (mig 333) — the BUTTON then says "Reprint".
-            o.bill_printed_at = s.bill_printed_at;
             // The verification line the bill prints (mig 332). Named the way billdoc's billData
             // reads them off the session, so no panel has to reshape anything.
             const ch = chainMap[o.session_id];
@@ -3628,6 +3621,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           return NextResponse.json({ error: "This looks identical to an order you just sent.", duplicateWarning: true }, { status: 409 });
         }
       }
+      // ── A QUICK-ORDER DISCOUNT IS JUDGED BEFORE THE ORDER EXISTS (sweep #10 T10 round 2, item 13) ──
+      // The power and the role's %-cap used to be checked only AFTER lfh_staff_place_order had run, so a
+      // refused discount answered 403 for an order that was already on the kitchen's screen — the panel
+      // handed the cart back as "not sent", and sending it again put the same food in twice. The rule
+      // for the parcel two branches down — "a request that is going to be refused must be refused before
+      // it creates anything" — now holds here too. The figures come from lfh_price_order, the SAME
+      // read-only pricer the order is placed with, so the base is the one the order will carry. It is
+      // asked only when a discount was typed; the check after placing stays as the backstop.
+      { const preDisc = Number(body?.discount);
+        if (Number.isFinite(preDisc) && preDisc > 0) {
+          if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
+          const priced = (await sb.rpc("lfh_price_order", { p_items: items, p_restaurant_id: rid })).data as
+            (OrderMoney & { ok?: boolean }) | null;
+          if (priced && priced.ok !== false) {
+            const preBase = discountBaseOf(priced, effectiveTaxRate(await taxSettings(rid)));
+            const preCap = await discountCapPct(rid, discountRole(g.user?.role));
+            if (overDiscountCap(preDisc, preBase, preCap)) return err(`That discount is over your ${preCap}% limit — ask the owner. Nothing was sent.`, 403);
+          }
+        } }
       const { data, error } = await sb.rpc("lfh_staff_place_order", {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
         p_restaurant_id: rid,
@@ -3981,28 +3993,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, id: b, paid: true });
     }
 
-    /* sessions/:id/bill-printed — record that this TABLE's bill went to the printer (mig 333).
-       The exact shape of platform/:id/printed below, one table across, and for the same stated
-       reason: the fact has to live on the BILL, not on the device that printed it, because the
-       manager prints at the till and a waiter may reprint from the tablet a minute later — that
-       second device has no other way to know paper already exists.
-       Stamped ONCE and never moved: the first print stays the first print. Deliberately not
-       reversible from here. Answering ok() when it is already stamped means a panel can call it
-       after every print without a guard of its own, and a retry is free.
-       WHAT IT IS FOR, AND WHAT IT IS NOT (corrected by sweep #10 T10, item 5): it ONLY lets the
-       button read "Reprint" instead of "Print". The second copy is NOT branded — the owner removed the "Reprint · Duplicate" band on
-       2026-08-19 (docs/REJECTED-IDEAS.md, the row beside R38) — and a reprint is NOT recorded
-       anywhere — R38. This comment used to promise that every later copy carries a reprint brand — the one
-       sentence most likely to make someone rebuild the band. See docs/REJECTED-IDEAS.md R38 and the row above it. */
-    if (a === "sessions" && c === "bill-printed") {
-      const owns = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
-      if (!owns) return err("That bill isn't for this restaurant.", 404);
-      if (owns.bill_printed_at) return ok({ ok: true, id: b, bill_printed_at: owns.bill_printed_at, reprint: true });
-      const at = new Date().toISOString();
-      const up = await sb.from("sessions").update({ bill_printed_at: at }).eq("id", b).eq("restaurant_id", rid);
-      if (up.error) throw new Error(up.error.message);
-      return ok({ ok: true, id: b, bill_printed_at: at, reprint: false });
-    }
+    // ── sessions/:id/bill-printed IS GONE (owner, 2026-10-10 — docs/REJECTED-IDEAS.md → R62) ──────
+    // It stamped sessions.bill_printed_at the first time a guest bill was printed, and that stamp did
+    // exactly one thing: it turned the bill's button into "Reprint". The owner removed the reprint
+    // marking from the guest bill — *"this was for kot not bill so remove the thing"* — so the stamp
+    // has no reader left (the waiter tablet's twin went in the same change). The column stays in the table, unread: dropping it would be a schema
+    // change for nothing, and an old value must not be able to bring the word back.
 
     // platform/:id/printed — record that this order's customer bill went to the printer
     // (mig 256). Together with `paid` this is what decides when a Parcel tile leaves the
@@ -4530,16 +4526,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // bill). Server-authoritative. A RE-issue (after a void) carries a reason and is REFUSED
     // once the bill is settled (mig 189 enforces both — the invoice locks at settlement).
     if (a === "sessions" && c === "invoice") {
-      // "Generate bills" is NOT a switch any more, and this line does not refuse anyone today
-      // (corrected by sweep #10 T10, item 11 — the comment said the opposite). The owner took
-      // take_orders / mark_paid / print_invoice / table_tags / table_ops out of the grant list on
-      // 2026-08-01 ("how the floor RUNS; a restaurant that switched them off could not trade"), so
-      // managerGrantValue() answers ON for print_invoice permanently and a stored
-      // manager_permissions.print_invoice is ignored — exactly the mark_paid case written out at the
-      // on-the-house gate. It is a guard in waiting, kept so that if a row ever returns every bill
-      // door honours it the same day. What actually decides who may issue a number is the manager
-      // gate itself, the customer rule below and lfh_generate_invoice's own refusals.
-      if (!(await managerCan(g, rid, "print_invoice"))) return permDenied("generate bills");
+      // REJECTED (owner, 2026-10-10) — docs/REJECTED-IDEAS.md → R63: there is NO switch that stops a
+      // manager generating or printing a bill, and there must not be one. *"manager will always have
+      // option to print bill … there should [not] be option to turn on and off."* A `managerCan(…,
+      // "print_invoice")` line sat here as a "guard in waiting" for a row that might return; it could
+      // never refuse anyone (print_invoice left the grant list on 2026-08-01) and it invited exactly
+      // that row back, so it is gone. Who may issue a number is decided by the manager gate itself,
+      // the customer rule below and lfh_generate_invoice's own refusals.
       // lfh_generate_invoice has no tenant param — confirm the session is THIS restaurant's
       // first (service-role bypasses RLS; a foreign session id must not get an invoice).
       const ownsGen = must(await sb.from("sessions").select("id, table_number, bill_no").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
@@ -5333,6 +5326,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tagRow = tagRows.find((r) => r.tag && COMP_TAGS.includes(r.tag)) || null;
       if (!tagRow) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
       const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
+      // REJECTED (owner, 2026-10-10) — docs/REJECTED-IDEAS.md → R64: no `.limit()` on a read that is
+      // already ONE table's or one party's live orders (this one, its khata and restart twins, and
+      // the filter-delete tag read). *"we don't need this don't suggest it … i mean the necessary
+      // one"* — a row cap belongs on a list that can grow, not on every read.
       let oq = sb.from("orders").select("id,subtotal,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
       oq = openSess ? oq.eq("session_id", openSess.id) : oq.eq("table_number", t);
       const orders = must(await oq) as { id: string; subtotal: number; status: string; payment_status: string }[];
@@ -5483,6 +5480,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (m?.device_id) device = m.device_id;
         if (!phone && m?.phone) phone = m.phone;
       }
+      // REJECTED (owner, 2026-10-10) — docs/REJECTED-IDEAS.md → R65: the ban reason is not trimmed or
+      // capped. Offered as sweep #10 T10 item 18; he answered "dn't do 18".
       const row = must(await sb.from("blocklist").insert({ phone, table_number: table, device_id: device, member_id: memberId, reason: body.reason || "banned", restaurant_id: rid }).select())[0];
       // Kick the banned guest from their seat in the SAME request (B23) — the manager panel used to
       // do this as a separate client call, so a network blip could leave them banned-but-still-seated.
@@ -5575,17 +5574,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, attempts: r.attempts });
     }
 
-    // ── SETTING THE PRINTERS UP, FROM THE COMPUTER THAT HAS THEM (mig 367) ──────────────────────
-    //
-    // Every SETUP verb that used to live below is deleted (owner, 2026-09-14); only the test print
-    // remains, and the refusal above catches anything else that arrives at this path.
-    // The screen hides the buttons too, but that is decoration: this is the gate.
-    //
-    // AND EVERY VERB IS SCOPED TO THIS BROWSER'S OWN COMPUTER. A person with the permission can set
-    // up the machine they are sitting at and route paper to it; they cannot rename, re-code or
-    // remove another restaurant's machine, or another machine in their own restaurant. Anything
-    // wider than "this computer" stays with the admin, which is what the owner asked for — the
-    // device does the setting up, Aevidine keeps the whole board.
     // ── EMPTY THE QUEUE THAT HAS PILED UP (owner, 2026-09-13) ───────────────────────────────────
     //
     // Deliberately ABOVE the print_setup gate: this is its own permission (accessTree → print_clear,
@@ -5621,41 +5609,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     if (a === "printing") {
-      // ── EVERY SETUP VERB IS CLOSED HERE (owner, 2026-09-14: "that setup will be done by me only") ──
-      // The panel's Printing section no longer draws any of these controls — and a screen hiding a
-      // button has never been the gate in this product, so the door is shut on the server. The one
-      // verb that is NOT setup keeps working: `queue/clear` is `print_clear`, a different amount of
-      // trust that he asked for by name on 2026-09-13, and it is handled ABOVE this line.
-      //
-      // The `test` verb is allowed through: a test print changes nothing — no route, no switch, no
-      // row — and seeing whether the printer is alive is the whole point of the status screen.
-      // ── ONLY THE TEST PRINT LIVES HERE NOW (owner, 2026-09-14) ─────────────────────────────
-      // `setup-code`, `this-computer`, `unlink` and `route` were DELETED from this block, not left
-      // behind a refusal: a verb that still mints a printing credential, or still rewrites which
-      // printer gets which paper, is a door — and a door nobody can currently open is still a door.
-      // All four live on /aevinite/printing. His ruling: **"That setup will be done by me only."**
-      //
-      // The refusal stays anyway, for anything that arrives at this path that is not the test — a
-      // stale tab, a replayed outbox write, a future verb somebody adds here by habit.
+      // ── ONLY THE TEST PRINT LIVES HERE (owner, 2026-09-14: "that setup will be done by me only") ──
+      // `setup-code`, `this-computer`, `unlink`, `route` and `mode` were deleted; all printer setup is on
+      // /aevinite/printing. `queue/clear` (print_clear) is handled above. Anything else that arrives at
+      // this path — a stale tab, a replayed outbox write — is refused below.
       const b0 = String(path[1] || "");
       if (b0 !== "test") return permDenied("set the printers up — Aevidine does that");
       const dv = deviceIdFrom(req);
-
-
       if (!dv) return err("This browser has no device id yet — reload the page and try again.", 400);
-
-
-
-// ── THE "mode" VERB IS GONE HERE TOO (owner, 2026-08-31) ─────────────────────────────────
-      // Same reason as the admin console: there is no mechanism left to choose. A manager who wants
-      // the slips on their own screen names themselves on the kitchen-slip line below ("a screen"),
-      // which is the same act with one fewer step and no stored copy to contradict it.
-
-            // ── who prints one kind of paper ──────────────────────────────────────────────────────────
-      // One line at a time, and only three answers: this computer, a screen, or nobody. A screen
-      // route from here always means THIS panel and THIS person — narrowing it to somebody else's
-      // screen is an admin act, and letting a manager do it from their own settings would be a way
-      // to move another person's paper without telling them.
 
       // ── A REAL SAMPLE OF A REAL DOCUMENT, ON THE ROUTE THAT PRINTS IT (owner, 2026-09-14) ─────
       //
@@ -6787,7 +6748,12 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       if (a === "filters" && !(await menuSubAllowed(g, rid, "manage_filters"))) return permDenied("manage filters");
       // What it was CALLED, read before it goes — an Audit row saying "dish: 7f3c-…" names
       // nothing a person recognises (2026-08-02).
-      const gonesTitle = ((await sb.from(t.name).select("title").eq(t.key, id).eq("restaurant_id", rid).maybeSingle()).data as { title?: string } | null)?.title || "";
+      // A dish has a `title`; a category or a tag has a per-language `name` and NO title column — so
+      // asking every kind for "title" made the category/tag read fail and the Audit fall back to the
+      // slug ("category: mains" for "Main course"). Fixed by sweep #10 T10 round 2, item 17.
+      const gone = (await sb.from(t.name).select(a === "items" ? "title" : "name").eq(t.key, id).eq("restaurant_id", rid).maybeSingle()).data as { title?: string; name?: unknown } | null;
+      const nm = gone && typeof gone.name === "object" && gone.name ? gone.name as Record<string, unknown> : null;
+      const gonesTitle = String(gone?.title || (nm ? (nm.en || Object.values(nm).find((v) => String(v ?? "").trim())) : gone?.name) || "").slice(0, 80);
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
       //

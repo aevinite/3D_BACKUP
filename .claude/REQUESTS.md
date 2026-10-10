@@ -1844,3 +1844,12 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [x] **The console tells the truth about Suspend** (item 38) — staff apps stop, owner + admin keep access; applies at once. VERIFIED live.
 - [x] **The alerts header matches the code** (item 39) and **the retired per-panel switch is deleted** (item 40). VERIFIED (guards).
 - [x] **Checked again until zero** — four mutation passes (720 breaks), 54 gaps closed, the last pass found none.
+
+## 2026-10-10 — sweep #10 T10 round 2 (owner's answers to the Part 4 list)
+
+- [ ] **The guest bill never says "Reprint"** — "this was for kot not bill so remove the thing" (reverses 2026-08-19; R62). KOT keeps DUPLICATE. Built; verify live.
+- [ ] **No on/off switch for a manager generating/printing a bill** (R63). Built; verify live.
+- [ ] **No row cap on reads that are already small; rule reworded** (R64) · **ban reason left as is** (R65). Recorded.
+- [ ] **Waiter tablet + kitchen can't revive a cancelled ticket** (item 12) · **quick-order discount judged before placing** (13) · **deleted category named in the Audit** (17) · **shared helpers name the restaurant** (15) · **leftover printer comments deleted** (16). Built; verify live.
+- [x] **Phone tiles show no table number** (19) — NOT a fault: the first screenshot had touch off; a real A35 shows every number.
+- [ ] **A 500–1000 phase re-test of the whole boundary at 6:00 AM, zero errors** — scheduled after this ships.

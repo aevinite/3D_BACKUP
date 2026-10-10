@@ -88,3 +88,20 @@ the file (lines ~3,442–end on 2026-10-09). Ledger: `LEDGER/T10-S10.md`. Each i
   alone after its ownership check (block A's named exemptions).
 - The waiter tablet's and the kitchen's `orders/:id/accept`, and the tablet's `items/:id/status`, can
   revive a cancelled ticket the same way item 1 fixed here.
+
+# Round 2 (2026-10-10) — the owner's answers to Part 4, built
+
+| # | what | his words / my call |
+|---|---|---|
+| 5 | the guest bill's "Reprint" button and the `bill_printed_at` stamp removed (both panels, both routes); the KOT keeps DUPLICATE | "this was for kot not bill so remove the thing" — reverses 2026-08-19 · R62 |
+| 11 | the dead `print_invoice` check deleted; a manager can always generate/print a bill | R63 |
+| 12 | the waiter tablet (Accept, serve a dish) and the kitchen (Accept, All ready, take back, one dish ready) refuse a cancelled ticket — the sabotage run showed all five REALLY revived it | "solve … all the rest" |
+| 13 | a quick-order discount over the limit is refused BEFORE the order is placed (it used to be refused after) | "solve … all the rest" |
+| 14 | not built; the rule now says "a `.limit()` on a list that can grow" | R64 |
+| 15 | lib/removalAudit + lib/sessionClose name the restaurant; 3 stale exemptions gone | "you decide for good of my project" |
+| 16 | 38 lines of leftover printer-setup comments deleted | — |
+| 17 | a deleted category/tag is recorded in the Audit by its name, not its slug | — |
+| 18 | not built | R65 |
+| 19 | NOT A FAULT — my phone emulation had touch off; as a real A35 every tile shows its number (P179909 corrected) | — |
+
+Guards: `verify:voided-stays` (25), `verify:t10-writes` (30), `verify:bill-reprint-is-silent` (part 4 rewritten), `verify:scoped-reads`, `verify:rejected` — each sabotage-tested.
