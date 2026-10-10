@@ -407,5 +407,32 @@ console.log("\n12. no dead gate, no optional scope, no read whose answer nothing
   else bad(`the points balance answered ${r.status} and read table_merges ${G.SCOPE_LOG.filter((q) => q.table === "table_merges").length}×`);
 }
 
+// ── 13. A WAITER'S PAID PARCEL IS FILED UNDER A REAL METHOD, IN ITS OWN SPELLING (round 2, item 18) ───
+console.log("\n13. a paid parcel's method is one of UPI / Cash / Card / Other, spelled the canonical way");
+{
+  const MENU = { menu_items: [{ id: "d1", restaurant_id: RID, title: "Soup", price: "120", tags: [] }] };
+  {
+    const G = await world({ fix: MENU, rpc: { lfh_platform_insert: [{ id: "agg1" }] } });
+    G.FIX.aggregator_orders = [{ id: "agg1", restaurant_id: RID }];
+    const r = await call("POST", "parcel", { body: { items: [{ id: "d1" }], paid: true } });
+    const m = G.FIX.aggregator_orders[0].payment_method;
+    if (r.status === 200 && m === "Cash") ok("no method given → 'Cash' (never lowercase 'cash', a bucket of its own)");
+    else bad(`no method given → ${r.status}, stored '${m}'`);
+  }
+  {
+    const G = await world({ fix: MENU, rpc: { lfh_platform_insert: [{ id: "agg1" }] } });
+    G.FIX.aggregator_orders = [{ id: "agg1", restaurant_id: RID }];
+    await call("POST", "parcel", { body: { items: [{ id: "d1" }], paid: true, method: "upi" } });
+    if (G.FIX.aggregator_orders[0].payment_method === "UPI") ok("'upi' is stored as 'UPI'");
+    else bad(`'upi' stored as '${G.FIX.aggregator_orders[0].payment_method}'`);
+  }
+  {
+    const G = await world({ fix: MENU, rpc: { lfh_platform_insert: [{ id: "agg1" }] } });
+    const r = await call("POST", "parcel", { body: { items: [{ id: "d1" }], paid: true, method: "Bitcoin" } });
+    if (r.status === 400 && /Pick how it was paid/.test(r.text) && !G.RPCS.some((x) => x.name === "lfh_platform_insert")) ok("an unknown method is refused BEFORE the parcel is created (nothing half-exists)");
+    else bad(`an unknown method answered ${r.status}, insert called: ${G.RPCS.some((x) => x.name === "lfh_platform_insert")}`);
+  }
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

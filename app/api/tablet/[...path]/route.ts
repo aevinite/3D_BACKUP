@@ -1412,6 +1412,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const parcelSplit = splitBill(picked, parcelSet, 0);
       total = parcelSplit.total;
 
+      // HOW IT WAS PAID IS ONE OF THE KNOWN METHODS, IN THEIR OWN SPELLING (sweep #10 T13 round 2, item 18).
+      // This stored `String(method || "cash")` as typed — lowercase "cash" by default, and anything at
+      // all otherwise — so a waiter's paid parcel landed in its own "cash" bucket beside the manager's
+      // "Cash" in every payment breakdown, and a mistyped method was filed as a method. The manager's
+      // twin has always matched it against PAYMENT_METHODS (case-insensitively, stored canonically) and
+      // refused an unknown one BEFORE inserting, so nothing half-exists. Same rule, same words, here.
+      let payMethod: string | null = null;
+      if (paid === true) {
+        const rawM = String(method || "Cash").trim();
+        const m = (PAYMENT_METHODS as readonly string[]).find((x) => x.toLowerCase() === rawM.toLowerCase());
+        if (!m) return err("Pick how it was paid.", 400);
+        payMethod = m;
+      }
       const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
       const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const ins = await sb.rpc("lfh_platform_insert", {
@@ -1424,7 +1437,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const wholeNote = String(note || "").trim().slice(0, 300);
       const alg = Array.isArray(allergies) ? allergies.map((x: unknown) => String(x)).slice(0, 20) : [];
       const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg } };
-      if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = String(method || "cash").slice(0, 20); }
+      if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = payMethod; }
       if (row?.id) { const up = await sb.from("aggregator_orders").update(patch).eq("id", row.id).eq("restaurant_id", rid); if (up.error) throw new Error(up.error.message); }
       await log("parcel_place", { device_id: dev });
       return ok({ ...row, paid: paid === true });
