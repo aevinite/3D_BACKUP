@@ -1548,7 +1548,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const sessRows = must(await sb.from("sessions").select("status").eq("id", m.session_id).eq("restaurant_id", rid).limit(1));
       if (!sessRows[0] || sessRows[0].status !== "open") return err("table is not open");
       if (m.role === "owner" && !m.removed) return ok(m);
-      must(await sb.from("session_members").update({ removed: true }).eq("session_id", m.session_id).eq("restaurant_id", rid).eq("role", "owner").eq("removed", false).select());
+      must(await sb.from("session_members").update({ removed: true }).eq("session_id", m.session_id).eq("restaurant_id", rid).eq("role", "owner").eq("removed", false));
       const row = must(await sb.from("session_members").update({ role: "owner", approved: true, removed: false }).eq("id", b).eq("restaurant_id", rid).select());
       return ok(row[0] || null);
     }
@@ -1578,7 +1578,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // omitting it stamped every tablet ban onto #1 — the ban did nothing at the acting
       // restaurant (guest could re-scan and rejoin) and put a phantom ban on #1. The editor
       // path was fixed in mig 142; this is the matching tablet fix. (2026-07-07)
-      must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet", restaurant_id: rid }).select());
+      must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet", restaurant_id: rid }));
       if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
       await log("member_ban", { detail: (phone ? `banned ${phone}` : "banned"), device_id: dev });
@@ -1754,7 +1754,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const rows = must(await q.select());
       // A restart ends the round (fresh round, fresh party) — release the head +
       // partners from this session, same as a close. (owner, 2026-06-18)
-      if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("removed", false).select());
+      // Scoped to the restaurant like every other write here, and no rows asked back — nothing reads them
+      // (sweep #10 T13 round 2, item 20).
+      if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("restaurant_id", rid).eq("removed", false));
       // ...and resolve this table's open waiter-calls + deny its pending requests (#7), the
       // same cleanup a close does (mig 020 trigger). Without this, an unanswered call from the
       // old party left a ghost 🔔 badge + ATTEND on the now-empty table. Shared helper so the
@@ -1763,7 +1765,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // ...and CLOSE the party. It used to stay open with no orders and no guests — invisible to
       // every screen (the floor draws it Free) but "open" in the database, which is the mismatch
       // the owner caught on table 30 (2026-08-01). One truth: the round ends, the table is free.
-      if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq("id", openSess.id).select());
+      if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq("id", openSess.id).eq("restaurant_id", rid));
       await log("table_restart", { table_number: t, detail: `${rows.length} ${rows.length === 1 ? "order" : "orders"} cleared${owed > 0 ? `, ≈₹${Math.round(owed)} was unpaid` : ""}`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
@@ -2577,14 +2579,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tg = recordPin(await tabletPerm("tablet_table_tags", req, body, rid, actor)); if (!tg.allow) return tg.resp;
       const tag = body?.tag ?? null;
       if (tag === null || tag === "") {
-        must(await sb.from("table_tags").delete().eq("restaurant_id", rid).eq("table_number", t).select());
+        must(await sb.from("table_tags").delete().eq("restaurant_id", rid).eq("table_number", t));
         await log("table_tag_clear", { table_number: t, device_id: dev });
         return ok({ ok: true, tag: "" });
       }
       if (!isTableTag(tag)) return err("invalid tag");
       must(await sb.from("table_tags")
-        .upsert({ restaurant_id: rid, table_number: t, tag, tagged_by: actor?.name || actor?.username || "waiter", tagged_at: nowIso() }, { onConflict: "restaurant_id,table_number" })
-        .select());
+        .upsert({ restaurant_id: rid, table_number: t, tag, tagged_by: actor?.name || actor?.username || "waiter", tagged_at: nowIso() }, { onConflict: "restaurant_id,table_number" }));
       await log("table_tag_set", { table_number: t, detail: tag, device_id: dev });
       return ok({ ok: true, tag });
     }
@@ -2626,7 +2627,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         must(await sb.from("orders").update({
           discount: Number(o.subtotal) || 0, discount_note: "On the house",
           payment_status: "paid", paid_at: nowIso(), payment_method: ON_THE_HOUSE_METHOD,
-        }).eq("id", o.id).eq("restaurant_id", rid).select("id"));
+        }).eq("id", o.id).eq("restaurant_id", rid));
       }
       await log("on_the_house", { table_number: t, device_id: dev, detail: `${unpaid.length} ${unpaid.length === 1 ? "order" : "orders"} · ${tagRow.tag}` });
       // Settling with no money collected is the largest money-lowering action there is — one Audit
@@ -2685,7 +2686,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       const stamp = nowIso();
       must(await sb.from("orders").update({ khata_at: stamp, khata_customer_id: customer!.id, archived: true, archived_at: stamp })
-        .in("id", kunpaid.map((o) => o.id)).eq("restaurant_id", rid).select("id"));
+        .in("id", kunpaid.map((o) => o.id)).eq("restaurant_id", rid));
       if (openSess) {
         const closed = await closeSession(openSess.id, { force: true }, { panel: "tablet", deviceId: dev, restaurantId: rid, user: actor ?? null, reason: reasonFromBody(body) });
         if (!closed.ok) return err(closed.message, closed.status);
@@ -2748,8 +2749,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // split settles keep whatever discount they had.
       const onHouseIds = paid.filter((o) => o.payment_method === ON_THE_HOUSE_METHOD).map((o) => o.id);
       const otherIds = paid.filter((o) => o.payment_method !== ON_THE_HOUSE_METHOD).map((o) => o.id);
-      if (otherIds.length) must(await sb.from("orders").update(base).in("id", otherIds).eq("restaurant_id", rid).select("id"));
-      if (onHouseIds.length) must(await sb.from("orders").update({ ...base, discount: 0, discount_note: null }).in("id", onHouseIds).eq("restaurant_id", rid).select("id"));
+      if (otherIds.length) must(await sb.from("orders").update(base).in("id", otherIds).eq("restaurant_id", rid));
+      if (onHouseIds.length) must(await sb.from("orders").update({ ...base, discount: 0, discount_note: null }).in("id", onHouseIds).eq("restaurant_id", rid));
       // The quick undo bar sends no reason; the explicit "Mark unpaid" button sends one
       // (a refund/correction) — record it for the money-accountability trail either way.
       const reason = String((body && body.reason) || "").trim().slice(0, 120);

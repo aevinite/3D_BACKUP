@@ -434,5 +434,28 @@ console.log("\n13. a paid parcel's method is one of UPI / Cash / Card / Other, s
   }
 }
 
+// ── 14. EVERY WRITE NAMES THE RESTAURANT, AND NO WRITE ASKS FOR ROWS NOBODY READS (round 2, item 20) ──
+console.log("\n14. every write is pinned to the restaurant, and none asks back rows nobody reads");
+{
+  const { readFileSync } = await import("node:fs");
+  const { chains } = await import("./sweep/t13s10/lib.mjs");
+  const src = readFileSync(new URL("../app/api/tablet/[...path]/route.ts", import.meta.url), "utf8").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+  const writes = chains(src).filter((c) => /\.(update|insert|upsert|delete)\(/.test(c.flat));
+  const unscoped = writes.filter((c) => !/restaurant_id/.test(c.flat));
+  if (!unscoped.length) ok(`all ${writes.length} writes in the waiter route name the restaurant`);
+  else bad(`${unscoped.length} write(s) do not name the restaurant: ${unscoped.map((c) => c.table).join(", ")}`);
+  // A write whose returning select is asked for must have its answer used: `must(await sb…select())`
+  // as a bare statement is the shape of rows asked for and thrown away.
+  const wasted = (src.match(/^\s*(?:if \([^)]*\) )?must\(await sb\.from\([^;]*?\.(?:update|insert|upsert|delete)\([\s\S]*?\.select\([^)]*\)\)\);/gm) || []);
+  if (!wasted.length) ok("no write asks the database to send back rows that nothing reads");
+  else bad(`${wasted.length} write(s) ask for rows and throw them away: ${wasted.map((w) => w.trim().slice(0, 60)).join(" | ")}`);
+  const G = await world({ fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open", last_activity_at: recent }],
+    orders: [], session_members: [{ id: "m1", restaurant_id: RID, session_id: "s1", removed: false }] } });
+  const r = await call("POST", "tables/3/restart", { body: {} });
+  const rs = G.SCOPE_LOG.filter((q) => (q.table === "session_members" || q.table === "sessions") && q.op === "update");
+  if (r.status === 200 && rs.length === 2 && rs.every((q) => q.filters.some((f) => f.col === "restaurant_id" && f.val === RID))) ok("restarting a table: releasing its guests and closing it are both pinned to the restaurant");
+  else bad(`restart answered ${r.status}; ${rs.filter((q) => !q.filters.some((f) => f.col === "restaurant_id")).length} unscoped write(s)`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
