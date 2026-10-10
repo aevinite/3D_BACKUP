@@ -260,5 +260,31 @@ console.log("\n6. one failed floor read is not handed to every device for the ne
   else bad(`joins after a failed read: first ${a.status} ${JSON.stringify(a.json && a.json.merges)}, next ${JSON.stringify(b.json && b.json.merges)}`);
 }
 
+// ── 7. A MANAGER ON THIS PANEL IS ANSWERED BY WHAT THEY ARE SHOWN (item 7) ─────────────────────────
+console.log("\n7. a manager or owner on the waiter panel can use the invoice button they are shown");
+{
+  const SESS = [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open" }];
+  const CUST = { cust_phone: "9876543210", cust_name: "Asha" };
+  for (const who of ["manager", "owner"]) {
+    const G = await world({ who, settings: { tablet_invoice: "on" }, fix: { sessions: SESS } });
+    const shown = (await call("GET", "summary", { query: "?nomenu=1" })).json?.settings?.tablet_invoice;
+    const r = await call("POST", "sessions/s1/invoice", { body: CUST });
+    if (shown === "on" && r.status === 200 && G.RPCS.some((x) => x.name === "lfh_generate_invoice")) ok(`a ${who} shown 'Generate invoice' can issue it (200)`);
+    else bad(`a ${who} was shown '${shown}' and the tap answered ${r.status} ${r.text.slice(0, 70)}`);
+  }
+  {
+    const G = await world({ who: "manager", settings: { tablet_invoice: "off" }, fix: { sessions: SESS } });
+    const r = await call("POST", "sessions/s1/invoice", { body: CUST });
+    if (r.status === 403 && !G.RPCS.some((x) => x.name === "lfh_generate_invoice")) ok("…and where the restaurant stored 'off', the manager is refused (not shown, not allowed)");
+    else bad(`a manager with 'off' answered ${r.status}`);
+  }
+  {
+    const G = await world({ settings: { tablet_invoice: "on" }, fix: { sessions: SESS } });
+    const r = await call("POST", "sessions/s1/invoice", { body: CUST });
+    if (r.status === 403 && !G.RPCS.some((x) => x.name === "lfh_generate_invoice")) ok("…while a WAITER is still refused, whatever is stored (the owner's never-list)");
+    else bad(`a waiter answered ${r.status} on the invoice`);
+  }
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

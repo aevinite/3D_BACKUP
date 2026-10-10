@@ -188,7 +188,17 @@ async function tabletPerm(key: string, req: NextRequest, body: any, rid: string,
   if (isPermMode(override)) mode = override as WaiterCap;
   else {
     const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
-    mode = waiterCapValue(key, (s.data as Record<string, string> | null)?.[key]);
+    const stored = (s.data as Record<string, string> | null)?.[key];
+    // A MANAGER OR OWNER IS ANSWERED BY WHAT THEY ARE SHOWN (sweep #10 T13, item 7). waiterCapValue()
+    // applies the waiter's never-list ("a waiter never issues the invoice") to EVERYONE, so the line
+    // above that scopes the never-list to a TABLET account was undone one step later: a manager on
+    // this panel was shown the stored "🧾 Generate invoice" (overlayUserPerms keeps their own reach),
+    // and the tap answered "This isn't enabled for you — ask a manager". Five restaurants store it 'on'
+    // today, French House among them. For a non-waiter a never-list key now reads the stored value —
+    // exactly what overlayUserPerms shows them — and anything unset stays off.
+    mode = user.role !== "tablet" && WAITER_NEVER.includes(key)
+      ? (isPermMode(stored) ? stored : "off")
+      : waiterCapValue(key, stored);
   }
   if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for you — ask a manager.", disabled: true }, { status: 403 }) };
   if (mode === "pin") return managerPinGate(req, body, rid);
