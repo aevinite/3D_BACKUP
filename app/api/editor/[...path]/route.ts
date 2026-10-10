@@ -3516,6 +3516,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const sess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
         .eq("table_number", t).eq("status", "open").order("last_activity_at", { ascending: false })
         .limit(1)).data?.[0] as { id: string } | undefined;
+      // Spending points takes money off the bill — never off a printed invoice (owner, 2026-10-11, item 11).
+      if (sess) {
+        const live = ((await sb.from("orders").select("id").eq("session_id", sess.id).eq("restaurant_id", rid)
+          .neq("status", "cancelled").neq("payment_status", "paid").limit(200)).data || []) as { id: string }[];
+        for (const o of live) if (await invoiceLockedByOrder(o.id, rid)) return err(LOCKED_MSG, 409);
+      }
       // ONE call: spend the points AND take the money off, so the two cannot half-happen.
       const r = await redeemOntoBill(rid, t, String(body?.phone || "").slice(0, 20),
         Number(body?.points) || 0, g.user?.name || g.user?.username || "Manager", sess?.id ?? null,
@@ -5355,6 +5361,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const unpaid = orders.filter((o) => o.payment_status !== "paid");
       if (!unpaid.length) return err("Nothing to settle on this table.", 409);
       if (unpaid.some((o) => o.status === "received")) return err("Accept the order first — a bill can only be settled once the order is accepted.", 409);
+      // A PRINTED INVOICE CANNOT BE COMPED AFTER THE FACT (owner, 2026-10-11: "do all for 11th"). On the
+      // house stores a 100% discount, so the guest's paper would say ₹X and the books ₹0 — rule 10
+      // (docs/COMPLIANCE-GUARDRAILS.md §3.0b). Twin of the waiter tablet's identical refusal.
+      for (const o of unpaid) if (await invoiceLockedByOrder(o.id, rid)) return err(LOCKED_MSG, 409);
       for (const o of unpaid) {
         must(await sb.from("orders").update({
           discount: Number(o.subtotal) || 0, discount_note: "On the house",

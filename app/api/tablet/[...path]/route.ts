@@ -2524,6 +2524,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const sess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
         .eq("table_number", t).eq("status", "open").order("last_activity_at", { ascending: false })
         .limit(1)).data?.[0] as { id: string } | undefined;
+      // Spending points takes money off the bill — item 11: not off a bill whose invoice is printed.
+      if (sess && (await invoiceLockedBySession(sess.id, rid))) return err(LOCKED_MSG, 409);
       // ONE call: spend the points AND take the money off, so the two cannot half-happen.
       const r = await redeemOntoBill(rid, t, String(body?.phone || "").slice(0, 20),
         Number(body?.points) || 0, actor?.name || actor?.username || "Waiter", sess?.id ?? null,
@@ -2583,6 +2585,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const unpaid = orders.filter((o) => o.payment_status !== "paid");
       if (!unpaid.length) return err("Nothing to settle on this table.", 409);
       if (unpaid.some((o) => o.status === "received")) return err("Accept the order first — a bill can only be settled once the order is accepted.", 409);
+      // A PRINTED INVOICE CANNOT BE COMPED AFTER THE FACT (owner, 2026-10-11, item 11 of T13's report:
+      // "do all for 11th"). "On the house" stores a 100% discount, so on a bill whose invoice is already
+      // printed the guest's paper says ₹X and the books say ₹0 — rule 10 again. Same lock, same words,
+      // on the manager's twin too. The legal route is unchanged: reopen, or a credit note.
+      for (const o of unpaid) if (await invoiceLockedByOrder(o.id, rid)) return err(LOCKED_MSG, 409);
       for (const o of unpaid) {
         must(await sb.from("orders").update({
           discount: Number(o.subtotal) || 0, discount_note: "On the house",

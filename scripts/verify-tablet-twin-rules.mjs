@@ -286,5 +286,40 @@ console.log("\n7. a manager or owner on the waiter panel can use the invoice but
   }
 }
 
+// ── 8. ON THE HOUSE AND SPENDING POINTS RESPECT A PRINTED INVOICE TOO (round 2, owner item 11) ─────
+console.log("\n8. a printed bill cannot be comped or paid down with points afterwards (both panels)");
+{
+  const inv = (voided = false) => ({
+    sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open", invoice_no: 21, invoice_voided: voided, invoice_at: recent, last_activity_at: recent }],
+    orders: [{ id: "o1", restaurant_id: RID, table_number: "3", session_id: "s1", status: "served", payment_status: "pending", archived: false, subtotal: 300, created_at: hourAgo }],
+    table_tags: [{ restaurant_id: RID, table_number: "3", tag: "family" }],
+  });
+  {
+    const G = await world({ fix: inv(), settings: { table_tags_allowed: true } });
+    const r = await call("POST", "tables/3/on-the-house", { body: {} });
+    if (r.status === 409 && /printed bill/.test(r.text) && G.FIX.orders[0].payment_status === "pending") ok("waiter: On the house on an invoiced bill is refused (409), nothing settled");
+    else bad(`waiter: On the house on an invoiced bill answered ${r.status}, payment ${G.FIX.orders[0].payment_status}`);
+  }
+  {
+    const G = await world({ fix: { ...inv(), sessions: [{ ...inv().sessions[0], invoice_no: null, invoice_at: null }] }, settings: { table_tags_allowed: true } });
+    const r = await call("POST", "tables/3/on-the-house", { body: {} });
+    if (r.status === 200 && G.FIX.orders[0].payment_status === "paid") ok("waiter: …and with no invoice it still settles on the house");
+    else bad(`waiter: an un-invoiced comp answered ${r.status}`);
+  }
+  {
+    const G = await world({ fix: inv(), ents: { customers: true } });
+    const r = await call("POST", "tables/3/loyalty-redeem", { body: { phone: "9876543210", points: 10 } });
+    if (r.status === 409 && /printed bill/.test(r.text) && !G.RPCS.some((x) => /loyalty|redeem|bill_discount/.test(x.name))) ok("waiter: spending points on an invoiced bill is refused (409), nothing spent");
+    else bad(`waiter: points on an invoiced bill answered ${r.status} ${r.text.slice(0, 70)}`);
+  }
+  const { readFileSync } = await import("node:fs");
+  const ed = readFileSync(new URL("../app/api/editor/[...path]/route.ts", import.meta.url), "utf8");
+  const after = (needle, span) => { const i = ed.indexOf(needle); return i < 0 ? "" : ed.slice(i, i + span); };
+  if (/for \(const o of unpaid\) if \(await invoiceLockedByOrder\(o\.id, rid\)\) return err\(LOCKED_MSG, 409\);/.test(after('if (a === "tables" && c === "on-the-house")', 9000))) ok("manager: On the house asks the same invoice lock before it writes");
+  else bad("manager: On the house no longer asks the invoice lock");
+  if (/invoiceLockedByOrder\(o\.id, rid\)\) return err\(LOCKED_MSG, 409\)/.test(after('if (a === "loyalty-redeem")', 2500))) ok("manager: spending points asks the same invoice lock");
+  else bad("manager: spending points no longer asks the invoice lock");
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
