@@ -143,6 +143,7 @@ const ANON_ALLOWED = {
   lfh_greet_device:           "returns a returning guest's name",
   lfh_leave_feedback:         "guest rates their order (one per order, enforced by a unique index)",
   lfh_submit_review:          "guest reviews a dish (one per device per dish, unique index)",
+  lfh_dish_reviews:           "a dish page reads its newest 20 reviews, each marked mine for the caller's own device — never a device id (mig 418)",
   lfh_request_unban:          "a blocked guest asks to be let back in",
   // Restored by mig 290 after migs 267/281 dropped it on the stated grounds that nothing
   // called it — lib/session.ts:203 → components/BanGate.tsx has called it all along, so the
@@ -402,7 +403,7 @@ async function checkDb(label, env) {
     menu_items: "the guest menu itself",
     restaurants: "tenant resolution from a slug; narrowed to 11 guest-facing COLUMNS — F9 narrowing was REVERTED by mig 274; see mig 281 for why",
     settings: "the guest's live settings subscription (mig 013); narrowed to 20 guest-facing COLUMNS — F9 narrowing was REVERTED by mig 274; see mig 281 for why",
-    reviews: "dish reviews are public by design",
+    // (reviews LEFT in mig 418: a dish page reads them through lfh_dish_reviews, which never returns a device id)
     realtime_events: "breadcrumbs; each panel/guest filters to its own restaurant via topic_rid",
   };
   // 6b. THE GUEST READ IS DELIBERATELY *NOT* CHECKED BY COLUMN HERE — read this before adding it.
@@ -804,7 +805,9 @@ function checkMigrations() {
 //      policy uses — migrations 362/392/393/416 removed Supabase's default grants, and a new table
 //      that arrives with them (as the loyalty tables did, mig 413) turns this red;
 //   3. the tables either key can READ are exactly the ones a guest screen needs, each through its policy.
-const GUEST_READABLE = ["categories", "filters", "menu_items", "realtime_events", "reviews"];
+// reviews LEFT this list in mig 418 (item 16): a dish page asks lfh_dish_reviews which review is the
+// caller's own, instead of reading every reviewer's device id straight off the table.
+const GUEST_READABLE = ["categories", "filters", "menu_items", "realtime_events"];
 async function checkTablePrivileges(label, env) {
   head(`${label} — who may touch which table`);
   const tabs = await q(env, `
@@ -829,7 +832,7 @@ async function checkTablePrivileges(label, env) {
   if (inert.length) fail(`${inert.length} table privilege(s) the public or signed-in key holds with no policy using them (remove them, as mig 416 did): ${inert.slice(0, 12).join(", ")}`);
   else pass("the public and signed-in keys hold no table privilege that no policy uses");
   const extra = [...readable].filter((t) => !GUEST_READABLE.includes(t)), missing = GUEST_READABLE.filter((t) => !readable.has(t));
-  if (extra.length || missing.length) fail(`guest-readable tables differ from the expected five — readable but not expected: ${extra.join(", ") || "none"}; expected but not readable: ${missing.join(", ") || "none"}`);
+  if (extra.length || missing.length) fail(`guest-readable tables differ from the expected ${GUEST_READABLE.length} — readable but not expected: ${extra.join(", ") || "none"}; expected but not readable: ${missing.join(", ") || "none"}`);
   else pass(`exactly the ${GUEST_READABLE.length} tables a guest screen needs are readable with the public key (${GUEST_READABLE.join(", ")})`);
 }
 

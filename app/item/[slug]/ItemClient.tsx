@@ -167,7 +167,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // client paint. (The same rule lib/restaurant-context.tsx records for the tenant pin.)
   const [reviewName, setReviewName] = useState("");          // reviewer's name — their ONE name
   const [reviewText, setReviewText] = useState("");          // reviewer's typed comment
-  const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string; deviceId?: string}[]>([]); // reviews shown (incl. ones just added)
+  const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string; mine?: boolean}[]>([]); // reviews shown (incl. ones just added)
   const [reviewTab, setReviewTab] = useState<"rate" | "reviews">("reviews"); // which review tab is open
   const reviewSubmittingRef = useRef(false); // blocks a double-tap from firing two review saves (audit)
   // After a HIGH rating (>= 4★) we invite the guest to share it on Google — but ONLY if
@@ -483,7 +483,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       if (cancelled) return;
       // No answer at all → behave as if it is off. A read we cannot justify is one we do not make.
       if (!real || !real.reviews || !real.ratings) { setLocalReviews([]); return; }
-      const r = await getItemReviews(item.slug, restaurantId).catch(() => null);
+      const r = await getItemReviews(item.slug, restaurantId, getDeviceId()).catch(() => null);
       if (!cancelled && r) setLocalReviews(r);
     })();
     return () => { cancelled = true; };
@@ -752,7 +752,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       name: typedName || "Guest",
       rating: selectedRating,
       text: reviewText.trim(),
-      deviceId: myDevice,
+      mine: true,
     };
     // The DB upserts (one review per device per dish) — mirror that on screen:
     // drop this device's previous review before prepending the new one, so
@@ -765,7 +765,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     // rows, so each shows the new name the next time its page is opened. A `.map()` over the list
     // we just filtered this device out of could never match anything. (`nameChanged` is read by the
     // toast below — a name that quietly rewrites their other reviews would be a surprise.)
-    setLocalReviews([newReview, ...localReviews.filter((r) => r.deviceId !== myDevice)]);
+    setLocalReviews([newReview, ...localReviews.filter((r) => !r.mine)]);
     // The box keeps their name rather than emptying — it is their name now, not one-off form data.
     setReviewName(typedName);
     setReviewText("");
