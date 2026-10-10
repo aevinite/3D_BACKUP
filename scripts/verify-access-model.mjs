@@ -1158,6 +1158,19 @@ else ok("the read/write route derives every allow-list from the model");
 // them. This keeps the next one from settling in: every exported VALUE (types are exempt — they are
 // shapes, not answers) must be imported by name by a file in app/, lib/ or components/.
 {
+  // (since item 26) the same question for lib/ownerEntitlements.ts, whose retired powerEntitled() sat
+  // exported and uncalled for two months.
+  for (const [lib, spec] of [["lib/ownerEntitlements.ts", "@/lib/ownerEntitlements"]]) {
+    const ex = [...read(lib).matchAll(/^export (?:async )?(?:const|function) (\w+)/gm)].map((m) => m[1]);
+    const files = []; const wd = (d) => { for (const e of readdirSync(join(root, d), { withFileTypes: true })) { const p = `${d}/${e.name}`; if (e.isDirectory()) { if (e.name !== "node_modules") wd(p); } else if (/\.(tsx?|mjs|js)$/.test(e.name) && p !== lib) files.push(read(p)); } };
+    for (const d of ["app", "lib", "components"]) wd(d);
+    const used = new Set(); const rx = new RegExp(`import\\s*\\{([^}]+)\\}\\s*from\\s*["']${spec.replace("/", "\\/")}["']`, "g");
+    for (const f of files) for (const m of f.matchAll(rx)) for (const x of m[1].split(",")) used.add(x.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]);
+    // re-exports used inside the file itself (MANAGER_POWER_FLAGS) and helpers its own exports call count as used
+    const inner = read(lib);
+    const dead = ex.filter((x) => !used.has(x) && (inner.match(new RegExp(`\\b${x}\\b`, "g")) || []).length < 2);
+    if (dead.length) fail(`${lib} exports what nothing uses: ${dead.join(", ")}`);
+  }
   const src = read("lib/accessModel.ts");
   const exported = [...src.matchAll(/^export (?:const|function) (\w+)/gm)].map((m) => m[1]);
   const corpus = [];

@@ -61,25 +61,13 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 export { MANAGER_POWER_FLAGS };
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
-// ⚠️ RETIRED 2026-08-06 — KEPT ONLY SO THE KEY SHAPE IS STILL DOCUMENTED. NOTHING READS THESE.
-//
-// `power_<flag>` was the OLD ladder's "may the admin allow this power at all" rung. It is now
-// unwritable by any code path in the product: the one and only writer of owner_entitlements is
-// app/api/admin/restaurants/access-tree/route.ts, which allow-lists from SECTION_ENTITLEMENTS —
-// owner PAGE keys — and the New-restaurant form's copy of the old ladder went on 2026-08-06.
-// So every power_<flag> is permanently absent, every read of it was permanently "allowed", and
-// it was a SECOND cap on an idea that already has a switch: access_config[flag].on, the Feature
-// half of that row on the Access screen. Two mechanisms for one idea is what the access model
-// exists to remove, so the five readers (editor ×3, inventory, staffProfile, owner/staff) were
-// deleted and each says where the live cap lives instead.
-//
-// Do not wire this back up. If a power needs an admin-level "does this restaurant have it",
-// that is a `has` row in lib/accessTree.ts — which is switchable, visible and audited.
-export function powerEntitled(rawEntitlements: unknown, flag: string): boolean {
-  const key = powerEntitlementKey(flag);
-  const v = rawEntitlements && typeof rawEntitlements === "object" ? (rawEntitlements as Record<string, unknown>)[key] : undefined;
-  return typeof v === "boolean" ? v : true;
-}
+// powerEntitled() — the OLD ladder's "may the admin allow this power at all" check on
+// owner_entitlements.power_<flag> — LEFT on 2026-10-10 (sweep #10 T18, item 26). It had been retired
+// since 2026-08-06 and kept "only so the key shape is documented": the only writer of
+// owner_entitlements allow-lists owner PAGE keys, so every power_<flag> was permanently absent and the
+// function always said yes. The key shape is still documented by powerEntitlementKey() above, which
+// OWNER_ENTITLEMENT_KEYS uses. If a power ever needs an admin-level "does this restaurant have it",
+// that is a `has` row in lib/accessTree.ts — switchable, visible and audited.
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [
   ...OWNER_SECTION_KEYS,
