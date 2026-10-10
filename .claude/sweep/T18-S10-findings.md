@@ -44,7 +44,7 @@ the three floor switches and Loyalty points; B.2 said "TWO rows" over a folder o
 `docs/STAFF-PROFILE.md` said a manager's page has two blocks (three) and 7 dropdowns (8). Corrected.
 **Guard:** `verify:access` check 59 (names and numbers only). Sabotage-tested with the old docs.
 
-## Recorded, not fixed (decisions for the owner — in the chat report)
+## Recorded, not fixed in round 1 — ALL SETTLED IN ROUND 2 (items 16, 17, 18, 19, 20, 21 below)
 - The OWNER's own panel can change one person's permissions (`/owner/staff/<id>`, live dropdowns), while
   `docs/ACCESS-MODEL.md` and CLAUDE.md say only the admin holds permissions. Which is right is his call.
 - `docs/ACCESS-REDESIGN-SPEC.md`: four of its nine `☐` lines are built or were overruled by him later;
@@ -57,3 +57,45 @@ the three floor switches and Loyalty points; B.2 said "TWO rows" over a folder o
 - `lib/settingsClone.ts` cites "REJECTED-IDEAS R8" for the inherited guest-menu settings; R8 is a
   different (moot) idea.
 - On a phone, "Manager settings (what manager can do)" wraps below its chevron on the Access screen.
+
+---
+
+# ROUND 2 (2026-10-10) — 21 more problems, all fixed, one commit each, each with a guard
+
+The owner: *"fix all the problems that you have listed … what you find outside of your territory for now …
+check every single bit … I want zero error in my code."* 603 new checks (`P187504`–`P188000`,
+`P165001`–`P165106`), all ✅; every round-1 row re-run green after the changes. Measured with line/branch
+coverage (1,275 of 1,276 lines run; every unreached arm has an invariant row) and three mutation passes
+(712 → 146 → 46 → 36 breaks undetected; the 36 are equivalent, each reason in
+`scripts/sweep/t18s10/r2/equivalent.json`).
+
+| # | where it lives (panel → screen → what you would see) | what was wrong → what it does now | guard |
+|---|---|---|---|
+| 7 | backend only, nothing on screen | `lib/accessModel.ts` held 16 helpers of the retired 4-rung panel nothing called → deleted | `verify:access` 60 |
+| 8 | Admin → Access → Waiter (backend gate) | a waiter action stored in access_config ignored its restaurant switch → honours it | 61 |
+| 9 | Admin → Access → Main → Move, merge & split (data) | ON for every restaurant but Aangan (the control); French House "who may take the menu down" held `true` → `"owner"` | live rows |
+| 10 | Admin → Access → Extra → Delivery apps → key box | a key under 8 characters could show whole behind the dots → dots only (`credHint`) | 62 |
+| 11 | backend only | a comment named a reader (featureDepth) that does not exist → corrected | 63 |
+| 12 | Owner panel → any page (backend gate) | a failed read of the owner's pages OPENED every page → retries once, then closes | 64 |
+| 13 | Owner → Staff → a person → Pay → Record a payment | ₹0.004 was saved as a ₹0.00 payment → refused after rounding | unit + live |
+| 14 | Admin → "view as this person" (backend) | a missing restaurant id was not refused on its own → refused before any read | 65 |
+| 15 | Admin → Access → Delivery apps / Ratings master | two admins both got "Saved", second silently won → first save wins, second told | 66 |
+| 16 | Owner → Staff → a person → Permissions | the owner could change one person's permissions, against "only the admin holds permissions" → read-only, "set by Aevidine"; the route refuses | 67 + live |
+| 17 | backend docs (`docs/ACCESS-REDESIGN-SPEC.md`) | 9 "open" lines, 7 built or overruled → ticked; 2 genuinely open | 54 |
+| 18 | Admin → Access → any pick-one sub-option (save) | any word was stored → only its own choices, else refused in words | 68 + live |
+| 19 | backend only | a never-called `capGroupsFor()` in the owner staff route → deleted | 69 |
+| 20 | backend docs (`docs/REJECTED-IDEAS.md`) | a lost rejection (old R8) restored as R66; `lib/settingsClone.ts` cites it | `verify:rejected` 3c/3d |
+| 21 | Admin → Access → a long row name, on a phone | the arrow sat alone on its own line → title wraps beside it | 70 + measured live |
+| 22 | backend tooling | `verify:guards-alive` refused saves over a list of files meant to be gone → fixed (#1481) | itself |
+| 23 | backend tooling | terminal 13's runner ended with a bare `process.exit()` → flushes first (#1481) | `verify:guards-alive` |
+| 24 | Admin + Owner → the Access reply (browser network tab) | every delivery app's API key reached the browser in full → only the masked hint | 3 unit + live |
+| 25 | backend only | `lib/accessModel.ts` is wiring only; each module carries the Access screen's own name | 71 |
+| 26 | backend only | the retired `powerEntitled()` removed | 60 |
+| 27 | backend only | the last unused export (`ModuleDef`) → sweep #9's P105050 is green; a duplicate "greater than zero" test merged | P105050 |
+
+**One of my own checks was wrong, and was fixed:** the live "₹0.00 payment is refused" row sent the
+person's id in a field the payment route does not read, got "not found", and passed. It now sends the
+right field and requires the exact amount sentence and no row written.
+
+**Still open (2 lines of the spec, genuinely unbuilt — not faults):** reset a staff PIN; a waiter's own
+profile sections.
