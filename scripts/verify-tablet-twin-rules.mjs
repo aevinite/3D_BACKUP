@@ -517,5 +517,19 @@ console.log("\n17. a move to table 0 is told it isn't a valid table, not that it
   else bad(`moving to table 0 answered ${r.status} ${r.text.slice(0, 80)}`);
 }
 
+// ── 18. A STANDALONE BANQUET BILL IS NO SECTION'S — FROM PLACING IT TO CANCELLING IT (round 2, item 24) ─
+console.log("\n18. a ticket with no table is never refused as 'not in your section'");
+{
+  const SEC = [1];
+  await world({ user: { assigned_tables: SEC }, fix: { orders: [{ id: "ob", restaurant_id: RID, status: "preparing", payment_status: "pending", table_number: null, session_id: null }] } });
+  const r = await call("POST", "orders/ob/delete", { body: { reason: "wrong lines" } });
+  if (r.status === 200) ok("a sectioned waiter can cancel a standalone banquet ticket (it belongs to no table)");
+  else bad(`a no-table ticket answered ${r.status} ${r.text.slice(0, 70)}`);
+  await world({ user: { assigned_tables: SEC }, fix: { waiter_calls: [{ id: "cx", restaurant_id: RID, table_number: null, resolved: false }] } });
+  const r2 = await call("POST", "calls/cx/attend", { body: {} });
+  if (r2.status === 403) ok("…while a guest call with no table is still 'couldn't tell' and refused");
+  else bad(`a no-table call answered ${r2.status}`);
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

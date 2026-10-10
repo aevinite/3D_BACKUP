@@ -52,7 +52,13 @@ const NO_TABLE: Affected = { tables: [], unknown: false };
 // the action's own restaurant-scoped read answers it, with its own 404. A FAILED read is still
 // "couldn't tell", and still refused — a blip must never read as "allowed".
 const GONE = Symbol("no such row");
-type Lookup = string | null | typeof GONE;
+// A TICKET THAT BELONGS TO NO TABLE (round 2, item 24): a standalone banquet bill is placed with no
+// table on purpose (mig 132) and is "never restricted by a section" when it is placed (see `banquet`
+// below). Acting on it afterwards — cancelling it, discounting it — was answered "That table isn't in
+// your section — ask your manager to add it", about a bill no section can hold. Only ORDERS answer
+// this: a party, a call, a request or a guest with no table is still "couldn't tell".
+const NO_TABLE_ROW = Symbol("a ticket with no table");
+type Lookup = string | null | typeof GONE | typeof NO_TABLE_ROW;
 
 async function tableOfSession(rid: string, id: string): Promise<Lookup> {
   const { data, error } = await sb.from("sessions").select("table_number")
@@ -67,12 +73,13 @@ async function tableOfOrder(rid: string, id: string): Promise<Lookup> {
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
   if (error) return null;
   if (!data) return GONE;
-  return data.table_number ? normTable(data.table_number) : null;
+  if (data.table_number == null || String(data.table_number).trim() === "") return NO_TABLE_ROW;
+  return normTable(data.table_number) || null;
 }
 
 // A parent row that has vanished under a child that still exists is "couldn't tell", not GONE: the
 // child is still there to be written to, so its table must be known.
-const parentOf = (v: Lookup): string | null => (v === GONE ? null : v);
+const parentOf = (v: Lookup): string | null | typeof NO_TABLE_ROW => (v === GONE ? null : v);
 
 // order_items carries NO table_number (mig 014) — the reliable join is
 // order_id → orders.table_number. session_id exists too but is null when the
@@ -131,7 +138,7 @@ export async function affectedTables(
   const bod = body || {};
   // GONE → nothing to protect (see "THREE ANSWERS" above); null → couldn't tell → refuse.
   const push = async (v: Lookup): Promise<Affected> =>
-    v === GONE ? { tables: [], unknown: false } : v ? { tables: [v], unknown: false } : { tables: [], unknown: true };
+    v === GONE || v === NO_TABLE_ROW ? { tables: [], unknown: false } : v ? { tables: [v], unknown: false } : { tables: [], unknown: true };
 
   // Actions with no table at all — a takeaway parcel, a standalone banquet bill, a
   // restaurant-wide floor complaint. Never restricted by a section.
