@@ -15,4 +15,5 @@ const only = onlyArg ? (onlyArg.split("=")[1] || a[a.indexOf(onlyArg) + 1]).spli
 const quietLog = console.error; if (!a.includes("--noisy")) { console.error = () => {}; console.warn = () => {}; }
 await runAll({ ledger: a.includes("--ledger"), quiet: !a.includes("--all"), only });
 console.error = quietLog;
-process.exit(0);
+// Not a bare exit: it throws away stdout still buffered when piped (verify:guards-alive). (sweep #10 T18, item 23)
+process.stdout.write("", () => process.exit(0));
