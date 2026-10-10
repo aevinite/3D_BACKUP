@@ -1251,6 +1251,35 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("viewAsPerson() refuses an empty restaurant before it reads anybody");
 }
 
+// ── 66 · FIRST SAVE WINS ON THE DELIVERY CHANNELS AND THE RATINGS MASTER TOO ────────────────────
+// Project rule 11: two admins tapping one switch — the second is refused and told, never silently
+// overwritten. The three channel switches and the Ratings master sent no expectation at all (sweep
+// #10 T18, item 15): a channel's on/off sits two levels deep beside a key the browser never holds, and
+// the master moves two stored values. Now: a stored channel expects `platform_channels.<k>.on`, a
+// never-stored one expects nothing (its first save must not read as a clash), the master expects each
+// of its two values that is stored, and lib/clash.ts accepts the two-level path.
+{
+  const T = await import("../node_modules/.cache/accessTree.mjs");
+  const probs = [];
+  const base = T.emptyState();
+  for (const n of ALL_NODES.filter((x) => x.bind.t === "channel")) {
+    const stored = { ...base, channels: { [n.bind.key]: true }, channelsStored: { [n.bind.key]: true } };
+    const e = T.nodeExpect(n, stored, "r");
+    if (!e || JSON.stringify(e.fields) !== JSON.stringify({ [`platform_channels.${n.bind.key}.on`]: true })) probs.push(`${n.id}: no .on expectation when stored`);
+    if (T.nodeExpect(n, { ...base, channels: { [n.bind.key]: false } }, "r") !== null) probs.push(`${n.id}: a never-stored channel sends an expectation (its first save would be refused)`);
+    const after = T.applyPatch(base, T.nodePatch(n, true));
+    if (!T.nodeExpect(n, after, "r")) probs.push(`${n.id}: after a save the next tap sends no expectation`);
+  }
+  const rm = NODE_BY_ID.ratings;
+  const e2 = T.nodeExpect(rm, { ...base, features: { ratings: false }, settings: { google_review_mode: "google" } }, "r");
+  if (!e2 || e2.fields["features.ratings"] !== false || e2.fields.google_review_mode !== "google") probs.push("the Ratings master does not expect both of its stored values");
+  if (T.nodeExpect(rm, base, "r") !== null) probs.push("the Ratings master expects something on a restaurant that stores neither value");
+  const clash = read("lib/clash.ts");
+  if (!/\(\\\.\[a-zA-Z0-9_-\]\+\)\{0,2\}/.test(clash)) probs.push("lib/clash.ts no longer accepts a two-level field path");
+  if (probs.length) fail(`a second admin's tap could silently overwrite the first: ${probs.join("; ")}`);
+  else ok("the delivery channels and the Ratings master refuse a second admin's stale tap, and never a first save");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27

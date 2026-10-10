@@ -78,7 +78,8 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
 
   const pc = obj(s.platform_channels);
   const channels: Record<string, boolean> = {};
-  for (const k of CHANNEL_KEYS) channels[k] = obj(pc[k]).on === true;
+  const channelsStored: Record<string, boolean> = {};
+  for (const k of CHANNEL_KEYS) { channels[k] = obj(pc[k]).on === true; channelsStored[k] = typeof obj(pc[k]).on === "boolean"; }
 
   // A channel's API key belongs to the restaurant's own Zomato/Swiggy account. It goes out ONLY
   // as a hint that says WHICH key is stored without being the key: "••••1234". The value itself
@@ -126,5 +127,5 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
     for (const key of TAB_ALLOWED[panel]) if (typeof stored[key] === "boolean") tabs[panel][key] = stored[key];
   }
 
-  return { features, settings, modules, channels, grants, sections, tabs, config: cfg, creds };
+  return { features, settings, modules, channels, channelsStored, grants, sections, tabs, config: cfg, creds };
 }
