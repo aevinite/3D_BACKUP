@@ -1317,6 +1317,25 @@ else ok("the read/write route derives every allow-list from the model");
   else ok(`every sub-option is saved only as one of its own values (${optChoice} pick-one rows, the rest on/off)`);
 }
 
+// ── 69 · NO NEVER-CALLED FUNCTION IN THE TWO ROUTES THIS MODEL FEEDS ────────────────────────────
+// app/api/owner/staff/route.ts carried capGroupsFor() — "the permission rows for one person,
+// resolved server-side" — which nothing called, reading a restaurant's whole permission state for a
+// path not in use (sweep #10 T18, item 19). A dead function in a permission route is the one that
+// makes the next reader believe it is the live path. Every top-level function declared in either
+// route must be referenced somewhere besides its own declaration.
+{
+  const dead = [];
+  for (const f of ["app/api/owner/staff/route.ts", "app/api/admin/restaurants/access-tree/route.ts"]) {
+    const src = read(f), body = src.split("\n").filter((l) => !/^\s*(\/\/|\*)/.test(l)).join("\n");
+    for (const m of body.matchAll(/^(?:async )?function (\w+)\(/gm)) {
+      const uses = body.match(new RegExp(`\\b${m[1]}\\b`, "g")) || [];
+      if (uses.length < 2) dead.push(`${f}: ${m[1]}()`);
+    }
+  }
+  if (dead.length) fail(`a function nothing calls sits in a permission route: ${dead.join("; ")}`);
+  else ok("every function in the owner staff and access-tree routes is called");
+}
+
 // ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
 // CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
 // many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27

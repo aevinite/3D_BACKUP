@@ -30,7 +30,7 @@ import { isRestaurantId } from "@/lib/ownerScope";
 import { BUSY_MESSAGE } from "@/lib/dbRefusal";
 import { managerSettingsOff, type MgrStaffPower } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
-import { capsForRole, capGroupsForRole, capVisible, roleDefault, effectiveCap } from "@/lib/staffCaps";
+import { capsForRole } from "@/lib/staffCaps";
 import { accessStateFor } from "@/lib/accessState";
 import { newWaiterTables } from "@/lib/tableAssign";
 import { viewAsPerson, isPersonId } from "@/lib/viewAsPerson";
@@ -693,39 +693,11 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
   return ok(out);
 }
 
-// ── THE PERMISSION ROWS FOR ONE PERSON — the SAME rows Aevidine's profile shows ────────────
-//
-// Resolved SERVER-side and sent as plain rows (key · name · help · pin · editable · what the
-// restaurant gives · what this person actually has). Two reasons it is done here rather than in
-// the browser:
-//   • the owner page used to carry its own hand-written waiter list, and it had drifted — three
-//     rows missing (table types, khata, banquet) and khata greyed by the WRONG module, so the
-//     screen offered a switch the server then refused. `lib/staffCaps` is the one list
-//     (docs/STAFF-PROFILE.md), and deriving from it makes that drift impossible.
-//   • the browser never needs the whole TreeState to draw a row, and that state carries
-//     things an owner has no reason to receive. Only the answers travel.
-//
-// A row the restaurant doesn't have at all is dropped (`capVisible`) — the owner's rule: "if the
-// feature is closed, it should not even be seen there". `editable:false` rows (an owner's own
-// pages, the manager-settings sections) are restaurant-wide, so they are shown for context and
-// carry no control — never a dropdown that saves nothing.
-async function capGroupsFor(role: string, rid: string, permissions: Record<string, string> | null | undefined) {
-  const st = await accessStateFor(rid);
-  return capGroupsForRole(role)
-    .map((g) => ({
-      group: g.group,
-      rows: g.caps.filter((c) => capVisible(c, st)).map((c) => ({
-        key: c.key,
-        name: c.node.name,
-        what: c.node.what || null,
-        pin: c.pin,
-        editable: c.perPerson,
-        roleDefault: roleDefault(c, st),
-        effective: effectiveCap(c, st, permissions),
-      })),
-    }))
-    .filter((g) => g.rows.length > 0);
-}
+// capGroupsFor() — "the permission rows for one person, resolved server-side" — LIVED HERE until
+// 2026-10-10 (sweep #10 T18, item 19). Nothing called it: the owner's copy of a profile renders its
+// rows in the browser from lib/staffCaps with the tree this route sends (creds stripped). A never-called
+// function that reads the restaurant's whole permission state is the shape that makes the next reader
+// believe it is the path in use, so it is gone.
 
 // WHICH LOG THIS BELONGS IN. An action the ADMIN performed is recorded against the admin panel even
 // when it was done from the owner's screens, so it lands in Aevidine's Everything Log and stays out
