@@ -738,6 +738,19 @@ for (const rel of PART_A) {
   if (bare.length) fail(`${rel} clamps a number from the address without Math.trunc — a decimal reaches PostgREST as a fractional limit/range (rule 12)`);
 }
 
+// ── RULE 13 — A SWITCH MOVES ONLY WHEN TOLD WHICH WAY; A DATE MUST EXIST (S10 T28, items 7–8) ───
+{
+  const mt = strip(readFileSync(join(root, "app/api/admin/maintenance/route.ts"), "utf8"));
+  const postAt = mt.search(/export\s+async\s+function\s+POST\b/);
+  const post = postAt >= 0 ? mt.slice(postAt) : "";
+  if (/typeof\s+body\?\.on\s*!==\s*"boolean"/.test(post) && post.search(/typeof\s+body\?\.on/) < post.search(/\.update\(/)) ok("maintenance: POST refuses a request that does not say on or off, before any write");
+  else fail("maintenance: POST no longer refuses a missing `on` — an empty body switches the flagship menu online and logs it (rule 13)");
+  const bl = strip(readFileSync(join(root, "app/api/admin/billing/route.ts"), "utf8"));
+  const usesRound = /toISOString\(\)\.slice\(0,\s*10\)\s*===\s*t/.test(bl) && (bl.match(/realDate\(/g) || []).length >= 2;
+  if (usesRound && !/Number\.isNaN\(Date\.parse\(paidOn\)\)/.test(bl)) ok("billing: every typed date is round-tripped, so 31 February is refused in words");
+  else fail("billing: a typed date is checked by shape + Date.parse only — 2026-02-31 reaches Postgres and answers 'try again' (rule 13)");
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {
