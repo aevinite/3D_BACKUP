@@ -205,8 +205,9 @@ update the detail doc's section in the same commit.
   `verify:everything` refuses to start while another run is alive (pid lock).
 - **🔑 Access model v2 (the 4-rung ladder is RETIRED):** a toggle exists only where the owner
   listed one (`lib/accessTree.ts`); only the ADMIN holds permissions; hiding is never the only
-  guard. Spec: `docs/ACCESS-MODEL.md`; **unbuilt owner asks: `docs/ACCESS-REDESIGN-SPEC.md`
-  (2 open `☐`; recount: `grep -c '^- ☐' docs/ACCESS-REDESIGN-SPEC.md`)**. Guards:
+  guard; **a waiter or manager never sees a power they weren't given** — absent, never greyed or
+  "ask your owner" (R67, 2026-10-11). Spec: `docs/ACCESS-MODEL.md`; **unbuilt owner asks: `docs/ACCESS-REDESIGN-SPEC.md`
+  (0 open `☐`; recount: `grep -c '^- ☐' docs/ACCESS-REDESIGN-SPEC.md`)**. Guards:
   `verify:access`, `verify:everything` (`--list` for
   the phase map — never hard-code phase numbers). **French House is written to; Aangan is the
   READ-ONLY control at factory defaults.**

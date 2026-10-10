@@ -98,6 +98,6 @@ export function ownerProfileHost(userId: string, scopePin: string | null, asPin:
     // holds permissions; the owner panel and the manager panel configure none"). The rows are shown,
     // read-only, and /api/owner/staff refuses set_permissions from an owner or a manager. To give owners
     // per-person control back, flip this one flag and the refusal in that route together.
-    can: { pin: false, signIn: false, role: false, visitAsPerson: false, accessLink: false, showPassword: false, permissions: false },
+    can: { pin: true, pinClear: false, signIn: false, role: false, visitAsPerson: false, accessLink: false, showPassword: false, permissions: false },
   };
 }

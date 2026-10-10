@@ -3,8 +3,8 @@
 // WHERE THIS BITES:
 //   · Admin console → Settings → "Log retention" card → the "Lock this for every restaurant" switch.
 //   · Manager panel → Audit & logs → Activity log / Customer log → the "Logs kept for …" chip in
-//     the header. Locked, it reads "🔒 set by Aevidine"; unlocked and viewed by a manager, it reads
-//     "owner only". Neither is a dropdown for them.
+//     the header. For the OWNER: locked, it reads "🔒 set by Aevidine"; otherwise a dropdown. For a
+//     MANAGER (since 2026-10-11, R67): "Logs kept for <window>" and nothing about who may change it.
 //
 // THE RULE (owner, 2026-08-21, answering "should the 1-month cap be enforced?"):
 //   *"make sure admin can do only lock for mangaer and ever admin do will be visible to manager"*
@@ -71,7 +71,10 @@ want(/XRAY_WHO\.retention/.test(PANEL),
 want(/if \(!R \|\| R\.canEdit !== true\)/.test(PANEL),
   "…and with no proven yes it draws the READ-ONLY form — never a control that can only fail");
 want(/set by Aevidine/.test(PANEL) && /owner only/.test(PANEL),
-  "the read-only chip carries its reason: who set it, or that it is the owner's to set");
+  "the OWNER's read-only chip carries its reason: who set it, or that it is the owner's to set");
+// R67 (owner, 2026-10-11): a MANAGER is never told who may change it — the window only.
+want(/if \(!\(typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO\.higherView\)\) \{\s*\n\s*return `<span class="ret-ctl ret-ctl-ro"[^`]*Logs kept for <b>\$\{esc\(label\)\}<\/b>\s*<\/span>`/.test(PANEL),
+  "a manager's header states how long logs are kept and nothing about who may change it (R67)");
 want(/e\.data && e\.data\.code/.test(PANEL),
   "a refusal is read from api()'s real contract (e.data.code), or the branch never runs");
 want(/ret-ctl-ro/.test(read("public/panels/editor/style.css")),

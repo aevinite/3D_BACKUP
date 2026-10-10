@@ -1871,4 +1871,11 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [x] **Only the admin holds permissions** (item 16, MY CALL on the written rule) — Owner → Staff → a person → Permissions is read-only, "set by Aevidine"; owner/manager saves refused. VERIFIED live. Lever: `permissions: true` in ownerProfileHost + drop the route refusal.
 - [x] **Move, merge & split ON for every restaurant except Aangan** (item 9, "this is test site … do as you want"). VERIFIED live.
 - [x] **603 new checks, zero errors, every bit measured** — coverage 1,275/1,276 lines (every unreached arm pinned by an invariant row); three mutation passes 712 → 146 → 46 → 36 (all 36 equivalent, reasons in `scripts/sweep/t18s10/r2/equivalent.json`); all 960 round-1 rows re-run green.
-- [ ] **Two spec lines genuinely unbuilt** (not faults): reset a staff PIN; a waiter's own-profile sections — `docs/ACCESS-REDESIGN-SPEC.md`, waiting on the owner.
+- [x] **Two spec lines genuinely unbuilt** (not faults): reset a staff PIN; a waiter's own-profile sections — settled 2026-10-11 (below).
+
+## 2026-10-11 — "do 1" + staff see only what they were given (owner: "do 1 and like we don't want waiter or manager to know there were more permisiion which are not given to you … make sure not to suggest this again")
+
+- [ ] **Owner resets a manager's PIN** — Owner → Staff → a manager → "🔑 Reset manager PIN": types 4–8 digits; no Clear (only Aevidine can remove one — with none the tablet stops asking). Not from the manager panel: only managers have PINs and a manager can't manage managers. Driven on :4419 (17/17 + 390px). Verify live on backup.
+- [ ] **A waiter or manager never sees a power they weren't given** (R67) — Manager → Settings → Tables plain facts, no Save (was greyed boxes + "Ask the admin"); Edit menu view-only has no "turned off for you" banner, buttons gone; KOT menu "Table type" absent without the power (was "you don't have that power"); Activity/Customer log header "Logs kept for X" for a manager (was "owner only"/"🔒 set by Aevidine" — ⚠️ reverses 2026-08-21 for managers); tablet KOT sheet "Split the bill" absent for a waiter who may not take payment (driven: diagt1 off → absent, on → listed). Verify live on backup.
+- [x] **Waiter's own-profile sections — declined** (R68, "do 1"). Not built, not to be suggested again.
+

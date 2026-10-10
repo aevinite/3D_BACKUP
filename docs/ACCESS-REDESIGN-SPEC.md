@@ -1,7 +1,7 @@
 # Access screen — the outstanding list (owner, 2026-08-01)
 
-> ✅ **LIVE WORKING SPEC — not history.** **2** of the lines below are still `☐` (9 until
-> 2026-10-10, when sweep #10 T18 re-checked every one against the code and the owner's later rulings:
+> ✅ **LIVE WORKING SPEC — not history.** **0** of the lines below are still `☐` (2 until 2026-10-11, when the owner had the PIN reset built
+> and declined the waiter-profile sections — "do 1"; 9 until 2026-10-10, when sweep #10 T18 re-checked every one against the code and the owner's later rulings:
 > five were built, three had been overruled by him and are marked `☒ SUPERSEDED` with his words). It claimed 13
 > until 2026-08-11, and there were only ever 12 — three of those were already BUILT and still
 > marked not-started, which sends the next session to rebuild things that are already there.
@@ -114,8 +114,10 @@ permission with a real gate — no decoration.
   2026-08-02. Ticked by sweep #10 T18, 2026-10-10.)*
 - ☑ **Reset a staff password.** *(Manager settings → Users → "Reset a password", its own switch since
   2026-08-20. Ticked 2026-10-10.)*
-- ☐ **Reset a staff PIN** from the manager panel — the PIN half of the same ask is not built: a
-  manager PIN is set only from the admin's profile.
+- ☑ **Reset a staff PIN.** *(Owner → Staff → a manager → "🔑 Reset manager PIN", built 2026-10-11 on
+  the owner's "do 1". Not from the manager panel: only a MANAGER has a PIN, and a manager can only
+  manage the logins below them, which have none. The owner sets a new 4–8 digits; only Aevidine can
+  remove a PIN, because with none the tablet stops asking.)*
 - ☒ **Delete a staff login.** — **SUPERSEDED by the owner, 2026-08-02:** *"it can disable the user, it
   can't delete the user."* A manager can switch a login off; deleting stays admin-only, with no switch.
 - ☑ *(more tablet ones will follow — build the group so adding one is a line, not a redesign.)*
@@ -128,8 +130,10 @@ permission with a real gate — no decoration.
 
 ## K · Waiter sections move into the person
 
-- ☐ *Who serves which table* is a **tablet user's own profile setting**, changeable from there —
-  not a separate Sections screen.
+- ☒ *Who serves which table* is a **tablet user's own profile setting**, changeable from there —
+  not a separate Sections screen. — **DECLINED by the owner, 2026-10-11:** *"do 1"* (only the PIN
+  reset), with *"make sure not to suggest this again"* (docs/REJECTED-IDEAS.md → R68). Sections stay on
+  Manager settings → Sections.
 
 ## L · The manager's Settings tab is DELETED
 

@@ -192,6 +192,7 @@ const PLACE: Record<string, Place> = {
   staff_rename: { area: "People & pay", screen: "Users" },
   staff_set_role: { area: "People & pay", screen: "Users" },
   staff_reset_password: { area: "People & pay", screen: "Users" },
+  staff_set_pin: { area: "People & pay", screen: "Staff profile" },
   staff_set_permissions: { area: "People & pay", screen: "Access & permissions" },
   manager_permissions: { area: "People & pay", screen: "Access & permissions" },
   access_change: { area: "People & pay", screen: "Access & permissions" },
