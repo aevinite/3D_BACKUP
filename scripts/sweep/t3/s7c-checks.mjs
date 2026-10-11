@@ -286,7 +286,9 @@ P("P42155", "the elapsed line cannot appear on any other screen", /step !== "req
 P("P42156", "…and it renders nothing at all when there is no stamp", /reqAt \? Math\.floor/.test(F.gate));
 P("P42157", "…and cannot show a negative time", /Math\.floor\(\(Date\.now\(\) - reqAt\) \/ 60000\)/.test(F.gate));
 P("P42158", "the request screen still names the table in the message above it", /pending\.current\?\.table/.test(F.gate));
-P("P42159", "the gate's own settings load is unchanged by this item", /const s = await getSettings\(rid\);/.test(F.gate));
+// RE-AIMED, sweep #10 T4 (2026-10-12) — the rule holds; the code moved ON PURPOSE. Sweep #9 item 7 put a deadline on that load
+// (Promise.race) — it is still THIS restaurant's getSettings(rid), asked every time.
+P("P42159", "the gate's own settings load is unchanged by this item", /const s = await Promise\.race\(\[\s*getSettings\(rid\),/.test(F.gate));
 P("P42160", "…and so is the fallback that stops a blip dead-ending a diner", /const known = settingsByRid\.current\.get\(/.test(F.gate));
 P("P42161", "no new network call was added for the clock", !/fetch\(/.test((F.gate.match(/const \[reqAt[\s\S]{0,600}/) || [""])[0]));
 P("P42162", "…and no new storage key", !/tset\(/.test((F.gate.match(/Asked \{mins[\s\S]{0,300}/) || [""])[0]));
@@ -521,7 +523,8 @@ P("P42360", "…and nothing else on the guest side is queued", !/enqueueGuestRev
 P("P42361", "the offline strip's sentence is still true of all three kinds", /Anything you send is saved and goes by itself\./.test(read("components/OfflineNotice.tsx")));
 P("P42362", "…and is still an English literal, as R15 requires", !/useTranslation/.test(read("components/OfflineNotice.tsx")));
 P("P42363", "the table gate still shows the restaurant's OWN name", /const brandLabel = restaurantName \|\|/.test(F.gate));
-P("P42364", "…and still refuses a table the restaurant does not have", /This place has tables 1–\$\{max\}/.test(F.gate));
+// RE-AIMED, sweep #10 T4 (2026-10-12) — the rule holds; the code moved ON PURPOSE. Sweep #9 item 5: the gate asks the shared checker.
+P("P42364", "…and still refuses a table the restaurant does not have", /validateTable\(tableInput, settingsRef\.current\?\.tableCount \|\| 0\)/.test(F.gate) && /tableCount > 0 && num > tableCount/.test(read("lib/table.ts")));
 P("P42365", "…and every one of its seventeen screens still renders", ["ask_table","not_open","request_sent","blocked","net_error","working"].every((s) => new RegExp(`step === "${s}"`).test(F.gate)));
 P("P42366", "the gate still reports its outcome exactly once", /if \(settled\.current\) return;/.test(F.gate));
 P("P42367", "…and closing still reports it cancelled", /reason: "cancelled", action: pending\.current\?\.action/.test(F.gate));

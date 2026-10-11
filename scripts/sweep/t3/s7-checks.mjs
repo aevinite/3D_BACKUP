@@ -332,9 +332,14 @@ P("P16209", "…and the true 'nothing ordered yet' message is still a separate, 
   /No dishes sent to the kitchen yet/.test(F.tbill));
 P("P16210", "the green live dot stops claiming a live connection while that message is up",
   /!loaded && stalled \? \{ background: "var\(--muted\)"/.test(F.tbill));
+// RE-AIMED, sweep #10 T4 (2026-10-12). Sweep #9 item 7 DELIBERATELY added a third "working" screen:
+// Place order and Call a waiter now open the sheet on "One moment…" BEFORE the restaurant's rules are
+// read, so a tap is never silent. Every exit from it is a named screen (net_error, ask_table, or the
+// flow's own steps) — verify:session-gate section D guards that one. The count is three, not two.
 P("P16211", "the gate's 'One moment…' step is always left by one of a finite set of endings",
   /setStep\("working"\)/.test(F.gate)
-  && (bare(F.gate).match(/setStep\("working"\)/g) || []).length === 2);
+  && (bare(F.gate).match(/setStep\("working"\)/g) || []).length === 3
+  && /if \(detail\.action !== "connect"\) \{ setOpen\(true\); setStep\("working"\); \}/.test(F.gate));
 P("P16212", "…the order path leaves it by placing, refusing, saving or closing",
   /orderKeyRef\.current = null; \/\/ placed → the next basket is a new order/.test(F.gate));
 // RE-AIMED: `setOpen(true)` was inserted before setStep — the sheet may have been dismissed
