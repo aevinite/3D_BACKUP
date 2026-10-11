@@ -395,7 +395,44 @@ async function t5Fixes() {
     : bad("a finished tile hides the ＋ with no word to replace it");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes];
+// ── I · EVERY CLOCK THE PANEL PRINTS IS THE RESTAURANT'S CLOCK (sweep #10 T6, 2026-10-12) ────────
+// fmtWhen() was pinned to Asia/Kolkata on 2026-08-05 so a manager — or the owner, looking in from
+// another country — reads the restaurant's own times. Four more clocks in the first third of the
+// panel were never pinned: the Pay Later book and the On-the-house report (fmtDate), the Rating
+// review card, the Dashboard's "Updated 7:15 pm / Today till 7:15 pm" and the performance report's
+// "Generated". Run from the SHIPPED source text under a New York clock: the answer must be India's.
+async function istClocks() {
+  console.log("\nI. every clock the manager panel prints is the restaurant's");
+  const app = src("public/panels/editor/app.js");
+  const end = app.indexOf("async function printZReport(");
+  const part1 = end > 0 ? app.slice(0, end) : app;
+  const dateFmt = /new Date\([^)]*\)\.toLocale(?:String|DateString|TimeString)\(|\bnow\.toLocale(?:String|DateString|TimeString)\(/g;
+  const unpinned = (txt) => txt.split("\n").map((l, i) => [l, i + 1]).filter(([l]) => { dateFmt.lastIndex = 0; return dateFmt.test(l) && !/timeZone/.test(l); });
+  const p1 = unpinned(part1);
+  p1.length === 0
+    ? ok("the first third of the panel (to printZReport) prints no clock in the READER's zone")
+    : bad(`${p1.length} clock(s) in the first third print the READER's zone`, p1.map(([, n]) => "app.js:" + n).join(", "));
+  // The rest of the file is other sweep territories; this is a RATCHET, so a new unpinned clock
+  // cannot be added there either while its owners work down the two this pattern finds (8314, 8324 on 2026-10-12).
+  const rest = unpinned(app.slice(part1.length));
+  rest.length <= 2
+    ? ok(`the rest of the panel adds no new unpinned clock (${rest.length} known, owned by later sweep terminals)`)
+    : bad(`the rest of the panel now has ${rest.length} unpinned clocks (2 were known on 2026-10-12)`, "pin the new one: { …, timeZone: \"Asia/Kolkata\" }");
+  // Behaviour: lift fmtDate and run it under a New York clock.
+  const line = (app.match(/^const fmtDate = .*$/m) || [""])[0];
+  if (!line) { bad("fmtDate() is gone from the panel — re-point this check"); return; }
+  const tz = process.env.TZ;
+  try {
+    process.env.TZ = "America/New_York";
+    const fmtDate = new Function(line.replace(/^const fmtDate = /, "return ").replace(/;\s*$/, ""))();
+    const got = fmtDate("2026-10-11T21:00:00Z");      // 02:30 on 12 Oct in India, 5 pm on 11 Oct in New York
+    /12 Oct/.test(got) && /02:30/.test(got)
+      ? ok(`a Pay Later date reads the restaurant's day under a New York clock (${got})`)
+      : bad(`a Pay Later date reads the reader's zone (${got})`, "expected 12 Oct, 02:30 am — India");
+  } finally { if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz; }
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

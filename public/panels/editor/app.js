@@ -4180,7 +4180,10 @@ function ordersCallsHtml() {
 // loadKhataBook(): fetch the person-grouped outstanding book + the comp-bill report
 // in parallel. Cached on state; refreshed every time the view is opened (rare path,
 // two scoped+limited reads — no polling).
-const fmtDate = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+// Pinned to the restaurant's zone like fmtWhen() above (sweep #10 T6, 2026-10-12): without it the
+// Pay Later book and the On-the-house report printed the READER's clock, so the same bill read
+// "12 Oct, 02:30 am" in India and "11 Oct, 05:00 pm" to anyone looking in from elsewhere.
+const fmtDate = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "—";
 let _khataLoading = false;
 async function loadKhataBook() {
   if (_khataLoading) return;
@@ -5816,7 +5819,7 @@ function renderRatings(d) {
   const filterHtml = `<div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn ${state.ratingsFilter === "all" ? "primary" : ""}" data-rfilter="all">All</button><button class="btn ${state.ratingsFilter === "unhandled" ? "primary" : ""}" data-rfilter="unhandled">To handle · ${s.unhandled || 0}</button></div>`;
   const cards = rows.length ? rows.map((r) => {
     const col = r.rating <= 2 ? "#e5484d" : r.rating === 3 ? "#f59e0b" : "#16a34a";
-    const when = new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    const when = new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
     return `<div style="border-left:4px solid ${col};background:var(--panel,#fff);border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:12px;margin-bottom:10px;opacity:${r.acknowledged ? 0.72 : 1}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:15px">${ratingStars(r.rating)}</span>
@@ -5942,7 +5945,8 @@ async function loadDashboard(useCache) {
     `<b>${s.paid}</b> paid · <b>${s.unpaid}</b> unpaid`,
     onlineCnt > 0 ? `avg ticket: dine-in <b>${inr(s.avgOrder)}</b> · online <b>${inr(onlineRev / onlineCnt)}</b>` : "",
   ].filter(Boolean).join("<br>");
-  const freshT = new Date(s.updatedAt || Date.now()).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  // The restaurant's clock, not the reader's — "Today till 7:15 pm" is a sentence about the restaurant's day.
+  const freshT = new Date(s.updatedAt || Date.now()).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
   // Plain-English narration (the Square trick): say what happened in one sentence.
   let narrate = "";
   if (s.revenue > 0) {
@@ -6441,7 +6445,7 @@ async function printManagerReport() {
 </style></head><body>
   <div class="head">
     <div><h1 class="rname">${name}</h1><div class="rtag">Performance report · ${rangeLabel}</div></div>
-    <div class="doc"><div class="t">PERFORMANCE REPORT</div><div class="m">Generated ${now.toLocaleString("en-IN")}</div><div class="m brand">✦ Aevidine</div></div>
+    <div class="doc"><div class="t">PERFORMANCE REPORT</div><div class="m">Generated ${now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</div><div class="m brand">✦ Aevidine</div></div>
   </div>
   <div class="kpis">
     ${kpi("Revenue", inr(s.revenue), rangeLabel)}${kpi("Orders", (s.orderCount || 0).toLocaleString("en-IN"))}${kpi("Avg order", inr(s.avgOrder))}
