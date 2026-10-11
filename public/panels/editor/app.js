@@ -6356,6 +6356,18 @@ async function printBill(t, sess, os, opts = {}) {
   if (printedSid) {
     api("POST", "/print/send", { kind: "bill", sessionId: printedSid, parcel: !!opts.parcel })
       .then((r) => {
+        // SAVED ON THIS DEVICE IS NOT "SENT TO THE PRINTER" (sweep #10 T6, 2026-10-12). With no signal
+        // (or a server too busy to answer) api() hands this to the offline outbox, which answers
+        // { ok, queued: true, action_id } — and `queued` read as the SERVER's "it is in the printer's
+        // basket". So the screen said "Sent to the printer", no window opened, nothing printed, and
+        // the saved send fired by itself whenever the signal came back — a bill coming out of the
+        // counter printer long after the guest had gone. The guest is standing here now: take the
+        // send back out of the queue and open the bill on this screen, which needs no network at all.
+        if (r && r.queued && r.action_id) {
+          try { if (window.LFH_OUTBOX && LFH_OUTBOX.dismiss) LFH_OUTBOX.dismiss(r.action_id); } catch (e) { /* the window still opens */ }
+          openBillWindow(html);
+          return;
+        }
         if (r && r.queued) { toast(r.note || ("Sent to " + (r.printer || "the printer")), "ok"); return; }
         // Viewing as the admin: their printer stays quiet and the bill opens here instead, so nothing
         // comes out of a paying client's roll because we looked at their screen.

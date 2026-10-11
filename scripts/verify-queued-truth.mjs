@@ -174,6 +174,31 @@ console.log("\nD. no success message states a server figure it cannot have");
   else bad(`${offenders.length} ok-toast(s) quote the server's reply with nothing guarding it`, offenders.join(", ") + " — offline these print the word `undefined`. Route it through okToast(<the api result>, \"…\"), or check that field is present before printing it.");
 }
 
+console.log("\nD2. a bill saved on this device is not 'sent to the printer' (sweep #10 T6, 2026-10-12)");
+// printBill() asks the server whether a computer owns the bills (POST /print/send). The SERVER's
+// "it is in the printer's basket" answer is `{ queued: true, id, printer, note }`; the OUTBOX's
+// "I saved it, no signal" answer is `{ ok: true, queued: true, action_id, why }`. Both say
+// `queued`, so a check on `r.queued` alone told a manager with no signal "Sent to the printer",
+// opened no window, printed nothing — and the saved send went off by itself whenever the signal
+// came back. The device-queued answer must be told apart (by its action_id) BEFORE the "Sent"
+// toast, and must open the bill window instead. Positions compared on code, not prose.
+{
+  const i = codeOnly.indexOf('api("POST", "/print/send", { kind: "bill", sessionId: printedSid');
+  if (i < 0) bad("printBill's hand-off to the printer is no longer written this way", "re-point this line");
+  else {
+    const win = codeOnly.slice(i, i + 1600);
+    const dev = win.search(/r\.queued && r\.action_id/);
+    const sent = win.search(/if \(r && r\.queued\) \{ toast\(/);
+    const opens = dev >= 0 ? win.slice(dev, dev + 400).indexOf("openBillWindow(html)") : -1;
+    if (dev < 0) bad("printBill() cannot tell 'saved on this device' from 'sent to the printer'", "offline it says Sent to the printer and nothing prints");
+    else if (sent >= 0 && sent < dev) bad("printBill() says 'Sent' BEFORE asking whether the send only reached this device");
+    else if (opens < 0) bad("a device-queued bill print does not open the bill window", "the guest is left with no bill");
+    else ok("a bill print that only reached this device opens the bill here, and never says 'Sent'");
+    if (/LFH_OUTBOX\.dismiss\(r\.action_id\)/.test(win)) ok("…and the saved send is taken back out of the queue, so it cannot print by itself later");
+    else bad("the device-queued bill send is left in the queue", "it would print at the counter on its own when the signal returns, long after the guest has gone");
+  }
+}
+
 console.log("\nE. reopen puts the TABLE back, not the bill (owner, 2026-08-26; mig 365)");
 // The four rules he gave, each asserted where it actually lives. Driven end to end when it was
 // built — a settled bill was refused while another party sat at the table, then accepted once the
