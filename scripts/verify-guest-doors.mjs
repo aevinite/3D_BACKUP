@@ -1048,6 +1048,11 @@ flush();
   { const m = r2("lib/menu.ts"); const cw = m.slice(m.indexOf("export async function callWaiter"), m.indexOf("export type OrderStatus"));
     check("item 10 — a QR waiter call refused by the table's limit sends the owner's limit beacon",
       /if \(res\.reason === "rate_limited"\) \{[\s\S]{0,200}"\/api\/guest\/limit-hit"[\s\S]{0,160}fn: "lfh_call_waiter_table"/.test(cw)); }
+  // item 11 — the Live-status dish reads follow a nudge + one-minute backstop, never the 5s redraw
+  { const c = r2("components/CartPanel.tsx");
+    check("item 11 — the bill reads each live order's dishes on a realtime nudge or the 60s backstop, not every 5 seconds",
+      /const cardsShown = open && showHistory && !sessionsEnabled;/.test(c) && /window\.addEventListener\("lfh:rt-tick", bump\)/.test(c)
+      && /setInterval\(bump, RT_BACKUP_MS\)/.test(c) && /\}, \[cardsShown, liveOrders, dishBeat\]\);/.test(c) && !/\}, \[open, liveOrders\]\);/.test(c)); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

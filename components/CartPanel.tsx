@@ -29,6 +29,7 @@ import {
   writeActiveOrders,
   liveActiveOrders,
   isFinalStatus,
+  RT_BACKUP_MS,
 } from "@/lib/orderStatus";
 
 // A single chosen option on a dish (e.g. group "Size", label "Large", +price).
@@ -433,29 +434,57 @@ export default function CartPanel() {
   const lineDisp = (it: CartItem) =>
     unitDisplay(parseFloat(it.price), (it.options || []).map((o) => o.price || 0), currency || undefined) * it.qty;
   // Red dot on the Live-status tab: a live order whose floating strip was hidden.
-  // Ask for each live order's lines when the sheet is open, and again whenever the orders change
-  // (a realtime breadcrumb or the tracker's own poll moves an order's status). One small read per
-  // live order — the same cadence the card itself already refreshes at, and nothing at all while
-  // the sheet is shut, which is the rule every other read in this app follows.
+  // Ask for each live order's lines — ONLY when someone can see them, and only when something may
+  // have changed.
+  //
+  // ── IT WAS A FIVE-SECOND DATABASE POLL (sweep #10 T3 round 2, item 11) ────────────────────────
+  // This effect ran on `[open, liveOrders]`, and the 5-second re-check above hands `liveOrders` a
+  // NEW array every five seconds whether anything changed or not. So every five seconds, for every
+  // live order, the phone called `get_order_dishes` — measured on the built app: 7 reads in 30
+  // seconds for ONE order with the Live status tab open. It also read while the CURRENT bill tab
+  // was showing, and for a seated table, where these cards are not drawn at all (the shared table
+  // bill above them is). The rule everywhere else in this app is a realtime nudge plus a 60-second
+  // backstop, never a fixed fast beat (docs/SAAS-EFFICIENCY-PLAYBOOK.md).
+  //
+  // Now a card's dishes are read when the Live-status cards are actually on screen, and then again
+  // only when there is a reason: the order's own status moved, a realtime breadcrumb arrived for the
+  // table (`lfh:rt-tick`, the same nudge OrderTracker listens to), or the one-minute backstop passed.
+  // `dishAsked` remembers what each order was last asked under, so a re-render alone asks nothing.
+  const cardsShown = open && showHistory && !sessionsEnabled;
+  const dishAsked = useRef<Record<string, string>>({});
+  const [dishBeat, setDishBeat] = useState(0);
   useEffect(() => {
-    if (!open) return;
-    let alive = true;
-    const ids = liveOrders.filter((o) => !isFinalStatus(o.status) || !orderDishes[o.id]).map((o) => o.id);
-    if (!ids.length) return;
+    if (!cardsShown) { dishAsked.current = {}; return; }   // hidden → ask afresh the next time they show
+    const bump = () => setDishBeat((n) => n + 1);
+    window.addEventListener("lfh:rt-tick", bump);
+    const iv = setInterval(bump, RT_BACKUP_MS);
+    return () => { window.removeEventListener("lfh:rt-tick", bump); clearInterval(iv); };
+  }, [cardsShown]);
+  useEffect(() => {
+    if (!cardsShown) return;
+    const due = liveOrders.filter((o) => {
+      if (isFinalStatus(o.status) && orderDishes[o.id]) return false;   // finished and already drawn
+      return dishAsked.current[o.id] !== `${o.status}|${dishBeat}`;
+    });
+    if (!due.length) return;
+    for (const o of due) dishAsked.current[o.id] = `${o.status}|${dishBeat}`;
     (async () => {
-      for (const id of ids) {
+      for (const { id } of due) {
         try {
+          // No "still wanted?" check: the answer is about THIS order and stays true however the list
+          // re-rendered meanwhile, and the panel never unmounts (it draws nothing while shut). Dropping
+          // it would leave the card un-asked until the next beat, because it is already marked asked.
           const rows = await getOrderDishes(id);
-          if (!alive) return;
           // Only ever replace with something real: an empty answer for an order that already has
           // lines would blank the card, and "I could not ask" is not "there are no dishes".
           if (rows.length) setOrderDishes((m) => ({ ...m, [id]: rows }));
-        } catch { /* busy database — keep whatever the card already has */ }
+        } catch { /* busy database — keep the card; the next nudge or the backstop asks again (never sooner) */ }
       }
     })();
-    return () => { alive = false; };
+    // `orderDishes` is read only to skip a finished order already drawn; listing it would re-run this
+    // effect on every answer it writes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, liveOrders]);
+  }, [cardsShown, liveOrders, dishBeat]);
 
   const hiddenLive = liveOrders.some((o) => o.stripHidden && !isFinalStatus(o.status));
   // ── the three price behaviours (mig 270) ───────────────────────────────────
