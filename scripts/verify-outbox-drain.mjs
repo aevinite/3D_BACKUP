@@ -76,6 +76,14 @@ const server = http.createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
+    // "discount-down" (section 13) → table 5's DISCOUNT always answers 503; everything else is
+    // accepted and recorded. The shape of one route failing while the rest of the server is fine.
+    if (mode === "discount-down") {
+      if (/\/tables\/5\/discount/.test(req.url)) { res.writeHead(503, { "content-type": "application/json" }); return res.end('{"error":"busy"}'); }
+      seen.push({ id: req.headers["x-lfh-action-id"] || "", path: req.url, replay: req.headers["x-lfh-replay"] === "1" });
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end('{"ok":true}');
+    }
     if (mode === "signout") { res.writeHead(401, { "content-type": "application/json" }); return res.end('{"error":"login"}'); }
     if (mode === "working") { res.writeHead(409, { "content-type": "application/json" }); return res.end('{"error":"sync_in_progress","retry":true}'); }
     // "refuse200" → the shape SEVERAL real staff branches answer with: a 200 whose BODY says no,
@@ -375,6 +383,47 @@ seen.length = 0;
 await page.evaluate(() => window.LFH_OUTBOX.send({ method: "POST", path: "/api/panel-profile", body: { phone: "1" }, label: "an old-shape save" }).catch(() => null));
 if (seen.length === 1 && seen[0].path === "/api/panel-profile") ok("the queue sends a base-less change to its own path");
 else bad("the queue still builds 'undefined' + path", JSON.stringify(seen.map((x) => x.path)));
+
+// ── 13. a change that runs out of tries IN THIS ROUND still holds the next one on its table ──
+// Sweep #10 T16, 2026-10-12. Section 11 proves the order holds while both changes are still trying,
+// and the start of every round stalls a table that is already owed something in `failed`. What was
+// not covered: the round in which a change GIVES UP. The discount moved to "Needs you" and the walk
+// carried straight on to the settle for the same table — so the bill went out at full price while
+// the discount sat there with a Try again button that would land on an already-settled bill.
+console.log("\n13) A discount that gives up mid-round still holds the settle behind it");
+await fresh(); seen.length = 0;
+mode = "discount-down";
+await page.evaluate(() => window.LFH_OUTBOX.__pause());
+const hold = await page.evaluate(async () => {
+  const O = window.LFH_OUTBOX;
+  const a = await O.send({ base: "", method: "POST", path: "/api/editor/tables/5/discount", body: { pct: 10 }, panel: "editor" });
+  const b = await O.send({ base: "", method: "POST", path: "/api/editor/tables/5/pay", body: {}, panel: "editor" });
+  // One round at a time: a round kicked by send() may still be running, and flush() returns at once
+  // while one is. Wait it out, then start the next — until the discount gives up (6 tries) or 40 goes.
+  for (let i = 0; i < 40 && !O.getSnapshot().failed.length; i++) {
+    while (O.isFlushing()) await new Promise((r) => setTimeout(r, 15));
+    await O.flush();
+  }
+  while (O.isFlushing()) await new Promise((r) => setTimeout(r, 15));
+  const s = O.getSnapshot();
+  return { a: a.why, b: b.why, queued: s.queued.map((x) => x.path), failed: s.failed.map((x) => ({ p: x.path, r: x.retryable })) };
+});
+if (hold.a === "busy" && hold.b === "behind") ok("the settle was queued behind the busy discount");
+else bad("the setup did not queue as expected", JSON.stringify(hold));
+if (hold.failed.some((f) => /\/5\/discount/.test(f.p) && f.r !== false)) ok("the discount ran out of tries and is waiting for a person, with Try again");
+else bad("the discount did not reach Needs you", JSON.stringify(hold.failed));
+if (!seen.some((x) => /\/tables\/5\/pay/.test(x.path))) ok("the settle for table 5 was NOT sent while its discount needs a person");
+else bad("the settle went out at full price the moment the discount gave up", JSON.stringify(seen.map((x) => x.path)));
+if (hold.queued.some((p) => /\/5\/pay/.test(p))) ok("…it is still waiting, behind the discount");
+else bad("the settle is not in the queue any more", JSON.stringify(hold));
+// …and it is released by the person's own choice, exactly as section 11's rule promises.
+mode = "ok";
+await page.evaluate(() => { const O = window.LFH_OUTBOX; const f = O.getSnapshot().failed[0]; return f ? O.retryOne(f.id) : null; });
+const released = await until(async () => seen.filter((x) => /\/tables\/5\//.test(x.path)).length === 2, 6000);
+const order5 = seen.filter((x) => /\/tables\/5\//.test(x.path)).map((x) => x.path.split("/").pop());
+if (released && order5.join(",") === "discount,pay") ok("Try again sent the discount FIRST, then the settle");
+else bad("after Try again the two did not go discount → settle", JSON.stringify(order5));
+await page.evaluate(() => window.LFH_OUTBOX.__resume());
 
 await browser.close();
 server.close();
