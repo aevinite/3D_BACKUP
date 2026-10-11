@@ -188,20 +188,54 @@ async function handler(req: NextRequest) {
       if (!UUID.test(orderId)) return err("invalid order_id");
       // Answers for itself — see the note in void_bill above. This one also feeds the Removals
       // record's amount, so a guess here would be a wrong figure on the owner's audit screen.
-      const curR = await readOne<{ table_number?: string; payment_status?: string; status?: string; total?: number | null; session_id?: string | null }>(
-        "orders", "id, table_number, payment_status, status, total, session_id", orderId, rid, "That order isn't for this restaurant.");
+      const curR = await readOne<{ table_number?: string; payment_status?: string; status?: string; total?: number | null; session_id?: string | null; deleted_at?: string | null }>(
+        "orders", "id, table_number, payment_status, status, total, session_id, deleted_at", orderId, rid, "That order isn't for this restaurant.");
       if ("res" in curR) return curR.res;
       const cur = curR.row;
-      await softDeleteOrders(rid, [orderId], { actor: "Admin (repair)", actorId: null, reason: reason || "admin repair delete" });
-      await logRepair("repair_delete_order", { order_id: orderId, table_number: cur.table_number ?? null, detail: (cur.payment_status === "paid" ? "was PAID — " : "") + "soft-deleted (tombstoned)" });
+      // ── AN ORDER THAT IS ALREADY DELETED IS NOT DELETED AGAIN (sweep #10 T29, item 3) ──────────────
+      // The twin of the void-twice fault above (T20, 2026-09-01), on the next branch down. A soft delete
+      // keeps the row, so the ownership read still finds it; softDeleteOrders() then skips it and says
+      // `{ deleted: 0 }` — and that count was never looked at. So deleting an order the manager (or a
+      // second tab, or a stale Repair list) had already deleted answered ok, wrote a second
+      // repair_delete_order diary line, and wrote a SECOND `order_deleted` row into the Removals record
+      // carrying the order's full amount. That record is where the owner and the manager answer "what
+      // came off my bills, and how much?", so anyone totalling it read the order twice.
+      // Not an error — pressing Delete on an order someone just removed is reasonable — so it answers ok
+      // and records nothing. Checked twice: before the write, and from the write's own count, because
+      // another device can delete it in between.
+      const already = () => NextResponse.json({ ok: true, alreadyDeleted: true, message: "That order was already deleted — nothing was changed." });
+      if (cur.deleted_at) return already();
+      // …AND A DELETE THAT THROWS AFTER THE ORDER WENT IS STILL RECORDED (same item). softDeleteOrders()
+      // stamps the order first and the bill's own tombstone last, so a throw from the second half used to
+      // land in the catch below as a raw 500 with the order already gone and NO Removals row for it — the
+      // same hole S10 T28 item 1 closed on the admin bill ledger. Find out what actually happened, and
+      // record exactly that.
+      let deleted = 0;
+      let tombstoneFailed = false;
+      try {
+        deleted = (await softDeleteOrders(rid, [orderId], { actor: "Admin (repair)", actorId: null, reason: reason || "admin repair delete" })).deleted;
+      } catch (e) {
+        console.error("[admin/repair] delete failed:", e instanceof Error ? e.message : String(e));
+        const nowQ = await sb.from("orders").select("deleted_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle();
+        if (nowQ.error || !(nowQ.data as { deleted_at?: string | null } | null)?.deleted_at) {
+          return err("Couldn't delete that order — nothing was changed. Please try again.", 500);
+        }
+        deleted = 1;
+        tombstoneFailed = true;
+      }
+      if (deleted === 0) return already();
+      await logRepair("repair_delete_order", { order_id: orderId, table_number: cur.table_number ?? null, detail: (cur.payment_status === "paid" ? "was PAID — " : "") + "soft-deleted (tombstoned)" + (tombstoneFailed ? " · its bill could NOT be marked deleted with it" : "") });
       // Same reason as the void above: a removal has to reach the Audit, not just the log.
       await recordRemoval({
         rid, kind: "order_deleted", reason: { note: reason || "admin repair delete" }, user: null,
         orderId, sessionId: cur.session_id ?? null,
         tableNumber: cur.table_number != null ? String(cur.table_number) : null,
         amount: Number(cur.total) || 0,
-        meta: { from: "admin repair kit", was_paid: cur.payment_status === "paid" },
+        meta: { from: "admin repair kit", was_paid: cur.payment_status === "paid", ...(tombstoneFailed ? { partial: true } : {}) },
       });
+      if (tombstoneFailed) {
+        return err("The order was deleted and is on the Removals record, but its bill could not be marked deleted with it. The order needs nothing more.", 500);
+      }
       return NextResponse.json({ ok: true });
     }
 

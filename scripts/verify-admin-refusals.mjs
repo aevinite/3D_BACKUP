@@ -271,5 +271,29 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 8 · A REMOVAL THAT DID NOT HAPPEN IS NEVER RECORDED (sweep #10 T29, item 3) ──────────────────
+// The Repair Kit's "Delete an order" read the order WITHOUT its deleted_at and never looked at the
+// count softDeleteOrders() hands back, so deleting an already-deleted order wrote a second
+// `order_deleted` row — full amount — into the Removals record the owner totals. The void branch two
+// blocks up has refused its own twin since T20 (2026-09-01); this holds the delete branch to it.
+{
+  const rel = "app/api/admin/repair/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    const del = src.slice(src.indexOf('op === "delete_order"'), src.indexOf('op === "refire_order"'));
+    check("Repair → Delete an order reads the order's deleted_at before deleting it",
+      /readOne<[^>]*deleted_at[^>]*>\(\s*"orders",\s*"[^"]*\bdeleted_at\b/.test(del), "an already-deleted order is indistinguishable from a live one");
+    check("…and an already-deleted order returns BEFORE anything is written",
+      /if \(cur\.deleted_at\) return/.test(del) && del.indexOf("if (cur.deleted_at) return") < del.indexOf("softDeleteOrders("),
+      "a second press would record the same removal twice");
+    check("…and it believes the delete's own count, not its own earlier read",
+      /\)\)\.deleted;/.test(del) && /if \(deleted === 0\) return/.test(del),
+      "another device can delete it between the read and the write");
+    check("…and the Removals row is written only after both of those",
+      del.indexOf("if (deleted === 0) return") > -1 && del.indexOf("recordRemoval(") > del.indexOf("if (deleted === 0) return"));
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);
