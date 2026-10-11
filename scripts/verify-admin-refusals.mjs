@@ -191,7 +191,9 @@ const NOT_YET = new Map([
   // DELIBERATE, not a miss: these two write the database's words INTO THE BACKUP FILE, next to the
   // table that failed, so whoever rebuilds a restaurant can see which table came back empty and why.
   // They never reach a toast. `_meta.failed` names them at the top of the same file.
-  ["app/api/admin/restaurants/export/route.ts", 2],
+  // WAS 2, NOW 1 (sweep #10 T29, item 12): every table — staff included — is now read through ONE
+  // paging helper, readAll(), which is the single place that hands the words on.
+  ["app/api/admin/restaurants/export/route.ts", 1],
   // ensureCodes() is an internal helper that RETURNS the words to its caller; the caller wraps them
   // in adminFail, so the screen never sees them. Counted here so the number stays honest.
   //
@@ -247,7 +249,7 @@ const NOT_YET = new Map([
     check("…and which tables could not be READ at all", /failed\.push\(/.test(src) && /meta\.failed\s*=/.test(src),
       "a failed table is invisible unless the reader scrolls to that key — the file looks complete and is not");
     check("…and it carries one flag a restore script can branch on", /meta\.complete\s*=/.test(src));
-    check("…and the staff table is counted too, not just the looped ones", /staffQ\.error\)\s*failed\.push/.test(src));
+    check("…and the staff table is counted too, not just the looped ones", /staffQ\.error(?: !== undefined)?\)\s*failed\.push/.test(src));
   }
 }
 
@@ -448,6 +450,24 @@ const NOT_YET = new Map([
       /new Date\(ms\)\.toISOString\(\)\.slice\(0, 10\) === v/.test(src) && !/!isNaN\(Date\.parse\(v\)\)/.test(src));
     check("…and an impossible or half-given range is refused, not swapped for the default view",
       /Pick both a start date and an end date\./.test(src) && /That isn't a real date/.test(src));
+  }
+}
+
+// ── 17 · THE RECOVERY BACKUP HOLDS EVERY ROW, OR SAYS IT DOES NOT (sweep #10 T29, item 12) ──────
+// Recycle bin → "download a backup first". Each table was ONE read with .limit(100000), and PostgREST
+// answers at most 1,000 rows per request — so French House's file held 1,000 of 20,561 orders and
+// still said `complete: true`. Every table must now be paged in a fixed key order.
+{
+  const rel = "app/api/admin/restaurants/export/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Recovery backup → no table is read in one request (PostgREST cuts every answer at 1,000)",
+      !/\.limit\(CAP\)/.test(src) && /\.range\(from, Math\.min\(from \+ PAGE, CAP\) - 1\)/.test(src));
+    check("…every page is read in the table's own key order, so no row repeats or goes missing",
+      /q = q\.order\(k, \{ ascending: true \}\)/.test(src) && /const ORDER_KEY: Record<string, string> = \{/.test(src));
+    check("…and the staff logins go through the same pager",
+      /const staffQ = await readAll\("staff_users"/.test(src));
   }
 }
 
