@@ -1595,6 +1595,18 @@ check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(e
   check(/paperStatus\(/.test(read("lib/printBoard.ts")) && /paperStatus\(target\)/.test(ownerApi2),
     "…and both the board and the owner's own route read that one function, never their own copy",
     "a screen has started deriving the printing status itself — that is how two boards come to disagree");
+  // ── THE OWNER'S TEST BUTTON NEVER PRINTS AT A RESTAURANT IT DID NOT NAME (sweep #10 T15) ─────
+  // The POST took `rid` when it was in scope and otherwise fell back to the owner's FIRST
+  // restaurant — so a stale screen's Test printed a sample on a different restaurant's printer and
+  // answered "Sample sent". A named restaurant that is not theirs must be refused; only a request
+  // naming none gets the default.
+  {
+    const post = code(ownerApi2).slice(code(ownerApi2).indexOf("export async function POST"));
+    const pick = (post.match(/const target = [\s\S]*?;/) || [""])[0];
+    check(/rid\s*\?\s*\(/.test(pick) && /:\s*""\s*\)/.test(pick) && /:\s*ids\[0\]/.test(pick),
+      "the owner's Test refuses a restaurant it was not given, instead of printing at their first one",
+      "app/api/owner/printing POST falls back to ids[0] for a named rid that is out of scope — a stale screen's Test prints at a different restaurant");
+  }
   // ── AN OWNER WITH MORE THAN ONE RESTAURANT (owner, 2026-09-14) ─────────────────────────────
   // Two faults, both measured on his own account, both of which made the owner's screen state
   // something confidently wrong rather than say nothing:
