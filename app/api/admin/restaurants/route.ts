@@ -351,8 +351,15 @@ export async function PATCH(req: NextRequest) {
     if (del.error) return adminFail("this restaurant's owner", del.error, { action: "save" });
   }
   // Add the NEW primary's membership (idempotent — composite PK + ignoreDuplicates).
+  // ── AND THIS IS THE WRITE THAT ACTUALLY LETS THEM IN (sweep #10 T29, item 5) ───────────────────
+  // Membership is the SCOPING source of truth (mig 097) — `owner_user_id` above is only the name on the
+  // list. This upsert's error was dropped, so a failed write answered ok: the console showed the new
+  // owner beside the restaurant, and that owner signed in to find nothing. The create path's twin was
+  // given exactly this correction in sweep #7 ("THE LOGIN EXISTS BUT NOBODY OWNS THE RESTAURANT").
+  // Pressing Save again converges: the old owner is by then the new one, so only this write re-runs.
   if (ownerId) {
-    await sb.from("restaurant_owners").upsert({ restaurant_id: rid, user_id: ownerId }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
+    const mem = await sb.from("restaurant_owners").upsert({ restaurant_id: rid, user_id: ownerId }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
+    if (mem.error) return adminFail("this restaurant's owner", mem.error, { action: "save" });
   }
   await logAction("admin", "restaurant_set_owner", { restaurant_id: rid, actor: "admin", detail: ownerId ? `assigned owner ${ownerId}` : "cleared owner" });
   return ok({ ok: true, ownerUserId: ownerId });

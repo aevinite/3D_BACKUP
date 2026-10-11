@@ -317,5 +317,23 @@ const NOT_YET = new Map([
   check("…and the clone sites were found at all (a shape change would otherwise pass in silence)", sites >= 7, `${sites} found`);
 }
 
+// ── 10 · ASSIGNING AN OWNER IS ONLY "SAVED" ONCE THEY CAN GET IN (sweep #10 T29, item 5) ─────────
+// The Restaurants list's owner picker wrote the name (`owner_user_id`) and then the membership row —
+// the one that decides what an owner SEES (mig 097) — with that second write's error dropped. Every
+// restaurant_owners write in the restaurants route must answer for itself.
+{
+  const rel = "app/api/admin/restaurants/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    const writes = [...src.matchAll(/(?:const (\w+) = )?await sb\.from\("restaurant_owners"\)\.(?:upsert|insert|delete)\(/g)];
+    check("the restaurants route still writes owner membership (a rename would otherwise pass in silence)", writes.length >= 3, `${writes.length} found`);
+    for (const w of writes) {
+      const ok = !!w[1] && new RegExp(`${w[1]}\\.error`).test(src.slice(w.index, w.index + 900));
+      check(`Restaurants → owner membership write '${w[1] || "(unnamed)"}' looks at its own error`, ok, "a failed write answers Saved and the owner signs in to nothing");
+    }
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);
