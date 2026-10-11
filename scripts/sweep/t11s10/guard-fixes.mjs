@@ -7,7 +7,8 @@
 //
 // The same three fixes are ALSO driven in memory (the real route, bundled, called against the stub
 // database) by scripts/sweep/t11s10/run.mjs — that is the proof they behave; this is the tripwire.
-import { row, APPC, ROUTEC, hasRe, lacksRe } from "../t9/lib.mjs";
+import { row, APPC, ROUTEC, hasRe, lacksRe, src, code } from "../t9/lib.mjs";
+const require_ = (rel) => code(src(rel));
 
 /** One POST branch of the kitchen route, from its test to the next top-level `if (a === "` test. */
 function branch(test) {
@@ -58,3 +59,30 @@ row("P180009", "item 1 · the panel's refused ALL READY still drops both overlay
   hasRe(APPC(), /pendingReadyOrders\.delete\(orderId\);\s*snap\.forEach\(\(s\) => pendingReady\.delete\(s\.id\)\);\s*toast\("Failed: " \+ e\.message\);/));
 row("P180010", "item 1 · a served dish's own write (the waiter path) is still allowed on this route", () =>
   hasRe(branch('if (a === "items" && c === "status")'), /\["received", "preparing", "ready", "served"\]\.includes\(status\)/));
+
+// ══ ITEM 2 · the kitchen route answers the kitchen login and the admin, nobody else — P180011–P180020 ══
+/** The gate() helper of the kitchen route, comments stripped. */
+const GATE = () => { const R = ROUTEC(); const i = R.indexOf("async function gate("); const j = R.indexOf("\n}", i); return i < 0 || j < 0 ? "" : R.slice(i, j + 2); };
+row("P180011", "item 2 · the gate still asks requireRole for the kitchen role first", () =>
+  hasRe(GATE(), /const g = await requireRole\(req, "kitchen"\);/));
+row("P180012", "item 2 · …then refuses any signed-in person whose role is not exactly kitchen", () =>
+  hasRe(GATE(), /if \(g\.user && g\.user\.role !== "kitchen"\) \{\s*return NextResponse\.json\(\{ error: "[^"]+" \}, \{ status: 403 \}\);/));
+row("P180013", "item 2 · the refusal comes AFTER the sign-in check, so a missing login is still 401 (the panel's /login bounce)", () => {
+  const g = GATE(); const a = g.indexOf("if (!g.ok)"), b = g.indexOf('g.user.role !== "kitchen"');
+  return (a > 0 && b > a) || "order changed";
+});
+row("P180014", "item 2 · the admin super-user (user === null) is NOT refused — the console's view-as still works", () =>
+  hasRe(GATE(), /if \(g\.user && g\.user\.role !== "kitchen"\)/));
+row("P180015", "item 2 · GET and POST both pass through the one gate before anything else", () => {
+  const R = ROUTEC();
+  const get = R.slice(R.indexOf("export async function GET("), R.indexOf("export async function GET(") + 200);
+  const post = R.slice(R.indexOf("async function postImpl("), R.indexOf("async function postImpl(") + 200);
+  return (/const g = await gate\(req\); if \(g instanceof NextResponse\) return g;/.test(get)
+    && /const g = await gate\(req\); if \(g instanceof NextResponse\) return g;/.test(post)) || "a handler no longer starts with gate()";
+});
+row("P180016", "item 2 · the /kitchen page still admits the kitchen role only, so page and API agree", () =>
+  hasRe(require_("lib/panelGate.ts"), /if \(u && u\.role === role\) \{/));
+row("P180017", "item 2 · the restaurant's own address still admits the kitchen role only", () =>
+  hasRe(require_("lib/panelGate.ts"), /if \(u && u\.role === role && u\.restaurant_id === r\.id && r\.active\)/));
+row("P180018", "item 2 · the refusal is a plain sentence that names what to do", () =>
+  hasRe(GATE(), /sign in with the kitchen login/));

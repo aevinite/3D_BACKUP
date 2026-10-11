@@ -44,6 +44,21 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
       ? NextResponse.json({ error: "Server can't reach the database — retrying." }, { status: 503 })
       : NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
   }
+  // ── THE KITCHEN'S OWN LOGIN, OR THE ADMIN — NOBODY ELSE (sweep #10 T11, item 2) ─────────────────
+  // requireRole("kitchen") also passes a MANAGER and an OWNER (lib/userAuth → roleSatisfies: they
+  // "cover" the kitchen). No screen of theirs ever calls this route — the /kitchen pages admit the
+  // kitchen role only (lib/panelGate → requirePanel / requirePanelAt) — so the wider door bought
+  // nothing and cost two things:
+  //   · an OWNER's row holds a shared "home" restaurant, not necessarily one they own (the manager
+  //     route proves an owner's ?rid against what they own; this route never did), so an owner's
+  //     session was answered with THAT restaurant's kitchen board and could move its tickets;
+  //   · a MANAGER whose "Mark as sold out" permission the admin had switched off (lib/accessTree →
+  //     mark_86) could still 86 a dish here, because this route checks no manager permission at all.
+  // Both closed by asking for the role the screen is for. The admin super-user (user === null) is
+  // unchanged: the console's view-as still opens every restaurant's kitchen.
+  if (g.user && g.user.role !== "kitchen") {
+    return NextResponse.json({ error: "This is the kitchen screen's connection — sign in with the kitchen login to use it." }, { status: 403 });
+  }
   return { user: g.user };
 }
 // (panel restaurant scope now comes from lib/panelScope → panelRestaurantId, which
