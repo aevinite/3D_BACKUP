@@ -210,12 +210,14 @@ for (const [path, body, want, what] of GONE_DOORS) {
   else bad(`someone else's table answered ${r.status} ${r.text.slice(0, 90)}`);
 }
 {
-  // A FAILED lookup is still "couldn't tell" and still refused — a blip never reads as allowed.
-  const G = await world({ user: { assigned_tables: SECTION_1_TO_3 }, fail: { waiter_calls: "error" }, fix: {
+  // A FAILED lookup never reads as allowed — and since round 2 (item 31) it is not a 403 either: it
+  // answers busy (5xx), which the panel's outbox keeps and sends again, where a 403 "That table isn't
+  // in your section" dropped the tap with a false reason. Either way nothing is written.
+  const G = await world({ user: { assigned_tables: SECTION_1_TO_3 }, fail: { waiter_calls: "timeout" }, fix: {
     waiter_calls: [{ id: "c9", restaurant_id: RID, table_number: "9", resolved: false }],
   } });
   const r = await call("POST", "calls/c9/attend", { body: {} });
-  if (r.status === 403 && G.WRITES.length === 0) ok("a lookup that FAILED still refuses (403) and writes nothing");
+  if (r.status >= 500 && G.WRITES.length === 0 && !/isn't in your section/.test(r.text)) ok(`a lookup that FAILED answers busy (${r.status}) and writes nothing — never a 403`);
   else bad(`a failed lookup answered ${r.status} with ${G.WRITES.length} write(s)`);
 }
 
@@ -545,12 +547,12 @@ console.log("\n19. a database timeout reads as 'busy — retrying' (503), not 's
   if (!dropped) ok("no branch throws `new Error(…)` — every database error keeps its SQLSTATE through pgError");
   else bad(`${dropped} branch(es) throw new Error(…) and drop the database's error code`);
   for (const [path, fail, what] of [["customer-recognize", "lfh_recognize_customer", "the repeat-customer lookup"], ["customer-search", "lfh_customer_phone_search", "the customer search"]]) {
-    const G = await world({ fail: { [`rpc:${fail}`]: "timeout" } });
+    await world({ fail: { [`rpc:${fail}`]: "timeout" } });
     const r = await call("GET", path, { query: path === "customer-search" ? "?q=987" : "?phone=98765" });
     if (r.status === 503) ok(`${what} timing out answers 503 (the screen retries)`);
     else bad(`${what} timing out answered ${r.status}`);
   }
-  const G = await world({ fail: { "rpc:lfh_staff_place_order": "timeout" } });
+  await world({ fail: { "rpc:lfh_staff_place_order": "timeout" } });
   const r = await call("POST", "order", { body: { table: "3", items: [{ id: "d1" }] } });
   if (r.status === 503) ok("placing an order while the database times out answers 503 — the outbox queues it, like offline");
   else bad(`placing an order during a timeout answered ${r.status}`);
