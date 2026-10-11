@@ -411,5 +411,29 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 15 · …AND NOT BY THE BACK DOOR EITHER: A CAUGHT THROW (sweep #10 T29, item 10) ───────────────
+// Rule 5's pattern looks for `error: x.message`. The Repair Kit threw `new Error(error.message)` and its
+// catch answered `err(e.message, 500)`, the recycle bin's purge answered `bad(m, 500)` with the
+// database's words in `m`, and "New restaurant" printed the raw seed error after "Menu seed failed:".
+// None matched rule 5. This looks for a caught error's message going into a response instead.
+// ALLOWED, with the reason: the two /api/admin/users throws come from lib helpers whose messages are
+// written FOR the screen (newWaiterTables — "Pick at least one table"; jobPatchFrom — "throws a
+// user-safe message"), not from the database.
+{
+  const ALLOWED_CAUGHT = new Map([["app/api/admin/users/route.ts", 2]]);
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  const bad = [];
+  for (const abs of walk(join(ROOT, "app/api/admin"))) {
+    const rel = abs.slice(ROOT.length + 1);
+    const src = code(rel);
+    const n = (src.match(/(?:return\s+\w+|NextResponse\.json)\(\s*(?:\{\s*error:\s*)?e instanceof Error \? e\.message/g) || []).length
+      + (src.match(/return bad\(m, 5\d\d\)/g) || []).length
+      + (src.match(/seedError = e instanceof Error \? e\.message/g) || []).length;
+    if (n > (ALLOWED_CAUGHT.get(rel) || 0)) bad.push(`${rel} (${n})`);
+  }
+  check("no admin route hands a CAUGHT database error's words to the console", bad.length === 0,
+    bad.length ? `${bad.join("; ")} — wrap it in adminFail(what, { message }, { action })` : "");
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

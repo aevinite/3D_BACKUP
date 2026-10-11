@@ -580,7 +580,9 @@ export async function POST(req: NextRequest) {
       if (/Retention lock/i.test(m)) return bad("This database still has the old 90-day wait on it — its migrations are behind. Nothing was removed.", 423);
       if (/never be purged/i.test(m)) return bad("The default restaurant can never be removed.", 400);
       if (/not in the recycle bin/i.test(m)) return bad("Only a restaurant in the recycle bin can be removed.", 409);
-      return bad(m, 500);
+      // Anything else is the database's own words — a sentence for the console, the words for the log
+      // (sweep #10 T29, item 10). The function is atomic, so nothing was removed.
+      return adminFail("the permanent removal of this restaurant", error, { action: "save" });
     }
     await logAction("admin", "restaurant_purge", { actor: "admin", detail: `permanently removed restaurant "${r.name}" (${rid}) — menu, staff and settings deleted; bills, invoices and the removals audit kept` });
     return ok({ ok: true, purged: true, billsKept: true });
@@ -735,6 +737,7 @@ export async function POST(req: NextRequest) {
     //     and editable from its manager panel. Egress-safe: scoped inserts, no reads.
     let menuSeeded = false;
     let seedError: string | null = null;
+    let seedDetail: string | null = null;
     if (seedMenu) {
       try {
         const menu = loadStarterMenu();
@@ -755,7 +758,11 @@ export async function POST(req: NextRequest) {
         }
         menuSeeded = true;
       } catch (e) {
-        seedError = e instanceof Error ? e.message : String(e);
+        // The create screen prints this after "Menu seed failed:", so it is a sentence, not the
+        // database's own words (sweep #10 T29, item 10); the words go to the log and to `seedDetail`.
+        seedDetail = e instanceof Error ? e.message : String(e);
+        console.error("[admin/restaurants] starter menu seed failed:", seedDetail);
+        seedError = "the database didn't accept the sample dishes";
       }
     }
     // 3) one starter login per ENABLED panel. Username = the panel name (unique PER restaurant),
@@ -802,7 +809,7 @@ export async function POST(req: NextRequest) {
       } catch { /* remembering defaults is a convenience, not critical */ }
     }
     return ok({
-      ok: true, id: rid, slug, name, panels, logins, loginErrors, menuSeeded, seedError,
+      ok: true, id: rid, slug, name, panels, logins, loginErrors, menuSeeded, seedError, ...(seedDetail ? { seedDetail } : {}),
       // Present ONLY when this address had a previous occupant, so the console can say so once and
       // then never mention it again. Not an error and not a refusal — freeing a binned name is his
       // rule; this is the consequence stated out loud so reprinting the codes is a decision.

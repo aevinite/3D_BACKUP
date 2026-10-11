@@ -362,7 +362,20 @@ async function handler(req: NextRequest) {
 
     return err("unknown repair op");
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e), 500);
+    // ── THE CONSOLE GETS A SENTENCE, NOT THE DATABASE'S OWN WORDS (sweep #10 T29, item 10) ─────────
+    // Every op above throws `new Error(error.message)` when the database refuses, and this handed that
+    // text straight to the Repair dialog — "lfh: invoice locked — …", a pooler timeout, a constraint
+    // name — the exact thing lib/adminFail exists to keep off the console. verify:admin-refusals rule 5
+    // could not see it: its pattern looks for `error: x.message`, not a throw caught two screens down.
+    // Every throw here happens BEFORE that op changes anything (the delete branch answers for its own
+    // later failure above), so adminFail's "nothing was changed" is true. The one refusal a person can
+    // act on keeps its own sentence.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/invoice locked/i.test(msg)) {
+      console.error("[admin/repair] refused:", msg);
+      return err("This bill is settled, so it can't be reopened. Issue a credit note against it instead — nothing was changed.", 409);
+    }
+    return adminFail("that repair", { message: msg }, { action: "save" });
   }
 }
 
