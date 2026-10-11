@@ -2519,7 +2519,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!rows.length) {
         return err("Nothing to settle on this bill — someone may have just settled it. Refresh to see where it stands.", 409);
       }
-      await log(splits ? "bill_split" : "bill_paid", { table_number: t, device_id: dev, detail: splits ? String(payUpdate.payment_note || "").slice(0, 120) : (body?.payment_method ? `via ${body.payment_method}` : undefined) });
+      // Always "bill_paid": the split branch above returns on every path (its own bill_split row), so
+      // the `splits ? "bill_split" : …` that sat here — left from the second split implementation
+      // removed on 2026-08-04 — could never pick its first arm (sweep #10 T13 round 2, item 32).
+      await log("bill_paid", { table_number: t, device_id: dev, detail: body?.payment_method ? `via ${body.payment_method}` : undefined });
       return ok({ ok: true, count: rows.length });
     }
 
