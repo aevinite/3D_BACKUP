@@ -41,7 +41,7 @@ import { spreadOrderAllergies } from "@/lib/orderAllergies";
 import { panelFailure } from "@/lib/panelFailure";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts, reverseSplitLegs, badSplitShape, PAY_LATER } from "@/lib/paySplit";
-import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
@@ -1369,12 +1369,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // the manager's /parcel (mig 197). Its own module + tablet cap; titles/prices resolved
     // server-side; total = item subtotal (matches every other platform order).
     if (a === "parcel" && path.length === 1) {
-      // The MODULE is enforced for everyone, admin included (no `actor &&` here since mig 259).
-      // X-ray reveals what a role is not GRANTED; it never conjures a feature the restaurant
-      // does not have — and the manager panel's parcel endpoint has always refused the admin
-      // too, so letting the tablet through made the same tap succeed on one panel and fail on
-      // the other. The client hides the button by the same rule, so this is the belt.
-      if (!(await parcelLadder(rid)).effective) return err("Parcel orders aren't switched on for this restaurant.", 403);
+      // (A parcelLadder() gate sat here — "Parcel orders aren't switched on for this restaurant".
+      // Parcel has had no on/off switch since 2026-08-03: parcelLadder() is the constant ALWAYS_ON,
+      // and lib/tableTags' box says why a switch must not come back. The refusal could never fire,
+      // so it went (sweep #10 T13 round 2, item 29). The waiter's own tablet_parcel power below is
+      // the real gate.)
       { const g2 = recordPin(await tabletPerm("tablet_parcel", req, body, rid, actor)); if (!g2.allow) return g2.resp; }
       const { items, customer, phone, note, allergies, paid, method } = body || {};
       if (!Array.isArray(items) || !items.length) return err("items required");
