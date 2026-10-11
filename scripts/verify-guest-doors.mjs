@@ -1077,6 +1077,10 @@ flush();
   { const c = r2("components/MiniCart.tsx");
     check("item 18 — the basket pill clamps a saved quantity to 1–99 exactly like the bill",
       /const qtyOf = \(q: unknown\) => Math\.min\(99, Math\.max\(1, Math\.floor\(/.test(c) && /qty: qtyOf\(it\.qty\)/.test(c)); }
+  // item 19 — saved bell taps at two restaurants stay two calls
+  { const o = r2("lib/guestOutbox.ts");
+    check("item 19 — two saved calls for table N at two different restaurants are kept apart",
+      /String\(x\.restaurantId \|\| ""\) === String\(p\.restaurantId \|\| ""\)/.test(o)); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

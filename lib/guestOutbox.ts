@@ -495,8 +495,12 @@ export async function enqueueGuestCall(p: {
   // So a still-unsent call for the same table/session simply keeps its place and takes the newer
   // note — the diner's most recent words — instead of queuing beside it. The at-most-once id is
   // kept too, so a call already in flight can't ring twice.
+  // …AND THE SAME RESTAURANT (sweep #10 T3 round 2, item 19). Table "4" at French House and table "4"
+  // at Aangan are two tables: two bell taps saved on one phone at two restaurants used to collapse
+  // into ONE call, and the second restaurant's waiter was never asked.
   const sameTable = (x: GuestOrder) =>
-    isCall(x) && x.mode === p.mode && String(x.table || "") === String(p.table || "") && String(x.token || "") === String(p.token || "");
+    isCall(x) && x.mode === p.mode && String(x.table || "") === String(p.table || "") && String(x.token || "") === String(p.token || "")
+    && String(x.restaurantId || "") === String(p.restaurantId || "");
   const already = queued.find(sameTable);
   if (already) {
     already.at = Date.now();
