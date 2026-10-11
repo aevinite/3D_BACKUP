@@ -23,7 +23,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { STALE_CLAIM_MS, wrote } from "@/lib/printQueue";
 import type { PaperSize, PrinterState } from "@/lib/printBoardWords";
-import { KIND_LABEL, KIND_OFF_LABEL, isPrinterState } from "@/lib/printBoardWords";
+import { KIND_LABEL, KIND_OFF_LABEL, isPrinterState, waitedWords } from "@/lib/printBoardWords";
 // Which modules this restaurant actually has — ONE settings select for all of them (mig 320).
 import { allModuleLadders } from "@/lib/tableTags";
 
@@ -1221,7 +1221,10 @@ export async function paperStatus(rid: string): Promise<PaperStatus[]> {
       };
     }
     if (t.kind === "computer") {
-      const mins = t.secondsAgo == null ? null : Math.round(t.secondsAgo / 60);
+      // A DURATION IN WORDS, days included (lib/printBoardWords → waitedWords). This said "541h" for a
+      // computer switched off three weeks ago — the exact "76 hours" the owner called out on
+      // 2026-09-13, left on the one line that file's fix did not reach (sweep #10 T15, item 6).
+      const away = t.secondsAgo == null ? "" : waitedWords(t.secondsAgo * 1000);
       return {
         ...base, via: "computer" as const, ok: t.connected,
         state: (t.connected ? "LIVE" : "ASLEEP") as PaperStatus["state"],
@@ -1229,7 +1232,7 @@ export async function paperStatus(rid: string): Promise<PaperStatus[]> {
         canTest: true,
         words: t.connected
           ? `${t.printer} — on ${t.agent}, answering now`
-          : `${t.printer} — ${t.agent} is not answering${mins == null ? "" : ` (last heard from ${mins < 60 ? mins + " min" : Math.round(mins / 60) + "h"} ago)`}. Anything for this printer is waiting, and prints the moment it is back.`,
+          : `${t.printer} — ${t.agent} is not answering${away ? ` (last heard from ${away} ago)` : ""}. Anything for this printer is waiting, and prints the moment it is back.`,
       };
     }
     if (t.kind === "off") {

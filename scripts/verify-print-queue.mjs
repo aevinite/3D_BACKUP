@@ -495,6 +495,17 @@ for (const [file, src] of [
   check(/86400000/.test(src),
     `${file} says DAYS when the printer has been silent that long`,
     `${file} has an age that stops at hours — the owner's 2026-09-13 complaint, written straight back`);
+// …AND HOW LONG A COMPUTER HAS BEEN QUIET, which the fix above never reached (sweep #10 T15, item 6).
+// Three lines still ended in a bare hour count: the admin overview ("asleep · 541h"), the computer's
+// own row on the board ("last seen 541h ago") and the shared "is it working" row the manager and
+// owner panels show too. No printing file in lib/ or the admin board may build an hour count by hand.
+for (const [file, src] of [["app/aevinite/printing/page.tsx", admPrint], ["lib/printHelpers.ts", read("lib/printHelpers.ts")]]) {
+  const c = String(src).replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
+  const hand = c.match(/\/ 3600\)[^\n]{0,12}(\+ "h"|\}h)|\/ 60\) \+ "h"/g) || [];
+  check(hand.length === 0,
+    `${file} says how long a computer has been quiet in days past a day, through the shared words`,
+    `${file} builds an hour count by hand again (${hand.join(" · ")}) — a PC off for three weeks reads "541h"`);
+}
 check(/whenWords\(j\.created_at\)/.test(admPrint) && !/toLocaleTimeString\("en-IN"[^)]*\)\}<\/td>/.test(admPrint),
   "the admin console's What-has-printed log prints the day through whenWords()",
   "the printing log went back to a bare clock — 07:14 am says nothing about WHICH 07:14 am");

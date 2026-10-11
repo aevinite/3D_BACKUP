@@ -110,7 +110,9 @@ function Overview({ over, onOpen }: { over: Over; onOpen: (id: string) => void }
     !r.computers ? "no computer yet"
     : r.connected ? `awake · seen ${r.secondsAgo ?? 0}s ago`
     : r.secondsAgo == null ? "never started"
-    : r.secondsAgo > 3600 ? `asleep · ${Math.round(r.secondsAgo / 3600)}h` : `asleep · ${Math.round(r.secondsAgo / 60)} min`;
+    // Days past a day, through the same one copy of the words (sweep #10 T15, item 6) — this line
+    // read "asleep · 541h" for a PC switched off three weeks earlier.
+    : `asleep · ${waitedShort(r.secondsAgo * 1000) || "under a minute"}`;
 
   const verdict = (r: OverRow) => {
     if (!r.allowed) return { cls: "off", word: "not switched on", what: "Printing does not exist for them — nothing appears in their panels." };
@@ -1167,7 +1169,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                       <b style={{ fontSize: 14 }}>{a.name}</b>
                       <span className="adm-muted" style={{ fontSize: 12 }}>
                         {a.connected ? `connected · seen ${a.secondsAgo ?? 0}s ago`
-                          : a.last_seen_at ? `last seen ${a.secondsAgo != null && a.secondsAgo > 3600 ? Math.round(a.secondsAgo / 3600) + "h" : Math.round((a.secondsAgo ?? 0) / 60) + " min"} ago`
+                          : a.last_seen_at ? `last seen ${waitedWords((a.secondsAgo ?? 0) * 1000) || "under a minute"} ago`
                           : "never said hello yet"}
                       </span>
                       <span className="adm-muted" style={{ fontSize: 12 }}>· {printerTally(a.printers)}</span>
