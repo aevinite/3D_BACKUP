@@ -178,6 +178,20 @@ const liveTicket = (o = {}) => world({ fix: {
   if (!/softDeleteOrders\s*\(/.test(t)) ok("the waiter's route calls softDeleteOrders nowhere");
   else bad("the waiter's route calls softDeleteOrders again — R27: nobody at the restaurant removes a bill");
 }
+{
+  // …AND THE BUTTON SAYS SO (round 2, items 8 + 34). The waiter's screen still read "🗑 Delete order" for
+  // a tap that cancels; and once it said "Cancel order", its question offered "Cancel" beside "Cancel
+  // order" — which one keeps the ticket? The box's close button is named per call ("Keep order" here)
+  // and set on EVERY call, so the label never lingers into the next question.
+  const { readFileSync } = await import("node:fs");
+  const js = readFileSync(new URL("../public/panels/tablet/app.js", import.meta.url), "utf8");
+  if (!/🗑 Delete order/.test(js) && (js.match(/✕ Cancel order/g) || []).length === 2) ok("both per-order buttons say \"✕ Cancel order\", none says Delete");
+  else bad("the waiter's per-order button no longer says \"✕ Cancel order\" (or a \"🗑 Delete order\" is back)");
+  if (/confirmDialog\("Cancel this whole order\?[^"]*", "Cancel order", "Keep order"\)/.test(js)) ok("its question offers \"Keep order\" beside \"Cancel order\" — never two Cancels");
+  else bad("the cancel-order question lost its \"Keep order\" button");
+  if (/const confirmDialog = \(text, yesLabel = "Yes, send it", noLabel = "Cancel"\)/.test(js) && /\$\("#confirmNo"\)\.textContent = noLabel;/.test(js)) ok("the shared question box sets its close label on every call (default \"Cancel\")");
+  else bad("confirmDialog no longer sets #confirmNo on every call — one question's label would linger into the next");
+}
 
 // ── 4. A TAP ON SOMETHING ALREADY GONE SAYS SO — NOT "ask your manager to add the table" (item 4) ──────
 // Sections are always on for a waiter, so the section gate runs before every row-id action. It could
