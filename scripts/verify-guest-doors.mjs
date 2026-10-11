@@ -40,6 +40,7 @@
 //
 // Static: it reads the shipped files. No database, no login, no deployed site — so it can never
 // add load or trip one of the app's own limits, and it runs in well under a second.
+import { execSync } from "node:child_process";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -955,6 +956,32 @@ flush();
     }
   } catch { bad = -1; }
   check(`item 4 — the basket stores the bill's own total for the same basket (${bad} of ${n4} differ)`, !!expr && bad === 0);
+}
+// ── 11. THE BAN WALL SAYS WHICH REFUSAL IT GOT (sweep #10 T4, item 4) ──────────────────────────────
+//
+// A blocked guest's one action is "Request unblock". Every failure used to show "We couldn't match
+// that number to this block", so a busy second or a dropped signal sent them hunting for a different
+// number. Only the database's own `not_blocked` (mig 385: no block record matched) means the number;
+// a timeout is the restaurant's system; anything else never reached a decision. Asserted on the code
+// (comments stripped) AND by calling the component's own sentence-maker logic for each answer.
+{
+  say("\n── 11. the ban wall says which refusal it got (sweep #10 T4) ──");
+  const ban = codeOnly(read("components/BanGate.tsx"));
+  check("item 4 — the ban wall keeps the REASON, not a yes/no flag", /const \[failed, setFailed\] = useState\(""\);/.test(ban));
+  check("item 4 — only the database's not_blocked answer blames the number",
+    /r\.reason === "not_blocked"\s*\n?\s*\? "We couldn't match that number to this block\./.test(ban));
+  check("item 4 — a timeout is worded as the restaurant's system, never as the guest's number",
+    /isSessionTimeout\(r\)\s*\n?\s*\? "The restaurant's system isn't answering right now/.test(ban));
+  check("item 4 — anything else is worded as 'not sent', so they try again rather than a new number",
+    /: "We couldn't send that just now — please check your connection and try again\."/.test(ban));
+  check("item 4 — the line shows whatever was decided, not one fixed sentence", /<p className="ban-fail" role="status">\{failed\}<\/p>/.test(ban));
+  check("item 4 — a success still says sent ONLY when the server says a row changed", /if \(r\.ok\) \{ setRequested\(true\); return; \}/.test(ban));
+  // the function's real answers, read from the newest migration that defines it
+  const migs = execSync("git ls-files supabase/migrations", { cwd: ROOT, encoding: "utf8" }).split("\n").filter((f) => f.endsWith(".sql")).sort();
+  const def = migs.filter((f) => /FUNCTION[^(]*lfh_request_unban/.test(read(f))).pop() || "";
+  const body = def ? read(def).slice(read(def).search(/FUNCTION[^(]*lfh_request_unban/)) : "";
+  check(`item 4 — the reason the wall branches on is one the function really sends (${def.split("/").pop() || "no migration found"})`,
+    /'reason', 'not_blocked'/.test(body.slice(0, 3000)));
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
