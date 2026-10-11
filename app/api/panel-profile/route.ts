@@ -70,7 +70,13 @@ export async function GET(req: NextRequest) {
   // They are kicked off together here and awaited where they were already needed; the two PAY reads
   // further down were already parallel with each other.
   const tablesP = u.restaurant_id ? waiterTables(u, u.restaurant_id) : Promise.resolve(null);
-  const ladderP = u.restaurant_id && hasProfile(u.role) ? payrollLadder(u.restaurant_id) : null;
+  // Caught at once, like rowP below, and for the same two reasons: a rejection that lands before the
+  // await would float unhandled, and this GET has no outer try. The module read throws on a failed
+  // read since sweep #10 T13 round 2 (item 28); for this DISPLAY read that means "no profile card
+  // this time", which is what it showed before.
+  const ladderP = u.restaurant_id && hasProfile(u.role)
+    ? payrollLadder(u.restaurant_id).then((l) => l, (e) => { console.error("[panel-profile] payroll module read failed:", e?.message ?? e); return { effective: false }; })
+    : null;
   // `.then(x => x, ...)`-style catch attached IMMEDIATELY: if the payroll gate below returns early,
   // this read is never awaited, and a floating rejected promise becomes an unhandled rejection that
   // can take the whole serverless invocation down. Resolving to an error-shaped object instead keeps
@@ -255,7 +261,11 @@ async function postImpl(req: NextRequest) {
   // nobody should be able to give themselves a raise. Whitelisted by SELF_PROFILE_FIELDS.
   if (body?.profile !== undefined) {
     if (!u.restaurant_id || !hasProfile(u.role)) return NextResponse.json({ error: "Your account doesn't have a profile." }, { status: 400 });
-    if (!(await payrollLadder(u.restaurant_id)).effective)
+    // A failed module read is busy (lib/tableTags throws since sweep #10 T13 round 2, item 28) — never
+    // "profiles aren't enabled", a 403 the panel would show as a reason and never retry.
+    const profLadder = await payrollLadder(u.restaurant_id).catch((e) => { console.error("[panel-profile] payroll module read failed:", e?.message ?? e); return null; });
+    if (!profLadder) return busyReply();
+    if (!profLadder.effective)
       return NextResponse.json({ error: "Staff profiles aren't enabled for this restaurant." }, { status: 403 });
     const p = body.profile;
     if (!p || typeof p !== "object" || Array.isArray(p)) return NextResponse.json({ error: "Missing profile fields." }, { status: 400 });
