@@ -134,7 +134,27 @@ export default function section(c) {
   phase("…and a ceiling that is not a number is ignored rather than stored", 'patch a limit of "lots"',
     async () => { const mo = await c.model(); const L = mo.limits[0]; if (!L) return "skip:no numeric ceiling in the model"; const before = (((await rst("access_config")).access_config || {})[L.id] || {}).limit?.[L.sides[0]]; await save({ config: { [L.id]: { limit: { [L.sides[0]]: "lots" } } } }); const v = (((await rst("access_config")).access_config || {})[L.id] || {}).limit?.[L.sides[0]]; return v === before || `stored ${JSON.stringify(v)} where a number belongs`; });
   phase("a per-side option the model knows is saved", "patch a known opt",
-    async () => { const mo = await c.model(); const O = mo.opts[0]; if (!O) return "skip:no per-side option in the model"; const r = await save({ config: { [O.id]: { [`${O.side}_opts`]: { [O.keys[0]]: true } } } }); const v = ((((await rst("access_config")).access_config || {})[O.id] || {})[`${O.side}_opts`] || {})[O.keys[0]]; return (r.status === 200 && v === true) || `saving ${O.id}.${O.side}_opts.${O.keys[0]} answered ${r.status} and stored ${JSON.stringify(v)}`; });
+    // AN ON/OFF OPTION, NOT A PICK-ONE (sweep #10 T29, 2026-10-11). This sent `true` to the FIRST
+    // stored option, which is maintenance.manager_opts.who — a PICK-ONE ("owner" / "manager"). Since
+    // sweep #10 T18 item 18 the route refuses a value that is not one of a pick-one's own choices, so
+    // this phase went red on a correct refusal. It now picks a stored on/off option the route accepts
+    // (a stored key the model has retired answers "nothing could be saved", so the next one is tried),
+    // preferring one stored OFF so the save is seen to change something.
+    async () => {
+      const cfg = (await rst("access_config")).access_config || {};
+      const cands = (await c.model()).opts.flatMap((O) => O.keys
+        .filter((k) => typeof ((cfg[O.id] || {})[`${O.side}_opts`] || {})[k] === "boolean")
+        .map((k) => ({ ...O, k, was: cfg[O.id][`${O.side}_opts`][k] })))
+        .sort((a, b) => Number(a.was) - Number(b.was));
+      if (!cands.length) return "skip:no stored on/off per-side option in the model";
+      for (const O of cands.slice(0, 8)) {
+        const r = await save({ config: { [O.id]: { [`${O.side}_opts`]: { [O.k]: true } } } });
+        if (r.status === 400 && /Nothing in that change could be saved/.test(r.json?.error || "")) continue;
+        const v = ((((await rst("access_config")).access_config || {})[O.id] || {})[`${O.side}_opts`] || {})[O.k];
+        return (r.status === 200 && v === true) || `saving ${O.id}.${O.side}_opts.${O.k} answered ${r.status} and stored ${JSON.stringify(v)}`;
+      }
+      return "skip:every stored on/off option is one the model has retired";
+    });
   phase("…and an option the model does not know is ignored", "patch a made-up opt key",
     async () => { const mo = await c.model(); const O = mo.opts[0]; if (!O) return "skip:no per-side option in the model"; await save({ config: { [O.id]: { [`${O.side}_opts`]: { not_an_opt: true } } } }); const v = ((((await rst("access_config")).access_config || {})[O.id] || {})[`${O.side}_opts`] || {}).not_an_opt; return v === undefined || `stored ${JSON.stringify(v)} under a key the model does not know`; });
   phase("a side this screen does not own is ignored", "patch kitchen_opts",
