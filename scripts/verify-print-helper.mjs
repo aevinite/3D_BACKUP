@@ -1989,6 +1989,17 @@ check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",
   "the print-helper design doc has shrunk to a stub");
 
+// …and its REFERENCE half describes today, not the first draft (sweep #10 T15, item 9). The dated
+// sections are history and may say anything; the undated "Endpoints" table is what a reader trusts,
+// and it still listed the deleted install code, left out the one tokenless verb, and quoted a route
+// count that had moved three times.
+{
+  const ep = plan.slice(plan.indexOf("## Endpoints"), plan.indexOf("## The helper itself"));
+  check(/`POST \/pair\/claim`/.test(ep) && /\?max=/.test(ep) && !/install code|all 48 others/.test(ep) && /FIFTH failure/.test(ep),
+    "docs/PRINT-HELPER.md's Endpoints table is today's: pair/claim, the batch, and when a failure tells somebody",
+    "docs/PRINT-HELPER.md's Endpoints table has drifted from the route again (pair/claim, ?max=, the fifth-failure rule, or a hard-coded admin route count)");
+}
+
 // ── 10 · WHICH PRINTERS, AND WHETHER THEY ARE ON (owner, 2026-09-14) ─────────────────────────
 // *"Right now, which printer are connected and which are online and all offline, all that stuff is
 // not there only. Make sure it should be there."* It was never reported, so no screen could show it.
