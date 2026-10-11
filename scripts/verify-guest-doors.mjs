@@ -914,6 +914,21 @@ flush();
   check("…and it never delays or fails what the diner was actually doing",
     /void renameMyReviews\(/.test(gname));
 }
+// ── WHAT THE ORDERING SCREENS SAY MUST BE TRUE (sweep #10 T3, items 1–4) ──────────────────────
+//
+// Four places a diner was told something that was not so. Each is asserted on the CODE (comments
+// stripped) and, for the two about money, on the NUMBERS the code produces. Every one was broken
+// once, on purpose, and turned this guard red before it shipped.
+{
+  say("\n── 10. what the ordering screens say is true (sweep #10 T3) ──");
+  // 1. The QR door's bell: the restaurant's own call limit answers {ok:true, reason:"rate_limited"}
+  //    and creates NO call. It must never fall into "On our way! · staff notified".
+  const chefCode = codeOnly(chef);
+  const send = chefCode.slice(chefCode.indexOf("const res = await callWaiter("));
+  const rl = send.indexOf('res.reason === "rate_limited"'), ok = send.indexOf("· staff notified`");
+  check("item 1 — a QR call the restaurant's limit refused is answered as a refusal, BEFORE the 'staff notified' branch",
+    rl >= 0 && ok > rl && /variant: "error"/.test(send.slice(rl, send.indexOf("} else", rl))));
+}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9

@@ -179,7 +179,16 @@ export default function ChefPopup() {
       // Tell the server staff are needed at this table for this reason, and read
       // its ACTUAL answer — a blocked table or a dropped duplicate is NOT success.
       const res = await callWaiter(check.value, reason, restaurantId);
-      if (res.ok && res.reason !== "already_sent" && res.reason !== "capped") {
+      // ── THE RESTAURANT'S OWN CALL LIMIT IS NOT "STAFF NOTIFIED" (sweep #10 T3, item 1) ─────────
+      // lfh_call_waiter_table (migration 386, from 205) answers `{ ok: true, reason: "rate_limited" }`
+      // when this table has used up its waiter calls for now — and it creates NO call. The success
+      // test below only knew `already_sent` and `capped`, so this answer fell into it and the diner
+      // read "On our way! · staff notified" while nobody had been told. The saved-call queue already
+      // treats it as a refusal (lib/guestOutbox.ts, sweep #9 item 4); this is the live door's half.
+      // Wording: tapping again would hit the same wall, so it says to wait or ask a person instead.
+      if (res.reason === "rate_limited") {
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Too many calls from this table just now", subtitle: "please wait a minute, or ask a member of staff", kicker: "service", variant: "error" } }));
+      } else if (res.ok && res.reason !== "already_sent" && res.reason !== "capped") {
         // A brand-new call actually landed.
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
           message: "On our way!", subtitle: `${reason} · staff notified`,
