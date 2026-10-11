@@ -1859,6 +1859,13 @@
          set its own word was always consistent and is untouched. */
       mrpNote: inside > 0 ? "MRP items include " + inr(inside) + " " + bi.taxLabel : "",
       autoPrint: a.autoPrint !== false,
+      /* THE GUEST'S POINTS, PASSED THROUGH (sweep #10 T14, 2026-10-12). The manager panel and the
+         waiter tablet both fetch the points (one request per print) and hand them in HERE, and this
+         object never carried them out — so billDocHtml saw no `loyalty` and the points block, the
+         one thing that makes the feature cost ₹0 to run, never printed from either panel. Only the
+         print helper, which hands them straight to billDocHtml, ever printed them. Absent stays
+         absent: a restaurant with the module off still gets byte-for-byte the same sheet. */
+      loyalty: a.loyalty || null,
     };
   }
 

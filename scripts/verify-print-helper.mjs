@@ -2233,6 +2233,9 @@ for (const f of ["scripts/verify-printing-sweep.mjs", "scripts/verify-print-spee
   check(/Riya Sharma/.test(h({ orders: [ord], session: sess, settings: {} })) && !/Riya/.test(h({ orders: [ord], session: sess, settings: { bill_customer_print: false } })),
     "a bill built from plain order rows (the waiter tablet, the print helper) names the customer stored on the session — and hides it when the restaurant says so",
     "billData ignores the session's own customer — the waiter tablet's and the print computer's bills never say who they are made out to");
+  check(/Points on this bill: 7/.test(h({ orders: [ord], settings: {}, loyalty: { earn: 7, balance: 1, toNext: 0 } })) && !/Points on this bill/.test(h({ orders: [ord], settings: {} })),
+    "the guest's points handed to billData reach the paper (the manager panel and the waiter tablet pass them there)",
+    "billData drops `loyalty` — the points block never prints from the manager panel or the waiter tablet");
   check(/const logo = /.test(docs) && /parcel: !!opts\?\.parcel, logo,/.test(docs),
     "lib/printDocs.ts billHtmlForSession hands billData the restaurant's logo, as every panel does",
     "the print computer's bill has no logo while every panel's copy does");

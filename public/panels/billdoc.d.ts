@@ -267,6 +267,8 @@ export function billData(a: {
    * a bill sheet is identical on the tenth copy and the first. */
   autoPrint?: boolean;
   now?: string | number | Date;
+  /** The guest's points (mig 401) — passed straight through to the sheet; absent prints nothing. */
+  loyalty?: { earn: number; balance: number; toNext: number } | null;
 }): BillDocData;
 /** One bill line per dish, not one per KOT. */
 export function combineBillLines(entries: BillDocLine[]): BillDocLine[];
