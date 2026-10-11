@@ -102,7 +102,8 @@ t6("P17652", "Settings closes on the backdrop only, never on a click inside it",
 t6("P17653", "Settings marks itself open so a board read can keep it truthful", "A", "window.__kdsSettingsOpen = true");
 t6("P17654", "…and a board read DOES re-render it while it is open", "A", /if \(window\.__kdsSettingsOpen\) renderKitchenSettings\(\);/);
 t6("P17655", "Settings has a dialog role and an accessible name", "A", /class="kset" role="dialog" aria-label="Kitchen settings"/);
-t6("P17656", "printing is ABSENT, not greyed, when it is off for this restaurant", "A", /const printSection = \(!auto && tgt !== "counter" && !hlp\) \? "" :/);
+// EXPECTATION CHANGED (sweep #10 T11, item 4): `&& !stopped` — a stopped queue is not "off".
+t6("P17656", "printing is ABSENT, not greyed, when it is off for this restaurant", "A", /const printSection = \(!auto && tgt !== "counter" && !hlp && !stopped\) \? "" :/);
 t6("P17657", "a counter-only restaurant gets one explanation, not controls it can never use", "A", /Kitchen tickets print on <b>the counter screen<\/b> for this restaurant/);
 t6("P17658", "…and it still says the 🖨 button on a ticket works here", "A", /The 🖨 button on a ticket still prints here if this screen has a printer of its own\./);
 t6("P17659", "Settings answers 'who is printing right now' in plain words", "A", /printingHere \? "THIS screen"/);

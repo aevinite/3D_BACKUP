@@ -129,10 +129,12 @@ row(next(), "the kitchen writes nothing to `settings`, so no panel's switches ca
   const r = ROUTEC();
   return lacksRe(r, /from\("settings"\)\s*\.(update|insert|upsert)/);
 });
+// EXPECTATION CHANGED (sweep #10 T11, item 4): `modules` is read too — an EXISTING column (the mig 326
+// bag), for the one flag modules.printing.paused, the admin's STOP. Still no NEW column.
 row(next(), "the kitchen adds no column to `settings` — it only reads five", () => {
   const cols = new Set();
   for (const m of ROUTEC().matchAll(/from\("settings"\)\s*\.select\("([^"]+)"\)/g)) for (const c of m[1].split(",")) cols.add(c.trim());
-  const known = ["auto_print_kot", "auto_print_kot_allowed", "kitchen_can_accept_platform", "platform_channels", "table_names"];
+  const known = ["auto_print_kot", "auto_print_kot_allowed", "kitchen_can_accept_platform", "platform_channels", "table_names", "modules"];
   const extra = [...cols].filter((c) => !known.includes(c));
   return extra.length === 0 || `extra settings columns: ${extra.join(", ")}`;
 });

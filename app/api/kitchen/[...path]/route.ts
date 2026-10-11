@@ -111,6 +111,12 @@ const must = (r: any) => {
  
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
+// Is the admin's master STOP on (modules.printing.paused, set on /aevinite → Printing)? Item 4, below.
+// Read off a settings row the caller already has, so asking costs no query.
+const isPaused = (s: unknown): boolean => {
+  const m = (s as { modules?: { printing?: { paused?: unknown } } } | null)?.modules;
+  return !!(m && typeof m === "object" && m.printing && m.printing.paused === true);
+};
 // The two answers a late tap gets once the waiter has already carried the food out (item 1, below).
 const SERVED_MSG = "Every dish on that ticket has already been served — refresh the board.";
 const SERVED_DISH_MSG = "That dish has already been served — refresh the board.";
@@ -247,7 +253,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // kitchen shows it on the ticket AND prints it on the KOT — a cook/waiter must read the
         // SAME table label the floor uses, not the raw number (owner 2026-07-29). Small JSONB,
         // one row, table-agnostic — the targeted ?table=N slice never re-reads it.
-        sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels, table_names").eq("restaurant_id", rid).maybeSingle(),
+        // `modules` rides along for ONE flag, modules.printing.paused (the admin's STOP — see `paused`
+        // below). The bag is a few hundred bytes and this is the read the board already makes, so the
+        // stop costs no new query.
+        sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels, table_names, modules").eq("restaurant_id", rid).maybeSingle(),
         // THIS restaurant's identity, so the kitchen header shows which restaurant the
         // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
@@ -324,8 +333,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (target.kind === "screen") kitchenMayAuto = target.panel === "kitchen";
       else if (target.kind === "off" || target.kind === "computer") kitchenMayAuto = false;
       const mayI = screenMayPrint(target, { panel: "kitchen", personId: g.user?.id || null, deviceId: deviceIdFrom(req) });
-      const screenPrints = kitchenMayAuto && mayI.ok;
-      const printJobs = await pendingKotJobs(rid, { includeAuto: autoJobs && screenPrints });
+      // ── A STOPPED QUEUE STOPS THIS SCREEN TOO (sweep #10 T11, item 4) ───────────────────────────
+      // The admin's ⏸ on Printing (modules.printing.paused) is THE master stop: "tickets wait". The
+      // helper's door has honoured it since 2026-09-14 and the manager's screen does too (its own words:
+      // "otherwise 'stop the queue' would stop the computer and let a screen carry on printing, which is
+      // not stopping anything"). This screen did not — and the kitchen screen is the DEFAULT printer for
+      // kitchen slips — so pressing Stop changed nothing in most kitchens, while this panel's 🖨 sheet
+      // went on saying "Automatic printing ON · this screen". Stopped now means: no queue handed over,
+      // no self-healing net, and the sheet is told why (`printRefused: "paused"`, words it already has).
+      const paused = isPaused(must(settings));
+      const screenPrints = kitchenMayAuto && mayI.ok && !paused;
+      const printJobs = paused ? [] : await pendingKotJobs(rid, { includeAuto: autoJobs && screenPrints });
       // WHICH ORDERS THE QUEUE HAS IN HAND — the panel's self-healing net (see lib/printQueue.ts →
       // ordersAlreadyQueued). Only asked when auto-print is on AND the panel is new enough to use
       // it: on a database that has not had mig 335 yet, nothing is queued, the panel sees these
@@ -374,7 +392,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         helper,
         // …and, when a SCREEN is the chosen printer, WHICH screen — so a kitchen tablet that is not
         // the named one says "printing happens on Rishi's manager screen" rather than going silent.
-        printTarget: target, printRefused: mayI.ok ? null : mayI.why,
+        // `paused` outranks every routing reason: it is the one master stop (item 4).
+        printTarget: target, printRefused: paused ? "paused" : mayI.ok ? null : mayI.why,
         // { "1": "A1", … } — display names only; every id/bill still uses the number.
         tableNames: ((must(settings) || {}) as { table_names?: Record<string, string> }).table_names || {},
         // { "6": "vip", … } — which tables are marked, so a cook can see a priority ticket.
@@ -803,8 +822,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // was a coin flip. The gate also TAKES the station when nobody holds it (so a kitchen that has
       // always just printed keeps doing exactly that) and refuses when a live screen elsewhere holds
       // it, telling this one where the paper is coming out.
-      const st = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle()) as
-        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
+      const st = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle()) as
+        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: unknown } | null;
+      // THE STOP IS CHECKED AT THE CLAIM as well as on the board read (item 4) — a tab opened before the
+      // admin pressed Stop still holds tickets it believes are its to print, and this is the door it uses.
+      if (isPaused(st)) return ok({ won: [], refused: "paused", station: await stationView(rid, dev) });
       // A COMPUTER OWNS IT — a screen may not take it (mig 341). Checked here as well as on the
       // board read, because a panel that was open BEFORE the route was set still holds tickets it
       // believes are its to print: a gate that lives only in the board read is a gate a stale tab
@@ -838,9 +860,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // taken over automatically after a few minutes).
     if (a === "print-station" && b === "take") {
       if (!dev) return err("This browser has no device id yet — reload the panel and try again.", 409);
-      const st2 = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle()) as
-        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
+      const st2 = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle()) as
+        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: unknown } | null;
       if (!(st2?.auto_print_kot === true && st2?.auto_print_kot_allowed === true)) return err("Automatic printing is switched off for this restaurant.", 409);
+      if (isPaused(st2)) return err("Printing is stopped for this restaurant — tickets wait until it starts again.", 409); // item 4
       // The ROUTE decides whether this room may hold printing at all (mig 369), asked through the one
       // resolver every other path uses — with the person and device from the REQUEST, so a narrowed
       // route ("only Rishi's counter PC") refuses a kitchen screen here too.

@@ -1756,10 +1756,17 @@ function renderKitchenSettings() {
   // and one is just showing."
   //
   // The admin names one person on Printing. This screen states where the paper comes out and stops.
-  const printSection = (!auto && tgt !== "counter" && !hlp) ? "" : `
+  // A STOPPED QUEUE IS NOT "OFF" EITHER (sweep #10 T11, item 4). The board now answers
+  // printRefused:"paused" when the admin has pressed Stop on Printing, and autoPrintKot:false with it —
+  // so without this the section below vanished exactly as it does for a restaurant that never prints,
+  // while the 🖨 sheet two taps away said "printing is stopped". Same words as that sheet.
+  const stopped = !hlp && state.printRefused === "paused";
+  const printSection = (!auto && tgt !== "counter" && !hlp && !stopped) ? "" : `
     <div class="kset-sec">
       <h4>🖨 Printing</h4>
-      ${hlp ? `<div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
+      ${stopped ? `<div class="kset-line"><span>Tickets print on</span><b>nobody right now</b></div>
+      <p class="kset-note">Printing is stopped for this restaurant, so nothing prints by itself — the tickets are waiting, not lost, and they come out when printing starts again.</p>`
+      : hlp ? `<div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
       <p class="kset-note">A printer program on <b>${esc(hlp.agent)}</b> prints this restaurant's kitchen slips, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : " It has not been heard from for a while — tickets are waiting, and print the moment it is back."}</p>`
       : tgt === "counter" && !auto ? `<p class="kset-note">Kitchen tickets print on <b>the counter screen</b> for this restaurant, so this screen prints nothing automatically. The 🖨 button on a ticket still prints here if this screen has a printer of its own.</p>` : `
       <div class="kset-line"><span>Automatic printing</span><b>${auto ? "ON" : "OFF"}</b></div>

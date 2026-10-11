@@ -126,3 +126,29 @@ row("P180026", "item 3 · no toast() call takes more than two arguments", () => 
   const bad = toastCalls().filter((c) => c.args.length > 2);
   return !bad.length || `${bad.length} call(s) with 3+ arguments`;
 });
+
+// ══ ITEM 4 · the admin's STOP on Printing holds this screen too — P180027–P180036 ════════════════
+const BOARD = () => { const R = ROUTEC(); const i = R.indexOf('if (path.join("/") === "board")'); const j = R.indexOf('return err("unknown GET endpoint", 404)'); return i < 0 || j < 0 ? "" : R.slice(i, j); };
+row("P180027", "item 4 · one helper answers 'is the queue stopped?' from modules.printing.paused", () =>
+  hasRe(ROUTEC(), /const isPaused = \(s: unknown\): boolean => \{[\s\S]{0,200}m\.printing\.paused === true\);/));
+row("P180028", "item 4 · the board's ONE settings read carries `modules`, so the stop costs no new query", () =>
+  hasRe(BOARD(), /from\("settings"\)\.select\("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels, table_names, modules"\)/));
+row("P180029", "item 4 · a stopped queue means this screen is not the printer (no auto rows, no net)", () =>
+  hasRe(BOARD(), /const paused = isPaused\(must\(settings\)\);\s*const screenPrints = kitchenMayAuto && mayI\.ok && !paused;/));
+row("P180030", "item 4 · …and hands over NO job at all, the manager's reprints included", () =>
+  hasRe(BOARD(), /const printJobs = paused \? \[\] : await pendingKotJobs\(/));
+row("P180031", "item 4 · the board tells the sheet WHY — printRefused 'paused' outranks every routing reason", () =>
+  hasRe(BOARD(), /printRefused: paused \? "paused" : mayI\.ok \? null : mayI\.why/));
+row("P180032", "item 4 · the CLAIM refuses while stopped, before winning anything (a stale tab walks through the board)", () => {
+  const b = branch('if (a === "print-jobs" && b === "claim")');
+  const stop = b.indexOf('if (isPaused(st)) return ok({ won: [], refused: "paused"'), win = b.indexOf("claimKotJobs(rid, ids)");
+  return (stop > 0 && win > stop) || "the claim's stop check is missing or comes after the claim";
+});
+row("P180033", "item 4 · 'print here instead' refuses while stopped, with the reason in words", () =>
+  hasRe(branch('if (a === "print-station" && b === "take")'), /if \(isPaused\(st2\)\) return err\("Printing is stopped for this restaurant — tickets wait until it starts again\.", 409\);/));
+row("P180034", "item 4 · the 🖨 sheet has the words for a stopped queue", () =>
+  hasRe(APPC(), /refused === "paused" \? "nobody right now — printing is stopped for this restaurant, and tickets wait until it starts again"/));
+row("P180035", "item 4 · ⚙️ Settings no longer goes silent on a stopped queue — it says so, in the same words", () =>
+  hasRe(APPC(), /const stopped = !hlp && state\.printRefused === "paused";[\s\S]{0,200}\(!auto && tgt !== "counter" && !hlp && !stopped\) \? "" :/));
+row("P180036", "item 4 · the manager route's own stop rule is still there to agree with", () =>
+  hasRe(code(src("app/api/editor/[...path]/route.ts")), /const paused = st\?\.modules\?\.printing\?\.paused === true;\s*const on = !paused &&/));
