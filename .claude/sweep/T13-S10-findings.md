@@ -38,6 +38,7 @@ This file is the engineering record only: one line per fixed problem, its commit
 | 32 | the settle log asked `splits ?` after the split branch had returned | plain "bill_paid" | new-i |
 | 33 | sixteen fallbacks that could never run (`b \|\| ""` ×11, `\|\| "/"` ×2, `?? ""` ×3) | removed | coverage.mjs |
 
+| 34 | the cancel-order question offered "Cancel" beside "Cancel order" (seen on backup the day item 8 shipped) | confirmDialog names its close button per call; this one says "Keep order" | `verify:tablet-twins` §3, P169208–P169210 |
 Not problems: **10** — the waiter/manager tile comparison, done on screen 2026-10-11 (ledger P11388). **13** — the three
 Pay-later sub-switches of the retired Access panel: already deleted on main by another terminal (5a151f78, 2026-10-10).
 
