@@ -170,6 +170,17 @@ database, unread. See `docs/REJECTED-IDEAS.md` R27 before ever re-adding it.
   about one bill in 1,200, against the database. Never write a new one; `node scripts/verify-money-round-twins.mjs`
   (in verify:static) fails if a copy drifts or a money × rate is rounded the float way anywhere. The
   RATE is one rule too — the waiter tablet's own copy charged a composition-scheme restaurant 5%.
+- **A counter parcel is in the GST filing, with the tax it was really charged** (owner, 2026-10-11:
+  *"do parcel one"* — mig 421). A parcel is a sale the restaurant owes GST on (a Zomato / Swiggy order is
+  not — the app pays it, CGST §9(5)). Both doors that make one save the split they priced it with
+  (`lib/tax.ts parcelTaxColumns`); an older parcel gets one only where its own lines reproduce its total
+  to the paisa, and is otherwise **named with its value** in every GST report — never guessed, never
+  dropped. Counted on the dine-in basis (paid, not cancelled, by the day it was made). The owner's Tax /
+  GST report folds them in with ONE function (`lib/taxFiling withParcels`); the manager's GST report and
+  the compiled statement ("GST TO FILE") count them too; Sales / Day figures stay dine-in and say what the
+  Tax report adds. Guard: `npm run verify:parcels-in-gst` (`-- --db` re-prices every parcel).
+  **AV-live release:** the schema comes with the migration, but `scripts/backfill-parcel-tax.mjs` refuses
+  any database but dev/test on purpose — classifying AV live's older parcels is its own ask-first step.
 - **Real GSTIN on any tax invoice** — remove the placeholder GSTIN before any tenant files a real bill.
 - **e-invoice / IRN is B2B only, turnover > ₹5 cr** — never stamp it on an ordinary diner bill.
 - **Reconcile to the rupee** — Z-report / dashboards must include voids and deleted bills (our past

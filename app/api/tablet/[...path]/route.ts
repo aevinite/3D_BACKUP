@@ -43,7 +43,7 @@ import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts, reverseSplitLegs, badSplitShape, PAY_LATER } from "@/lib/paySplit";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
-import { TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
+import { TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill, parcelTaxColumns } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { waiterTables, assignedOf, allows, blockedReason, notYoursMessage, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
@@ -1475,7 +1475,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const row = Array.isArray(ins.data) ? ins.data[0] : ins.data;
       const wholeNote = String(note || "").trim().slice(0, 300);
       const alg = Array.isArray(allergies) ? allergies.map((x: unknown) => String(x)).slice(0, 20) : [];
-      const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg } };
+      // The tax that was charged is recorded with it (mig 421) — the same split that set `total`, read by
+      // both GST reports. The manager's twin does the same; one helper (lib/tax.ts parcelTaxColumns).
+      const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg }, ...parcelTaxColumns(parcelSplit) };
       if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = payMethod; }
       if (row?.id) { const up = await sb.from("aggregator_orders").update(patch).eq("id", row.id).eq("restaurant_id", rid); if (up.error) throw pgError(up.error); }
       await log("parcel_place", { device_id: dev });

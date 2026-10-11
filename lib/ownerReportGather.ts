@@ -89,6 +89,8 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
         net: t ? Number(t.revenue) || 0 : (Number(a.kpis?.revenue) || 0),
         cancelledOrders: t ? Number(t.cancelledOrders) || 0 : null,
         cancelledValue: t ? Number(t.cancelledValue) || 0 : null,
+        // Counter parcels (mig 421) ride on the same money payload; `null` = the server couldn't read them.
+        parcels: m && !m.error ? (m.parcels === undefined ? undefined : m.parcels) : undefined,
       },
       busiestHour: hour?.orders ? hour12(Number(hour.hour) || 0) : null,
       dishes: (a.dishes ?? []) as { title: string; qty: number; revenue: number }[],
@@ -155,6 +157,13 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
         taxComponents: Array.from(gc.entries()).map(([label, amount]) => ({ label, amount })),
         taxTotal: bsum("taxTotal"), net: totalRev,
         cancelledOrders: bsum("cancelledOrders"), cancelledValue: bsum("cancelledValue"),
+        // Summed only when EVERY restaurant's parcels were read — otherwise null, said on the paper, never
+        // a partial sum printed as the group's figure.
+        parcels: perRest.some((r) => r.billing.parcels === null) ? null
+          : perRest.every((r) => r.billing.parcels === undefined) ? undefined
+          : perRest.reduce((a, r) => { const p = r.billing.parcels; if (!p) return a;
+              return { parcels: a.parcels + p.parcels, taxable: a.taxable + p.taxable, tax: Math.round((a.tax + p.tax) * 100) / 100, total: Math.round((a.total + p.total) * 100) / 100, untaxedParcels: a.untaxedParcels + p.untaxedParcels, untaxedTotal: Math.round((a.untaxedTotal + p.untaxedTotal) * 100) / 100 }; },
+            { parcels: 0, taxable: 0, tax: 0, total: 0, untaxedParcels: 0, untaxedTotal: 0 }),
       },
       payments: Array.from(gp.values()).sort((a, b) => b.revenue - a.revenue),
       khata,

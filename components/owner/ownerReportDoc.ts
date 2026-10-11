@@ -19,7 +19,16 @@ export type BillingDetails = {
   net: number;                     // revenue kept (paid, net of discounts)
   cancelledOrders: number | null;
   cancelledValue: number | null;
+  // Counter parcels in the window (mig 421, owner 2026-10-11: "do parcel one"). NOT inside the dine-in
+  // figures above: a parcel is its own sale, read from aggregator_orders. null = couldn't be read
+  // (said on the paper); undefined = an older payload without the field.
+  parcels?: { parcels: number; taxable: number; tax: number; total: number; untaxedParcels: number; untaxedTotal: number } | null;
 };
+// The GST to file for a billing block: dine-in GST + the GST on counter parcels — the SAME figure the
+// Tax / GST report shows (it folds the same parcels into its periods). null when the dine-in GST is unknown.
+export function gstToFile(b: BillingDetails): number | null {
+  return b.taxTotal == null ? null : Math.round((b.taxTotal + (b.parcels?.tax || 0)) * 100) / 100;
+}
 export type DailyRow = { label: string; iso: string; orders: number; gross: number; discount: number; tax: number; net: number };
 export type ReportRestaurant = {
   name: string; slug: string;
@@ -105,6 +114,20 @@ function billingRows(b: BillingDetails): [string, string][] {
     rows.push(["Net amount (kept)", inr(b.net)]);
   }
   if (b.cancelledValue != null) rows.push(["Cancelled orders — never entered the numbers above", `${nfmt(b.cancelledOrders || 0)} · ${inr(b.cancelledValue)} lost`]);
+  // ── COUNTER PARCELS, AND THE GST TO FILE (mig 421) ───────────────────────────────────────────────
+  // The rows above are DINE-IN bills. Parcels are their own sales, so they come after, and the last row
+  // is what a return needs: dine-in GST + parcel GST, the Tax / GST report's own total. Parcels saved
+  // without their tax are NAMED with their value — never left out in silence.
+  if (b.parcels === null) rows.push(["Counter parcels — could not be read just now (GST below is dine-in only)", "—"]);
+  else if (b.parcels && (b.parcels.parcels > 0 || b.parcels.untaxedParcels > 0)) {
+    if (b.parcels.parcels > 0) {
+      rows.push([`Counter parcels — ${nfmt(b.parcels.parcels)} sold at the counter, GST included`, inr(b.parcels.total)]);
+      rows.push(["   of which : GST on parcels", "+ " + inr(b.parcels.tax)]);
+    }
+    if (b.parcels.untaxedParcels > 0) rows.push([`Older parcels saved without their tax — ${nfmt(b.parcels.untaxedParcels)}, check their paper bills`, inr(b.parcels.untaxedTotal)]);
+    const g = gstToFile(b);
+    if (g != null && b.parcels.parcels > 0) rows.push(["= GST TO FILE — dine-in + counter parcels", inr(g)]);
+  }
   return rows;
 }
 // "vs the previous equal period" — the one line every owner asks first.
@@ -267,14 +290,14 @@ export function buildReportHtml(d: ReportData): string {
         ${inHand != null ? kv("Money in hand", inr(inHand), "after GST set aside") : ""}
         ${kv("Orders", nfmt(g.orders), `${nfmt(g.paidOrders)} paid`)}
         ${kv("Average bill", inr(g.avg), "per paid order")}
-        ${g.billing.taxTotal != null ? kv("Total GST", inr(g.billing.taxTotal), g.billing.taxComponents.map((c) => c.label).join(" + ") || "collected") : ""}
+        ${gstToFile(g.billing) != null ? kv("Total GST", inr(gstToFile(g.billing) as number), g.billing.parcels?.parcels ? `dine-in ${inr(g.billing.taxTotal as number)} + parcels ${inr(g.billing.parcels.tax)}` : (g.billing.taxComponents.map((c) => c.label).join(" + ") || "collected")) : ""}
         ${g.billing.discount != null ? kv("Discounts", inr(g.billing.discount)) : ""}
         ${g.billing.cancelledValue != null ? kv("Lost to cancellations", inr(g.billing.cancelledValue), `${nfmt(g.billing.cancelledOrders || 0)} orders`) : ""}
         ${extremes ? kv("Best day", inr(extremes.best.net), extremes.best.label) : ""}
         ${extremes ? kv("Weakest day", inr(extremes.worst.net), extremes.worst.label) : ""}
       </div>
       <div class="two">
-        <div><h3>Money flow — from sale to in-hand</h3>${billingTableHtml(g.billing)}</div>
+        <div><h3>Money flow — dine-in bills, from sale to in-hand</h3>${billingTableHtml(g.billing)}</div>
         <div><h3>Settlement — how the money arrived</h3>${settlementHtml(g.payments)}</div>
       </div>
       ${g.khata && g.khata.outstanding > 0 ? `
@@ -318,7 +341,7 @@ export function buildReportHtml(d: ReportData): string {
         ${r.busiestHour ? kv("Busiest hour", r.busiestHour, "most orders") : ""}
       </div>
       <div class="two">
-        <div><h3>Money flow — from sale to in-hand</h3>${billingTableHtml(r.billing)}</div>
+        <div><h3>Money flow — dine-in bills, from sale to in-hand</h3>${billingTableHtml(r.billing)}</div>
         <div><h3>Settlement</h3>${settlementHtml(r.payments)}</div>
       </div>
       ${categoriesHtml(r.categories)}
@@ -438,7 +461,7 @@ export function buildReportTables(d: ReportData): ExportTable[] {
     out.push({
       title: "Restaurant comparison",
       head: ["#", "Restaurant", "Total collected", "Share %", "Orders", "Paid orders", "Avg bill", "Total GST", "Cancelled value"],
-      rows: d.restaurants.map((r, i) => [i + 1, r.name, Math.round(r.revenue), Math.round(r.share * 100), r.orders, r.paidOrders, Math.round(r.avg), r.billing.taxTotal != null ? Math.round(r.billing.taxTotal) : "", r.billing.cancelledValue != null ? Math.round(r.billing.cancelledValue) : ""]),
+      rows: d.restaurants.map((r, i) => [i + 1, r.name, Math.round(r.revenue), Math.round(r.share * 100), r.orders, r.paidOrders, Math.round(r.avg), gstToFile(r.billing) != null ? Math.round(gstToFile(r.billing) as number) : "", r.billing.cancelledValue != null ? Math.round(r.billing.cancelledValue) : ""]),
     });
     const gSlow = groupSlowDishes(d.restaurants);
     if (gSlow.length) out.push({
