@@ -44,11 +44,12 @@ export type MoneyPeriod = { bucket: string; orders: number; paidOrders: number; 
 export function withParcels<R extends MoneyPeriod>(rows: R[] | null | undefined, parcels: ParcelPeriod[] | null | undefined): R[] {
   const out = (rows ?? []).map((r) => ({ ...r }));
   for (const p of parcels ?? []) {
-    if (!p || !(Number(p.parcels) > 0)) continue;
+    const n = Number(p?.parcels);
+    if (!(n > 0)) continue;   // a missing entry, or a period with no known-tax parcels, changes nothing
     const at = Date.parse(String(p.bucket));
     let row = out.find((r) => Date.parse(String(r.bucket)) === at);
     if (!row) { row = { bucket: p.bucket, orders: 0, paidOrders: 0, subtotal: 0, tax: 0, discount: 0, revenue: 0 } as R; out.push(row); }
-    row.orders += Number(p.parcels) || 0; row.paidOrders += Number(p.parcels) || 0;
+    row.orders += n; row.paidOrders += n;
     row.subtotal = p2(row.subtotal + (Number(p.subtotal) || 0)); row.discount = p2(row.discount + (Number(p.discount) || 0));
     row.tax = p2(row.tax + (Number(p.tax) || 0)); row.revenue = p2(row.revenue + (Number(p.total) || 0));
   }

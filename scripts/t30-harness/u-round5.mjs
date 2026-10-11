@@ -139,3 +139,28 @@ t("item 34: coverage.mjs creates node_modules/.cache before its reporter writes 
   for (const f of readdirSync(dir).filter((x) => /^u-.*\.mjs$/.test(x))) readFileSync(join(dir, f), "utf8").split("\n").forEach((l, i) => { if (/["`]lib\/[A-Za-z]+\.(ts|mjs):[0-9]/.test(l)) typed.push(`${f}:${i + 1}`); });
   const seesOne = /["`]lib\/[A-Za-z]+\.(ts|mjs):[0-9]/.test('t("lib/clash.ts:' + "262 — describe()"); // built in two halves so this line is not itself a hit
   t("item 37: no harness row names a code line by a typed number (scripts/t30-harness/u-*.mjs) — and the scan recognises one", !typed.length && seesOne, typed.length ? `typed: ${typed.join(", ")}` : "the scan no longer sees a typed label"); }
+
+// ── counter parcels in the GST reports (owner, 2026-10-11: "do parcel one" — mig 421) ────────────────────────
+// lib/tax.ts parcelTaxColumns (what both parcel doors save) and lib/taxFiling.ts withParcels / totalsOf (the ONE
+// fold-in the Tax screen applies). Every figure must add back to the parcel's own total, and the fold-in must
+// never mutate, never invent a period for an empty entry, and never throw on junk.
+{ const TX = await import("@/lib/tax.ts"); const TF = await import("@/lib/taxFiling.ts");
+  const S5 = { tax_rate: 0.05 }, INCL = { tax_rate: 0.05, price_tax_mode: "inclusive" }, COMP = { price_tax_mode: "composition" };
+  const lines = [{ title: "Pizza", qty: 2, price: 149 }], mixed = [{ title: "Pizza", qty: 1, price: 250 }, { title: "Water", qty: 2, price: 20, tax_mode: "exempt", is_mrp: true }];
+  const adds = (c, sp) => c.tax_rate > 0 ? Math.abs((c.taxable_base - c.discount + c.tax + c.nontax_amount) - sp.total) < 0.005 : Math.abs((c.subtotal - c.discount) - sp.total) < 0.005;
+  const cases = [[lines, S5, 0], [lines, S5, 30], [lines, INCL, 0], [mixed, S5, 10], [lines, COMP, 20], [[], S5, 0]];
+  const bad = cases.find(([ls, st, d]) => { const sp = TX.splitBill(ls, st, d); const c = TX.parcelTaxColumns(sp);
+    return !(c.tax_basis === "at_sale" && c.subtotal === sp.subtotal && c.discount === sp.discount && c.taxable_base === sp.taxableBase && c.nontax_amount === sp.nontaxAmount && c.mrp_amount === sp.mrpAmount && c.tax_rate === sp.rate && c.tax === sp.tax && adds(c, sp)); });
+  t("parcels: parcelTaxColumns carries every figure of the split, and they add back to the parcel's total — 5% with and without a discount, tax inside the price, an MRP line, composition, an empty parcel", !bad, bad ? JSON.stringify(bad) : "");
+  t("parcels: an older parcel proven by its own lines is saved with basis 'repriced'", TX.parcelTaxColumns(TX.splitBill(lines, S5, 0), "repriced").tax_basis === "repriced");
+  const rows = [{ bucket: "2026-10-01T18:30:00.000Z", orders: 2, paidOrders: 2, subtotal: 200, tax: 10, discount: 0, revenue: 210, cancelledOrders: 1 }];
+  const m = TF.withParcels(rows, [{ bucket: "2026-10-01T18:30:00Z", parcels: 1, subtotal: 298, discount: 0, tax: 14.9, total: 312.9 },
+    { bucket: "2026-09-30T18:30:00.000+00:00", parcels: 2, subtotal: 100, discount: 10, tax: 4.5, total: 94.5 }, { bucket: "2026-10-05T18:30:00Z", parcels: 0, subtotal: 9, discount: 0, tax: 9, total: 9 }, null]);
+  t("parcels: withParcels adds a parcel to its own period however the instant is spelled, makes a period that had none, skips an empty or missing entry, keeps time order",
+    m.length === 2 && m[0].bucket === "2026-09-30T18:30:00.000+00:00" && m[0].tax === 4.5 && m[0].paidOrders === 2 && m[1].tax === 24.9 && m[1].orders === 3 && m[1].revenue === 522.9 && m[1].cancelledOrders === 1, JSON.stringify(m));
+  t("parcels: withParcels never changes the rows it was given", rows[0].tax === 10 && rows[0].orders === 2 && rows.length === 1);
+  const tot = TF.totalsOf({ orders: 2, paidOrders: 2, subtotal: 200, tax: 10, discount: 0, revenue: 210, cancelledOrders: 1, cancelledValue: 50 }, m);
+  t("parcels: totalsOf re-sums the six money fields from the merged rows and keeps every other field (cancellations)", tot.tax === 29.4 && tot.orders === 5 && tot.revenue === 617.4 && tot.subtotal === 598 && tot.discount === 10 && tot.cancelledOrders === 1 && tot.cancelledValue === 50, JSON.stringify(tot));
+  let threw = null; const junk = [undefined, null, [], [{}], [{ bucket: "x" }], [{ bucket: null, parcels: "2", tax: "a" }], [{ bucket: "2026-10-01T00:00:00Z", parcels: Infinity, tax: NaN, total: -1 }]];
+  for (const a of [undefined, null, [], [{ bucket: "bad", orders: 1, paidOrders: 1, subtotal: 1, tax: 1, discount: 0, revenue: 1 }]]) for (const b of junk) { try { const o = TF.withParcels(a, b); TF.totalsOf({ orders: 0, paidOrders: 0, subtotal: 0, tax: 0, discount: 0, revenue: 0 }, o); } catch (e) { threw = `${JSON.stringify(a)} × ${JSON.stringify(b)}: ${e.message}`; } }
+  t("parcels: withParcels / totalsOf never throw on missing, empty or junk input (28 combinations)", threw === null, threw || ""); }
