@@ -35,6 +35,12 @@ import { pageAll } from "@/lib/pageAll";
 export const dynamic = "force-dynamic";
 
 const ROLES: Role[] = ["manager", "tablet", "kitchen"];
+// ── AN ID THAT CANNOT BE ONE IS "NOT FOUND", NOT "TRY AGAIN" (sweep #10 T29, item 8) ───────────────
+// This was the one route in its half of the admin API that let a malformed id reach a uuid column.
+// Postgres refuses it, and that refusal came back as "Couldn't open that person — please try again."
+// (500) — a sentence that invites a retry that can never work. Every sibling shape-checks first
+// (restaurants PATCH: "a stale link produces a raw Postgres 500 instead of the tidy 'not found'").
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
@@ -131,7 +137,7 @@ async function detail(id: string) {
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const one = new URL(req.url).searchParams.get("id");
-  if (one) return await detail(one);
+  if (one) return UUID.test(one) ? await detail(one) : bad("User not found.", 404);
   const [usersQ, restsQ] = await Promise.all([
     sb.from("staff_users")
       .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin, restaurant_id")
@@ -170,6 +176,7 @@ export async function POST(req: NextRequest) {
   const restaurantId = String(body?.restaurant_id || "").trim() || DEFAULT_RESTAURANT_ID;
   if (key.length < 2) return bad("Username must be at least 2 characters.");
   if (!ROLES.includes(role)) return bad("Pick a valid role.");
+  if (!UUID.test(restaurantId)) return bad("Pick a valid restaurant.");
   // Exclude binned restaurants — creating staff on a soft-deleted restaurant just makes
   // orphan rows the admin can never reach (login is blocked for binned restaurants).
   // A FAILED READ IS NOT "pick a valid restaurant" (T27 sweep #9, 2026-09-15) — the same correction
@@ -219,6 +226,7 @@ export async function PATCH(req: NextRequest) {
   const id = String(body?.id || "");
   const action = String(body?.action || "");
   if (!id) return bad("Missing user id.");
+  if (!UUID.test(id)) return bad("User not found.", 404);
   // NAMED COLUMNS, NOT `*` (sweep 2026-08-04). `staff_users` holds password_hash, and this handler
   // never needs it — `select("*")` pulled every person's password hash into route memory on every
   // profile edit, one spread away from reaching a response body. These are exactly the fields the
@@ -422,6 +430,7 @@ export async function DELETE(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return bad("Missing user id.");
+  if (!UUID.test(id)) return bad("User not found.", 404);
   const dQ = await sb.from("staff_users").select("username, role, restaurant_id").eq("id", id).limit(1);
   if (dQ.error) return adminFail("this person", dQ.error, { action: "load" });   // see PATCH above
   const u = dQ.data?.[0];

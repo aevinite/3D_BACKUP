@@ -371,5 +371,26 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 13 · A MALFORMED ID IS "NOT FOUND", NEVER "TRY AGAIN" (sweep #10 T29, item 8) ────────────────
+// /api/admin/users let a malformed id reach a uuid column on four doors; Postgres refused it and the
+// console said "please try again" (500) to a request that could never work.
+{
+  const rel = "app/api/admin/users/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("People → a person's profile (GET ?id) shape-checks the id before reading", /if \(one\) return UUID\.test\(one\)/.test(src));
+    const patch = src.slice(src.indexOf("export async function PATCH"), src.indexOf("export async function DELETE"));
+    const del = src.slice(src.indexOf("export async function DELETE"));
+    const post = src.slice(src.indexOf("export async function POST"), src.indexOf("export async function PATCH"));
+    check("…and every profile write (PATCH) does too, before its first read",
+      /if \(!UUID\.test\(id\)\) return bad\("User not found\.", 404\)/.test(patch) && patch.indexOf("UUID.test(id)") < patch.indexOf("sb.from("));
+    check("…and Delete this person (DELETE) does too, before its first read",
+      /if \(!UUID\.test\(id\)\) return bad\("User not found\.", 404\)/.test(del) && del.indexOf("UUID.test(id)") < del.indexOf("sb.from("));
+    check("…and Add a person (POST) shape-checks the restaurant before reading it",
+      /if \(!UUID\.test\(restaurantId\)\)/.test(post) && post.indexOf("UUID.test(restaurantId)") < post.indexOf("sb.from("));
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);
