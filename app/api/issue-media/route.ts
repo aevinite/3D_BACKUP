@@ -21,6 +21,10 @@ import { BUSY_MESSAGE } from "@/lib/dbRefusal";
 
 export const dynamic = "force-dynamic";
 const bad = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
+// The sentences lib/issues.ts → storeIssueMedia() writes for a PERSON when it refuses the file itself
+// (wrong kind of file, too big, no restaurant). Anything else it throws is the storage service talking
+// (item 6 below). verify:panel-api keeps this list in step with what that function actually says.
+const OWN_REFUSAL = /^(Invalid restaurant\.|Photo must be |Voice note format not supported\.|Voice note must be )/;
 
 export async function POST(req: NextRequest) {
   // Staff login FIRST (a device can hold both cookies — see requireRole's note), else admin.
@@ -83,6 +87,20 @@ export async function POST(req: NextRequest) {
     const url = await storeIssueMedia(rid, file, kind);
     return NextResponse.json({ ok: true, url, kind });
   } catch (e) {
-    return bad(e instanceof Error ? e.message : "Upload failed.", 400);
+    // ── THE STORAGE SERVICE'S OWN WORDS ARE NOT A SENTENCE FOR A COOK (sweep #10 T4, item 6) ────────
+    // storeIssueMedia() throws two kinds of thing: its OWN refusals of the file ("Photo must be 5 MB or
+    // smaller.") — sentences written for the person holding the phone, which keep their 400 — and
+    // `new Error(up.error.message)` when the upload itself fails, which is the storage service talking
+    // ("Bucket not found", "new row violates row-level security policy", "fetch failed"). This handed
+    // both straight to the screen, so public/panels/issue-raise.js put "Couldn't send: <that>" in front
+    // of a waiter. The detail now goes to our log; the person is told what happened and what they can
+    // do, in the panels' busy shape (503 + X-LFH-Busy), because a storage hiccup is not their fault.
+    const msg = e instanceof Error ? e.message : "";
+    if (OWN_REFUSAL.test(msg)) return bad(msg, 400);
+    console.error("[issue-media] upload failed:", msg || e);
+    return NextResponse.json(
+      { error: `The ${kind === "audio" ? "voice note" : "photo"} couldn't be uploaded just now — send the ticket without it, or try again in a moment.`, busy: true },
+      { status: 503, headers: { "X-LFH-Busy": "1" } },
+    );
   }
 }

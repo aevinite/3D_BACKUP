@@ -97,6 +97,30 @@ const fail = (m) => fails.push(m);
   } else {
     fail("issue-media's AuthDbError branch no longer answers the 503 `busy` shape — a signed-in person gets 'please log in' again and their photo report is thrown away (F2)");
   }
+  // ── …AND THE UPLOAD'S OWN FAILURE IS WORDED FOR A PERSON (sweep #10 T4, item 6) ──────────────────
+  // storeIssueMedia() throws its OWN sentences for a refused file, and the storage service's raw text
+  // when the upload fails. Only the first kind may reach the screen; the route tells them apart with
+  // OWN_REFUSAL, so that list must match every literal sentence the function throws — and nothing raw.
+  {
+    const issues = read("lib/issues.ts");
+    const fnStart = issues.indexOf("export async function storeIssueMedia(");
+    const fnBody = fnStart >= 0 ? issues.slice(fnStart, issues.indexOf("\n}\n", fnStart)) : "";
+    const literals = [...fnBody.matchAll(/throw new Error\(([^)]*?)\)/g)].map((m) => m[1]);
+    // Sentences only — the ternaries also hold the bare words "image"/"audio", which are not messages.
+    const sentences = literals.flatMap((l) => [...l.matchAll(/"([^"]+)"/g)].map((m) => m[1])).filter((t) => /\s/.test(t) || /\.$/.test(t));
+    const rawThrow = literals.some((l) => /\.error\.message/.test(l));
+    const reSrc = (media.match(/const OWN_REFUSAL = \/(.+)\/;/) || [])[1];
+    let re = null; try { re = reSrc ? new RegExp(reSrc) : null; } catch { re = null; }
+    if (re && sentences.length && sentences.every((t) => re.test(t))) ok(`issue-media recognises every sentence storeIssueMedia writes for a person (${sentences.length})`);
+    else fail(`issue-media's OWN_REFUSAL no longer matches storeIssueMedia's own sentences (${sentences.filter((t) => !re || !re.test(t)).join(" | ") || "list or function not found"}) — a refused file would be answered as a storage failure`);
+    if (rawThrow && re && !re.test("Bucket not found") && !re.test("new row violates row-level security policy") && !re.test("fetch failed")) ok("…and nothing the storage service says would pass for one of them");
+    else fail("issue-media's OWN_REFUSAL would let the storage service's raw words through, or storeIssueMedia no longer throws them (re-read item 6)");
+    const catchAt = media.indexOf("const msg = e instanceof Error ? e.message");
+    const catchBlock = catchAt >= 0 ? media.slice(catchAt, catchAt + 900) : "";
+    if (/if \(OWN_REFUSAL\.test\(msg\)\) return bad\(msg, 400\);/.test(catchBlock) && /status: 503/.test(catchBlock) && /X-LFH-Busy/.test(catchBlock) && !/bad\(e instanceof Error \? e\.message/.test(media))
+      ok("issue-media: a failed upload is logged and answered in plain words (503 busy), never with the storage service's own text");
+    else fail("issue-media hands the upload's raw failure text to the screen again (item 6) — a waiter reads the storage service's words");
+  }
   const rt = read("app/api/rt-config/route.ts");
   if (/reason:\s*"rt_busy"/.test(rt)) ok("rt-config answers a database blip with a branchable code (rt_busy)");
   else fail("rt-config lost its rt_busy code — a blip is back to an unclassified 500 the badge cannot read (F3)");
