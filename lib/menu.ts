@@ -309,7 +309,7 @@ export async function callWaiter(tableNumber: string, note?: string, restaurantI
   // (lib/dbRefusal.ts — the same one lib/session.ts uses for the seated door), so a refused VALUE is
   // never mistaken for a busy one.
   if (error) {
-    if (isDbUnreachable(error)) throw busyError("could not reach the restaurant");
+    if (isDbUnreachable(error) || isUnreachable(error)) throw busyError("could not reach the restaurant");
     throw new Error(`Call failed: ${error.message}`);
   }
   // Otherwise hand back the RPC's own {ok, reason} so the UI can react honestly.
@@ -364,7 +364,12 @@ function isUnreachable(err: unknown): boolean {
   const e = err as { message?: unknown; name?: unknown } | null;
   const msg = String(e?.message ?? "");
   const name = String(e?.name ?? "");
-  return /abort|timeout|timed out|network|fetch failed|load failed/i.test(msg) || /AbortError|TimeoutError/i.test(name);
+  // "failed to fetch" is CHROME's wording for a request that never reached the server (Safari says
+  // "Load failed", Firefox "NetworkError…", Node "fetch failed" — all three were already here). Without
+  // it, on Chrome a status check whose connection dropped came back as "no such order", and three of
+  // those in a row marked a cooking order CANCELLED on the diner's strip — measured on the built app
+  // with the phone online and only get_order_status failing (sweep #10 T3 round 2, item 23).
+  return /abort|timeout|timed out|network|fetch failed|failed to fetch|load failed/i.test(msg) || /AbortError|TimeoutError/i.test(name);
 }
 
 // A deadline on every order, WITHOUT assuming the browser can make one. `AbortSignal.timeout`

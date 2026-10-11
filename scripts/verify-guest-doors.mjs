@@ -1089,6 +1089,10 @@ flush();
   { const c = r2("app/api/guest/limit-hit/route.ts");
     check("item 22 — the limit beacon ignores a function name that is not text (a list is not a name)",
       /const key = typeof b\.fn === "string" \? FN_TO_KEY\[b\.fn\] : undefined;/.test(c) && !/FN_TO_KEY\[String\(/.test(c)); }
+  // item 23 — a dropped connection on Chrome is "couldn't ask", never "the order is gone"
+  { const m = r2("lib/menu.ts"); const f = m.slice(m.indexOf("function isUnreachable("), m.indexOf("function isUnreachable(") + 400);
+    check("item 23 — Chrome's 'Failed to fetch' counts as the restaurant not answering (so a cooking order is never marked cancelled by a dropped connection)",
+      /failed to fetch/.test(f) && /if \(isDbUnreachable\(error\) \|\| isUnreachable\(error\)\) throw busyError\(/.test(m)); }
   // item 21 — only a real duplicate reads "Already sent"
   { const c = r2("components/ChefPopup.tsx");
     check("item 21 — an unknown answer to a QR call is said honestly, never as 'Already sent'",
