@@ -1034,6 +1034,11 @@ flush();
   { const c = r2("components/OrderConfirmModal.tsx");
     check("item 6 — the dish popup announces the 99-per-dish ceiling instead of stopping in silence",
       /const capped = !!existing && existing\.qty \+ qty > 99;/.test(c) && /if \(capped\) \{[\s\S]{0,120}message: "Maximum 99 per dish"/.test(c)); }
+  // item 7 — ONE helper finds a token's restaurant, and all three writing doors use it
+  { const doors = ["place-order", "call-waiter", "leave"].map((d) => r2(`app/api/guest/${d}/route.ts`));
+    const anyCopy = doors.some((c) => /async function ridFromToken/.test(c));
+    check("item 7 — all three writing doors find a token's restaurant through lib/guestTokenRestaurant.ts (no private copies)",
+      !anyCopy && doors.every((c) => /restaurantOfToken\(b\.token\)/.test(c)) && /export async function restaurantOfToken/.test(r2("lib/guestTokenRestaurant.ts"))); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

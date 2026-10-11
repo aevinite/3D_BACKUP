@@ -16,6 +16,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { offPlanTable } from "@/lib/planTable";
 import { invalidateFloor } from "@/lib/floorSummary";
+// The restaurant a session token belongs to — ONE copy for the three writing doors (sweep #10 T3
+// round 2, item 7): `lfh_call_waiter` (migration 084) answers `{ok:true}` and nothing else, so an
+// older saved call carrying no `restaurantId` needs the token to drop the floor snapshot.
+import { restaurantOfToken } from "@/lib/guestTokenRestaurant";
 
 export const dynamic = "force-dynamic";
 
@@ -51,23 +55,6 @@ function callLanded(data: unknown): boolean {
   return !["already_sent", "capped", "rate_limited"].includes(String(d.reason ?? ""));
 }
 
-// The restaurant a session token belongs to. The twin of the helper in
-// /api/guest/place-order — and it exists for the same reason: `lfh_call_waiter` (migration 084)
-// returns `{ok:true}` and nothing else, so the "prefer the restaurant the RPC itself resolved"
-// note below has never had a value to prefer, and an older saved call carrying no `restaurantId`
-// left the floor snapshot standing. Two single-row, column-listed, capped reads, and only when
-// both cheaper answers came back empty.
-async function ridFromToken(token: string | undefined): Promise<string> {
-  if (!token) return "";
-  try {
-    const m = await sb.from("session_members").select("session_id").eq("token", token).limit(1).maybeSingle();
-    const sid = m.data?.session_id;
-    if (!sid) return "";
-    const s = await sb.from("sessions").select("restaurant_id").eq("id", sid).limit(1).maybeSingle();
-    const rid = s.data?.restaurant_id;
-    return isUuid(rid) ? String(rid) : "";
-  } catch { return ""; }
-}
 
 // ── "THE RESTAURANT IS BUSY — WAIT THIS LONG" (T10 sweep, improvement I2) ─────────────────────────
 //
@@ -150,7 +137,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
       : null;
     const rid = isUuid(fromRpc)
       ? (fromRpc as string)
-      : (isUuid(b.restaurantId) ? (b.restaurantId as string) : await ridFromToken(b.token));
+      : (isUuid(b.restaurantId) ? (b.restaurantId as string) : await restaurantOfToken(b.token));
     // A raised hand changes the floor — a duplicate of one already raised does not.
     if (rid && callLanded(data)) invalidateFloor(rid);
     else if (!rid) console.warn("[guest/call-waiter] session replay had no resolvable restaurant — floor snapshot not dropped");
