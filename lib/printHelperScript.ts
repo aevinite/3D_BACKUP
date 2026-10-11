@@ -1036,7 +1036,28 @@ echo.
 :loop
 REM Every printer this PC has, as JSON, so the app's dropdowns are built from the machine's own words.
 powershell -NoProfile -Command "%PSPRINTERS%; @{ fingerprint='%FP%'; printers=$out } | ConvertTo-Json -Compress -Depth 4" > "%WORK%\\hello.json" 2>nul
-curl -s -m 20 -X POST "%SITE%/api/print-agent/hello" -H "x-lfh-agent: %CODE%" -H "content-type: application/json" --data-binary "@%WORK%\\hello.json" > "%WORK%\\hello.out" 2>nul
+REM ── ONLY THE SITE SAYING NO UNLINKS THIS PC (sweep #10 T15, 2026-10-12) ─────────────────────
+REM The Mac and Linux files learned this on 2026-09-13 ("it threw its own token away on any odd
+REM answer") and this one was left behind. Here it was worse: this hello runs ONCE, when the PC
+REM starts - which is exactly when the Wi-Fi is not up yet. An empty reply, a timeout or a 502 in
+REM the middle of a deploy all read as "unlinked", so the code was deleted, the auto-started copy
+REM quit, and the shop's printing stayed off until somebody fetched a new setup code. Now the HTTP
+REM status is read, and only a 401 - the site really refusing this code - is believed. Anything
+REM else keeps the code and asks again in 30 seconds.
+set "HCODE="
+curl -s -m 20 -o "%WORK%\\hello.out" -w "%%{http_code}" -X POST "%SITE%/api/print-agent/hello" -H "x-lfh-agent: %CODE%" -H "content-type: application/json" --data-binary "@%WORK%\\hello.json" > "%WORK%\\hello.code" 2>nul
+if exist "%WORK%\\hello.code" set /p HCODE=<"%WORK%\\hello.code"
+if not "%HCODE%"=="200" if not "%HCODE%"=="401" (
+  echo %DATE% %TIME%  the site did not answer, HTTP %HCODE% - keeping this computer's code and trying again>>"%LOG%"
+  timeout /t 30 /nobreak >nul
+  goto loop
+)
+findstr /C:"\\"ok\\":true" "%WORK%\\hello.out" >nul
+if errorlevel 1 if not "%HCODE%"=="401" (
+  echo %DATE% %TIME%  the site answered oddly but did not refuse this computer - keeping its code>>"%LOG%"
+  timeout /t 30 /nobreak >nul
+  goto loop
+)
 findstr /C:"\\"ok\\":true" "%WORK%\\hello.out" >nul
 if errorlevel 1 (
   REM ── A REFUSED TOKEN CLEARS ITSELF (mig 380) ────────────────────────────────────────────

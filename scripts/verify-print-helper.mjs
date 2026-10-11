@@ -1320,6 +1320,24 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     && (script.match(/if \[ "\$HCODE" != "401" \]/g) || []).length >= 2,
     "…and only the site actually refusing the code (401) counts as being unlinked",
     "the helper throws its own token away on ANY answer that is not ok:true — an empty reply, a timeout or a 502 mid-deploy then unlinks a restaurant's printer and it needs a new setup code");
+  // …AND THE THIRD FILE, which the two counts above never looked at (sweep #10 T15, 2026-10-12).
+  // The Windows helper says hello ONCE, when the PC starts — the moment its Wi-Fi is least likely to
+  // be up — and deleted its token on anything that was not ok:true. Asserted on the GENERATED file:
+  // the status is captured, a non-200/401 waits and asks again, and the token is only deleted after
+  // both of those gates.
+  {
+    let win = "";
+    try { win = (await import(new URL("../lib/printHelperScript.ts", import.meta.url))).helperScript("windows", { origin: "https://example.test" }); }
+    catch (e) { fails.push(`could not generate the Windows helper to check its unlink rule: ${e && e.message}`); }
+    const at = (s) => win.indexOf(s);
+    const del = at('del /q "%TOKENFILE%"');
+    check(del > 0
+      && at('-w "%%{http_code}"') > 0 && at('-w "%%{http_code}"') < del
+      && at('if not "%HCODE%"=="200" if not "%HCODE%"=="401" (') > 0 && at('if not "%HCODE%"=="200" if not "%HCODE%"=="401" (') < del
+      && at('if errorlevel 1 if not "%HCODE%"=="401" (') > 0 && at('if errorlevel 1 if not "%HCODE%"=="401" (') < del,
+      "…the Windows helper too: only a 401 unlinks it, and a PC that starts before its Wi-Fi keeps its code",
+      "the Windows helper deletes its token on any hello that is not ok:true — a PC that boots before its Wi-Fi is up unlinks itself and stops printing until somebody fetches a new setup code");
+  }
   // Counted in both files, for the same reason as the check above.
   check((script.match(/cp -f "\$SELF" "\$run\.new"/g) || []).length >= 2
     && (script.match(/mv -f "\$run\.new" "\$run"/g) || []).length >= 2,
