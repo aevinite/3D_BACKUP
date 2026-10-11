@@ -1039,6 +1039,11 @@ flush();
     const anyCopy = doors.some((c) => /async function ridFromToken/.test(c));
     check("item 7 — all three writing doors find a token's restaurant through lib/guestTokenRestaurant.ts (no private copies)",
       !anyCopy && doors.every((c) => /restaurantOfToken\(b\.token\)/.test(c)) && /export async function restaurantOfToken/.test(r2("lib/guestTokenRestaurant.ts"))); }
+  // item 8 — the old T3 runners switch French House's sessions on ONLY around the gate sections
+  { const files = ["basket-and-doors", "order-end-to-end", "across-panels", "screens", "s7-live"].map((f) => r2(`scripts/sweep/t3/${f}.mjs`));
+    const helper = r2("scripts/sweep/t3/sessionsOn.mjs");
+    check("item 8 — the old runners that drive the join-a-table gate switch sessions ON for their run and put them back",
+      files.every((c) => /sessionsOnForRun\(\)/.test(c) && /sessionsBack\(\)/.test(c)) && /restoreOnExit\(/.test(helper) && /sessions_enabled: false/.test(helper)); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

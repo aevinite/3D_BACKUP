@@ -3,6 +3,7 @@
 import { chromium } from "playwright";
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
+import { sessionsOnForRun } from "./sessionsOn.mjs";   // round 2 item 8: sessions ON only where the gate is driven
 // THIS CHECKOUT'S OWN KEYS, NOT THE SHARED FOLDER'S (sweep #6 / T28, 2026-08-22). This read
 // /Users/aevinite/Documents/Projects/backup_Menu/.env.local by absolute path. Every parallel lane of a
 // sweep runs from its OWN worktree — that is the rule — so a guard that reaches back into the shared
@@ -96,6 +97,9 @@ const cartOf = (p) => p.evaluate(() => { const o = {}; for (let i = 0; i < local
   await ctx.close();
 }
 
+{ // D — needs dining sessions ON (French House is OFF by default): switched on for this block only
+  const sessionsBack = await sessionsOnForRun();
+  try {
 { // D. the join-a-table gate on a sessions-ON restaurant
   const ctx = await b.newContext(phone); const p = await ctx.newPage();
   await p.goto(BASE + FH, { waitUntil: "domcontentloaded" }); await settle(p);
@@ -139,6 +143,8 @@ const cartOf = (p) => p.evaluate(() => { const o = {}; for (let i = 0; i < local
   t("P01339", "closing the gate closes it", (await p.locator(".sg-overlay").count()) === 0);
   t("P01340", "…and the dish it was holding is NOT quietly added", ((await cartOf(p))["lfh_cart:french-house"] || []).length === 0);
   await ctx.close();
+}
+  } finally { await sessionsBack(); }
 }
 
 { // E. no signal

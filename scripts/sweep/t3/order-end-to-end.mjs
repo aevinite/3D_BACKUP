@@ -3,6 +3,7 @@
 import { chromium } from "playwright";
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
+import { sessionsOnForRun } from "./sessionsOn.mjs";   // round 2 item 8: sessions ON only where the gate is driven
 // THIS CHECKOUT'S OWN KEYS, NOT THE SHARED FOLDER'S (sweep #6 / T28, 2026-08-22). This read
 // /Users/aevinite/Documents/Projects/backup_Menu/.env.local by absolute path. Every parallel lane of a
 // sweep runs from its OWN worktree — that is the rule — so a guard that reaches back into the shared
@@ -26,6 +27,9 @@ let pass = 0, fail = 0; const fails = [];
 const t = (id, n, ok, x = "") => { if (ok) pass++; else { fail++; fails.push(id); } console.log(`${ok ? "ok  " : "FAIL"} ${id} ${n}${x ? " — " + x : ""}`); };
 const mine = { orders: [], sessions: [] };
 let b;
+// Round 2 item 8: the whole block drives the join-a-table gate, so French House's dining sessions are
+// switched ON for the run and put back before every exit (and on Ctrl-C / a crash — ./sessionsOn.mjs).
+const sessionsBack = await sessionsOnForRun();
 try {
   b = await chromium.launch();
   const ctx = await b.newContext({ viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
@@ -174,5 +178,6 @@ try {
   console.log(`\n· cleaned up ${mine.orders.length} order(s) and ${mine.sessions.length} session(s), each by its own id · still mine and live: ${liveMine.length} order(s), ${liveSess.length} session(s)`);
   console.log(`BLOCK 3b: ${pass} passed, ${fail} failed${fails.length ? " -> " + fails.join(", ") : ""}`);
   if (b) await b.close();
+  await sessionsBack();
   process.exit(fail ? 1 : 0);
 }

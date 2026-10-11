@@ -1,6 +1,7 @@
 // Block 4 — the captures I open and look at, plus the hit-test behind P01404/P01405.
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { sessionsOnForRun } from "./sessionsOn.mjs";   // round 2 item 8: sessions ON only where the gate is driven
 // WHERE THE CAPTURES LAND. This was an absolute path into ONE Claude session's scratch folder —
 // the session that first wrote this file, in sweep #6. Every later run wrote its shots into a dead
 // session's directory, which is both un-findable and not where the sweep rules say shots go
@@ -61,6 +62,9 @@ async function build(ctx, theme) {
   await p.locator(".gob-chip").click(); await p.waitForTimeout(900);
   await p.screenshot({ path: OUT + "/a35-outbox-sheet.png" });
   await ctx.close(); }
+{ // the gate captures — needs dining sessions ON (French House is OFF by default): switched on for this block only
+  const sessionsBack = await sessionsOnForRun();
+  try {
 { const ctx = await b.newContext(A35); const p = await ctx.newPage();
   await p.goto(BASE + "/r/french-house/menu", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(6500);
   await p.locator('button[aria-label^="Add"], .fc-plus').first().click(); await p.waitForTimeout(2500);
@@ -68,5 +72,7 @@ async function build(ctx, theme) {
   await p.locator(".sg-input").first().fill("29"); await p.locator(".sg-btn.gold").first().click(); await p.waitForTimeout(4200);
   await p.screenshot({ path: OUT + "/a35-gate-notopen.png" });
   await ctx.close(); }
+  } finally { await sessionsBack(); }
+}
 await b.close();
 console.log("shots -> " + OUT);
