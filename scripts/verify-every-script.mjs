@@ -78,6 +78,9 @@ const TOOL = "a tool whose job IS to change data, run by hand on purpose — und
 const ASKS = "its POSTs go to the database's query endpoint and only read (no INSERT/UPDATE/DELETE in its SQL)";
 const EXPLAINED_WRITES = {
   "scripts/agent-run-record.mjs": TOOL,
+  // classifies older parcels' tax once (mig 421) — writes only the new, empty columns, only on rows not yet
+  // classified, never `total`; a second run is a no-op. Read 2026-10-11.
+  "scripts/backfill-parcel-tax.mjs": TOOL,
   "scripts/apply-migration-avlive.mjs": TOOL,
   "scripts/apply-migration-prod.mjs": TOOL,
   "scripts/compare-schemas.mjs": ASKS,

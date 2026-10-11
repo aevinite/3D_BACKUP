@@ -1902,3 +1902,9 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [x] **The three Pay-later sub-switches** (item 13) — already deleted on main by another terminal (5a151f78, 2026-10-10); nothing read them.
 - [x] **594 new checks, every reachable line run** — coverage-measured (route 534 → 17 never-run lines, all 18 left classified), every fix sabotage-tested; ledger `T13-S10.md` → Round 2.
 - [x] **The cancel-order question says "Keep order", not "Cancel"** (item 34) — Waiter tablet → ✎ Edit → ✕ Cancel order. VERIFIED live on backup (PR #1499): panel fc68fc62 shows "Keep order" / "Cancel order"; Keep order leaves the ticket alone.
+
+## 2026-10-11 — owner: "do parcel one and have to done the retest of everything"
+
+- [ ] **Counter parcels in the GST reports** — Owner → Reports → Tax / GST counts every paid, not-cancelled parcel with a known tax (tiles, CGST/SGST split, chart, filing table); the manager's GST report and the compiled statement ("GST TO FILE") count them too; Sales / Day figures stay dine-in and say what the Tax report adds. Each new parcel saves the tax it was charged (mig 421); older ones backfilled only where provable (dev: 20 repriced · 12 saved without tax · 4 unmatched — all named with their value). Guard `verify:parcels-in-gst`. Tick when live on backup.
+- [ ] **Retest of everything** after it ships.
+- [ ] **WAITING ON THE OWNER:** should counter parcels also count as Revenue (Dashboard, Sales, Day summary)? · Delivery-app sales on a separate "tax paid by the app" line? · Parcel invoices are not yet in the signed invoice chain (mig 332 signs dine-in only). · Demo platform orders in the manager Z-report.
