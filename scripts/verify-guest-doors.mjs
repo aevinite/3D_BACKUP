@@ -1069,6 +1069,10 @@ flush();
   { const c = r2("components/StarRating.tsx");
     check("item 16 — the stars' 'lit' class is owned by the animation, never re-set by a render",
       /<li key=\{i\} className="sr-li">/.test(c) && !/className=\{`sr-li \$\{i < value/.test(c)); }
+  // item 17 — the QR bell on a busy restaurant is saved, like no signal
+  { const m = r2("lib/menu.ts"), ch = r2("components/ChefPopup.tsx");
+    check("item 17 — a QR call the restaurant did not ANSWER is saved and sent later (busy = offline)",
+      /if \(isDbUnreachable\(error\)\) throw busyError\(/.test(m) && /if \(isServerBusy\(err\)\) \{[\s\S]{0,160}enqueueGuestCall\(/.test(ch)); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

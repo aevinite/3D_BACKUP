@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 // callWaiter sends a service request; getSettings reads restaurant on/off options.
 import { enqueueGuestCall } from "@/lib/guestOutbox";
-import { callWaiter, getSettings } from "@/lib/menu";
+import { callWaiter, getSettings, isServerBusy } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
 // Helpers for checking/cleaning the table number and reading a scanned-QR table.
 import { validateTable, flagTableInput, getScannedTable, setScannedTable } from "@/lib/table";
@@ -208,7 +208,6 @@ export default function ChefPopup() {
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Already sent", subtitle: `${reason} · staff are on the way`, kicker: "service", icon: "🛎" } }));
         window.dispatchEvent(new Event("lfh:close-all"));
       }
-    } catch {
       // If the request failed, show an error toast asking them to try again.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't reach staff", subtitle: "please try again", kicker: "service", variant: "error" } }));
     } finally {
