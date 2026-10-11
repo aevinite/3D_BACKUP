@@ -906,7 +906,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {
-    if (worthLogging(e)) logError("tablet", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
+    if (worthLogging(e)) logError("tablet", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/")}` });
     return panelFailure(e);
   }
 }
@@ -1029,7 +1029,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         {
           const psLimit = await waiterTables(actor, rid);
           if (psLimit !== null && !allows(psLimit, o.table_number)) {
-            return err(notYoursMessage(String(o.table_number ?? "")), 403);
+            // No `?? ""`: allows() passes a ticket with no table, so here the number is real (round 2 coverage).
+            return err(notYoursMessage(String(o.table_number)), 403);
           }
         }
         if (!g.user && (body as Record<string, unknown>)?.force !== true) {
@@ -1064,7 +1065,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       {
         const psLimit = await waiterTables(actor, rid);
         if (psLimit !== null && !allows(psLimit, sess.table_number)) {
-          return err(notYoursMessage(String(sess.table_number ?? "")), 403);
+          return err(notYoursMessage(String(sess.table_number)), 403);
         }
       }
       // ── THE ADMIN LOOKING IS NOT THE RESTAURANT PRINTING (owner, 2026-08-20) ──────────────────
@@ -1160,7 +1161,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       {
         const pjLimit = await waiterTables(actor, rid);
         if (pjLimit !== null && !allows(pjLimit, rpo.table_number)) {
-          return err(notYoursMessage(String(rpo.table_number ?? "")), 403);
+          return err(notYoursMessage(String(rpo.table_number)), 403);
         }
       }
       must(await sb.from("print_jobs").insert({
@@ -1767,7 +1768,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // (a completed order kept in records/revenue — NOT cancelled). Mirrors the
     // editor's restartTable, done as one scoped bulk update. (owner, 2026-06-17)
     if (a === "tables" && c === "restart") {
-      const tRaw = String(b || "").trim();
+      // `b.trim()`, not `String(b || "").trim()`: a third segment (`c`) means the second one exists
+      // and is a non-empty string, so that fallback could never run (sweep #10 T13 round 2 coverage —
+      // eleven handlers below carried the same dead arm).
+      const tRaw = b.trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       // A merged child's party lives on its parent — act on the whole party (lib/tableMerge).
       const t = await mergeParentTable(sb, rid, tRaw);
@@ -1926,7 +1930,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // child's number here. The RPC returns what actually moved, so the panel's confirm can have told
     // the truth before anyone tapped.
     if (a === "tables" && c === "unmerge") {
-      const tu = String(b || "").trim();
+      const tu = b.trim();
       if (!/^\d+$/.test(tu)) return err("valid table required");
       if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
       const gu = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gu.allow) return gu.resp;
@@ -2397,7 +2401,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // arithmetic and the write are lib/paySplit.ts, shared with the manager panel: the server
     // recomputes the due itself and refuses parts that don't add up.
     if (a === "tables" && c === "pay-split") {
-      const tRaw = String(b || "").trim();
+      const tRaw = b.trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       // A merged child's bill lives on its parent — split the PARTY's bill (lib/tableMerge).
       const t = await mergeParentTable(sb, rid, tRaw);
@@ -2428,7 +2432,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // order for the table as paid. The waiter confirms on-screen that the money
     // was actually collected before this fires.
     if (a === "tables" && c === "pay") {
-      const tRaw = String(b || "").trim();
+      const tRaw = b.trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       // A merged child's bill lives on its parent — settle the PARTY's bill, never half of it
       // (found live 2026-08-03: paying at the child covered ₹662 of a ₹1,323 joint bill).
@@ -2533,7 +2537,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // "customers" entitlement (default on). Fire-and-forget from the pay sheet — a
     // failure here NEVER blocks the settle that already happened.
     if (a === "tables" && c === "customer-capture") {
-      const tRaw = String(b || "").trim();
+      const tRaw = b.trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       // The bill (and its visit) belongs to the party's session — resolve a merged child first.
       const t = await mergeParentTable(sb, rid, tRaw);
@@ -2576,7 +2580,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Both refuse with { on: false } when the admin has not switched the module on, so the pay
     // sheet simply renders nothing (owner, 2026-09-19: off means everything stays as it is now).
     if (a === "tables" && c === "loyalty") {
-      const tRaw = String(b || "").trim();
+      const tRaw = b.trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       // (A mergeParentTable() read sat here whose answer nothing used — the balance is the PHONE's,
       //  not the table's. One database round trip per pay-sheet open, removed in round 2.)
@@ -2587,7 +2591,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(await loyaltyStateFor(rid, phone));
     }
     if (a === "tables" && c === "loyalty-redeem") {
-      const tRaw = String(b || "").trim();
+      const tRaw = b.trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       const t = await mergeParentTable(sb, rid, tRaw);
       const ent = await getOwnerEntitlements(rid);
@@ -2614,7 +2618,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // tables/:t/tag — the waiter marks/clears a table's special type. Feature-laddered
     // + the manager's tablet_table_tags tri-state (off default | on | pin).
     if (a === "tables" && c === "tag") {
-      const t = String(b || "").trim();
+      const t = b.trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
       if (actor && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       const tg = recordPin(await tabletPerm("tablet_table_tags", req, body, rid, actor)); if (!tg.allow) return tg.resp;
@@ -2637,7 +2641,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Stored as a 100% pre-tax discount + the reserved "On the house" method, so every
     // money view (net-of-discount, paid-only) reads ₹0 — identical to the manager path.
     if (a === "tables" && c === "on-the-house") {
-      const tRaw = String(b || "").trim();
+      const tRaw = b.trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       // The comp settles the PARTY's bill — resolve a merged child to the table holding it.
       const t = await mergeParentTable(sb, rid, tRaw);
@@ -2688,7 +2692,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // table (same flow as the manager's; see the editor route). Gated by the manager's
     // tablet_khata tri-state. body { customer_id } OR { name, phone?, note? }.
     if (a === "tables" && c === "khata") {
-      const tRaw = String(b || "").trim();
+      const tRaw = b.trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       // Parking "collect later" parks the PARTY's bill — resolve a merged child first.
       const t = await mergeParentTable(sb, rid, tRaw);
@@ -2746,7 +2750,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // heavier restore stays the manager panel's job. Gated by the same tablet_mark_paid
     // permission as pay, so a mistaken revert is no easier than a mistaken payment.
     if (a === "tables" && c === "unpay") {
-      const tRaw = String(b || "").trim();
+      const tRaw = b.trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       // Reopening the bill reopens the PARTY's bill — resolve a merged child first.
       const t = await mergeParentTable(sb, rid, tRaw);
@@ -2858,7 +2862,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // error from a since-deleted row) — don't leak the internal message to the waiter's toast;
     // log it server-side and return a generic 500. (NB2)
     console.error("[tablet POST]", e instanceof Error ? e.message : e);
-    if (worthLogging(e)) logError("tablet", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
+    if (worthLogging(e)) logError("tablet", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/")}` });
     // The generic sentence stays for anything we can't classify (NB2 above). A database that
     // didn't answer, or a value it refused, now says so instead — see lib/panelFailure.ts.
     return panelFailure(e, { unknown: "Something went wrong — try again." });
