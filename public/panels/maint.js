@@ -85,8 +85,16 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   if (window.LFH_OUTBOX && window.LFH_OUTBOX.send) {
     // send() throws on a 4xx (a clash, a refused value — a person must see those) and resolves
     // { ok:true, queued:true } when it has kept the change for later. Same contract as api().
+    // `base: ""` — THE QUEUE BUILDS ITS ADDRESS AS base + path (sweep #10 T16, 2026-10-12). This
+    // call named no base from the day it was written (2026-08-05), so the address came out as
+    // "undefined/api/panel-profile": a RELATIVE address, which the browser resolved against the
+    // panel's own page to /panels/editor/undefined/api/panel-profile — a 404. Every save on this
+    // drawer and on "My profile & pay" (name, phone, PIN, the first-login card, personal details)
+    // answered "Not Found" for two months. outbox.js now treats a missing base as "" as well, so a
+    // save already sitting on a device in the old shape is delivered to the right place.
+    // Guarded by `npm run verify:outbox` (section 12).
     var j = await window.LFH_OUTBOX.send({
-      method: "POST", path: "/api/panel-profile", body: body,
+      base: "", method: "POST", path: "/api/panel-profile", body: body,
       panel: "panel-profile", label: (opts && opts.label) || "save your profile",
       expect: expect,
     });

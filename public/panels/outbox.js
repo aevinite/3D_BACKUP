@@ -322,7 +322,13 @@
     // two waiters editing the same dish at the same moment is the common case.
     if (item.expect) headers["X-LFH-Expect"] = JSON.stringify(item.expect);
     if (replay) headers["X-LFH-Replay"] = "1";
-    return fetch(item.base + item.path, {
+    // `|| ""` — A CALLER THAT NAMES NO BASE STILL GETS ITS OWN ADDRESS (sweep #10 T16, 2026-10-12).
+    // `undefined + "/api/x"` is the string "undefined/api/x", a relative address the browser
+    // resolves against the panel's page, so the write went to /panels/<panel>/undefined/api/x and
+    // got a 404. That is exactly what every profile save did for two months (maint.js
+    // LFH_PROFILE_SAVE named no base). Defaulting here, not only at that call site, is what lets a
+    // change already saved on a device in that shape replay to the right place.
+    return fetch((item.base || "") + item.path, {
       method: item.method,
       headers: headers,
       body: item.body != null ? JSON.stringify(item.body) : undefined,

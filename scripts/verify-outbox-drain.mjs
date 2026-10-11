@@ -59,6 +59,20 @@ const server = http.createServer((req, res) => {
       <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>
       <script>${readFileSync(join(ROOT, "public/panels/offline.js"), "utf8")}</script>`);
   }
+  // THE PROFILE DRAWER'S PAGE (section 12): the queue AND the shared profile helper that lives in
+  // maint.js, which is the caller that named no base. The boot read answers "not a staff member",
+  // so maint.js builds nothing and only its two shared helpers are on the page.
+  if (req.url === "/page-profile") {
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(`<!doctype html><meta charset="utf-8"><body><div class="topbar"><div class="top-actions"></div></div>
+      <script>window.LFH_TEST_PACING = { first: 300, base: 400, max: 800, wake: 50, stuck: 1500 };</script>
+      <script>${readFileSync(join(ROOT, "public/panels/maint.js"), "utf8")}</script>
+      <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>`);
+  }
+  if (req.method === "GET" && req.url === "/api/panel-profile") {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end('{"staff":false}');
+  }
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
@@ -334,6 +348,33 @@ const order = seen.filter((x) => /\/tables\/7\//.test(x.path)).map((x) => x.id);
    // ids are opaque; order is what matters
 if (order.length === 2 && order[0] !== order[1]) ok("…in the order they were made, not the order they were retried");
 else bad("the two changes for one table did not arrive as two distinct writes", JSON.stringify(order));
+
+// ── 12. a save that names no base still reaches its own address ──────────────────────────
+// Sweep #10 T16, 2026-10-12. maint.js's LFH_PROFILE_SAVE (the ⚙ drawer's Save details / Set PIN /
+// first-login card, and "My profile & pay") called the queue with no `base`, and the queue built
+// the address as base + path — "undefined/api/panel-profile", which the browser resolved against
+// the panel's page into a 404. Driven here through the REAL helper on a page at the site root, so
+// the broken address would have arrived as "/undefined/api/panel-profile".
+console.log("\n12) A profile save goes to /api/panel-profile, not to an address with 'undefined' in it");
+mode = "ok"; seen.length = 0;
+await page.goto(BASE + "/page-profile", { waitUntil: "domcontentloaded" });
+await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForFunction(() => !!(window.LFH_OUTBOX && window.LFH_PROFILE_SAVE), null, { timeout: 10000 });
+const prof = await page.evaluate(() => window.LFH_PROFILE_SAVE({ phone: "9000000000" }, { label: "save your phone number" })
+  .then((r) => ({ ok: r.ok, queued: r.queued }), (e) => ({ threw: String(e && e.message) })));
+const profPaths = seen.map((x) => x.path);
+if (profPaths.length === 1 && profPaths[0] === "/api/panel-profile") ok("the drawer's save reached /api/panel-profile");
+else bad("the drawer's save went somewhere else", JSON.stringify(profPaths));
+if (prof && prof.ok && !prof.queued && !prof.threw) ok("…and the person is told it saved, because it did");
+else bad("the save did not come back as saved", JSON.stringify(prof));
+if (!profPaths.some((p) => /undefined/.test(p))) ok("no request carried the word 'undefined' in its address");
+else bad("an address was built from a missing base", JSON.stringify(profPaths));
+// …and the queue's own default, for a change already saved on a device in the old shape.
+seen.length = 0;
+await page.evaluate(() => window.LFH_OUTBOX.send({ method: "POST", path: "/api/panel-profile", body: { phone: "1" }, label: "an old-shape save" }).catch(() => null));
+if (seen.length === 1 && seen[0].path === "/api/panel-profile") ok("the queue sends a base-less change to its own path");
+else bad("the queue still builds 'undefined' + path", JSON.stringify(seen.map((x) => x.path)));
 
 await browser.close();
 server.close();
