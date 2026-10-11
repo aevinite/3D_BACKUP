@@ -1085,6 +1085,10 @@ flush();
   { const ok3 = ["place-order", "call-waiter", "leave"].every((d) => /if \(!b \|\| typeof b !== "object" \|\| Array\.isArray\(b\)\) return NextResponse\.json\(\{ ok: false, reason: "bad_body" \}, \{ status: 400 \}\);/.test(r2(`app/api/guest/${d}/route.ts`)));
     check("item 20 — a body that parses to null / a number / a list is refused (or a no-op beacon), never a 500",
       ok3 && /if \(!b \|\| typeof b !== "object" \|\| Array\.isArray\(b\)\) b = \{\};/.test(r2("app/api/guest/limit-hit/route.ts"))); }
+  // item 22 — the limit beacon reads a function NAME only when it is text
+  { const c = r2("app/api/guest/limit-hit/route.ts");
+    check("item 22 — the limit beacon ignores a function name that is not text (a list is not a name)",
+      /const key = typeof b\.fn === "string" \? FN_TO_KEY\[b\.fn\] : undefined;/.test(c) && !/FN_TO_KEY\[String\(/.test(c)); }
   // item 21 — only a real duplicate reads "Already sent"
   { const c = r2("components/ChefPopup.tsx");
     check("item 21 — an unknown answer to a QR call is said honestly, never as 'Already sent'",
