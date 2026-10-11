@@ -366,6 +366,10 @@ export default function CartPanel() {
     // listeners, so re-running never double-subscribes.
     // features.allergies too: the switches also resolve a beat after the defaults, and the
     // allergy restore above must act on the REAL value, not the default "on".
+    // pruneCartToMenu is left out ON PURPOSE: it reads storage, never state, so a newer copy of it
+    // would do exactly what this one does — and listing it would re-run this whole setup (every
+    // listener, two settings reads) on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurantId, features.allergies]);
 
   // Persist the order-wide allergy avoidances. Skip the very first run: on mount
@@ -1151,7 +1155,6 @@ export default function CartPanel() {
           ) : (
             // One block per cart line.
             cart.map((item, idx) => {
-              const c = conflicts(item.id); // allergens in THIS dish the guest avoids
               return (
                 <div key={`${item.id}-${item.sig || ""}-${idx}`} className="cart-item">
                   {/* THE DISH'S OWN PHOTO (owner, 2026-09-20: "IF POSSIBLE ADD IMAGE LIKE D3").
