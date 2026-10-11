@@ -335,5 +335,24 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 11 · THE BILL PREVIEW DRAWS THE RESTAURANT ASKED FOR, OR NOTHING (sweep #10 T29, item 6) ──────
+// Access & permissions → "Format of …" → Preview / Print. A missing id fell back to restaurant #1 (the
+// flagship's header under another restaurant's screen) and a failed read drew a bill with a blank
+// header, both with a 200.
+{
+  const rel = "app/api/admin/restaurants/bill-preview/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Access → bill preview: no silent fall-back to restaurant #1 for a missing id",
+      !/DEFAULT_RESTAURANT_ID|DEFAULT_RID/.test(src), "the flagship's bill would be drawn under another restaurant's name");
+    check("…and both reads are checked before a bill is drawn",
+      /if \(setQ\.error \|\| restQ\.error\)/.test(src) && src.indexOf("setQ.error || restQ.error") < src.indexOf("billPreviewHtml("),
+      "a failed read draws a bill with no name, no address and no tax lines");
+    check("…and an unknown restaurant is said in words, not drawn as an empty bill",
+      /if \(!restQ\.data\) return/.test(src));
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);
