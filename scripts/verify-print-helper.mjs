@@ -1103,6 +1103,35 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     "the sanitiser is now eating ordinary names");
 }
 
+// ── 8i · A WINDOWS PATH KEEPS ITS BACKSLASH ON THE WAY OUT OF THE APP (sweep #10 T15, 2026-10-12) ──
+//
+// Both files are JavaScript TEMPLATE strings, and inside one a lone `\s` is not a backslash and an
+// s — it is just "s". The Windows print-station file therefore shipped
+//     echo …>>"%LOGDIR%station.log"
+// for five weeks: the log landed BESIDE its folder (`…\AevidinePrintHelperstation.log`), the folder
+// the T11 fix of 2026-09-04 made "so the station leaves a trace" stayed empty, and every read of the
+// SOURCE looked right. So this asserts on the GENERATED text: no `%VAR%` glued straight onto a name.
+// (Node strips the TypeScript types itself; if it ever cannot, the check FAILS rather than passing.)
+{
+  const gen = [];
+  try {
+    const st = await import(new URL("../lib/printStationScript.ts", import.meta.url));
+    const hp = await import(new URL("../lib/printHelperScript.ts", import.meta.url));
+    gen.push(["the Windows print-station file", st.stationScript("windows", { origin: "https://example.test", panel: "kitchen", label: "x" })]);
+    gen.push(["the Windows print-helper file", hp.helperScript("windows", { origin: "https://example.test" })]);
+  } catch (e) { fails.push(`could not generate the two Windows files to check them: ${e && e.message}`); }
+  for (const [what, txt] of gen) {
+    const glued = txt.split("\n").filter((l) => !/^\s*REM\b/i.test(l) && /%[A-Z_]+%[A-Za-z]/.test(l));
+    check(txt.length > 1000 && glued.length === 0,
+      `${what}: every %FOLDER% is followed by a backslash, so nothing is written beside its folder`,
+      `${what} glues a folder variable straight onto a file name (a template string ate the backslash): ${glued.map((l) => l.trim().slice(0, 100)).join(" · ")}`);
+  }
+  const station = (gen[0] || ["", ""])[1];
+  check(/>>"%LOGDIR%\\station\.log"/.test(station),
+    "the print station's start-up line goes INTO its log folder",
+    "the Windows print station no longer writes its start-up line to %LOGDIR%\\station.log");
+}
+
 // ── 8h · THE BACKUP PRINTER IS GONE, AND STAYS GONE (T25 round 3, item 39, 2026-08-31) ────────────
 //
 // Removed across nine files on 2026-08-30 at the owner's word: *"What is this backup printer and all
