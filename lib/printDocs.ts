@@ -24,12 +24,21 @@ const IDENTITY_COLUMNS = "restaurant_name, restaurant_address, restaurant_phone,
 // short. Found by the printing sweep on 2026-08-29, asking for A4 and measuring A5.
 const BANQUET_PAPER_COLUMNS =
   "banquet_paper, banquet_paper_size, banquet_paper_top, banquet_paper_bot, banquet_paper_side, " +
-  "banquet_paper_foot, banquet_paper_sign, banquet_paper_fill";
+  "banquet_paper_foot, banquet_paper_sign, banquet_paper_fill, banquet_tax_components, banquet_fields";
 
 /**
  * The table as the FLOOR knows it — the table's NAME when the owner set one, else "T7", and "T?"
  * when a row has no table at all (a banquet bill with the table left blank).
  *
+//
+// …AND THE SHEET'S OWN TAX LINES AND FIELD LIST, for exactly the same reason (sweep #10 T14,
+// 2026-10-12). banquetDocHtml also reads `banquet_tax_components` (bqTaxModel — a banquet is taxed at
+// its OWN rate, mig 239) and `banquet_fields` (bqOn — whether "Prepared by" prints). Neither was
+// selected, so the helper's copy fell back again: every SAMPLE banquet sheet was taxed at the dine-in
+// rate (Aangan, set to CGST 9 + SGST 9 for banquets, printed 2.5 + 2.5), and a real sheet from a
+// restaurant that switched "Prepared by" on came out of the helper without that line while the
+// manager panel's copy had it. verify:print-helper now derives every setting the sheet reads from
+// billdoc.js and fails if this list misses one.
  * "T7", NEVER "Table 7" (owner, 2026-08-05: "it should always be T7"). ONE short form everywhere —
  * panels, tickets and the printed bill — which is why this mirrors `tlong()` in the kitchen panel
  * exactly rather than inventing a longer wording for paper.
@@ -486,11 +495,17 @@ export async function sampleBanquetHtml(rid: string): Promise<string> {
   // rate. One source, one answer.
   const bqTm = BILLDOC.bqTaxModel((setQ.data || {}) as Record<string, unknown>) as
     { rate: number; pct: number; components: { label: string; rate: number }[] };
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-  const taxLines = (bqTm.components || []).map((c) => ({
-    label: c.label, rate: c.rate, amt: round2(subtotal * (c.rate / 100)),
-  }));
-  const taxAmt = round2(taxLines.reduce((a, c) => a + c.amt, 0));
+  // …AND A RESTAURANT ON A PLAIN RATE HAS NO COMPONENTS (sweep #10 T14, 2026-10-12). This built its
+  // tax lines from `components` only — EMPTY for a restaurant that set a rate and named no lines, the
+  // default state (French House, Pizza Palace and Demo Bistro among them) — so the sample still printed
+  // "GST 0% · 0.00" for a restaurant charging 5%, the very lie this paragraph says was removed.
+  // The answer is NOT to split the rate here: a caller doing its own CGST/SGST arithmetic is the drift
+  // verify:print-documents forbids. The sample hands over the TAX AMOUNT only, with no frozen lines,
+  // and banquetDocHtml splits it the way it splits any sheet without them — the restaurant's own
+  // banquet components when they describe the rate, else the CGST/SGST halves. One allocator.
+  const round2 = BILLDOC.moneyRound;   // the ONE paisa rule (item 10), not a float round
+  const taxAmt = round2(subtotal * (Number(bqTm.rate) || 0));
+  const taxLines: { label: string; rate: number; amt: number }[] = [];
   const bill = {
     bill_no: null, issued_at: new Date().toISOString(),
     cust_name: "Sample Customer", cust_person: "—", cust_phone: "", cust_addr: "", cust_gstin: "",
