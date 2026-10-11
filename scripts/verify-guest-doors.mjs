@@ -1044,6 +1044,10 @@ flush();
     const helper = r2("scripts/sweep/t3/sessionsOn.mjs");
     check("item 8 — the old runners that drive the join-a-table gate switch sessions ON for their run and put them back",
       files.every((c) => /sessionsOnForRun\(\)/.test(c) && /sessionsBack\(\)/.test(c)) && /restoreOnExit\(/.test(helper) && /sessions_enabled: false/.test(helper)); }
+  // item 10 — the QR bell sends the owner's limit beacon like every other guest limit
+  { const m = r2("lib/menu.ts"); const cw = m.slice(m.indexOf("export async function callWaiter"), m.indexOf("export type OrderStatus"));
+    check("item 10 — a QR waiter call refused by the table's limit sends the owner's limit beacon",
+      /if \(res\.reason === "rate_limited"\) \{[\s\S]{0,200}"\/api\/guest\/limit-hit"[\s\S]{0,160}fn: "lfh_call_waiter_table"/.test(cw)); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

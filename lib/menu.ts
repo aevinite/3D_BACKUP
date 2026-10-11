@@ -305,6 +305,20 @@ export async function callWaiter(tableNumber: string, note?: string, restaurantI
   if (error) throw new Error(`Call failed: ${error.message}`);
   // Otherwise hand back the RPC's own {ok, reason} so the UI can react honestly.
   const res = (data ?? {}) as CallWaiterResult;
+  // ── THE OWNER'S PHONE HEARS ABOUT THIS LIMIT TOO (owner picked item 10, 2026-10-12) ────────────
+  // A table's waiter-call limit is enforced inside Postgres, so no server route sees it trip. The
+  // seated door and every order already send the limit beacon (lib/session.ts rpc(), and the
+  // /api/guest/place-order route's own ping); this direct QR call was the one guest limit that
+  // tripped in silence. Same beacon, same rule: the server pings only if a genuine open
+  // rate_limit_events row exists, so this cannot invent an alert. Fire-and-forget — never blocks.
+  if (res.reason === "rate_limited") {
+    try {
+      fetch("/api/guest/limit-hit", {
+        method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fn: "lfh_call_waiter_table", rid: restaurantId }),
+      }).catch(() => {});
+    } catch { /* best-effort */ }
+  }
   return { ok: res.ok !== false, reason: res.reason };
 }
 
