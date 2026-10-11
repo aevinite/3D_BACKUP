@@ -1,4 +1,4 @@
-// verify-session-gate-taps.mjs — guards two rules about the guest's table sheet
+// verify-session-gate-taps.mjs — guards the rules about the guest's table sheet
 // (components/SessionGate.tsx), both found by driving it in sweep #9, terminal 4.
 //
 //   A. A SCREEN IS NEVER SET ON A SHEET NOBODY CAN SEE.
@@ -42,6 +42,15 @@
 //      hard-coded hex cannot follow the skin, which the admin console already records in its own
 //      words. The sheet must use the class, and the class must have a light-skin override placed
 //      BELOW its base rule (a later rule of equal weight is what wins).
+//
+//   H. A BUSY RESTAURANT IS NEVER BLAMED ON THE DINER'S WIFI (sweep #10 T4, item 1).
+//      lib/session.ts turns a saturated restaurant database into the code `timed_out` precisely so
+//      a diner whose phone is fine is not sent off to fix their wifi during the restaurant's own
+//      busy hour. afterLocation() honoured it; joining a table as its head, asking to join one,
+//      re-checking a table you are already at, and the first read of the restaurant's rules did
+//      not — all five said "check your internet" whatever had happened. Every sentence in the sheet
+//      that tells a diner to check their internet must now sit behind a test that rules out "it
+//      was us".
 //
 //   B. THE TABLE NUMBER THAT LEAVES ANY OF THE THREE DOORS IS THE ONE THE FLOOR USES.
 //      A table's identity everywhere is its NUMBER, kept as text and compared with `=`
@@ -251,6 +260,30 @@ function run(src) {
     "…and asks nothing, and publishes nothing, until the restaurant is known");
   check(/\}, \[restaurantId, restaurantReady\]\);/.test(cardSrc2),
     "…and wakes up the moment it becomes known, so this is a wait and not a refusal");
+
+  console.log("H. a busy restaurant is never blamed on the diner's wifi");
+  // Every sentence that sends the diner to their own internet, found in the CODE (comments
+  // stripped), must sit behind a test that rules out "the restaurant's own system did not answer".
+  const blames = [...code.matchAll(/check your internet/gi)].map((m) => m.index);
+  check(blames.length > 0, `${blames.length} sentence(s) in the sheet tell a diner to check their internet`);
+  const unguarded = blames.filter((i) => !/isSessionTimeout\(|if \(ours\)/.test(code.slice(Math.max(0, i - 420), i)));
+  check(unguarded.length === 0, `every one of them sits behind a "was it us?" test${unguarded.length ? ` (${unguarded.length} do not)` : ""}`);
+  check(/const joinFailedNote = \(r: \{ ok: boolean; reason\?: string \}\): string =>\s*\n\s*isSessionTimeout\(r\)/.test(code),
+    "the two join screens share ONE sentence-maker, and it splits on the timeout code");
+  const head = bodyOf(code, "const joinAsHead = useCallback(async ()");
+  const guest = bodyOf(code, "const doJoinAsGuest = async (preset?: string)");
+  check(!!head && /if \(!r\.ok\) \{ setTableInput\(p\.table\); setNote\(joinFailedNote\(r\)\);/.test(head),
+    "opening a table as its head words a failed join through it");
+  check(!!guest && /if \(!r\.ok\) \{ setNote\(joinFailedNote\(r\)\); setStep\("guest_name"\);/.test(guest),
+    "…and so does asking to join someone else's table");
+  const ready = bodyOf(code, "const ensureReadyAndAct = useCallback(async ()");
+  check(!!ready && /setNote\(isSessionTimeout\(state\)/.test(ready),
+    "re-checking a table you are already at splits on the timeout code too (your spot is kept either way)");
+  check(/const settingsFailedNote = \(err: unknown, again: boolean\): string =>/.test(code)
+    && /"settings_timed_out" \|\| isDbUnreachable\(err\)/.test(code),
+    "the first read of the restaurant's rules tells our own deadline and a silent database apart from no signal");
+  check((code.match(/setNote\(settingsFailedNote\(err, (true|false)\)\)/g) || []).length === 2,
+    "…and both places that read those rules use it (opening the sheet, and Retry)");
   return failed;
 }
 
@@ -303,6 +336,9 @@ if (process.argv.includes("--self-test")) {
     ["a nameless waiter request let through to the floor", (s) => s.replace('if (!who && type === "access") { setNote(""); setOpen(true); setStep("access_name"); return; }\n', "")],
     ["a screen declared but never drawn", (s) => s.replace('| "nickname" | "access_name" |', '| "nickname" | "access_name" | "ghost_screen" |')],
     ["restaurant #1 substituted for an unknown one again", (s) => s.replace("const rid = settledRid;", "const rid = settledRid || DEFAULT_RESTAURANT_ID;")],
+    ["a failed head-join blamed on the diner's wifi again", (s) => s.replace("setTableInput(p.table); setNote(joinFailedNote(r));", "setTableInput(p.table); setNote(\"Couldn't reach the restaurant's system — check your internet and try again.\");")],
+    ["a failed rejoin blamed on the wifi whatever happened", (s) => s.replace("setNote(isSessionTimeout(state)\n", "setNote(false\n")],
+    ["the rules read's failure worded without asking whose it was", (s) => s.replace("setNote(settingsFailedNote(err, true));", "setNote(\"Still can't reach the restaurant's system — check your internet and try again.\");")],
   ];
   for (const [what, bend] of sabotage) {
     const bent = bend(src);

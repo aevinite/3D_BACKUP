@@ -186,8 +186,12 @@ P("P16147", "no handler awaits setAutoApprove and drops the answer",
   !/^\s*await setAutoApprove\(/m.test(bare(ALL_GUEST)));
 P("P16148", "the join flow reads its answer and branches on every ending it can give",
   ["blocked", "too_far", "no_open_session"].every((r) => new RegExp(`r\\.reason === "${r}"`).test(F.gate)));
+// RE-AIMED, sweep #10 T4 item 1 (2026-10-12). The rule HOLDS: a failed join keeps the guest's place
+// and says it could not reach the restaurant. The sentence moved into joinFailedNote(), which now
+// also says "this one's on us" when the restaurant's own system was the one that did not answer.
 P("P16149", "…and treats anything else as 'could not reach', keeping the guest's place",
-  /if \(!r\.ok\) \{ setTableInput\(p\.table\); setNote\("Couldn't reach the restaurant's system/.test(F.gate));
+  /if \(!r\.ok\) \{ setTableInput\(p\.table\); setNote\(joinFailedNote\(r\)\);/.test(F.gate)
+  && /: "Couldn't reach the restaurant's system — check your internet and try again\.";/.test(F.gate));
 // RE-AIMED, sweep #8 (2026-09-02). The rule HOLDS and the code got STRONGER: the bare
 // `const r = await callWaiterSession(...)` is now wrapped in the gate's own `guarded()` helper and
 // falls back to `{ ok:false, reason:"timed_out" }`, so the answer is not only read, it can no longer
