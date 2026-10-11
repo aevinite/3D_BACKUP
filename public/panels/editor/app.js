@@ -5724,6 +5724,13 @@ const DASH_RANGE_BTN = {
   last7: ["Last 7 days", "a week of trading"],
   last30: ["Last 30 days", "a month of trading"],
 };
+// The range IN WORDS, for a sentence ("…over the last 7 days"). Staff watch and Menu winners each
+// kept a two-rung map ({ today, yesterday }) from before the four rungs (2026-09-23), so a restaurant
+// given seven or thirty days read "by staff over last7" — the code's own key printed into a sentence
+// (sweep #10 T6, 2026-10-12). One map, every rung, and always the EFFECTIVE rung (what the server
+// answers), never a remembered one this restaurant no longer has.
+const DASH_RANGE_WORDS = { today: "today", yesterday: "yesterday", last7: "the last 7 days", last30: "the last 30 days" };
+function dashRangeWords() { return DASH_RANGE_WORDS[dashRangeEffective()] || "today"; }
 function dashRangeToggleHtml() {
   // Draw only the rungs this restaurant was GIVEN. One rung = no chooser at all, which is his
   // 2026-08-05 rule above and the dead-switch rule everywhere else: a control with one option
@@ -6469,7 +6476,7 @@ async function printManagerReport() {
 // heads-up to glance at — the "anti-theft" pattern the bigger POS systems use.
 async function openStaffRisk() {
   document.querySelector(".sr-overlay")?.remove();
-  const rangeLbl = { today: "today", yesterday: "yesterday" }[dashRange] || dashRange;
+  const rangeLbl = dashRangeWords();
   const wrap = el(`<div class="sx-modal-overlay sr-overlay"><div class="sx-modal" style="max-width:620px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🔍 Staff watch</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">Discounts, voids, deletes &amp; paid-reverts by staff over ${esc(rangeLbl)} (follows the Dashboard range). A high count is just worth a glance — not proof of anything.</div><div id="srBody">${loadingHtml("Counting the day\u2019s edits\u2026")}</div></div>
@@ -6483,7 +6490,7 @@ async function openStaffRisk() {
     // with no date window, which undercounted — and could miss a staff member — on a busy day,
     // review #4). It returns a small { rows:[{who,disc,void,del,rev,total}], truncated } summary,
     // with the void action name handled correctly server-side (review #1).
-    const res = await api("GET", "/staff-risk?range=" + dashRange);
+    const res = await api("GET", "/staff-risk?range=" + dashRangeEffective());
     const list = (res && res.rows) || [];
     const maxT = list.length ? list[0].total : 0;
     const flag = (t) => t >= Math.max(8, maxT * 0.8) ? ` <span class="inv-chip voided">watch</span>` : "";
@@ -6501,7 +6508,7 @@ async function openStaffRisk() {
 // dish cost isn't tracked yet (that's the future inventory module), so it's labelled honestly.
 async function openMenuMatrix() {
   document.querySelector(".mm-overlay")?.remove();
-  const rangeLbl = { today: "today", yesterday: "yesterday" }[dashRange] || dashRange;
+  const rangeLbl = dashRangeWords();
   const wrap = el(`<div class="sx-modal-overlay mm-overlay"><div class="sx-modal" style="max-width:820px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>📊 Menu winners &amp; losers</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">By how often each dish sells × the revenue it brings, over ${esc(rangeLbl)}. (Revenue, not profit — cost tracking comes with the inventory module.)</div><div id="mmBody">${loadingHtml("Working out which dishes win\u2026")}</div></div>

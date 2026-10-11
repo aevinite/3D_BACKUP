@@ -432,7 +432,35 @@ async function istClocks() {
   } finally { if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz; }
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks];
+// ── J · A RANGE IS SAID IN WORDS, NEVER AS ITS KEY (sweep #10 T6, 2026-10-12) ─────────────────────
+// Staff watch and Menu winners kept a two-rung { today, yesterday } map from before the four rungs
+// (2026-09-23), so a restaurant given seven or thirty days read "by staff over last7".
+async function rangeWords() {
+  console.log("\nJ. a dashboard range is said in words, never as its key");
+  const app = src("public/panels/editor/app.js");
+  const line = (app.match(/^const DASH_RANGE_WORDS = .*$/m) || [""])[0];
+  if (!line) { bad("DASH_RANGE_WORDS is gone — Staff watch / Menu winners would have no words for a range"); return; }
+  const W = new Function(line.replace(/^const DASH_RANGE_WORDS = /, "return ").replace(/;\s*$/, ""))();
+  const rungs = (app.match(/^const DASH_RUNG = \{([^}]*)\}/m) || ["", ""])[1].match(/[a-z0-9]+(?=:)/g) || [];
+  const missing = rungs.filter((k) => !W[k] || /^(last|today_)\w*\d|_/.test(W[k]) || W[k] === k && /\d/.test(k));
+  rungs.length >= 4 && !missing.length
+    ? ok(`every dashboard rung has words (${rungs.map((k) => `${k} → "${W[k]}"`).join(", ")})`)
+    : bad("a dashboard rung has no words, or prints its key", missing.join(", ") || "DASH_RUNG not found");
+  for (const fn of ["openStaffRisk", "openMenuMatrix"]) {
+    const i = app.indexOf(`async function ${fn}(`);
+    const body = i < 0 ? "" : app.slice(i, app.indexOf("\n}", i));
+    if (!body) { bad(`${fn}() is gone — re-point this check`); continue; }
+    /dashRangeWords\(\)/.test(body) && !/\}\[dashRange\]\s*\|\|\s*dashRange/.test(body)
+      ? ok(`${fn}() says its range through dashRangeWords()`)
+      : bad(`${fn}() prints the range from its own map again`, "a seven-day restaurant would read 'over last7'");
+  }
+  const sr = app.slice(app.indexOf("async function openStaffRisk("));
+  /\/staff-risk\?range=" \+ dashRangeEffective\(\)/.test(sr.slice(0, 3000))
+    ? ok("Staff watch asks for the EFFECTIVE range, the one its words describe")
+    : bad("Staff watch asks for a remembered range its words may not describe");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }
