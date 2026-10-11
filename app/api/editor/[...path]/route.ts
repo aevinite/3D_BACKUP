@@ -674,17 +674,20 @@ const LOCKED_MSG = "This was on the printed bill, so it can't be taken off. Reop
 // `created_at` missing, or `invoice_at` missing, means LOCKED: a missing timestamp must never
 // be the thing that lets a printed line off a bill. Mirrored by invoiceLocksOrder() in
 // public/panels/editor/app.js — the panel hides the button, this refuses the request.
+// A FAILED READ IS BUSY, NEVER "NOT PRINTED" (sweep #10 T13 round 2, item 30): `.data` alone read a
+// blip as "no invoice", so a discount or a removal could land on a printed bill. The waiter route's
+// twin got the same fix in the same commit — verify:tablet-twins §2 compares the two.
 async function invoiceLockedByOrder(orderId: string, rid: string): Promise<boolean> {
-  const o = (await sb.from("orders").select("session_id,created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { session_id?: string; created_at?: string | null } | null;
+  const o = must(await sb.from("orders").select("session_id,created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()) as { session_id?: string; created_at?: string | null } | null;
   if (!o?.session_id) return false;
-  const s = (await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
+  const s = must(await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()) as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
   if (!s || s.invoice_no == null) return false;
   if (!s.invoice_voided) return true;
   if (!s.invoice_at || !o.created_at) return true;
   return new Date(o.created_at).getTime() <= new Date(s.invoice_at).getTime();
 }
 async function invoiceLockedByItem(itemId: string, rid: string): Promise<boolean> {
-  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string } | null;
+  const it = must(await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()) as { order_id?: string } | null;
   return it?.order_id ? invoiceLockedByOrder(it.order_id, rid) : false;
 }
 

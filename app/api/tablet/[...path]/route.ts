@@ -340,6 +340,15 @@ const stampEdited = async (orderId: string | null | undefined, rid: string) => {
 // used `throw new Error(error.message)`, which dropped the SQLSTATE, so a statement timeout answered a
 // generic 500 "something went wrong" instead of 503 "busy — retrying", and a row that vanished mid-write
 // was written to the Repair board as a crash. verify:tablet-twins §19 keeps it that way.
+// EVERY READ GOES THROUGH must() (sweep #10 T13 round 2, item 30). Thirty-four reads here took
+// `.data` and ignored `.error`, so a database blip read as an ANSWER: the invoice-lock checks said
+// "not printed" (a discount could land on a printed bill), the owns-this-row checks said "gone" (a
+// 404 the outbox never retries), the open-party lookups said "no party" (the action fell to the
+// sessions-off path, by table number), the accept-first check said "nothing waiting" (a bill
+// settled past an unaccepted ticket), the parcel's tax read said "no settings" (priced at
+// defaults), the khata phone lookup said "new person" (a duplicate in the book), and a table count
+// read as 0, which skips the "that table doesn't exist" check (a move onto table 9999). A failed
+// read is busy — never an answer.
 const must = (r: any) => {
   if (r.error) throw pgError(r.error); // pgError keeps code/details/hint — see lib/dbRefusal
   return r.data;
@@ -410,16 +419,16 @@ const VOIDED_MSG = "That ticket was cancelled — restore it first if it should 
 // the manager's ever stop being identical.
 const LOCKED_MSG = "This was on the printed bill, so it can't be taken off. Reopen the bill to add to it, or issue a credit note to correct it.";
 async function invoiceLockedByOrder(orderId: string, rid: string): Promise<boolean> {
-  const o = (await sb.from("orders").select("session_id,created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { session_id?: string; created_at?: string | null } | null;
+  const o = must(await sb.from("orders").select("session_id,created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()) as { session_id?: string; created_at?: string | null } | null;
   if (!o?.session_id) return false;
-  const s = (await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
+  const s = must(await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()) as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
   if (!s || s.invoice_no == null) return false;
   if (!s.invoice_voided) return true;
   if (!s.invoice_at || !o.created_at) return true;
   return new Date(o.created_at).getTime() <= new Date(s.invoice_at).getTime();
 }
 async function invoiceLockedByItem(itemId: string, rid: string): Promise<boolean> {
-  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string } | null;
+  const it = must(await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()) as { order_id?: string } | null;
   return it?.order_id ? invoiceLockedByOrder(it.order_id, rid) : false;
 }
 // The WHOLE-BILL discount names a session, not an order, and spreads across every unpaid ticket on it
@@ -429,11 +438,11 @@ async function invoiceLockedByItem(itemId: string, rid: string): Promise<boolean
 // Two scoped reads at most (the session, then — only for a reopened bill — its live tickets' times),
 // never one pair per ticket.
 async function invoiceLockedBySession(sessionId: string, rid: string): Promise<boolean> {
-  const s = (await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
+  const s = must(await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()) as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
   if (!s || s.invoice_no == null) return false;
   if (!s.invoice_voided) return true;
-  const live = ((await sb.from("orders").select("created_at").eq("session_id", sessionId).eq("restaurant_id", rid)
-    .neq("status", "cancelled").neq("payment_status", "paid").limit(200)).data || []) as { created_at?: string | null }[];
+  const live = (must(await sb.from("orders").select("created_at").eq("session_id", sessionId).eq("restaurant_id", rid)
+    .neq("status", "cancelled").neq("payment_status", "paid").limit(200)) || []) as { created_at?: string | null }[];
   const cut = s.invoice_at ? new Date(s.invoice_at).getTime() : NaN;
   return live.some((o) => !o.created_at || !Number.isFinite(cut) || new Date(o.created_at).getTime() <= cut);
 }
@@ -674,7 +683,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const fullBatch = fullP ? await fullP : null;
       const myTables: SectionLimit | null = fullBatch
         ? (viewer && viewer.role === "tablet"
-          ? { tables: assignedOf(viewer), floor: Math.max(0, Number((fullBatch[0].data as { table_count?: unknown } | null)?.table_count) || 0) }
+          ? { tables: assignedOf(viewer), floor: Math.max(0, Number((must(fullBatch[0]) as { table_count?: unknown } | null)?.table_count) || 0) }
           : null)
         : await waiterTables(viewer, rid); // resolved ONCE for this request
       // NARROW A COPY, NEVER THE SHARED OBJECT (found 2026-08-02, live bug).
@@ -799,7 +808,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     if (path.join("/") === "banquet-items") {
       const flags = await sb.from("settings").select("banquet_allowed, tablet_banquet").eq("restaurant_id", rid).maybeSingle();
-      const f = overlayUserPerms((flags.data as Record<string, any> | null), g.user);
+      const f = overlayUserPerms((must(flags) as Record<string, any> | null), g.user);
       // Full ladder (mig 167): the owner's toggle counts too, not just the admin switch.
       if (g.user && !(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
       if ((f?.tablet_banquet || "off") === "off" && g.user) return err("Banquet billing is off for the tablet — ask a manager.", 403);
@@ -1011,8 +1020,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (!orderId) {
           return ok({ printer: own.printer, agent: own.agent, connected: !!own.connected });
         }
-        const o = (await sb.from("orders").select("id, status, kot_no, table_number, deleted_at")
-          .eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as
+        const o = must(await sb.from("orders").select("id, status, kot_no, table_number, deleted_at")
+          .eq("id", orderId).eq("restaurant_id", rid).maybeSingle()) as
           { id: string; status?: string; kot_no?: number | null; table_number?: unknown; deleted_at?: string | null } | null;
         if (!o) return err("That KOT isn't on this restaurant's board any more.", 404);
         if (o.status === "cancelled") return err("That KOT was cancelled — there is nothing to reprint.");
@@ -1045,7 +1054,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!sid) return err("Which bill?", 400);
       // `table_number` rides along for the section check below, and `bill_no` so the diary line
       // can NAME the bill — one read, not three.
-      const sess = (await sb.from("sessions").select("id, table_number, bill_no").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
+      const sess = must(await sb.from("sessions").select("id, table_number, bill_no").eq("id", sid).eq("restaurant_id", rid).maybeSingle()) as
         { id: string; table_number: unknown; bill_no: unknown } | null;
       if (!sess) return err("That table's bill is not this restaurant's.", 404);
       // WAITER SECTIONS (mig 222) — the same answer every other table-scoped write on this route
@@ -1266,7 +1275,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           : Promise.resolve({ data: [] }),
       ]);
       if (!tableOk) return err("valid table required");
-      const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+      const tableCount = Number((must(tcRow) as { table_count?: number } | null)?.table_count) || 0;
       const tn = Number(t);
       if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
       if (!itemsOk) return err("items required");
@@ -1309,7 +1318,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // of the SAME queued action, so only the human "yes, really send again" path bypasses.
       if (!skipDupCheck) {
         // Read above, alongside the table check — see the note on that Promise.all.
-        const recent = (recentRows.data || []) as { items?: unknown[]; allergies?: unknown }[];
+        const recent = (must(recentRows) || []) as { items?: unknown[]; allergies?: unknown }[];
         if (recent.some((o: any) => JSON.stringify({
           items: (o.items || []).map(lineSig),
           allergies: Array.isArray(o.allergies) ? o.allergies : [],
@@ -1387,9 +1396,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // path prices itself instead of calling lfh_price_order, so it must apply that rule by hand.
       const menu = (must(await sb.from("menu_items").select("id,title,price,open_price,tags,tax_mode").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown; open_price?: boolean; tags?: string[]; tax_mode?: string }[];
       const byId = new Map(menu.map((d) => [String(d.id), d]));
-      const parcelSet = (await sb.from("settings")
+      const parcelSet = must(await sb.from("settings")
         .select(`${TAX_SETTINGS_COLUMNS}, item_tax_modes_allowed, mrp_tax_treatment`)
-        .eq("restaurant_id", rid).maybeSingle()).data || {};
+        .eq("restaurant_id", rid).maybeSingle()) || {};
       const picked: { title: string; qty: number; price: number; note?: string; tax_mode?: string; is_mrp?: boolean }[] = [];
       let total = 0;
       for (const it of items) {
@@ -1488,7 +1497,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (t) {
         if (!/^\d+$/.test(t)) return err("valid table required");
         const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
-        const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+        const tableCount = Number((must(tcRow) as { table_count?: number } | null)?.table_count) || 0;
         if (tableCount > 0 && (Number(t) < 1 || Number(t) > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
       }
       const lines = Array.isArray(body?.lines) ? body.lines : [];
@@ -1646,7 +1655,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // owns every ticket's discount via the split) — so block a single-ticket discount while
       // a bill discount is active, or the two would fight / double-count. (mig 143)
       if (cur.session_id) {
-        const sd = (await sb.from("sessions").select("discount").eq("id", cur.session_id).eq("restaurant_id", rid).maybeSingle()).data as { discount?: number } | null;
+        const sd = must(await sb.from("sessions").select("discount").eq("id", cur.session_id).eq("restaurant_id", rid).maybeSingle()) as { discount?: number } | null;
         if (sd && Number(sd.discount) > 0) return err("Clear the whole-bill discount first, then discount a single ticket.", 409);
       }
       const raw = Number(body && body.amount);
@@ -1729,7 +1738,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const g = recordPin(await tabletPerm("tablet_invoice", req, body, rid, actor)); if (!g.allow) return g.resp;
       // lfh_generate_invoice takes only p_session (no tenant param) — confirm the session is
       // THIS restaurant's first (service-role bypasses RLS), mirroring the editor invoice guard.
-      const ownsGen = (await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
+      const ownsGen = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!ownsGen) return err("That table isn't for this restaurant.", 404);
       // Same rule as the manager panel: when the restaurant requires it, no invoice without
       // the customer's mobile + name (lib/billCustomer.ts, mig 227). Saved first, so an
@@ -1762,9 +1771,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
       // A merged child's party lives on its parent — act on the whole party (lib/tableMerge).
       const t = await mergeParentTable(sb, rid, tRaw);
-      const openSess = (await sb.from("sessions").select("id")
+      const openSess = must(await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
-        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+        .order("last_activity_at", { ascending: false }).limit(1))?.[0];
       // A restart needs a manager PIN only when there's an order GOING ON or an
       // UNPAID bill to clear — an empty table can be restarted freely.
       let peek = sb.from("orders").select("status,payment_status,total,discount").neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
@@ -1869,7 +1878,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const to = String((body && body.to) || "").trim();
       if (!/^\d+$/.test(to)) return err("valid target table required");
       const mtc2 = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
-      const tc2 = Number((mtc2.data as { table_count?: number } | null)?.table_count) || 0;
+      const tc2 = Number((must(mtc2) as { table_count?: number } | null)?.table_count) || 0;
       if (tc2 > 0 && (Number(to) < 1 || Number(to) > tc2)) return err(`Table ${to} doesn't exist (this place has ${tc2} tables).`, 400);
       // Session ownership is enforced INSIDE the RPC via p_rid (returns no_session otherwise).
       // WHO joined them (mig 308) — the same names this panel's log() uses, so the merge record and
@@ -1947,7 +1956,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const to = String((body && body.to) || "").trim();
       if (!/^\d+$/.test(to)) return err("valid target table required");
       const mtc3 = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
-      const tc3 = Number((mtc3.data as { table_count?: number } | null)?.table_count) || 0;
+      const tc3 = Number((must(mtc3) as { table_count?: number } | null)?.table_count) || 0;
       if (tc3 > 0 && (Number(to) < 1 || Number(to) > tc3)) return err(`Table ${to} doesn't exist (this place has ${tc3} tables).`, 400);
       const { data: im, error: imErr } = await sb.rpc("lfh_staff_move_order_item", { p_item: b, p_to: to, p_rid: rid });
       if (imErr) throw pgError(imErr);
@@ -1978,10 +1987,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // in the kitchen, and nothing in the Activity log. The manager's twin was given exactly this
       // refusal as sweep #10 T10 item 1; the waiter's handheld, the screen most often left showing a
       // stale tile, was not. Asked first, before anything is written. See VOIDED_MSG near the top of the file.
-      const owner = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
+      const owner = must(await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { order_id?: string | null } | null;
       if (!owner) return err("That dish isn't on this restaurant's board any more — refresh and try again.", 404);
       if (owner.order_id) {
-        const ord = (await sb.from("orders").select("status").eq("id", owner.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
+        const ord = must(await sb.from("orders").select("status").eq("id", owner.order_id).eq("restaurant_id", rid).maybeSingle()) as { status?: string } | null;
         if (ord?.status === "cancelled") return err(VOIDED_MSG, 409);
       }
       const patch: any = { status };
@@ -2131,7 +2140,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Confirm the dish belongs to THIS restaurant before the RPC (which looks it up by id
       // alone) — the manager's twin of this endpoint has always done so and this one did not
       // (2026-08-02). Reading it here also captures what it WAS, for the Audit row below.
-      const gone = (await sb.from("order_items").select("id, title, qty, unit_price, order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
+      const gone = must(await sb.from("order_items").select("id, title, qty, unit_price, order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
         { id: string; title: string | null; qty: number | null; unit_price: number | null; order_id: string | null } | null;
       if (!gone) return err("That dish was already removed.", 404);
       if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
@@ -2169,7 +2178,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // What it WAS, read before the RPC re-prices it — the Audit row says 2 → 1, not just "1".
       // (Same shape as the manager's twin; this side recorded nothing until 2026-08-03, so a
       //  waiter halving a quantity took money off a bill and left no trace in the Audit.)
-      const wasRow = (await sb.from("order_items").select("id, title, qty, unit_price").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
+      const wasRow = must(await sb.from("order_items").select("id, title, qty, unit_price").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
         { id: string; title: string | null; qty: number | null; unit_price: number | null } | null;
       if (!wasRow) return err("That dish was already removed.", 404);
       if (await invoiceLockedByItem(b, rid)) return err(LOCKED_MSG, 409);   // item 2 — see LOCKED_MSG
@@ -2196,7 +2205,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // id in the URL rather than by which restaurant the request belongs to. Every sibling on
       // this endpoint family already does it (status/removed are .eq-scoped; delete and qty
       // pre-read the row); note was the one left behind. See the note on items/:id/removed.
-      const ownNote = (await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
+      const ownNote = must(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!ownNote) return err(editErrMsg("item_not_found"), 404);
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw pgError(error);
@@ -2281,7 +2290,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // restaurant argument — so confirm the order is THIS restaurant's before adding a dish to
       // it. Without this the bill a dish lands on is decided by the id in the URL. (The `parent`
       // read below is already rid-scoped, but it runs AFTER the dish has been added.)
-      const ownAdd = (await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
+      const ownAdd = must(await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!ownAdd) return err(editErrMsg("order_not_found"), 404);
       // Item 2 — a dish ADDED to a printed ticket changes that ticket's total on paper the guest holds.
       // After a reopen the bill takes a NEW ticket instead (a fresh order is not locked).
@@ -2361,7 +2370,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!/^\d+$/.test(to)) return err("valid target table required");
       // Reject a target table that doesn't exist (1..table_count) — same guard as place-order.
       const mtc = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
-      const mTableCount = Number((mtc.data as { table_count?: number } | null)?.table_count) || 0;
+      const mTableCount = Number((must(mtc) as { table_count?: number } | null)?.table_count) || 0;
       if (mTableCount > 0 && (Number(to) < 1 || Number(to) > mTableCount)) return err(`Table ${to} doesn't exist (this place has ${mTableCount} tables).`, 400);
       // All the move logic lives in the shared RPC (mig 173) — atomic, tenant-checked
       // against rid, re-splits both bills' discounts, and nudges BOTH tables' tiles
@@ -2428,15 +2437,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Settle only the CURRENT party's bill: scope to the table's open session
       // so we never mark a previous party's leftover order paid. Sessions-off
       // mode (no open session) falls back to the table's active orders.
-      const openSess = (await sb.from("sessions").select("id")
+      const openSess = must(await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
-        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+        .order("last_activity_at", { ascending: false }).limit(1))?.[0];
       // RULE (owner 2026-06-29): can't settle a bill while ANY order on it is still 'received'
       // (not yet accepted). The order must be accepted (gone to prepare) before payment. (When a
       // payment system is added it will auto-accept on pay and skip this — not now.)
       let rq = sb.from("orders").select("id").eq("status", "received").eq("restaurant_id", rid);
       rq = openSess ? rq.eq("session_id", openSess.id) : rq.eq("table_number", t).eq("archived", false);
-      if (((await rq.limit(1)).data || []).length)
+      if ((must(await rq.limit(1)) || []).length)
         return err("Accept the order first — a bill can only be paid once the order is accepted.", 409);
       // Never mark a 'received' order paid even if the check above is bypassed (belt-and-suspenders).
       // How the money came in — asked by the "Mark paid" flow (owner, 2026-07-01). Optional so
@@ -2532,9 +2541,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const consent = body?.consent === true;
       // The party being billed, taken from the table's OPEN session (never "the latest party
       // ever seated here" — that booked the visit onto the NEXT party, mig 233).
-      const capSess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
+      const capSess = must(await sb.from("sessions").select("id").eq("restaurant_id", rid)
         .eq("table_number", t).eq("status", "open").order("last_activity_at", { ascending: false })
-        .limit(1)).data?.[0] as { id: string } | undefined;
+        .limit(1))?.[0] as { id: string } | undefined;
       const { data, error } = await sb.rpc("lfh_capture_customer", {
         p_restaurant_id: rid, p_table: t, p_phone: phone, p_name: name, p_consent: consent,
         p_session: capSess?.id ?? null,
@@ -2584,9 +2593,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // itself needs — never a blanket "anyone at the till" (the least-privilege rule).
       const may = recordPin(await tabletPerm("tablet_discount", req, body, rid, actor));
       if (!may.allow) return may.resp;
-      const sess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
+      const sess = must(await sb.from("sessions").select("id").eq("restaurant_id", rid)
         .eq("table_number", t).eq("status", "open").order("last_activity_at", { ascending: false })
-        .limit(1)).data?.[0] as { id: string } | undefined;
+        .limit(1))?.[0] as { id: string } | undefined;
       // Spending points takes money off the bill — item 11: not off a bill whose invoice is printed.
       if (sess && (await invoiceLockedBySession(sess.id, rid))) return err(LOCKED_MSG, 409);
       // ONE call: spend the points AND take the money off, so the two cannot half-happen.
@@ -2632,15 +2641,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (actor && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       const hg = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!hg.allow) return hg.resp;
       // The mark may sit on ANY member of a merged party (same rule as the manager route).
-      const partyKids = ((await sb.from("table_merges").select("child_table")
-        .eq("restaurant_id", rid).eq("parent_table", t).is("ended_at", null).limit(20)).data || []) as { child_table: string }[];
-      const tagRows = ((await sb.from("table_tags").select("tag")
-        .eq("restaurant_id", rid).in("table_number", [t, ...partyKids.map((k) => k.child_table)])).data || []) as { tag?: TableTag }[];
+      const partyKids = (must(await sb.from("table_merges").select("child_table")
+        .eq("restaurant_id", rid).eq("parent_table", t).is("ended_at", null).limit(20)) || []) as { child_table: string }[];
+      const tagRows = (must(await sb.from("table_tags").select("tag")
+        .eq("restaurant_id", rid).in("table_number", [t, ...partyKids.map((k) => k.child_table)])) || []) as { tag?: TableTag }[];
       const tagRow = tagRows.find((r) => r.tag && COMP_TAGS.includes(r.tag)) || null;
       if (!tagRow) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
-      const openSess = (await sb.from("sessions").select("id")
+      const openSess = must(await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
-        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+        .order("last_activity_at", { ascending: false }).limit(1))?.[0];
       let oq = sb.from("orders").select("id,subtotal,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
       oq = openSess ? oq.eq("session_id", openSess.id) : oq.eq("table_number", t);
       const orders = must(await oq) as { id: string; subtotal: number; status: string; payment_status: string }[];
@@ -2682,9 +2691,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const t = await mergeParentTable(sb, rid, tRaw);
       if (actor && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       const kg = recordPin(await tabletPerm("tablet_khata", req, body, rid, actor)); if (!kg.allow) return kg.resp;
-      const openSess = (await sb.from("sessions").select("id")
+      const openSess = must(await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
-        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+        .order("last_activity_at", { ascending: false }).limit(1))?.[0];
       let kq = sb.from("orders").select("id,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
       kq = openSess ? kq.eq("session_id", openSess.id) : kq.eq("table_number", t);
       const korders = must(await kq) as { id: string; status: string; payment_status: string }[];
@@ -2694,14 +2703,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return err("This table still has orders cooking — serve them first, then park the bill.", 409);
       let customer: { id: string; name: string; phone: string | null } | null = null;
       if (body?.customer_id) {
-        customer = (await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("id", String(body.customer_id)).maybeSingle()).data as any;
+        customer = must(await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("id", String(body.customer_id)).maybeSingle()) as any;
         if (!customer) return err("That person isn't in this restaurant's khata book.", 404);
       } else {
         const name = String(body?.name || "").trim().slice(0, 80);
         if (!name) return err("A name is required to park a bill.");
         const phone = String(body?.phone || "").trim().slice(0, 20) || null;
         const note = String(body?.note || "").trim().slice(0, 200) || null;
-        if (phone) customer = (await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data as any;
+        if (phone) customer = must(await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("phone", phone).maybeSingle()) as any;
         if (!customer) {
           const ins = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone, note }).select("id,name,phone");
           // Same rule as customer-capture above (T17, finding F10): the waiter reads a sentence,
@@ -2739,9 +2748,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Reopening the bill reopens the PARTY's bill — resolve a merged child first.
       const t = await mergeParentTable(sb, rid, tRaw);
       const g = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!g.allow) return g.resp;
-      const openSess = (await sb.from("sessions").select("id")
+      const openSess = must(await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
-        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+        .order("last_activity_at", { ascending: false }).limit(1))?.[0];
       if (!openSess) return err("This table's bill is already closed — reopen it from the manager panel.", 409);
       const GRACE_MS = 30 * 60 * 1000;
       const cutoff = new Date(Date.now() - GRACE_MS).toISOString();
@@ -2823,7 +2832,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Reject an out-of-range table (1..table_count) so a bad QR / hand-formed body can't
       // open a phantom session on a table that doesn't exist — same guard as place-order/move.
       const otc = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
-      const oTableCount = Number((otc.data as { table_count?: number } | null)?.table_count) || 0;
+      const oTableCount = Number((must(otc) as { table_count?: number } | null)?.table_count) || 0;
       if (oTableCount > 0 && (Number(t) < 1 || Number(t) > oTableCount)) return err(`Table ${t} doesn't exist (this place has ${oTableCount} tables).`, 400);
       // Clear any still-pending "asked to open" request for this table (the editor's open RPC
       // does this via lfh_staff_open_table). Without it, opening a table with the quick "Open"
