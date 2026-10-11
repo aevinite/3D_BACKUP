@@ -1065,6 +1065,10 @@ flush();
   { const o = r2("lib/guestOutbox.ts");
     check("item 15 — restoring after a reload lets memory win across BOTH lists (one row, one list)",
       /const inMemory = new Set\(\[\.\.\.queued, \.\.\.failed\]\.map\(\(x\) => x\.id\)\);/.test(o) && (o.match(/!inMemory\.has\(x\.id\)/g) || []).length === 2); }
+  // item 16 — the star animation, not the render, decides when a star lights
+  { const c = r2("components/StarRating.tsx");
+    check("item 16 — the stars' 'lit' class is owned by the animation, never re-set by a render",
+      /<li key=\{i\} className="sr-li">/.test(c) && !/className=\{`sr-li \$\{i < value/.test(c)); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
