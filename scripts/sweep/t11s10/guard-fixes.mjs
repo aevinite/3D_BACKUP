@@ -86,3 +86,43 @@ row("P180017", "item 2 · the restaurant's own address still admits the kitchen 
   hasRe(require_("lib/panelGate.ts"), /if \(u && u\.role === role && u\.restaurant_id === r\.id && r\.active\)/));
 row("P180018", "item 2 · the refusal is a plain sentence that names what to do", () =>
   hasRe(GATE(), /sign in with the kitchen login/));
+
+// ══ ITEM 3 · a refusal never draws an UNDO that cannot undo anything — P180021–P180026 ══════════
+/** Every toast(...) call in the kitchen panel, split into its top-level arguments. */
+function toastCalls() {
+  const a = APPC(), out = [];
+  const re = /(?<![\w.])toast\(/g;
+  let m;
+  while ((m = re.exec(a))) {
+    let d = 0, i = m.index + m[0].length - 1, start = i + 1, args = [], q = null;
+    for (; i < a.length; i++) {
+      const c = a[i];
+      if (q) { if (c === "\\") { i++; continue; } if (c === q) q = null; continue; }
+      if (c === '"' || c === "'" || c === "`") { q = c; continue; }
+      if (c === "(" || c === "[" || c === "{") d++;
+      else if (c === ")" || c === "]" || c === "}") { d--; if (d === 0) { args.push(a.slice(start, i).trim()); break; } }
+      else if (c === "," && d === 1) { args.push(a.slice(start, i).trim()); start = i + 1; }
+    }
+    out.push({ at: m.index, args });
+  }
+  return out;
+}
+row("P180021", "item 3 · toast()'s second argument is the UNDO callback, and the definition still says so", () =>
+  hasRe(APPC(), /const toast = \(msg, undoFn\) => \{[\s\S]{0,400}undoFn \? '<button class="undo">UNDO<\/button>' : ""/));
+row("P180022", "item 3 · NO toast() call passes a string, number or object where the UNDO callback goes", () => {
+  const bad = toastCalls().filter((c) => c.args.length > 1 && /^(["'`]|\d|\{|\[|true|false|null)/.test(c.args[1]));
+  return !bad.length || `${bad.length} call(s): ${bad.map((c) => c.args.join(", ")).join(" | ").slice(0, 160)}`;
+});
+row("P180023", "item 3 · every toast() that DOES offer an UNDO hands it a function it defined", () => {
+  const two = toastCalls().filter((c) => c.args.length > 1);
+  const ok = two.every((c) => /^[A-Za-z_$][\w$]*$/.test(c.args[1]) && new RegExp(`const ${c.args[1]} = (async )?\\(`).test(APPC()));
+  return (two.length >= 1 && ok) || `${two.length} two-argument call(s); not all name a defined function`;
+});
+row("P180024", "item 3 · a refused manual print on a TABLE ticket toasts the reason alone", () =>
+  hasRe(APPC(), /try \{ says = await askWhoPrints\(\{ orderId: id, reprint: dup \}\); \}\s*catch \(e\) \{ toast\(e\.message\); return; \}/));
+row("P180025", "item 3 · a refused manual print on a DELIVERY ticket toasts the reason alone", () =>
+  hasRe(APPC(), /try \{ says = await askWhoPrints\(\{ aggId: id, reprint: dup \}\); \}\s*catch \(e\) \{ toast\(e\.message\); return; \}/));
+row("P180026", "item 3 · no toast() call takes more than two arguments", () => {
+  const bad = toastCalls().filter((c) => c.args.length > 2);
+  return !bad.length || `${bad.length} call(s) with 3+ arguments`;
+});

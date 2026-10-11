@@ -1101,8 +1101,10 @@ async function reprintOrder(id) {
   const dup = printedIds.has(o.id);
   // ── THE COMPUTER GETS FIRST REFUSAL, AND THERE IS NO WINDOW WHEN IT TAKES IT ─────────────────
   let says = null;
+  // toast(msg) ONLY — its second argument is the UNDO callback, so the "err" this used to pass drew an
+  // UNDO button on a refusal, and tapping it threw "undoFn is not a function" (sweep #10 T11, item 3).
   try { says = await askWhoPrints({ orderId: id, reprint: dup }); }
-  catch (e) { toast(e.message, "err"); return; }
+  catch (e) { toast(e.message); return; }
   if (says && says.queued) {
     // The ticket is a ROW now, and the row is what makes it come out exactly once — so this screen
     // records nothing in printedIds. The helper brands the DUPLICATE, on the paper, from the flag
@@ -1143,7 +1145,7 @@ async function reprintPlatform(id) {
   // kotHtmlForAggregator).
   let says = null;
   try { says = await askWhoPrints({ aggId: id, reprint: dup }); }
-  catch (e) { toast(e.message, "err"); return; }
+  catch (e) { toast(e.message); return; }   // no second argument — see reprintOrder (item 3)
   if (says && says.queued) { toast(says.note || ("Sent to " + (says.printer || "the printer"))); return; }
   // The order shape printKot reads: kot_no, created_at and items all exist on an aggregator row.
   if (printKot(p, Array.isArray(p.items) ? p.items : [], state.restaurant, { reprint: dup, tableLabel: label })) {
