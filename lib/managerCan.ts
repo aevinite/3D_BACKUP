@@ -9,6 +9,7 @@
 // production, and each line they defend looks removable until you know why it is there.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { managerGrantValue } from "@/lib/accessTree";
+import { pgError } from "@/lib/dbRefusal";
 import type { StaffUser } from "@/lib/userAuth";
 
 export // Whether the acting staff may perform an owner-gated MANAGER action. The admin
@@ -42,15 +43,26 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
     // The switch is the Feature half of Access → Manager → Edit menu (`access_config.edit_menu.on`),
     // which is exactly what the panel reads, so the two can't disagree again. ONE tiny indexed
     // read, and only when the question is edit_menu — every other power still costs nothing, as
-    // the note above has always promised. It fails OPEN on a read error, deliberately and in step
-    // with the manager path six lines down: this rung decides whether an owner may edit their own
-    // menu, and a database blip must not lock them out of their own restaurant mid-service.
+    // the note above has always promised.
+    //
+    // A FAILED READ NEITHER GRANTS NOR REFUSES — IT SAYS "BUSY" (owner left it to sweep #10 T13,
+    // 2026-10-11, round 2 item 12). This used to fail OPEN here and fall back to the screen's DEFAULT
+    // on the manager path below — so during a database blip a power the admin had switched OFF (say
+    // Discount, whose default is on) was handed out, and one whose default is off was refused with a
+    // "you can't" that wasn't true. Both were guesses. Now the read's error is thrown with its SQLSTATE
+    // (pgError): every caller answers through lib/panelFailure ("busy — this will come back by itself")
+    // or, before its try, as a bare 5xx — and the panel's api() treats either as "queue and retry",
+    // exactly like offline (CLAUDE.md: busy = offline, both ways). Nobody is locked out: the same tap
+    // goes through a moment later, with the real answer.
     if (flag !== "edit_menu") return true;
-    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data as
-      { access_config?: Record<string, { on?: boolean }> | null } | null;
+    const res = await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle();
+    if (res.error) throw pgError(res.error);
+    const cfg = res.data as { access_config?: Record<string, { on?: boolean }> | null } | null;
     return cfg?.access_config?.edit_menu?.on !== false;
   }
-  const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as
+  const res = await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle();
+  if (res.error) throw pgError(res.error);   // a blip is "busy", never the default — see the owner branch above
+  const r = res.data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; access_config?: Record<string, { on?: boolean }> } | null;
   // THE FEATURE HALF (owner, 2026-08-01). A row on the Access screen now answers two questions:
   // does this restaurant HAVE the thing, and what does a person of that role start with. This is

@@ -674,17 +674,20 @@ const LOCKED_MSG = "This was on the printed bill, so it can't be taken off. Reop
 // `created_at` missing, or `invoice_at` missing, means LOCKED: a missing timestamp must never
 // be the thing that lets a printed line off a bill. Mirrored by invoiceLocksOrder() in
 // public/panels/editor/app.js — the panel hides the button, this refuses the request.
+// A FAILED READ IS BUSY, NEVER "NOT PRINTED" (sweep #10 T13 round 2, item 30): `.data` alone read a
+// blip as "no invoice", so a discount or a removal could land on a printed bill. The waiter route's
+// twin got the same fix in the same commit — verify:tablet-twins §2 compares the two.
 async function invoiceLockedByOrder(orderId: string, rid: string): Promise<boolean> {
-  const o = (await sb.from("orders").select("session_id,created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { session_id?: string; created_at?: string | null } | null;
+  const o = must(await sb.from("orders").select("session_id,created_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()) as { session_id?: string; created_at?: string | null } | null;
   if (!o?.session_id) return false;
-  const s = (await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
+  const s = must(await sb.from("sessions").select("invoice_no,invoice_voided,invoice_at").eq("id", o.session_id).eq("restaurant_id", rid).maybeSingle()) as { invoice_no?: number | null; invoice_voided?: boolean; invoice_at?: string | null } | null;
   if (!s || s.invoice_no == null) return false;
   if (!s.invoice_voided) return true;
   if (!s.invoice_at || !o.created_at) return true;
   return new Date(o.created_at).getTime() <= new Date(s.invoice_at).getTime();
 }
 async function invoiceLockedByItem(itemId: string, rid: string): Promise<boolean> {
-  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string } | null;
+  const it = must(await sb.from("order_items").select("order_id").eq("id", itemId).eq("restaurant_id", rid).maybeSingle()) as { order_id?: string } | null;
   return it?.order_id ? invoiceLockedByOrder(it.order_id, rid) : false;
 }
 
@@ -2319,7 +2322,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // still updates the instant its order lands.
       const { data, error } = tbl
         ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
-        : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
+        : await sharedFloorSummary(`floor:${rid}`, async () => {
+          // A failed read THROWS so the 1.5s share drops it (supabase-js resolves `{ error }`, which the
+          // share would otherwise hand every device in the window). The waiter tablet's twin got this as
+          // sweep #10 T13 item 6; the owner asked for this one too (2026-10-11).
+          const r = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null });
+          if (r.error) throw pgError(r.error);
+          return r;
+        });
       if (error) throw new Error(error.message);
       // ── PRINTER TROUBLE — ITS OWN SHARED KEY, NOT FOLDED INTO THE FLOOR READ ───────────────
       // Open printer problems + reprints nobody printed (queued/printing past 90s, or failed out
@@ -2410,9 +2420,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // exact key; the manager route was the one that didn't. Same 1.5s window, and
       // invalidateFloor() drops any key ending in the restaurant id, so a just-made merge is never
       // served stale after a write.
-      const merges = await sharedFloorSummary(`merges:${rid}`, async () => (await sb.from("table_merges")
-        .select("parent_table, child_table, merged_at, merged_by")
-        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || []);
+      const merges = await sharedFloorSummary(`merges:${rid}`, async () => {
+        const r = await sb.from("table_merges")
+          .select("parent_table, child_table, merged_at, merged_by")
+          .eq("restaurant_id", rid).is("ended_at", null).limit(200);
+        if (r.error) throw pgError(r.error);   // never share a failed read as "no joins" (T13 item 6's twin)
+        return r.data || [];
+      }).catch(() => [] as unknown[]);
       // Spread into a NEW object — `data` may BE the 1.5s shared snapshot and a handler must never
       // write into it (owner bug, 2026-08-02). `printer` lands in the same place the panel already
       // reads it from (`state.summary.printer`, editor/app.js printerAlerts), and stays absent on
@@ -3516,6 +3530,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const sess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
         .eq("table_number", t).eq("status", "open").order("last_activity_at", { ascending: false })
         .limit(1)).data?.[0] as { id: string } | undefined;
+      // Spending points takes money off the bill — never off a printed invoice (owner, 2026-10-11, item 11).
+      if (sess) {
+        const live = ((await sb.from("orders").select("id").eq("session_id", sess.id).eq("restaurant_id", rid)
+          .neq("status", "cancelled").neq("payment_status", "paid").limit(200)).data || []) as { id: string }[];
+        for (const o of live) if (await invoiceLockedByOrder(o.id, rid)) return err(LOCKED_MSG, 409);
+      }
       // ONE call: spend the points AND take the money off, so the two cannot half-happen.
       const r = await redeemOntoBill(rid, t, String(body?.phone || "").slice(0, 20),
         Number(body?.points) || 0, g.user?.name || g.user?.username || "Manager", sess?.id ?? null,
@@ -5355,6 +5375,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const unpaid = orders.filter((o) => o.payment_status !== "paid");
       if (!unpaid.length) return err("Nothing to settle on this table.", 409);
       if (unpaid.some((o) => o.status === "received")) return err("Accept the order first — a bill can only be settled once the order is accepted.", 409);
+      // A PRINTED INVOICE CANNOT BE COMPED AFTER THE FACT (owner, 2026-10-11: "do all for 11th"). On the
+      // house stores a 100% discount, so the guest's paper would say ₹X and the books ₹0 — rule 10
+      // (docs/COMPLIANCE-GUARDRAILS.md §3.0b). Twin of the waiter tablet's identical refusal.
+      for (const o of unpaid) if (await invoiceLockedByOrder(o.id, rid)) return err(LOCKED_MSG, 409);
       for (const o of unpaid) {
         must(await sb.from("orders").update({
           discount: Number(o.subtotal) || 0, discount_note: "On the house",

@@ -72,6 +72,8 @@ function builder(table) {
       const mode = nth && nth.at === G.CALLS[ck] ? nth.mode : G.FAIL && (G.FAIL[ck] || G.FAIL[st.table]);
       if (mode === "throw") return Promise.reject(new Error("stub: " + st.table + " unreachable"));
       if (mode === "error") return Promise.resolve({ data: null, error: { message: "stub: " + st.table + " failed" }, count: null });
+      // "timeout" = the realistic blip (57014, a statement timeout) — the route answers 503 busy, which the outbox keeps.
+      if (mode === "timeout") return Promise.resolve({ data: null, error: { message: "canceling statement due to statement timeout", code: "57014" }, count: null });
       // "refuse" = the database refusing the VALUE (22P02, e.g. a non-id in a uuid column) — a 4xx, never a retry.
       if (mode === "refuse") return Promise.resolve({ data: null, error: { message: 'invalid input syntax for type uuid: "x"', code: "22P02" }, count: null });
     }
@@ -130,5 +132,5 @@ export const supabaseAdmin = {
   from: (t) => builder(t),
   // A guard may hand the stub a stand-in for a real database function (G.RPC_IMPL[name] = (args) => data), so a
   // function that WRITES — like lfh_staff_login_failed (mig 411) — changes the fixture world the way the SQL does.
-  rpc: (name, args) => { G.RPCS.push({ name, args: clone(args || {}) }); const fm = G.FAIL && G.FAIL["rpc:" + name]; if (fm === "throw") return Promise.reject(new Error("stub: rpc " + name + " unreachable")); if (fm === "error") return Promise.resolve({ data: null, error: { message: "stub: rpc " + name + " failed" } }); if (G.RPC_IMPL && G.RPC_IMPL[name]) return Promise.resolve({ data: G.RPC_IMPL[name](clone(args || {})), error: null }); return Promise.resolve({ data: name in G.RPC_ANSWERS ? G.RPC_ANSWERS[name] : { ok: true }, error: null }); },
+  rpc: (name, args) => { G.RPCS.push({ name, args: clone(args || {}) }); const fm = G.FAIL && G.FAIL["rpc:" + name]; if (fm === "timeout") return Promise.resolve({ data: null, error: { message: "canceling statement due to statement timeout", code: "57014" } }); if (fm === "throw") return Promise.reject(new Error("stub: rpc " + name + " unreachable")); if (fm === "error") return Promise.resolve({ data: null, error: { message: "stub: rpc " + name + " failed" } }); if (G.RPC_ERR && G.RPC_ERR[name]) return Promise.resolve({ data: null, error: G.RPC_ERR[name] }); if (G.RPC_IMPL && G.RPC_IMPL[name]) return Promise.resolve({ data: G.RPC_IMPL[name](clone(args || {})), error: null }); return Promise.resolve({ data: name in G.RPC_ANSWERS ? G.RPC_ANSWERS[name] : { ok: true }, error: null }); },
 };

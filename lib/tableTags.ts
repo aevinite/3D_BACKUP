@@ -7,6 +7,7 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { MODULE_DEFS } from "@/lib/accessModel";
 import { readInChunks } from "@/lib/inChunks";
+import { pgError } from "@/lib/dbRefusal";
 
 /** One module's ladder as it is stored in settings.modules (mig 320) — the JSONB alternative to the
  *  four columns a module used to need. Absent keys read as false/false/true (new modules start OFF). */
@@ -39,11 +40,18 @@ export async function moduleLadder(
   rid: string,
   cols: { allowed: string; control: string; enabled: string },
 ): Promise<TableTagsLadder> {
-  const s = (await sb
+  // A FAILED READ IS BUSY, NEVER "OFF" (sweep #10 T13 round 2, item 28). Reading only `.data` turned
+  // a database blip into "this module is switched off": every waiter-tablet gate below answered 403
+  // "isn't enabled for this restaurant", and a 4xx is final to the panel's outbox — the tap was
+  // dropped with a false reason instead of queued like offline (the busy rule). A missing ROW still
+  // reads as defaults (off); only an ERROR throws, and every route caller answers it as busy.
+  const res = await sb
     .from("settings")
     .select(`${cols.allowed}, ${cols.control}, ${cols.enabled}`)
     .eq("restaurant_id", rid)
-    .maybeSingle()).data as Record<string, boolean> | null;
+    .maybeSingle();
+  if (res.error) throw pgError(res.error);
+  const s = res.data as Record<string, boolean> | null;
   const allowed = s?.[cols.allowed] === true;
   const ownerControl = s?.[cols.control] === true;
   const enabled = s?.[cols.enabled] !== false;
@@ -60,8 +68,9 @@ export async function allModuleLadders(rid: string): Promise<Record<string, Tabl
   // SAME single select, so this stays one round-trip however many modules exist. No module declares
   // the bag today, which is why this cannot change a single answer yet — it is the road, not a turn.
   const cols = MODULE_DEFS.filter((m) => !m.bag).flatMap((m) => [m.allowed, m.control, m.enabled]);
-  const s = (await sb.from("settings").select([...cols, "modules"].join(", ")).eq("restaurant_id", rid).maybeSingle())
-    .data as (Record<string, boolean> & { modules?: Record<string, ModuleBagEntry> }) | null;
+  const res = await sb.from("settings").select([...cols, "modules"].join(", ")).eq("restaurant_id", rid).maybeSingle();
+  if (res.error) throw pgError(res.error); // busy, never "every module off" — see moduleLadder
+  const s = res.data as (Record<string, boolean> & { modules?: Record<string, ModuleBagEntry> }) | null;
   const bag = (s?.modules && typeof s.modules === "object" ? s.modules : {}) as Record<string, ModuleBagEntry>;
   const out: Record<string, TableTagsLadder> = {};
   for (const m of MODULE_DEFS) {
@@ -186,11 +195,17 @@ export const payrollLadder = (rid: string) =>
 export async function payrollEffectiveByRid(ids: string[]): Promise<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
   if (!ids.length) return out;
-  const { rows } = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
+  const res = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
     sb.from("settings")
       .select("restaurant_id, payroll_allowed, payroll_owner_control, payroll_enabled")
       .in("restaurant_id", chunk).limit(chunk.length));
-  for (const r of rows || []) {
+  // A FAILED READ IS BUSY, NEVER "OFF" (sweep #10 T13 round 2, item 27). `rows || []` turned a
+  // database blip into "no restaurant has this module": the owner's day sheet dropped its staff-pay
+  // expense (profit read too high — the very "figure that is too small" analytics guards against),
+  // the stock estate called every box switched off, and both answers could be cached. Every caller
+  // sits inside a try that answers "couldn't load — try again" (dbFail), which is the truth.
+  if (!res.rows) throw pgError(res.error);
+  for (const r of res.rows) {
     out[String(r.restaurant_id)] =
       r.payroll_allowed === true && (r.payroll_owner_control !== true || r.payroll_enabled !== false);
   }
@@ -208,11 +223,12 @@ export const inventoryLadder = (rid: string) =>
 export async function inventoryEffectiveByRid(ids: string[]): Promise<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
   if (!ids.length) return out;
-  const { rows } = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
+  const res = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
     sb.from("settings")
       .select("restaurant_id, inventory_allowed, inventory_owner_control, inventory_enabled")
       .in("restaurant_id", chunk).limit(chunk.length));
-  for (const r of rows || []) {
+  if (!res.rows) throw pgError(res.error); // see payrollEffectiveByRid — a failed read is busy, never "off"
+  for (const r of res.rows) {
     out[String(r.restaurant_id)] =
       r.inventory_allowed === true && (r.inventory_owner_control !== true || r.inventory_enabled !== false);
   }
@@ -232,8 +248,9 @@ export const platformLadder = takeawayLadder;
 // a restaurant nobody has touched has the module OFF. That is what makes shipping a new module
 // safe: no existing restaurant changes behaviour until an admin switches it on.
 export async function moduleBagLadder(rid: string, key: string): Promise<TableTagsLadder> {
-  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle())
-    .data as { modules?: Record<string, ModuleBagEntry> } | null;
+  const res = await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle();
+  if (res.error) throw pgError(res.error); // busy, never "module off" — see moduleLadder
+  const s = res.data as { modules?: Record<string, ModuleBagEntry> } | null;
   const e = (s?.modules && typeof s.modules === "object" ? s.modules[key] : undefined) || {};
   const allowed = e.allowed === true;
   const ownerControl = e.owner_control === true;

@@ -16,6 +16,9 @@ import { businessDayStartIso } from "@/lib/businessDay";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 // The SHARED bounded fan-out. See the note on pageBoard below for why the paging helper is NOT shared.
 import { mapLimit } from "@/lib/mapLimit";
+// Errors keep their SQLSTATE (pgError) so the kitchen/tablet routes answer a timeout as "busy — retrying"
+// and a refused value as a refusal, not as an unknown crash (sweep #10 T13 round 2, item 26's twin).
+import { pgError } from "@/lib/dbRefusal";
 
 // We only touch id / created_at / session_id here; the rest of the row passes
 // through untouched, hence the index signature.
@@ -94,12 +97,12 @@ const KITCHEN_ACTIVE_STATUSES = ["received", "preparing"];
 const PAGE = 1000;
 const MAX_PAGES = 20;
 async function pageBoard<T>(
-  makePage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  makePage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string } | null }>,
 ): Promise<T[]> {
   const all: T[] = [];
   for (let p = 0; p < MAX_PAGES; p++) {
     const { data, error } = await makePage(p * PAGE, p * PAGE + PAGE - 1);
-    if (error) throw new Error(error.message);
+    if (error) throw pgError(error);
     const rows = data ?? [];
     all.push(...rows);
     if (rows.length < PAGE) return all;
@@ -171,7 +174,7 @@ export async function liveOrdersAndItems(
   // stragglers off the board with nobody told. 2,000 is far past any real floor.
   const openRes = await sb.from("sessions").select("id")
     .eq("status", "open").eq("restaurant_id", restaurantId).lt("created_at", since).limit(2000);
-  if (openRes.error) throw new Error(openRes.error.message);
+  if (openRes.error) throw pgError(openRes.error);
   const openIds = (openRes.data ?? []).map((s) => s.id as string);
 
   // Orders: today's, PLUS any belonging to a still-open session (matches the brain).
@@ -203,40 +206,21 @@ export async function liveOrdersAndItems(
         .in("order_id", c)
         .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to))));
 
-  // TARGETED path: items are simply the items of the orders we fetched — scope by
-  // order_id (no today/open OR logic needed; the orders query already settled which
-  // orders count, including today's closed-session ones). Empty orders → empty items.
-  if (tableFilter) {
-    const orderIds = orders.map((o) => o.id);
-    if (!orderIds.length) return { orders, items: [] };
-    return { orders, items: await itemsForOrderIds(orderIds) };
-  }
-
-  // ACTIVE-ONLY (kitchen) full board: the caller already dropped served/cancelled orders
-  // server-side, and the client only ever reads items keyed to an order still on the board.
-  // So scope items to exactly those active orders' ids instead of shipping EVERY of today's
-  // items (served + cancelled included) on this 60s-polled, rush-throttled path — the whole-
-  // board read the egress rules forbid, once per kitchen screen. The tablet (activeOnly=false)
-  // still needs served items for bills, so it keeps the full read below. (egress fix 2026-07-09)
-  if (activeOnly) {
-    const activeIds = orders.map((o) => o.id);
-    if (!activeIds.length) return { orders, items: [] };
-    return { orders, items: await itemsForOrderIds(activeIds) };
-  }
-
-  // FULL path: per-dish rows are today's, PLUS the items of the OLD (pre-rollover)
-  // open-session orders we just kept — so their dishes' statuses come along too.
-  // Keeping the id-list to just those old orders keeps the query small.
-  const sinceMs = new Date(since).getTime();
-  const oldOrderIds = orders.filter((o) => new Date(o.created_at).getTime() < sinceMs).map((o) => o.id);
-  const items = mergeRows([
-    await pageBoard<Row>((from, to) =>
-      sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId).gte("created_at", since)
-        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
-    oldOrderIds.length ? await itemsForOrderIds(oldOrderIds) : [],
-  ]);
-
-  return { orders, items };
+  // ONE RULE FOR THE DISHES: a board's dishes are the dishes of the orders it returned — chunked, so the
+  // URL can never overflow. The orders query above already settled which orders count (today's, the
+  // overnight open tables', the named tables', the kitchen's active ones), so nothing more is needed.
+  //
+  // THIS USED TO BE THREE PATHS (sweep #10 T13 round 2, item 19). The targeted and the kitchen's
+  // active-only paths already worked this way. The third, the FULL board (no table, not active-only),
+  // read EVERY dish created today plus the dishes of the overnight orders — a different, wider read,
+  // including dishes of archived and deleted orders the board never draws. Nothing has called it since
+  // the waiter's whole-floor /state went (T4 improvement 4, 2026-08-11): the waiter asks one table at a
+  // time and the kitchen asks for its active pass. It was dead code that disagreed with its live
+  // siblings about what a board's dishes are, so it now follows the same rule — and if a full-board
+  // caller ever returns, it gets the right dishes and none of the dead weight.
+  const orderIds = orders.map((o) => o.id);
+  if (!orderIds.length) return { orders, items: [] };
+  return { orders, items: await itemsForOrderIds(orderIds) };
 }
 
 // ── WHO PUNCHED IT — collapsed to one small flag, or dropped entirely ────────────────────────────

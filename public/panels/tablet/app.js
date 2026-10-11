@@ -2089,14 +2089,14 @@ function renderPanel() {
     return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${remMark}${fromChip(o)}${opt}${rem}${note}</span>${priceTag}<span class="iacts">${statusBadge}${serveBtn}${editCtl}${delBtn}</span></div>`;
   };
   // Per-order staff controls. NOT editing: an "✎ Edit" button (opens the gated edit
-  // mode) + Delete order. EDITING: allergen toggle chips ("avoid in all dishes"),
-  // an "＋ Add dish" button, Delete order, and "✓ Done editing". The dish rows show
+  // mode) + Cancel order. EDITING: allergen toggle chips ("avoid in all dishes"),
+  // an "＋ Add dish" button, Cancel order, and "✓ Done editing". The dish rows show
   // qty steppers + a note edit while editing. (owner, 2026-06-17)
   const orderControlsHtml = (o) => {
     if (!state.editOrders.has(o.id)) {
       return `<div class="ordctl">
         <button class="btn small" data-edit-order="${esc(o.id)}">✎ Edit</button>
-        <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
+        <button class="btn small danger" data-del-order="${esc(o.id)}">✕ Cancel order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
       </div>`;
     }
     // Order-wide allergen chips: the 6 standard toggles, any TYPED ones already set, and
@@ -2112,7 +2112,7 @@ function renderPanel() {
       <div class="ordctl-row">
         <button class="btn small" data-add-dish="${esc(o.id)}">＋ Add dish</button>
         ${tshow("tablet_discount") && !(Number(s && s.discount) > 0) ? `<button class="btn small${txray("tablet_discount")}" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>` : ""}
-        <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
+        <button class="btn small danger" data-del-order="${esc(o.id)}">✕ Cancel order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
         <button class="btn small primary" data-done-order="${esc(o.id)}">✓ Done editing</button>
       </div>
     </div>`;
@@ -2344,9 +2344,11 @@ function renderPanel() {
     if (await confirmDialog("Remove this dish from the order? The bill updates automatically.", "Remove dish"))
       act(() => api("POST", `/items/${b.dataset.delItem}/delete`));
   }));
-  // Delete a WHOLE order (confirm; refused server-side if the order is already paid).
+  // CANCEL a whole order (confirm; refused server-side if it is paid or on a printed invoice). The
+  // endpoint is still /orders/:id/delete so older handhelds keep working, but since sweep #10 T13
+  // item 3 it CANCELS — nobody at the restaurant removes a bill (R27). These words say what it does.
   document.querySelectorAll("[data-del-order]").forEach((b) => (b.onclick = async () => {
-    if (await confirmDialog("Delete this whole order? It leaves the floor and the reports, and stays in the records for 90 days.", "Delete order"))
+    if (await confirmDialog("Cancel this whole order? It stays on the bill at ₹0 and in the reports, with your name on it — a manager can restore it within 30 minutes.", "Cancel order"))
       act(() => api("POST", `/orders/${b.dataset.delOrder}/delete`));
   }));
   // ── STAFF EDIT-AFTER-CONFIRM (owner, 2026-06-17) ──────────────────────────

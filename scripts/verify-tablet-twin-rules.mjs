@@ -210,12 +210,14 @@ for (const [path, body, want, what] of GONE_DOORS) {
   else bad(`someone else's table answered ${r.status} ${r.text.slice(0, 90)}`);
 }
 {
-  // A FAILED lookup is still "couldn't tell" and still refused — a blip never reads as allowed.
-  const G = await world({ user: { assigned_tables: SECTION_1_TO_3 }, fail: { waiter_calls: "error" }, fix: {
+  // A FAILED lookup never reads as allowed — and since round 2 (item 31) it is not a 403 either: it
+  // answers busy (5xx), which the panel's outbox keeps and sends again, where a 403 "That table isn't
+  // in your section" dropped the tap with a false reason. Either way nothing is written.
+  const G = await world({ user: { assigned_tables: SECTION_1_TO_3 }, fail: { waiter_calls: "timeout" }, fix: {
     waiter_calls: [{ id: "c9", restaurant_id: RID, table_number: "9", resolved: false }],
   } });
   const r = await call("POST", "calls/c9/attend", { body: {} });
-  if (r.status === 403 && G.WRITES.length === 0) ok("a lookup that FAILED still refuses (403) and writes nothing");
+  if (r.status >= 500 && G.WRITES.length === 0 && !/isn't in your section/.test(r.text)) ok(`a lookup that FAILED answers busy (${r.status}) and writes nothing — never a 403`);
   else bad(`a failed lookup answered ${r.status} with ${G.WRITES.length} write(s)`);
 }
 
@@ -284,6 +286,276 @@ console.log("\n7. a manager or owner on the waiter panel can use the invoice but
     if (r.status === 403 && !G.RPCS.some((x) => x.name === "lfh_generate_invoice")) ok("…while a WAITER is still refused, whatever is stored (the owner's never-list)");
     else bad(`a waiter answered ${r.status} on the invoice`);
   }
+}
+
+// ── 8. ON THE HOUSE AND SPENDING POINTS RESPECT A PRINTED INVOICE TOO (round 2, owner item 11) ─────
+console.log("\n8. a printed bill cannot be comped or paid down with points afterwards (both panels)");
+{
+  const inv = (voided = false) => ({
+    sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open", invoice_no: 21, invoice_voided: voided, invoice_at: recent, last_activity_at: recent }],
+    orders: [{ id: "o1", restaurant_id: RID, table_number: "3", session_id: "s1", status: "served", payment_status: "pending", archived: false, subtotal: 300, created_at: hourAgo }],
+    table_tags: [{ restaurant_id: RID, table_number: "3", tag: "family" }],
+  });
+  {
+    const G = await world({ fix: inv(), settings: { table_tags_allowed: true } });
+    const r = await call("POST", "tables/3/on-the-house", { body: {} });
+    if (r.status === 409 && /printed bill/.test(r.text) && G.FIX.orders[0].payment_status === "pending") ok("waiter: On the house on an invoiced bill is refused (409), nothing settled");
+    else bad(`waiter: On the house on an invoiced bill answered ${r.status}, payment ${G.FIX.orders[0].payment_status}`);
+  }
+  {
+    const G = await world({ fix: { ...inv(), sessions: [{ ...inv().sessions[0], invoice_no: null, invoice_at: null }] }, settings: { table_tags_allowed: true } });
+    const r = await call("POST", "tables/3/on-the-house", { body: {} });
+    if (r.status === 200 && G.FIX.orders[0].payment_status === "paid") ok("waiter: …and with no invoice it still settles on the house");
+    else bad(`waiter: an un-invoiced comp answered ${r.status}`);
+  }
+  {
+    const G = await world({ fix: inv(), ents: { customers: true } });
+    const r = await call("POST", "tables/3/loyalty-redeem", { body: { phone: "9876543210", points: 10 } });
+    if (r.status === 409 && /printed bill/.test(r.text) && !G.RPCS.some((x) => /loyalty|redeem|bill_discount/.test(x.name))) ok("waiter: spending points on an invoiced bill is refused (409), nothing spent");
+    else bad(`waiter: points on an invoiced bill answered ${r.status} ${r.text.slice(0, 70)}`);
+  }
+  const { readFileSync } = await import("node:fs");
+  const ed = readFileSync(new URL("../app/api/editor/[...path]/route.ts", import.meta.url), "utf8");
+  const after = (needle, span) => { const i = ed.indexOf(needle); return i < 0 ? "" : ed.slice(i, i + span); };
+  if (/for \(const o of unpaid\) if \(await invoiceLockedByOrder\(o\.id, rid\)\) return err\(LOCKED_MSG, 409\);/.test(after('if (a === "tables" && c === "on-the-house")', 9000))) ok("manager: On the house asks the same invoice lock before it writes");
+  else bad("manager: On the house no longer asks the invoice lock");
+  if (/invoiceLockedByOrder\(o\.id, rid\)\) return err\(LOCKED_MSG, 409\)/.test(after('if (a === "loyalty-redeem")', 2500))) ok("manager: spending points asks the same invoice lock");
+  else bad("manager: spending points no longer asks the invoice lock");
+}
+
+// ── 9. A FAILED PERMISSION READ IS "BUSY", NEVER A GUESS (round 2, item 12) ──────────────────────────
+console.log("\n9. a database blip during a permission check neither grants nor refuses — it says busy");
+{
+  const FIXO = { orders: [{ id: "o1", restaurant_id: RID, table_number: "3", status: "served", payment_status: "pending", subtotal: 400, taxable_base: 400, discount: 0 }] };
+  {
+    const G = await world({ fix: FIXO, fail: { "settings:select": "error" } });
+    const r = await call("POST", "orders/o1/discount", { body: { amount: 10 } });
+    if (r.status >= 500 && !G.WRITES.some((w) => w.table === "orders" && w.matched)) ok(`waiter: the switch could not be read → ${r.status} (retry), no discount written`);
+    else bad(`waiter: a failed switch read answered ${r.status} with ${G.WRITES.filter((w) => w.matched).length} write(s)`);
+  }
+  {
+    const G = await world({ fix: FIXO, settings: { tablet_discount: "pin" } });
+    G.FIX.staff_users = [{ id: "m", restaurant_id: RID, role: "manager", active: true, pin_hash: "plain:1234" }];
+    G.FAIL = { "staff_users:select": "error" };
+    const r = await call("POST", "orders/o1/discount", { body: { amount: 10 } });
+    if (r.status >= 500 && !G.WRITES.some((w) => w.table === "orders" && w.matched)) ok(`waiter: on PIN, "has any manager set a PIN?" could not be read → ${r.status}, NOT let through without a PIN`);
+    else bad(`waiter: a failed PIN-setup read answered ${r.status} — a PIN-gated discount went through`);
+  }
+  {
+    const G = await world({ fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open" }] }, fail: { "restaurants:select": "error" } });
+    const r = await call("POST", "sessions/s1/close", { body: { force: true } });
+    if (r.status >= 500 && !G.WRITES.some((w) => w.matched)) ok(`waiter: the walk-out switch could not be read → ${r.status}, the table stays open`);
+    else bad(`waiter: a failed walk-out read answered ${r.status}`);
+  }
+  {
+    const { bundle } = await import("./sweep/t13s10/lib.mjs");
+    const MC = bundle("lib/managerCan.ts");
+    await world({ who: "manager", accessConfig: { give_discounts: { on: false } }, fail: { restaurants: "error" } });
+    let threw = false; try { await MC.managerCan({ user: { id: "m", role: "manager", restaurant_id: RID, permissions: {} } }, RID, "give_discounts"); } catch { threw = true; }
+    if (threw) ok("manager: managerCan THROWS on a failed read (the caller answers busy) instead of handing out the default");
+    else bad("manager: managerCan answered a failed read with a guess");
+    let threw2 = false; try { await MC.managerCan({ user: { id: "o", role: "owner", restaurant_id: RID, permissions: {} } }, RID, "edit_menu"); } catch { threw2 = true; }
+    if (threw2) ok("owner: the edit-menu cascade throws too (a retry, never a fail-open guess)");
+    else bad("owner: the edit-menu read still fails open");
+  }
+  {
+    const G = await world({ fix: FIXO });
+    const r = await call("POST", "orders/o1/discount", { body: { amount: 10 } });
+    if (r.status === 200 && G.FIX.orders[0].discount === 10) ok("…and with the database answering, the same discount goes through (200)");
+    else bad(`a healthy discount answered ${r.status}`);
+  }
+}
+
+// ── 10. THE KHATA PICKER ASKS THE SAME QUESTION AS THE PARK (round 2, item 9) ────────────────────────
+console.log("\n10. the 'Collect later' picker and the park button can never disagree");
+{
+  const K = { khata_customers: [{ id: "k1", restaurant_id: RID, name: "Ravi", phone: "1", created_at: recent }] };
+  const G = await world({ fix: K, settings: { khata_allowed: true, tablet_khata: null } });
+  const r = await call("GET", "khata/customers", { query: "?q=ra" });
+  if (r.status === 200 && r.json.customers.length === 1) ok("an UNSET waiter khata switch reads as its default (on): the picker answers, like the park");
+  else bad(`an unset khata switch: the picker answered ${r.status}`);
+  G.FIX.settings[0].tablet_khata = "off";
+  const r2 = await call("GET", "khata/customers", { query: "?q=ra" });
+  if (r2.status === 403) ok("…and 'off' still refuses the picker");
+  else bad(`'off' answered ${r2.status}`);
+}
+
+// ── 11. THE MANAGER'S FLOOR NEVER SHARES A FAILED READ EITHER (round 2, item 15 — item 6's twin) ──────
+console.log("\n11. the manager floor: one failed read is not handed to every device for 1.5 s");
+{
+  const T9 = await import("./sweep/t9s10/lib.mjs");
+  const SUM = { tiles: { 1: { counts: {} } }, calls: [], requests: [], joiners: [], order_count: 0 };
+  const G = await T9.world({ fail: { "rpc:lfh_table_view_summary": "error" } });
+  await T9.call("POST", "nothing-here", { body: {} });        // drops floor:<rid> through the editor route's own copy
+  const a = await T9.call("GET", "summary");
+  delete G.FAIL; G.RPC_ANSWERS.lfh_table_view_summary = SUM;
+  const b = await T9.call("GET", "summary");
+  if (a.status >= 500 && b.status === 200) ok(`manager: the failed floor read answers ${a.status}; the very next read is fresh (200)`);
+  else bad(`manager: after a failed floor read the next answered ${b.status} — the failure was shared`);
+}
+
+// ── 12. THE DEAD BITS STAY GONE (round 2, item 17) ──────────────────────────────────────────────────
+console.log("\n12. no dead gate, no optional scope, no read whose answer nothing uses");
+{
+  const { readFileSync } = await import("node:fs");
+  const t = readFileSync(new URL("../app/api/tablet/[...path]/route.ts", import.meta.url), "utf8").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+  if (!/parcelEffectiveFromRow\s*[(=]/.test(t)) ok("the always-true parcel 'rung' is gone (Parcel has no switch since 2026-08-03)");
+  else bad("parcelEffectiveFromRow is back — a gate that can never fire");
+  if (/const stampEdited = async \(orderId: string \| null \| undefined, rid: string\)/.test(t) && !/if \(rid\) q = q\.eq/.test(t)) ok("stampEdited REQUIRES the restaurant (no unscoped fallback)");
+  else bad("stampEdited's restaurant is optional again");
+  if (!/if \(!picked\.length\) return err\(/.test(t)) ok("parcel carries no unreachable 'no valid dishes' refusal (item 25)");
+  else bad("parcel's unreachable 'no valid dishes' refusal is back");
+  const cwSrc = readFileSync(new URL("../lib/cancelWatch.ts", import.meta.url), "utf8");
+  if (!/count === 1 \?/.test(cwSrc)) ok("the cancellation alert has no '1 bill' arm it can never reach (it sends at 5 or more)");
+  else bad("the cancellation alert's unreachable singular arm is back");
+  const G = await world({ ents: { customers: true }, fix: { table_merges: [] } });
+  const r = await call("POST", "tables/3/loyalty", { body: { phone: "9876543210" } });
+  if (r.status === 200 && !G.SCOPE_LOG.some((q) => q.table === "table_merges")) ok("the points balance asks no table question (the merged-parent read whose answer nothing used is gone)");
+  else bad(`the points balance answered ${r.status} and read table_merges ${G.SCOPE_LOG.filter((q) => q.table === "table_merges").length}×`);
+}
+
+// ── 13. A WAITER'S PAID PARCEL IS FILED UNDER A REAL METHOD, IN ITS OWN SPELLING (round 2, item 18) ───
+console.log("\n13. a paid parcel's method is one of UPI / Cash / Card / Other, spelled the canonical way");
+{
+  const MENU = { menu_items: [{ id: "d1", restaurant_id: RID, title: "Soup", price: "120", tags: [] }] };
+  {
+    const G = await world({ fix: MENU, rpc: { lfh_platform_insert: [{ id: "agg1" }] } });
+    G.FIX.aggregator_orders = [{ id: "agg1", restaurant_id: RID }];
+    const r = await call("POST", "parcel", { body: { items: [{ id: "d1" }], paid: true } });
+    const m = G.FIX.aggregator_orders[0].payment_method;
+    if (r.status === 200 && m === "Cash") ok("no method given → 'Cash' (never lowercase 'cash', a bucket of its own)");
+    else bad(`no method given → ${r.status}, stored '${m}'`);
+  }
+  {
+    const G = await world({ fix: MENU, rpc: { lfh_platform_insert: [{ id: "agg1" }] } });
+    G.FIX.aggregator_orders = [{ id: "agg1", restaurant_id: RID }];
+    await call("POST", "parcel", { body: { items: [{ id: "d1" }], paid: true, method: "upi" } });
+    if (G.FIX.aggregator_orders[0].payment_method === "UPI") ok("'upi' is stored as 'UPI'");
+    else bad(`'upi' stored as '${G.FIX.aggregator_orders[0].payment_method}'`);
+  }
+  {
+    const G = await world({ fix: MENU, rpc: { lfh_platform_insert: [{ id: "agg1" }] } });
+    const r = await call("POST", "parcel", { body: { items: [{ id: "d1" }], paid: true, method: "Bitcoin" } });
+    if (r.status === 400 && /Pick how it was paid/.test(r.text) && !G.RPCS.some((x) => x.name === "lfh_platform_insert")) ok("an unknown method is refused BEFORE the parcel is created (nothing half-exists)");
+    else bad(`an unknown method answered ${r.status}, insert called: ${G.RPCS.some((x) => x.name === "lfh_platform_insert")}`);
+  }
+}
+
+// ── 14. EVERY WRITE NAMES THE RESTAURANT, AND NO WRITE ASKS FOR ROWS NOBODY READS (round 2, item 20) ──
+console.log("\n14. every write is pinned to the restaurant, and none asks back rows nobody reads");
+{
+  const { readFileSync } = await import("node:fs");
+  const { chains } = await import("./sweep/t13s10/lib.mjs");
+  const src = readFileSync(new URL("../app/api/tablet/[...path]/route.ts", import.meta.url), "utf8").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+  const writes = chains(src).filter((c) => /\.(update|insert|upsert|delete)\(/.test(c.flat));
+  const unscoped = writes.filter((c) => !/restaurant_id/.test(c.flat));
+  if (!unscoped.length) ok(`all ${writes.length} writes in the waiter route name the restaurant`);
+  else bad(`${unscoped.length} write(s) do not name the restaurant: ${unscoped.map((c) => c.table).join(", ")}`);
+  // A write whose returning select is asked for must have its answer used: `must(await sb…select())`
+  // as a bare statement is the shape of rows asked for and thrown away.
+  const wasted = (src.match(/^\s*(?:if \([^)]*\) )?must\(await sb\.from\([^;]*?\.(?:update|insert|upsert|delete)\([\s\S]*?\.select\([^)]*\)\)\);/gm) || []);
+  if (!wasted.length) ok("no write asks the database to send back rows that nothing reads");
+  else bad(`${wasted.length} write(s) ask for rows and throw them away: ${wasted.map((w) => w.trim().slice(0, 60)).join(" | ")}`);
+  const G = await world({ fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open", last_activity_at: recent }],
+    orders: [], session_members: [{ id: "m1", restaurant_id: RID, session_id: "s1", removed: false }] } });
+  const r = await call("POST", "tables/3/restart", { body: {} });
+  const rs = G.SCOPE_LOG.filter((q) => (q.table === "session_members" || q.table === "sessions") && q.op === "update");
+  if (r.status === 200 && rs.length === 2 && rs.every((q) => q.filters.some((f) => f.col === "restaurant_id" && f.val === RID))) ok("restarting a table: releasing its guests and closing it are both pinned to the restaurant");
+  else bad(`restart answered ${r.status}; ${rs.filter((q) => !q.filters.some((f) => f.col === "restaurant_id")).length} unscoped write(s)`);
+}
+
+// ── 15. ONE SETTINGS READ PER FLOOR REFRESH, AND THE SAME SECTION ANSWER AS waiterTables (item 21) ────
+console.log("\n15. a floor refresh reads the settings row once, and the section rule matches the library's");
+{
+  const { bundle } = await import("./sweep/t13s10/lib.mjs");
+  const TA = bundle("lib/tableAssign.ts");
+  const SUM = { tiles: { 1: { counts: {} }, 2: { counts: {} }, 5: { counts: {} }, 47: { counts: {} } }, calls: [], requests: [], joiners: [] };
+  const ONE_TWO = [1, 2], NO_TABLES = [];
+  for (const [who, user, label] of [["waiter", { assigned_tables: ONE_TWO }, "a waiter holding tables 1–2"], ["waiter", { assigned_tables: NO_TABLES }, "a waiter holding no tables"], ["manager", {}, "a manager looking in"], ["admin", {}, "the admin"]]) {
+    const G = await world({ who, user, rpc: { lfh_table_view_summary: SUM } });
+    await call("POST", "nothing-here", { body: {}, query: `?rid=${RID}` });
+    G.SCOPE_LOG.length = 0;
+    const r = await call("GET", "summary", { query: `?nomenu=1&rid=${RID}` });
+    const reads = G.SCOPE_LOG.filter((q) => q.table === "settings").length;
+    const lib = await TA.waiterTables(G.ACTOR.user, RID);
+    const libVisible = Object.keys(SUM.tiles).filter((t) => TA.allows(lib, t)).join(",");
+    const routeVisible = Object.keys(r.json?.tiles || {}).join(",");
+    const sameList = JSON.stringify(r.json?.my_tables ?? null) === JSON.stringify(lib ? lib.tables : null);
+    if (r.status === 200 && reads === 1 && sameList && routeVisible === libVisible) ok(`${label}: 1 settings read, sees ${routeVisible || "nothing"} — exactly what waiterTables + allows() say`);
+    else bad(`${label}: ${r.status}, ${reads} settings read(s), tiles ${routeVisible} vs library ${libVisible}, list ${JSON.stringify(r.json?.my_tables)} vs ${JSON.stringify(lib && lib.tables)}`);
+  }
+}
+
+// ── 16. A GUEST'S PHONE NUMBER NEVER RIDES TO A WAITER'S DEVICE (round 2, item 22) ───────────────────
+console.log("\n16. the table slice carries the five guest columns the screen reads — never a phone or a device id");
+{
+  const { readFileSync } = await import("node:fs");
+  const route = readFileSync(new URL("../app/api/tablet/[...path]/route.ts", import.meta.url), "utf8");
+  const panel = readFileSync(new URL("../public/panels/tablet/app.js", import.meta.url), "utf8");
+  const cols = ((route.match(/const MEMBER_COLS = "([^"]+)"/) || [])[1] || "").split(",").map((c) => c.trim());
+  if (cols.length && !cols.some((c) => /phone|device_id/.test(c))) ok(`the slice's guest columns: ${cols.join(", ")} — no phone, no device id`);
+  else bad(`the slice's guest columns carry personal data or are missing: ${cols.join(", ") || "(none found)"}`);
+  // Every field the panel reads off a guest row must be on the list (a missing column is a blank on screen).
+  const used = [...new Set([...panel.matchAll(/\bm\.(name|role|approved|session_id|id|phone|device_id|joined_at|location_ok|phone_verified)\b/g)].map((x) => x[1]))];
+  const missing = used.filter((f) => !cols.includes(f));
+  if (!missing.length) ok(`every guest field the waiter screen reads is sent (${used.join(", ")})`);
+  else bad(`the waiter screen reads guest fields the slice no longer sends: ${missing.join(", ")}`);
+  const reqSel = (route.match(/from\("requests"\)\.select\("([^"]+)"\)\.eq\("status", "pending"\)/) || [])[1] || "";
+  if (reqSel && !/phone|\*/.test(reqSel)) ok("the join-request rows are sent without the asking guest's phone");
+  else bad(`the join-request read sends: ${reqSel || "(not found — select(*)?)"}`);
+  const G = await world({ fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open" }],
+    session_members: [{ id: "m1", restaurant_id: RID, session_id: "s1", name: "Asha", role: "owner", approved: true, removed: false, phone: "9876543210", device_id: "dev-x" }] } });
+  const scope = G.SCOPE_LOG; scope.length = 0;
+  const r = await call("GET", "state", { query: "?table=3" });
+  if (r.status === 200 && (r.json.members || []).length === 1) ok("…and the slice still carries the party (one guest, Asha)");
+  else bad(`the slice answered ${r.status} with ${(r.json && r.json.members || []).length} guest(s)`);
+}
+
+// ── 17. TABLE 0 IS NOT A TABLE — SO IT IS NOT "SOMEONE ELSE'S SECTION" EITHER (round 2, item 23) ──────
+console.log("\n17. a move to table 0 is told it isn't a valid table, not that it's outside the waiter's section");
+{
+  const { bundle } = await import("./sweep/t13s10/lib.mjs");
+  const TA = bundle("lib/tableOfAction.ts");
+  if (["0", 0, "-3", -1].every((v) => TA.normTable(v) === "") && TA.normTable("07") === "7") ok("normTable: 0 and negatives are 'not a table' (\"\"); 07 is still table 7");
+  else bad(`normTable(0) = '${TA.normTable(0)}', normTable(-3) = '${TA.normTable(-3)}'`);
+  await world({ fix: { sessions: [{ id: "s1", restaurant_id: RID, table_number: "3", status: "open" }] } });
+  const r = await call("POST", "sessions/s1/shift", { body: { to: "0" } });
+  if (r.status === 400 && /valid table to move to/.test(r.text)) ok("moving a party to table 0 → 400 'Pick a valid table to move to'");
+  else bad(`moving to table 0 answered ${r.status} ${r.text.slice(0, 80)}`);
+}
+
+// ── 18. A STANDALONE BANQUET BILL IS NO SECTION'S — FROM PLACING IT TO CANCELLING IT (round 2, item 24) ─
+console.log("\n18. a ticket with no table is never refused as 'not in your section'");
+{
+  const SEC = [1];
+  await world({ user: { assigned_tables: SEC }, fix: { orders: [{ id: "ob", restaurant_id: RID, status: "preparing", payment_status: "pending", table_number: null, session_id: null }] } });
+  const r = await call("POST", "orders/ob/delete", { body: { reason: "wrong lines" } });
+  if (r.status === 200) ok("a sectioned waiter can cancel a standalone banquet ticket (it belongs to no table)");
+  else bad(`a no-table ticket answered ${r.status} ${r.text.slice(0, 70)}`);
+  await world({ user: { assigned_tables: SEC }, fix: { waiter_calls: [{ id: "cx", restaurant_id: RID, table_number: null, resolved: false }] } });
+  const r2 = await call("POST", "calls/cx/attend", { body: {} });
+  if (r2.status === 403) ok("…while a guest call with no table is still 'couldn't tell' and refused");
+  else bad(`a no-table call answered ${r2.status}`);
+}
+
+// ── 19. A DATABASE ERROR KEEPS ITS CODE, SO A TIMEOUT SAYS "BUSY" (round 2, item 26) ──────────────────
+console.log("\n19. a database timeout reads as 'busy — retrying' (503), not 'something went wrong' (500)");
+{
+  const { readFileSync } = await import("node:fs");
+  const t = readFileSync(new URL("../app/api/tablet/[...path]/route.ts", import.meta.url), "utf8").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+  const dropped = (t.match(/throw new Error\(/g) || []).length;
+  if (!dropped) ok("no branch throws `new Error(…)` — every database error keeps its SQLSTATE through pgError");
+  else bad(`${dropped} branch(es) throw new Error(…) and drop the database's error code`);
+  for (const [path, fail, what] of [["customer-recognize", "lfh_recognize_customer", "the repeat-customer lookup"], ["customer-search", "lfh_customer_phone_search", "the customer search"]]) {
+    await world({ fail: { [`rpc:${fail}`]: "timeout" } });
+    const r = await call("GET", path, { query: path === "customer-search" ? "?q=987" : "?phone=98765" });
+    if (r.status === 503) ok(`${what} timing out answers 503 (the screen retries)`);
+    else bad(`${what} timing out answered ${r.status}`);
+  }
+  await world({ fail: { "rpc:lfh_staff_place_order": "timeout" } });
+  const r = await call("POST", "order", { body: { table: "3", items: [{ id: "d1" }] } });
+  if (r.status === 503) ok("placing an order while the database times out answers 503 — the outbox queues it, like offline");
+  else bad(`placing an order during a timeout answered ${r.status}`);
 }
 
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);

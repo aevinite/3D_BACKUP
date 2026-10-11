@@ -97,7 +97,8 @@ export async function watchCancellations(rid: string): Promise<void> {
     await sendOwnerAlert(
       alertText([
         ["Restaurant", restaurantName || "—"],
-        ["Cancelled today", `${count} bill${count === 1 ? "" : "s"}`],
+        // Always plural: this only ever sends at MIN_COUNT (5) or more, so a "1 bill" spelling could never show.
+        ["Cancelled today", `${count} bills`],
         ["Worth", `₹${Math.round(cancelledValue).toLocaleString("en-IN")}`],
         ["Share of the day", `${Math.round(share * 100)}%`],
       ], "Nothing is wrong with the app — this is the day's void level. Reports → Cancellations has the detail."),

@@ -34,6 +34,19 @@ export async function loyaltyOn(rid: string): Promise<boolean> {
   return (await loyaltyLadder(rid)).effective;
 }
 
+// THE SAME QUESTION, FOR A PATH THAT MUST NOT FAIL. loyaltyLadder() throws on a failed read since
+// sweep #10 T13 round 2 (item 28 — a gate must answer busy, never "off"), which is right for the
+// paths that MOVE points (redeem, adjust, save rules). It is wrong for two kinds of path, which keep
+// the old answer — logged, "off" this once:
+//   · AFTER the money (earn, reverse): the settle / un-pay is already written, so a throw would
+//     report a finished action as failed. Same outcome as their own RPC failing, two lines down.
+//   · DISPLAY (state, rules, history): each already answers "off" when its own read fails, the
+//     printed bill reads the rules, and a busy answer to a read-only POST would be queued by the
+//     panel's outbox as if it were a saved change.
+async function loyaltyOnSoft(rid: string, what: string): Promise<boolean> {
+  return loyaltyOn(rid).catch((e) => { console.error(`[loyalty] ${what}: module read failed —`, e?.message ?? e); return false; });
+}
+
 /**
  * What this bill actually came to — computed HERE, never taken from the browser.
  *
@@ -67,7 +80,7 @@ export async function earnOnSettle(
   rid: string, table: string, phone: string, sessionId: string | null,
 ): Promise<{ ok: boolean; earned?: number; balance?: number }> {
   if (!phone || !sessionId) return { ok: false };
-  if (!(await loyaltyOn(rid))) return { ok: false };
+  if (!(await loyaltyOnSoft(rid, "earn"))) return { ok: false };
   const total = await settledTotalOf(rid, sessionId);
   if (total <= 0) return { ok: false };
   const { data, error } = await sb.rpc("lfh_loyalty_earn", {
@@ -83,7 +96,7 @@ export async function earnOnSettle(
 
 /** Un-paying a bill takes back exactly the points that bill granted — see mig 401 §7. */
 export async function reverseOnUnpay(rid: string, table: string, sessionId: string | null): Promise<void> {
-  if (!(await loyaltyOn(rid))) return;
+  if (!(await loyaltyOnSoft(rid, "reverse"))) return;
   const { error } = await sb.rpc("lfh_loyalty_reverse", {
     p_restaurant_id: rid, p_table: table, p_session: sessionId,
   });
@@ -92,7 +105,7 @@ export async function reverseOnUnpay(rid: string, table: string, sessionId: stri
 
 /** The balance + rules for one guest, for the pay sheet. One row, no scan. */
 export async function loyaltyStateFor(rid: string, phone: string): Promise<LoyaltyState> {
-  if (!(await loyaltyOn(rid))) return { on: false };
+  if (!(await loyaltyOnSoft(rid, "state"))) return { on: false };
   const { data, error } = await sb.rpc("lfh_loyalty_state", { p_restaurant_id: rid, p_phone: phone });
   if (error) { console.error("[loyalty] state failed:", error.message); return { on: false }; }
   return (data as LoyaltyState) || { on: false };
@@ -238,7 +251,7 @@ export type LoyaltyRules = {
 /** Read the rules (mig 401 §5 fills the defaults, so a restaurant that never opened the screen
  *  still answers). Ladder-gated like everything else here. */
 export async function loyaltyRules(rid: string): Promise<LoyaltyRules> {
-  if (!(await loyaltyOn(rid))) return { on: false };
+  if (!(await loyaltyOnSoft(rid, "rules"))) return { on: false };
   const { data, error } = await sb.rpc("lfh_loyalty_state", { p_restaurant_id: rid, p_phone: "" });
   if (error) { console.error("[loyalty] rules read failed:", error.message); return { on: false }; }
   const r = (data as LoyaltyState) || { on: false };
@@ -316,7 +329,7 @@ export async function adjustPoints(
 
 /** One guest's points history, newest first — capped in SQL. For justifying a correction. */
 export async function loyaltyHistory(rid: string, phone: string, limit = 20): Promise<Array<Record<string, unknown>>> {
-  if (!(await loyaltyOn(rid))) return [];
+  if (!(await loyaltyOnSoft(rid, "history"))) return [];
   const { data, error } = await sb.rpc("lfh_loyalty_history", { p_restaurant_id: rid, p_phone: phone, p_limit: limit });
   if (error) { console.error("[loyalty] history failed:", error.message); return []; }
   return (data as Array<Record<string, unknown>>) || [];

@@ -415,8 +415,10 @@ const PANELS = ["public/panels/kitchen/app.js", "public/panels/tablet/app.js", "
 const panelText = PANELS.map((p) => (existsSync(join(root, p)) ? src(p) : "")).join("\n");
 
 addStatic("The shared board · every read in it is scoped to ONE restaurant", () => {
+  // MOVED DELIBERATELY (sweep #10 T13 round 2, item 19): the dead full-board dish read went, so the
+  // board makes THREE reads (open tables, orders, dishes) — each must still name the restaurant.
   const froms = C.blib.match(/\.from\("(orders|order_items|sessions)"\)/g) || [];
-  return froms.length >= 4 && (C.blib.match(/\.eq\("restaurant_id", restaurantId\)/g) || []).length >= 4;
+  return froms.length >= 3 && (C.blib.match(/\.eq\("restaurant_id", restaurantId\)/g) || []).length >= froms.length;
 });
 addStatic("The shared board · no read in it selects every column", () => !/select\("\*"\)/.test(C.blib));
 addStatic("The shared board · both column lists are written out in full", () => /const ORDER_COLS =/.test(C.blib) && /const ITEM_COLS =/.test(C.blib));
@@ -429,8 +431,8 @@ addStatic("The shared board · it returns TODAY's orders PLUS every order on a s
 addStatic("The shared board · that second pass only reaches back BEFORE the rollover (no double counting)", () => /\.lt\("created_at", since\)\.in\("session_id", ids\)/.test(C.blib));
 addStatic("The shared board · the open-session list itself is bounded, so overnight tables cannot vanish silently", () => /\.eq\("status", "open"\)[\s\S]{0,120}\.limit\(2000\)/.test(C.blib));
 addStatic("The shared board · the open-session read is scoped to the restaurant", () => /sessions"\)\.select\("id"\)[\s\S]{0,160}\.eq\("restaurant_id", restaurantId\)/.test(C.blib));
-addStatic("The shared board · a failed open-session read throws instead of quietly answering 'no tables'", () => /if \(openRes\.error\) throw new Error\(openRes\.error\.message\)/.test(C.blib));
-addStatic("The shared board · a failed page throws too — a short board is never passed off as the whole one", () => /if \(error\) throw new Error\(error\.message\)/.test(C.blib));
+addStatic("The shared board · a failed open-session read throws instead of quietly answering 'no tables'", () => /if \(openRes\.error\) throw (?:new Error\(openRes\.error\.message\)|pgError\(openRes\.error\))/.test(C.blib)); // pgError since T13 round 2
+addStatic("The shared board · a failed page throws too — a short board is never passed off as the whole one", () => /if \(error\) throw (?:new Error\(error\.message\)|pgError\(error\))/.test(C.blib)); // pgError since T13 round 2 (it keeps the SQLSTATE) — still a throw
 addStatic("The shared board · it walks past PostgREST's 1000-row cap instead of stopping at it", () => /const PAGE = 1000/.test(C.blib) && /\.range\(from, to\)/.test(C.blib));
 addStatic("The shared board · paging stops at the first short page, not after a fixed number", () => /if \(rows\.length < PAGE\) return all/.test(C.blib));
 addStatic("The shared board · a runaway is logged, never silently truncated", () => /console\.error\(`liveBoard: pageBoard hit MAX_PAGES/.test(C.blib));
@@ -440,7 +442,7 @@ addStatic("The shared board · the chunks run a few at a time, inside the connec
 addStatic("The shared board · the fan-out uses the SHARED worker pool, not a private copy", () => /from "@\/lib\/mapLimit"/.test(C.blib) && /mapLimit\(chunkIds\(/.test(C.blib));
 addStatic("The shared board · chunk results are merged and de-duplicated by row id", () => /const byId = new Map<string, Row>\(\)/.test(C.blib));
 addStatic("The shared board · the merged list is ordered by time, with a stable tie-break", () => /a\.created_at < b\.created_at \? -1[\s\S]{0,120}a\.id < b\.id \? -1/.test(C.blib));
-addStatic("The shared board · every page is ordered the same way it is merged", () => (C.blib.match(/\.order\("created_at", \{ ascending: true \}\)\.order\("id", \{ ascending: true \}\)/g) || []).length >= 4);
+addStatic("The shared board · every page is ordered the same way it is merged", () => (C.blib.match(/\.order\("created_at", \{ ascending: true \}\)\.order\("id", \{ ascending: true \}\)/g) || []).length >= 3); // three paged reads since item 19
 addStatic("The shared board · an archived order never reaches a panel", () => /\.eq\("archived", false\)/.test(C.blib));
 addStatic("The shared board · a removed order never reaches a panel", () => /\.is\("deleted_at", null\)/.test(C.blib));
 addStatic("The shared board · the kitchen pass drops served and cancelled orders on the SERVER", () => /const KITCHEN_ACTIVE_STATUSES = \["received", "preparing"\]/.test(C.blib) && /q\.in\("status", KITCHEN_ACTIVE_STATUSES\)/.test(C.blib));
@@ -449,10 +451,12 @@ addStatic("The shared board · a targeted refetch reads only the tables the brea
 addStatic("The shared board · an empty table list means the FULL board, never an empty one", () => /Array\.isArray\(tableNumbers\) && tableNumbers\.length[\s\S]{0,60}: null/.test(C.blib));
 addStatic("The shared board · table numbers are compared as text, the way the column stores them", () => /tableNumbers\.map\(String\)/.test(C.blib));
 addStatic("The shared board · a targeted read with no orders returns no dishes, not every dish", () => /if \(!orderIds\.length\) return \{ orders, items: \[\] \}/.test(C.blib));
-addStatic("The shared board · the kitchen's full board reads only the ACTIVE orders' dishes", () => /if \(activeOnly\) \{[\s\S]{0,220}itemsForOrderIds\(activeIds\)/.test(C.blib));
-addStatic("The shared board · …and returns nothing rather than the whole day when the board is empty", () => /if \(!activeIds\.length\) return \{ orders, items: \[\] \}/.test(C.blib));
+// MOVED DELIBERATELY (item 19): the kitchen's "active orders' dishes only" became the rule for EVERY board —
+// a board's dishes are the dishes of the orders it returned, and an empty board asks for none.
+addStatic("The shared board · the kitchen's full board reads only the ACTIVE orders' dishes", () => /if \(activeOnly\) q = q\.in\("status", KITCHEN_ACTIVE_STATUSES\)/.test(C.blib) && /return \{ orders, items: await itemsForOrderIds\(orderIds\) \};/.test(C.blib));
+addStatic("The shared board · …and returns nothing rather than the whole day when the board is empty", () => /if \(!orderIds\.length\) return \{ orders, items: \[\] \}/.test(C.blib));
 addStatic("The shared board · the dish read is chunked by order id as well", () => /itemsForOrderIds = async \(ids: string\[\]\): Promise<Row\[\]> =>\s*mergeRows\(await mapLimit\(chunkIds\(ids\)/.test(C.blib));
-addStatic("The shared board · the overnight dishes ride along with their overnight orders", () => /const oldOrderIds = orders\.filter\(\(o\) => new Date\(o\.created_at\)\.getTime\(\) < sinceMs\)/.test(C.blib));
+addStatic("The shared board · the overnight dishes ride along with their overnight orders", () => /\.lt\("created_at", since\)\.in\("session_id", ids\)/.test(C.blib) && /const orderIds = orders\.map\(\(o\) => o\.id\);/.test(C.blib)); // item 19: the overnight ORDERS are on the board, so their dishes are too
 addStatic("The shared board · who punched an order never leaves the server as a name", () => /const \{ placed_by_id, placed_by, \.\.\.rest \} = r as Record<string, unknown>/.test(C.blib));
 addStatic("The shared board · a guest's own order can still be told apart, by one small flag", () => /keepGuestFlag && guest \? \{ \.\.\.rest, guest: 1 \} : rest/.test(C.blib));
 addStatic("The shared board · that flag costs nothing on a waiter-punched ticket", () => /const guest = !placed_by_id && !placed_by/.test(C.blib));

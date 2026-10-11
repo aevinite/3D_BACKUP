@@ -108,7 +108,7 @@ const FIXED = {
   "GET: ?table= must be digits, or a bad param becomes a full refresh and not a 500": () => ({ ok: (G.match(/\/\^\\d\{1,6\}\$\/\.test\(tblRaw\.trim\(\)\)/g) || []).length === 2, note: "both reads" }),
   "GET: the settings row is stripped of the delivery apps' keys": () => ({ ok: /panelSafeSettings\(must\(settings\)\)/.test(G), note: "panelSafeSettings" }),
   "GET: the restaurant's whole permission record is peeled off before the row is sent": () => ({ ok: /filter\(\(\[k\]\) => k !== "access_config"\)/.test(G), note: "access_config filtered" }),
-  "GET: ?nomenu=1 skips the big dish list rather than sending an empty one": () => ({ ok: /const dishesP = nomenu\s*\? null/.test(G) && /if \(dishesP\) body\.dishes = /.test(G), note: "key absent on nomenu" }),
+  "GET: ?nomenu=1 skips the big dish list rather than sending an empty one": () => ({ ok: /const dishesP = tbl \|\| nomenu\s*\? null/.test(G) && /if \(dishesP\) body\.dishes = /.test(G), note: "key absent on nomenu (and on a targeted ?table= refetch — round 2 item 21 starts the read up front)" }),
   "GET: the whole-floor /state branch is GONE and says where the floor lives": () => ({ ok: /return err\("Ask for one table \(\/state\?table=N\) — the whole floor comes from \/summary\.", 400\);/.test(G), note: "400 with directions" }),
   "GET: an unknown GET is a 404, not a 500": () => ({ ok: /return err\("unknown GET endpoint", 404\);/.test(G), note: "404" }),
   "GET: a caught failure is told apart from a bug by lib/panelFailure": () => ({ ok: /return panelFailure\(e\);/.test(G), note: "panelFailure(e)" }),
@@ -176,6 +176,10 @@ export function gridRows() {
           else if (!code) res = { ok: false, note: `branch ${name} not found in today's dispatcher` };
           else if (P[prop]) res = P[prop](code, name);
           else if (/^gated on (tablet_[a-z_]+), server-side/.test(prop)) res = gatedOn(prop.match(/tablet_[a-z_]+/)[0])(code);
+          // RETIRED on purpose: Parcel has had no switch since 2026-08-03 (parcelLadder is the constant
+          // ALWAYS_ON); sweep #10 T13 round 2 item 29 removed the refusal that could never fire. The row's
+          // subject is now "no module rung is asked" — the waiter's own tablet_parcel power is the gate.
+          else if (name === "parcel" && /module rung \(parcelLadder\)/.test(prop)) res = { ok: !/parcelLadder/.test(code) && /tabletPerm\("tablet_parcel"/.test(code), note: "RETIRED 2026-10-11 — round 2 item 29: Parcel is permanent, no rung to ask; tabletPerm(\"tablet_parcel\") is the gate" };
           else if (/the restaurant's module rung \((\w+)\) is asked first/.test(prop)) res = ladderFirst(prop.match(/\((\w+)\)/)[1])(code);
           else if (/taking money off a bill writes the "(\w+)" Audit row/.test(prop)) res = writesKind(prop.match(/"(\w+)"/)[1])(code, name);
           else res = { ok: false, note: `unknown property "${prop}" — re-derive by hand` };

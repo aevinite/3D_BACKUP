@@ -10,13 +10,19 @@
 // of tableAssign.ts there would have dragged an unreleased feature onto a live client.
 // One small shared file keeps both stacks on the SAME code with no fork.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { pgError } from "@/lib/dbRefusal";
 
 // Table numbers are TEXT in every operational table (orders/sessions/waiter_calls/
 // requests/table_tags) but INTEGER[] on the staff row, so all comparing is done on
 // normalised STRINGS. "007" and 7 must be the same table.
+// A table is 1 or more. 0 and negatives are not tables at all (sweep #10 T13 round 2, item 23): they
+// used to come back as "0" / "-3", so moving a party to "table 0" was refused by the section gate with
+// "Table 0 isn't in your section — ask your manager to add it", sending a waiter to a manager about a
+// table that cannot exist. As "" they are "not a table number" — the section gate lets them past and
+// the action's own check answers ("Pick a valid table to move to").
 export const normTable = (v: unknown): string => {
   const n = parseInt(String(v ?? "").trim(), 10);
-  return Number.isFinite(n) ? String(n) : "";
+  return Number.isFinite(n) && n > 0 ? String(n) : "";
 };
 
 export type Affected = { tables: string[]; unknown: boolean };
@@ -36,7 +42,7 @@ const NO_TABLE: Affected = { tables: [], unknown: false };
 // ── THREE ANSWERS, NOT TWO (sweep #10 T13, item 4) ───────────────────────────────────────────
 // Each lookup below answers one of:
 //   · a table number  — the row exists here and names its table;
-//   · `null`          — COULDN'T TELL: the row exists but carries no table, or the read failed;
+//   · `null`          — COULDN'T TELL: the row exists but carries no table;
 //   · GONE            — there is no such row in this restaurant at all.
 // The last two used to be the same `null`, so a waiter tapping a call, a dish or a guest that had
 // been cleared a second earlier on another device (the stale tile every busy floor has) was refused
@@ -44,15 +50,26 @@ const NO_TABLE: Affected = { tables: [], unknown: false };
 // are always on for a waiter (owner, 2026-07-30), so EVERY one of the route's own "that's no longer
 // on the board — refresh" answers was unreachable for the person most likely to need it, and the one
 // they got sent them to a manager for nothing. A row that does not exist has no table to protect:
-// the action's own restaurant-scoped read answers it, with its own 404. A FAILED read is still
-// "couldn't tell", and still refused — a blip must never read as "allowed".
+// the action's own restaurant-scoped read answers it, with its own 404.
+// A FAILED READ THROWS (round 2, item 31). It used to be "couldn't tell", which the section gate
+// refuses — right that a blip must never read as "allowed", wrong in HOW: the waiter got a 403
+// "That table isn't in your section — ask your manager to add it" for a table that IS theirs, and a
+// 4xx is final to the panel's outbox, so the tap was dropped. Thrown, nothing runs either (the route
+// answers busy) and the outbox sends it again. lib/clash.ts wraps its call and fails open, exactly
+// as it treats "couldn't tell".
 const GONE = Symbol("no such row");
-type Lookup = string | null | typeof GONE;
+// A TICKET THAT BELONGS TO NO TABLE (round 2, item 24): a standalone banquet bill is placed with no
+// table on purpose (mig 132) and is "never restricted by a section" when it is placed (see `banquet`
+// below). Acting on it afterwards — cancelling it, discounting it — was answered "That table isn't in
+// your section — ask your manager to add it", about a bill no section can hold. Only ORDERS answer
+// this: a party, a call, a request or a guest with no table is still "couldn't tell".
+const NO_TABLE_ROW = Symbol("a ticket with no table");
+type Lookup = string | null | typeof GONE | typeof NO_TABLE_ROW;
 
 async function tableOfSession(rid: string, id: string): Promise<Lookup> {
   const { data, error } = await sb.from("sessions").select("table_number")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  if (error) return null;
+  if (error) throw pgError(error); // item 31 — busy, never "couldn't tell"
   if (!data) return GONE;
   return data.table_number ? normTable(data.table_number) : null;
 }
@@ -60,14 +77,15 @@ async function tableOfSession(rid: string, id: string): Promise<Lookup> {
 async function tableOfOrder(rid: string, id: string): Promise<Lookup> {
   const { data, error } = await sb.from("orders").select("table_number")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  if (error) return null;
+  if (error) throw pgError(error); // item 31 — busy, never "couldn't tell"
   if (!data) return GONE;
-  return data.table_number ? normTable(data.table_number) : null;
+  if (data.table_number == null || String(data.table_number).trim() === "") return NO_TABLE_ROW;
+  return normTable(data.table_number) || null;
 }
 
 // A parent row that has vanished under a child that still exists is "couldn't tell", not GONE: the
 // child is still there to be written to, so its table must be known.
-const parentOf = (v: Lookup): string | null => (v === GONE ? null : v);
+const parentOf = (v: Lookup): string | null | typeof NO_TABLE_ROW => (v === GONE ? null : v);
 
 // order_items carries NO table_number (mig 014) — the reliable join is
 // order_id → orders.table_number. session_id exists too but is null when the
@@ -76,7 +94,7 @@ async function tableOfItem(rid: string, id: string): Promise<Lookup> {
   const { data, error } = await sb
     .from("order_items").select("order_id, session_id")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  if (error) return null;
+  if (error) throw pgError(error); // item 31 — busy, never "couldn't tell"
   if (!data) return GONE;
   if (data.order_id) return parentOf(await tableOfOrder(rid, data.order_id));
   if (data.session_id) return parentOf(await tableOfSession(rid, data.session_id));
@@ -88,7 +106,7 @@ async function tableOfSimple(
 ): Promise<Lookup> {
   const { data, error } = await sb.from(table).select("table_number")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  if (error) return null;
+  if (error) throw pgError(error); // item 31 — busy, never "couldn't tell"
   if (!data) return GONE;
   return data.table_number ? normTable(data.table_number) : null;
 }
@@ -97,7 +115,7 @@ async function tableOfMember(rid: string, id: string): Promise<Lookup> {
   const { data, error } = await sb
     .from("session_members").select("session_id")
     .eq("restaurant_id", rid).eq("id", id).maybeSingle();
-  if (error) return null;
+  if (error) throw pgError(error); // item 31 — busy, never "couldn't tell"
   if (!data) return GONE;
   return data.session_id ? parentOf(await tableOfSession(rid, data.session_id)) : null;
 }
@@ -126,7 +144,7 @@ export async function affectedTables(
   const bod = body || {};
   // GONE → nothing to protect (see "THREE ANSWERS" above); null → couldn't tell → refuse.
   const push = async (v: Lookup): Promise<Affected> =>
-    v === GONE ? { tables: [], unknown: false } : v ? { tables: [v], unknown: false } : { tables: [], unknown: true };
+    v === GONE || v === NO_TABLE_ROW ? { tables: [], unknown: false } : v ? { tables: [v], unknown: false } : { tables: [], unknown: true };
 
   // Actions with no table at all — a takeaway parcel, a standalone banquet bill, a
   // restaurant-wide floor complaint. Never restricted by a section.

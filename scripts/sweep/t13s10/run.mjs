@@ -4,10 +4,15 @@
 //   node scripts/sweep/t13s10/run.mjs --ledger     — print ledger rows (`| id | file — what | how | ✅ | note |`)
 //   node scripts/sweep/t13s10/run.mjs --only P182001,P182002
 import { runAll } from "./lib.mjs";
-const blocks = (process.env.T13_BLOCKS || "a,b,c,d").split(",");
+const blocks = (process.env.T13_BLOCKS || "a,b,c,d,e,f,g,h,i").split(",");
 if (blocks.includes("a")) await import("./new-a-libs.mjs");
 if (blocks.includes("b")) await import("./new-b-libs.mjs").catch((e) => { if (!/Cannot find module/.test(e.message)) throw e; });
 if (blocks.includes("c")) await import("./new-c-route.mjs").catch((e) => { if (!/Cannot find module/.test(e.message)) throw e; });
+if (blocks.includes("e")) await import("./new-e-route-deep.mjs");
+if (blocks.includes("f")) await import("./new-f-route-deep.mjs").catch((e) => { if (!/Cannot find module/.test(e.message)) throw e; });
+if (blocks.includes("g")) await import("./new-g-libs-deep.mjs").catch((e) => { if (!/Cannot find module/.test(e.message)) throw e; });
+if (blocks.includes("i")) await import("./new-i-corners.mjs");
+if (blocks.includes("h")) await import("./new-h-live.mjs").catch((e) => { if (!/Cannot find module/.test(e.message)) throw e; });
 if (blocks.includes("d")) await import("./new-d-live.mjs").catch((e) => { if (!/Cannot find module/.test(e.message)) throw e; });
 const a = process.argv;
 const onlyArg = a.find((x) => x.startsWith("--only"));
