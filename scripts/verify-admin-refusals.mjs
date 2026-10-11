@@ -435,5 +435,21 @@ const NOT_YET = new Map([
     bad.length ? `${bad.join("; ")} — wrap it in adminFail(what, { message }, { action })` : "");
 }
 
+// ── 16 · USAGE COUNTS THE WINDOW ASKED FOR, OR REFUSES (sweep #10 T29, item 11) ──────────────────
+// Admin console → Usage → a custom date range. "2026-02-31" passed the shape test and Date.parse, so the
+// counts started on 3 March while the answer echoed 31 February; an impossible or half-given range fell
+// back to the default view without a word. Same round trip as Billing (S10 T28 item 8).
+{
+  const rel = "app/api/admin/usage/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Usage → a typed date must survive a round trip (no 31 February)",
+      /new Date\(ms\)\.toISOString\(\)\.slice\(0, 10\) === v/.test(src) && !/!isNaN\(Date\.parse\(v\)\)/.test(src));
+    check("…and an impossible or half-given range is refused, not swapped for the default view",
+      /Pick both a start date and an end date\./.test(src) && /That isn't a real date/.test(src));
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);
