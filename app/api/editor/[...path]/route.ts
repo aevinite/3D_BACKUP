@@ -30,7 +30,7 @@ import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { mergeParentTable } from "@/lib/tableMerge";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { raiseIssue } from "@/lib/issues";
-import { effectiveTaxRate, taxComponents, TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
+import { effectiveTaxRate, taxComponents, TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill, parcelTaxColumns } from "@/lib/tax";
 // The rate ONE order was charged at is decided in the same file the printed bill uses, so the
 // day-close sheet and the paper can never answer differently — see billTaxOf() below.
 import BILLDOC from "@/public/panels/billdoc.js";
@@ -2210,10 +2210,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const [gstSetQ, gstRestQ] = await Promise.all([
+      const [gstSetQ, gstRestQ, gstParcelQ] = await Promise.all([
         sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, gstin`).eq("restaurant_id", rid).maybeSingle(),
         // The restaurant's own name for the filing's heading — same rule as the Z-report (item 11).
         sb.from("restaurants").select("id, slug, name, logo_text").eq("id", rid).maybeSingle(),
+        // COUNTER PARCELS (owner, 2026-10-11: "do parcel one" — mig 421). A parcel is a sale this restaurant
+        // owes GST on, so it is in the filing — on the dine-in bills' own basis: paid, not cancelled, by the
+        // day it was made. Each carries the split it was priced with (tax_basis at_sale / repriced); an older
+        // parcel saved without its tax is counted with its value and NAMED, never folded in as a guess.
+        // Zomato / Swiggy rows are not read: the app pays that GST itself (CGST §9(5)).
+        sb.from("aggregator_orders").select("taxable_base,nontax_amount,discount,tax_rate,tax,total,tax_basis,created_at")
+          .eq("restaurant_id", rid).eq("source", "parcel").eq("paid", true).not("status", "in", "(cancelled,rejected)")
+          .gte("created_at", startIso).lt("created_at", endIso).limit(20000),
       ]);
       const set = (must(gstSetQ) || {}) as any;
       const rate = effectiveTaxRate(set);
@@ -2273,6 +2281,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // taxable base rounds at a different point, so the split wouldn't reconcile on the filing
       // document (off by a few paise/rupees). Split the ACTUAL rounded total tax by component rate
       // instead, with the last component absorbing the remainder → the parts sum to tax exactly.
+      // The parcels join the same per-day lines (see the read above). A failed read is said in the note and
+      // the figures stay dine-in, never a silent zero passed off as "no parcels".
+      const parcelRowsG = gstParcelQ.error ? null : ((gstParcelQ.data || []) as { taxable_base: number | null; nontax_amount: number | null; discount: number | null; tax_rate: number | null; tax: number | null; total: number | null; tax_basis: string | null; created_at: string }[]);
+      let parcelsKnown = 0, parcelsTax = 0, untaxedParcels = 0, untaxedTotal = 0;
+      for (const pr of parcelRowsG || []) {
+        if (pr.tax_basis !== "at_sale" && pr.tax_basis !== "repriced") { untaxedParcels++; untaxedTotal += Number(pr.total) || 0; continue; }
+        const disc = Number(pr.discount) || 0, base = Number(pr.taxable_base) || 0;
+        const tx = r2((Number(pr.tax_rate) || 0) > 0 ? base - disc : base), t = Number(pr.tax) || 0, tot = Number(pr.total) || 0, nt = Number(pr.nontax_amount) || 0;
+        taxable += tx; tax += t; gross += tot; mrp += nt; parcelsKnown++; parcelsTax += t;
+        const day = istDay(pr.created_at);
+        const d = byDay.get(day) || { taxable: 0, tax: 0, mrp: 0, gross: 0, bills: 0 };
+        d.taxable += tx; d.tax += t; d.mrp += nt; d.gross += tot; d.bills += 1; byDay.set(day, d);
+      }
       const taxR2 = r2(tax);
       const compRateSum = comps.reduce((s, c) => s + c.rate, 0);
       let compAllocated = 0;
@@ -2293,9 +2314,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         restaurant: { name: BILLDOC.billIdentity(set, gstRestQ.data || { id: rid }).name, gstin: set.gstin || "" },
         ratePct: Math.round(rate * 10000) / 100,
         components,
-        totals: { bills: bills.size, taxable: r2(taxable), tax: r2(tax), mrp: r2(mrp), gross: r2(gross) },
+        totals: { bills: bills.size + parcelsKnown, taxable: r2(taxable), tax: r2(tax), mrp: r2(mrp), gross: r2(gross) },
+        parcels: parcelRowsG === null ? null : { parcels: parcelsKnown, tax: r2(parcelsTax), untaxedParcels, untaxedTotal: r2(untaxedTotal) },
         days: [...byDay.entries()].sort().map(([date, v]) => ({ date, taxable: r2(v.taxable), tax: r2(v.tax), mrp: r2(v.mrp), gross: r2(v.gross), bills: v.bills })),
-        note: `Paid dine-in bills for ${windowLabel} (this restaurant's own sales; excludes Zomato/Swiggy). Discount applied before tax.`
+        note: `Paid dine-in bills${parcelRowsG === null ? "" : " and counter parcels"} for ${windowLabel} (this restaurant's own sales; excludes Zomato/Swiggy, whose GST the app pays). Discount applied before tax.`
+          + (parcelsKnown > 0 ? ` Includes ${parcelsKnown} counter parcel${parcelsKnown === 1 ? "" : "s"} (₹${r2(parcelsTax).toFixed(2)} of tax).` : "")
+          + (untaxedParcels > 0 ? ` ${untaxedParcels} older parcel${untaxedParcels === 1 ? "" : "s"} (₹${r2(untaxedTotal).toFixed(2)}) ${untaxedParcels === 1 ? "was" : "were"} saved without ${untaxedParcels === 1 ? "its" : "their"} tax and ${untaxedParcels === 1 ? "is" : "are"} not in these figures — check the paper bill${untaxedParcels === 1 ? "" : "s"}.` : "")
+          + (parcelRowsG === null ? " Counter parcels could not be read just now, so these figures are dine-in only — try again." : "")
           + (mrp > 0 ? " MRP / nil-rated turnover is listed separately — no GST is charged on it." : ""),
       });
     }
@@ -3856,7 +3881,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         }
         parcelDisc = Math.round(Math.max(rawPDisc, 0) * 100) / 100;
       }
-      total = splitBill(picked, parcelSet, parcelDisc).total;
+      const parcelSplit = splitBill(picked, parcelSet, parcelDisc);
+      total = parcelSplit.total;
 
       // HOW IT WAS PAID, IN THE ONE SPELLING EVERY BREAKDOWN COUNTS — CHECKED BEFORE THE ROW
       // EXISTS (2026-08-05). Two faults, one line: it wrote `String(method || "cash").slice(0, 20)`
@@ -3895,7 +3921,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // _orders has no discount column, so the record rides in `payload` (JSONB, already written
       // here): what came off, and the reason, readable on the parcel and printed on its bill.
       const pDisc = parcelDisc > 0 ? { discount: parcelDisc, discount_note: String(body?.discountNote || "").slice(0, 200) || null } : {};
-      const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg, ...pDisc } };
+      // THE TAX THAT WAS CHARGED IS RECORDED WITH IT (mig 421, owner 2026-10-11: "do parcel one"). The
+      // same split that set `total` — one splitBill(), so record and paper cannot disagree — is what
+      // both GST reports now read (lfh_owner_parcel_tax). It used to be thrown away here.
+      const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg, ...pDisc }, ...parcelTaxColumns(parcelSplit) };
       if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = payMethod as string; }
       if (row?.id) { const up = await sb.from("aggregator_orders").update(patch).eq("id", row.id).eq("restaurant_id", rid); if (up.error) throw new Error(up.error.message); }
       await log("manager", "parcel_place", { restaurant_id: rid, detail: `${paid === true ? "paid" : "unpaid"} · ₹${total}${parcelDisc > 0 ? ` · discount ₹${parcelDisc}` : ""}`, device_id: dev });

@@ -226,6 +226,19 @@ export function splitBill(lines: SplitLine[], raw: ModeSettings, discount = 0): 
   };
 }
 
+// The columns a counter parcel keeps of its own split (mig 421). aggregator_orders once held only
+// `total`, so the tax inside a parcel was on no record and neither GST report could count it. Both
+// doors that make a parcel (manager QO/P, waiter tablet) and scripts/backfill-parcel-tax.mjs call
+// this with the splitBill() that set the parcel's total — one shape, written one way.
+//   basis "at_sale"  — written as the parcel is made;
+//   basis "repriced" — an older parcel whose own lines give back its stored total to the paisa.
+export function parcelTaxColumns(sp: BillSplit, basis: "at_sale" | "repriced" = "at_sale") {
+  return {
+    subtotal: sp.subtotal, discount: sp.discount, taxable_base: sp.taxableBase,
+    nontax_amount: sp.nontaxAmount, mrp_amount: sp.mrpAmount, tax_rate: sp.rate, tax: sp.tax, tax_basis: basis,
+  };
+}
+
 // maxDiscount() USED TO LIVE HERE — a one-line wrapper returning splitBill(lines, s, 0).discountBase.
 // Nothing in app/, lib/ or components/ ever called it (sweep #10 T30 measured it, item 14,
 // 2026-10-09): the panels read `discountBase` off splitBill directly, so it was a second name for one
