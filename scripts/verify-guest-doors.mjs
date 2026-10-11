@@ -1057,6 +1057,10 @@ flush();
   { const c = r2("components/CartPanel.tsx");
     check("item 13 — the bill builds one menu lookup per menu change instead of walking the menu for every line",
       !/menuItems\.find\(/.test(c) && /const menuById = useMemo\(/.test(c)); }
+  // item 14 — a body the database cannot read is refused at the door, not retried as "busy"
+  { const po = r2("app/api/guest/place-order/route.ts"), cw = r2("app/api/guest/call-waiter/route.ts");
+    check("item 14 — malformed items / allergies / token / table are refused as bad_body before any database call",
+      /if \(!items\.every\(goodItem\) \|\| !allergies\.every\(\(a\) => typeof a === "string"\)/.test(po) && /typeof raw\.token !== "string"/.test(cw)); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

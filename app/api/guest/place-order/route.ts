@@ -131,6 +131,21 @@ async function postImpl(req: NextRequest): Promise<Response> {
   if (allergies.length > MAX_ALLERGIES || allergies.some((a) => typeof a === "string" && a.length > MAX_ALLERGY_LEN)) {
     return NextResponse.json({ ok: false, reason: "allergies_too_long" }, { status: 400 });
   }
+  // (After the size ceilings, so a huge body is turned away before it is walked.)
+  // ── A BODY THE DATABASE CANNOT READ IS REFUSED HERE, NOT RETRIED (sweep #10 T3 round 2, item 14) ──
+  // An item that is not an object with a dish id, an allergy that is not text, a token or table that
+  // is not text: Postgres rejected those with an error, which this route — correctly, for a REAL
+  // database error — answers as `server_busy`. So a corrupted saved order was retried by the phone
+  // for about four minutes (six rounds of backoff) before the diner was told anything. It is a body
+  // problem, not a busy restaurant: say so at once with the code the phone already words.
+  const textOrNum = (v: unknown) => v === undefined || v === null || typeof v === "string" || (typeof v === "number" && Number.isFinite(v));
+  const goodItem = (x: unknown) => !!x && typeof x === "object" && !Array.isArray(x)
+    && typeof (x as { id?: unknown }).id === "string" && (x as { id: string }).id.length > 0
+    && Number.isFinite(Number((x as { qty?: unknown }).qty ?? 1));
+  if (!items.every(goodItem) || !allergies.every((a) => typeof a === "string")
+    || !textOrNum(b.table) || (b.token !== undefined && b.token !== null && typeof b.token !== "string")) {
+    return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
+  }
 
   if (b.mode === "session") {
     if (!b.token) return NextResponse.json({ ok: false, reason: "invalid_token" }, { status: 400 });

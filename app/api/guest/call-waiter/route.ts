@@ -120,6 +120,13 @@ async function postImpl(req: NextRequest): Promise<Response> {
   if (hasAt && !Number.isFinite(at)) return NextResponse.json({ ok: false, reason: "call_too_old" });
   if (hasAt && Date.now() - at > STALE_CALL_MS) return NextResponse.json({ ok: false, reason: "call_too_old" });
 
+  // A token or table that is not text is a broken body, not a busy restaurant (item 14, as in
+  // place-order): refuse it now instead of letting the database error be retried for minutes.
+  const raw = b as { token?: unknown; table?: unknown };
+  if ((raw.token !== undefined && raw.token !== null && typeof raw.token !== "string")
+    || (raw.table !== undefined && raw.table !== null && typeof raw.table !== "string" && !(typeof raw.table === "number" && Number.isFinite(raw.table)))) {
+    return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
+  }
   const reason = String(b.reason || "").slice(0, 200);
 
   if (b.mode === "session") {
