@@ -391,7 +391,9 @@
        strictly better than printing nothing. */
     var rows = (d.lines || []).filter(Boolean).map(function (i) {
       var q = Number(i.qty) || 1;
-      var opts = Array.isArray(i.options) ? i.options.filter(function (x) { return Number(x.price); }) : [];
+      // …and an empty entry inside a dish's ADD-ONS costs nothing either (sweep #10 T14, 2026-10-12):
+      // `x.price` on a null option threw, and the guest's bill window came up blank.
+      var opts = Array.isArray(i.options) ? i.options.filter(function (x) { return x && Number(x.price); }) : [];
       var addUnit = opts.reduce(function (a, x) { return a + (Number(x.price) || 0); }, 0);
       var baseUnit = (parseFloat(i.price) || 0) - addUnit;
       measure("qty", pn(q)); measure("rate", pn(baseUnit)); measure("amt", pn(baseUnit * q));
@@ -1621,7 +1623,14 @@
   function billData(a) {
     a = a || {};
     var s = a.settings || {};
-    var orders = a.orders || [];
+    /* A HOLE IN THE ORDERS LIST MUST NOT COST THE BILL — HERE TOO (sweep #10 T14, 2026-10-12).
+       billMoney() was taught this on 2026-09-07 (T11 sweep #8) and its note says why: a throw here
+       is a BLANK bill window. But billData() — the function every panel actually calls to make the
+       bill — then read `o.status` on the very same list three more times, so billData({orders:
+       [null, order]}) still threw, after billMoney had survived it. verify:print-paper asserted the
+       guard on billMoney and never on billData, so the guard and the bill disagreed. Dropped once,
+       here, so every read below sees the same list billMoney saw. */
+    var orders = (a.orders || []).filter(Boolean);
     var m = a.money || billMoney(orders, s);
     // THE ITEM ROWS AND THE MONEY MUST DROP THE SAME ORDERS (2026-08-06). billMoney() was taught
     // on 2026-08-05 to exclude a soft-deleted order from the subtotal, the tax and the TOTAL; this
@@ -2042,8 +2051,9 @@ function banquetDocHtml(a) {
       ? [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }]
       : [{ label: bi.taxLabel, rate: Math.round(billRate * 10000) / 100 }]);   // one word — see billData's mrpNote
   let taxRows;
-  if (Array.isArray(b.tax_lines) && b.tax_lines.length) {
-    taxRows = b.tax_lines.map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));
+  if (Array.isArray(b.tax_lines) && b.tax_lines.filter(Boolean).length) {
+    // …and so does an empty frozen tax line (sweep #10 T14, 2026-10-12).
+    taxRows = b.tax_lines.filter(Boolean).map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));
   } else {
     const rateSum = comps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
     let run = 0;
@@ -2171,8 +2181,10 @@ function banquetDocHtml(a) {
 
   // Terms box: the advances, the remark, and the function line — each only if present.
   const terms = [];
-  for (const a of (b.advances || [])) {
-    if (Number(a.amt) > 0) {
+  // An empty entry in the advances list (JSONB, written with no cast — see bqDay above) costs that
+  // one line, never the sheet (sweep #10 T14, 2026-10-12: `a.amt` on null threw).
+  for (const a of (Array.isArray(b.advances) ? b.advances : [])) {
+    if (a && Number(a.amt) > 0) {
       const d = bqDay(a.date);
       terms.push(`${esc(String(a.mode || "").toUpperCase())} PAY${d ? " DT." + d : ""} — ${bq0(a.amt)}/-`);
     }
