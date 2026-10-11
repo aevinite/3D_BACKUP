@@ -20,7 +20,7 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
      the code it is judging can only ever agree with it. Kept in step by P04184, which asserts the
      phrase list has not moved. */
   const NOISE = [
-    "Failed to fetch", "NetworkError when attempting to fetch", "Load failed",
+    "Failed to fetch", "NetworkError when attempting to fetch resource", "Load failed",
     "The network connection was lost", "The Internet connection appears to be offline", "network error",
   ];
   const isBenign = (message) => {
@@ -39,6 +39,17 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
   check("P04179", "the network-noise filter matches the browser's WHOLE message, never a fragment", () =>
     /bare\.toLowerCase\(\) === NETWORK_NOISE\[i\]\.toLowerCase\(\)/.test(isBenignSrc));
   check("P04180", "'Menu Load failed' (our own words) is still reported", () => isBenign("Menu Load failed") === false);
+  // Sweep #10 T16, 2026-10-12: the list is compared WHOLE, so each entry must be the browser's EXACT
+  // sentence, not a fragment of it. These are the real rejections each engine throws for a dropped
+  // request — the Firefox one went unmatched for two months because the list held only its first words.
+  // Judged against the FILE's own list (extracted, not evaluated), so a fragment there turns this red.
+  check("P185001", "every engine's REAL network-drop wording is dropped by errlog.js's own phrase list", () => {
+    const listed = [...(R.match(/var NETWORK_NOISE = \[([\s\S]*?)\];/) || ["", ""])[1].matchAll(/"([^"]+)"/g)].map((m) => m[1].toLowerCase());
+    const real = ["TypeError: Failed to fetch", "TypeError: NetworkError when attempting to fetch resource.", "TypeError: Load failed",
+      "The network connection was lost.", "The Internet connection appears to be offline."];
+    const missed = real.filter((m) => !listed.includes(m.replace(/^[A-Za-z]*Error:\s*/, "").replace(/[.\s]+$/, "").toLowerCase()));
+    return missed.length ? `filed as a crash: ${missed.join(" | ")}` : true;
+  });
   check("P04181", "a 'TypeError: Failed to fetch' prefix is still recognised as noise", () => isBenign("TypeError: Failed to fetch") === true);
   check("P04182", "a trailing full stop / whitespace does not defeat the match", () => isBenign("Load failed. ") === true);
   check("P04183", "the late print rejection is filtered (auto-print is best-effort)", () =>
