@@ -1901,4 +1901,4 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [x] **Waiter vs manager tile wording compared on screen** (item 10) — all 30 French House tiles: same number, seats, "Free" label and legend; the waiter tile adds a 🪑 icon.
 - [x] **The three Pay-later sub-switches** (item 13) — already deleted on main by another terminal (5a151f78, 2026-10-10); nothing read them.
 - [x] **594 new checks, every reachable line run** — coverage-measured (route 534 → 17 never-run lines, all 18 left classified), every fix sabotage-tested; ledger `T13-S10.md` → Round 2.
-- [ ] **The cancel-order question says "Keep order", not "Cancel"** (item 34) — built and seen on the dev server; live check on backup after PR merges.
+- [x] **The cancel-order question says "Keep order", not "Cancel"** (item 34) — Waiter tablet → ✎ Edit → ✕ Cancel order. VERIFIED live on backup (PR #1499): panel fc68fc62 shows "Keep order" / "Cancel order"; Keep order leaves the ticket alone.
