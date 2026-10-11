@@ -686,6 +686,32 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
   }
 }
 
+// ── 16. AN ELEMENT THAT STARTS `hidden` CARRIES NO INLINE display ─────────────────────────────
+// (sweep #10 T6, 2026-10-12.) An inline `style="display:flex"` beats the browser's own
+// [hidden]{display:none}, so the element is shown anyway and the code that toggles `.hidden` on it
+// changes nothing a person can see. Found on the manager panel's Rating review: the internal-note
+// box carried both, so it sat open under every rating and ✎ Note was a tap that did nothing.
+// Every panel script and page is scanned, because the trap is the same in all of them; the fix is
+// always to put the display on an INNER box, or to use a class with its own [hidden] rule.
+{
+  const files = [];
+  const walk = (d) => { for (const f of fs.readdirSync(d)) { const p = d + "/" + f; const s = fs.statSync(p);
+    if (s.isDirectory()) { if (!/\/vendor$/.test(p)) walk(p); } else if (/\.(js|html)$/.test(f)) files.push(p); } };
+  try { walk("public/panels"); } catch { /* no panels in this checkout */ }
+  const SHAPES = [
+    /<[a-z][a-z0-9-]*\b[^<>]*\shidden(?=[\s>/])[^<>]*\sstyle\s*=\s*"[^"]*\bdisplay\s*:\s*(?!none)/gi,
+    /<[a-z][a-z0-9-]*\b[^<>]*\sstyle\s*=\s*"[^"]*\bdisplay\s*:\s*(?!none)[^"]*"[^<>]*\shidden(?=[\s>/])/gi,
+  ];
+  const hits = [];
+  for (const f of files) {
+    const s = fs.readFileSync(f, "utf8");
+    for (const re of SHAPES) for (const m of s.matchAll(re)) hits.push(`${f}:${s.slice(0, m.index).split("\n").length}`);
+  }
+  if (hits.length) bad("an element starts `hidden` but carries an inline display, so it is shown anyway",
+    hits.join(", ") + "\n         Inline display beats [hidden]. Move the display onto an inner box (or a class), so toggling .hidden really hides it.");
+  else ok("no panel element is both `hidden` and given an inline display");
+}
+
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");

@@ -5830,7 +5830,12 @@ function renderRatings(d) {
       ${r.comment ? `<p style="margin:8px 0 0;font-size:13px;line-height:1.5;overflow-wrap:anywhere;word-break:break-word">“${esc(r.comment)}”</p>` : ""}
       <div style="margin-top:8px;font-size:12px;color:#888;overflow-wrap:anywhere">${r.name ? `<b>${esc(r.name)}</b>` : "Guest"} · ${esc(when)}${r.acknowledged && r.acknowledged_by ? ` · handled by ${esc(r.acknowledged_by)}` : ""}</div>
       ${r.staff_note ? `<div style="margin-top:8px;font-size:12.5px;background:rgba(127,127,127,.08);border-radius:8px;padding:6px 9px;overflow-wrap:anywhere">📝 ${esc(r.staff_note)}</div>` : ""}
-      <div data-rnoterow="${r.id}" hidden style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><input class="search" style="flex:1;min-width:180px" maxlength="500" placeholder="Internal note" value="${esc(r.staff_note || "")}"/><button class="btn primary" data-rnotesave="${r.id}">Save</button></div>
+      ${"" /* THE NOTE BOX OPENS ON ✎ NOTE, NOT ALWAYS (sweep #10 T6, 2026-10-12). It carried the hidden
+            attribute AND an inline display:flex, and an inline display beats the browser's own [hidden]
+            rule — so the box sat open under every rating and ✎ Note toggled an attribute nobody could
+            see: a tap that did nothing. The flex row lives on an INNER box now, so hidden on the outer
+            one really hides it. verify:ui section 16 keeps the two apart in every panel. */}
+      <div data-rnoterow="${r.id}" hidden><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><input class="search" style="flex:1;min-width:180px" maxlength="500" placeholder="Internal note" value="${esc(r.staff_note || "")}"/><button class="btn primary" data-rnotesave="${r.id}">Save</button></div></div>
     </div>`;
   }).join("") : `<div class="empty">${state.ratingsFilter === "unhandled" ? "Nothing left to handle 🎉" : "No guest ratings yet."}</div>`;
   body.innerHTML = summaryHtml + filterHtml + cards;
