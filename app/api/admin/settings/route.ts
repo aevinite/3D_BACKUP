@@ -55,11 +55,18 @@ function describeStack(): { name: string; live: boolean; ref: string } {
 // row would make a single truth into N truths that can drift.
 const LOCK_KEY = "log_retention_lock";
 type RetentionLock = { locked: boolean; at: string | null };
-async function readLock(): Promise<RetentionLock> {
+async function readLock(): Promise<RetentionLock | { error: { message?: string } }> {
   const r = await sb.from("app_config").select("value").eq("key", LOCK_KEY).maybeSingle();
+  // ── A FAILED READ IS NOT "NEVER LOCKED" (sweep #10 T29, item 7) ──────────────────────────────────
+  // This folded the error into the missing-row case, so on a database hiccup the Settings page showed
+  // the lock OFF ("Unlocked — a restaurant's owner can set their own window") while every restaurant was
+  // in fact locked — and the manager panel's own read of this same row (app/api/editor → retentionLock()) fails
+  // CLOSED, so the two screens disagreed about one fact, which the GET below promises they
+  // never do. The error now travels up and the page shows its own "Couldn't load — Retry".
+  if (r.error) return { error: r.error };
   // A missing row means "never locked" — the honest default, and NOT an error the screen should
   // show: a platform that has never used the lock is the normal state.
-  if (r.error || !r.data) return { locked: false, at: null };
+  if (!r.data) return { locked: false, at: null };
   const v = (r.data.value || {}) as Record<string, unknown>;
   return { locked: v.locked === true, at: typeof v.at === "string" ? v.at : null };
 }
@@ -69,6 +76,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const r = await sb.from("settings").select("oplog_retention_days, custlog_retention_days, audit_retention_years").eq("id", "site").limit(1);
   if (r.error) return adminFail("the log-retention settings", r.error, { action: "load" });
+  const lock = await readLock();
+  if ("error" in lock) return adminFail("the log-retention lock", lock.error, { action: "load" });
   const s = r.data?.[0] || {};
   return NextResponse.json({
     // Default to the 30-day MAX (clampDays cap), not 90 — an unconfigured row used to report
@@ -88,7 +97,7 @@ export async function GET(req: NextRequest) {
     environment: describeStack(),
     // The manager panel reads the same fact through its own whoami, so the two screens can never
     // disagree about whether a restaurant may change this.
-    retentionLock: await readLock(),
+    retentionLock: lock,
   });
 }
 

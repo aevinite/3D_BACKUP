@@ -354,5 +354,22 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 12 · "COULDN'T READ THE LOCK" IS NOT "UNLOCKED" (sweep #10 T29, item 7) ──────────────────────
+// Admin console → Settings → the log-retention lock. A failed read of app_config showed the lock OFF
+// while the manager panel's read of the same row fails CLOSED. The admin route must not fold an error
+// into the missing-row answer.
+{
+  const rel = "app/api/admin/settings/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Settings → the retention lock: a failed read is not answered as 'never locked'",
+      !/if \(r\.error \|\| !r\.data\) return \{ locked: false/.test(src) && /if \(r\.error\) return \{ error: r\.error \}/.test(src),
+      "a hiccup shows every restaurant as unlocked while the manager panel says locked");
+    check("…and the GET refuses in words rather than drawing a guessed lock",
+      /if \("error" in lock\) return adminFail\(/.test(src));
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);
