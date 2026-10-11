@@ -7,6 +7,7 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { MODULE_DEFS } from "@/lib/accessModel";
 import { readInChunks } from "@/lib/inChunks";
+import { pgError } from "@/lib/dbRefusal";
 
 /** One module's ladder as it is stored in settings.modules (mig 320) — the JSONB alternative to the
  *  four columns a module used to need. Absent keys read as false/false/true (new modules start OFF). */
@@ -186,11 +187,17 @@ export const payrollLadder = (rid: string) =>
 export async function payrollEffectiveByRid(ids: string[]): Promise<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
   if (!ids.length) return out;
-  const { rows } = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
+  const res = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
     sb.from("settings")
       .select("restaurant_id, payroll_allowed, payroll_owner_control, payroll_enabled")
       .in("restaurant_id", chunk).limit(chunk.length));
-  for (const r of rows || []) {
+  // A FAILED READ IS BUSY, NEVER "OFF" (sweep #10 T13 round 2, item 27). `rows || []` turned a
+  // database blip into "no restaurant has this module": the owner's day sheet dropped its staff-pay
+  // expense (profit read too high — the very "figure that is too small" analytics guards against),
+  // the stock estate called every box switched off, and both answers could be cached. Every caller
+  // sits inside a try that answers "couldn't load — try again" (dbFail), which is the truth.
+  if (!res.rows) throw pgError(res.error);
+  for (const r of res.rows) {
     out[String(r.restaurant_id)] =
       r.payroll_allowed === true && (r.payroll_owner_control !== true || r.payroll_enabled !== false);
   }
@@ -208,11 +215,12 @@ export const inventoryLadder = (rid: string) =>
 export async function inventoryEffectiveByRid(ids: string[]): Promise<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
   if (!ids.length) return out;
-  const { rows } = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
+  const res = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
     sb.from("settings")
       .select("restaurant_id, inventory_allowed, inventory_owner_control, inventory_enabled")
       .in("restaurant_id", chunk).limit(chunk.length));
-  for (const r of rows || []) {
+  if (!res.rows) throw pgError(res.error); // see payrollEffectiveByRid — a failed read is busy, never "off"
+  for (const r of res.rows) {
     out[String(r.restaurant_id)] =
       r.inventory_allowed === true && (r.inventory_owner_control !== true || r.inventory_enabled !== false);
   }
