@@ -150,8 +150,10 @@ P("P42052", "…and nothing in it writes to the tracked-orders list",
   !/lfh_active_orders/.test(F.sync));
 P("P42053", "the sync still stands down entirely when the restaurant has sessions off",
   /enabled\.current = \(await getSettings\(restaurantId\)\)\.sessionsEnabled/.test(F.sync));
+// RE-AIMED, sweep #10 T4 item 2 (2026-10-12): a failure is now left UNKNOWN (asked again on the next
+// tick) instead of cached as OFF for the whole visit — still caught, still never crashes the menu.
 P("P42054", "…and a settings failure is treated as OFF rather than crashing the menu",
-  /catch \{ enabled\.current = false; \}/.test(F.sync));
+  /catch \{ return; \}/.test(F.sync) && !/catch \{ enabled\.current = false; \}/.test(F.sync));
 P("P42055", "the component still renders nothing at all",
   /return null;/.test(F.sync));
 P("P42056", "every listener it adds is removed on unmount",

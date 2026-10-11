@@ -217,8 +217,12 @@ P("P41071", "the settings read asks a function, not the settings table, so a col
   /\.rpc\("lfh_guest_settings", \{ p_restaurant_id: restaurantId \}\)/.test(F.menu));
 P("P41072", "…and a failure THROWS rather than silently returning defaults as if they were real",
   /throw new Error\(`Failed to load settings: \$\{error\.message\}`\)/.test(F.menu));
+// RE-AIMED, sweep #10 T4 item 2 (2026-10-12): the table card, the host prompt and the table bill now
+// read the switch through lib/tableConnection.ts watchSessionsSwitch(), which catches AND asks again.
 P("P41073", "…which every caller in the territory catches, so no screen dies of it",
-  ["cart", "chef", "tracker", "tbill", "widget", "owner", "sync"].every((k) => /catch/.test(F[k])));
+  ["cart", "chef", "tracker", "sync"].every((k) => /catch/.test(F[k]))
+  && ["tbill", "widget", "owner"].every((k) => /watchSessionsSwitch\(restaurantId,/.test(F[k]))
+  && /\.catch\(\(\) => \{\s*if \(!alive\) return;/.test(read("lib/tableConnection.ts")));
 P("P41074", "a dish row maps to camelCase in ONE place",
   /function mapRow\(row: any, agg\?: RatingAgg\): MenuItem/.test(F.menu));
 P("P41075", "…where a missing description becomes an empty string, not the word undefined",

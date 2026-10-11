@@ -52,6 +52,13 @@
 //      that tells a diner to check their internet must now sit behind a test that rules out "it
 //      was us".
 //
+//   I. ONE FAILED READ OF THE RESTAURANT'S SWITCH IS ASKED AGAIN, NEVER TAKEN AS "OFF" FOR THE VISIT
+//      (sweep #10 T4, item 2). The table card, the host's "let them in" prompt, the shared basket
+//      and the live table bill each read "are table sessions on here?" once, and a failed read left
+//      the answer at false until the diner reloaded. lib/tableConnection.ts → watchSessionsSwitch()
+//      asks again on a widening wait; this section RUNS it against a read that fails twice, and
+//      checks all four components use it (the basket, which already re-ticks, leaves it unknown).
+//
 //   B. THE TABLE NUMBER THAT LEAVES ANY OF THE THREE DOORS IS THE ONE THE FLOOR USES.
 //      A table's identity everywhere is its NUMBER, kept as text and compared with `=`
 //      (migration 131's own header; lfh_table_status does `WHERE table_number = ...`). "007"
@@ -67,7 +74,8 @@
 // Static — no key, no database, no running app, so it is safe in the PostToolUse hook.
 //   node scripts/verify-session-gate-taps.mjs
 //   node scripts/verify-session-gate-taps.mjs --self-test   # proves each check can go red
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -352,5 +360,96 @@ if (process.argv.includes("--self-test")) {
   run(src); // leave the real result printed last
 }
 
-console.log(bad ? `\n✗ ${bad} check(s) failed` : "\n✓ every screen the sheet puts up can be seen, and the floor gets the table number it knows");
+// ── I. the restaurant's switch is asked until it is answered ────────────────────────────────────────
+// Static half: every widget that reads the switch goes through the retrying reader (or, for the
+// basket, leaves a failed read UNKNOWN so its next tick asks again) — and none swallows a failure
+// into "off". Behavioural half: the real watchSessionsSwitch, bundled with a fake getSettings that
+// fails twice and then answers, under a clock that runs every wait at once.
+const WIDGETS = ["components/SessionStatusWidget.tsx", "components/SessionOwner.tsx", "components/SessionTableBill.tsx"];
+function sectionIStatic(read) {
+  let n = 0; const ok = (c, m) => { if (c) console.log(`  ✓ ${m}`); else { n++; console.log(`  ✗ ${m}`); } };
+  for (const f of WIDGETS) {
+    const c = codeOnly(read(f));
+    ok(/watchSessionsSwitch\(restaurantId,/.test(c), `${f} asks the switch through the retrying reader`);
+    ok(!/getSettings\(restaurantId\)/.test(c), `…and no longer makes a one-shot read of its own`);
+    ok(/stopSwitch\(\)/.test(c), `…and stops the retry when it goes away`);
+  }
+  const cart = codeOnly(read("components/SessionCartSync.tsx"));
+  ok(/catch \{ return; \}/.test(cart) && !/catch \{ enabled\.current = false; \}/.test(cart),
+    "the shared basket leaves a failed read unknown, so its next tick asks again, instead of caching 'off'");
+  const tc = codeOnly(read("lib/tableConnection.ts"));
+  ok(/export function watchSessionsSwitch\(/.test(tc), "the retrying reader exists in lib/tableConnection.ts");
+  ok(/SWITCH_RETRY_MS\[attempt\] \?\? RT_BACKUP_MS/.test(tc), "…widening, then settling on the shared 60-second backstop (never faster)");
+  ok(/0\.75 \+ Math\.random\(\) \* 0\.5/.test(tc), "…jittered, so a room full of phones does not come back on one beat");
+  return n;
+}
+async function sectionIRun(tcSource) {
+  let n = 0; const ok = (c, m) => { if (c) console.log(`  ✓ ${m}`); else { n++; console.log(`  ✗ ${m}`); } };
+  const esbuild = (await import("esbuild")).default;
+  const cache = join(ROOT, "node_modules/.cache"); mkdirSync(cache, { recursive: true });
+  const stub = join(cache, "vsg-menu-stub.mjs");
+  writeFileSync(stub, `export let calls = 0; export let failFirst = 2;
+export function reset(k) { calls = 0; failFirst = k; }
+export function getSettings(rid) { calls++; return calls <= failFirst ? Promise.reject(new Error("statement timeout")) : Promise.resolve({ sessionsEnabled: true, rid }); }`);
+  // The two neighbours it imports are stood in for too: the real ones reach the browser's storage
+  // and the database client, and this check is about the retry, nothing else.
+  const nb = join(cache, "vsg-neighbours.mjs");
+  writeFileSync(nb, "export const getStoredSession = () => null; export const getScannedTable = () => ''; export const RT_BACKUP_MS = 60000;");
+  const out = join(cache, "vsg-tableConnection.cjs");
+  await esbuild.build({ stdin: { contents: tcSource, resolveDir: join(ROOT, "lib"), loader: "ts", sourcefile: "tableConnection.ts" },
+    bundle: true, platform: "node", format: "cjs", outfile: out, logLevel: "silent",
+    plugins: [{ name: "stand-ins", setup(b) {
+      b.onResolve({ filter: /^\.\/menu$/ }, () => ({ path: stub }));
+      b.onResolve({ filter: /^\.\/(session|table|orderStatus)$/ }, () => ({ path: nb }));
+    } }] });
+  const req = createRequire(import.meta.url); delete req.cache[out];
+  const mod = req(out);
+  // A clock that runs every wait at once, and remembers how long each one was meant to be.
+  const realST = globalThis.setTimeout; const waits = [];
+  globalThis.setTimeout = (fn, ms) => { waits.push(ms); return realST(fn, 0); };
+  try {
+    const answers = []; let firstFail = 0;
+    await new Promise((resolve) => {
+      const stop = mod.watchSessionsSwitch("rid-1", (s) => { answers.push(s); stop(); resolve(); }, () => { firstFail++; });
+      realST(resolve, 3000);
+    });
+    ok(answers.length === 1 && answers[0].sessionsEnabled === true, `a read that fails twice is answered on the third ask (${answers.length} answer(s))`);
+    ok(firstFail === 1, `…and the caller hears about the failure ONCE, not once per attempt (${firstFail})`);
+    ok(waits.length === 2 && waits[0] >= 1500 && waits[0] <= 2500 && waits[1] >= 3750 && waits[1] <= 6250,
+      `…after a widening, jittered wait (${waits.map((w) => w + "ms").join(", ")})`);
+    // stopping it really stops it
+    waits.length = 0; let late = 0;
+    const stop2 = mod.watchSessionsSwitch("rid-2", () => { late++; });
+    stop2();
+    await new Promise((r) => realST(r, 50));
+    ok(late === 0, "…and a reader stopped before it answered never calls back");
+  } catch (e) { ok(false, `the reader could not be run: ${e && e.message}`); }
+  finally { globalThis.setTimeout = realST; }
+  return n;
+}
+{
+  const readDisk = (f) => readFileSync(join(ROOT, f), "utf8");
+  console.log("\nI. one failed read of the restaurant's switch is asked again, never taken as 'off'");
+  bad += sectionIStatic(readDisk);
+  bad += await sectionIRun(readDisk("lib/tableConnection.ts"));
+  if (process.argv.includes("--self-test")) {
+    console.log("\nSELF-TEST (section I)");
+    const tcSrc = readDisk("lib/tableConnection.ts");
+    const quiet = async (fn) => { const b = console.log; console.log = () => {}; try { return await fn(); } finally { console.log = b; } };
+    const bentRetry = tcSrc.replace("timer = setTimeout(() => { timer = null; if (alive) ask(); }, Math.round(wait * (0.75 + Math.random() * 0.5)));", "void wait;");
+    if (bentRetry === tcSrc) { console.log("  ✗ sabotage 'the retry removed' matched nothing"); bad++; }
+    else { const r = await quiet(() => sectionIRun(bentRetry)); if (r > 0) console.log(`  ✓ the retry removed → ${r} check(s) red`); else { console.log("  ✗ the retry removed → still green"); bad++; } }
+    for (const [what, file, from, to] of [
+      ["the card back to a one-shot read", "components/SessionStatusWidget.tsx", "watchSessionsSwitch(restaurantId,", "oneShot(restaurantId,"],
+      ["the basket caching 'off' on a blip again", "components/SessionCartSync.tsx", "catch { return; }", "catch { enabled.current = false; }"],
+    ]) {
+      const orig = readDisk(file); const bent = orig.replace(from, to);
+      if (bent === orig) { console.log(`  ✗ sabotage '${what}' matched nothing`); bad++; continue; }
+      const r = await quiet(() => sectionIStatic((f) => (f === file ? bent : readDisk(f))));
+      if (r > 0) console.log(`  ✓ ${what} → ${r} check(s) red`); else { console.log(`  ✗ ${what} → still green`); bad++; }
+    }
+  }
+}
+
+console.log(bad ? `\n✗ ${bad} check(s) failed` : "\n✓ every screen the sheet puts up can be seen, the floor gets the table number it knows, and a failed read is asked again");
 process.exit(bad ? 1 : 0);
