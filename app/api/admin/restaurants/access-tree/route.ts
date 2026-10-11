@@ -26,6 +26,8 @@ import {
 import { expectClash, clashJson } from "@/lib/clash";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// One retry for a read that failed for a plumbing reason — see lib/readRetry.ts.
+import { retryRead } from "@/lib/readRetry";
 
 export const dynamic = "force-dynamic";
 
@@ -454,7 +456,11 @@ export async function POST(req: NextRequest) {
       // columns it names explicitly, so a failed read would build a settings row out of column
       // defaults and whatever this one patch said — a restaurant born half-configured, with no
       // error anywhere. (T27 sweep #9, 2026-09-15.)
-      const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
+      // ONE quiet second try for a connection blip (sweep #10 T29, item 4 follow-up — owner: "make sure
+      // that this never happen"). lib/readRetry retries only a dropped connection / 502-type failure, once,
+      // ~0.2 s later; a real problem still reaches the refusal below. A database can always fail, so the
+      // refusal stays as the safety net — this makes a passing hiccup never reach the admin at all.
+      const template = (await retryRead(() => sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle())).result;
       if (template.error) return adminFail("these permissions", template.error, { action: "save" });
       const row = { ...cleanClonedSettings(template.data), id: rid, restaurant_id: rid, ...setPatch };
       const up = await sb.from("settings").upsert(row, { onConflict: "restaurant_id" });

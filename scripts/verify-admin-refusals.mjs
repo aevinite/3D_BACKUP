@@ -309,14 +309,20 @@ const NOT_YET = new Map([
   for (const abs of walk(dir)) {
     const rel = abs.slice(ROOT.length + 1);
     const src = code(rel);
-    for (const m of src.matchAll(/const (\w+) = await sb\.from\("settings"\)\.select\("\*"\)\.eq\("restaurant_id", DEFAULT_\w+\)\.maybeSingle\(\);/g)) {
+    // The read itself goes through lib/readRetry (owner, 2026-10-12: "make sure that this never
+    // happen"): one quiet second try for a dropped connection, so a passing blip never reaches the
+    // admin. The `.error` refusal below it stays as the safety net for anything that is still wrong.
+    for (const m of src.matchAll(/const (\w+) = \(await retryRead\(\(\) => sb\.from\("settings"\)\.select\("\*"\)\.eq\("restaurant_id", DEFAULT_\w+\)\.maybeSingle\(\)\)\)\.result;/g)) {
       sites++;
       const after = src.slice(m.index + m[0].length, src.indexOf(`cleanClonedSettings(${m[1]}.data)`, m.index));
       check(`${rel}: the settings template read is checked before a row is built from it`,
         new RegExp(`if \\(${m[1]}\\.error\\)`).test(after), "a failed read builds a half-configured settings row and still answers success");
     }
   }
-  check("…and the clone sites were found at all (a shape change would otherwise pass in silence)", sites >= 7, `${sites} found`);
+  check("…and the clone sites were found at all, every one read through the one-retry helper (a shape change would otherwise pass in silence)", sites >= 7, `${sites} found`);
+  // …and no clone site reads the template WITHOUT the retry (an eighth site added the old way).
+  const bare = walk(dir).filter((abs) => /await sb\.from\("settings"\)\.select\("\*"\)\.eq\("restaurant_id", DEFAULT_\w+\)/.test(code(abs.slice(ROOT.length + 1))));
+  check("…and no route reads the settings template without that retry", bare.length === 0, bare.map((a) => a.slice(ROOT.length + 1)).join(", "));
 }
 
 // ── 10 · ASSIGNING AN OWNER IS ONLY "SAVED" ONCE THEY CAN GET IN (sweep #10 T29, item 5) ─────────

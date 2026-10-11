@@ -20,6 +20,8 @@ import { cleanClonedSettings } from "@/lib/settingsClone";
 import { MP_DEFAULT } from "@/lib/accessConfig";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// One retry for a read that failed for a plumbing reason — see lib/readRetry.ts.
+import { retryRead } from "@/lib/readRetry";
 // Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
 import { pageAll } from "@/lib/pageAll";
 import { forgetRestaurant, ownersOf } from "@/lib/panelAccess";
@@ -691,7 +693,11 @@ export async function POST(req: NextRequest) {
     const rid = rest.data.id as string;
     // 2) its settings row — clone #1 as a template, then override id/restaurant_id/enabled_panels
     //    and start with a modest table_count (a new restaurant shouldn't inherit #1's big floor).
-    const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RID).maybeSingle();
+    // ONE quiet second try for a connection blip (sweep #10 T29, item 4 follow-up — owner: "make sure
+    // that this never happen"). lib/readRetry retries only a dropped connection / 502-type failure, once,
+    // ~0.2 s later; a real problem still reaches the refusal below. A database can always fail, so the
+    // refusal stays as the safety net — this makes a passing hiccup never reach the admin at all.
+    const template = (await retryRead(() => sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RID).maybeSingle())).result;
     // ── THE TEMPLATE ANSWERS FOR ITSELF (sweep #10 T29, item 4) ────────────────────────────────────
     // Its error was never looked at, so a failed read handed `null` to cleanClonedSettings(), which then
     // returns only the ~50 columns it names itself — and the create went on to answer success. The new
