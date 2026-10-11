@@ -18,6 +18,10 @@
 //   B. DATA   — no live order anywhere belongs to a closed/missing session.
 //   C. DB     — closing a session with a bare UPDATE cancels+archives its live orders, the
 //               money record survives, and a reopened table starts empty.
+//   E. STUB   — the shared close (lib/sessionClose.ts) RUN against a stand-in database: a read
+//               that did not answer is "busy" (thrown, so the panel keeps the tap), never "that
+//               table isn't for this restaurant"; a refused value and a missing row still are
+//               (sweep #10 T4, item 3). `--self-test` puts the old line back and must see it red.
 //   D. BROWSER (opt-in) — a fresh party at a table with a leftover order sees NOTHING of it,
 //               in the manager AND the waiter panel; and clicking from one table to the next
 //               keeps every tile/detail showing its OWN table (owner, 2026-07-30: "click on
@@ -344,6 +348,70 @@ head("C. Closing a session — its food leaves the floor with it");
     await sb.from("sessions").delete().eq("id", party.id);
     console.log("  · test rows cleaned up");
   }
+}
+
+// ── E. STUB: the shared close answers "busy" when it could not ask (sweep #10 T4, item 3) ────
+// Bundled with esbuild and RUN, with the database, the activity log and the removal audit stood in
+// for — nothing here touches a real row. Only the ownership read is varied; the first read that
+// would come after it throws a marker, so "it went on past the check" is visible as that marker.
+async function closeVerdicts(sessionCloseSource) {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const { createRequire } = await import("node:module");
+  const esbuild = (await import("esbuild")).default;
+  const cache = join(root, "node_modules/.cache"); mkdirSync(cache, { recursive: true });
+  const stub = join(cache, "vto-close-stubs.mjs");
+  writeFileSync(stub, `const chain = (final) => { const c = { select: () => c, eq: () => c, neq: () => c, is: () => c, in: () => c, limit: () => final(), maybeSingle: () => final(), update: () => c }; return c; };
+export const supabaseAdmin = { from: (t) => t === "sessions" ? chain(() => Promise.resolve(globalThis.__vtoOwns)) : chain(() => { throw new Error("WENT_PAST_THE_CHECK"); }) };
+export const logAction = async () => {}; export const recordRemoval = async () => {};`);
+  const out = join(cache, "vto-sessionClose.cjs");
+  await esbuild.build({ stdin: { contents: sessionCloseSource, resolveDir: join(root, "lib"), loader: "ts", sourcefile: "sessionClose.ts" },
+    bundle: true, platform: "node", format: "cjs", outfile: out, logLevel: "silent",
+    plugins: [{ name: "stand-ins", setup(b) {
+      b.onResolve({ filter: /^@\/lib\/(supabaseAdmin|oplog|removalAudit)$/ }, () => ({ path: stub }));
+      b.onResolve({ filter: /^@\/lib\/dbRefusal$/ }, () => ({ path: join(root, "lib/dbRefusal.ts") }));
+      b.onResolve({ filter: /^@\/lib\/userAuth$/ }, () => ({ path: stub }));
+    } }] });
+  const req = createRequire(import.meta.url); delete req.cache[out];
+  const mod = req(out);
+  // The bundle carries its own copy of the stand-in, so the answer is handed over on globalThis.
+  const ask = async (owns) => {
+    globalThis.__vtoOwns = owns;
+    try { const r = await mod.closeSession("11111111-1111-4111-8111-111111111111", { force: true }, { panel: "editor", restaurantId: "rid-1" }); return { returned: r }; }
+    catch (e) { return { threw: e }; }
+  };
+  return {
+    busy: await ask({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }),
+    gateway: await ask({ data: null, error: { message: "upstream request timeout" } }),
+    refused: await ask({ data: null, error: { code: "22P02", message: "invalid input syntax for type uuid" } }),
+    missing: await ask({ data: null, error: null }),
+    mine: await ask({ data: { id: "x" }, error: null }),
+  };
+}
+{
+  head("E. The shared close — \"I couldn't ask\" is not \"that table isn't yours\" (stand-in database)");
+  const srcClose = readFileSync(join(root, "lib/sessionClose.ts"), "utf8");
+  const judge = (v, quiet) => {
+    let n = 0; const ok = (c, m) => { if (c) { if (!quiet) pass(m); } else { n++; if (!quiet) fail(m); } };
+    const notYours = (x) => x.returned && x.returned.ok === false && x.returned.status === 404;
+    ok(!!v.busy.threw && !notYours(v.busy), "a statement timeout on the ownership read is THROWN (the panel answers busy and keeps the tap) — not a 404");
+    ok(!!v.gateway.threw && !notYours(v.gateway), "…and so is a gateway that never answered");
+    ok(!!v.busy.threw && v.busy.threw.code === "57014", "…carrying the database's own code, so the route can classify it");
+    ok(notYours(v.refused), "a malformed id (a refused VALUE) still answers 404 \"That table isn't for this restaurant.\"");
+    ok(notYours(v.missing), "…and so does a session that is simply not this restaurant's");
+    ok(!!v.mine.threw && /WENT_PAST_THE_CHECK/.test(String(v.mine.threw.message)), "…while this restaurant's own session goes on past the check");
+    return n;
+  };
+  try {
+    failed += judge(await closeVerdicts(srcClose), false);
+    if (process.argv.includes("--self-test")) {
+      const bent = srcClose.replace("if (ownsRead.error && !isDataRefusal(ownsRead.error)) throw ownsRead.error;\n", "");
+      if (bent === srcClose) fail("self-test: the sabotage matched nothing — this section names code that has moved");
+      else {
+        const n = judge(await closeVerdicts(bent), true);
+        n > 0 ? pass(`self-test: the old line (a failed read answered 404) turns ${n} check(s) red`) : fail("self-test: the old line stays green — this section cannot catch it");
+      }
+    }
+  } catch (e) { fail(`the shared close could not be run in memory: ${(e && e.message) || e}`); }
 }
 
 // ── D. BROWSER (opt-in): what the staff actually see ─────────────────────────
