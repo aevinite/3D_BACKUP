@@ -437,8 +437,12 @@ export default function OrderTracker() {
       setDismissing({ tx, ty }); // triggers the fly-into-the-cross animation
       // After the animation finishes, toast and actually hide the strip(s).
       setTimeout(() => {
+        // "Live status", NOT "Previous orders" (sweep #10 T3, item 3). The bill's second tab was renamed
+        // when the per-device past-bills history was removed (owner, 2026-06-17 — see lib/orderStatus.ts
+        // and the top of components/CartPanel.tsx), and this toast still sent the diner to look for a tab
+        // that no longer exists. The order is in the tab the strip itself opens. Guarded by verify:guest-doors.
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
-          message: "Tracker hidden", subtitle: "still in Previous orders",
+          message: "Tracker hidden", subtitle: "still in Live status on your bill",
           kicker: "order update", icon: "🧾", variant: "success",
         } }));
         if (wasMulti) { write(read().map((o) => (allIds.includes(o.id) ? { ...o, stripHidden: true } : o))); refresh(); broadcast(); }

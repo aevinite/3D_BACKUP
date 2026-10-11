@@ -55,7 +55,7 @@ terminals' rows — keep both sides.
 |---|---|---|---|---|---|---|---|
 | T1 | `P170001`–`P171000` | The guest menu and its three doors | ⏳ not run yet | — | — | — | — |
 | T2 | `P171001`–`P172000` | The dish page and the 3D viewer | ⏳ not run yet | — | — | — | — |
-| T3 | `P172001`–`P173000` | Ordering — the basket, placing an order, calling staff, rating | ⏳ not run yet | — | — | — | — |
+| T3 | `P172001`–`P173000` | Ordering — the basket, placing an order, calling staff, rating | `T3-S10.md` | 508 | 504 | 4 | 4 |
 | T4 | `P173001`–`P174000` | The table session — a table shows only its own party | ⏳ not run yet | — | — | — | — |
 | T5 | `P174001`–`P175000` | App shell, offline, realtime and the small shared components | ⏳ not run yet | — | — | — | — |
 | T6 | `P175001`–`P176000` | Manager panel — editor/app.js, part 1 of 3 | ⏳ not run yet | — | — | — | — |

@@ -914,6 +914,48 @@ flush();
   check("…and it never delays or fails what the diner was actually doing",
     /void renameMyReviews\(/.test(gname));
 }
+// ── WHAT THE ORDERING SCREENS SAY MUST BE TRUE (sweep #10 T3, items 1–4) ──────────────────────
+//
+// Four places a diner was told something that was not so. Each is asserted on the CODE (comments
+// stripped) and, for the two about money, on the NUMBERS the code produces. Every one was broken
+// once, on purpose, and turned this guard red before it shipped.
+{
+  say("\n── 10. what the ordering screens say is true (sweep #10 T3) ──");
+  // 1. The QR door's bell: the restaurant's own call limit answers {ok:true, reason:"rate_limited"}
+  //    and creates NO call. It must never fall into "On our way! · staff notified".
+  const chefCode = codeOnly(chef);
+  const send = chefCode.slice(chefCode.indexOf("const res = await callWaiter("));
+  const rl = send.indexOf('res.reason === "rate_limited"'), ok = send.indexOf("· staff notified`");
+  check("item 1 — a QR call the restaurant's limit refused is answered as a refusal, BEFORE the 'staff notified' branch",
+    rl >= 0 && ok > rl && /variant: "error"/.test(send.slice(rl, send.indexOf("} else", rl))));
+  // 2. A saved order's total on the chip must be the BILL's figure, not a menu-rounded one.
+  const F = await import("../lib/format.ts");
+  const chipCode = codeOnly(chip);
+  const usesMoney = /o\.track\?\.total \? ` · \$\{formatMoney\(o\.track\.total,/.test(chipCode) && !/formatPrice\(/.test(chipCode);
+  let off = 0;
+  for (const cur of F.CURRENCIES) for (let paise = 5000; paise < 400000; paise += 37) {
+    const n = paise / 100;
+    if (F.formatMoney(n, cur) !== F.formatAmount(F.toMinor(n * cur.rate, cur), cur)) off++;
+  }
+  check(`item 2 — the saved-orders chip prints an order total with the bill's rounding (formatMoney; ${off} of ${F.CURRENCIES.length * 10676} sample figures differ from the bill)`, usesMoney && off === 0);
+  // 3. The tracker's "hidden" toast must name a tab the bill actually has.
+  const sub = (codeOnly(tracker).match(/message: "Tracker hidden", subtitle: "([^"]+)"/) || [])[1] || "";
+  const tabs = [...cart.matchAll(/onClick=\{\(\) => setShowHistory\((?:true|false)\)\}>\s*([A-Za-z ]+)/g)].map((m) => m[1].trim());
+  check(`item 3 — hiding the order strip points at a tab that exists ("${sub}" · tabs: ${tabs.join(" / ")})`,
+    tabs.length === 2 && tabs.some((t) => sub.toLowerCase().includes(t.toLowerCase())) && !/previous orders/i.test(sub));
+  // 4. The total the basket STORES (the Live-status card's figure) is the bill's own total.
+  const T = await import("../lib/tax.ts");
+  const expr = (codeOnly(cart).match(/const totalUsd = ([^;]+);/) || [])[1] || "";
+  let bad = 0, n4 = 0;
+  try {
+    const stored = new Function("subtotalUsd", "usdOnTopBase", "taxRate", "roundPaise", `return ${expr};`);
+    for (const rate of [0.05, 0.12, 0.18, 0.025, 0.28]) for (let sub2 = 1; sub2 <= 4000; sub2 += 1) {
+      const bill = T.splitBill([{ price: String(sub2), qty: 1, tax_mode: "excl" }], { price_tax_mode: "excl", tax_rate: rate });
+      n4++; if (Math.abs(stored(sub2, bill.taxableBase, bill.rate, T.roundPaise) - bill.total) > 0.0001) bad++;
+    }
+  } catch { bad = -1; }
+  check(`item 4 — the basket stores the bill's own total for the same basket (${bad} of ${n4} differ)`, !!expr && bad === 0);
+}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
