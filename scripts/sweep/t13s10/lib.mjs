@@ -99,7 +99,8 @@ export async function runAll({ ledger = false, quiet = false, only = null } = {}
     seen.add(d.id);
     if (!d.rerun) {
       const n = Number(String(d.id).slice(1));
-      if (n < ID_FLOOR || n > ID_CEILING) throw new Error(`${d.id} is outside this terminal's block`);
+      // round 2 adds P169001–P169999 (claimed on main in #1491 before a row was written)
+      if (!((n >= ID_FLOOR && n <= ID_CEILING) || (n >= 169001 && n <= 169999))) throw new Error(`${d.id} is outside this terminal's blocks`);
     }
   }
   const rows = [];
@@ -175,7 +176,7 @@ export async function world(o = {}) {
   bundle(ROUTE_REL);
   const { G, resetWorld } = await state();
   resetWorld();
-  delete G.FAIL; delete G.FAIL_NTH; delete G.CALLS; delete G.RPC_IMPL;
+  delete G.FAIL; delete G.FAIL_NTH; delete G.CALLS; delete G.RPC_IMPL; delete G.RPC_ERR;
   G.HONOUR_RANGE = true; G.HONOUR_NOT_IN = true; G.HONOUR_LIMIT = true;
   G.NULL_DATA = o.nullData || undefined;
   G.SCOPE_LOG = [];
@@ -201,6 +202,7 @@ export async function world(o = {}) {
   for (const [k, v] of Object.entries(o.fix || {})) G.FIX[k] = JSON.parse(JSON.stringify(v));
   if (o.rpc) for (const [k, v] of Object.entries(o.rpc)) G.RPC_ANSWERS[k] = v;
   if (o.rpcImpl) G.RPC_IMPL = o.rpcImpl;
+  if (o.rpcErr) G.RPC_ERR = o.rpcErr;   // { name: { message, code } } — a database refusal WITH its SQLSTATE
   if (o.fail) G.FAIL = o.fail;
   if (o.failNth) G.FAIL_NTH = o.failNth;
   return G;

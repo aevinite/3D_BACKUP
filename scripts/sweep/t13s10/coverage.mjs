@@ -1,7 +1,7 @@
 // scripts/sweep/t13s10/coverage.mjs — which lines of terminal 13's seven files did NO check execute?
 //
 //   node scripts/sweep/t13s10/coverage.mjs                 # every in-memory suite, every file
-//   node scripts/sweep/t13s10/coverage.mjs --file lib/liveBoard.ts --show
+//   node scripts/sweep/t13s10/coverage.mjs --file=lib/liveBoard.ts --show   (--show prints each line + the fragment not run)
 //
 // Runs the in-memory suites (blocks a–c and round 2's, the re-run rows, verify:tablet-twins) under
 // NODE_V8_COVERAGE against the REAL source files (./hooks.mjs). A character is "not run" when the
@@ -19,7 +19,7 @@ const FILES = ["app/api/tablet/[...path]/route.ts", "lib/cancelWatch.ts", "lib/f
 const only = (process.argv.find((a) => a.startsWith("--file=")) || "").split("=")[1];
 const SHOW = process.argv.includes("--show");
 const dir = mkdtempSync(join(tmpdir(), "t13cov-"));
-const env = { ...process.env, NODE_V8_COVERAGE: dir, T13_COVERAGE: "1", T13_BLOCKS: process.env.T13_BLOCKS || "a,b,c,e,f,g,h" };
+const env = { ...process.env, NODE_V8_COVERAGE: dir, T13_COVERAGE: "1", T13_BLOCKS: process.env.T13_BLOCKS || "a,b,c,e,f,g,h,i" };
 const runs = [
   ["scripts/sweep/t13s10/run.mjs", "--quiet"],
   ["scripts/sweep/t13s10/rerun-rows.mjs"],
@@ -53,19 +53,19 @@ try {
         byProc.set(f, true);
       }
     }
-    const lines = src.split("\n"); let off = 0; const miss = [];
+    const lines = src.split("\n"); let off = 0; const miss = []; const frag = new Map();
     for (let ln = 0; ln < lines.length; ln++) {
       const L = lines[ln], code = L.replace(/\/\/.*$/, "").trim();
       if (code && !/^[*/]/.test(code) && !/^[})\];,]+$/.test(code)) {
         let bad = false;
         for (let i = 0; i < L.length; i++) { const ch = L[i]; if (/\s/.test(ch)) continue; if (L.slice(i).startsWith("//")) break; if (seen[off + i] && !run[off + i]) { bad = true; break; } }
-        if (bad) miss.push(ln + 1);
+        if (bad) { miss.push(ln + 1); frag.set(ln + 1, L.replace(/\S/g, (ch, i) => (seen[off + i] && !run[off + i] ? ch : "·")).replace(/·+/g, "·").trim()); }
       }
       off += L.length + 1;
     }
     total += miss.length;
     console.log(`${miss.length ? "✗" : "✓"} ${rel}: ${miss.length} line(s) with code no check ran${miss.length ? " — " + compress(miss) : ""}`);
-    if (SHOW) for (const m of miss) console.log(`    ${String(m).padStart(5)}  ${lines[m - 1].trim().slice(0, 150)}`);
+    if (SHOW) for (const m of miss) console.log(`    ${String(m).padStart(5)}  ${lines[m - 1].trim().slice(0, 150)}\n           not run: ${frag.get(m).slice(0, 150)}`);
   }
   console.log(`\n${total} uncovered line(s) across ${only ? 1 : FILES.length} file(s)`);
 } finally { rmSync(dir, { recursive: true, force: true }); }
