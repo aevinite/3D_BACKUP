@@ -312,7 +312,11 @@ const toast = (msg, ok = true, ms) => {
 // anyway" tap, 2026-07-29.) The second call is now refused — answered "no" so it returns
 // cleanly — and the question already on screen SHAKES so the waiter sees what's waiting.
 let confirmOpen = false;
-const confirmDialog = (text, yesLabel = "Yes, send it") => new Promise((resolve) => {
+// `noLabel` names the button that closes the box (default "Cancel", set on EVERY call so one caller's
+// label never lingers into the next). It exists for the one question whose action is itself called
+// "Cancel order": "Cancel" beside "Cancel order" left a waiter guessing which one keeps the ticket
+// (sweep #10 T13 round 2, item 34 — seen on the backup site the day item 8 shipped).
+const confirmDialog = (text, yesLabel = "Yes, send it", noLabel = "Cancel") => new Promise((resolve) => {
   if (confirmOpen) {
     const box = $("#confirmOverlay");
     if (box) { box.classList.remove("cf-nudge"); void box.offsetWidth; box.classList.add("cf-nudge"); }
@@ -321,6 +325,7 @@ const confirmDialog = (text, yesLabel = "Yes, send it") => new Promise((resolve)
   confirmOpen = true;
   $("#confirmText").textContent = text;
   $("#confirmYes").textContent = yesLabel;
+  $("#confirmNo").textContent = noLabel;
   $("#confirmOverlay").hidden = false;
   // Register with the back-stack so the hardware/browser back button closes THIS
   // dialog (as a cancel) instead of the layer underneath / the whole panel.
@@ -2348,7 +2353,7 @@ function renderPanel() {
   // endpoint is still /orders/:id/delete so older handhelds keep working, but since sweep #10 T13
   // item 3 it CANCELS — nobody at the restaurant removes a bill (R27). These words say what it does.
   document.querySelectorAll("[data-del-order]").forEach((b) => (b.onclick = async () => {
-    if (await confirmDialog("Cancel this whole order? It stays on the bill at ₹0 and in the reports, with your name on it — a manager can restore it within 30 minutes.", "Cancel order"))
+    if (await confirmDialog("Cancel this whole order? It stays on the bill at ₹0 and in the reports, with your name on it — a manager can restore it within 30 minutes.", "Cancel order", "Keep order"))
       act(() => api("POST", `/orders/${b.dataset.delOrder}/delete`));
   }));
   // ── STAFF EDIT-AFTER-CONFIRM (owner, 2026-06-17) ──────────────────────────
