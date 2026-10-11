@@ -602,7 +602,10 @@ await phase("EGRESS · restaurant names come from rows already in hand, never on
 await phase("EGRESS · every one of the picker's filters acts on rows already fetched", () => (C.repair.match(/rid \? \w+\.filter\(/g) || []).length >= 5 || "the picker costs a round-trip");
 await phase("EGRESS · the bulk resolve is ONE request, not one per tile", () => /body: JSON\.stringify\(\{ all: true/.test(C.repair) || "nineteen requests where one would do");
 await phase("EGRESS · …and 'Resolve all complaints' is one-per-row ON PURPOSE, with the reason written down", () => /One request each on purpose/.test(SRC.repair) || "the exception is undocumented and someone will 'optimise' it");
-await phase("EGRESS · a malformed restaurant id is refused before it reaches a uuid column", () => /UUID\.test\(body\.restaurant_id\)/.test(C.resolveRoute) || "a bad id would raise a database error instead of a refusal");
+// Sweep #10 T39 item 78 (2026-10-09) made this STRICTER — a present-but-malformed scope is now refused
+// with a 400 instead of being widened to "all restaurants" — and moved the test onto `rawScope`. The old
+// regex only knew `UUID.test(body.restaurant_id)`, so it went red on the better code (sweep #10 T29).
+await phase("EGRESS · a malformed restaurant id is refused before it reaches a uuid column", () => (/UUID\.test\(body\.restaurant_id\)/.test(C.resolveRoute) || (/rawScope = body\.restaurant_id/.test(C.resolveRoute) && /!\(typeof rawScope === "string" && UUID\.test\(rawScope\)\)\)\s*\{\s*return NextResponse\.json\(\{ error:[^}]*\}, \{ status: 400 \}\)/.test(C.resolveRoute))) || "a bad id would raise a database error instead of a refusal");
 await phase("EGRESS · nothing in this territory recomputes analytics on open", () => !/recompute|refresh_snapshot/.test(C.repair + C.health) || "an expensive job on a page load");
 
 // A TAP NEVER VANISHES
