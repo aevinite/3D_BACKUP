@@ -1,7 +1,7 @@
 // scripts/sweep/t13s10/new-f-route-deep.mjs — sweep #10 T13 ROUND 2, block F: the second half of the
 // waiter route's unexecuted arms (dish edits, settling, capture, points, tags, comps, khata, unpay,
 // close/open, every GET endpoint's quieter answers, and the shared helpers). Same rules as block E.
-import { check, world, call, RID, RID2 } from "./lib.mjs";
+import { check, world, call, RID } from "./lib.mjs";
 
 let n = 182675;
 const id = () => `P${n++}`;
@@ -138,7 +138,7 @@ P("unpay: an 'On the house' settle is reverted AND its 100% discount stripped", 
 P("unpay: one Audit row per order reverted, with the old method", "tables/3/unpay", {}, { fix: { orders: [live({ payment_status: "paid", paid_at: NOW, payment_method: "Card" })] } }, (r, G) => rpc(G, "lfh_record_removal")?.args.p_kind === "payment_reverted");
 P("unpay: the visit and the points the settle booked are reversed for THIS party", "tables/3/unpay", {}, { fix: { orders: [live({ payment_status: "paid", paid_at: NOW, payment_method: "Cash" })] } }, (r, G) => rpc(G, "lfh_uncapture_customer")?.args.p_session === "s1");
 // ── close / open ────────────────────────────────────────────────────────────────────────────────
-P("close: a table with nothing owed closes without any gate", "sessions/s1/close", {}, { fix: { orders: [live({ payment_status: "paid" })] } }, (r, G) => ({ ok: r.status === 200, note: `${r.status} ${r.text.slice(0, 80)}` }));
+P("close: a table with nothing owed closes without any gate", "sessions/s1/close", {}, { fix: { orders: [live({ payment_status: "paid" })] } }, (r) => ({ ok: r.status === 200, note: `${r.status} ${r.text.slice(0, 80)}` }));
 P("close: an unpaid table without force is refused by the shared close rule", "sessions/s1/close", {}, {}, (r) => ({ ok: r.status >= 400 && r.status < 500, note: `${r.status} ${r.text.slice(0, 80)}` }));
 P("close force: the walk-out switch on 'on' for this waiter closes it", "sessions/s1/close", { force: true }, { user: { permissions: { "cap:close_unpaid": "on" } } }, (r) => ({ ok: r.status === 200, note: `${r.status}` }));
 P("close force: this waiter's own 'off' refuses even if the restaurant allows", "sessions/s1/close", { force: true }, { user: { permissions: { "cap:close_unpaid": "off" } }, accessConfig: { close_unpaid: { tablet: "on" } } }, st(403, /isn't enabled on the tablet/));
@@ -154,7 +154,7 @@ Q("customer-search: three digits ask for at most six, for THIS restaurant", "cus
 Q("customer-search: a non-list answer is an empty list, not a crash", "customer-search", "?q=987", { rpc: { lfh_customer_phone_search: { weird: 1 } } }, (r) => Array.isArray(r.json.matches) && r.json.matches.length === 0);
 Q("customer-search: the search failing is a server error", "customer-search", "?q=987", { fail: { "rpc:lfh_customer_phone_search": "error" } }, (r) => r.status >= 500);
 Q("menu-sig: digests the dishes and categories into 16 hex characters", "menu-sig", "", { fix: { menu_items: [{ id: "d1", restaurant_id: RID, title: "Soup", price: 120, tags: ["veg"] }], categories: [{ slug: "soups", restaurant_id: RID, name: { en: "Soups" }, sort_order: 1, active: true }] } }, (r) => /^[0-9a-f]{16}$/.test(r.json.sig) && r.json.dishes === 1);
-Q("menu-sig: a price change changes the digest", "menu-sig", "", { fix: { menu_items: [{ id: "d1", restaurant_id: RID, title: "Soup", price: 125, tags: [] }] } }, async (r) => { const G2 = await world({ fix: { menu_items: [{ id: "d1", restaurant_id: RID, title: "Soup", price: 120, tags: [] }] } }); const r2 = await call("GET", "menu-sig"); return r.json.sig !== r2.json.sig; });
+Q("menu-sig: a price change changes the digest", "menu-sig", "", { fix: { menu_items: [{ id: "d1", restaurant_id: RID, title: "Soup", price: 125, tags: [] }] } }, async (r) => { await world({ fix: { menu_items: [{ id: "d1", restaurant_id: RID, title: "Soup", price: 120, tags: [] }] } }); const r2 = await call("GET", "menu-sig"); return r.json.sig !== r2.json.sig; });
 Q("menu-sig: a dish read failing is a server error", "menu-sig", "", { fail: { "menu_items:select": "error" } }, (r) => r.status >= 500);
 Q("summary: the floor answering nothing is an empty floor, not a crash", "summary", "?nomenu=1", { prep: async () => {}, rpc: { lfh_table_view_summary: null } }, async (r) => ({ ok: r.status === 200 && typeof r.json.tiles === "object", note: `${r.status}` }));
 Q("summary: a restaurant row that is missing sends restaurant:null, not a crash", "summary", "?nomenu=1", { prep: (G) => { G.FIX.restaurants = G.FIX.restaurants.filter((x) => x.id !== RID); }, rpc: { lfh_table_view_summary: { tiles: {} } } }, (r) => r.status === 200 && r.json.restaurant === null);

@@ -3,7 +3,7 @@
 // own PIN bypass, the PIN lockout, a reopened bill's lock, the blocked-device memo), every "a value is
 // missing" fallback a real request can produce, and the seven libraries' last uncovered lines.
 import { createHash } from "node:crypto";
-import { check, world, call, bundle, RID, RID2 } from "./lib.mjs";
+import { check, world, call, bundle, RID } from "./lib.mjs";
 
 let n = 182817;
 const id = () => `P${n++}`;
@@ -98,7 +98,7 @@ P("print-jobs: a ticket with no number answers kot_no null", "print-jobs", { ord
 P("an offline replay that arrived after the table moved on is refused with a reason (clash)", "orders/o1/tip", { amount: 1 }, { headers: { "x-lfh-replay": "1", "x-lfh-queued-at": new Date(Date.now() - 864e5).toISOString() }, fix: { sessions: [{ ...base().sessions[0], status: "closed", closed_at: NOW }] } }, (r) => ({ ok: r.status === 409 || r.status === 200, note: `${r.status} ${r.text.slice(0, 80)}` }));
 P("an edit that carries what it was edited FROM is refused when someone changed it since (no silent overwrite)", "orders/o1/tip", { amount: 1 }, { headers: { "x-lfh-expect": JSON.stringify({ table: "orders", id: "o1", fields: { tip: 99 } }) }, fix: { orders: [live({ tip: 5 })] } }, (r) => ({ ok: r.status === 409, note: `${r.status} ${r.text.slice(0, 80)}` }));
 P("a dine-in table absurdly far beyond the plan is refused by the plan check", "order", { table: "9754262", items: [{ id: "d1" }] }, {}, (r) => r.status === 400);
-P("issue: a waiter with no name is credited by username, role kept", "issue", { subject: "Leak" }, { user: { name: "", username: "w-only" } }, (r, G) => r.status === 200);
+P("issue: a waiter with no name is credited by username, role kept", "issue", { subject: "Leak" }, { user: { name: "", username: "w-only" } }, (r) => r.status === 200);
 P("order: a body with no table at all → refused", "order", { items: [{ id: "d1" }] }, {}, st(400, /valid table/));
 P("order: a dish whose options are empty compares as no options", "order", { table: "3", items: [{ id: "d1", options: [] }] }, { prep: (G) => { G.FIX.orders = [{ id: "o9", restaurant_id: RID, table_number: "3", created_at: new Date().toISOString(), items: [{ id: "d1" }], allergies: null }]; } }, (r) => r.status === 409);
 P("order: a stored recent order with no items is not a duplicate of a real one", "order", { table: "3", items: [{ id: "d1" }] }, { prep: (G) => { G.FIX.orders = [{ id: "o9", restaurant_id: RID, table_number: "3", created_at: new Date().toISOString(), items: null }]; } }, (r, G) => !!rpc(G, "lfh_staff_place_order"));
