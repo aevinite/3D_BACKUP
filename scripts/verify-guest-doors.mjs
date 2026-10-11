@@ -928,6 +928,16 @@ flush();
   const rl = send.indexOf('res.reason === "rate_limited"'), ok = send.indexOf("· staff notified`");
   check("item 1 — a QR call the restaurant's limit refused is answered as a refusal, BEFORE the 'staff notified' branch",
     rl >= 0 && ok > rl && /variant: "error"/.test(send.slice(rl, send.indexOf("} else", rl))));
+  // 2. A saved order's total on the chip must be the BILL's figure, not a menu-rounded one.
+  const F = await import("../lib/format.ts");
+  const chipCode = codeOnly(chip);
+  const usesMoney = /o\.track\?\.total \? ` · \$\{formatMoney\(o\.track\.total,/.test(chipCode) && !/formatPrice\(/.test(chipCode);
+  let off = 0;
+  for (const cur of F.CURRENCIES) for (let paise = 5000; paise < 400000; paise += 37) {
+    const n = paise / 100;
+    if (F.formatMoney(n, cur) !== F.formatAmount(F.toMinor(n * cur.rate, cur), cur)) off++;
+  }
+  check(`item 2 — the saved-orders chip prints an order total with the bill's rounding (formatMoney; ${off} of ${F.CURRENCIES.length * 10676} sample figures differ from the bill)`, usesMoney && off === 0);
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

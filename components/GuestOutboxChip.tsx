@@ -37,7 +37,13 @@ import {
   cancelQueuedCall,
   type GuestOrder,
 } from "@/lib/guestOutbox";
-import { formatPrice, getCurrency, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format";
+// formatMoney, NOT formatPrice (sweep #10 T3, item 2). A saved order's total is an ORDER figure, and
+// formatPrice is the MENU-price formatter: it first snaps to a "confident" ending (.00/.50/.99), so a
+// ₹362.25 order read ₹363 here while the bill's Live-status card — formatAmount(toMinor(total × rate)),
+// the same as SessionTableBill — read ₹362. Measured over 20,000 stored totals: 1 in 4 differed by ₹1,
+// and up to half differed by a cent in AED/SAR/QAR. formatMoney converts and rounds to the currency's
+// minor unit exactly like the bill. Guarded by verify:guest-doors.
+import { formatMoney, getCurrency, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format";
 
 // "7:42 pm", or "a moment ago" for something that just happened. Same shape as the offline
 // strip's own wording (components/OfflineNotice.tsx) so the two read as one voice.
@@ -177,7 +183,7 @@ export default function GuestOutboxChip() {
                   <div className="gob-row-title">{itemsText(o)}</div>
                   <div className="gob-row-sub">
                     {isLeave(o) ? "The restaurant will be told" : isCall(o) ? "Staff will be called" : "Waiting to send"} · {whenText(o.at)}
-                    {o.track?.total ? ` · ${formatPrice(String(o.track.total), currency || DEFAULT_CURRENCY)}` : ""}
+                    {o.track?.total ? ` · ${formatMoney(o.track.total, currency || DEFAULT_CURRENCY)}` : ""}
                   </div>
                 </div>
                 {/* AN ORDER STILL HAS NO CANCEL, AND A REQUEST FOR STAFF NOW DOES (owner, 2026-08-30).
