@@ -98,6 +98,10 @@ type Body = {
 async function postImpl(req: NextRequest): Promise<Response> {
   let b: Body;
   try { b = (await req.json()) as Body; } catch { return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 }); }
+  // A body that PARSES but is not an object — `null`, `5`, `"x"`, `[]` — is a broken body, not a crash
+  // (sweep #10 T3 round 2, item 20). `null` used to sail through `req.json()` and then throw on the
+  // first property read, so every guest door answered a bare 500 — measured on the built app.
+  if (!b || typeof b !== "object" || Array.isArray(b)) return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
 
   // TOO LATE TO BE USEFUL. Answered as a plain refusal (not an error) so the phone stops
   // retrying it and can say something true to the person.

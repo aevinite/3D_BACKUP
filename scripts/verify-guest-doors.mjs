@@ -1081,6 +1081,10 @@ flush();
   { const o = r2("lib/guestOutbox.ts");
     check("item 19 — two saved calls for table N at two different restaurants are kept apart",
       /String\(x\.restaurantId \|\| ""\) === String\(p\.restaurantId \|\| ""\)/.test(o)); }
+  // item 20 — a JSON body of `null` (or any non-object) is a clear refusal on every guest door
+  { const ok3 = ["place-order", "call-waiter", "leave"].every((d) => /if \(!b \|\| typeof b !== "object" \|\| Array\.isArray\(b\)\) return NextResponse\.json\(\{ ok: false, reason: "bad_body" \}, \{ status: 400 \}\);/.test(r2(`app/api/guest/${d}/route.ts`)));
+    check("item 20 — a body that parses to null / a number / a list is refused (or a no-op beacon), never a 500",
+      ok3 && /if \(!b \|\| typeof b !== "object" \|\| Array\.isArray\(b\)\) b = \{\};/.test(r2("app/api/guest/limit-hit/route.ts"))); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

@@ -42,6 +42,9 @@ const MAX_PER_WINDOW = 6;
 export async function POST(req: NextRequest) {
   let b: { fn?: string; rid?: string } = {};
   try { b = await req.json(); } catch { /* empty body → no-op below */ }
+  // A body that parses to `null` (or any non-object) is a no-op too, never a crash — it threw on `b.fn`
+  // and answered 500, the one thing this beacon promises never to do (sweep #10 T3 round 2, item 20).
+  if (!b || typeof b !== "object" || Array.isArray(b)) b = {};
   const key = FN_TO_KEY[String(b.fn || "")];
   if (key) {
     const rid = typeof b.rid === "string" && UUID.test(b.rid) ? b.rid : null;

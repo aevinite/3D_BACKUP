@@ -125,6 +125,10 @@ function busy(): Response {
 async function postImpl(req: NextRequest): Promise<Response> {
   let b: Body;
   try { b = (await req.json()) as Body; } catch { return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 }); }
+  // A body that PARSES but is not an object — `null`, `5`, `"x"`, `[]` — is a broken body, not a crash
+  // (sweep #10 T3 round 2, item 20). `null` used to sail through `req.json()` and then throw on the
+  // first property read, so every guest door answered a bare 500 — measured on the built app.
+  if (!b || typeof b !== "object" || Array.isArray(b)) return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
   const items = Array.isArray(b.items) ? b.items : [];
   const allergies = Array.isArray(b.allergies) ? b.allergies : [];
   if (items.length > MAX_ITEMS) return NextResponse.json({ ok: false, reason: "order_too_big" }, { status: 400 });
