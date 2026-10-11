@@ -123,6 +123,42 @@ const rcpBody = rcp.slice(0, rcp.indexOf("\n}"));
 if (/\bmrpTotalsRows\s*\(/.test(rcpBody)) pass("the bill pane's totals come from the shared stack, not from arithmetic of its own");
 else fail("billReceiptHtml() no longer uses the shared totals stack — a discount, an MRP line or a composition-scheme restaurant would be re-derived here and could disagree with the printed bill");
 
+// ── 7. the dish lines a receipt shows are the ones its total counts (sweep #10 T6, 2026-10-12) ──
+// billMath() leaves a cancelled ticket out of the money, so the pane must leave its dishes out of
+// the lines: the owner's 2026-07-03 screenshot was "Litchi Cooler ₹229 … Total ₹0", fixed in the
+// bill modal then, and brought back by this pane on 2026-08-22 (it drew ordItemsHtml(g) over every
+// ticket, cancelled ones included). DRIVEN, not grepped: the real functions are lifted out of the
+// panel and run against a cancelled bill and a part-cancelled one.
+{
+  const lift = (name) => {
+    let i = panel.search(new RegExp(`\\n(?:async )?function ${name}\\(`));
+    if (i >= 0) { i += 1; let d = 0, j = panel.indexOf("{", i); for (; j < panel.length; j++) { if (panel[j] === "{") d++; else if (panel[j] === "}" && --d === 0) break; } return panel.slice(i, j + 1); }
+    const k = panel.search(new RegExp(`\\nconst ${name} = `));
+    if (k < 0) return "";
+    // To the end of THIS statement: its ";" may be followed by a trailing comment on the same line.
+    const end = panel.slice(k + 1).search(/;[ \t]*(\/\/[^\n]*)?\n/);
+    return panel.slice(k + 1, k + 1 + end + 1);
+  };
+  const names = ["esc", "INR_RATE", "inr", "mrpPill", "dishNoTag", "ordItemsHtml", "billLiveLinesHtml"];
+  const parts = names.map(lift);
+  if (parts.some((p) => !p)) fail(`could not lift ${names.filter((_, i) => !parts[i]).join(", ")} out of the panel — re-derive this check`);
+  else {
+    const run = new Function("state", parts.join("\n") + "\nreturn billLiveLinesHtml;");
+    const lines = run({ data: { items: [] } });
+    const o = (title, status) => ({ status, items: [{ title, qty: 1, price: 229 }] });
+    const allCancelled = lines([o("Litchi Cooler", "cancelled")]);
+    const mixed = lines([o("Litchi Cooler", "cancelled"), o("Masala Chai", "served")]);
+    if (!/Litchi Cooler/.test(allCancelled) && /cancelled/i.test(allCancelled)) pass("a cancelled bill's pane lists no priced dish — it says it was cancelled");
+    else fail("a cancelled bill's pane lists its dishes with prices over a ₹0 total — the 2026-07-03 screen is back");
+    if (!/Litchi Cooler/.test(mixed) && /Masala Chai/.test(mixed)) pass("a part-cancelled bill lists only the tickets its total counts");
+    else fail("a part-cancelled bill lists a cancelled ticket's dishes — the lines no longer add up to the subtotal under them");
+  }
+  const pane = panelCode.slice(panelCode.indexOf("function billReceiptHtml"));
+  const paneBody = pane.slice(0, pane.indexOf("\n}"));
+  if (/br-items[^\n]*billLiveLinesHtml\(g\)/.test(paneBody)) pass("the bill pane draws its lines through billLiveLinesHtml()");
+  else fail("billReceiptHtml() no longer draws its lines through billLiveLinesHtml() — a cancelled ticket's priced dishes can reach the pane");
+}
+
 console.log(failed
   ? `\n✗ verify:bills-screen — ${failed} check${failed === 1 ? "" : "s"} failed.`
   : "\n✓ verify:bills-screen — the layout, the one-box search, the split parts and both numbers are all in place");

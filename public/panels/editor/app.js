@@ -3837,11 +3837,24 @@ function billReceiptHtml(b) {
       ${b.billPhone ? `<div class="br-id"><span>Phone</span><b>${esc(b.billPhone)}</b></div>` : ""}
       ${g.length > 1 ? `<div class="br-id"><span>Tickets</span><b>${g.length} on this bill</b></div>` : ""}
     </div>
-    <div class="br-items">${ordItemsHtml(g)}</div>
+    <div class="br-items">${billLiveLinesHtml(g)}</div>
     <div class="br-totals">${rows}</div>
     ${billPaidHtml(b, m)}
     ${billReceiptActions(b, st)}
   </div>`;
+}
+
+// THE DISH LINES A RECEIPT PRINTS ARE THE ONES ITS TOTAL COUNTS (sweep #10 T6, 2026-10-12).
+// billMath() leaves a cancelled ticket out of the money, so its dishes must stay out of the lines
+// too — otherwise the pane read "Mint Melon Juice ₹380 · Espresso ×2 ₹292 … Subtotal ₹0 · Total ₹0"
+// on a cancelled bill, and on a bill with one ticket cancelled the lines added up to more than the
+// subtotal under them. That is the exact screen the owner sent on 2026-07-03 ("Litchi Cooler ₹229 …
+// Total ₹0"); openBillModal() was fixed then, and this pane, added on 2026-08-22, brought it back.
+// Same rule as the modal, in the same words: the live tickets' lines, or one sentence when there are none.
+function billLiveLinesHtml(g) {
+  const live = (g || []).filter((o) => o.status !== "cancelled");
+  return live.length ? ordItemsHtml(live)
+    : `<div class="bm-line bm-cancelled"><span class="bm-nm">This bill was cancelled — no charge.</span></div>`;
 }
 
 // ── HOW THE MONEY CAME IN ───────────────────────────────────────────────────────────────────
