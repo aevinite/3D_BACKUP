@@ -1022,6 +1022,19 @@ flush();
   check("item 1 — …and never mistakes a busy restaurant, an empty answer or a refusal for an offline phone", !!re && notOffline.every((t) => !re.test(t)));
   check("item 1 — a busy restaurant (timed_out) can never count as an offline phone, whatever the browser says", /if \(r && r\.reason === "timed_out"\) return false;/.test(codeOnly(sess)));
 }
+// ── ROUND 2 OF SWEEP #10 T3 — THE FIXES THE OWNER PICKED, AND THE ONES THE SECOND COMB FOUND ─────
+//
+// One sub-block per item, so a single item can be taken out with its guard. Asserted on the CODE
+// (comments stripped). Each was broken once on purpose and turned this guard red before it shipped.
+// The behaviour behind every one is also DRIVEN in scripts/sweep/t3s10 (round 2 blocks).
+{
+  say("\n── 11. sweep #10 T3 round 2 — what the second pass fixed ──");
+  const r2 = (p) => codeOnly(read(p));
+  // item 6 — the dish popup says so when "Add" hits the 99 ceiling, in the bill's own words
+  { const c = r2("components/OrderConfirmModal.tsx");
+    check("item 6 — the dish popup announces the 99-per-dish ceiling instead of stopping in silence",
+      /const capped = !!existing && existing\.qty \+ qty > 99;/.test(c) && /if \(capped\) \{[\s\S]{0,120}message: "Maximum 99 per dish"/.test(c)); }
+}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
