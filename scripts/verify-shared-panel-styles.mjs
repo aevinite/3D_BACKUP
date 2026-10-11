@@ -66,6 +66,30 @@ for (const [js, css] of SHARED) {
   for (const need of ["position: fixed", "z-index", "background"])
     if (!sheet.includes(need)) bad(`${css} has no "${need}"`, "the box would render in the page flow again");
   if (/position: fixed/.test(sheet)) ok(`${css} still makes the box an overlay, not a block in the page`);
+
+  // 4. THE BOX MUST BE ABLE TO SCROLL (sweep #10 T14, 2026-10-12). It is capped at a share of the
+  //    window, so on a short screen — a phone turned sideways, or with its keyboard up — everything
+  //    past the cap has to be reached by scrolling. A later `overflow: hidden` (kept for the rounded
+  //    corners) beat the earlier `overflow-y: auto`, and "Generate bill" sat below the box's edge,
+  //    unreachable, on the real panels. Read in CASCADE ORDER: every rule whose selector list
+  //    contains the box's own class, every overflow / overflow-y declaration in it, last one wins.
+  if (css === "billcustomer.css") {
+    const flat = sheet.replace(/\/\*[\s\S]*?\*\//g, "");
+    let overflowY = "visible", capped = false;
+    for (const m of flat.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const sels = m[1].split(",").map((x) => x.trim());
+      if (!sels.includes(".bcust-modal")) continue;
+      for (const d of m[2].split(";")) {
+        const [k, ...v] = d.split(":"); const key = (k || "").trim(), val = v.join(":").trim().split(/\s+/);
+        if (key === "max-height") capped = true;
+        if (key === "overflow") overflowY = val[1] || val[0];
+        if (key === "overflow-y") overflowY = val[0];
+      }
+    }
+    if (capped && !/^(auto|scroll)$/.test(overflowY))
+      bad(`${css}: the box is height-capped but its overflow-y ends up "${overflowY}"`, "on a short screen \"Generate bill\" sits below the box's edge and cannot be reached");
+    else ok(`${css}: the box is height-capped and scrolls (overflow-y: ${overflowY}) — nothing on it can be cut off`);
+  }
 }
 console.log(fails ? `\n❌ verify:shared-panel-styles — ${fails} problem(s)` : "\n✅ verify:shared-panel-styles — every panel that loads a shared script loads its look too");
 process.exit(fails ? 1 : 0);

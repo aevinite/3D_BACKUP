@@ -39,7 +39,14 @@
    It was two bare inputs stacked with dead space between them and a primary button that looked
    half-disabled even when it wasn't. This gives it a header that says what it's for, fields that
    read as fields, and a button that states clearly whether it can be pressed. */
-.bcust-modal { max-width: 460px; width: min(94vw, 460px); border-radius: 18px; overflow: hidden; }
+/* THE BOX SCROLLS INSIDE ITS OWN ROUNDED EDGE (sweep #10 T14, 2026-10-12). This line said
+   `overflow: hidden` — there for the rounded corners — and, coming after the `overflow-y: auto` at the
+   top of this file, it won: the box was capped at 86vh and could not scroll. Measured on the real
+   panels: a Samsung A35 held upright with four suggestions showing cut the Cancel button off; the
+   same phone turned sideways, or with its keyboard up, cut off the Name box AND "Generate bill" —
+   a bill that could not be issued from that screen at all. `overflow-x: hidden` keeps the corners;
+   `overflow-y: auto` gives the scroll back. verify:shared-panel-styles §4 pins it. */
+.bcust-modal { max-width: 460px; width: min(94vw, 460px); border-radius: 18px; overflow-x: hidden; overflow-y: auto; }
 .bcust-head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 18px 14px;
   border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--gold) 8%, var(--panel)); }
 .bcust-ico { width: 40px; height: 40px; flex: none; border-radius: 12px; display: grid; place-items: center;
