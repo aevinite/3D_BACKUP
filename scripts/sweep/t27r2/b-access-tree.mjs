@@ -39,7 +39,7 @@ export default function section(c) {
     () => /const existingQ = await sb[\s\S]{0,200}?if \(existingQ\.error\) return adminFail/.test(c.clean(F)));
   phase("the template read answers for itself too, so a restaurant is never born half-configured",
     "the template read's error is answered",
-    () => /const template = await sb[\s\S]{0,220}?if \(template\.error\) return adminFail/.test(c.clean(F)));
+    () => /const template = (?:\(await retryRead\(\(\) => |await )sb[\s\S]{0,260}?if \(template\.error\) return adminFail/.test(c.clean(F)));
   phase("no read in this file decides anything from an unreachable error any more",
     "grep for the (await sb…).data shape",
     () => !/\(\s*await\s+sb\s*\.\s*from\s*\([\s\S]{0,600}?\)\s*\.\s*data/.test(c.clean(F)));

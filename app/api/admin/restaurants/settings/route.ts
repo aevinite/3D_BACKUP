@@ -13,6 +13,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// One retry for a read that failed for a plumbing reason — see lib/readRetry.ts.
+import { retryRead } from "@/lib/readRetry";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { clampPerRow } from "@/lib/floorLayout";
@@ -348,7 +350,11 @@ export async function POST(req: NextRequest) {
   } else {
     // No settings row yet → clone #1 as a template so every NOT NULL column is satisfied
     // (same pattern as the quick-features route), then apply the patch on top.
-    const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
+    // ONE quiet second try for a connection blip (sweep #10 T29, item 4 follow-up — owner: "make sure
+    // that this never happen"). lib/readRetry retries only a dropped connection / 502-type failure, once,
+    // ~0.2 s later; a real problem still reaches the refusal below. A database can always fail, so the
+    // refusal stays as the safety net — this makes a passing hiccup never reach the admin at all.
+    const template = (await retryRead(() => sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle())).result;
     // The template answers for itself (sweep #10 T29, item 4) — the access-tree route says why.
     if (template.error) return adminFail("this restaurant's settings", template.error, { action: "save" });
     const base = cleanClonedSettings(template.data);
