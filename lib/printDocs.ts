@@ -16,12 +16,29 @@ import { TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 
 const IDENTITY_COLUMNS = "restaurant_name, restaurant_address, restaurant_phone, gstin, invoice_prefix, bill_footer, tax_label, table_names";
 
+// WHAT THE GUEST'S BILL READS BEYOND TAX AND IDENTITY (sweep #10 T14, 2026-10-12). billData reads
+// `bill_customer_print` (does the customer's name and mobile print — the restaurant's own switch) and
+// `mrp_tax_treatment` (does the "MRP items include ₹X GST" note print). Neither was selected, so the
+// helper's bill treated an absent switch as ON and an inclusive-MRP restaurant as "none" — the same
+// bill coming out different from a print computer than from the manager panel. verify:print-helper
+// derives every setting the documents read from billdoc.js and fails if a read here misses one.
+const BILL_COLUMNS = "bill_customer_print, mrp_tax_treatment";
+
 // THE BANQUET SHEET'S OWN PAPER (mig 237). `bqPaper(settings)` reads these eight, and a column that
 // is not SELECTED comes back undefined — so it fell back to every default and the helper printed a
 // sheet the restaurant had not set up: A5 when they had chosen A4, 33/14/6mm margins whatever they
 // had typed, the signature line and the filler rows back on. The manager's own screen was always
 // right because it hands the whole settings row to the same function; only the helper's copy was
 // short. Found by the printing sweep on 2026-08-29, asking for A4 and measuring A5.
+//
+// …AND THE SHEET'S OWN TAX LINES AND FIELD LIST, for exactly the same reason (sweep #10 T14,
+// 2026-10-12). banquetDocHtml also reads `banquet_tax_components` (bqTaxModel — a banquet is taxed at
+// its OWN rate, mig 239) and `banquet_fields` (bqOn — whether "Prepared by" prints). Neither was
+// selected, so the helper's copy fell back again: every SAMPLE banquet sheet was taxed at the dine-in
+// rate (Aangan, set to CGST 9 + SGST 9 for banquets, printed 2.5 + 2.5), and a real sheet from a
+// restaurant that switched "Prepared by" on came out of the helper without that line while the
+// manager panel's copy had it. verify:print-helper now derives every setting the sheet reads from
+// billdoc.js and fails if this list misses one.
 const BANQUET_PAPER_COLUMNS =
   "banquet_paper, banquet_paper_size, banquet_paper_top, banquet_paper_bot, banquet_paper_side, " +
   "banquet_paper_foot, banquet_paper_sign, banquet_paper_fill, banquet_tax_components, banquet_fields";
@@ -152,7 +169,7 @@ export async function kotHtmlForAggregator(rid: string, aggId: string, reprint: 
 export async function billHtmlForSession(rid: string, sessionId: string, opts?: { parcel?: boolean }): Promise<string | null> {
   const [sessQ, setQ, restQ] = await Promise.all([
     sb.from("sessions").select("*").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle(),
-    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}, ${BILL_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
     sb.from("restaurants").select("*").eq("id", rid).maybeSingle(),
   ]);
   const session = sessQ.data as Record<string, unknown> | null;
@@ -190,9 +207,15 @@ export async function billHtmlForSession(rid: string, sessionId: string, opts?: 
 
   // noBar goes to billDocHtml (the DOCUMENT), not to billData (the FIGURES) — they are two different
   // shapes and the compiler said so, which is the third time today a type has caught a real mistake.
+  const restaurant = (restQ.data || {}) as Record<string, unknown>;
+  // THE LOGO THE PANELS PRINT (sweep #10 T14, 2026-10-12) — the manager panel, the waiter tablet and
+  // the admin's preview all hand billData the restaurant's logo under the same http(s)-only rule;
+  // only this copy left it off, so a print computer's bill had no logo on top. The helper renders
+  // with a 4-second virtual-time budget, which lets the image load before the page is printed.
+  const logo = /^https?:\/\//i.test(String(restaurant.logo_url || "").trim()) ? String(restaurant.logo_url).trim() : "";
   return BILLDOC.billDocHtml({ ...BILLDOC.billData({
-    settings, restaurant: (restQ.data || {}) as Record<string, unknown>,
-    orders, session, tableDisp, parcel: !!opts?.parcel,
+    settings, restaurant,
+    orders, session, tableDisp, parcel: !!opts?.parcel, logo,
     // The helper prints it with the machine's own print command — there is no window to fire a
     // dialog in, so the document must not try to print itself.
     autoPrint: false,
@@ -434,7 +457,7 @@ export async function sampleKotHtml(rid: string): Promise<string> {
  *  bill, so the tax rows a restaurant is set up for are the tax rows that come out. */
 export async function sampleBillHtml(rid: string): Promise<string> {
   const [setQ, restQ] = await Promise.all([
-    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}, ${BILL_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
     sb.from("restaurants").select("*").eq("id", rid).maybeSingle(),
   ]);
   const settings = (setQ.data || {}) as Record<string, unknown>;

@@ -1669,8 +1669,17 @@
     var printCust = s.bill_customer_print !== false;
     var row = orders.find(function (o) { return o.bill_cust_name || o.bill_cust_phone; }) || {};
     var named = orders.find(function (o) { return String(o.customer_name || "").trim(); }) || {};
-    var cust = printCust ? (row.bill_cust_name || named.customer_name || "") : "";
-    var phoneRaw = printCust ? String(row.bill_cust_phone || "").replace(/\D/g, "") : "";
+    /* THE PAIR LIVES ON THE SESSION — THE BILL ITSELF — SO READ IT FROM THERE TOO (sweep #10 T14,
+       2026-10-12). Mig 227 stores the customer on `sessions.cust_name / cust_phone`, and only the
+       MANAGER panel's route copied it onto each order as `bill_cust_*` before calling this. The
+       waiter tablet's route and the print helper (lib/printDocs.ts) hand over plain order rows, and
+       `orders` has no such columns — so a bill printed from the waiter tablet, or by a print computer,
+       never said who it was made out to, at a restaurant that asked for it on the paper. Same
+       restaurant, same bill, different paper depending on which screen pressed Print: the fault this
+       file was created to end. The order copy still wins when it is there. */
+    var sessFor = a.session || {};
+    var cust = printCust ? (row.bill_cust_name || sessFor.cust_name || named.customer_name || "") : "";
+    var phoneRaw = printCust ? String(row.bill_cust_phone || sessFor.cust_phone || "").replace(/\D/g, "") : "";
     // 10 digits print as "98250 12345" — easier to read back to a guest than one long run.
     //
     // A COUNTRY CODE MUST NOT COST THE GROUPING (2026-08-06). The grouping applied at EXACTLY ten

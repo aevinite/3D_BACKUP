@@ -2210,7 +2210,7 @@ for (const f of ["scripts/verify-printing-sweep.mjs", "scripts/verify-print-spee
     if (!m) return null;
     return new Set(m[1].replace(/\$\{([A-Z_]+)\}/g, (_, k) => consts[k] || "").split(",").map((x) => x.trim()).filter(Boolean));
   };
-  for (const [fn, keys] of [["banquetHtmlForBill", BQ_KEYS], ["sampleBanquetHtml", BQ_KEYS]]) {
+  for (const [fn, keys] of [["billHtmlForSession", BILL_KEYS], ["sampleBillHtml", BILL_KEYS], ["banquetHtmlForBill", BQ_KEYS], ["sampleBanquetHtml", BQ_KEYS]]) {
     const sel = selectOf(fn);
     const miss = sel ? keys.filter((k) => !sel.has(k)) : ["(no settings select found)"];
     check(miss.length === 0 && keys.length >= 10,
@@ -2225,6 +2225,17 @@ for (const f of ["scripts/verify-printing-sweep.mjs", "scripts/verify-print-spee
       && /tax_lines: taxLines/.test(docs) && /const taxLines: \{ label: string; rate: number; amt: number \}\[\] = \[\];/.test(docs),
     "lib/printDocs.ts sampleBanquetHtml taxes at the restaurant's banquet rate and lets the document split it — never 0%, never split here",
     "the sample banquet sheet prints GST 0% for a restaurant that set a rate but named no tax lines");
+  // …and the two things only billData can get right for EVERY caller, run for real:
+  const BD = req("../public/panels/billdoc.js");
+  const ord = { status: "served", subtotal: 200, taxable_base: 200, items: [{ title: "Dal", qty: 1, price: 200 }] };
+  const sess = { cust_name: "Riya Sharma", cust_phone: "9825012345" };
+  const h = (a) => BD.billDocHtml(BD.billData(a));
+  check(/Riya Sharma/.test(h({ orders: [ord], session: sess, settings: {} })) && !/Riya/.test(h({ orders: [ord], session: sess, settings: { bill_customer_print: false } })),
+    "a bill built from plain order rows (the waiter tablet, the print helper) names the customer stored on the session — and hides it when the restaurant says so",
+    "billData ignores the session's own customer — the waiter tablet's and the print computer's bills never say who they are made out to");
+  check(/const logo = /.test(docs) && /parcel: !!opts\?\.parcel, logo,/.test(docs),
+    "lib/printDocs.ts billHtmlForSession hands billData the restaurant's logo, as every panel does",
+    "the print computer's bill has no logo while every panel's copy does");
 }
 
 if (fails.length) {
