@@ -473,5 +473,6 @@
  "r5|mig|418": "P210833",
  "r5|mig|419": "P210834",
  "r5|plan|rule-sees-one": "P210835",
- "parity|ids-clear-of-harness": "P210836"
+ "parity|ids-clear-of-harness": "P210836",
+ "docs/COMPLIANCE-GUARDRAILS.md|verify:parcels-in-gst (named in COMPLIANCE-GUARDRAILS.md) is a real npm script and is green today": "P210837"
 }
