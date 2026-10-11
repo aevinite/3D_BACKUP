@@ -61,7 +61,13 @@ export function assignedOf(user: StaffUser | null | undefined): string[] {
  * `floor` is the restaurant's table_count, and it is the second half of the rule — see
  * allows() for why a table number ABOVE it is never hidden.
  */
-export type SectionLimit = { tables: string[]; floor: number };
+export type SectionLimit = {
+  tables: string[];
+  floor: number;
+  /** Set when the floor size could NOT be read (item 5): the failure itself, so a write that needs
+   *  the answer can be refused as busy — kept and replayed — rather than allowed or refused on a guess. */
+  floorUnknown?: unknown;
+};
 
 export async function waiterTables(
   user: StaffUser | null | undefined,
@@ -71,8 +77,26 @@ export async function waiterTables(
   if (user.role !== "tablet") return null; // manager/owner oversight keeps the full floor
   // Sections are ALWAYS on (owner 2026-07-30) — no module rung to consult. One tiny read
   // for the floor size, which allows() needs to spot an off-plan table.
-  const { data } = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
-  return { tables: assignedOf(user), floor: Math.max(0, Number(data?.table_count) || 0) };
+  //
+  // ── A FAILED READ MUST NOT OPEN THE WHOLE FLOOR (sweep #10 T4, item 5) ────────────────────────────
+  // This kept only `.data`, so a read that failed looked like a restaurant with table_count 0 — and
+  // allows() treats every table above the floor size as "off the plan, visible to everyone". With a
+  // floor of 0 that is EVERY table: for as long as one settings read failed, a waiter limited to
+  // tables 4–6 could act on table 20, and the targeted floor read handed them its tiles. The floor
+  // size only ever exists to grant that one exemption, so when it cannot be read the exemption is
+  // simply not granted — the waiter keeps exactly their own section and nothing beyond it. No error
+  // is thrown on purpose: four routes call this, and "busy" for a waiter's OWN tables would be worse.
+  // A WRITE outside the section during that window is not refused either (that would throw the tap
+  // away with a wrong reason): blockedReason() answers it as busy, so the panel keeps it and sends it
+  // again once the size can be read — and only then is it allowed or refused for real.
+  let floor = Number.POSITIVE_INFINITY; // unknown → no table counts as off-plan
+  let floorUnknown: unknown = undefined;
+  try {
+    const { data, error } = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+    if (error) floorUnknown = error;
+    else floor = Math.max(0, Number(data?.table_count) || 0);
+  } catch (e) { floorUnknown = e || new Error("settings read failed"); /* unknown → keep the safe answer above */ }
+  return floorUnknown === undefined ? { tables: assignedOf(user), floor } : { tables: assignedOf(user), floor, floorUnknown };
 }
 
 /**
@@ -139,7 +163,11 @@ export async function newWaiterTables(rid: string, picked: unknown): Promise<num
 }
 
 export async function fullFloorFor(rid: string): Promise<number[]> {
-  const { data } = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+  const { data, error } = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+  // …and the same split here (item 5): a read that failed is not a restaurant with no tables. The
+  // two create-a-waiter screens show this message as it is, and the old answer — an empty floor —
+  // made newWaiterTables() tell a person who HAD picked tables to "pick at least one table".
+  if (error) throw new Error("Couldn't read this restaurant's tables just now — please try again in a moment.");
   const n = Math.max(1, Number(data?.table_count) || 0);
   if (!data?.table_count) return [];
   return Array.from({ length: n }, (_, i) => i + 1);
@@ -169,5 +197,9 @@ export async function blockedReason(
   const { tables, unknown } = await affectedTables(rid, a, b, c, body);
   if (unknown) return notYoursMessage("");
   const bad = tables.find((t) => t && !allows(limit, t));
+  // Outside the section, and the floor size that decides "off-plan, so visible to everyone" could not
+  // be read (item 5): neither allow nor refuse on a guess — answer busy, with the read's own failure,
+  // so the route's lib/panelFailure says "busy — retrying" and the panel's queue keeps the tap.
+  if (bad && limit.floorUnknown !== undefined) throw limit.floorUnknown;
   return bad ? notYoursMessage(bad) : null;
 }

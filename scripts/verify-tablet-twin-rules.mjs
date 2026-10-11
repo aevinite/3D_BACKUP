@@ -572,5 +572,59 @@ console.log("\n19. a database timeout reads as 'busy — retrying' (503), not 's
   else bad(`placing an order during a timeout answered ${r.status}`);
 }
 
+// ── 20. A FAILED FLOOR-SIZE READ KEEPS A WAITER TO THEIR OWN SECTION (sweep #10 T4, item 5) ──────────
+// lib/tableAssign.ts → waiterTables() used to keep only `.data` from its settings read, so a failed read
+// looked like table_count 0 — and allows() lets every table above the floor size through as "off the
+// plan". With a floor of 0 that is every table. Now an unreadable floor size grants no exemption: the
+// waiter keeps exactly their section. RUN against the stand-in database with the settings read failing.
+console.log("\n20. a failed floor-size read keeps a waiter to their own section — it never opens the whole floor");
+{
+  const { bundle } = await import("./sweep/t13s10/lib.mjs");
+  const judge = async (TA, quiet) => {
+    let n = 0; const say = (c, m) => { if (c) { if (!quiet) ok(m); } else { n++; if (!quiet) bad(m); } };
+    const waiter = { id: "w1", role: "tablet", restaurant_id: RID, permissions: {}, assigned_tables: [1, 2] };
+    await world({});
+    const good = await TA.waiterTables(waiter, RID);
+    say(TA.allows(good, "25") === true && TA.allows(good, "10") === false && TA.allows(good, "1") === true,
+      "control: with the floor size read (20), an off-plan table 25 is visible to everyone, table 10 is not this waiter's, table 1 is");
+    for (const mode of ["timeout", "error", "throw"]) {
+      await world({ fail: { "settings:select": mode } });
+      const lim = await TA.waiterTables(waiter, RID).catch((e) => ({ threw: e }));
+      say(!lim.threw, `a settings read that ${mode === "throw" ? "throws" : "answers " + mode} does not throw out of waiterTables (four routes call it)`);
+      say(!lim.threw && JSON.stringify(lim.tables) === '["1","2"]' && TA.allows(lim, "1") === true && TA.allows(lim, "2") === true,
+        `…the waiter still has their own tables 1–2 (${mode})`);
+      say(!lim.threw && TA.allows(lim, "25") === false && TA.allows(lim, "10") === false && TA.allows(lim, "20") === false,
+        `…and NOTHING outside them — no table counts as off-plan while the size is unknown (${mode})`);
+      // A WRITE outside the section in that window is answered busy (thrown, so the route says 503 and
+      // the panel keeps the tap) — neither let through nor refused with "not in your section" on a guess.
+      const out = await TA.blockedReason(lim, RID, "tables", "25", "restart", {}).then((v) => ({ v }), (e) => ({ e }));
+      const inside = await TA.blockedReason(lim, RID, "tables", "1", "restart", {}).then((v) => ({ v }), (e) => ({ e }));
+      say(!!out.e && inside.v === null,
+        `…a write to table 25 is answered busy (${out.e ? "thrown" : "returned " + JSON.stringify(out.v)}), a write to their own table 1 goes ahead (${mode})`);
+    }
+    await world({ fail: { "settings:select": "timeout" } });
+    const made = await TA.newWaiterTables(RID, [1, 2]).then((v) => ({ v }), (e) => ({ e }));
+    say(!!made.e && /Couldn't read this restaurant's tables/.test(made.e.message),
+      `creating a waiter during that blip says it could not read the tables — not "pick at least one table" (${made.e ? made.e.message.slice(0, 60) : "no error"})`);
+    await world({});
+    const made2 = await TA.newWaiterTables(RID, [1, 2]).then((v) => ({ v }), (e) => ({ e }));
+    say(!!made2.v && made2.v.join() === "1,2", "…and with the read healthy, the picked tables are kept");
+    return n;
+  };
+  fail += await judge(bundle("lib/tableAssign.ts"), false);
+  if (process.argv.includes("--self-test")) {
+    const { readFileSync, writeFileSync } = await import("node:fs");
+    const path = new URL("../lib/tableAssign.ts", import.meta.url);
+    const orig = readFileSync(path, "utf8");
+    const bent = orig.replace("if (error) floorUnknown = error;\n    else floor = Math.max(0, Number(data?.table_count) || 0);", "floor = Math.max(0, Number(data?.table_count) || 0); void error;");
+    if (bent === orig) { bad("self-test: the sabotage matched nothing — section 20 names code that has moved"); }
+    else {
+      writeFileSync(path, bent);
+      let n; try { n = await judge(bundle("lib/tableAssign.ts", ["--define:__SECTION20_SABOTAGE__=1"]), true); } finally { writeFileSync(path, orig); }
+      if (n > 0) ok(`self-test: the old fail-open floor turns ${n} check(s) red`); else bad("self-test: the old fail-open floor stays green — section 20 cannot catch it");
+    }
+  }
+}
+
 console.log(`\n${fail ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
