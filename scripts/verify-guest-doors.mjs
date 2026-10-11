@@ -943,6 +943,18 @@ flush();
   const tabs = [...cart.matchAll(/onClick=\{\(\) => setShowHistory\((?:true|false)\)\}>\s*([A-Za-z ]+)/g)].map((m) => m[1].trim());
   check(`item 3 — hiding the order strip points at a tab that exists ("${sub}" · tabs: ${tabs.join(" / ")})`,
     tabs.length === 2 && tabs.some((t) => sub.toLowerCase().includes(t.toLowerCase())) && !/previous orders/i.test(sub));
+  // 4. The total the basket STORES (the Live-status card's figure) is the bill's own total.
+  const T = await import("../lib/tax.ts");
+  const expr = (codeOnly(cart).match(/const totalUsd = ([^;]+);/) || [])[1] || "";
+  let bad = 0, n4 = 0;
+  try {
+    const stored = new Function("subtotalUsd", "usdOnTopBase", "taxRate", "roundPaise", `return ${expr};`);
+    for (const rate of [0.05, 0.12, 0.18, 0.025, 0.28]) for (let sub2 = 1; sub2 <= 4000; sub2 += 1) {
+      const bill = T.splitBill([{ price: String(sub2), qty: 1, tax_mode: "excl" }], { price_tax_mode: "excl", tax_rate: rate });
+      n4++; if (Math.abs(stored(sub2, bill.taxableBase, bill.rate, T.roundPaise) - bill.total) > 0.0001) bad++;
+    }
+  } catch { bad = -1; }
+  check(`item 4 — the basket stores the bill's own total for the same basket (${bad} of ${n4} differ)`, !!expr && bad === 0);
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

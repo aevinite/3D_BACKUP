@@ -7,7 +7,7 @@ import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, taxRule
 // The ONE rule that turns a dish's price into money under the three behaviours (mig 270):
 // GST on top ('excl'), GST already inside ('incl'), never taxed ('exempt' — an MRP bottle).
 // Mirrored byte-for-byte by lfh_split_items_tax in SQL, so the quote and the bill agree.
-import { splitBill, resolveTaxMode, isMrpDish } from "@/lib/tax";
+import { splitBill, resolveTaxMode, isMrpDish, roundPaise } from "@/lib/tax";
 // offline: save order, send on reconnect. reasonMsg/refusalOf are the ONE place that turns a
 // refusal code into words a diner can act on — shared with the queue and the session gate.
 import { enqueueGuestOrder, reasonMsg, refusalOf, dishFor } from "@/lib/guestOutbox";
@@ -510,12 +510,16 @@ export default function CartPanel() {
   const usdOnTopBase = taxRules.price_tax_mode === "composition"
     ? 0
     : splitBill(usdLines.filter((l) => l.tax_mode === "excl"), taxRules).taxableBase;
-  // Written as "the taxable part, grossed up + everything else at face value" rather than
-  // `subtotal + base × rate`: when every line is taxable the two terms collapse to exactly
-  // `subtotalUsd × (1 + taxRate)` — the same expression, in the same order, as before — so the
-  // stored figure is bit-for-bit what it always was (`a + a×r` and `a×(1+r)` are NOT the same
-  // number in floating point, and that alone was moving a paisa on 0.3% of carts).
-  const totalUsd = Math.round((usdOnTopBase * (1 + taxRate) + (subtotalUsd - usdOnTopBase)) * 100) / 100;
+  // ── THE BILL'S ROUNDING, IN THE BILL'S ORDER (sweep #10 T3, item 4) ──────────────────────────────
+  // This used to be `Math.round((base × (1 + rate) + (subtotal − base)) × 100) / 100`, kept bit-for-bit
+  // with an even older `subtotal × (1 + rate)` — float rounding of the grossed-up figure. The bill
+  // (lib/tax.ts splitBill, mirroring SQL lfh_split_items_tax) rounds the GST to the paisa FIRST and then adds it, with the exact rounding
+  // rule roundPaise. The two disagree on a half-paisa: 79 at 2.5% is 80.97 here and 80.98 on the bill —
+  // measured, 7,353 of 240,000 basket/rate pairs a paisa apart, and a CENT apart on the Live-status
+  // total for a diner reading in $ / € / AED (86, 60 and 326 of them). Rupees were never visibly
+  // affected. Same fault sweep #10 T30 item 32 removed from the menu's tax line. Guarded by
+  // verify:guest-doors (it runs this expression against splitBill over 20,000 baskets).
+  const totalUsd = roundPaise(subtotalUsd + roundPaise(usdOnTopBase * taxRate));
 
   // dishImage(): the dish's own photo, for the bill line (owner, 2026-09-20 — "IF POSSIBLE ADD
   // IMAGE LIKE D3"). It comes from the menu the panel has ALREADY loaded for the edit/pairing/
