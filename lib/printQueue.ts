@@ -326,11 +326,25 @@ export async function finishKotJob(
   const parked = attempts >= 5;
   // A failure here would leave `attempts` where it was, so a ticket could retry for ever without
   // ever reaching the fifth try that tells somebody.
-  await wrote("recording a failed print", sb.from("print_jobs").update({
+  //
+  // ── …AND THE CHECK ABOVE IS NOT ENOUGH ON ITS OWN (sweep #10 T15, 2026-10-12) ───────────────
+  // It READ the status and then wrote in a second statement, two database trips later. "Clear the
+  // N waiting tickets" is pressed exactly when a printer is jammed — i.e. while a helper is
+  // reporting failure after failure — so a clear landing between that read and this write was put
+  // straight back to `queued` and printed anyway. The bill and banquet path in
+  // app/api/print-agent has always made the write itself refuse a taken-out row; this is the same
+  // `.in("status", …)`, so the two paths now keep the rule the same way.
+  const back = await wrote("recording a failed print", sb.from("print_jobs").update({
     status: parked ? "failed" : "queued",
     attempts, claimed_at: null,
     error: String(error || "print failed").slice(0, 300),
-  }).eq("id", id).eq("restaurant_id", rid));
+  }).eq("id", id).eq("restaurant_id", rid)
+    .in("status", ["queued", "printing", "failed"]).select("id").maybeSingle());
+  if (!back.error && !back.data) {
+    await wrote("releasing a ticket that was taken out", sb.from("print_jobs")
+      .update({ claimed_at: null }).eq("id", id).eq("restaurant_id", rid));
+    return { found: true, orderId: job.order_id ?? null, reprint: job.reprint !== false, attempts: job.attempts || 0, parked: false, kotNo: ord?.kot_no ?? null, tableNumber: ord?.table_number ?? null };
+  }
 
   // ── A TICKET THAT CANNOT PRINT TELLS SOMEBODY (owner, 2026-08-30) ──────────────────────────
   // This is what REPLACED the backup printer. His words: "we don't even need the backup printer —

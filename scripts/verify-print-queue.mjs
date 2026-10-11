@@ -532,6 +532,17 @@ check(/select\("order_id, reprint, attempts, status"\)/.test(pqSrc) && /job\.sta
     "…it only releases the claim: the reason it was taken out is kept, and nobody is paged",
     "the taken-out branch rewrites the row's reason or raises an alert — a ticket taken out on purpose has not gone wrong");
 }
+// …AND THE KITCHEN SLIP'S OWN WRITE REFUSES A TAKEN-OUT ROW (sweep #10 T15, 2026-10-12). The branch
+// above READS the status and the requeue was a separate write two database trips later — so a
+// "Clear the N waiting tickets" pressed while a jammed printer was failing ticket after ticket (the
+// exact moment it is pressed) could land in between and the slip came back and printed anyway.
+{
+  const i = pqSrc.indexOf('"recording a failed print"');
+  const stmt = i < 0 ? "" : pqSrc.slice(i, i + 420);
+  check(/\.in\("status", \["queued", "printing", "failed"\]\)/.test(stmt) && /\.select\("id"\)/.test(stmt),
+    "…and the slip's requeue is itself conditional, so a clear landing mid-report still wins",
+    "finishKotJob requeues a failed kitchen slip unconditionally again — a ticket cleared between its status read and its requeue comes back and prints");
+}
 check(/\.in\("status", \["queued", "printing", "failed"\]\)/.test(agentRoute),
   "…and the same holds for a BILL or a banquet sheet reported failed by a helper",
   "the print-agent failure path requeues whatever it is handed, so a cleared bill can still print");
