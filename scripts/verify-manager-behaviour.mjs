@@ -460,7 +460,23 @@ async function rangeWords() {
     : bad("Staff watch asks for a remembered range its words may not describe");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords];
+// ── K · THE GST REPORT'S EMPTY LINE SAYS THE WINDOW ITS HEADING SAYS (sweep #10 T6, 2026-10-12) ──
+// A today-only manager saw "Covering today" over "No paid bills in this month." (T9's P178707).
+async function gstEmptyLine() {
+  console.log("\nK. the GST report's empty line says the window its heading says");
+  const app = src("public/panels/editor/app.js");
+  const i = app.indexOf("function gstNoneLine(");
+  if (i < 0) { bad("gstNoneLine() is gone — the GST report's empty line would not follow its window"); return; }
+  const body = app.slice(i, app.indexOf("\n}", i) + 2);
+  const f = new Function(body + "\nreturn gstNoneLine;")();
+  const cases = [["today", "No paid bills today."], ["today and yesterday", "No paid bills today or yesterday."], ["the last 7 days", "No paid bills in the last 7 days."], ["October 2026", "No paid bills in October 2026."], ["", "No paid bills today."]];
+  const wrong = cases.filter(([w, want]) => f({ windowLabel: w }) !== want);
+  wrong.length ? bad("the empty line does not follow the window", wrong.map(([w]) => JSON.stringify(w)).join(", ")) : ok("the empty line names the same window the heading does, for every window the server sends");
+  const g = app.slice(app.indexOf("async function openGstReport("));
+  /No paid bills in this month\./.test(g.slice(0, 9000)) ? bad("the GST report still prints 'in this month' whatever the window") : ok("…and 'in this month' is no longer printed under a today-only heading");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

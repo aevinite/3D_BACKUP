@@ -6555,6 +6555,17 @@ async function openMenuMatrix() {
 // manager given one day sees a document headed "today" with no picker to tempt them, and a
 // manager given thirty sees the month picker a filing actually needs. The picker is drawn
 // from the server's own list — not guessed here — so the two can never disagree.
+// THE EMPTY LINE SAYS THE SAME WINDOW AS THE HEADING (sweep #10 T6, 2026-10-12; seen first by T9 as
+// P178707). Since the GST report learned to reach only as far as the dashboard does (2026-09-23), a
+// manager given one day sees "Covering today" — and, on a day with no paid bill, "No paid bills in this
+// month." under it. The server says which window it answered for (windowLabel: a month's name, or
+// "today" / "today and yesterday" / "the last N days"), so the line now says that window.
+function gstNoneLine(d) {
+  const w = String((d && d.windowLabel) || "").trim();
+  if (!w || w === "today") return "No paid bills today.";
+  if (w === "today and yesterday") return "No paid bills today or yesterday.";
+  return `No paid bills in ${w}.`;
+}
 async function openGstReport() {
   document.querySelector(".gst-overlay")?.remove();
   const wrap = el(`<div class="sx-modal-overlay gst-overlay"><div class="sx-modal" style="max-width:640px">
@@ -6619,7 +6630,7 @@ async function openGstReport() {
           <div class="tp-bl grand"><span>Total (incl. GST)</span><span class="tp-bl-amt">${inr(t.gross)}</span></div>
         </div>
         <div class="muted small" style="margin-bottom:8px">${esc(d.note || "")}</div>
-        ${dayRows ? `<table class="gst-table" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left">Day</th><th style="text-align:right">Bills</th><th style="text-align:right">Taxable</th><th style="text-align:right">GST</th>${anyMrp ? `<th style="text-align:right">MRP</th>` : ""}<th style="text-align:right">Total</th></tr></thead><tbody>${dayRows}</tbody></table>` : `<div class="empty">No paid bills in this month.</div>`}`;
+        ${dayRows ? `<table class="gst-table" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left">Day</th><th style="text-align:right">Bills</th><th style="text-align:right">Taxable</th><th style="text-align:right">GST</th>${anyMrp ? `<th style="text-align:right">MRP</th>` : ""}<th style="text-align:right">Total</th></tr></thead><tbody>${dayRows}</tbody></table>` : `<div class="empty">${esc(gstNoneLine(d))}</div>`}`;
     } catch (e) { wrap.querySelector("#gstBody").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
   };
   wrap.querySelector("#gstCsv").onclick = () => {
