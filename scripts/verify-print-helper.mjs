@@ -661,6 +661,14 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     && /already a computer with that name/i.test(codeLib),
     "a machine re-linking under its own name is renamed, never refused — revoked rows count too",
     "claimSetupCode filters revoked rows out of its name check again, or dropped the retry: unlink a computer, run the helper, type a fresh code, and the person at the printer is shown a uniqueness error");
+  {
+    // EVERY computer a code makes remembers which screen issued it — the retry included (sweep #10
+    // T15). The race loser was created with no device, so its own panel said "not set up yet".
+    const calls = [...code(codeLib).matchAll(/createAgent\(([^)]*)\)/g)].map((m) => m[1]);
+    check(calls.length >= 2 && calls.every((a) => a.split(",").length >= 3),
+      "every computer a setup code creates carries the device that issued the code, the name-clash retry too",
+      `lib/printSetupCode.ts calls createAgent without the issuing device (${calls.filter((a) => a.split(",").length < 3).join(" · ")}) — that machine's own panel will say it is not set up`);
+  }
   check(/expires_at/.test(codeLib) && /SETUP_CODE_TTL_MS = 10 \* 60_000/.test(codeLib),
     "…and it dies in ten minutes, which is the owner's own number",
     "the ten-minute life is gone from lib/printSetupCode.ts — a code left on a screen stays usable");
