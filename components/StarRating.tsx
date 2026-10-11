@@ -110,6 +110,10 @@ function punchHole(li: HTMLElement) {
   requestAnimationFrame(anim);
 }
 
+// REJECTED (owner, 2026-10-12): no "reduce motion" version of these stars — docs/REJECTED-IDEAS.md R69.
+// "we want the star animation, all the cool animation we want". Do not add a prefers-reduced-motion
+// branch here and do not suggest one again.
+//
 // The "turn a star ON" animation: the star leaps up, spins, drops down with a
 // springy bounce, and lands happy. It's a chain of tweens, each starting when
 // the previous one finishes. (You don't need to follow every number — the
