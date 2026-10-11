@@ -172,5 +172,58 @@ check("tablet route: shiftErrMsg speaks the two merge refusals",
 check("both routes: an on-the-house mark counts on ANY member of the party",
   /in\("table_number", \[t, \.\.\.partyKids/.test(editorRoute) && /in\("table_number", \[t, \.\.\.partyKids/.test(tabletRoute));
 
+// ── "I COULDN'T ASK" IS NOT "IT ISN'T MERGED" (sweep #10 T4, item 7) ───────────────────────────────
+// lib/tableMerge.ts → mergeParentTable() used to answer the table itself when its one read failed, which
+// on a merged child is the half-bill answer: Mark paid finds no session for the child and settles the
+// child's own orders. RUN, not read: the real helper against stand-in reads, then the real tablet route
+// in memory with the merge read timing out — it must answer busy (the panel keeps the tap), never pay.
+{
+  const esbuild = (await import("esbuild")).default;
+  const { createRequire } = await import("node:module");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const runHelper = async (src) => {
+    const cache = join(root, "node_modules/.cache"); mkdirSync(cache, { recursive: true });
+    const out = join(cache, "vmp-tableMerge.cjs");
+    writeFileSync(out, (await esbuild.transform(src, { loader: "ts", format: "cjs" })).code);
+    const req = createRequire(import.meta.url); delete req.cache[out];
+    const { mergeParentTable } = req(out);
+    const sbAnswer = (ans) => ({ from: () => { const c = { select: () => c, eq: () => c, is: () => c, limit: () => (ans instanceof Error ? Promise.reject(ans) : Promise.resolve(ans)) }; return c; } });
+    const ask = (ans, t = "7") => mergeParentTable(sbAnswer(ans), "rid", t).then((v) => ({ v }), (e) => ({ e }));
+    return {
+      merged: await ask({ data: [{ parent_table: "3" }], error: null }),
+      alone: await ask({ data: [], error: null }),
+      timeout: await ask({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }),
+      thrown: await ask(new Error("fetch failed")),
+      blank: await ask({ data: [], error: null }, "  "),
+    };
+  };
+  const judge = (h, quiet) => {
+    let n = 0; const c = (name, ok) => { if (!ok) n++; if (!quiet) check(name, ok); };
+    c("mergeParentTable: a merged child is resolved to the table holding the bill", h.merged.v === "3");
+    c("…an unmerged table is itself", h.alone.v === "7");
+    c("…a merge read that TIMED OUT is not answered as 'not merged' — it propagates, with its code", !!h.timeout.e && h.timeout.e.code === "57014");
+    c("…and neither is a read that threw", !!h.thrown.e);
+    c("…and a blank table is answered blank without asking", h.blank.v === "");
+    return n;
+  };
+  const tmSrc = read("lib/tableMerge.ts");
+  fail += judge(await runHelper(tmSrc), false);
+  // The real tablet route, in memory (the same harness verify:tablet-twins uses).
+  try {
+    const { world, call } = await import("./sweep/t13s10/lib.mjs");
+    await world({ fail: { "table_merges:select": "timeout" } });
+    const r = await call("POST", "tables/3/pay", { body: {} });
+    check(`the waiter tablet's Mark paid, with the merge read timing out, answers busy (${r.status}) — it settles nothing on a guess`, r.status === 503);
+    await world({});
+    const r2 = await call("POST", "tables/3/pay", { body: {} });
+    check(`…and with the read healthy the same tap is not refused as busy (${r2.status})`, r2.status !== 503);
+  } catch (e) { check(`the tablet route could not be run in memory: ${(e && e.message) || e}`, false); }
+  if (process.argv.includes("--self-test")) {
+    const bent = tmSrc.replace("if (r.error) throw r.error; // keeps its SQLSTATE, so the route can tell busy from refused\n", "");
+    if (bent === tmSrc) check("self-test: the sabotage matched nothing — this block names code that has moved", false);
+    else { const n = judge(await runHelper(bent), true); check(`self-test: answering 'not merged' on a failed read again turns ${n} check(s) red`, n > 0); }
+  }
+}
+
 console.log(fail ? `\n${fail} merge-party check(s) FAILED` : "\nAll merge-party checks passed — a merged party is one bill everywhere.");
 process.exit(fail ? 1 : 0);
