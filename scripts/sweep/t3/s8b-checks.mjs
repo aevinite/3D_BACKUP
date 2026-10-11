@@ -218,7 +218,7 @@ P("P57335", "…and falls back to no offset if the box cannot be read", /const t
 P("P57336", "…the order being animated is FROZEN, so a new one cannot swap in", /dismissingOrderRef\.current = order;/.test(T));
 P("P57337", "…the strip stops taking taps during the flight", /pointerEvents: "none"/.test(T));
 P("P57338", "…and the timeout matches the CSS transition, not a guess", /\}, 340\); \/\/ matches the 0\.34s CSS transition/.test(T));
-P("P57339", "…after which the diner is told it was hidden, not cancelled", /message: "Tracker hidden", subtitle: "still in Previous orders"/.test(T));
+P("P57339", "…after which the diner is told it was hidden, not cancelled", /message: "Tracker hidden", subtitle: "still in Live status on your bill"/.test(T));   // wording moved deliberately: sweep #10 T3 item 3 — the tab is called "Live status" since 2026-06-17
 P("P57340", "hiding the COMBINED strip hides every order behind it", /if \(wasMulti\) \{ write\(read\(\)\.map\(\(o\) => \(allIds\.includes\(o\.id\)/.test(T));
 P("P57341", "…and the ids are captured BEFORE the animation, not read after it", /const allIds = visible\.map\(\(o\) => o\.id\);/.test(T));
 P("P57342", "…and whether it was combined is captured then too", /const wasMulti = multi;/.test(T));

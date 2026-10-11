@@ -938,6 +938,11 @@ flush();
     if (F.formatMoney(n, cur) !== F.formatAmount(F.toMinor(n * cur.rate, cur), cur)) off++;
   }
   check(`item 2 — the saved-orders chip prints an order total with the bill's rounding (formatMoney; ${off} of ${F.CURRENCIES.length * 10676} sample figures differ from the bill)`, usesMoney && off === 0);
+  // 3. The tracker's "hidden" toast must name a tab the bill actually has.
+  const sub = (codeOnly(tracker).match(/message: "Tracker hidden", subtitle: "([^"]+)"/) || [])[1] || "";
+  const tabs = [...cart.matchAll(/onClick=\{\(\) => setShowHistory\((?:true|false)\)\}>\s*([A-Za-z ]+)/g)].map((m) => m[1].trim());
+  check(`item 3 — hiding the order strip points at a tab that exists ("${sub}" · tabs: ${tabs.join(" / ")})`,
+    tabs.length === 2 && tabs.some((t) => sub.toLowerCase().includes(t.toLowerCase())) && !/previous orders/i.test(sub));
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
