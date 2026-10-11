@@ -1,7 +1,7 @@
 // Runs in the browser so it can read/save the cart and react to taps.
 "use client";
 
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, taxRulesOf, DEFAULT_TAX_RULES, getOrderDishes, type MenuItem, type TaxRules, type OrderDish } from "@/lib/menu";
 // The ONE rule that turns a dish's price into money under the three behaviours (mig 270):
@@ -495,7 +495,15 @@ export default function CartPanel() {
   // What a dish's own tax_mode is. A line whose dish hasn't loaded yet (the menu is fetched
   // lazily on first open) reads as "default" = follow the restaurant, which is exactly the
   // pre-269 behaviour, and settles the moment the menu lands.
-  const dishMode = (id: string) => menuItems.find((m) => m.id === id)?.taxMode;
+  // ONE lookup table for the menu, built when the menu changes (sweep #10 T3 round 2, item 13). Five
+  // helpers below each walked the whole `menuItems` array per bill line, and two of them run twice per
+  // line (the display money and the stored money), on every redraw — and the open bill redraws every
+  // five seconds. A Map turns each of those walks into one look-up; nothing it answers changes.
+  const menuById = useMemo(() => new Map(menuItems.map((m) => [m.id, m])), [menuItems]);
+  // First dish wins on a shared title, exactly as `.find()` did — a Map built straight from the array
+  // would keep the LAST one and could hand a live card a different dish's photo.
+  const menuByTitle = useMemo(() => { const t = new Map<string, MenuItem>(); for (const m of menuItems) if (!t.has(m.title)) t.set(m.title, m); return t; }, [menuItems]);
+  const dishMode = (id: string) => menuById.get(id)?.taxMode;
   // The BEHAVIOUR the line actually gets, decided ONLY by lib/tax.ts (mirrors SQL
   // lfh_resolve_tax_mode): 'excl' = GST on top, 'incl' = GST already in the price,
   // 'exempt' = never taxed. Never branch on the dish's raw setting instead of this.
@@ -559,7 +567,7 @@ export default function CartPanel() {
   // allergen lookups, so no request is made for it — same rule as everything else on this sheet.
   // Empty string when the dish has no picture or the menu has not arrived yet; the line then
   // renders a blank cell of the same size, so the grid never shifts when the photo appears.
-  const dishImage = (id: string) => menuItems.find((m) => m.id === id)?.image || "";
+  const dishImage = (id: string) => menuById.get(id)?.image || "";
   // itemAllergens(): the allergens a given dish contains.
   const itemAllergens = (id: string) => allergenMap[id] || [];
   // conflicts(): of a dish's allergens, which ones the guest said they avoid.
@@ -574,7 +582,7 @@ export default function CartPanel() {
   // We broadcast "lfh:open-order-confirm" with the dish + its current choices so
   // the OrderConfirmModal opens already filled in.
   const editLine = (it: CartItem) => {
-    const dish = menuItems.find((m) => m.id === it.id);
+    const dish = menuById.get(it.id);
     if (!dish) return;
     window.dispatchEvent(new CustomEvent("lfh:open-order-confirm", {
       detail: {
@@ -590,7 +598,7 @@ export default function CartPanel() {
   // 2026-07-05). Even a plain dish with no options/allergens can be customized —
   // the popup always lets the guest flag a per-dish allergy and add a kitchen
   // note. We only hide Edit if the dish is gone from the menu (nothing to open).
-  const canEdit = (id: string) => !!menuItems.find((m) => m.id === id);
+  const canEdit = (id: string) => menuById.has(id);
 
   // Which cart lines have gone sold-out (best-effort, from the menu we loaded on
   // open). Used to flag lines in the bill and to block placing with a CLEAR reason
@@ -1045,7 +1053,7 @@ export default function CartPanel() {
                       {orderDishes[o.id]?.length ? (
                         <div className="live-dishes">
                           {orderDishes[o.id].map((d, i) => {
-                            const m = menuItems.find((x) => x.title === d.title);
+                            const m = menuByTitle.get(d.title);
                             const bits: string[] = [];
                             if (d.options?.length) bits.push(d.options.map((x) => x.label).filter(Boolean).join(", "));
                             if (d.removed.length) bits.push(`No ${d.removed.map((r) => allergenLabel(r).toLowerCase()).join(", ")}`);

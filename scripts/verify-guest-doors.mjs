@@ -1053,6 +1053,10 @@ flush();
     check("item 11 — the bill reads each live order's dishes on a realtime nudge or the 60s backstop, not every 5 seconds",
       /const cardsShown = open && showHistory && !sessionsEnabled;/.test(c) && /window\.addEventListener\("lfh:rt-tick", bump\)/.test(c)
       && /setInterval\(bump, RT_BACKUP_MS\)/.test(c) && /\}, \[cardsShown, liveOrders, dishBeat\]\);/.test(c) && !/\}, \[open, liveOrders\]\);/.test(c)); }
+  // item 13 — the bill looks dishes up in a table built once, not by walking the menu per line
+  { const c = r2("components/CartPanel.tsx");
+    check("item 13 — the bill builds one menu lookup per menu change instead of walking the menu for every line",
+      !/menuItems\.find\(/.test(c) && /const menuById = useMemo\(/.test(c)); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
