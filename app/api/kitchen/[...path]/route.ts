@@ -96,7 +96,10 @@ const must = (r: any) => {
  
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
- 
+// The two answers a late tap gets once the waiter has already carried the food out (item 1, below).
+const SERVED_MSG = "Every dish on that ticket has already been served — refresh the board.";
+const SERVED_DISH_MSG = "That dish has already been served — refresh the board.";
+
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
 type Ctx = { params: Promise<{ path?: string[] }> };
@@ -571,6 +574,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't on this restaurant's board any more.", 404);
       if (cur.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409); // sweep #10 T10 round 2, item 12 — a cancelled ticket comes back only through Restore (the manager route's VOIDED_MSG rule)
+      if (cur.status === "served") return err(SERVED_MSG, 409); // item 1 — the same rule as /ready below
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: the client discards the body and re-fetches the board, so we skip
       // BOTH the .select() on the update and the full-row re-read (server↔DB egress saver).
@@ -587,6 +591,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't on this restaurant's board any more.", 404);
       if (cur.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409); // sweep #10 T10 round 2, item 12 — a cancelled ticket comes back only through Restore (the manager route's VOIDED_MSG rule)
+      // A SERVED TICKET IS NOT COOKING AGAIN (sweep #10 T11, item 1). Every dish on it has been carried
+      // out, so the rollup made it 'served' — and this handler used to write 'preparing' over that,
+      // whatever it found. A kitchen screen a second behind the waiter (or an ALL READY saved offline
+      // and sent after the food went out) therefore put a finished table back to "cooking" on the
+      // manager's floor and the waiter's tablet, with nothing left to cook. First save wins: say so.
+      if (cur.status === "served") return err(SERVED_MSG, 409);
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
       // return=minimal: client discards the body and re-fetches the board → skip the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
@@ -674,7 +684,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Scoped by rid so a foreign dish id can't be advanced (service-role bypasses RLS).
       // Item 12 (sweep #10 T10 round 2): ask the dish's ORDER first — this handler rewrites that order's
       // status from its dishes below, so on a cancelled ticket it would quietly revive it.
-      { const own = (await sb.from("order_items").select("order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null } | null;
+      { const own = (await sb.from("order_items").select("order_id, status").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null; status?: string | null } | null;
+        // A DISH THE WAITER HAS SERVED STAYS SERVED (sweep #10 T11, item 1). The kitchen's ✓ and its
+        // take-back both land here, and neither may un-serve: a ✓ tapped a second after the waiter
+        // carried the plate out, or replayed from the offline queue later, used to write 'ready' over
+        // 'served', clear served_at and roll the whole order back to 'preparing' — so the floor said
+        // the table was cooking again. /unready above has always left a served dish alone; this is the
+        // same rule. Un-serving is the waiter tablet's own explicit "↩ Send back to kitchen".
+        if (own && own.status === "served" && status !== "served") return err(SERVED_DISH_MSG, 409);
         if (own && own.order_id) {
           const ord = (await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
           if (ord && ord.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409);

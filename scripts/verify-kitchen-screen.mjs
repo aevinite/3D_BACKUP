@@ -44,6 +44,8 @@ for (const m of ["replay-block1", "replay-block1b", "replay-block2", "replay-con
                  "round3-branches", "round3-paths"]) {
   await import("./sweep/t9/" + m + ".mjs");
 }
+// SWEEP #10 · T11 — the guards its three fixes left behind (P180001–P180040).
+await import("./sweep/t11s10/guard-fixes.mjs");
 
 // ── THE ROW THE SABOTAGE PASS FOUND MISSING — P63221–P63230 ──────────────────────────────────
 // Sabotaging `tshort()` back to `tname(t) || \`T${t}\`` — the exact fault that printed the literal
