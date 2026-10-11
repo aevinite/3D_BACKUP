@@ -284,7 +284,9 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
 
     // NEW
     check("P65921", "the back manager swallows only OUR OWN rewind, never a real Back press", () =>
-      /if \(ignore > 0\) \{ ignore -= 1; return; \}/.test(S));
+      // Sweep #10 T16: the swallow now also catches up once the rewind has landed (settleRewind), and
+      // still returns before the "a real Back press pops a layer" branch — which is this row's point.
+      /if \(ignore > 0\) \{ ignore -= 1; (if \(ignore === 0\) settleRewind\(\); )?return; \}/.test(S));
     check("P65922", "the pushed counter is corrected BEFORE the rewind is asked for", () =>
       before(reconcile, /pushed = target;/, /history\.go\(-remove\)/));
     check("P65923", "the file is strict mode, so a typo becomes an error rather than a global", () =>
