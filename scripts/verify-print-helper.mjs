@@ -834,6 +834,17 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   check(/id="after"/.test(read("public/print-setup.html")) && /They shut the computer down at night/.test(read("public/print-setup.html")),
     "the guide answers what happens after it is installed — shutdowns, restarts, a new computer",
     "the after-install section is gone from /print-setup.html");
+  // A SECOND TAP ON COPY COPIES THE COMMAND, NOT "Copied ✓" (sweep #10 T15, item 8). The handler
+  // stripped a trailing "Copy" off the block's text, and the button says "Copied ✓" for 1.8 s after
+  // a press — so a double-tap put the words on the clipboard and broke the last pasted line. It must
+  // read the block with its button removed, not trim a word it guesses is there.
+  {
+    const g = read("public/print-setup.html");
+    const h = g.slice(g.indexOf('querySelectorAll("pre[data-copy]")'));
+    check(/cloneNode\(true\)/.test(h.slice(0, 900)) && /\.remove\(\)/.test(h.slice(0, 900)) && !/pre\.innerText\.replace\(/.test(h.slice(0, 900)),
+      "the guide's Copy reads the block without its own button, so a second tap copies the same command",
+      "public/print-setup.html derives the copied text by trimming the button's word off pre.innerText — a double-tap copies 'Copied ✓' onto the end of the command");
+  }
 }
 
 // ── 8e · THREE THINGS A REVIEW CAUGHT (owner relayed them, 2026-08-28) ────────────────────────
