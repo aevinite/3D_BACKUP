@@ -683,6 +683,17 @@ export async function POST(req: NextRequest) {
     // 2) its settings row — clone #1 as a template, then override id/restaurant_id/enabled_panels
     //    and start with a modest table_count (a new restaurant shouldn't inherit #1's big floor).
     const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RID).maybeSingle();
+    // ── THE TEMPLATE ANSWERS FOR ITSELF (sweep #10 T29, item 4) ────────────────────────────────────
+    // Its error was never looked at, so a failed read handed `null` to cleanClonedSettings(), which then
+    // returns only the ~50 columns it names itself — and the create went on to answer success. The new
+    // restaurant was born half-configured (none of restaurant #1's guest-menu set-up that R66 says a new
+    // restaurant deliberately starts from), with no error anywhere and nothing on the screen to say so.
+    // The access-tree route refuses this same read in the same words (T27 sweep #9). Nothing but the
+    // restaurant row exists yet, so it is rolled back exactly as the settings-write failure below is.
+    if (template.error) {
+      await sb.from("restaurants").delete().eq("id", rid);
+      return adminFail("the new restaurant's settings", template.error, { action: "save" });
+    }
     // cleanClonedSettings strips #1's tenant-specific identity/geo/tax (and sets table_count:10)
     // so a new restaurant never inherits #1's invoice name/GSTIN or café geofence coordinates.
     const baseRow = cleanClonedSettings(template.data);

@@ -295,5 +295,27 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 9 · THE SETTINGS TEMPLATE READ ANSWERS FOR ITSELF, EVERYWHERE (sweep #10 T29, item 4) ───────────
+// Seven admin routes build a settings row from restaurant #1's (`cleanClonedSettings(template.data)`).
+// Only the access-tree route checked that read; the other six — the CREATE-A-RESTAURANT path among
+// them, which runs on every create — handed a failed read's `null` on, and the restaurant was born
+// half-configured with a success answer. Matched by SHAPE, so an eighth clone site is held to it too.
+{
+  const dir = join(ROOT, "app/api/admin");
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  let sites = 0;
+  for (const abs of walk(dir)) {
+    const rel = abs.slice(ROOT.length + 1);
+    const src = code(rel);
+    for (const m of src.matchAll(/const (\w+) = await sb\.from\("settings"\)\.select\("\*"\)\.eq\("restaurant_id", DEFAULT_\w+\)\.maybeSingle\(\);/g)) {
+      sites++;
+      const after = src.slice(m.index + m[0].length, src.indexOf(`cleanClonedSettings(${m[1]}.data)`, m.index));
+      check(`${rel}: the settings template read is checked before a row is built from it`,
+        new RegExp(`if \\(${m[1]}\\.error\\)`).test(after), "a failed read builds a half-configured settings row and still answers success");
+    }
+  }
+  check("…and the clone sites were found at all (a shape change would otherwise pass in silence)", sites >= 7, `${sites} found`);
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

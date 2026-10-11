@@ -95,6 +95,8 @@ export async function POST(req: NextRequest) {
   }
   // No settings row yet → clone #1 as a template so every NOT NULL column is satisfied, then apply.
   const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
+  // The template answers for itself (sweep #10 T29, item 4) — the access-tree route says why.
+  if (template.error) return adminFail("this restaurant's features", template.error, { action: "save" });
   const base = cleanClonedSettings(template.data);
   // Keyed by the restaurant id, not its slug — same reason as the create route (T20, 2026-08-16):
   // `settings.id` is a primary key and a binned restaurant keeps its row, so a slug that is free in
