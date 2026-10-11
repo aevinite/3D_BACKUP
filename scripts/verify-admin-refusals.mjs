@@ -392,5 +392,24 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 14 · RESOLVING A PROBLEM THAT IS ALREADY RESOLVED RECORDS NOTHING (sweep #10 T29, item 9) ────
+// Repair → a problem tile → Resolve, pressed on a stale board. The tapped row was pushed into the
+// update unconditionally, so a row another tab had resolved got its resolved_at re-stamped and a
+// second "Resolved: …" line went into the Activity log.
+{
+  const rel = "app/api/admin/resolve-error/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Repair → Resolve reads whether the tapped problem is still open",
+      /\.select\("panel, action, detail, restaurant_id, level, resolved_at"\)/.test(src));
+    check("…and only adds it to the update while it is still in the state being acted on",
+      /if \(!ids\.includes\(actionId\) && inSourceState\) ids\.push\(actionId\)/.test(src) && !/if \(!ids\.includes\(actionId\)\) ids\.push\(actionId\)/.test(src),
+      "an already-resolved problem is re-stamped and logged as resolved a second time");
+    check("…and an empty set answers before anything is written or logged",
+      /if \(!ids\.length\) \{/.test(src) && src.indexOf("if (!ids.length) {") < src.indexOf('.in("id", ids)'));
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

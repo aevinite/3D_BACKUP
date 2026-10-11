@@ -119,11 +119,11 @@ export async function POST(req: NextRequest) {
   // problem disappear, believed it handled, and it was back on the next refresh with no record that
   // anything had been attempted. Every OTHER read in this handler already answers for itself.
   const rowQ = await sb.from("staff_actions")
-    .select("panel, action, detail, restaurant_id, level")
+    .select("panel, action, detail, restaurant_id, level, resolved_at")
     .eq("id", actionId).maybeSingle();
   if (rowQ.error) return adminFail("that problem's status", rowQ.error, { action: "load" });
   const row = rowQ.data as
-    { panel: string; action: string; detail: string | null; restaurant_id: string | null; level: string } | null;
+    { panel: string; action: string; detail: string | null; restaurant_id: string | null; level: string; resolved_at: string | null } | null;
   if (!row) return NextResponse.json({ error: "that entry no longer exists" }, { status: 404 });
   if (row.level !== "error") return NextResponse.json({ error: "only errors can be resolved" }, { status: 400 });
 
@@ -149,8 +149,21 @@ export async function POST(req: NextRequest) {
   const ids = (candQ.data || [])
     .filter((c: { id: string; detail: string | null }) => errorSig(c.detail) === wantSig)
     .map((c: { id: string }) => c.id);
-  // The row the admin tapped is always in scope, even if a race moved it out of the candidate read.
-  if (!ids.includes(actionId)) ids.push(actionId);
+  // The row the admin tapped is always in scope, even if a race moved it out of the candidate read —
+  // BUT ONLY WHILE IT IS STILL IN THE STATE BEING ACTED ON (sweep #10 T29, item 9). The candidate read
+  // already leaves out a row that is in the target state, so pushing it back in only ever mattered when
+  // another tab or device had resolved (or reopened) it first: the update then re-stamped `resolved_at`
+  // — overwriting WHEN it was really handled — and wrote a second "Resolved: …" line into the Activity
+  // log for a resolve this press did not make. Same rule as the Repair Kit's unstick and the logo
+  // removal: an operation that changed nothing must not be recorded as one.
+  const inSourceState = reopen ? row.resolved_at !== null : row.resolved_at === null;
+  if (!ids.includes(actionId) && inSourceState) ids.push(actionId);
+  if (!ids.length) {
+    return NextResponse.json({
+      ok: true, already: true, resolved: 0, reopened: 0, snoozed: 0, remembered: false,
+      message: reopen ? "That problem is already open again." : "That problem was already resolved — nothing to do.",
+    });
+  }
 
   // A WAIT writes `snoozed_until` and leaves resolved_at alone — the problem stays open, it just
   // stops occupying the board until then (mig 344).

@@ -44,7 +44,12 @@ export default function section(c) {
     () => { const s = c.clean(F); return /import \{ errorSig \}/.test(s) && /errorSig\(row\.detail\)/.test(s) && /errorSig\(c\.detail\)/.test(s); });
   phase("the row the admin tapped is always in scope, even if a race moved it",
     "check the id is pushed back in",
-    () => /if \(!ids\.includes\(actionId\)\) ids\.push\(actionId\)/.test(c.clean(F)));
+    // Since sweep #10 T29 item 9 the push is CONDITIONAL — only while the tapped row is still in the
+    // state being acted on — because pushing an already-resolved row re-stamped it and logged a second
+    // "Resolved". A still-open tapped row the candidate read missed is still added, which is this
+    // phase's whole claim.
+    () => /if \(!ids\.includes\(actionId\)(?: && inSourceState)?\) ids\.push\(actionId\)/.test(c.clean(F))
+      && (!/&& inSourceState\)/.test(c.clean(F)) || /const inSourceState = reopen \? row\.resolved_at !== null : row\.resolved_at === null/.test(c.clean(F))));
   phase("the candidate read is bounded, so a huge repeat count cannot make it unbounded",
     "check the limit", () => /\.limit\(500\)/.test(c.clean(F)));
   phase("a blip no longer reads as 'that entry no longer exists' (round 1, item 4)",
