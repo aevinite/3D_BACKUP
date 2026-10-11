@@ -18,6 +18,13 @@ import { panelSafeSettings } from "@/lib/panelSettings";
 
 export const dynamic = "force-dynamic";
 const CAP = 100_000; // per-table row cap for the backup
+const PAGE = 1000;   // PostgREST's own per-request ceiling — a bigger .limit() is silently cut to it
+// The order each table is paged in: its own unique key, so paging can never repeat or skip a row.
+// Five tables have no `id` column (measured 2026-10-11); each is keyed by what makes a row unique.
+const ORDER_KEY: Record<string, string> = {
+  categories: "slug", filters: "slug", customers: "phone", daily_counters: "key,day", seq_counters: "key",
+  restaurant_owners: "user_id", restaurant_billing: "restaurant_id",
+};
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 // Tenant tables to include (staff_users handled separately to drop secrets).
@@ -59,6 +66,30 @@ export async function GET(req: NextRequest) {
     },
     restaurant: restQ.data,
   };
+  // ── EVERY ROW, A PAGE AT A TIME (sweep #10 T29, item 12) ────────────────────────────────────────
+  // Each table used to be ONE read with `.limit(CAP)` (100,000). PostgREST answers at most 1,000 rows
+  // per request whatever limit is asked for, so every table stopped at 1,000 — and `truncated` was
+  // only set at 100,000, so the file said `complete: true` over it. Measured on French House: 1,000
+  // of 20,561 orders and 1,000 of 1,315 Removals rows, in a file offered as the thing a permanently
+  // removed restaurant is rebuilt from. Now each table is read in pages of 1,000 in a fixed order (its
+  // own key, so no page can repeat or skip a row), up to CAP; a table that has more says so in
+  // `truncated`, and a page that fails marks the table `failed` — never a shorter list with no word.
+  const readAll = async (table: string, cols = "*"): Promise<{ rows: unknown[]; truncated: boolean; error?: undefined } | { error: string; rows?: undefined; truncated?: undefined }> => {
+    const rows: unknown[] = [];
+    const key = ORDER_KEY[table] || "id";
+    for (let from = 0; from < CAP; from += PAGE) {
+      let q = sb.from(table).select(cols).eq("restaurant_id", rid);
+      for (const k of key.split(",")) q = q.order(k, { ascending: true });
+      const r = await q.range(from, Math.min(from + PAGE, CAP) - 1);
+      if (r.error) return { error: r.error.message || "this table could not be read" };
+      const batch = (r.data || []) as unknown[];
+      rows.push(...batch);
+      if (batch.length < PAGE) return { rows, truncated: false };
+    }
+    // Exactly CAP rows read: one more look says whether anything was left behind.
+    const more = await sb.from(table).select("restaurant_id", { count: "exact", head: true }).eq("restaurant_id", rid);
+    return { rows, truncated: (more.count ?? CAP + 1) > CAP };
+  };
   const truncated: string[] = [];
   // ── A BACKUP THAT IS INCOMPLETE MUST SAY SO AT THE TOP (T20 sweep, 2026-08-19) ─────────────────
   // A failed table read already put `{ error: … }` in place of that table's rows, which is right —
@@ -73,8 +104,8 @@ export async function GET(req: NextRequest) {
   const failed: string[] = [];
 
   for (const t of TABLES) {
-    const q = await sb.from(t).select("*").eq("restaurant_id", rid).limit(CAP);
-    if (q.error) { backup[t] = { error: q.error.message }; failed.push(t); continue; }
+    const q = await readAll(t);
+    if (q.error !== undefined) { backup[t] = { error: q.error }; failed.push(t); continue; }
     // THE SETTINGS ROW CARRIES A CREDENTIAL, AND THIS FILE LEAVES THE BUILDING (T17 sweep,
     // 2026-08-13, finding F3). `settings.platform_channels` holds the delivery apps' connection
     // keys (mig 209) — the two admin screens that manage them deliberately never hand the value
@@ -84,17 +115,16 @@ export async function GET(req: NextRequest) {
     // every setting — a channel's key is re-entered from the platform's own dashboard, which is
     // the only place it should be read from anyway.
     backup[t] = t === "settings"
-      ? (q.data || []).map((row) => panelSafeSettings(row as Record<string, unknown>))
-      : (q.data || []);
-    if ((q.data?.length || 0) >= CAP) truncated.push(t);
+      ? q.rows.map((row) => panelSafeSettings(row as Record<string, unknown>))
+      : q.rows;
+    if (q.truncated) truncated.push(t);
   }
 
   // staff_users WITHOUT secrets — a backup must never carry password/pin hashes.
-  const staffQ = await sb.from("staff_users")
-    .select("id, username, name, role, restaurant_id, phone, active, profile_confirmed, permissions, created_at")
-    .eq("restaurant_id", rid).limit(CAP);
-  backup.staff_users = staffQ.error ? { error: staffQ.error.message } : (staffQ.data || []);
-  if (staffQ.error) failed.push("staff_users");
+  const staffQ = await readAll("staff_users", "id, username, name, role, restaurant_id, phone, active, profile_confirmed, permissions, created_at");
+  backup.staff_users = staffQ.error !== undefined ? { error: staffQ.error } : staffQ.rows;
+  if (staffQ.error !== undefined) failed.push("staff_users");
+  if (staffQ.truncated) truncated.push("staff_users");
 
   const meta = backup._meta as Record<string, unknown>;
   meta.truncated = truncated;
@@ -112,7 +142,18 @@ export async function GET(req: NextRequest) {
   const stamp = new Date().toISOString().slice(0, 10);
   // Audit trail: record that a full recovery backup (with financials) was downloaded.
   await logAction("admin", "restaurant_export", { detail: "recovery backup downloaded (contains financials)", restaurant_id: rid });
-  return new NextResponse(JSON.stringify(backup, null, 2), {
+  // SENT AS A STREAM (sweep #10 T29, item 12). A complete backup is tens of megabytes now that every row
+  // is in it (French House: 43.8 MB), and a hosting platform may refuse a single buffered answer that
+  // large. Handing the same bytes over in 1 MB pieces changes nothing about the file the admin saves.
+  const text = JSON.stringify(backup, null, 2);
+  const enc = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(ctl) {
+      for (let i = 0; i < text.length; i += 1 << 20) ctl.enqueue(enc.encode(text.slice(i, i + (1 << 20))));
+      ctl.close();
+    },
+  });
+  return new NextResponse(body, {
     status: 200,
     headers: {
       "Content-Type": "application/json",

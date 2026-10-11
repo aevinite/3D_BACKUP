@@ -222,6 +222,7 @@
     "verify:bill-reprint": "node scripts/verify-bill-reprint-is-silent.mjs",
     "verify:owner-scope": "node scripts/verify-owner-scope-503.mjs",
     "verify:admin-refusals": "node scripts/verify-admin-refusals.mjs",
+    "verify:admin-routes-t29": "node scripts/verify-admin-routes-t29.mjs",
     "verify:retention": "node scripts/verify-retention-lock.mjs",
     "verify:floor-offplan": "node scripts/verify-floor-offplan.mjs",
     "verify:tip": "node scripts/verify-tip.mjs",

@@ -351,8 +351,15 @@ export async function PATCH(req: NextRequest) {
     if (del.error) return adminFail("this restaurant's owner", del.error, { action: "save" });
   }
   // Add the NEW primary's membership (idempotent — composite PK + ignoreDuplicates).
+  // ── AND THIS IS THE WRITE THAT ACTUALLY LETS THEM IN (sweep #10 T29, item 5) ───────────────────
+  // Membership is the SCOPING source of truth (mig 097) — `owner_user_id` above is only the name on the
+  // list. This upsert's error was dropped, so a failed write answered ok: the console showed the new
+  // owner beside the restaurant, and that owner signed in to find nothing. The create path's twin was
+  // given exactly this correction in sweep #7 ("THE LOGIN EXISTS BUT NOBODY OWNS THE RESTAURANT").
+  // Pressing Save again converges: the old owner is by then the new one, so only this write re-runs.
   if (ownerId) {
-    await sb.from("restaurant_owners").upsert({ restaurant_id: rid, user_id: ownerId }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
+    const mem = await sb.from("restaurant_owners").upsert({ restaurant_id: rid, user_id: ownerId }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
+    if (mem.error) return adminFail("this restaurant's owner", mem.error, { action: "save" });
   }
   await logAction("admin", "restaurant_set_owner", { restaurant_id: rid, actor: "admin", detail: ownerId ? `assigned owner ${ownerId}` : "cleared owner" });
   return ok({ ok: true, ownerUserId: ownerId });
@@ -573,7 +580,9 @@ export async function POST(req: NextRequest) {
       if (/Retention lock/i.test(m)) return bad("This database still has the old 90-day wait on it — its migrations are behind. Nothing was removed.", 423);
       if (/never be purged/i.test(m)) return bad("The default restaurant can never be removed.", 400);
       if (/not in the recycle bin/i.test(m)) return bad("Only a restaurant in the recycle bin can be removed.", 409);
-      return bad(m, 500);
+      // Anything else is the database's own words — a sentence for the console, the words for the log
+      // (sweep #10 T29, item 10). The function is atomic, so nothing was removed.
+      return adminFail("the permanent removal of this restaurant", error, { action: "save" });
     }
     await logAction("admin", "restaurant_purge", { actor: "admin", detail: `permanently removed restaurant "${r.name}" (${rid}) — menu, staff and settings deleted; bills, invoices and the removals audit kept` });
     return ok({ ok: true, purged: true, billsKept: true });
@@ -683,6 +692,17 @@ export async function POST(req: NextRequest) {
     // 2) its settings row — clone #1 as a template, then override id/restaurant_id/enabled_panels
     //    and start with a modest table_count (a new restaurant shouldn't inherit #1's big floor).
     const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RID).maybeSingle();
+    // ── THE TEMPLATE ANSWERS FOR ITSELF (sweep #10 T29, item 4) ────────────────────────────────────
+    // Its error was never looked at, so a failed read handed `null` to cleanClonedSettings(), which then
+    // returns only the ~50 columns it names itself — and the create went on to answer success. The new
+    // restaurant was born half-configured (none of restaurant #1's guest-menu set-up that R66 says a new
+    // restaurant deliberately starts from), with no error anywhere and nothing on the screen to say so.
+    // The access-tree route refuses this same read in the same words (T27 sweep #9). Nothing but the
+    // restaurant row exists yet, so it is rolled back exactly as the settings-write failure below is.
+    if (template.error) {
+      await sb.from("restaurants").delete().eq("id", rid);
+      return adminFail("the new restaurant's settings", template.error, { action: "save" });
+    }
     // cleanClonedSettings strips #1's tenant-specific identity/geo/tax (and sets table_count:10)
     // so a new restaurant never inherits #1's invoice name/GSTIN or café geofence coordinates.
     const baseRow = cleanClonedSettings(template.data);
@@ -717,6 +737,7 @@ export async function POST(req: NextRequest) {
     //     and editable from its manager panel. Egress-safe: scoped inserts, no reads.
     let menuSeeded = false;
     let seedError: string | null = null;
+    let seedDetail: string | null = null;
     if (seedMenu) {
       try {
         const menu = loadStarterMenu();
@@ -737,7 +758,11 @@ export async function POST(req: NextRequest) {
         }
         menuSeeded = true;
       } catch (e) {
-        seedError = e instanceof Error ? e.message : String(e);
+        // The create screen prints this after "Menu seed failed:", so it is a sentence, not the
+        // database's own words (sweep #10 T29, item 10); the words go to the log and to `seedDetail`.
+        seedDetail = e instanceof Error ? e.message : String(e);
+        console.error("[admin/restaurants] starter menu seed failed:", seedDetail);
+        seedError = "the database didn't accept the sample dishes";
       }
     }
     // 3) one starter login per ENABLED panel. Username = the panel name (unique PER restaurant),
@@ -784,7 +809,7 @@ export async function POST(req: NextRequest) {
       } catch { /* remembering defaults is a convenience, not critical */ }
     }
     return ok({
-      ok: true, id: rid, slug, name, panels, logins, loginErrors, menuSeeded, seedError,
+      ok: true, id: rid, slug, name, panels, logins, loginErrors, menuSeeded, seedError, ...(seedDetail ? { seedDetail } : {}),
       // Present ONLY when this address had a previous occupant, so the console can say so once and
       // then never mention it again. Not an error and not a refusal — freeing a binned name is his
       // rule; this is the consequence stated out loud so reprinting the codes is a decision.

@@ -191,7 +191,9 @@ const NOT_YET = new Map([
   // DELIBERATE, not a miss: these two write the database's words INTO THE BACKUP FILE, next to the
   // table that failed, so whoever rebuilds a restaurant can see which table came back empty and why.
   // They never reach a toast. `_meta.failed` names them at the top of the same file.
-  ["app/api/admin/restaurants/export/route.ts", 2],
+  // WAS 2, NOW 1 (sweep #10 T29, item 12): every table — staff included — is now read through ONE
+  // paging helper, readAll(), which is the single place that hands the words on.
+  ["app/api/admin/restaurants/export/route.ts", 1],
   // ensureCodes() is an internal helper that RETURNS the words to its caller; the caller wraps them
   // in adminFail, so the screen never sees them. Counted here so the number stays honest.
   //
@@ -247,7 +249,7 @@ const NOT_YET = new Map([
     check("…and which tables could not be READ at all", /failed\.push\(/.test(src) && /meta\.failed\s*=/.test(src),
       "a failed table is invisible unless the reader scrolls to that key — the file looks complete and is not");
     check("…and it carries one flag a restore script can branch on", /meta\.complete\s*=/.test(src));
-    check("…and the staff table is counted too, not just the looped ones", /staffQ\.error\)\s*failed\.push/.test(src));
+    check("…and the staff table is counted too, not just the looped ones", /staffQ\.error(?: !== undefined)?\)\s*failed\.push/.test(src));
   }
 }
 
@@ -268,6 +270,204 @@ const NOT_YET = new Map([
     check("…and the two expense tiles are fetched together, not one after the other",
       /Promise\.all\(\[staffPayExpense\(\), foodLossExpense\(\)\]\)/.test(src),
       "awaiting them in sequence inside the returned object makes the second wait on the first");
+  }
+}
+
+// ── 8 · A REMOVAL THAT DID NOT HAPPEN IS NEVER RECORDED (sweep #10 T29, item 3) ──────────────────
+// The Repair Kit's "Delete an order" read the order WITHOUT its deleted_at and never looked at the
+// count softDeleteOrders() hands back, so deleting an already-deleted order wrote a second
+// `order_deleted` row — full amount — into the Removals record the owner totals. The void branch two
+// blocks up has refused its own twin since T20 (2026-09-01); this holds the delete branch to it.
+{
+  const rel = "app/api/admin/repair/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    const del = src.slice(src.indexOf('op === "delete_order"'), src.indexOf('op === "refire_order"'));
+    check("Repair → Delete an order reads the order's deleted_at before deleting it",
+      /readOne<[^>]*deleted_at[^>]*>\(\s*"orders",\s*"[^"]*\bdeleted_at\b/.test(del), "an already-deleted order is indistinguishable from a live one");
+    check("…and an already-deleted order returns BEFORE anything is written",
+      /if \(cur\.deleted_at\) return/.test(del) && del.indexOf("if (cur.deleted_at) return") < del.indexOf("softDeleteOrders("),
+      "a second press would record the same removal twice");
+    check("…and it believes the delete's own count, not its own earlier read",
+      /\)\)\.deleted;/.test(del) && /if \(deleted === 0\) return/.test(del),
+      "another device can delete it between the read and the write");
+    check("…and the Removals row is written only after both of those",
+      del.indexOf("if (deleted === 0) return") > -1 && del.indexOf("recordRemoval(") > del.indexOf("if (deleted === 0) return"));
+  }
+}
+
+// ── 9 · THE SETTINGS TEMPLATE READ ANSWERS FOR ITSELF, EVERYWHERE (sweep #10 T29, item 4) ───────────
+// Seven admin routes build a settings row from restaurant #1's (`cleanClonedSettings(template.data)`).
+// Only the access-tree route checked that read; the other six — the CREATE-A-RESTAURANT path among
+// them, which runs on every create — handed a failed read's `null` on, and the restaurant was born
+// half-configured with a success answer. Matched by SHAPE, so an eighth clone site is held to it too.
+{
+  const dir = join(ROOT, "app/api/admin");
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  let sites = 0;
+  for (const abs of walk(dir)) {
+    const rel = abs.slice(ROOT.length + 1);
+    const src = code(rel);
+    for (const m of src.matchAll(/const (\w+) = await sb\.from\("settings"\)\.select\("\*"\)\.eq\("restaurant_id", DEFAULT_\w+\)\.maybeSingle\(\);/g)) {
+      sites++;
+      const after = src.slice(m.index + m[0].length, src.indexOf(`cleanClonedSettings(${m[1]}.data)`, m.index));
+      check(`${rel}: the settings template read is checked before a row is built from it`,
+        new RegExp(`if \\(${m[1]}\\.error\\)`).test(after), "a failed read builds a half-configured settings row and still answers success");
+    }
+  }
+  check("…and the clone sites were found at all (a shape change would otherwise pass in silence)", sites >= 7, `${sites} found`);
+}
+
+// ── 10 · ASSIGNING AN OWNER IS ONLY "SAVED" ONCE THEY CAN GET IN (sweep #10 T29, item 5) ─────────
+// The Restaurants list's owner picker wrote the name (`owner_user_id`) and then the membership row —
+// the one that decides what an owner SEES (mig 097) — with that second write's error dropped. Every
+// restaurant_owners write in the restaurants route must answer for itself.
+{
+  const rel = "app/api/admin/restaurants/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    const writes = [...src.matchAll(/(?:const (\w+) = )?await sb\.from\("restaurant_owners"\)\.(?:upsert|insert|delete)\(/g)];
+    check("the restaurants route still writes owner membership (a rename would otherwise pass in silence)", writes.length >= 3, `${writes.length} found`);
+    for (const w of writes) {
+      const ok = !!w[1] && new RegExp(`${w[1]}\\.error`).test(src.slice(w.index, w.index + 900));
+      check(`Restaurants → owner membership write '${w[1] || "(unnamed)"}' looks at its own error`, ok, "a failed write answers Saved and the owner signs in to nothing");
+    }
+  }
+}
+
+// ── 11 · THE BILL PREVIEW DRAWS THE RESTAURANT ASKED FOR, OR NOTHING (sweep #10 T29, item 6) ──────
+// Access & permissions → "Format of …" → Preview / Print. A missing id fell back to restaurant #1 (the
+// flagship's header under another restaurant's screen) and a failed read drew a bill with a blank
+// header, both with a 200.
+{
+  const rel = "app/api/admin/restaurants/bill-preview/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Access → bill preview: no silent fall-back to restaurant #1 for a missing id",
+      !/DEFAULT_RESTAURANT_ID|DEFAULT_RID/.test(src), "the flagship's bill would be drawn under another restaurant's name");
+    check("…and both reads are checked before a bill is drawn",
+      /if \(setQ\.error \|\| restQ\.error\)/.test(src) && src.indexOf("setQ.error || restQ.error") < src.indexOf("billPreviewHtml("),
+      "a failed read draws a bill with no name, no address and no tax lines");
+    check("…and an unknown restaurant is said in words, not drawn as an empty bill",
+      /if \(!restQ\.data\) return/.test(src));
+  }
+}
+
+// ── 12 · "COULDN'T READ THE LOCK" IS NOT "UNLOCKED" (sweep #10 T29, item 7) ──────────────────────
+// Admin console → Settings → the log-retention lock. A failed read of app_config showed the lock OFF
+// while the manager panel's read of the same row fails CLOSED. The admin route must not fold an error
+// into the missing-row answer.
+{
+  const rel = "app/api/admin/settings/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Settings → the retention lock: a failed read is not answered as 'never locked'",
+      !/if \(r\.error \|\| !r\.data\) return \{ locked: false/.test(src) && /if \(r\.error\) return \{ error: r\.error \}/.test(src),
+      "a hiccup shows every restaurant as unlocked while the manager panel says locked");
+    check("…and the GET refuses in words rather than drawing a guessed lock",
+      /if \("error" in lock\) return adminFail\(/.test(src));
+  }
+}
+
+// ── 13 · A MALFORMED ID IS "NOT FOUND", NEVER "TRY AGAIN" (sweep #10 T29, item 8) ────────────────
+// /api/admin/users let a malformed id reach a uuid column on four doors; Postgres refused it and the
+// console said "please try again" (500) to a request that could never work.
+{
+  const rel = "app/api/admin/users/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("People → a person's profile (GET ?id) shape-checks the id before reading", /if \(one\) return UUID\.test\(one\)/.test(src));
+    const patch = src.slice(src.indexOf("export async function PATCH"), src.indexOf("export async function DELETE"));
+    const del = src.slice(src.indexOf("export async function DELETE"));
+    const post = src.slice(src.indexOf("export async function POST"), src.indexOf("export async function PATCH"));
+    check("…and every profile write (PATCH) does too, before its first read",
+      /if \(!UUID\.test\(id\)\) return bad\("User not found\.", 404\)/.test(patch) && patch.indexOf("UUID.test(id)") < patch.indexOf("sb.from("));
+    check("…and Delete this person (DELETE) does too, before its first read",
+      /if \(!UUID\.test\(id\)\) return bad\("User not found\.", 404\)/.test(del) && del.indexOf("UUID.test(id)") < del.indexOf("sb.from("));
+    check("…and Add a person (POST) shape-checks the restaurant before reading it",
+      /if \(!UUID\.test\(restaurantId\)\)/.test(post) && post.indexOf("UUID.test(restaurantId)") < post.indexOf("sb.from("));
+  }
+}
+
+// ── 14 · RESOLVING A PROBLEM THAT IS ALREADY RESOLVED RECORDS NOTHING (sweep #10 T29, item 9) ────
+// Repair → a problem tile → Resolve, pressed on a stale board. The tapped row was pushed into the
+// update unconditionally, so a row another tab had resolved got its resolved_at re-stamped and a
+// second "Resolved: …" line went into the Activity log.
+{
+  const rel = "app/api/admin/resolve-error/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Repair → Resolve reads whether the tapped problem is still open",
+      /\.select\("panel, action, detail, restaurant_id, level, resolved_at"\)/.test(src));
+    check("…and only adds it to the update while it is still in the state being acted on",
+      /if \(!ids\.includes\(actionId\) && inSourceState\) ids\.push\(actionId\)/.test(src) && !/if \(!ids\.includes\(actionId\)\) ids\.push\(actionId\)/.test(src),
+      "an already-resolved problem is re-stamped and logged as resolved a second time");
+    check("…and an empty set answers before anything is written or logged",
+      /if \(!ids\.length\) \{/.test(src) && src.indexOf("if (!ids.length) {") < src.indexOf('.in("id", ids)'));
+  }
+}
+
+// ── 15 · …AND NOT BY THE BACK DOOR EITHER: A CAUGHT THROW (sweep #10 T29, item 10) ───────────────
+// Rule 5's pattern looks for `error: x.message`. The Repair Kit threw `new Error(error.message)` and its
+// catch answered `err(e.message, 500)`, the recycle bin's purge answered `bad(m, 500)` with the
+// database's words in `m`, and "New restaurant" printed the raw seed error after "Menu seed failed:".
+// None matched rule 5. This looks for a caught error's message going into a response instead.
+// ALLOWED, with the reason: the two /api/admin/users throws come from lib helpers whose messages are
+// written FOR the screen (newWaiterTables — "Pick at least one table"; jobPatchFrom — "throws a
+// user-safe message"), not from the database.
+{
+  const ALLOWED_CAUGHT = new Map([["app/api/admin/users/route.ts", 2]]);
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  const bad = [];
+  for (const abs of walk(join(ROOT, "app/api/admin"))) {
+    const rel = abs.slice(ROOT.length + 1);
+    const src = code(rel);
+    const n = (src.match(/(?:return\s+\w+|NextResponse\.json)\(\s*(?:\{\s*error:\s*)?e instanceof Error \? e\.message/g) || []).length
+      + (src.match(/return bad\(m, 5\d\d\)/g) || []).length
+      + (src.match(/seedError = e instanceof Error \? e\.message/g) || []).length;
+    if (n > (ALLOWED_CAUGHT.get(rel) || 0)) bad.push(`${rel} (${n})`);
+  }
+  check("no admin route hands a CAUGHT database error's words to the console", bad.length === 0,
+    bad.length ? `${bad.join("; ")} — wrap it in adminFail(what, { message }, { action })` : "");
+}
+
+// ── 16 · USAGE COUNTS THE WINDOW ASKED FOR, OR REFUSES (sweep #10 T29, item 11) ──────────────────
+// Admin console → Usage → a custom date range. "2026-02-31" passed the shape test and Date.parse, so the
+// counts started on 3 March while the answer echoed 31 February; an impossible or half-given range fell
+// back to the default view without a word. Same round trip as Billing (S10 T28 item 8).
+{
+  const rel = "app/api/admin/usage/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Usage → a typed date must survive a round trip (no 31 February)",
+      /new Date\(ms\)\.toISOString\(\)\.slice\(0, 10\) === v/.test(src) && !/!isNaN\(Date\.parse\(v\)\)/.test(src));
+    check("…and an impossible or half-given range is refused, not swapped for the default view",
+      /Pick both a start date and an end date\./.test(src) && /That isn't a real date/.test(src));
+  }
+}
+
+// ── 17 · THE RECOVERY BACKUP HOLDS EVERY ROW, OR SAYS IT DOES NOT (sweep #10 T29, item 12) ──────
+// Recycle bin → "download a backup first". Each table was ONE read with .limit(100000), and PostgREST
+// answers at most 1,000 rows per request — so French House's file held 1,000 of 20,561 orders and
+// still said `complete: true`. Every table must now be paged in a fixed key order.
+{
+  const rel = "app/api/admin/restaurants/export/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Recovery backup → no table is read in one request (PostgREST cuts every answer at 1,000)",
+      !/\.limit\(CAP\)/.test(src) && /\.range\(from, Math\.min\(from \+ PAGE, CAP\) - 1\)/.test(src));
+    check("…every page is read in the table's own key order, so no row repeats or goes missing",
+      /q = q\.order\(k, \{ ascending: true \}\)/.test(src) && /const ORDER_KEY: Record<string, string> = \{/.test(src));
+    check("…and the staff logins go through the same pager",
+      /const staffQ = await readAll\("staff_users"/.test(src));
   }
 }
 

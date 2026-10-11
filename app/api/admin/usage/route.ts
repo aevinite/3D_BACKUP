@@ -24,9 +24,28 @@ export async function GET(req: NextRequest) {
   // Both dates are validated and CLAMPED before they reach SQL: a window is at most 400 days, so a
   // typo (or a hand-edited URL) can never turn this screen into an all-time scan of `orders`.
   const url = new URL(req.url);
-  const parseDay = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v)) ? v : null);
-  const fromDay = parseDay(url.searchParams.get("from"));
-  const toDay = parseDay(url.searchParams.get("to"));
+  // ── A DATE THAT EXISTS, OR A REFUSAL — NEVER A DIFFERENT WINDOW (sweep #10 T29, item 11) ────────
+  // The shape test plus Date.parse let "2026-02-31" through — JavaScript reads it as 3 March — so the
+  // figures were counted from 3 March while the answer echoed "2026-02-31" as the window used. And a
+  // date that failed outright ("2026-13-01"), or only one of the two, silently fell back to the default
+  // 7/30-day view, answering a question nobody asked. The Billing screen's dates were given this exact
+  // round trip by S10 T28 item 8. The calendar on the Usage page always sends two real dates or none,
+  // so nothing it does changes; only a typed or stale address now gets a sentence instead of a guess.
+  const realDay = (v: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    const ms = Date.parse(`${v}T00:00:00Z`);
+    return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === v;
+  };
+  const rawFrom = url.searchParams.get("from");
+  const rawTo = url.searchParams.get("to");
+  if ((rawFrom || rawTo) && !(rawFrom && rawTo)) {
+    return NextResponse.json({ error: "Pick both a start date and an end date." }, { status: 400 });
+  }
+  if (rawFrom && rawTo && !(realDay(rawFrom) && realDay(rawTo))) {
+    return NextResponse.json({ error: "That isn't a real date — pick one from the calendar." }, { status: 400 });
+  }
+  const fromDay = rawFrom || null;
+  const toDay = rawTo || null;
   let range: { from: string; to: string } | null = null;
   if (fromDay && toDay) {
     // IST business days: the window runs from 00:00 on `from` to 00:00 on the day AFTER `to`, so

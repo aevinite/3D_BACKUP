@@ -130,7 +130,9 @@ export default function section(c) {
     async () => { const b = await backup(); const m = c.clean(FE).match(/const TABLES = \[([\s\S]*?)\] as const/); const names = m ? [...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]) : []; return names.length > 0 && names.every((n) => n in b); });
   phase("a table that could not be read carries an error in its place, not silence",
     "read the source's failure handling",
-    () => /backup\[t\] = \{ error: q\.error\.message \}; failed\.push\(t\)/.test(c.clean(FE)));
+    // Since sweep #10 T29 item 12 every table is paged through readAll(), which hands back the words
+    // as `q.error` itself — the same "error in its place, and named in failed" shape.
+    () => /backup\[t\] = \{ error: q\.error(?:\.message)? \}; failed\.push\(t\)/.test(c.clean(FE)));
   phase("every table read is capped, so one huge restaurant cannot exhaust the server",
     "read the cap", () => /const CAP = 100_000/.test(c.clean(FE)));
   phase("the download is written into the record, because money left the building",

@@ -65,6 +65,8 @@ export async function POST(req: NextRequest) {
   // No settings row yet → clone #1 as a template so every NOT NULL column is satisfied
   // (mirrors the features/panels routes), then set id/restaurant_id + the flag.
   const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
+  // The template answers for itself (sweep #10 T29, item 4) — the access-tree route says why.
+  if (template.error) return adminFail("this restaurant's staff features", template.error, { action: "save" });
   const base = cleanClonedSettings(template.data); // strip #1's identity/geo/tax so they don't leak into the new restaurant
   // THE SETTINGS ROW IS KEYED BY THE RESTAURANT'S OWN ID, NOT ITS SLUG (T20 sweep, 2026-08-19).
   // `settings.id` is that table's PRIMARY KEY (mig 003). Migration 319 frees a restaurant's slug the
