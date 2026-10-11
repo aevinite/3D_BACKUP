@@ -323,7 +323,10 @@ export async function GET(req: NextRequest) {
   // are indistinguishable from correct ones — so they are orphaned rather than trusted. This is the
   // same reasoning the v3 note above gives ("BUMP THIS VERSION WHENEVER A PAYLOAD SHAPE CHANGES"),
   // applied to a change in what a key MEANS, which is the other half of the same rule.
-  const cacheKey = `reports:v6:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${rangePart}`;
+  // v8 (2026-10-11, mig 421): every money payload gained `parcels`, `parcelRows` and `drillParcelRows`, which
+  // the Tax screen folds in — an older snapshot has none, and would show tax without parcels until something
+  // moved. (v7 lived only on a branch, and its rows on dev had `parcels` but no per-period figures.)
+  const cacheKey = `reports:v8:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${rangePart}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
   // Change-detector choice. The precise ordersFingerprint SCANS its window — on a WIDE
@@ -390,11 +393,28 @@ export async function GET(req: NextRequest) {
     return [m?.id ?? 0, e?.created_at ?? "", e?.voided_at ?? "", rl.count ?? 0, ordersPart].join("|");
   };
 
+  // Money reports also carry counter parcels (mig 421), which neither orders detector can see — so a parcel
+  // paid, cancelled or made would sit behind a stale snapshot. The parcels' own window answer (a few tiny
+  // pre-summed rows, indexed by restaurant + time) is appended; a read that fails answers a fresh value,
+  // so the snapshot recomputes rather than serving tax nobody could check (the staff detector's rule).
+  const moneyFingerprint = async (): Promise<string | null> => {
+    const base = await (useMonthFp ? reportMonthFingerprint(fpIds, from, to) : ordersFingerprint(fpIds, from, to));
+    if (base === null) return base;
+    const ids = rid ? null : scope.all ? null : scope.ids;
+    if (!rid && !scope.all && !(ids && ids.length)) return base;
+    // The admin's every-restaurant view has no id list here; its parcels are still re-read on every
+    // Refresh and on the 5-minute recompute, like the rest of that platform-wide sheet.
+    if (!rid && scope.all) return `${base}|pc:all`;
+    const r = await sb.rpc("lfh_owner_parcel_tax", rid ? { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: "month" } : { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: "month", p_ids: ids });
+    if (r.error) { console.error("[owner/reports] the parcel change-detector could not be read:", r.error.message); return `${base}|pc:unread:${Date.now()}`; }
+    return `${base}|pc:${((r.data ?? []) as Row[]).map((x) => `${x.parcels}/${x.tax}/${x.untaxed_parcels}/${x.untaxed_total}`).join(",")}`;
+  };
   try {
     const payload = await cachedOwnerPayload({
       key: cacheKey, force,
       fingerprint: () => (invType ? invFingerprint()
         : staffType ? staffFingerprint()
+        : moneyType ? moneyFingerprint()
         : useMonthFp ? reportMonthFingerprint(fpIds, from, to) : ordersFingerprint(fpIds, from, to)),
       compute: async () => {
     // ── money reports: one bucketed summary drives sales/tax/discounts/cancellations ──
@@ -404,6 +424,39 @@ export async function GET(req: NextRequest) {
       // Which optional parts of this sheet could NOT be read (T9 improvement 2, 2026-08-06). Named
       // in the payload as `partial` so the screen can say so instead of just having one fewer block.
       const partialKeys: PartialKey[] = [];
+      // ── COUNTER PARCELS (owner, 2026-10-11: "do parcel one" — mig 421) ──────────────────────────────
+      // A parcel is a taxable sale the restaurant itself owes GST on, but it lives in aggregator_orders,
+      // which lfh_owner_sales_report never reads. lfh_owner_parcel_tax answers per bucket on the SAME
+      // basis as the dine-in figure (paid, not cancelled, created_at in IST): the parcels whose tax is
+      // known, summed, and the older ones saved without it, counted with their value. The rows below stay
+      // DINE-IN for every money type — the Sales / Tax / Discounts screens share ONE payload (the client
+      // fetches type=sales for all three), so a server-side fold-in for type=tax never reached the screen
+      // (found by its own screenshot, 2026-10-11). Instead every money payload carries the per-period parcel
+      // figures (`parcelRows`, `drillParcelRows`) and the summary (`parcels`), and the Tax screen folds them
+      // in with lib/taxFiling.ts withParcels() — one fold-in, in one place. Revenue on Sales / Discounts /
+      // Day summary is untouched: whether a parcel counts as Revenue is the owner's call.
+      // A failed read is NON-fatal and said on the page (partial "parcels"), never a silent zero.
+      type ParcelRow = { bucket: string; parcels: number; subtotal: number; discount: number; taxable: number; tax: number; total: number; untaxedParcels: number; untaxedTotal: number };
+      let parcelScope: string[] | null | undefined;   // the ids to ask about (resolved once); null = one restaurant via rid
+      const parcelRows = async (f: string, t: string, bkt: string): Promise<ParcelRow[] | null> => {
+        if (parcelScope === undefined) {
+          if (rid) parcelScope = null;
+          else if (!scope.all) parcelScope = scope.ids;
+          else {   // the admin's every-restaurant view: the function refuses an unscoped call by design
+            const all = await sb.from("restaurants").select("id").limit(10000);
+            parcelScope = all.error ? [] : ((all.data ?? []) as { id: string }[]).map((x) => x.id);
+          }
+        }
+        if (parcelScope && !parcelScope.length) return [];
+        const res = await sb.rpc("lfh_owner_parcel_tax", rid
+          ? { p_restaurant_id: rid, p_from: f, p_to: t, p_bucket: bkt }
+          : { p_restaurant_id: null, p_from: f, p_to: t, p_bucket: bkt, p_ids: parcelScope });
+        if (res.error) { console.error("[owner/reports] counter parcels unread:", res.error.message); if (!partialKeys.includes("parcels")) partialKeys.push("parcels"); return null; }
+        return ((res.data ?? []) as Row[]).map((r) => ({
+          bucket: String(r.bucket), parcels: Number(r.parcels) || 0, subtotal: num(r.subtotal), discount: num(r.discount),
+          taxable: num(r.taxable), tax: num(r.tax), total: num(r.total), untaxedParcels: Number(r.untaxed_parcels) || 0, untaxedTotal: num(r.untaxed_total),
+        }));
+      };
       // One bucketed fetch — reused for the main window AND for the sparse auto-drill
       // (below), so both go through the identical scope/merge/mapping path.
       const salesRows = async (f: string, t: string, bkt: string) => {
@@ -432,13 +485,14 @@ export async function GET(req: NextRequest) {
             raw.sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)));
           }
         }
-        return raw.map((r) => ({
+        const out = raw.map((r) => ({
           bucket: r.bucket,
           orders: Number(r.orders) || 0,
           paidOrders: Number(r.paid_orders) || 0,
           subtotal: num(r.subtotal), tax: num(r.tax), discount: num(r.discount), revenue: num(r.revenue),
           cancelledOrders: Number(r.cancelled_orders) || 0, cancelledValue: num(r.cancelled_value),
         }));
+        return out;
       };
       const rows = await salesRows(from, to, bucket);
 
@@ -448,6 +502,7 @@ export async function GET(req: NextRequest) {
       // month→day) and hand the chart the fuller series via drillRows. The daily `rows`
       // (and the GST-style table built from them) are left untouched.
       let drillBucket: string | undefined, drillRows: typeof rows | undefined;
+      let drillParcelRows: ParcelRow[] | null | undefined;
       if (rows.length === 1 && (bucket === "day" || bucket === "month")) {
         const b0 = new Date(String(rows[0].bucket));
         const finer = bucket === "day" ? "hour" : "day";
@@ -457,7 +512,7 @@ export async function GET(req: NextRequest) {
           : (() => { const d = new Date(b0.getTime() + 5.5 * 3600_000); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - 5.5 * 3600_000); })();
         try {
           const drilled = await salesRows(b0.toISOString(), next.toISOString(), finer);
-          if (drilled.length >= 2) { drillRows = drilled; drillBucket = finer; }
+          if (drilled.length >= 2) { drillRows = drilled; drillBucket = finer; drillParcelRows = await parcelRows(b0.toISOString(), next.toISOString(), finer); }
         } catch { /* drill is best-effort; fall back to the single-bucket message */ }
       }
       const totals = rows.reduce((a, r) => ({
@@ -726,7 +781,15 @@ export async function GET(req: NextRequest) {
       //
       // Reachable by a stale client or a hand-edited link rather than by the date picker, so it is a
       // wrong LABEL rather than a wrong number — which is exactly why it would have gone unnoticed.
-      return { type, range, window: { from, to }, bucket, rows, totals, tax, payments, staffPay, tips, inventory, costSeries, drillBucket, drillRows,
+      // The window's counter parcels, per period and in one line (see the note at the top of this branch).
+      // `inTotals` is false here: `totals` / `rows` are dine-in; withParcels() sets it on the Tax screen's copy.
+      const parcelRowsMain = await parcelRows(from, to, bucket);
+      const parcels = parcelRowsMain === null ? null : parcelRowsMain.reduce((a, p) => ({
+        parcels: a.parcels + p.parcels, taxable: num(a.taxable + p.taxable), tax: num(a.tax + p.tax), total: num(a.total + p.total),
+        untaxedParcels: a.untaxedParcels + p.untaxedParcels, untaxedTotal: num(a.untaxedTotal + p.untaxedTotal), inTotals: false,
+      }), { parcels: 0, taxable: 0, tax: 0, total: 0, untaxedParcels: 0, untaxedTotal: 0, inTotals: false });
+      return { type, range, window: { from, to }, bucket, rows, totals, tax, payments, staffPay, tips, inventory, costSeries, drillBucket, drillRows, parcels,
+        parcelRows: parcelRowsMain ?? undefined, drillParcelRows: drillParcelRows ?? undefined,
         ...(partialKeys.length ? { partial: partialKeys } : {}) };
     }
 

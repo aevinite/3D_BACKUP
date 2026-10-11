@@ -42,7 +42,7 @@ import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { SectionExport, printSection, POPUP_BLOCKED } from "@/components/owner/reports/sectionExport";
 // ONE filing computation for the whole app (screen, CSV, printed sheet) — see lib/taxFiling.ts
 // for why having three was a bug rather than a style choice.
-import { buildFiling, splitTax, taxableValue, exemptIsMaterial, taxableFor } from "@/lib/taxFiling";
+import { buildFiling, splitTax, taxableValue, exemptIsMaterial, taxableFor, withParcels, totalsOf, type ParcelPeriod } from "@/lib/taxFiling";
 
 // "day" never appears in the period dropdown — it is the Day-summary sheet's own window
 // (`range=day&date=…` = ONE 05:00-IST business day). See DAY_KINDS below.
@@ -198,6 +198,11 @@ type DishRow = { title: string; qty: number; revenue: number };
 type CatRow = { category: string; qty: number; revenue: number };
 type HourRow = { hour: number; orders: number; revenue: number };
 type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: PayRow[]; bucket?: string; drillBucket?: string; drillRows?: unknown[];
+  // Counter parcels in this window (mig 421). On the TAX report the known ones are already inside
+  // `totals`/`rows` (inTotals); every money report carries the summary. null = couldn't be read.
+  parcels?: { parcels: number; taxable: number; tax: number; total: number; untaxedParcels: number; untaxedTotal: number; inTotals: boolean } | null;
+  parcelRows?: ParcelPeriod[]; drillParcelRows?: ParcelPeriod[];   // per period, known-tax parcels only
+  partial?: string[];
   staffPay?: { paidOut: number; people: number; entries: number } | null;
   // Tips collected in the window (mig 268 / sweep F20). Null = nothing tipped, so no tile.
   tips?: { collected: number; orders: number } | null;
@@ -239,6 +244,13 @@ const qsOf = (kind: DataKind, rid: string, e: Eff, scopePin: string | null) => {
   if (scopePin) q.set("scope", scopePin);
   return q;
 };
+// A DINE-IN GST FIGURE THAT LINKS TO THE TAX REPORT SAYS WHAT THE TAX REPORT ADDS (mig 421). The Sales,
+// Day summary and hub figures stay dine-in on purpose — they sit in "net sales + GST = total collected",
+// and that total is dine-in — while the Tax / GST report also counts counter parcels. Without this the
+// owner taps ₹1,047 and lands on ₹1,085 with nothing saying why.
+function parcelGstHint(p?: Payload["parcels"]): string | undefined {
+  return p && !p.inTotals && p.parcels > 0 ? `dine-in · + ${inrP(p.tax)} on ${p.parcels} parcel${p.parcels === 1 ? "" : "s"} in the Tax report` : undefined;
+}
 
 /** "just now" / "4 min ago" / "2 h ago" — how old the figures on screen are. */
 function timeAgo(iso?: string): string {
@@ -1089,7 +1101,7 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
           <div className="k"><span className="lbl">Net sales</span><span className="v">{blank ? "—" : <AnimatedNumber value={Math.max(0, (t?.subtotal || 0) - (t?.discount || 0))} money loading={loading} />}</span></div>
           <div className="k"><span className="lbl">Paid bills</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.paidOrders || 0} format={nfmt} loading={loading} />}</span></div>
           <div className="k"><span className="lbl">Avg bill</span><span className="v">{blank ? "—" : <AnimatedNumber value={avg} money loading={loading} />}</span></div>
-          <div className="k"><span className="lbl">GST collected</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.tax || 0} money loading={loading} />}</span></div>
+          <div className="k"><span className="lbl">GST collected</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.tax || 0} money loading={loading} />}</span>{!blank && parcelGstHint(money?.data?.parcels) && <span className="lbl" style={{ fontSize: 10, fontWeight: 500 }}>{parcelGstHint(money?.data?.parcels)}</span>}</div>
           <div className="k"><span className="lbl">Discounts</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.discount || 0} money loading={loading} />}</span></div>
         </div>
         <div className="rs-ov-chart">
@@ -1258,6 +1270,20 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         {bk === "invexpenses" && <InvExpensesReport d={d} />}
       </>
     );
+  }
+  // ── THE TAX REPORT COUNTS COUNTER PARCELS (owner, 2026-10-11: "do parcel one" — mig 421) ──────────────
+  // The money payload is shared by Sales / Tax / Discounts and its rows are DINE-IN. For the Tax report only,
+  // the parcels the server sent per period are folded in HERE, once, by lib/taxFiling withParcels(), and the
+  // totals re-summed from the merged rows — so every tile, the split, the chart and the filing table below
+  // count them through the one computation they already share. Sales keeps its dine-in arithmetic.
+  if (bk === "tax" && (data.parcelRows?.length || data.drillParcelRows?.length)) {
+    const rowsP = withParcels((data.rows ?? []) as MoneyRow[], data.parcelRows);
+    const zero = { orders: 0, paidOrders: 0, subtotal: 0, tax: 0, discount: 0, revenue: 0, cancelledOrders: 0, cancelledValue: 0 };
+    data = {
+      ...data, rows: rowsP, totals: totalsOf(data.totals ?? zero, rowsP),
+      drillRows: data.drillRows ? withParcels(data.drillRows as MoneyRow[], data.drillParcelRows) : data.drillRows,
+      parcels: data.parcels ? { ...data.parcels, inTotals: true } : data.parcels,
+    };
   }
   const bucket = data.bucket || "day";
   const t = data.totals;
@@ -1498,7 +1524,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
           <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`of ${nfmt(placed)} order${placed === 1 ? "" : "s"} placed`} />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avg)} />
-          <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
+          <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} sub={parcelGstHint(data.parcels)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
           <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={`${inr(t.cancelledValue)} lost`} onClick={() => onOpenReport("payments", { pay: "cancellations" })} title="Open the Cancellations report" />
           {/* STAFF PAY OUT (mig 220) — money that LEFT on this day, so the sheet shows both
               directions. Rendered only when the restaurant has the module (a null payload
@@ -1643,7 +1669,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
           <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
           <Stat label="Item sales" tone="info" icon="fa-cart-shopping" value={inr(t.subtotal)} sub="menu prices, before discount" />
-          <Stat label="GST collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} sub="held for the government" onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
+          <Stat label="GST collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} sub={parcelGstHint(data.parcels) ?? "held for the government"} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
           <Stat label="Discounts" tone="warn" icon="fa-tag" value={inr(t.discount)} onClick={() => onOpenReport("payments", { pay: "discounts" })} title="Open the Discounts report" />
         </div>
         {/* Revenue — with the INVENTORY COST line beside it when the module is on (mig 227,
@@ -1943,6 +1969,25 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           )}
           {!composition && <Stat label="Tax per bill" tone="info" icon="fa-receipt" value={inr(avgTaxPerBill)} sub="average" />}
         </div>
+        {/* ── COUNTER PARCELS ARE IN THESE FIGURES (owner, 2026-10-11: "do parcel one", mig 421) ──────────
+            A parcel is a sale the restaurant owes GST on, so the server folds every parcel with a known tax
+            into the periods above (tiles, split, chart and filing table all count it). Say so, and say
+            plainly when OLDER parcels have no tax on record — they are named here, never silently left out
+            (a sale can never disappear from a tax report). Zomato / Swiggy orders are NOT here: the app
+            pays that GST itself (CGST §9(5)). */}
+        {data.partial?.includes("parcels") ? (
+          <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
+            <i className="fas fa-triangle-exclamation" aria-hidden style={{ color: "var(--adm-warn)", marginRight: 6 }} />
+            We couldn&apos;t read your counter parcels just now, so these figures are <b>dine-in bills only</b>. Tap Refresh to try again.
+          </p>
+        ) : data.parcels && (data.parcels.parcels > 0 || data.parcels.untaxedParcels > 0) ? (
+          <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
+            <i className="fas fa-bag-shopping" aria-hidden style={{ color: "var(--accent)", marginRight: 6 }} />
+            {data.parcels.parcels > 0 && <>Includes <b>{nfmt(data.parcels.parcels)} counter parcel{data.parcels.parcels === 1 ? "" : "s"}</b> — {inrP(data.parcels.tax)} of tax on {inr(data.parcels.taxable)}. </>}
+            {data.parcels.untaxedParcels > 0 && <><b>{nfmt(data.parcels.untaxedParcels)} older parcel{data.parcels.untaxedParcels === 1 ? "" : "s"} ({inr(data.parcels.untaxedTotal)})</b> {data.parcels.untaxedParcels === 1 ? "was" : "were"} saved without {data.parcels.untaxedParcels === 1 ? "its" : "their"} tax, so {data.parcels.untaxedParcels === 1 ? "it is" : "they are"} not in these figures — check {data.parcels.untaxedParcels === 1 ? "its" : "their"} paper bill{data.parcels.untaxedParcels === 1 ? "" : "s"} before you file. </>}
+            Zomato and Swiggy orders are not here: the app pays that GST itself.
+          </p>
+        ) : null}
         {composition && (
           <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
             <i className="fas fa-circle-info" aria-hidden style={{ color: "var(--accent)", marginRight: 6 }} />

@@ -31,6 +31,35 @@ const p2 = (v: number) => {
   return r === 0 ? 0 : (x < 0 ? -r : r) / 100;
 };
 
+// ── COUNTER PARCELS IN THE TAX REPORT (owner, 2026-10-11: "do parcel one" — mig 421) ──────────────────────
+// A counter parcel is a sale the restaurant owes GST on, but the money payload's rows are DINE-IN (they come
+// from lfh_owner_sales_report). The payload also carries the parcels per period (`parcelRows`, from
+// lfh_owner_parcel_tax: only parcels whose tax is KNOWN are in its sums — one saved without its tax would
+// otherwise read as "exempt sales"). This is the ONE place they are folded in: each period's parcels join that
+// period's row, and the totals are re-summed from the merged rows, so the tiles, the CGST/SGST split, the chart
+// and the filing table all count them through the same computation and can never disagree with each other.
+// Pure, and imports nothing (this file's rule — plain-node scripts load it).
+export type ParcelPeriod = { bucket: string; parcels: number; subtotal: number; discount: number; tax: number; total: number };
+export type MoneyPeriod = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number };
+export function withParcels<R extends MoneyPeriod>(rows: R[] | null | undefined, parcels: ParcelPeriod[] | null | undefined): R[] {
+  const out = (rows ?? []).map((r) => ({ ...r }));
+  for (const p of parcels ?? []) {
+    if (!p || !(Number(p.parcels) > 0)) continue;
+    const at = Date.parse(String(p.bucket));
+    let row = out.find((r) => Date.parse(String(r.bucket)) === at);
+    if (!row) { row = { bucket: p.bucket, orders: 0, paidOrders: 0, subtotal: 0, tax: 0, discount: 0, revenue: 0 } as R; out.push(row); }
+    row.orders += Number(p.parcels) || 0; row.paidOrders += Number(p.parcels) || 0;
+    row.subtotal = p2(row.subtotal + (Number(p.subtotal) || 0)); row.discount = p2(row.discount + (Number(p.discount) || 0));
+    row.tax = p2(row.tax + (Number(p.tax) || 0)); row.revenue = p2(row.revenue + (Number(p.total) || 0));
+  }
+  return out.sort((a, b) => Date.parse(String(a.bucket)) - Date.parse(String(b.bucket)));
+}
+// Totals re-summed from merged rows, on top of the original totals' other fields (cancellations etc.).
+export function totalsOf<T extends Omit<MoneyPeriod, "bucket">>(base: T, rows: MoneyPeriod[]): T {
+  const sum = (k: "orders" | "paidOrders" | "subtotal" | "tax" | "discount" | "revenue") => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  return { ...base, orders: sum("orders"), paidOrders: sum("paidOrders"), subtotal: p2(sum("subtotal")), tax: p2(sum("tax")), discount: p2(sum("discount")), revenue: p2(sum("revenue")) };
+}
+
 /**
  * Split `target` across `rates` proportionally, to the paise. The LAST line absorbs the
  * rounding remainder, so `sum(result) === p2(target)` exactly — a GST return where
