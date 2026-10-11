@@ -169,9 +169,11 @@ P("P110092", "the on-top GST base is the taxable base of the 'excl' lines ALONE"
 P("P110093", "…so a tax-INSIDE price can never be charged its GST twice", has(C_CART, /l\.tax_mode === "excl"/));
 P("P110094", "the stored record's money is a SEPARATE domain from the screen's", has(C_CART, /const usdLines = cart\.map/) && has(C_CART, /const dispLines = cart\.map/));
 P("P110095", "…and both go through splitBill, never a hand-rolled second rule", countOf(C_CART, /splitBill\(/g) >= 3);
-P("P110096", "…and the stored total keeps its original floating-point shape to the paisa", has(C_CART, /Math\.round\(\(usdOnTopBase \* \(1 \+ taxRate\) \+ \(subtotalUsd - usdOnTopBase\)\) \* 100\) \/ 100/));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 1 item 4); the rule still holds
+P("P110096", "…and the stored total keeps its original floating-point shape to the paisa", has(C_CART, /const totalUsd = roundPaise\(subtotalUsd \+ roundPaise\(usdOnTopBase \* taxRate\)\);/));
 P("P110097", "a line's behaviour is decided ONLY by the shared tax rule, never off the dish's raw setting", has(C_CART, /const behaviourOf = \(it: CartItem\) => resolveTaxMode\(dishMode\(it\.id\), taxRules\)/));
-P("P110098", "…and a dish whose menu row has not loaded yet falls back to the restaurant's own mode", has(C_CART, /menuItems\.find\(\(m\) => m\.id === id\)\?\.taxMode/));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 13); the rule still holds
+P("P110098", "…and a dish whose menu row has not loaded yet falls back to the restaurant's own mode", has(C_CART, /menuById\.get\(id\)\?\.taxMode/));
 P("P110099", "the MRP stamp is purely presentational and asks the same shared rule", has(C_CART, /const isMrpLine = \(it: CartItem\) => isMrpDish\(dishMode\(it\.id\), taxRules\)/));
 P("P110100", "…and it explains itself on hover, so a missing GST reads as correct rather than as a mistake", has(C_CART, /Maximum Retail Price — this price is final, no tax is added/));
 
@@ -191,11 +193,13 @@ P("P110111", "the remove button names its dish too", has(C_CART, /aria-label=\{`
 // to a bigger one "as professional aesthetic as it is right now". The tap area is now a 44×44 box in
 // app/globals.css around the same 16px icon — so the row reads the stylesheet, not an inline padding.
 P("P110112", "…and has real padding, so it is not an 18px icon to hit", /\.cart-item-controls \.remove-item \{[^}]*width: 44px; height: 44px/.test(read("app/globals.css")) && has(C_CART, /className="remove-item"/));
-P("P110113", "Edit is offered on every dish still on the menu, not only customisable ones", has(C_CART, /const canEdit = \(id: string\) => !!menuItems\.find\(\(m\) => m\.id === id\)/));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 13); the rule still holds
+P("P110113", "Edit is offered on every dish still on the menu, not only customisable ones", has(C_CART, /const canEdit = \(id: string\) => menuById\.has\(id\)/));
 P("P110114", "…and hidden for a dish that has left it, where the popup would have nothing to open", has(C_CART, /\{canEdit\(item\.id\) && \(/));
 P("P110115", "editing re-opens the popup PRE-FILLED with what the line already holds", has(C_CART, /preselect: \{ options: it\.options, removed: it\.removed, note: it\.note, qty: it\.qty \}/));
 P("P110116", "…identified by the line's signature, so the right line is replaced", has(C_CART, /editSig: it\.sig \|\| "\[\]"/));
-P("P110117", "…and it refuses rather than opening an empty popup for a dish that is gone", has(C_CART, /const dish = menuItems\.find\(\(m\) => m\.id === it\.id\);\s*\n\s*if \(!dish\) return;/));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 13); the rule still holds
+P("P110117", "…and it refuses rather than opening an empty popup for a dish that is gone", has(C_CART, /const dish = menuById\.get\(it\.id\);\s*\n\s*if \(!dish\) return;/));
 P("P110118", "'−' at one removes the line rather than sitting at zero", has(C_CART, /else next\.splice\(idx, 1\);/));
 P("P110119", "a line's value is qty × the unit, with add-ons rounded the way the popup rounds them", has(C_CART, /unitDisplay\(parseFloat\(it\.price\), \(it\.options \|\| \[\]\)\.map\(\(o\) => o\.price \|\| 0\), currency \|\| undefined\) \* it\.qty/));
 P("P110120", "…and a missing add-on price counts as zero rather than NaN", has(C_CART, /o\.price \|\| 0/));
@@ -394,7 +398,8 @@ P("P110286", "…and it carries a deadline, so the Saving… button cannot wedge
 P("P110287", "the bell call carries one too", has(C_MENU, /lfh_call_waiter_table[\s\S]{0,200}abortSignal/));
 P("P110288", "…and hands back the RPC's own answer so the popup can tell the truth", has(C_MENU, /return \{ ok: res\.ok !== false, reason: res\.reason \}/));
 P("P110289", "…treating a missing ok as success, which is what the RPC means by it", has(C_MENU, /res\.ok !== false/));
-P("P110290", "a real transport failure on the bell is raised, not swallowed as 'sent'", has(C_MENU, /if \(error\) throw new Error\(`Call failed/));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 17: an unanswered call is raised as BUSY, any other failure as an error — never 'sent'); the rule still holds
+P("P110290", "a real transport failure on the bell is raised, not swallowed as 'sent'", has(C_MENU, /throw new Error\(`Call failed/) && has(C_MENU, /throw busyError\("could not reach the restaurant"\)/));
 
 
 console.log("\n══ BLOCK D · lib/guestOutbox.ts — the saved-work queue (P110291–P110330) ══");
@@ -452,7 +457,8 @@ for (const [name, src] of Object.entries(ROUTES)) {
 }
 P("P110347", "the three WRITING doors are at-most-once; the beacon deliberately is not", countOf(C_PL + C_CW + C_LV, /withIdempotency\(postImpl, "guest"\)/g) === 3 && !has(C_LH, /withIdempotency/));
 P("P110348", "…all three under the same 'guest' scope, so one diner's replays share a namespace", countOf(C_PL + C_CW + C_LV, /"guest"\)/g) >= 3);
-P("P110349", "a malformed body is a 400 with a CODE on all three writing doors", countOf(C_PL + C_CW + C_LV, /reason: "bad_body" \}, \{ status: 400 \}/g) === 3);
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 items 14/20: more malformed bodies are refused, each with the same code); the rule still holds
+P("P110349", "a malformed body is a 400 with a CODE on all three writing doors", [C_PL, C_CW, C_LV].every((c) => countOf(c, /reason: "bad_body" \}, \{ status: 400 \}/g) >= 2));
 P("P110350", "…and the beacon answers 200 even to one, because it must never surface an error", has(C_LH, /try \{ b = await req\.json\(\); \} catch \{/) && has(C_LH, /return NextResponse\.json\(\{ ok: true \}\);/) && countOf(C_LH, /return NextResponse/g) === 1);
 P("P110351", "a database that will not answer is BUSY on all three writing doors, never a refusal", countOf(C_PL + C_CW + C_LV, /reason: "server_busy"/g) === 3);
 P("P110352", "…each answering 502, so the phone keeps the request", countOf(C_PL + C_CW + C_LV, /status: 502/g) === 3);
@@ -480,9 +486,12 @@ P("P110373", "…and it is a plain refusal, not an error, so the phone stops ret
 P("P110374", "a floor snapshot is dropped only when something really landed, on all three doors", has(C_PL, /dropFloorIfPlaced/) && has(C_CW, /callLanded/) && has(C_LV, /leaveLanded/));
 P("P110375", "…and the three 'no new row' answers are named as codes, never as prose", has(C_CW, /\["already_sent", "capped", "rate_limited"\]/));
 P("P110376", "…with the session path's own duplicate answer handled too", has(C_CW, /d\.already_active === true/));
-P("P110377", "the restaurant is resolved from the TOKEN when neither the reply nor the body knows", countOf(C_PL + C_CW, /async function ridFromToken/g) === 2);
-P("P110378", "…by two single-row, column-listed, capped reads", countOf(C_PL + C_CW, /\.select\("session_id"\)\.eq\("token", token\)\.limit\(1\)\.maybeSingle\(\)/g) === 2);
-P("P110379", "…and a failed lookup never costs the diner their order", countOf(C_PL + C_CW, /catch \{ return ""; \}/g) === 2);
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 7: one helper for all three doors); the rule still holds
+P("P110377", "the restaurant is resolved from the TOKEN when neither the reply nor the body knows", countOf(C_PL + C_CW + C_LV, /restaurantOfToken\(b\.token\)/g) === 3 && /export async function restaurantOfToken/.test(read("lib/guestTokenRestaurant.ts")));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 7); the rule still holds
+P("P110378", "…by two single-row, column-listed, capped reads", countOf(read("lib/guestTokenRestaurant.ts"), /\.select\("session_id"\)\.eq\("token", token\)\.limit\(1\)\.maybeSingle\(\)/g) === 1);
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 7); the rule still holds
+P("P110379", "…and a failed lookup never costs the diner their order", countOf(read("lib/guestTokenRestaurant.ts"), /catch \{ return ""; \}/g) === 1);
 P("P110380", "the limit beacon counts per caller AND per limit, so one cannot eat another's budget", has(C_LH, /`limithit:\$\{key\}:\$\{capKeyFor\(req\)\}`/));
 
 

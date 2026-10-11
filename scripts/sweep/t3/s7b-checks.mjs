@@ -123,8 +123,9 @@ P("P41029", "the live list drops an order the diner dismissed",
   /if \(o\.dismissed \|\| now - o\.placedAt > MAX_AGE_MS\) return false;/.test(F.status));
 P("P41030", "…and one older than the 3-hour ceiling",
   /export const MAX_AGE_MS = 3 \* 60 \* 60 \* 1000;/.test(F.status));
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (owner 2026-09-20: unfinished first, newest first within each group); the rule still holds
 P("P41031", "…and shows the newest first, so the strip is about what just happened",
-  /\.sort\(\(a, b\) => b\.placedAt - a\.placedAt\)/.test(F.status));
+  /const aDone = isFinalStatus\(a\.status\) \? 1 : 0;[\s\S]{0,200}return b\.placedAt - a\.placedAt;/.test(F.status));
 P("P41032", "…and takes 'now' as an argument, so the rule is testable without waiting three hours",
   /now: number = Date\.now\(\)/.test(F.status));
 // The finding of this pass: the linger constant described a screen that no longer exists.
@@ -149,8 +150,9 @@ P("P41039", "the hidden-live helper ignores an order that has already finished",
   /\.some\(\(o\) => o\.stripHidden && !isFinalStatus\(o\.status\)\)/.test(F.status));
 P("P41040", "the backup poll is the 60-second one every guest surface shares",
   /export const RT_BACKUP_MS = 60 \* 1000;/.test(F.status));
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (POLL_MS deleted on purpose, owner 2026-09-18); the rule still holds
 P("P41041", "…and the snappy 1.5s constant is NOT used as a poll anywhere in the territory",
-  /export const POLL_MS = 1500;/.test(F.status)
+  !/POLL_MS = 1500/.test(bare(F.status))
   && !new RegExp("setInterval\\([^,]+, POLL_MS\\)").test(F.tracker + F.cart + F.tbill + F.widget));
 P("P41042", "an order row carries what the strip needs and nothing the server owns",
   /finalizedAt\?: number;/.test(F.status) && /stripHidden\?: boolean;/.test(F.status));
@@ -588,10 +590,12 @@ P("P41241", "the queue is restored oldest-first, so orders send in the order the
 // in memory instead of assigning over it, so an order saved in the same instant is not dropped from
 // the sending list. The two filters are unchanged and still the source of both lists — they now feed
 // a map rather than an assignment.
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 15: memory wins across both lists); the rule still holds
 P("P41242", "…and failed rows are restored separately, not re-sent",
-  /all\.filter\(\(x\) => x\.status === "failed"\)\) failedById\.set/.test(F.outbox));
+  /all\.filter\(\(x\) => x\.status === "failed" && !inMemory\.has\(x\.id\)\)\) failedById\.set/.test(F.outbox));
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 15); the rule still holds
 P("P41243", "…and anything not explicitly failed counts as still queued",
-  /all\.filter\(\(x\) => x\.status !== "failed"\)\) byId\.set/.test(F.outbox));
+  /all\.filter\(\(x\) => x\.status !== "failed" && !inMemory\.has\(x\.id\)\)\) byId\.set/.test(F.outbox));
 P("P41244", "restoring immediately gives the queue a timer and a flush",
   /notify\(\);\s*ensureRetry\(\);\s*void flushGuestOutbox\(\);/.test(bare(F.outbox)));
 P("P41245", "a phone that never queued anything does not gain a database",
@@ -697,8 +701,9 @@ P("P41297", "every repeating timer in the territory is cleared on unmount",
   ["cart","sync","widget","tracker","tbill","owner"].every((k) => !/setInterval/.test(F[k]) || /clearInterval/.test(F[k])));
 P("P41298", "the live strip's status poll is torn down with a cancelled flag as well as a cleared timer",
   /cancelled = true;\s*clearInterval\(iv\);/.test(bare(F.tracker)));
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (after unmount it now stops asking at all); the rule still holds
 P("P41299", "…so a reply that lands after unmount cannot write to a dead component",
-  /if \(cancelled\) continue;/.test(F.tracker));
+  /if \(cancelled\) break;/.test(F.tracker));
 P("P41300", "the shared bill guards the same way",
   /let alive = true;/.test(F.tbill) && /if \(!alive\) return;/.test(F.tbill));
 P("P41301", "the table card guards the same way",

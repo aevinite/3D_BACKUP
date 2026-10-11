@@ -499,14 +499,16 @@ P("P42335", "…nor a note", /note: features\.guest_note \? it\.note : undefined
 P("P42336", "the dish popup still drops only the line being edited", /\(it\.sig \|\| "\[\]"\) === editSig/.test(read("components/OrderConfirmModal.tsx")));
 P("P42337", "…and still caps a merge at 99", /Math\.min\(99, existing\.qty \+ qty\)/.test(read("components/OrderConfirmModal.tsx")));
 P("P42338", "the mini-cart still shows a subtotal only", !/tax/i.test(bare(read("components/MiniCart.tsx"))));
-P("P42339", "…and still counts items, not lines", /s \+ \(it\.qty \|\| 1\)/.test(read("components/MiniCart.tsx")));
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 18); the rule still holds
+P("P42339", "…and still counts items, not lines", /s \+ qtyOf\(it\?\.qty\)/.test(read("components/MiniCart.tsx")));
 P("P42340", "nothing in the territory can erase, hide or edit an issued sale",
   !/\.delete\(\)|deleted_at/.test(F.cart + F.gate + F.widget + F.chip + F.outbox + F.sync));
 P("P42341", "…including the new leave endpoint", !/delete|deleted_at/i.test(F.leave.replace(/\/\/[^\n]*/g, "")));
 P("P42342", "…which only ever calls the leave RPC", (F.leave.match(/sb\.rpc\(/g) || []).length === 1);
 P("P42343", "the new endpoint does not read the request's restaurant to decide WHO leaves", /p_token: b\.token/.test(F.leave));
 P("P42344", "…the token alone decides that, as everywhere else on the guest side", !/p_restaurant_id/.test(F.leave));
-P("P42345", "…and the restaurant id is used only to drop a cached floor view", /if \(rid\) invalidateFloor\(rid\)/.test(F.leave));
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (item 9: an already-gone leave drops nothing); the rule still holds
+P("P42345", "…and the restaurant id is used only to drop a cached floor view", /if \(rid && leaveLanded\) invalidateFloor\(rid\)/.test(F.leave));
 P("P42346", "the queue still bounds every kind of failure", /const SERVER_MAX_TRIES = 6;/.test(F.outbox));
 P("P42347", "…and still persists the counters, so a reload cannot reset them", /await persist\(item\)/.test(F.outbox));
 P("P42348", "…and 'Try again' still clears all three", /it\.tries = 0; it\.netTries = 0; it\.busyTries = 0;/.test(F.outbox));
