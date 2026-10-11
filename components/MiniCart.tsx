@@ -31,15 +31,20 @@ export default function MiniCart() {
       const raw = tget("lfh_cart");
       const arr = raw ? JSON.parse(raw) : []; // turn the saved text back into a list
       const list = Array.isArray(arr) ? arr : [];
+      // THE SAME QUANTITY THE BILL USES (sweep #10 T3 round 2, item 18). The bill reads every saved
+      // line through normalize() — a whole number, 1 to 99 — and this pill read `it.qty || 1` raw, so a
+      // corrupted or legacy saved line (150, 2.5, -3) made the pill say "150 items · ₹…" over a bill
+      // that says 99. One rule, copied byte for byte from CartPanel's normalize().
+      const qtyOf = (q: unknown) => Math.min(99, Math.max(1, Math.floor(typeof q === "number" && q > 0 ? q : 1)));
       // Add up the quantities of every line to get the total item count.
-      setCount(list.reduce((s, it) => s + (it.qty || 1), 0));
+      setCount(list.reduce((s, it) => s + qtyOf(it?.qty), 0));
       // Remember each line's USD unit price (already "pretty" — both add paths
       // store it that way), its add-on prices, and qty; the display subtotal
       // is computed at draw time in the guest's currency.
       setLines(list.map((it: { price: string; qty?: number; options?: { price?: number }[] }) => ({
         usd: parseFloat(it.price) || 0,
         addons: (it.options || []).map((o) => o.price || 0),
-        qty: it.qty || 1,
+        qty: qtyOf(it.qty),
       })));
     } catch {
       // If the saved data is broken somehow, just show an empty cart.
