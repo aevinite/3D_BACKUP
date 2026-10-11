@@ -1061,6 +1061,10 @@ flush();
   { const po = r2("app/api/guest/place-order/route.ts"), cw = r2("app/api/guest/call-waiter/route.ts");
     check("item 14 — malformed items / allergies / token / table are refused as bad_body before any database call",
       /if \(!items\.every\(goodItem\) \|\| !allergies\.every\(\(a\) => typeof a === "string"\)/.test(po) && /typeof raw\.token !== "string"/.test(cw)); }
+  // item 15 — a reload's restore never puts one saved row in BOTH lists
+  { const o = r2("lib/guestOutbox.ts");
+    check("item 15 — restoring after a reload lets memory win across BOTH lists (one row, one list)",
+      /const inMemory = new Set\(\[\.\.\.queued, \.\.\.failed\]\.map\(\(x\) => x\.id\)\);/.test(o) && (o.match(/!inMemory\.has\(x\.id\)/g) || []).length === 2); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

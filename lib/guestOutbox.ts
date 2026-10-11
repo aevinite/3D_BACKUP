@@ -1032,12 +1032,20 @@ function restoreQueue() {
     // both keeps its IN-MEMORY version — that copy may already have been through a flush and be
     // carrying fresh attempt counters. Everything else is taken from storage. Sorted oldest-first
     // afterwards, exactly as before, so the queue still drains in the order the diner placed it.
+    //
+    // …AND ONE ROW LIVES IN ONE LIST (sweep #10 T3 round 2, item 15). Memory also wins ACROSS the two
+    // lists: a row the running flush had just moved to `failed`, whose storage write had not landed
+    // when this read came back, was still `queued` in storage — and was put back in the send list
+    // while it also sat in the failed list. The diner saw it twice ("waiting" AND "couldn't send"),
+    // and the queue would have sent an order it had just told them it couldn't. So a row memory holds
+    // in either list is taken from memory alone.
+    const inMemory = new Set([...queued, ...failed].map((x) => x.id));
     const byId = new Map<string, GuestOrder>();
-    for (const x of all.filter((x) => x.status !== "failed")) byId.set(x.id, x);
+    for (const x of all.filter((x) => x.status !== "failed" && !inMemory.has(x.id))) byId.set(x.id, x);
     for (const x of queued) byId.set(x.id, x);
     queued = [...byId.values()].sort((a, b) => a.at - b.at);
     const failedById = new Map<string, GuestOrder>();
-    for (const x of all.filter((x) => x.status === "failed")) failedById.set(x.id, x);
+    for (const x of all.filter((x) => x.status === "failed" && !inMemory.has(x.id))) failedById.set(x.id, x);
     for (const x of failed) failedById.set(x.id, x);
     failed = [...failedById.values()];
     notify();
