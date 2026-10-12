@@ -568,7 +568,9 @@ for (const [name, code] of [["health", C.healthRoute], ["panels-health", C.panel
 for (const [name, code] of [["health", C.healthRoute], ["panels-health", C.panelsRoute], ["attention", C.attRoute]]) {
   await phase(`EGRESS · every list read in /api/admin/${name} is bounded`, () => {
     const sel = [...code.matchAll(/\.from\("(\w+)"\)\.select\([^;]*?(?=\)\),|\)\)\s*\)|;)/gs)].map((m) => m[0]);
-    const unbounded = sel.filter((s) => !/\.limit\(|head: true|maybeSingle|count: "exact"/.test(s));
+    // `.range(f, t)` inside pagedRead/pageAll is bounded too: one page at a time, never past what the
+    // database hands back (S10 T28 item 17 moved these lists onto paging).
+    const unbounded = sel.filter((s) => !/\.limit\(|\.range\(|head: true|maybeSingle|count: "exact"/.test(s));
     return unbounded.length === 0 || `${unbounded.length} unbounded read(s) in ${name}`;
   });
 }

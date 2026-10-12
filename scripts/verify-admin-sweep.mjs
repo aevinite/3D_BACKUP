@@ -355,7 +355,8 @@ await phase("the rate-limit edit records a sentence", () => /detail: rateEditWor
 // its subject deliberately moved (S10 T28, 2026-10-11). The property kept: the line is written as a
 // sentence if the door exists, and the door stays gone — never back as a stringified patch object.
 await phase("the platform toggle records a sentence", () => /TOGGLE_WORDS/.test(CODE.editorRoute)
-  || (/platform\/toggles IS GONE/.test(CODE.editorRoute) && !/p\s*===\s*["']platform\/toggles["']/.test(CODE.editorRoute))
+  // CODE is comment-stripped, so the obituary is invisible here — the door being GONE is the test.
+  || (/platform\/toggles IS GONE/.test(SRC.editorRoute || "") && !/platform\/toggles/.test(CODE.editorRoute))
   || "the toggles door is back without its sentence map");
 // A7 · the manager panel is SENT the sentence, never left to write its own (3)
 await phase("/oplog attaches the plain sentence to error rows", () => /row\.plain\s*=\s*plainHeadline/.test(CODE.editorRoute) || "the manager panel has no way to write one itself and cannot import the translator");
