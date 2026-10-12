@@ -123,6 +123,66 @@ const rcpBody = rcp.slice(0, rcp.indexOf("\n}"));
 if (/\bmrpTotalsRows\s*\(/.test(rcpBody)) pass("the bill pane's totals come from the shared stack, not from arithmetic of its own");
 else fail("billReceiptHtml() no longer uses the shared totals stack — a discount, an MRP line or a composition-scheme restaurant would be re-derived here and could disagree with the printed bill");
 
+// ── 7. the dish lines a receipt shows are the ones its total counts (sweep #10 T6, 2026-10-12) ──
+// billMath() leaves a cancelled ticket out of the money, so the pane must leave its dishes out of
+// the lines: the owner's 2026-07-03 screenshot was "Litchi Cooler ₹229 … Total ₹0", fixed in the
+// bill modal then, and brought back by this pane on 2026-08-22 (it drew ordItemsHtml(g) over every
+// ticket, cancelled ones included). DRIVEN, not grepped: the real functions are lifted out of the
+// panel and run against a cancelled bill and a part-cancelled one.
+{
+  const lift = (name) => {
+    let i = panel.search(new RegExp(`\\n(?:async )?function ${name}\\(`));
+    if (i >= 0) { i += 1; let d = 0, j = panel.indexOf("{", i); for (; j < panel.length; j++) { if (panel[j] === "{") d++; else if (panel[j] === "}" && --d === 0) break; } return panel.slice(i, j + 1); }
+    const k = panel.search(new RegExp(`\\nconst ${name} = `));
+    if (k < 0) return "";
+    // To the end of THIS statement: its ";" may be followed by a trailing comment on the same line.
+    const end = panel.slice(k + 1).search(/;[ \t]*(\/\/[^\n]*)?\n/);
+    return panel.slice(k + 1, k + 1 + end + 1);
+  };
+  const names = ["esc", "INR_RATE", "inr", "mrpPill", "dishNoTag", "ordItemsHtml", "billLiveLinesHtml"];
+  const parts = names.map(lift);
+  if (parts.some((p) => !p)) fail(`could not lift ${names.filter((_, i) => !parts[i]).join(", ")} out of the panel — re-derive this check`);
+  else {
+    const run = new Function("state", parts.join("\n") + "\nreturn billLiveLinesHtml;");
+    const lines = run({ data: { items: [] } });
+    const o = (title, status) => ({ status, items: [{ title, qty: 1, price: 229 }] });
+    const allCancelled = lines([o("Litchi Cooler", "cancelled")]);
+    const mixed = lines([o("Litchi Cooler", "cancelled"), o("Masala Chai", "served")]);
+    if (!/Litchi Cooler/.test(allCancelled) && /cancelled/i.test(allCancelled)) pass("a cancelled bill's pane lists no priced dish — it says it was cancelled");
+    else fail("a cancelled bill's pane lists its dishes with prices over a ₹0 total — the 2026-07-03 screen is back");
+    if (!/Litchi Cooler/.test(mixed) && /Masala Chai/.test(mixed)) pass("a part-cancelled bill lists only the tickets its total counts");
+    else fail("a part-cancelled bill lists a cancelled ticket's dishes — the lines no longer add up to the subtotal under them");
+  }
+  const pane = panelCode.slice(panelCode.indexOf("function billReceiptHtml"));
+  const paneBody = pane.slice(0, pane.indexOf("\n}"));
+  if (/br-items[^\n]*billLiveLinesHtml\(g\)/.test(paneBody)) pass("the bill pane draws its lines through billLiveLinesHtml()");
+  else fail("billReceiptHtml() no longer draws its lines through billLiveLinesHtml() — a cancelled ticket's priced dishes can reach the pane");
+}
+
+// ── 8. a FAILED read of the record is not shown as a slow one (sweep #10 T6, 2026-10-12) ──────────
+// The skeleton ("Still reading — a long day takes a moment.") is drawn while state.billsRec has never
+// landed. A failed read left it null for ever, so with no signal the screen promised progress that
+// was not happening, over bills the device already held. The catch must remember the failure, the
+// skeleton must step aside for it, and the view must say in words what it is showing instead.
+{
+  const lb = panelCode.slice(panelCode.indexOf("async function loadBillsRecord("));
+  const lbBody = lb.slice(0, lb.indexOf("\n}"));
+  /catch \(e\) \{[\s\S]*state\.billsRecErr = \{/.test(lbBody)
+    ? pass("a failed bills read is remembered (state.billsRecErr), not swallowed")
+    : fail("loadBillsRecord() swallows a failed read — Previous bills would show 'still reading' for ever");
+  /if \(!state\.billsRec && state\.billsRecErr && Date\.now\(\) - state\.billsRecErr\.at </.test(lbBody)
+    ? pass("…and retried on a gentle clock, not on every repaint")
+    : fail("a failed bills read is retried on every repaint — a poll by another name");
+  const pv = panelCode.slice(panelCode.indexOf("function ordersPreviousHtml("));
+  const pvBody = pv.slice(0, pv.indexOf("\nfunction "));
+  /if \(!state\.billsRec && !state\.billsRecErr\) \{/.test(pvBody)
+    ? pass("the 'still reading' skeleton steps aside once the read has failed")
+    : fail("the skeleton is drawn whenever the record is missing — including after the read FAILED");
+  /const partial = !state\.billsRec && state\.billsRecErr/.test(pvBody) && /these are the bills this device already has/.test(pv.slice(0, pvBody.length + 2000) + panel)
+    ? pass("…and the view says in words that it is showing what the device holds")
+    : fail("after a failed read the record view says nothing about showing only what the device holds");
+}
+
 console.log(failed
   ? `\n✗ verify:bills-screen — ${failed} check${failed === 1 ? "" : "s"} failed.`
   : "\n✓ verify:bills-screen — the layout, the one-box search, the split parts and both numbers are all in place");

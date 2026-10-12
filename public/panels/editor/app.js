@@ -229,6 +229,9 @@ const state = {
   // The bills-record fetch (GET /orders?bills=1): dine-in rows for the whole window (beyond
   // the local 200) + finished PARCEL bills + the server's reach. at = when it landed.
   billsRec: null,
+  // …and why it is still null, when it is: the last failed read of it ({ at, offline, why }), so the
+  // record view can show what the device holds instead of an endless "still reading" (2026-10-12).
+  billsRecErr: null,
   // Audit & logs left-bar: audit | operations | customers — remembered across refresh.
   // Values stored by older builds are migrated: the retired top-toggle wrote "log" (which
   // the renderer never understood — it fell through to the customer log); everything else
@@ -3279,6 +3282,9 @@ async function loadBillsRecord(force) {
   // in this file keeps — re-renders while the view is open are what call this, so a busy
   // board must not turn into a faster poll (PR #748 review).
   if (state.billsRec && Date.now() - (state.billsRec.at || 0) < (force ? 3000 : 60000)) return;
+  // A read that just FAILED is retried on a gentle clock, not on every re-render: realtime repaints
+  // this view often, and each one asking again is a poll by another name.
+  if (!state.billsRec && state.billsRecErr && Date.now() - state.billsRecErr.at < (force ? 3000 : 15000)) return;
   // WHEN the read started, so the loading state can say how long it has been going. Set before
   // the await, and only for the FIRST read — a 60s background refresh must not restart the bar
   // under a list that is already on screen.
@@ -3287,8 +3293,18 @@ async function loadBillsRecord(force) {
   try {
     const r = await api("GET", "/orders?bills=1");
     state.billsRec = { rows: Array.isArray(r && r.rows) ? r.rows : [], parcels: Array.isArray(r && r.parcels) ? r.parcels : [], reach: (r && r.reach) || "today", at: Date.now() };
+    state.billsRecErr = null;
     if (state.tab === "orders" && ordersViewKey() === "previous") { renderList(); renderEditor(); }
-  } catch { /* keep whatever we had; the local 200 still renders */ }
+  } catch (e) {
+    // A FAILED READ IS NOT A SLOW ONE (sweep #10 T6, 2026-10-12). This used to keep "whatever we had",
+    // and promise "the local 200 still renders" — but the loading state added on 2026-09-27 draws
+    // its skeleton for as long as the record has never landed, so on a failed read (no signal on a
+    // device that never saved it, a busy server) the screen said "Still reading — a long day takes a
+    // moment." for ever, over bills this device was already holding. Remembered here, so the view
+    // can stop pretending and show what it has (see ordersPreviousHtml), and retried by itself.
+    state.billsRecErr = { at: Date.now(), offline: !!(e && e.offline), why: errText(e) };
+    if (state.tab === "orders" && ordersViewKey() === "previous") { renderList(); renderEditor(); }
+  }
   finally { _billsRecLoading = false; }
 }
 
@@ -3623,7 +3639,7 @@ function ordersPreviousHtml(today, previous) {
   // skeleton of generic bars that then reflows is worse than none. Each row's sweep is delayed
   // by its index — the list reads as one wave instead of five bars blinking in lockstep — and
   // the whole thing is inert under prefers-reduced-motion.
-  if (!state.billsRec) {
+  if (!state.billsRec && !state.billsRecErr) {
     // ── "COUNTED" — IT SAYS HOW FAR IT HAS GOT (owner picked this one, 2026-09-27) ──────────
     // Shown five options, he chose the one that reports progress: *"you can tell the difference
     // between nearly there and stuck."*
@@ -3684,7 +3700,13 @@ function ordersPreviousHtml(today, previous) {
            A bill older than that is in the owner's Reports.</div></div>`
     : "";
 
-  return `${bar}<div class="bill-split">
+  // The full record did not answer: say so in one line, and show the bills this device already holds.
+  const partial = !state.billsRec && state.billsRecErr
+    ? `<div class="ord-note" role="status">⚠ ${state.billsRecErr.offline
+        ? "No internet right now — these are the bills this device already has. The full record loads by itself when you're back online."
+        : "The full record didn't answer just now — these are the bills this device already has. It tries again by itself."}</div>`
+    : "";
+  return `${bar}${partial}<div class="bill-split">
       <div class="bill-listcol">${nothing || listHtml}</div>
       <div class="bill-rcpcol">${pick ? billReceiptHtml(pick) : `<div class="bill-rcp-empty">Pick a bill on the left to see it here.</div>`}</div>
     </div>`;
@@ -3837,11 +3859,24 @@ function billReceiptHtml(b) {
       ${b.billPhone ? `<div class="br-id"><span>Phone</span><b>${esc(b.billPhone)}</b></div>` : ""}
       ${g.length > 1 ? `<div class="br-id"><span>Tickets</span><b>${g.length} on this bill</b></div>` : ""}
     </div>
-    <div class="br-items">${ordItemsHtml(g)}</div>
+    <div class="br-items">${billLiveLinesHtml(g)}</div>
     <div class="br-totals">${rows}</div>
     ${billPaidHtml(b, m)}
     ${billReceiptActions(b, st)}
   </div>`;
+}
+
+// THE DISH LINES A RECEIPT PRINTS ARE THE ONES ITS TOTAL COUNTS (sweep #10 T6, 2026-10-12).
+// billMath() leaves a cancelled ticket out of the money, so its dishes must stay out of the lines
+// too — otherwise the pane read "Mint Melon Juice ₹380 · Espresso ×2 ₹292 … Subtotal ₹0 · Total ₹0"
+// on a cancelled bill, and on a bill with one ticket cancelled the lines added up to more than the
+// subtotal under them. That is the exact screen the owner sent on 2026-07-03 ("Litchi Cooler ₹229 …
+// Total ₹0"); openBillModal() was fixed then, and this pane, added on 2026-08-22, brought it back.
+// Same rule as the modal, in the same words: the live tickets' lines, or one sentence when there are none.
+function billLiveLinesHtml(g) {
+  const live = (g || []).filter((o) => o.status !== "cancelled");
+  return live.length ? ordItemsHtml(live)
+    : `<div class="bm-line bm-cancelled"><span class="bm-nm">This bill was cancelled — no charge.</span></div>`;
 }
 
 // ── HOW THE MONEY CAME IN ───────────────────────────────────────────────────────────────────
@@ -4167,7 +4202,10 @@ function ordersCallsHtml() {
 // loadKhataBook(): fetch the person-grouped outstanding book + the comp-bill report
 // in parallel. Cached on state; refreshed every time the view is opened (rare path,
 // two scoped+limited reads — no polling).
-const fmtDate = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+// Pinned to the restaurant's zone like fmtWhen() above (sweep #10 T6, 2026-10-12): without it the
+// Pay Later book and the On-the-house report printed the READER's clock, so the same bill read
+// "12 Oct, 02:30 am" in India and "11 Oct, 05:00 pm" to anyone looking in from elsewhere.
+const fmtDate = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "—";
 let _khataLoading = false;
 async function loadKhataBook() {
   if (_khataLoading) return;
@@ -5708,6 +5746,13 @@ const DASH_RANGE_BTN = {
   last7: ["Last 7 days", "a week of trading"],
   last30: ["Last 30 days", "a month of trading"],
 };
+// The range IN WORDS, for a sentence ("…over the last 7 days"). Staff watch and Menu winners each
+// kept a two-rung map ({ today, yesterday }) from before the four rungs (2026-09-23), so a restaurant
+// given seven or thirty days read "by staff over last7" — the code's own key printed into a sentence
+// (sweep #10 T6, 2026-10-12). One map, every rung, and always the EFFECTIVE rung (what the server
+// answers), never a remembered one this restaurant no longer has.
+const DASH_RANGE_WORDS = { today: "today", yesterday: "yesterday", last7: "the last 7 days", last30: "the last 30 days" };
+function dashRangeWords() { return DASH_RANGE_WORDS[dashRangeEffective()] || "today"; }
 function dashRangeToggleHtml() {
   // Draw only the rungs this restaurant was GIVEN. One rung = no chooser at all, which is his
   // 2026-08-05 rule above and the dead-switch rule everywhere else: a control with one option
@@ -5803,7 +5848,7 @@ function renderRatings(d) {
   const filterHtml = `<div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn ${state.ratingsFilter === "all" ? "primary" : ""}" data-rfilter="all">All</button><button class="btn ${state.ratingsFilter === "unhandled" ? "primary" : ""}" data-rfilter="unhandled">To handle · ${s.unhandled || 0}</button></div>`;
   const cards = rows.length ? rows.map((r) => {
     const col = r.rating <= 2 ? "#e5484d" : r.rating === 3 ? "#f59e0b" : "#16a34a";
-    const when = new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    const when = new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
     return `<div style="border-left:4px solid ${col};background:var(--panel,#fff);border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:12px;margin-bottom:10px;opacity:${r.acknowledged ? 0.72 : 1}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:15px">${ratingStars(r.rating)}</span>
@@ -5817,7 +5862,12 @@ function renderRatings(d) {
       ${r.comment ? `<p style="margin:8px 0 0;font-size:13px;line-height:1.5;overflow-wrap:anywhere;word-break:break-word">“${esc(r.comment)}”</p>` : ""}
       <div style="margin-top:8px;font-size:12px;color:#888;overflow-wrap:anywhere">${r.name ? `<b>${esc(r.name)}</b>` : "Guest"} · ${esc(when)}${r.acknowledged && r.acknowledged_by ? ` · handled by ${esc(r.acknowledged_by)}` : ""}</div>
       ${r.staff_note ? `<div style="margin-top:8px;font-size:12.5px;background:rgba(127,127,127,.08);border-radius:8px;padding:6px 9px;overflow-wrap:anywhere">📝 ${esc(r.staff_note)}</div>` : ""}
-      <div data-rnoterow="${r.id}" hidden style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><input class="search" style="flex:1;min-width:180px" maxlength="500" placeholder="Internal note" value="${esc(r.staff_note || "")}"/><button class="btn primary" data-rnotesave="${r.id}">Save</button></div>
+      ${"" /* THE NOTE BOX OPENS ON ✎ NOTE, NOT ALWAYS (sweep #10 T6, 2026-10-12). It carried the hidden
+            attribute AND an inline display:flex, and an inline display beats the browser's own [hidden]
+            rule — so the box sat open under every rating and ✎ Note toggled an attribute nobody could
+            see: a tap that did nothing. The flex row lives on an INNER box now, so hidden on the outer
+            one really hides it. verify:ui section 16 keeps the two apart in every panel. */}
+      <div data-rnoterow="${r.id}" hidden><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><input class="search" style="flex:1;min-width:180px" maxlength="500" placeholder="Internal note" value="${esc(r.staff_note || "")}"/><button class="btn primary" data-rnotesave="${r.id}">Save</button></div></div>
     </div>`;
   }).join("") : `<div class="empty">${state.ratingsFilter === "unhandled" ? "Nothing left to handle 🎉" : "No guest ratings yet."}</div>`;
   body.innerHTML = summaryHtml + filterHtml + cards;
@@ -5924,7 +5974,8 @@ async function loadDashboard(useCache) {
     `<b>${s.paid}</b> paid · <b>${s.unpaid}</b> unpaid`,
     onlineCnt > 0 ? `avg ticket: dine-in <b>${inr(s.avgOrder)}</b> · online <b>${inr(onlineRev / onlineCnt)}</b>` : "",
   ].filter(Boolean).join("<br>");
-  const freshT = new Date(s.updatedAt || Date.now()).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  // The restaurant's clock, not the reader's — "Today till 7:15 pm" is a sentence about the restaurant's day.
+  const freshT = new Date(s.updatedAt || Date.now()).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
   // Plain-English narration (the Square trick): say what happened in one sentence.
   let narrate = "";
   if (s.revenue > 0) {
@@ -6343,6 +6394,18 @@ async function printBill(t, sess, os, opts = {}) {
   if (printedSid) {
     api("POST", "/print/send", { kind: "bill", sessionId: printedSid, parcel: !!opts.parcel })
       .then((r) => {
+        // SAVED ON THIS DEVICE IS NOT "SENT TO THE PRINTER" (sweep #10 T6, 2026-10-12). With no signal
+        // (or a server too busy to answer) api() hands this to the offline outbox, which answers
+        // { ok, queued: true, action_id } — and `queued` read as the SERVER's "it is in the printer's
+        // basket". So the screen said "Sent to the printer", no window opened, nothing printed, and
+        // the saved send fired by itself whenever the signal came back — a bill coming out of the
+        // counter printer long after the guest had gone. The guest is standing here now: take the
+        // send back out of the queue and open the bill on this screen, which needs no network at all.
+        if (r && r.queued && r.action_id) {
+          try { if (window.LFH_OUTBOX && LFH_OUTBOX.dismiss) LFH_OUTBOX.dismiss(r.action_id); } catch (e) { /* the window still opens */ }
+          openBillWindow(html);
+          return;
+        }
         if (r && r.queued) { toast(r.note || ("Sent to " + (r.printer || "the printer")), "ok"); return; }
         // Viewing as the admin: their printer stays quiet and the bill opens here instead, so nothing
         // comes out of a paying client's roll because we looked at their screen.
@@ -6411,7 +6474,7 @@ async function printManagerReport() {
 </style></head><body>
   <div class="head">
     <div><h1 class="rname">${name}</h1><div class="rtag">Performance report · ${rangeLabel}</div></div>
-    <div class="doc"><div class="t">PERFORMANCE REPORT</div><div class="m">Generated ${now.toLocaleString("en-IN")}</div><div class="m brand">✦ Aevidine</div></div>
+    <div class="doc"><div class="t">PERFORMANCE REPORT</div><div class="m">Generated ${now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</div><div class="m brand">✦ Aevidine</div></div>
   </div>
   <div class="kpis">
     ${kpi("Revenue", inr(s.revenue), rangeLabel)}${kpi("Orders", (s.orderCount || 0).toLocaleString("en-IN"))}${kpi("Avg order", inr(s.avgOrder))}
@@ -6435,7 +6498,7 @@ async function printManagerReport() {
 // heads-up to glance at — the "anti-theft" pattern the bigger POS systems use.
 async function openStaffRisk() {
   document.querySelector(".sr-overlay")?.remove();
-  const rangeLbl = { today: "today", yesterday: "yesterday" }[dashRange] || dashRange;
+  const rangeLbl = dashRangeWords();
   const wrap = el(`<div class="sx-modal-overlay sr-overlay"><div class="sx-modal" style="max-width:620px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🔍 Staff watch</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">Discounts, voids, deletes &amp; paid-reverts by staff over ${esc(rangeLbl)} (follows the Dashboard range). A high count is just worth a glance — not proof of anything.</div><div id="srBody">${loadingHtml("Counting the day\u2019s edits\u2026")}</div></div>
@@ -6449,7 +6512,7 @@ async function openStaffRisk() {
     // with no date window, which undercounted — and could miss a staff member — on a busy day,
     // review #4). It returns a small { rows:[{who,disc,void,del,rev,total}], truncated } summary,
     // with the void action name handled correctly server-side (review #1).
-    const res = await api("GET", "/staff-risk?range=" + dashRange);
+    const res = await api("GET", "/staff-risk?range=" + dashRangeEffective());
     const list = (res && res.rows) || [];
     const maxT = list.length ? list[0].total : 0;
     const flag = (t) => t >= Math.max(8, maxT * 0.8) ? ` <span class="inv-chip voided">watch</span>` : "";
@@ -6467,7 +6530,7 @@ async function openStaffRisk() {
 // dish cost isn't tracked yet (that's the future inventory module), so it's labelled honestly.
 async function openMenuMatrix() {
   document.querySelector(".mm-overlay")?.remove();
-  const rangeLbl = { today: "today", yesterday: "yesterday" }[dashRange] || dashRange;
+  const rangeLbl = dashRangeWords();
   const wrap = el(`<div class="sx-modal-overlay mm-overlay"><div class="sx-modal" style="max-width:820px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>📊 Menu winners &amp; losers</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">By how often each dish sells × the revenue it brings, over ${esc(rangeLbl)}. (Revenue, not profit — cost tracking comes with the inventory module.)</div><div id="mmBody">${loadingHtml("Working out which dishes win\u2026")}</div></div>
@@ -6514,6 +6577,17 @@ async function openMenuMatrix() {
 // manager given one day sees a document headed "today" with no picker to tempt them, and a
 // manager given thirty sees the month picker a filing actually needs. The picker is drawn
 // from the server's own list — not guessed here — so the two can never disagree.
+// THE EMPTY LINE SAYS THE SAME WINDOW AS THE HEADING (sweep #10 T6, 2026-10-12; seen first by T9 as
+// P178707). Since the GST report learned to reach only as far as the dashboard does (2026-09-23), a
+// manager given one day sees "Covering today" — and, on a day with no paid bill, "No paid bills in this
+// month." under it. The server says which window it answered for (windowLabel: a month's name, or
+// "today" / "today and yesterday" / "the last N days"), so the line now says that window.
+function gstNoneLine(d) {
+  const w = String((d && d.windowLabel) || "").trim();
+  if (!w || w === "today") return "No paid bills today.";
+  if (w === "today and yesterday") return "No paid bills today or yesterday.";
+  return `No paid bills in ${w}.`;
+}
 async function openGstReport() {
   document.querySelector(".gst-overlay")?.remove();
   const wrap = el(`<div class="sx-modal-overlay gst-overlay"><div class="sx-modal" style="max-width:640px">
@@ -6578,7 +6652,7 @@ async function openGstReport() {
           <div class="tp-bl grand"><span>Total (incl. GST)</span><span class="tp-bl-amt">${inr(t.gross)}</span></div>
         </div>
         <div class="muted small" style="margin-bottom:8px">${esc(d.note || "")}</div>
-        ${dayRows ? `<table class="gst-table" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left">Day</th><th style="text-align:right">Bills</th><th style="text-align:right">Taxable</th><th style="text-align:right">GST</th>${anyMrp ? `<th style="text-align:right">MRP</th>` : ""}<th style="text-align:right">Total</th></tr></thead><tbody>${dayRows}</tbody></table>` : `<div class="empty">No paid bills in this month.</div>`}`;
+        ${dayRows ? `<table class="gst-table" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left">Day</th><th style="text-align:right">Bills</th><th style="text-align:right">Taxable</th><th style="text-align:right">GST</th>${anyMrp ? `<th style="text-align:right">MRP</th>` : ""}<th style="text-align:right">Total</th></tr></thead><tbody>${dayRows}</tbody></table>` : `<div class="empty">${esc(gstNoneLine(d))}</div>`}`;
     } catch (e) { wrap.querySelector("#gstBody").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
   };
   wrap.querySelector("#gstCsv").onclick = () => {
