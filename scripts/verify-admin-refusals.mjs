@@ -593,6 +593,15 @@ const NOT_YET = new Map([
   check("…and textOf keeps only a value that already IS text", /typeof v === "string" \? v : ""/.test(code("lib/jsonObject.ts") || ""));
 }
 
+// ── 26 · LEAVING THE OWNER OUT IS NOT "CLEAR THE OWNER" (sweep #10 T29 round 2, item 30) ───────────
+// `raw == null` caught a MISSING field too, so a PATCH that never named an owner removed the primary
+// owner and their membership. The field must now be present (the console always sends it).
+{
+  const r = code("app/api/admin/restaurants/route.ts") || "";
+  const patch = r.slice(r.indexOf("export async function PATCH"), r.indexOf("export async function POST"));
+  check("restaurants PATCH refuses a body with no owner_user_id before reading or writing anything", /if \(!\("owner_user_id" in body\)\) return bad\(/.test(patch) && patch.indexOf('"owner_user_id" in body') < patch.indexOf("sb.from("));
+  check("…and the console's Save always sends the field", /owner_user_id: ownerId \|\| null/.test(raw("app/aevinite/restaurants/page.tsx") || ""));
+}
 
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

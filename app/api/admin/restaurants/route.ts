@@ -309,8 +309,13 @@ export async function PATCH(req: NextRequest) {
   // stale link produces a raw Postgres 500 body instead of the tidy "Restaurant not found." below.
   if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
   // owner_user_id may be a uuid (assign) or null/"" (clear the owner).
+  // ── LEAVING THE FIELD OUT IS NOT "CLEAR THE OWNER" (sweep #10 T29 round 2, item 30) ─────────────
+  // `raw == null` also caught a MISSING field, so a request that never named an owner removed the
+  // primary owner AND their membership — that person lost the restaurant. The console always sends the
+  // field (null for "No owner"), so it must now be present; a missing one is refused, nothing changes.
+  if (!("owner_user_id" in body)) return bad("Choose an owner, or choose \"No owner\" — nothing was changed.");
   const raw = body?.owner_user_id;
-  const ownerId = raw == null || raw === "" ? null : String(raw);
+  const ownerId = raw == null || raw === "" ? null : textOf(raw);
   if (ownerId && !UUID.test(ownerId)) return bad("That user isn't an owner.", 400);
   // The two reads below do not depend on each other, so they are asked together (sweep #10 T29 round 2,
   // item 24); each still answers for itself in the same order as before.
