@@ -517,5 +517,18 @@ const NOT_YET = new Map([
   check("every screen that mints a password uses lib/readablePassword — no route keeps its own copy", copies.length === 0, copies.join(", "));
 }
 
+// ── 21 · THE ACCESS LOG LINE SAYS WHAT WAS SAVED, NOT WHAT WAS ASKED (sweep #10 T29 r2, item 17) ──
+{
+  const rel = "app/api/admin/restaurants/access-tree/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Access → the Activity line is written from what LANDED (a clamped ceiling is logged clamped)",
+      /const changed = describeAccessPatch\(landed\)/.test(src) && !/describeAccessPatch\(patch\)/.test(src),
+      "the line would describe values the allow-lists dropped or clamped");
+    check("…and the clamped ceiling is what gets recorded", /\.limit = \{ \.\.\.\(landed\.config\[permId\]\.limit \|\| \{\}\), \[sd\]: dest\[sd\] \}/.test(src));
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

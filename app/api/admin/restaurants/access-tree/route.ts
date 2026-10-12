@@ -198,6 +198,15 @@ export async function POST(req: NextRequest) {
   }
 
   const patch = obj(body.patch ?? body);
+  // WHAT ACTUALLY LANDED (sweep #10 T29 round 2, item 17). The Activity line used to describe the patch
+  // AS SENT — so a hand-made 100,000% discount ceiling (stored clamped to 100%) was logged as 100,000%,
+  // and a key the allow-lists dropped was logged as if it had changed. Every branch below records the
+  // value it really accepted here, and the line is written from this.
+  const landed: Record<string, any> = {};
+  const land = (group: string, k: string, v: unknown, sub?: string) => {
+    const g = (landed[group] ||= {});
+    if (sub) (g[sub] ||= {})[k] = v; else g[k] = v;
+  };
 
   // ── restaurants columns ───────────────────────────────────────────────────
   const restUpdate: Record<string, any> = {};
@@ -208,13 +217,13 @@ export async function POST(req: NextRequest) {
   if (patch.grants) {
     const next = { ...obj(cur.manager_permissions) };
     let took = 0;
-    for (const [k, v] of Object.entries(obj(patch.grants))) if (GRANT_FLAGS.includes(k)) { next[k] = v === true; took++; }
+    for (const [k, v] of Object.entries(obj(patch.grants))) if (GRANT_FLAGS.includes(k)) { next[k] = v === true; took++; land("grants", k, v === true); }
     if (took) restUpdate.manager_permissions = next;
   }
   if (patch.sections) {
     const next = { ...obj(cur.owner_entitlements) };
     let took = 0;
-    for (const [k, v] of Object.entries(obj(patch.sections))) if (SECTION_ENTITLEMENTS.includes(k)) { next[k] = v === true; took++; }
+    for (const [k, v] of Object.entries(obj(patch.sections))) if (SECTION_ENTITLEMENTS.includes(k)) { next[k] = v === true; took++; land("sections", k, v === true); }
     if (took) restUpdate.owner_entitlements = next;
   }
 
@@ -236,7 +245,7 @@ export async function POST(req: NextRequest) {
     for (const [panel, keys] of Object.entries(obj(patch.tabs))) {
       if (!TAB_ALLOWED[panel]) continue;
       const dest = { ...obj(menus[panel]) };
-      for (const [k, v] of Object.entries(obj(keys))) if (TAB_ALLOWED[panel].has(k)) { dest[k] = v === true; cfgTook++; }
+      for (const [k, v] of Object.entries(obj(keys))) if (TAB_ALLOWED[panel].has(k)) { dest[k] = v === true; cfgTook++; land("tabs", k, v === true, panel); }
       menus[panel] = dest;
     }
     root.menus = menus;
@@ -250,11 +259,11 @@ export async function POST(req: NextRequest) {
       for (const [side, vals] of Object.entries(incoming)) {
         // config[id].on — "does this restaurant have it at all", the feature half of a row.
         if (side === "on") {
-          if (HAS_IDS.includes(permId)) { entry.on = vals === true; cfgTook++; }
+          if (HAS_IDS.includes(permId)) { entry.on = vals === true; cfgTook++; land("config", "on", vals === true, permId); }
           continue;
         }
         if (side === "tablet") {
-          if (CONFIG_TABLET.has(permId) && isTri(vals)) { entry.tablet = vals; cfgTook++; }
+          if (CONFIG_TABLET.has(permId) && isTri(vals)) { entry.tablet = vals; cfgTook++; land("config", "tablet", vals, permId); }
           continue;
         }
         if (side === "limit") {
@@ -268,6 +277,7 @@ export async function POST(req: NextRequest) {
             // dropdown could ever show or undo — and lib/discountCap.ts would honour it.
             const ceiling = CONFIG_LIMIT_MAX.get(`${permId}|${sd}`);
             dest[sd] = ceiling === undefined ? n : Math.max(0, Math.min(n, ceiling)); cfgTook++;
+            ((landed.config ||= {})[permId] ||= {}).limit = { ...(landed.config[permId].limit || {}), [sd]: dest[sd] };
           }
           entry.limit = dest;
           continue;
@@ -281,6 +291,7 @@ export async function POST(req: NextRequest) {
             if (legal === "bool" ? typeof v !== "boolean" : !(legal && typeof v === "string" && legal.has(v)))
               return bad(legal === "bool" ? `"${k}" is an on/off — send true or false.` : `"${String(v)}" isn't one of the choices for "${k}".`);
             dest[k] = v; cfgTook++;
+            (((landed.config ||= {})[permId] ||= {})[side] ||= {})[k] = v;
           }
         entry[side] = dest;
       }
@@ -343,7 +354,7 @@ export async function POST(req: NextRequest) {
     const curFeat = obj((curFeatQ.data as { features?: unknown } | null)?.features);
     const next = { ...curFeat };
     let took = 0;
-    for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) { next[k] = v === true; took++; }
+    for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) { next[k] = v === true; took++; land("features", k, v === true); }
     if (took) setPatch.features = next;
   }
   // A BAG MODULE'S ON/OFF — settings.modules[key].allowed (mig 326). Same merge discipline as
@@ -365,6 +376,7 @@ export async function POST(req: NextRequest) {
       if (!MODULE_BAG_KEYS.includes(k)) continue;
       next[k] = { ...obj(next[k]), allowed: v === true, enabled: true };
       took++;
+      land("modules", k, v === true);
     }
     if (took) setPatch.modules = next;
   }
@@ -384,6 +396,7 @@ export async function POST(req: NextRequest) {
       if (!CHANNEL_KEYS.includes(k)) continue;
       next[k] = { ...obj(next[k]), on: v === true }; // keep any stored API credentials
       took++;
+      land("channels", k, v === true);
     }
     for (const [k, v] of Object.entries(obj(patch.creds))) {
       if (!CREDS_KEYS.includes(k)) continue;
@@ -396,6 +409,7 @@ export async function POST(req: NextRequest) {
       // `key`, NOT `api_key` (T17 sweep, 2026-08-13, finding F4): the legacy field is dropped on
       // every write, which is what makes an already-split restaurant converge on one copy.
       next[k] = applyChannelKey(obj(next[k]), v);
+      land("creds", k, v);
     }
     if (took) setPatch.platform_channels = next;
   }
@@ -515,7 +529,8 @@ export async function POST(req: NextRequest) {
   //   · the device id rides along, and the whole thing is `.catch()`ed — a logging failure must
   //     never fail a save that already succeeded.
   // A credential's VALUE never reaches the log; only that one was saved or removed.
-  const changed = describeAccessPatch(patch);
+  for (const k of Object.keys(obj(patch.settings))) if (k in setPatch) land("settings", k, setPatch[k]);
+  const changed = describeAccessPatch(landed);
   const groups = Object.keys(patch).filter((k) => (patch[k] && typeof patch[k] === "object" ? Object.keys(patch[k]).length : patch[k] !== undefined));
 
   // A SAVE THAT LANDED NOWHERE MUST NOT SAY "Saved" (sweep 2026-08-05). Every allow-list above
