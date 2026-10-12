@@ -1093,6 +1093,13 @@ flush();
   { const m = r2("lib/menu.ts"); const f = m.slice(m.indexOf("function isUnreachable("), m.indexOf("function isUnreachable(") + 400);
     check("item 23 — Chrome's 'Failed to fetch' counts as the restaurant not answering (so a cooking order is never marked cancelled by a dropped connection)",
       /failed to fetch/.test(f) && /if \(isDbUnreachable\(error\) \|\| isUnreachable\(error\)\) throw busyError\(/.test(m)); }
+  // item 24 — on a narrow phone the order strip ends before the bell's corner begins
+  { const css = codeOnly(read("app/globals.css"));
+    const strip = (css.match(/\.order-tracker \{[^}]*?width: min\(340px, calc\(100vw - (\d+)px\)\)/) || [])[1];
+    const bell = css.match(/\.chef-call \{[^}]*?right: calc\((\d+)px[^}]*?width: clamp\(\d+px, [\d.]+vw, (\d+)px\)/);
+    const left = Number((css.match(/\.order-tracker \{[^}]*?left: (\d+)px/) || [])[1]);
+    const need = bell ? left + Number(bell[1]) + Number(bell[2]) + 8 : Infinity;
+    check(`item 24 — the order strip leaves the fixed bell its corner on a phone (strip gives up ${strip}px, the bell needs ${need}px)`, !!strip && Number(strip) >= need); }
   // item 21 — only a real duplicate reads "Already sent"
   { const c = r2("components/ChefPopup.tsx");
     check("item 21 — an unknown answer to a QR call is said honestly, never as 'Already sent'",
