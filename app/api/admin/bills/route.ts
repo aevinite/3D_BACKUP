@@ -418,7 +418,7 @@ async function postImpl(req: NextRequest) {
           rid, kind: "order_deleted", reason: { note: reason || null }, user: null,
           orderId: o.id, sessionId, tableNumber: sess.table_number != null ? String(sess.table_number) : null,
           amount: netAmount(o),
-          meta: { from: "admin bill ledger", orders_on_bill: (orderRows || []).length, partial: true },
+          meta: { orders_on_bill: (orderRows || []).length, partial: true },
         });
       }
       invalidateFloor(rid);
@@ -437,7 +437,7 @@ async function postImpl(req: NextRequest) {
         // rule lib/billLedger.ts now uses. `orders.total` carries tax on the PRE-discount subtotal,
         // so the raw column overstated what the guest was ever asked for.
         amount: netAmount(o),
-        meta: { from: "admin bill ledger", orders_on_bill: (orderRows || []).length },
+        meta: { orders_on_bill: (orderRows || []).length },
       });
     }
     // A session with no orders won't be reached by softDeleteOrders — tombstone it directly.
@@ -506,10 +506,10 @@ async function postImpl(req: NextRequest) {
     // same shape the delete writes, so the two sit next to each other and tell the whole story.
     for (const o of orderRows || []) {
       await recordRemoval({
-        rid, kind: "order_restored", reason: { note: "put back from the admin bill ledger" }, user: null,
+        rid, kind: "order_restored", reason: { note: "bill restored" }, user: null,
         orderId: o.id, sessionId, tableNumber: sess.table_number != null ? String(sess.table_number) : null,
         amount: netAmount(o),
-        meta: { from: "admin bill ledger", orders_on_bill: (orderRows || []).length },
+        meta: { orders_on_bill: (orderRows || []).length },
       });
     }
     invalidateFloor(rid);

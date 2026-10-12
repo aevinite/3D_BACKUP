@@ -46,7 +46,25 @@ export function isPlatformActor(row: ActorRow): boolean {
  */
 export function forReader<T extends ActorRow>(row: T, isAdmin: boolean): T {
   if (isAdmin || !isPlatformActor(row)) return row;
-  return { ...row, actor: null, actor_role: null };
+  const out = { ...row, actor: null, actor_role: null } as T & { reason_note?: unknown; meta?: unknown };
+  // ── …AND THE WORDS THE PLATFORM WROTE ABOUT ITSELF (owner, 2026-10-11 — S10 T28 item 16) ───────
+  // *"make sure to follow the rule that admin log thing should not be shown on the owner or manager"*.
+  // Withholding the actor was not enough: the admin bill ledger also wrote "put back from the admin
+  // bill ledger" as a restore's reason and `{ from: "admin bill ledger" }` into meta, and the owner's
+  // and the manager's removal card print both ("Reason" and the extra-facts list). Those two
+  // system-written phrases are neutralised here for every row already stored; the route no longer
+  // writes them. A reason a PERSON typed is the removal's reason and is never changed.
+  const note = (out as { reason_note?: unknown }).reason_note;
+  if (typeof note === "string" && /^put back from the admin bill ledger$/i.test(note.trim())) {
+    (out as { reason_note?: unknown }).reason_note = "bill restored";
+  }
+  const meta = (out as { meta?: unknown }).meta;
+  if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+    const m = { ...(meta as Record<string, unknown>) };
+    for (const k of Object.keys(m)) if (k !== "was" && typeof m[k] === "string" && /\badmin\b|aevidine/i.test(m[k] as string)) delete m[k];
+    (out as { meta?: unknown }).meta = m;
+  }
+  return out;
 }
 
 /** The same, for a whole list. */
