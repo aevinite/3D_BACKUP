@@ -1448,6 +1448,32 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
+// ── NOTHING LEFT THIS TABLET IS NOT "SENT" (sweep #10 T12, items 2–4) ──────────────────────────────
+// Every POST goes through the offline queue, whose own answer is { queued: true, why }. Three places
+// read that answer as the SERVER's: Print bill said "Sent to undefined" and opened nothing (and the
+// saved request printed at the counter whenever the signal came back); the 🖨 "where?" sheet's
+// question and the loyalty look-ups sat in "waiting to send" as changes nobody made; and a banquet
+// bill saved offline was announced "created — total ₹0". The live proof is
+// scripts/sweep/t12s10/b-live.mjs P181333–P181337; these hold the shape in place.
+{
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const slice = (from, to) => { const a = code.indexOf(from); return a < 0 ? "" : code.slice(a, to ? code.indexOf(to, a + from.length) : a + 3000); };
+  check(
+    "tablet: the queue's own answer is told apart from the server's by `why`",
+    /const queueAnswered = \(r\) => !!\(r && r\.queued === true && typeof r\.why === "string"\);/.test(code)
+      && /const forgetQueued = \(r\) =>[\s\S]{0,200}LFH_OUTBOX\.dismiss\(r\.action_id\)/.test(code),
+    `${TABLET}: queueAnswered()/forgetQueued() are what keep a device-saved answer from being read as the printer's.`,
+  );
+  const pb = slice("async function printTableBill", "function openBillWindow");
+  check(
+    "tablet: Print bill with no internet opens the bill HERE and drops the saved request",
+    /if \(queueAnswered\(r\)\) \{[\s\S]{0,500}forgetQueued\(r\);[\s\S]{0,400}openBillWindow\(html\);/.test(pb)
+      && pb.indexOf("queueAnswered(r)") < pb.indexOf("if (r && r.queued)")
+      && /r\.printer \|\| "the printer"/.test(pb),
+    `${TABLET}: printTableBill must answer a queue-saved print with the bill window (and dismiss the saved\n    request) BEFORE treating { queued } as "the counter printer has it" — or it says "Sent to undefined".`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");

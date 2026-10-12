@@ -259,6 +259,19 @@ const api = async (method, path, body, opts) => {
 // sync on reconnect — it did NOT fail. Callers show a friendly "saved" note instead of a
 // success/failure toast, and skip the post-write GET (which would reject offline).
 const isQueued = (r) => !!(r && r.queued === true);
+// WAS IT THE DEVICE'S OWN QUEUE THAT ANSWERED, OR THE SERVER? (sweep #10 T12, items 2 and 3.)
+// api() sends every POST through the offline queue, and the queue's own answer is
+// { queued: true, why: "offline" | "slow" | "busy" | "behind" }. Two of the server's answers ALSO
+// say `queued: true` — /print/send when a computer took the paper — but they never carry `why`. So
+// `why` is what tells "the counter printer has it" from "nothing has left this tablet yet".
+const queueAnswered = (r) => !!(r && r.queued === true && typeof r.why === "string");
+// A POST that only ASKS something (who owns the slips? how many points?) or that is only worth doing
+// NOW (print the guest's bill) is not a change to keep and replay hours later. When the queue took
+// one, take it back out again, so it never sits in "waiting to send" and never comes out of a
+// printer after the guest has gone.
+const forgetQueued = (r) => {
+  try { if (queueAnswered(r) && r.action_id && window.LFH_OUTBOX && window.LFH_OUTBOX.dismiss) window.LFH_OUTBOX.dismiss(r.action_id); } catch (e) { /* best effort */ }
+};
 // Accurate whether offline (syncs on reconnect) or online-with-a-pending-queue (syncs now).
 // WHAT TO SAY WHEN A WRITE WAS SAVED INSTEAD OF SENT (improvement #3).
 // One sentence used to cover four quite different situations, and "Saved ✓ — syncing
@@ -904,7 +917,19 @@ async function printTableBill(t) {
   if (!sess.id) { openBillWindow(html); return; }
   api("POST", "/print/send", { kind: "bill", sessionId: sess.id })
     .then((r) => {
-      if (r && r.queued) { toast(r.note || ("Sent to " + r.printer), true); return; }
+      // NOTHING LEFT THIS TABLET (sweep #10 T12, item 2). With no internet — or behind another change
+      // still waiting for this table — the device's own queue answered `{ queued: true }`, and this
+      // line read it as the counter printer's answer: the waiter saw "Sent to undefined", no bill
+      // opened, and the saved request would have printed at the counter whenever the signal came
+      // back, long after the guest had gone. Show the bill HERE instead, say why, and drop the
+      // saved request so it can never come out later.
+      if (queueAnswered(r)) {
+        forgetQueued(r);
+        toast(r.why === "offline" ? "No internet — the bill is open here instead of at the counter printer." : "The counter printer isn't answering — the bill is open here instead.", false);
+        openBillWindow(html);
+        return;
+      }
+      if (r && r.queued) { toast(r.note || ("Sent to " + (r.printer || "the printer")), true); return; }
       openBillWindow(html);
     })
     .catch(() => openBillWindow(html));
