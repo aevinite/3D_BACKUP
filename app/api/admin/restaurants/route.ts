@@ -706,7 +706,9 @@ export async function POST(req: NextRequest) {
     // The access-tree route refuses this same read in the same words (T27 sweep #9). Nothing but the
     // restaurant row exists yet, so it is rolled back exactly as the settings-write failure below is.
     if (template.error) {
-      await sb.from("restaurants").delete().eq("id", rid);
+      // The roll-back is looked at too, like the settings-write one below (S10 T28 item 15).
+      const rb = await sb.from("restaurants").delete().eq("id", rid);
+      if (rb.error) console.error("[admin/restaurants] create failed AND its roll-back failed — a half-made restaurant remains:", rid, rb.error.message);
       return adminFail("the new restaurant's settings", template.error, { action: "save" });
     }
     // cleanClonedSettings strips #1's tenant-specific identity/geo/tax (and sets table_count:10)
