@@ -110,6 +110,9 @@ const EXPLAINED_WRITES = {
   "scripts/verify-outbound-honesty.mjs": "its one POST names a random restaurant id that can never exist, so the update matches nothing (asserted 409)",
   "scripts/verify-outbox-drain.mjs": "every POST goes to its own local http server or is aborted by page.route — nothing reaches the app",
   "scripts/verify-t24b-live.mjs": "every write is one the server refuses (400/409) — read-only by construction, as its header says",
+  // every owner Test POST is one the server refuses (an unknown paper → 400, a paper no computer owns
+  // → 409), and each row skips its POST when a computer DOES own that paper. Read 2026-10-12 (S10 T15).
+  "scripts/sweep/t15s10/g-owner-route.mjs": "each POST is shaped to be refused (unknown paper, or a paper no computer owns — skipped when one does) and asserts the refusal",
   "scripts/sweep/t3/s9-checks.mjs": "each POST is shaped to be refused (bad table, 201 lines, no token, junk body) and asserts the refusal",
   "scripts/sweep/t27r2/d-settings.mjs": "its settings saves are undone by the harness's whole-row snapshot; table 1's QR code is put back by itself (item 80)",
   "scripts/verify-t10-manager-writes.mjs": "hermetic — the manager and tablet routes run in-process against the in-memory stub (scripts/panel-stubs), a fresh world per check; its POSTs never leave the process",
