@@ -619,6 +619,9 @@ console.log("\n20. a failed floor-size read keeps a waiter to their own section 
     const bent = orig.replace("if (error) floorUnknown = error;\n    else floor = Math.max(0, Number(data?.table_count) || 0);", "floor = Math.max(0, Number(data?.table_count) || 0); void error;");
     if (bent === orig) { bad("self-test: the sabotage matched nothing — section 20 names code that has moved"); }
     else {
+      // The sabotage rewrites a REAL file, so it is put back on an interruption too, not only on a throw.
+      const { restoreOnExit } = await import("./sweep/restore.mjs");
+      restoreOnExit("lib/tableAssign.ts (section 20 self-test)", () => writeFileSync(path, orig));
       writeFileSync(path, bent);
       let n; try { n = await judge(bundle("lib/tableAssign.ts", ["--define:__SECTION20_SABOTAGE__=1"]), true); } finally { writeFileSync(path, orig); }
       if (n > 0) ok(`self-test: the old fail-open floor turns ${n} check(s) red`); else bad("self-test: the old fail-open floor stays green — section 20 cannot catch it");
