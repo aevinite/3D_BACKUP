@@ -353,7 +353,11 @@ function KpiButton({ label, value, icon, color, active, onClick, hint }: {
         <i className={`fas ${icon}`} style={{ fontSize: 13 }} />
       </span>
       <span style={{ minWidth: 0 }}>
-        <span style={{ display: "block", fontSize: 10, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+        {/* WRAPS, NEVER CUTS (owner picked S10 T28 item 15, 2026-10-11). On a phone the two-column grid
+            leaves ~90px beside the icon, so the one-line ellipsis read "ACTIVE OWNE…" and
+            "MULTI-RESTAU…" — the name of the number was the part that went missing. Two short lines
+            say all of it; the box simply grows. */}
+        <span style={{ display: "block", fontSize: 10, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--muted)", lineHeight: 1.25, overflowWrap: "anywhere" }}>{label}</span>
         <span style={{ display: "block", fontSize: 19, fontWeight: 800, marginTop: 1 }}>{value}</span>
       </span>
     </button>
