@@ -797,7 +797,8 @@ for (const rel of PART_A) {
 // error. A read that must be complete pages (lib/pageAll → pageAll / pagedRead); anything else asks
 // for at most 1,000. PENDING, by count, are the reads that sweep #10 T29 listed for the owner in its
 // own files on 2026-10-11 — a fifth fails at once, and an entry that reaches 0 must be deleted.
-const OVER_CAP_PENDING = { "app/api/admin/restaurants/report/route.ts": 1, "app/api/admin/users/route.ts": 1, "app/api/admin/repair/route.ts": 2 };
+// All four were paged by T29 round 2 (item 14, 2026-10-12), so the list is empty — any read over 1,000 fails.
+const OVER_CAP_PENDING = {};
 for (const rel of PART_A) {
   const src = strip(readFileSync(join(root, rel), "utf8"));
   const over = [...src.matchAll(/\.limit\(\s*([0-9_]+)\s*\)/g)].filter((m) => Number(m[1].replace(/_/g, "")) > 1000).length;
