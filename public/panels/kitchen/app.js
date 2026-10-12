@@ -325,16 +325,36 @@ let audioCtx = null;
 // chimed silently and the display never beeped until someone touched it (bug M8,
 // 2026-07-05). Fix: create the context eagerly and resume() it on the first ANY user
 // gesture (one-time), and also try to resume() on every chime in case it lapsed.
-function primeAudio() {
+// ── THE FIRST TAP OF THE SHIFT MUST LAND WHERE THE FINGER IS (sweep #10 T11, item 6) ────────────────
+// The gesture listener below unlocks sound on pointerDOWN, and the moment the audio starts the nudge row
+// under the top bar folds away — so the whole board jumped up ~45px while the cook's finger was still on
+// the glass. Measured on the running board: with a mouse the tap simply vanished (down on one ✓, up on
+// another spot, no click at all); on a TOUCH screen it was worse — the click landed on the line that had
+// slid under the finger, and the dish BELOW the one tapped was marked ready. So when the unlock comes
+// from a gesture, the nudge waits until that gesture's click has been delivered (or ~2.5s, for a press
+// that never becomes a click) before it folds. A tap ON the nudge itself is not affected: that tap is
+// for the nudge, and nothing underneath it is being aimed at.
+function afterGesture(fn) {
+  let done = false;
+  const go = () => {
+    if (done) return; done = true;
+    ["click", "pointercancel"].forEach((e) => window.removeEventListener(e, go, true));
+    setTimeout(fn, 0);   // after the click's own handlers have run on the element that was really tapped
+  };
+  ["click", "pointercancel"].forEach((e) => window.addEventListener(e, go, true));
+  setTimeout(go, 2500);
+}
+function primeAudio(fromGesture) {
+  const settle = fromGesture ? () => afterGesture(updateSoundNudge) : updateSoundNudge;
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     const p = audioCtx.resume?.();
-    if (p && p.then) p.then(() => updateSoundNudge()).catch(() => {}); // resume() is async — re-check once it settles
+    if (p && p.then) p.then(() => settle()).catch(() => {}); // resume() is async — re-check once it settles
   } catch {}
-  updateSoundNudge();
+  settle();
 }
 if (typeof window !== "undefined") {
-  const once = () => { primeAudio(); ["pointerdown", "keydown", "touchstart"].forEach((e) => window.removeEventListener(e, once)); };
+  const once = () => { primeAudio(true); ["pointerdown", "keydown", "touchstart"].forEach((e) => window.removeEventListener(e, once)); };
   ["pointerdown", "keydown", "touchstart"].forEach((e) => window.addEventListener(e, once, { once: true, passive: true }));
 }
 // Is sound actually usable right now (context exists AND is running, not suspended)?

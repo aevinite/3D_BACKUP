@@ -234,7 +234,9 @@ row("P02555", "toast() escapes the message", () => has(APP(), "<span>${esc(msg)}
 row("P02556", "toast() cannot leave a node behind — the 4s timeout removes it even if already removed", () => hasRe(APP(), /setTimeout\(\(\) => t\.remove\(\), 4000\);/));
 row("P02557", "primeAudio() is wrapped so a browser with no WebAudio cannot break the boot", () => {
   const a = APPC();
-  const fn = a.slice(a.indexOf("function primeAudio()"), a.indexOf("if (typeof window !== \"undefined\") {"));
+  // EXPECTATION CHANGED (sweep #10 T11, item 6): primeAudio gained a `fromGesture` argument and re-checks the
+  // nudge through `settle` (deferred until the tap's click lands when the unlock came from a gesture).
+  const fn = a.slice(a.indexOf("function primeAudio("), a.indexOf("if (typeof window !== \"undefined\") {"));
   return hasRe(fn, /try \{[\s\S]*\} catch \{\}/);
 });
 row("P02558", "the one-time gesture listeners are both { once: true } AND removed by hand", () => {
@@ -254,8 +256,10 @@ row("P02563", "the sound nudge has a body fallback if the top bar is somehow mis
   hasRe(APP(), /else \(document\.body \|\| document\.documentElement\)\.appendChild\(soundNudgeEl\)/));
 row("P02564", "the sound nudge hides itself the instant the context runs or the cook mutes", () =>
   hasRe(APP(), /const need = !state\.muted && !audioReady\(\);/));
+// EXPECTATION CHANGED (sweep #10 T11, item 6): primeAudio gained a `fromGesture` argument and re-checks the
+// nudge through `settle` (deferred until the tap's click lands when the unlock came from a gesture).
 row("P02565", "updateSoundNudge is re-run after resume() settles, since resume is async", () =>
-  hasRe(APP(), /p\.then\(\(\) => updateSoundNudge\(\)\)/));
+  hasRe(APP(), /const settle = fromGesture \? \(\) => afterGesture\(updateSoundNudge\) : updateSoundNudge;[\s\S]{0,300}p\.then\(\(\) => settle\(\)\)/));
 
 // ── rows and the ticket — P02566–P02585 ──────────────────────────────────────
 row("P02566", "itemsByOrderId() builds the order→items index once per render pass", () => {

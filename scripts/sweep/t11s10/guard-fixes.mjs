@@ -166,3 +166,16 @@ row("P180039", "item 5 · the card is found with CSS.escape, like every other by
 row("P180040", "item 5 · a REFUSED ✓ still forgets the stamp entirely (the path item 5 does not replace)", () =>
   hasRe(MIR(), /forgetCardHtml\(o \? o\.id : it\.order_id\);/));
 
+// ══ ITEM 6 · the first tap of the shift lands where the finger is — P180561–P180566 ══════════════
+row("P180561", "item 6 · the gesture that unlocks sound defers the nudge until that gesture's click is delivered", () =>
+  hasRe(APPC(), /function afterGesture\(fn\) \{[\s\S]{0,400}\["click", "pointercancel"\]\.forEach\(\(e\) => window\.addEventListener\(e, go, true\)\);\s*setTimeout\(go, 2500\);/));
+row("P180562", "item 6 · …and runs it AFTER the click's own handlers (setTimeout 0 inside the capture listener)", () =>
+  hasRe(APPC(), /setTimeout\(fn, 0\);/));
+row("P180563", "item 6 · primeAudio takes the gesture path only when asked, and uses it for BOTH re-checks", () =>
+  hasRe(APPC(), /function primeAudio\(fromGesture\) \{\s*const settle = fromGesture \? \(\) => afterGesture\(updateSoundNudge\) : updateSoundNudge;[\s\S]{0,300}p\.then\(\(\) => settle\(\)\)[\s\S]{0,80}settle\(\);\s*\}/));
+row("P180564", "item 6 · the board's first-gesture listener is the one that asks for the gesture path", () =>
+  hasRe(APPC(), /const once = \(\) => \{ primeAudio\(true\);/));
+row("P180565", "item 6 · a tap ON the nudge still folds it promptly (that tap is aimed at the nudge)", () =>
+  hasRe(APPC(), /soundNudgeEl\.onclick = \(\) => \{ primeAudio\(\); setTimeout\(updateSoundNudge, 250\); \};/));
+row("P180566", "item 6 · the nudge still sits IN the flow under the bar (the reason the fold moves the board)", () =>
+  hasRe(APPC(), /bar\.parentNode\.insertBefore\(soundNudgeEl, bar\.nextSibling\)/));

@@ -38,7 +38,8 @@ const FALLBACKS = [
   ["P100388", "the menu-cache purge is best-effort and cannot fail the 86", "R", /try \{ revalidateTag\(menuTag\(rid\), \{ expire: 0 \}\); \} catch \{/],
   ["P100389", "printedIds starts EMPTY from a corrupt stored value", "A", /\} catch \{ return \[\]; \}/],
   ["P100390", "savePrintedIds swallows a storage refusal so the panel still prints", "A", /localStorage\.setItem\(PRINTED_KEY, JSON\.stringify\(\[\.\.\.printedIds\]\)\); \} catch \{/],
-  ["P100391", "primeAudio swallows a missing WebAudio so the boot survives", "A", /function primeAudio\(\) \{\s*\n?\s*try \{/],
+  // EXPECTATION CHANGED (sweep #10 T11, item 6): primeAudio(fromGesture) computes `settle` first, then tries.
+  ["P100391", "primeAudio swallows a missing WebAudio so the boot survives", "A", /function primeAudio\(fromGesture\) \{\s*\n?\s*const settle = [^\n]+\n\s*try \{/],
   ["P100392", "chime swallows a suspended context rather than throwing into a load", "A", /\} catch \{\}\s*\n?\s*updateSoundNudge\(\);/],
   ["P100393", "the PerformanceObserver is wrapped, so a browser without it boots", "A", /try \{\s*\n?\s*if \(typeof PerformanceObserver === "function"\)/],
   ["P100394", "printKot returns FALSE from its catch, so the caller can tell the cook", "A", /return false;\s*\n?\s*\}/],
