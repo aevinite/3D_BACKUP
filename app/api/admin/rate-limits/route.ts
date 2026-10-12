@@ -275,9 +275,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (action === "dismiss") {
-    const r = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId).select("id").maybeSingle();
+    const r = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId).select("id, restaurant_id, key, subject, subject_label").maybeSingle();
     if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
     if (!r.data) return err("that limit-reached record no longer exists — refresh the page", 404);
+    // ON THE RECORD LIKE ITS SIBLINGS (owner picked S10 T28 item 9, 2026-10-11). "Clear all" wrote a
+    // line and dismissing ONE alert wrote nothing, so "who cleared that alert, and when?" had no
+    // answer for the single case. On the `admin` panel, so no restaurant's own log ever shows it.
+    const ev = r.data as { restaurant_id?: string | null; key?: string; subject?: string; subject_label?: string | null };
+    await logAction("admin", "rate_limit_dismiss", {
+      restaurant_id: ev.restaurant_id && ev.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? ev.restaurant_id : undefined,
+      level: "info",
+      detail: `Cleared one limit-reached alert (${ev.subject_label || ev.subject || ev.key || "an alert"}). No limit changed and nobody was let through or blocked.`,
+    });
     return NextResponse.json({ ok: true });
   }
   return err("unknown action");
