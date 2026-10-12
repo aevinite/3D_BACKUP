@@ -20,6 +20,8 @@ import { cleanClonedSettings } from "@/lib/settingsClone";
 import { clampPerRow } from "@/lib/floorLayout";
 import { cleanBanquetFields } from "@/lib/banquetFields";
 import { logAction } from "@/lib/oplog";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -277,7 +279,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const body = (await req.json().catch(() => ({}))) as Patch;
+  const body = (await jsonObject(req)) as Patch;
   const rid = body?.restaurant_id;
   if (!isUuid(rid)) return NextResponse.json({ error: "missing or invalid restaurant_id" }, { status: 400 });
 

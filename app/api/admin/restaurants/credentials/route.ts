@@ -38,6 +38,8 @@ import { withIdempotency } from "@/lib/idempotency";
 import { adminFail } from "@/lib/adminFail";
 // The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
 import { readablePassword } from "@/lib/readablePassword";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -192,7 +194,7 @@ async function postImpl(req: NextRequest) {
   if (!(await revealUnlocked(req.cookies.get(REVEAL_COOKIE)?.value))) return err(REVEAL_LOCKED_MESSAGE, 423);
   if (!vaultReady()) return err("This deployment has no credential key set, so a password can't be stored for printing.", 409);
   let body: Record<string, unknown> = {};
-  try { body = await req.json(); } catch { /* empty */ }
+  body = await jsonObject(req);
   const rid = String(body.restaurant_id || "");
   if (!UUID.test(rid)) return err("invalid restaurant_id");
 

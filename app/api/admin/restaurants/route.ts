@@ -27,6 +27,8 @@ import { pageAll } from "@/lib/pageAll";
 import { forgetRestaurant, ownersOf } from "@/lib/panelAccess";
 // The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
 import { readablePassword } from "@/lib/readablePassword";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject } from "@/lib/jsonObject";
 
 // The remembered "New restaurant" setup (panels + sample-menu), stored in
 // app_config (mig 186) so the create form auto-fills from the admin's last choice.
@@ -300,7 +302,7 @@ export async function GET(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
-  let body: any = {}; try { body = await req.json(); } catch {}
+  let body: any = {}; body = await jsonObject(req);
   const rid = String(body?.restaurant_id || "");
   if (!rid) return bad("Missing restaurant_id.");
   // Shape-checked before it reaches a uuid column, like every sibling admin route — otherwise a
@@ -369,7 +371,7 @@ export async function PATCH(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
-  let body: any = {}; try { body = await req.json(); } catch {}
+  let body: any = {}; body = await jsonObject(req);
   const action = String(body?.action || "");
 
   // ── set_restaurant_active — the platform kill switch (owner 2026-07-04: "where is

@@ -33,6 +33,8 @@ import { adminFail } from "@/lib/adminFail";
 import { pageAll } from "@/lib/pageAll";
 // The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
 import { readablePassword } from "@/lib/readablePassword";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -163,7 +165,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {};
-  try { body = await req.json(); } catch {}
+  body = await jsonObject(req);
   // ONE "Name" is the whole identity: stored as-typed for display (`name`) and as
   // a normalized, unique key for login (`username`). No separate username concept.
   const display = String(body?.name ?? body?.username ?? "").trim().slice(0, 80);
@@ -222,7 +224,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {};
-  try { body = await req.json(); } catch {}
+  body = await jsonObject(req);
   const id = String(body?.id || "");
   const action = String(body?.action || "");
   if (!id) return bad("Missing user id.");

@@ -23,6 +23,8 @@ import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { softDeleteOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
 import { invalidateFloor } from "@/lib/floorSummary";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +84,7 @@ const writeRid = new WeakMap<NextRequest, string>();
 async function handler(req: NextRequest) {
   const gate = await requireAdmin(req); if (gate !== true) return gate;
   let body: Record<string, unknown> = {};
-  try { body = await req.json(); } catch { /* empty */ }
+  body = await jsonObject(req);
 
   const op = String(body.op || "");
   const rid = String(body.restaurant_id || "");

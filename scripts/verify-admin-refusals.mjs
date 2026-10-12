@@ -555,5 +555,18 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 23 · A BODY THAT IS NOT AN OBJECT IS REFUSED IN WORDS, NEVER A CRASH (sweep #10 T29 r2, item 26) ─
+// `try { body = await req.json() } catch {}` leaves `body` null for the valid JSON `null` (or 42, or a
+// list) and the next `body.x` threw — a bare 500 from five doors. Every admin route from position 27 on
+// reads its body through lib/jsonObject, which turns anything but a plain object into {}.
+{
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  const mine = walk(join(ROOT, "app/api/admin")).map((a) => a.slice(ROOT.length + 1)).sort().slice(26);
+  const raw = mine.filter((rel) => /req\.json\(\)/.test(code(rel)));
+  check("no admin route from position 27 on reads its body with a bare req.json()", raw.length === 0, raw.join(", "));
+  const lib = code("lib/jsonObject.ts") || "";
+  check("…and the one reader turns null / a number / a list into {}", /parsed && typeof parsed === "object" && !Array\.isArray\(parsed\)/.test(lib));
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

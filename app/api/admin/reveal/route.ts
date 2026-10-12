@@ -25,6 +25,8 @@ import {
   REVEAL_COOKIE, REVEAL_TTL_MS, mintRevealToken, revealConfigured,
   revealPasswordMatches, revealUnlockedUntil,
 } from "@/lib/revealGate";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +104,7 @@ export async function POST(req: NextRequest) {
   }
 
   let body: Record<string, unknown> = {};
-  try { body = await req.json(); } catch { /* empty */ }
+  body = await jsonObject(req);
   const typed = String(body.password || "");
   if (!typed) return err("Type the admin password.", 400);
 
