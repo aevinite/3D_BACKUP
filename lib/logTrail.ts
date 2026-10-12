@@ -328,6 +328,8 @@ const PLACE: Record<string, Place> = {
   errors_resolved_all: { area: "Aevidine console", screen: "Repair" },
   errors_snoozed_all: { area: "Aevidine console", screen: "Repair" },
   rate_limit_dismiss_all: { area: "Aevidine console", screen: "Repair" },
+  rate_limit_dismiss: { area: "Aevidine console", screen: "Rate limits" },
+  fix_request_status: { area: "Aevidine console", screen: "Repair" },
   repair_void_bill: { area: "Aevidine console", screen: "Repair" },
   repair_delete_order: { area: "Aevidine console", screen: "Repair" },
   repair_refire_order: { area: "Aevidine console", screen: "Repair" },
