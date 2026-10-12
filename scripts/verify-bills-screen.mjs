@@ -159,6 +159,30 @@ else fail("billReceiptHtml() no longer uses the shared totals stack — a discou
   else fail("billReceiptHtml() no longer draws its lines through billLiveLinesHtml() — a cancelled ticket's priced dishes can reach the pane");
 }
 
+// ── 8. a FAILED read of the record is not shown as a slow one (sweep #10 T6, 2026-10-12) ──────────
+// The skeleton ("Still reading — a long day takes a moment.") is drawn while state.billsRec has never
+// landed. A failed read left it null for ever, so with no signal the screen promised progress that
+// was not happening, over bills the device already held. The catch must remember the failure, the
+// skeleton must step aside for it, and the view must say in words what it is showing instead.
+{
+  const lb = panelCode.slice(panelCode.indexOf("async function loadBillsRecord("));
+  const lbBody = lb.slice(0, lb.indexOf("\n}"));
+  /catch \(e\) \{[\s\S]*state\.billsRecErr = \{/.test(lbBody)
+    ? pass("a failed bills read is remembered (state.billsRecErr), not swallowed")
+    : fail("loadBillsRecord() swallows a failed read — Previous bills would show 'still reading' for ever");
+  /if \(!state\.billsRec && state\.billsRecErr && Date\.now\(\) - state\.billsRecErr\.at </.test(lbBody)
+    ? pass("…and retried on a gentle clock, not on every repaint")
+    : fail("a failed bills read is retried on every repaint — a poll by another name");
+  const pv = panelCode.slice(panelCode.indexOf("function ordersPreviousHtml("));
+  const pvBody = pv.slice(0, pv.indexOf("\nfunction "));
+  /if \(!state\.billsRec && !state\.billsRecErr\) \{/.test(pvBody)
+    ? pass("the 'still reading' skeleton steps aside once the read has failed")
+    : fail("the skeleton is drawn whenever the record is missing — including after the read FAILED");
+  /const partial = !state\.billsRec && state\.billsRecErr/.test(pvBody) && /these are the bills this device already has/.test(pv.slice(0, pvBody.length + 2000) + panel)
+    ? pass("…and the view says in words that it is showing what the device holds")
+    : fail("after a failed read the record view says nothing about showing only what the device holds");
+}
+
 console.log(failed
   ? `\n✗ verify:bills-screen — ${failed} check${failed === 1 ? "" : "s"} failed.`
   : "\n✓ verify:bills-screen — the layout, the one-box search, the split parts and both numbers are all in place");

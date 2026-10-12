@@ -229,6 +229,9 @@ const state = {
   // The bills-record fetch (GET /orders?bills=1): dine-in rows for the whole window (beyond
   // the local 200) + finished PARCEL bills + the server's reach. at = when it landed.
   billsRec: null,
+  // …and why it is still null, when it is: the last failed read of it ({ at, offline, why }), so the
+  // record view can show what the device holds instead of an endless "still reading" (2026-10-12).
+  billsRecErr: null,
   // Audit & logs left-bar: audit | operations | customers — remembered across refresh.
   // Values stored by older builds are migrated: the retired top-toggle wrote "log" (which
   // the renderer never understood — it fell through to the customer log); everything else
@@ -3279,6 +3282,9 @@ async function loadBillsRecord(force) {
   // in this file keeps — re-renders while the view is open are what call this, so a busy
   // board must not turn into a faster poll (PR #748 review).
   if (state.billsRec && Date.now() - (state.billsRec.at || 0) < (force ? 3000 : 60000)) return;
+  // A read that just FAILED is retried on a gentle clock, not on every re-render: realtime repaints
+  // this view often, and each one asking again is a poll by another name.
+  if (!state.billsRec && state.billsRecErr && Date.now() - state.billsRecErr.at < (force ? 3000 : 15000)) return;
   // WHEN the read started, so the loading state can say how long it has been going. Set before
   // the await, and only for the FIRST read — a 60s background refresh must not restart the bar
   // under a list that is already on screen.
@@ -3287,8 +3293,18 @@ async function loadBillsRecord(force) {
   try {
     const r = await api("GET", "/orders?bills=1");
     state.billsRec = { rows: Array.isArray(r && r.rows) ? r.rows : [], parcels: Array.isArray(r && r.parcels) ? r.parcels : [], reach: (r && r.reach) || "today", at: Date.now() };
+    state.billsRecErr = null;
     if (state.tab === "orders" && ordersViewKey() === "previous") { renderList(); renderEditor(); }
-  } catch { /* keep whatever we had; the local 200 still renders */ }
+  } catch (e) {
+    // A FAILED READ IS NOT A SLOW ONE (sweep #10 T6, 2026-10-12). This used to keep "whatever we had",
+    // and promise "the local 200 still renders" — but the loading state added on 2026-09-27 draws
+    // its skeleton for as long as the record has never landed, so on a failed read (no signal on a
+    // device that never saved it, a busy server) the screen said "Still reading — a long day takes a
+    // moment." for ever, over bills this device was already holding. Remembered here, so the view
+    // can stop pretending and show what it has (see ordersPreviousHtml), and retried by itself.
+    state.billsRecErr = { at: Date.now(), offline: !!(e && e.offline), why: errText(e) };
+    if (state.tab === "orders" && ordersViewKey() === "previous") { renderList(); renderEditor(); }
+  }
   finally { _billsRecLoading = false; }
 }
 
@@ -3623,7 +3639,7 @@ function ordersPreviousHtml(today, previous) {
   // skeleton of generic bars that then reflows is worse than none. Each row's sweep is delayed
   // by its index — the list reads as one wave instead of five bars blinking in lockstep — and
   // the whole thing is inert under prefers-reduced-motion.
-  if (!state.billsRec) {
+  if (!state.billsRec && !state.billsRecErr) {
     // ── "COUNTED" — IT SAYS HOW FAR IT HAS GOT (owner picked this one, 2026-09-27) ──────────
     // Shown five options, he chose the one that reports progress: *"you can tell the difference
     // between nearly there and stuck."*
@@ -3684,7 +3700,13 @@ function ordersPreviousHtml(today, previous) {
            A bill older than that is in the owner's Reports.</div></div>`
     : "";
 
-  return `${bar}<div class="bill-split">
+  // The full record did not answer: say so in one line, and show the bills this device already holds.
+  const partial = !state.billsRec && state.billsRecErr
+    ? `<div class="ord-note" role="status">⚠ ${state.billsRecErr.offline
+        ? "No internet right now — these are the bills this device already has. The full record loads by itself when you're back online."
+        : "The full record didn't answer just now — these are the bills this device already has. It tries again by itself."}</div>`
+    : "";
+  return `${bar}${partial}<div class="bill-split">
       <div class="bill-listcol">${nothing || listHtml}</div>
       <div class="bill-rcpcol">${pick ? billReceiptHtml(pick) : `<div class="bill-rcp-empty">Pick a bill on the left to see it here.</div>`}</div>
     </div>`;
