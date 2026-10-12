@@ -3609,7 +3609,11 @@ async function renderReprintWhere(t, o) {
     const r = await api("POST", "/print/send", { kind: "kot" });
     // `{ noRoute: true }` — no computer owns the slips, so both buttons, exactly as before.
     // `{ printer, agent, connected }` — a computer does. Nothing was queued either way.
-    own = r && r.printer ? r : null;
+    // …unless there is no internet: then the DEVICE's queue answered and kept the question to ask
+    // again later, where it sat in "waiting to send" as a change the waiter never made (item 3).
+    // Take it back out, and answer from what the server said last time — the safe direction.
+    if (queueAnswered(r)) { forgetQueued(r); own = kotOwnerSays; }
+    else own = r && r.printer ? r : null;
   } catch (e) { own = kotOwnerSays; }
   kotOwnerSays = own;
   const hatch = !own || own.connected === false;
@@ -4169,6 +4173,7 @@ async function loyaltyForBill(t, sess, money) {
     const phone = String((sess && sess.cust_phone) || "").trim();
     if (!phone || t == null || t === "") return null;
     const st = await api("POST", `/tables/${t}/loyalty`, { phone });
+    forgetQueued(st);   // a lookup the queue saved for later is a lookup nobody needs later (item 3)
     if (!st || !st.on) return null;
     const total = Number(money && money.total) || 0;
     const earn = Math.floor((total * (Number(st.earn_per_100) || 0)) / 100);
@@ -4194,7 +4199,7 @@ async function renderLoyalty(ov, t, phone) {
   // table means no bill to spend points against, so show nothing rather than guess one.
   if (t == null || t === "") { hideLoyalty(ov); return; }
   let st = null;
-  try { st = await api("POST", `/tables/${t}/loyalty`, { phone }); } catch { st = null; }
+  try { st = await api("POST", `/tables/${t}/loyalty`, { phone }); forgetQueued(st); } catch { st = null; }
   if (!st || !st.on) { hideLoyalty(ov); return; }
   const bal = Number(st.balance) || 0;
   const min = Number(st.min_redeem) || 0;

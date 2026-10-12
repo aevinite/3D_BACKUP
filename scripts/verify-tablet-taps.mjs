@@ -1472,6 +1472,19 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
       && /r\.printer \|\| "the printer"/.test(pb),
     `${TABLET}: printTableBill must answer a queue-saved print with the bill window (and dismiss the saved\n    request) BEFORE treating { queued } as "the counter printer has it" — or it says "Sent to undefined".`,
   );
+  const rw = slice("async function renderReprintWhere", "// Move a SINGLE order");
+  check(
+    "tablet: the 🖨 'where?' question asked with no internet is taken back out of the queue",
+    /if \(queueAnswered\(r\)\) \{ forgetQueued\(r\); own = kotOwnerSays; \}/.test(rw),
+    `${TABLET}: renderReprintWhere's probe is a QUESTION — a queued copy is a change the waiter never made.`,
+  );
+  const lb = slice("async function loyaltyForBill", "// ── LOYALTY POINTS ON THE PAY SHEET");
+  const rl = slice("async function renderLoyalty", "// payBillWithMethod");
+  check(
+    "tablet: both loyalty look-ups forget a queue-saved copy of themselves",
+    /forgetQueued\(st\)/.test(lb) && /forgetQueued\(st\)/.test(rl),
+    `${TABLET}: /tables/:t/loyalty is a read sent as a POST; offline it must not wait in the queue for hours.`,
+  );
 }
 
 if (fails.length) {
