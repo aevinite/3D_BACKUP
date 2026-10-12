@@ -89,6 +89,12 @@ for (const [js, css] of SHARED) {
     if (capped && !/^(auto|scroll)$/.test(overflowY))
       bad(`${css}: the box is height-capped but its overflow-y ends up "${overflowY}"`, "on a short screen \"Generate bill\" sits below the box's edge and cannot be reached");
     else ok(`${css}: the box is height-capped and scrolls (overflow-y: ${overflowY}) — nothing on it can be cut off`);
+    // 5. …AND EVERY CONTROL ON IT IS STYLED BY THIS FILE (sweep #10 T14, 2026-10-12). The ✕ carried only
+    //    the manager stylesheet's `tbl-modal-close`, so on the tablet it was the browser's white button.
+    const xRule = [...flat.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((m) => m[1].split(",").map((x) => x.trim()).includes(".bcust-x")).map((m) => m[2]).join(";");
+    if (!/background:\s*transparent/.test(xRule) || !/border:\s*none/.test(xRule))
+      bad(`${css}: the sheet's ✕ is not styled here`, "it relies on .tbl-modal-close, which only the manager panel defines — the waiter tablet shows a white browser button");
+    else ok(`${css}: the sheet's ✕ is styled by this file, so it looks the same in both panels`);
   }
 }
 console.log(fails ? `\n❌ verify:shared-panel-styles — ${fails} problem(s)` : "\n✅ verify:shared-panel-styles — every panel that loads a shared script loads its look too");
