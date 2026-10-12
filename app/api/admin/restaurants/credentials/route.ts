@@ -39,7 +39,7 @@ import { adminFail } from "@/lib/adminFail";
 // The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
 import { readablePassword } from "@/lib/readablePassword";
 // A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
-import { jsonObject } from "@/lib/jsonObject";
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -195,7 +195,7 @@ async function postImpl(req: NextRequest) {
   if (!vaultReady()) return err("This deployment has no credential key set, so a password can't be stored for printing.", 409);
   let body: Record<string, unknown> = {};
   body = await jsonObject(req);
-  const rid = String(body.restaurant_id || "");
+  const rid = textOf(body.restaurant_id);
   if (!UUID.test(rid)) return err("invalid restaurant_id");
 
   // ── ONE PRESS FOR THE WHOLE RESTAURANT (owner, 2026-08-31 — item 28) ─────────────────────────────
@@ -203,9 +203,9 @@ async function postImpl(req: NextRequest) {
   // confirmation: owner, manager, kitchen, waiter — four rounds of the same dialogue for one handover.
   // Nobody is signed out unless it is asked for — see the note above resetAll().
   const signOut = body.signOut === true;
-  if (String(body.action || "") === "reset_all") return resetAll(rid, signOut);
+  if (textOf(body.action) === "reset_all") return resetAll(rid, signOut);
 
-  const userId = String(body.user_id || "");
+  const userId = textOf(body.user_id);
   if (!UUID.test(userId)) return err("invalid user_id");
 
   // The person must really belong to this restaurant — either its own staff, or one of its owners

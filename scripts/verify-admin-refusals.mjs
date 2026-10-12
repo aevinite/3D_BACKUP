@@ -581,5 +581,18 @@ const NOT_YET = new Map([
   check("…nor either password door", /\\\/api\\\/admin\\\/reveal/.test(never));
 }
 
+// ── 25 · AN ID IS TEXT, OR IT IS NOTHING (sweep #10 T29 round 2, item 29) ─────────────────────────
+// String(["<uuid>"]) is "<uuid>", so a ONE-ITEM LIST passed every id check: four doors switched French
+// House off, cleared its owner, changed its colour and saved an Access switch for a request no screen
+// sends. Every id / action / op read from a body in positions 27+ goes through textOf().
+{
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  const mine = walk(join(ROOT, "app/api/admin")).map((a) => a.slice(ROOT.length + 1)).sort().slice(26);
+  const coerced = mine.filter((rel) => /String\(body\??\.(?:[a-z_]*_id|id|action|op|feature)\b/.test(code(rel)));
+  check("no admin route from position 27 on turns a body id or action into text with String(…)", coerced.length === 0, coerced.join(", "));
+  check("…and textOf keeps only a value that already IS text", /typeof v === "string" \? v : ""/.test(code("lib/jsonObject.ts") || ""));
+}
+
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

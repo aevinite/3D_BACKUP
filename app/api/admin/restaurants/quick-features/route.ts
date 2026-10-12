@@ -24,7 +24,7 @@ import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { logAction } from "@/lib/oplog";
 // A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
-import { jsonObject } from "@/lib/jsonObject";
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await jsonObject(req);
   const rid = body?.restaurant_id;
-  const feature = String(body?.feature || "");
+  const feature = textOf(body?.feature);
   const on = body?.on === true;
   if (!isUuid(rid)) return NextResponse.json({ error: "missing or invalid restaurant_id" }, { status: 400 });
   if (!PATCH[feature]) return NextResponse.json({ error: "unknown feature" }, { status: 400 });

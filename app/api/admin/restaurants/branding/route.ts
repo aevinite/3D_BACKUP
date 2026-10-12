@@ -10,7 +10,7 @@ import { isHexColor, sanitizeBrandTheme } from "@/lib/brandTheme";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
 // A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
-import { jsonObject } from "@/lib/jsonObject";
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 const ok = (d: any, s = 200) => NextResponse.json(d, { status: s });
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {}; body = await jsonObject(req);
-  const rid = String(body?.restaurant_id || "");
+  const rid = textOf(body?.restaurant_id);
   if (!isUuid(rid)) return bad("Missing or invalid restaurant_id.");
   const patch: Record<string, unknown> = {};
   if ("accent_color" in body) {

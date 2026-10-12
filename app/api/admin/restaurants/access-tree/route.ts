@@ -29,7 +29,7 @@ import { adminFail } from "@/lib/adminFail";
 // One retry for a read that failed for a plumbing reason — see lib/readRetry.ts.
 import { retryRead } from "@/lib/readRetry";
 // A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
-import { jsonObject } from "@/lib/jsonObject";
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -167,7 +167,7 @@ function describeAccessPatch(patch: Record<string, any>): string {
 export async function POST(req: NextRequest) {
   if (!(await gate(req))) return bad("unauthorized", 401);
   let body: Record<string, any> = {}; body = await jsonObject(req);
-  const rid = String(body.restaurant_id || "");
+  const rid = textOf(body.restaurant_id);
   if (!uuid(rid)) return bad("Invalid restaurant_id.");
   // ── A BLIP MUST NOT READ AS "RESTAURANT NOT FOUND" ON THE PERMISSION SCREEN (T20 sweep #7,
   //    2026-08-27) ─────────────────────────────────────────────────────────────────────────────────

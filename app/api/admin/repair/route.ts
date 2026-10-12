@@ -24,7 +24,7 @@ import { softDeleteOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
 import { invalidateFloor } from "@/lib/floorSummary";
 // A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
-import { jsonObject } from "@/lib/jsonObject";
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -86,8 +86,8 @@ async function handler(req: NextRequest) {
   let body: Record<string, unknown> = {};
   body = await jsonObject(req);
 
-  const op = String(body.op || "");
-  const rid = String(body.restaurant_id || "");
+  const op = textOf(body.op);
+  const rid = textOf(body.restaurant_id);
   const reason = String(body.reason || "").trim().slice(0, 200);
   if (!UUID.test(rid)) return err("invalid restaurant_id");
   if (!reason) return err("A reason is required for every repair.");
@@ -113,7 +113,7 @@ async function handler(req: NextRequest) {
   try {
     // ── Void a bill (reopen an invoiced bill; number kept in the record) ──────────
     if (op === "void_bill") {
-      const sessionId = String(body.session_id || "");
+      const sessionId = textOf(body.session_id);
       if (!UUID.test(sessionId)) return err("invalid session_id");
     // ── A BLIP MUST NOT READ AS "THAT ISN'T FOR THIS RESTAURANT" (T27 sweep #9, 2026-09-15) ──────
     // All five ownership reads in this handler were `(await sb…).data` — the shape where the error
@@ -191,7 +191,7 @@ async function handler(req: NextRequest) {
     //    ERASE a real sale (mig 188/190): this tombstones it (restorable), never a hard
     //    DELETE — a hard delete of an issued bill is refused at the database level.
     if (op === "delete_order") {
-      const orderId = String(body.order_id || "");
+      const orderId = textOf(body.order_id);
       if (!UUID.test(orderId)) return err("invalid order_id");
       // Answers for itself — see the note in void_bill above. This one also feeds the Removals
       // record's amount, so a guess here would be a wrong figure on the owner's audit screen.
@@ -248,7 +248,7 @@ async function handler(req: NextRequest) {
 
     // ── Re-fire an order: clone its dishes into a fresh order (new KOT, re-priced) ──
     if (op === "refire_order") {
-      const orderId = String(body.order_id || "");
+      const orderId = textOf(body.order_id);
       if (!UUID.test(orderId)) return err("invalid order_id");
       // Answers for itself — see the note in void_bill above.
       const srcR = await readOne<{ table_number?: string; items?: unknown[]; allergies?: unknown }>(
@@ -319,7 +319,7 @@ async function handler(req: NextRequest) {
 
     // ── Unstick a jammed table: force-close an open/pending session ────────────────
     if (op === "unstick_table") {
-      const sessionId = String(body.session_id || "");
+      const sessionId = textOf(body.session_id);
       if (!UUID.test(sessionId)) return err("invalid session_id");
       // ── AND A TABLE THAT IS ALREADY CLOSED IS NOT A TABLE THIS UNSTUCK (T20 round 4, 2026-09-01) ──
       // `status` is read now. `closeSession` does not look at it — it sets `status:'closed'` over
@@ -347,9 +347,9 @@ async function handler(req: NextRequest) {
 
     // ── Edit an order's time/date (moves it across report/day boundaries) ──────────
     if (op === "edit_time") {
-      const orderId = String(body.order_id || "");
+      const orderId = textOf(body.order_id);
       if (!UUID.test(orderId)) return err("invalid order_id");
-      const when = String(body.created_at || "");
+      const when = textOf(body.created_at);
       const d = new Date(when);
       if (isNaN(d.getTime())) return err("Pick a valid date and time.");
       // Guard against a fat-fingered far-future/past time.

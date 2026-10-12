@@ -34,7 +34,7 @@ import { pageAll } from "@/lib/pageAll";
 // The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
 import { readablePassword } from "@/lib/readablePassword";
 // A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
-import { jsonObject } from "@/lib/jsonObject";
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
   const key = normalizeLoginName(display);
   const role = String(body?.role || "") as Role;
   // WHICH restaurant this user works at. Admin picks it; defaults to #1 for back-compat.
-  const restaurantId = String(body?.restaurant_id || "").trim() || DEFAULT_RESTAURANT_ID;
+  const restaurantId = textOf(body?.restaurant_id).trim() || DEFAULT_RESTAURANT_ID;
   if (key.length < 2) return bad("Username must be at least 2 characters.");
   if (!ROLES.includes(role)) return bad("Pick a valid role.");
   if (!UUID.test(restaurantId)) return bad("Pick a valid restaurant.");
@@ -225,8 +225,8 @@ export async function PATCH(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {};
   body = await jsonObject(req);
-  const id = String(body?.id || "");
-  const action = String(body?.action || "");
+  const id = textOf(body?.id);
+  const action = textOf(body?.action);
   if (!id) return bad("Missing user id.");
   if (!UUID.test(id)) return bad("User not found.", 404);
   // NAMED COLUMNS, NOT `*` (sweep 2026-08-04). `staff_users` holds password_hash, and this handler

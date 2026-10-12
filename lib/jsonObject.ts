@@ -16,3 +16,11 @@ export async function jsonObject(req: Request): Promise<Record<string, any>> {
   try { parsed = await req.json(); } catch { /* empty or not JSON — treated as {} */ }
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, any>) : {};
 }
+
+// ── AN ID IS TEXT, OR IT IS NOTHING (sweep #10 T29 round 2, item 29) ────────────────────────────────
+// `String(body.restaurant_id || "")` turns a ONE-ITEM LIST into its item: String(["<uuid>"]) is "<uuid>",
+// so `{ restaurant_id: ["<a real id>"] }` passed every id check and was written to — four admin doors
+// (switch a restaurant off, clear its owner, change its colour, save an Access switch) did exactly that
+// for a request no screen sends. textOf() keeps a value only when it already IS text; anything else
+// becomes "" and meets the route's own existing "Missing restaurant_id" refusal.
+export const textOf = (v: unknown): string => (typeof v === "string" ? v : "");

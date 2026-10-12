@@ -28,7 +28,7 @@ import { forgetRestaurant, ownersOf } from "@/lib/panelAccess";
 // The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
 import { readablePassword } from "@/lib/readablePassword";
 // A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
-import { jsonObject } from "@/lib/jsonObject";
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 // The remembered "New restaurant" setup (panels + sample-menu), stored in
 // app_config (mig 186) so the create form auto-fills from the admin's last choice.
@@ -303,7 +303,7 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {}; body = await jsonObject(req);
-  const rid = String(body?.restaurant_id || "");
+  const rid = textOf(body?.restaurant_id);
   if (!rid) return bad("Missing restaurant_id.");
   // Shape-checked before it reaches a uuid column, like every sibling admin route — otherwise a
   // stale link produces a raw Postgres 500 body instead of the tidy "Restaurant not found." below.
@@ -372,13 +372,13 @@ export async function PATCH(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {}; body = await jsonObject(req);
-  const action = String(body?.action || "");
+  const action = textOf(body?.action);
 
   // ── set_restaurant_active — the platform kill switch (owner 2026-07-04: "where is
   // the button to suspend?"). active=false stops the tenant resolver serving the
   // guest menu; the admin can still reach every panel via act-as to inspect/fix. ──
   if (action === "set_restaurant_active") {
-    const rid = String(body?.restaurant_id || "");
+    const rid = textOf(body?.restaurant_id);
     const active = !!body?.active;
     if (!rid) return bad("Missing restaurant_id.");
     if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
@@ -405,7 +405,7 @@ export async function POST(req: NextRequest) {
   // longer log in, but nothing is erased. Reversible via restore for 90 days, then
   // purgeable. Restaurant #1 (the default) can never be binned. ─────────────────
   if (action === "soft_delete_restaurant") {
-    const rid = String(body?.restaurant_id || "");
+    const rid = textOf(body?.restaurant_id);
     if (!rid) return bad("Missing restaurant_id.");
     if (rid === DEFAULT_RID) return bad("The default restaurant can't be deleted.", 400);
     const reason = String(body?.reason ?? "").trim().slice(0, 300) || null;
@@ -436,7 +436,7 @@ export async function POST(req: NextRequest) {
   // by default (active=false) so it can't silently go live; pass activate:true to
   // reactivate it in one step. Clears the recycle-bin fields. ───────────────────
   if (action === "restore_restaurant") {
-    const rid = String(body?.restaurant_id || "");
+    const rid = textOf(body?.restaurant_id);
     if (!rid) return bad("Missing restaurant_id.");
     const activate = body?.activate === true;
     if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
@@ -557,7 +557,7 @@ export async function POST(req: NextRequest) {
   // WAIT IS GONE (owner, 2026-08-20 — see the note on RETENTION_DAYS at the top of this
   // file); migration 342 removed its SQL half so the two sides can't disagree. ────────
   if (action === "purge_restaurant") {
-    const rid = String(body?.restaurant_id || "");
+    const rid = textOf(body?.restaurant_id);
     if (!rid) return bad("Missing restaurant_id.");
     if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
     if (rid === DEFAULT_RID) return bad("The default restaurant can’t be permanently removed.", 400);
