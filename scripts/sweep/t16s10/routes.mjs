@@ -30,6 +30,7 @@ export async function route(name) {
     "--alias:@/lib/oplog=./scripts/panel-stubs/oplog.mjs",
     "--alias:@/lib/alerts=./scripts/sweep/t16s10/stubs/alerts.mjs",
     "--alias:@/lib/tenant=./scripts/sweep/t16s10/stubs/tenant.mjs",
+    "--alias:@/lib/panelAccess=./scripts/sweep/t16s10/stubs/panelAccess.mjs",
     "--alias:next/server=./scripts/sweep/t16s10/stubs/next-server.mjs",
     "--external:next/dist/*", "--external:next/cache", "--external:next/headers",
     `--outfile=${out}`, "--log-level=error"], { cwd: ROOT });
@@ -41,7 +42,7 @@ export const FH = "11111111-1111-4111-8111-111111111111", PP = "22222222-2222-42
 export async function world(o = {}) {
   await world0(); reset();
   delete G.FAIL; delete G.FAIL_NTH; delete G.CALLS; G.HONOUR_LIMIT = true;
-  G.ALERTS = []; G.AFTER = []; G.SLUGS = [];
+  G.ALERTS = []; G.AFTER = []; G.SLUGS = []; G.OWNED = o.owned || {}; G.OWNED_ASKED = [];
   const who = o.who || "manager";
   const MANAGER = { id: "u1", role: "manager", name: "Diag Manager", username: "diagm1", restaurant_id: FH, permissions: {} };
   G.ACTOR = who === "admin" ? { ok: true, user: null }
