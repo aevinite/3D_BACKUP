@@ -65,7 +65,7 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
       return /row\("fa-[^"]*", esc\(/.test(S) ? "a call site is escaping again before row() does" : true;
     });
     check("P04359", "a panel that loaded without a connection still offers the profile once it is back", () =>
-      /catch \(e\) \{ return false; \}/.test(available) &&
+      /catch \(e\) \{ (retryLater\(\); )?return false; \}/.test(available) &&
       /window\.addEventListener\("online", function \(\) \{ if \(availability !== true\) wireManagerButton\(\); \}\)/.test(S));
     check("P04360", "the manager top-bar button is revealed by clearing BOTH hidden and display", () =>
       /btn\.hidden = false; btn\.style\.display = "";/.test(wireBtn));
@@ -82,7 +82,9 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
     });
     check("P66052", "available() remembers a real answer but never a failure", () =>
       /if \(availability !== null\) return availability;/.test(available) &&
-      /catch \(e\) \{ return false; \}/.test(available));
+      /catch \(e\) \{ (retryLater\(\); )?return false; \}/.test(available) &&
+      // sweep #10 T16: a 5xx is a failure too, not only a throw — it must not be remembered either
+      /if \(readFailed\) \{ retryLater\(\); return false; \}/.test(available));
     check("P66053", "a message to the person uses the panel's own card, with the dialog as fallback", () =>
       before(tell, /LFH_ASK\.say/, /alert\(/) && /try \{ alert\(msg\); \} catch \(e\) \{ /.test(tell));
     check("P66054", "the overlay unregisters its back layer on close", () => {

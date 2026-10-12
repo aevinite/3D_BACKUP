@@ -454,9 +454,18 @@ mode = "profile-busy"; profileBusyLeft = 2;
 await page.goto(BASE + "/page-boot", { waitUntil: "domcontentloaded" });
 await page.waitForFunction(() => !!(window.LFH_ME && window.LFH_PROFILE_GET), null, { timeout: 10000 });
 await wait(150);
+const bootSaid = await page.evaluate(async () => { await window.LFH_ME.open(); return document.getElementById("meBody").innerText; });
+if (!/not signed in/i.test(bootSaid)) ok("a busy read does not tell a signed-in manager they are not signed in");
+else bad("a busy read was reported as 'not signed in'", bootSaid.slice(0, 120));
+if (/Couldn't load your profile just now/.test(bootSaid)) ok(`…it says what happened and offers Try again ("${bootSaid.split("\n")[0]}")`);
+else bad("the failed read did not say what happened", bootSaid.slice(0, 120));
+await page.evaluate(() => window.LFH_ME.close());
 const backBy = await until(async () => page.evaluate(() => !!document.getElementById("staffSettingsBtn")), 8000);
 if (backBy) ok("the ⚙ Profile button (with Sign out) came back by itself once the server answered");
 else bad("the Profile button never came back after a busy boot — no Sign out for the rest of the shift");
+const mine = await until(async () => page.evaluate(() => { const b = document.getElementById("myProfileBtn"); return b && !b.hidden; }), 8000);
+if (mine) ok("…and so did 'My profile & pay'");
+else bad("'My profile & pay' stayed hidden after a busy boot");
 mode = "ok";
 
 await browser.close();
