@@ -152,3 +152,17 @@ row("P180035", "item 4 · ⚙️ Settings no longer goes silent on a stopped que
   hasRe(APPC(), /const stopped = !hlp && state\.printRefused === "paused";[\s\S]{0,200}\(!auto && tgt !== "counter" && !hlp && !stopped\) \? "" :/));
 row("P180036", "item 4 · the manager route's own stop rule is still there to agree with", () =>
   hasRe(code(src("app/api/editor/[...path]/route.ts")), /const paused = st\?\.modules\?\.printing\?\.paused === true;\s*const on = !paused &&/));
+
+// ══ ITEM 5 · a ✓'d dish that is put back to cooking gets its ✓ back — P180037–P180040 ════════════
+const MIR = () => { const a = APPC(); const i = a.indexOf("function markItemReady("); const j = a.indexOf("async function undoReady("); return i < 0 || j < 0 ? "" : a.slice(i, j); };
+row("P180037", "item 5 · after the in-place ✓ edit, a card that stays in its lane is re-stamped with what it now says", () =>
+  hasRe(MIR(), /if \(o && orderPhase\(o\) === "ready"\) moveCardToReady\(o\);\s*else if \(o\) \{\s*const card = document\.querySelector\([^\n]+\);\s*if \(card\) card\.__kdsHtml = ticketHtml\(o\);\s*\}/));
+row("P180038", "item 5 · the re-stamp happens AFTER the dish's status is set to ready (so it stamps the truth)", () => {
+  const m = MIR(); const set = m.indexOf('it.status = "ready"; pendingReady.add(id);'), stamp = m.indexOf("card.__kdsHtml = ticketHtml(o)");
+  return (set > 0 && stamp > set) || "order changed";
+});
+row("P180039", "item 5 · the card is found with CSS.escape, like every other by-id card lookup here", () =>
+  hasRe(MIR(), /\.ticket\[data-ticket="\$\{window\.CSS && CSS\.escape \? CSS\.escape\(String\(o\.id\)\) : o\.id\}"\]/));
+row("P180040", "item 5 · a REFUSED ✓ still forgets the stamp entirely (the path item 5 does not replace)", () =>
+  hasRe(MIR(), /forgetCardHtml\(o \? o\.id : it\.order_id\);/));
+

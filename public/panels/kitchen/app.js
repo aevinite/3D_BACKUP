@@ -869,6 +869,18 @@ function markItemReady(id, btn) {
   // ✓ buttons survive and the cook's next rapid tap isn't eaten. (owner, 2026-06-19)
   const o = (state.orders || []).find((x) => x.id === it.order_id);
   if (o && orderPhase(o) === "ready") moveCardToReady(o);
+  // …AND WHEN THE TICKET STAYS IN ITS LANE, RE-STAMP WHAT THE CARD NOW SAYS (sweep #10 T11, item 5).
+  // The edit above changes one line in place, so the card's `__kdsHtml` still holds the html from BEFORE
+  // the ✓. When the server then confirms the ✓, load() sees an unchanged signature and paints nothing —
+  // so that stale stamp survives. If the dish is later put back to cooking from another screen, the
+  // board's next desired html is the old pre-✓ html, it matches the stale stamp, reconcileList reuses
+  // the node, and the card goes on saying "ready" with no ✓ while every other panel says cooking.
+  // Watched on the running board. Stamping the html this card now corresponds to makes that change-check
+  // compare against the truth: a confirmation still reuses the node, a reversal repaints it.
+  else if (o) {
+    const card = document.querySelector(`.ticket[data-ticket="${window.CSS && CSS.escape ? CSS.escape(String(o.id)) : o.id}"]`);
+    if (card) card.__kdsHtml = ticketHtml(o);
+  }
   api("POST", `/items/${id}/status`, { status: "ready" }).then((r) => {
     // Saved on this device rather than sent — say so, and skip the reconcile (which would refetch
     // the board and paint the dish back as still cooking, exactly the "did my tap work?" moment
