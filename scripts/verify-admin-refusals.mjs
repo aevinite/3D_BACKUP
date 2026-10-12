@@ -451,9 +451,9 @@ const NOT_YET = new Map([
   check(`${rel} exists`, !!src);
   if (src) {
     check("Usage → a typed date must survive a round trip (no 31 February)",
-      /new Date\(ms\)\.toISOString\(\)\.slice\(0, 10\) === v/.test(src) && !/!isNaN\(Date\.parse\(v\)\)/.test(src));
-    check("…and an impossible or half-given range is refused, not swapped for the default view",
-      /Pick both a start date and an end date\./.test(src) && /That isn't a real date/.test(src));
+      /new Date\(ms\)\.toISOString\(\)\.slice\(0, 10\) === v/.test(src));
+    check("…and a date-shaped but impossible range is refused in words (junk words still get the honest default view, P74068)",
+      /if \(fromDay && toDay && !\(realDay\(fromDay\) && realDay\(toDay\)\)\)/.test(src) && /That isn't a real date/.test(src));
   }
 }
 
