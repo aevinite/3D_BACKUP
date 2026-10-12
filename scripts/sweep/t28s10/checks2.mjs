@@ -40,6 +40,7 @@ const env = Object.fromEntries(readFileSync(join(ROOT, ".env.local"), "utf8").sp
   .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
   .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
 refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "the T28 round-2 checks");
+const letters = (n) => { let out = ""; while (out.length < n) out += "abcdefghjkmnpqrstuvwxyz"[Math.floor(Math.random() * 23)]; return out; };
 const svc = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const TAG = `t28r2-${Date.now().toString(36)}`;
 const H0 = adminHeaders(BASE);
@@ -174,7 +175,8 @@ try {
   let fixtureSid = null;
   {
     const like = (await svc.from("orders").select("items").eq("restaurant_id", FH).gt("total", 100).not("items", "is", null).limit(1)).data?.[0]?.items?.[0];
-    const table = "zz-r-" + Array.from({ length: 8 }, () => "abcdefghjkmnpqrstuvwxyz"[Math.floor(Math.random() * 23)]).join("");
+    // A digit-free name, so it can never be one of the numbered tables other guards own (claimedTables).
+    const table = "zz-r-" + letters(8);
     const s = await svc.from("sessions").insert({ restaurant_id: FH, table_number: table, status: "closed", closed_at: new Date().toISOString() }).select("id").single();
     if (s.data?.id) { made.sessions.push(s.data.id); fixtureSid = s.data.id; }
     const o = like ? await svc.from("orders").insert({ restaurant_id: FH, table_number: table, session_id: fixtureSid, items: [{ ...like, qty: 1, note: TAG, status: "served" }], status: "served", payment_status: "pending" }).select("id").single() : { data: null };
