@@ -7,10 +7,10 @@
 // column list is the kind of thing that silently goes stale when a feature adds a column.
 //
 // But one column in that row is not a setting at all: `platform_channels` carries the per-channel
-// CONNECTION KEY for Zomato / Swiggy / the website (migration 209). Both admin screens that manage
-// those keys go out of their way never to hand the value back —
-// `app/api/admin/restaurants/platform-channels/route.ts` answers `hasKey: true/false`, and the
-// Access screen shows `••••1234` (lib/accessState.ts). It was reaching every manager's and every
+// CONNECTION KEY for Zomato / Swiggy / the website (migration 209). The admin screen that manages
+// those keys goes out of its way never to hand the value back — the Access screen shows `••••1234`
+// (lib/accessState.ts). (A second door, `/api/admin/restaurants/platform-channels`, answered
+// `hasKey: true/false`; no screen used it and it was retired on 2026-10-12.) It was reaching every manager's and every
 // waiter's browser anyway, once a minute per tablet, and NOT ONE line of `public/panels/` reads it.
 //
 // So this is the same move the tablet route already makes for `access_config` (T6 sweep,

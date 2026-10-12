@@ -2,16 +2,18 @@
 // say which restaurant (or which one row) it is about? Proved by READING the code — never by calling a
 // route signed out (sweep #10 rule 7). One phase per exported handler, one per file.
 export default function section(c) {
+  const { RETIRED, GONE, FILED, isGone } = c;   // the filed list (round 2, item 13) — defined in the main script
   c.sec("A · the admin login comes first, in every handler of every route (read, not probed)");
   const GATE = /tokenIsValid\(|requireAdmin\(req\)|await admin\(req\)|await gate\(req\)/;
   const DB = /\bsb\.(from|rpc|storage)\(|supabaseAdmin\.(from|rpc)\(|softDeleteOrders\(|closeSession\(|recordRemoval\(|logAction\(|pageAll</;
-  for (const rel of c.ROUTES) {
-    const hs = c.handlers(rel);
+  for (const rel of FILED) {
+    const hs = isGone(rel) ? Object.fromEntries(RETIRED[rel].map((v) => [v, null])) : c.handlers(rel);
     for (const verb of Object.keys(hs).sort()) {
       const short = rel.replace("app/api/admin/", "").replace("/route.ts", "");
       c.phase(`${short} · ${verb} checks the admin sign-in before anything touches the database`,
         `read ${rel}: the first gate call sits before the first database / storage / audit call in the ${verb} body`,
         () => {
+          if (isGone(rel)) return GONE;
           const b = hs[verb];
           const g = b.search(GATE), d = b.search(DB);
           if (g < 0) return `no admin gate found in ${verb}`;
@@ -34,11 +36,12 @@ export default function section(c) {
     ["staff_actions", "the Repair board's bulk resolve, scoped to one restaurant when the picker names one"],
     ["app_config", "platform-wide keys (the remembered create form, the retention lock)"],
   ]);
-  for (const rel of c.ROUTES) {
+  for (const rel of FILED) {
     const short = rel.replace("app/api/admin/", "").replace("/route.ts", "");
     c.phase(`${short} — every table query names a restaurant or a row, or is a declared platform-wide read`,
       `read ${rel}: each sb.from(...) chain up to its semicolon`,
       () => {
+        if (isGone(rel)) return GONE;
         const src = c.clean(rel);
         const bad = [];
         for (const m of src.matchAll(/sb\.from\("([a-z_]+)"\)/g)) {
@@ -52,11 +55,11 @@ export default function section(c) {
   }
 
   c.sec("A · no restaurant, person or session is taken from a header or a cookie the screen controls");
-  for (const rel of c.ROUTES) {
+  for (const rel of FILED) {
     const short = rel.replace("app/api/admin/", "").replace("/route.ts", "");
     c.phase(`${short} — the restaurant it acts on comes from the request body / query it validates, never from a header`,
       `grep ${rel} for headers.get("x-…restaurant…") / cookies.get(…rid…)`,
-      () => !/headers\.get\("x-[a-z-]*(restaurant|rid|tenant)/i.test(c.clean(rel)) && !/cookies\.get\("[^"]*(rid|restaurant)/i.test(c.clean(rel)) || "reads a restaurant from a header or cookie");
+      () => isGone(rel) ? GONE : !/headers\.get\("x-[a-z-]*(restaurant|rid|tenant)/i.test(c.clean(rel)) && !/cookies\.get\("[^"]*(rid|restaurant)/i.test(c.clean(rel)) || "reads a restaurant from a header or cookie");
   }
 
   c.sec("A · secrets never leave the server");
@@ -103,8 +106,13 @@ export default function section(c) {
       // Since item 12 every table is paged through readAll(), the staff list with its own named columns.
       return /panelSafeSettings\(/.test(s) && /readAll\("staff_users", "id, username, name, role, restaurant_id, phone, active, profile_confirmed, permissions, created_at"\)/.test(s) || "the backup could carry a secret";
     });
-  c.phase("the delivery-channel route answers on/off and hasKey only — never the key",
-    "read platform-channels present(): its output shape", () => /out\[c\] = \{ on: cell\.on === true, hasKey:/.test(c.clean("app/api/admin/restaurants/platform-channels/route.ts")) || "present() returns more");
+  // The delivery-channel door was RETIRED in round 2 (item 13); Access & permissions is its one home now.
+  c.phase("Access & permissions shows each delivery channel's on/off and never a key value",
+    "GET the French House state; read channels and search for a stored key", async () => {
+      const r = await c.req(`/api/admin/restaurants/access-tree?restaurant_id=${c.FH}`);
+      const ch = r.json?.state?.channels || {};
+      return ["zomato", "swiggy", "website"].every((k) => typeof ch[k] === "boolean") && !/"(key|api_key)"\s*:\s*"[^"]/.test(r.text) || "a key value, or a channel missing";
+    });
   c.phase("the uncover cookie is HttpOnly, path /, and Secure in production",
     "read reveal/route.ts cookies.set", () => /res\.cookies\.set\(REVEAL_COOKIE, value, \{\s*httpOnly: true, sameSite: "lax", path: "\/",\s*maxAge: [^,]+, secure: secure\(\),?\s*\}\)/.test(c.clean("app/api/admin/reveal/route.ts")) || "cookie flags changed");
   c.phase("re-covering clears the cookie with the SAME flags it was set with, so the browser really drops it",

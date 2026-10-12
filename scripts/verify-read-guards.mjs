@@ -76,7 +76,7 @@ const read = (p) => {
   const FIXTURE = "app/api/admin/restaurants/credentials/route.ts";
   const src = read(FIXTURE);
   if (!readRaw(FIXTURE)) ok(`${FIXTURE} is gone — the stripper fixture needs a new file with "/*" in a line comment`);
-  else if (/linkQ\.error/.test(src) && /genPassword/.test(src)) {
+  else if (/linkQ\.error/.test(src) && /readablePassword/.test(src)) {   // genPassword → lib/readablePassword (T29 r2 item 15)
     ok("the comment stripper reaches the END of a file whose header quotes a \"/api/admin/*\" path");
   } else {
     fail(`the comment stripper is eating ${FIXTURE} again — a "/*" inside a line comment opens a block comment when blocks are stripped FIRST, so every rule below that reads this file silently passes. Strip LINE comments first.`);
@@ -414,7 +414,8 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
     if (/vaultReady\(\)/.test(impl)) ok("reset_all refuses on a deployment with no credential key, rather than burning every password for nothing");
     else fail("reset_all no longer checks the credential vault — it would reset every password and be unable to print any of them");
 
-    if (/const userId = String\(body\.user_id/.test(src)) ok("the one-login-at-a-time reset still exists");
+    // textOf since sweep #10 T29 round 2 item 29 (a list is not an id); String() before that.
+    if (/const userId = (?:textOf\(body\.user_id\)|String\(body\.user_id)/.test(src)) ok("the one-login-at-a-time reset still exists");
     else fail("the single-login reset is gone; there would be no way to reset one password at all");
 
     // NEW, and the reason the whole card is safe to leave on screen: the passwords are behind a

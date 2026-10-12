@@ -15,12 +15,16 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// Read every row past PostgREST's 1,000-row cap — see lib/pageAll.ts.
+import { pageAll } from "@/lib/pageAll";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { softDeleteOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
 import { invalidateFloor } from "@/lib/floorSummary";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -80,10 +84,10 @@ const writeRid = new WeakMap<NextRequest, string>();
 async function handler(req: NextRequest) {
   const gate = await requireAdmin(req); if (gate !== true) return gate;
   let body: Record<string, unknown> = {};
-  try { body = await req.json(); } catch { /* empty */ }
+  body = await jsonObject(req);
 
-  const op = String(body.op || "");
-  const rid = String(body.restaurant_id || "");
+  const op = textOf(body.op);
+  const rid = textOf(body.restaurant_id);
   const reason = String(body.reason || "").trim().slice(0, 200);
   if (!UUID.test(rid)) return err("invalid restaurant_id");
   if (!reason) return err("A reason is required for every repair.");
@@ -109,7 +113,7 @@ async function handler(req: NextRequest) {
   try {
     // ── Void a bill (reopen an invoiced bill; number kept in the record) ──────────
     if (op === "void_bill") {
-      const sessionId = String(body.session_id || "");
+      const sessionId = textOf(body.session_id);
       if (!UUID.test(sessionId)) return err("invalid session_id");
     // ── A BLIP MUST NOT READ AS "THAT ISN'T FOR THIS RESTAURANT" (T27 sweep #9, 2026-09-15) ──────
     // All five ownership reads in this handler were `(await sb…).data` — the shape where the error
@@ -155,12 +159,15 @@ async function handler(req: NextRequest) {
       // manager open to answer "what came off my bills, and how much?". Refuse before touching the
       // invoice: reopening a bill is not urgent enough to record it wrongly, and the same request
       // succeeds a second later.
-      // `.limit(2000)` is a runaway guard, not a business bound — the same shape and the same reason as
-      // the khata balance read in /api/owner/customers. One sitting with 2000 orders on it is a
-      // different conversation; leaving it unbounded meant PostgREST's own cap decided the sum instead.
-      const beforeQ = await sb.from("orders").select("total, discount").eq("session_id", sessionId).eq("restaurant_id", rid).limit(2000);
-      if (beforeQ.error) return adminFail("this bill's figures before reopening it", beforeQ.error, { action: "load" });
-      const beforeVoid = beforeQ.data as { total: number | null; discount: number | null }[] | null;
+      // EVERY ORDER ON THE BILL, PAGED (sweep #10 T29 round 2, item 14). This was `.limit(2000)`, but
+      // PostgREST answers at most 1,000 rows per request whatever limit is asked, so the "runaway guard"
+      // was really a silent 1,000 — a bill with more orders would have recorded a smaller amount in the
+      // Removals record. One bill is a short list; pageAll costs nothing extra below 1,000 rows and
+      // refuses past 50,000 instead of shortening the sum.
+      const beforeQ = await pageAll<{ id: string; total: number | null }>("this bill's orders", (from, to) =>
+        sb.from("orders").select("id, total").eq("session_id", sessionId).eq("restaurant_id", rid).order("id").range(from, to));
+      if (beforeQ.error) return adminFail("this bill's figures before reopening it", beforeQ.error as { message?: string }, { action: "load" });
+      const beforeVoid = beforeQ.rows;
       const wasTotal = (beforeVoid || []).reduce((s, o) => s + (Number(o.total) || 0), 0);
       // p_actor was missing, so the append-only invoice history recorded a void with NO actor —
       // the one field whose whole job is answering "who did this?".
@@ -184,7 +191,7 @@ async function handler(req: NextRequest) {
     //    ERASE a real sale (mig 188/190): this tombstones it (restorable), never a hard
     //    DELETE — a hard delete of an issued bill is refused at the database level.
     if (op === "delete_order") {
-      const orderId = String(body.order_id || "");
+      const orderId = textOf(body.order_id);
       if (!UUID.test(orderId)) return err("invalid order_id");
       // Answers for itself — see the note in void_bill above. This one also feeds the Removals
       // record's amount, so a guess here would be a wrong figure on the owner's audit screen.
@@ -241,7 +248,7 @@ async function handler(req: NextRequest) {
 
     // ── Re-fire an order: clone its dishes into a fresh order (new KOT, re-priced) ──
     if (op === "refire_order") {
-      const orderId = String(body.order_id || "");
+      const orderId = textOf(body.order_id);
       if (!UUID.test(orderId)) return err("invalid order_id");
       // Answers for itself — see the note in void_bill above.
       const srcR = await readOne<{ table_number?: string; items?: unknown[]; allergies?: unknown }>(
@@ -312,7 +319,7 @@ async function handler(req: NextRequest) {
 
     // ── Unstick a jammed table: force-close an open/pending session ────────────────
     if (op === "unstick_table") {
-      const sessionId = String(body.session_id || "");
+      const sessionId = textOf(body.session_id);
       if (!UUID.test(sessionId)) return err("invalid session_id");
       // ── AND A TABLE THAT IS ALREADY CLOSED IS NOT A TABLE THIS UNSTUCK (T20 round 4, 2026-09-01) ──
       // `status` is read now. `closeSession` does not look at it — it sets `status:'closed'` over
@@ -340,9 +347,9 @@ async function handler(req: NextRequest) {
 
     // ── Edit an order's time/date (moves it across report/day boundaries) ──────────
     if (op === "edit_time") {
-      const orderId = String(body.order_id || "");
+      const orderId = textOf(body.order_id);
       if (!UUID.test(orderId)) return err("invalid order_id");
-      const when = String(body.created_at || "");
+      const when = textOf(body.created_at);
       const d = new Date(when);
       if (isNaN(d.getTime())) return err("Pick a valid date and time.");
       // Guard against a fat-fingered far-future/past time.

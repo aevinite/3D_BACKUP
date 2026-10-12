@@ -32,6 +32,8 @@ import { rememberErrorHandled, forgetErrorSignature } from "@/lib/errorMemory";
 // The SAME signature function the Repair board groups its tiles with — so "Resolve" clears the
 // whole ×N tile instead of only the rows whose text happens to match character for character.
 import { errorSig } from "@/lib/errorSignature";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +44,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   let body: Record<string, unknown> = {};
-  try { body = await req.json(); } catch { /* empty */ }
+  body = await jsonObject(req);
 
   // "Wait, then show me again" — hours, bounded to a month so a mis-typed value can't park a
   // problem out of sight for a year. 0/absent = not a snooze.

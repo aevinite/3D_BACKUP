@@ -12,7 +12,7 @@
 //      audit trail records THAT the admin uncovered the passwords and when — never what he typed,
 //      and never whose password was uncovered by it (that is the per-person route's own record).
 //   3. WRONG GUESSES ARE SLOWED DOWN. Five wrong answers inside five minutes and this door stops
-//      answering for five minutes, per signed-in console. Deliberately NOT the DB rate limiter:
+//      answering for five minutes — for every admin console at once (see the counter's note below). Deliberately NOT the DB rate limiter:
 //      that one pings the owner's PHONE when a wall is reached (lib/rateLimit.ts → notifyRateHit),
 //      and the person tripping this wall IS the owner, mistyping his own password. An alert about
 //      yourself is exactly the noise that makes a real alert get ignored.
@@ -25,6 +25,8 @@ import {
   REVEAL_COOKIE, REVEAL_TTL_MS, mintRevealToken, revealConfigured,
   revealPasswordMatches, revealUnlockedUntil,
 } from "@/lib/revealGate";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +35,18 @@ const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.v
 const secure = () => process.env.NODE_ENV === "production";
 
 // ── The wrong-guess counter ──────────────────────────────────────────────────────────────────────
-// In memory, keyed by a HASH of the admin cookie, so one console's mistyping cannot lock another
-// out and the key itself is not the cookie. A serverless restart forgets the count — accepted, and
-// worth saying plainly rather than pretending otherwise: this slows a person down at a keyboard,
-// which is the whole threat model here (the admin cookie is already required to get this far).
+// In memory, keyed by a HASH of the admin cookie, so the key itself is not the cookie.
+//
+// CORRECTED (sweep #10 T29 round 2, item 16): this used to say "one console's mistyping cannot lock
+// another out". It can. The admin cookie is the SAME value on every device (it is derived from the one
+// admin password — lib/staffAuth tokenIsValid), so every console shares one counter: five wrong tries
+// on the laptop also pause the phone for five minutes. That is ACCEPTED, not fixed — there is one
+// admin, and a per-device counter would need a device id this door does not have. Said plainly here
+// so nobody "relies" on per-device behaviour that never existed.
+//
+// A serverless restart (or a second running instance) forgets the count — also accepted, and worth
+// saying: this slows a person down at a keyboard, which is the whole threat model here (the admin
+// cookie is already required to get this far).
 const MAX_TRIES = 5;
 const COOL_OFF_MS = 5 * 60 * 1000;
 const tries = new Map<string, { n: number; first: number; until: number }>();
@@ -94,7 +104,7 @@ export async function POST(req: NextRequest) {
   }
 
   let body: Record<string, unknown> = {};
-  try { body = await req.json(); } catch { /* empty */ }
+  body = await jsonObject(req);
   const typed = String(body.password || "");
   if (!typed) return err("Type the admin password.", 400);
 

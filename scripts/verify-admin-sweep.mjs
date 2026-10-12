@@ -41,8 +41,8 @@
 // ── SAFE-AUDIT WORDING (CLAUDE.md, read first every session) ────────────────────────────────────
 //
 // Band C is a PRODUCT-CORRECTNESS check, asked and worded as one: "does every admin request
-// require being logged in?" It reads the code and makes ordinary, signed-out requests to its own
-// dev server — exactly what a browser does before you log in. It swaps no ids, replays nothing as
+// require being logged in?" It READS each GET handler and checks the admin gate comes before the first
+// database call (since sweep #10 T29 round 2 it makes no signed-out requests at all — rule 7). It swaps no ids, replays nothing as
 // anybody else, and proves nothing by trickery. A gap found by reading is REPORTED, never poked at.
 //
 // ── SAFETY ──────────────────────────────────────────────────────────────────────────────────────
@@ -156,7 +156,27 @@ const ADMIN_PAGES = walk("app/aevinite").filter((f) => f.endsWith("/page.tsx"))
   .map((u) => (u === "/aevinite" ? "/aevinite" : u))
   .filter((u) => !/\[/.test(u))                                  // no dynamic admin pages today
   .sort();
-const ADMIN_ROUTES = walk("app/api/admin").filter((f) => f.endsWith("/route.ts")).sort();
+// RETIRED ROUTES KEEP THEIR SLOTS (sweep #10 T29 round 2, item 13). Bands C and G write one phase per
+// admin route, and the ids are positional — so the three switch doors retired on 2026-10-12 stay in the
+// list and answer UNANSWERED ("retired") instead of vanishing and shifting every later id.
+const RETIRED_ROUTES = [
+  "app/api/admin/restaurants/google-review/route.ts",
+  "app/api/admin/restaurants/platform-channels/route.ts",
+  "app/api/admin/restaurants/staff-features/route.ts",
+];
+const LIVE_ROUTES = walk("app/api/admin").filter((f) => f.endsWith("/route.ts")).sort();
+const ADMIN_ROUTES = [...new Set([...LIVE_ROUTES, ...RETIRED_ROUTES])].sort();
+const isRetired = (f) => RETIRED_ROUTES.includes(f) && !LIVE_ROUTES.includes(f);
+// The admin gate, proved by READING one handler (sweep #10 rule 7 — never by calling it signed out).
+function gateFirstIn(f, verb) {
+  const src = read(f).replace(/(^|[^:'"`\\])\/\/[^\n]*/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
+  const head = src.search(new RegExp(`export\\s+async\\s+function\\s+${verb}\\s*\\(`));
+  if (head < 0) return null;                                      // no such handler here
+  const body = src.slice(head, head + 6000);
+  const g = body.search(/\b(tokenIsValid|admin|requireAdmin|gate)\s*\(/);
+  const d = body.search(/\b(sb|supabaseAdmin)\s*\.\s*(from|rpc|storage)\s*\(/);
+  return g > -1 && (d < 0 || g < d);
+}
 const routeUrl = (f) => "/" + f.replace(/^app\//, "").replace(/\/route\.ts$/, "").replace(/\[\.\.\.[^\]]+\]/g, "x").replace(/\[[^\]]+\]/g, "x");
 
 const SRC = {
@@ -501,24 +521,21 @@ for (const url of ADMIN_PAGES) {
 band = "C · signed-out requests are refused";
 console.log("\n── C · every admin request requires being signed in ────────────────────────────");
 await phase("every admin route file checks the sign-in before any database call", () => {
-  const missing = ADMIN_ROUTES.filter((f) => !/tokenIsValid/.test(read(f)));
+  const missing = LIVE_ROUTES.filter((f) => !/tokenIsValid/.test(read(f)));
   return missing.length === 0 || `${missing.length} do not mention tokenIsValid: ${missing.slice(0, 4).join(", ")}`;
 });
 await phase("the count of gated routes equals the count of routes", () => {
-  const gated = ADMIN_ROUTES.filter((f) => /tokenIsValid/.test(read(f))).length;
-  return gated === ADMIN_ROUTES.length || `${gated} of ${ADMIN_ROUTES.length} gated`;
+  const gated = LIVE_ROUTES.filter((f) => /tokenIsValid/.test(read(f))).length;
+  return gated === LIVE_ROUTES.length || `${gated} of ${LIVE_ROUTES.length} gated`;
 });
 for (const f of ADMIN_ROUTES) {
+  // Proved by READING the GET handler, not by calling it signed out (sweep #10 rule 7, adopted here by
+  // T29 round 2, item 20). Same id, same label: the label's promise is what the code says.
+  if (isRetired(f)) { await needs(false, `${routeUrl(f)} — a signed-out GET is refused`, "route retired 2026-10-12 — Access & permissions does this job"); continue; }
   await phase(`${routeUrl(f)} — a signed-out GET is refused`, async () => {
-    const r = await get(routeUrl(f), { signedOut: true });
-    if (r.status === 0) return `no answer (${r._err})`;
-    if ([401, 403].includes(r.status)) return true;
-    if ([307, 308, 302].includes(r.status)) return true;            // bounced to the sign-in page
-    if (r.status === 404 || r.status === 405) return true;          // no GET here at all
-    if (r.status === 410) return true;                              // deliberately retired
-    if (r.status === 400) return true;                              // refused before doing anything
-    if (r.status === 500) return `answered 500 signed out — it got far enough to fail`;
-    return `answered ${r.status} to a signed-out request`;
+    const r = gateFirstIn(f, "GET");
+    if (r === null) return true;                                    // no GET here at all
+    return r || "the GET reaches the database before the admin check";
   });
 }
 
@@ -719,6 +736,7 @@ for (const url of ADMIN_PAGES.slice(0, 20)) {
 band = "G · signed-in requests answer";
 console.log("\n── G · every admin request answers when signed in ──────────────────────────────");
 for (const f of ADMIN_ROUTES) {
+  if (isRetired(f)) { await needs(false, `${routeUrl(f)} — a signed-in GET does not fall over`, "route retired 2026-10-12 — Access & permissions does this job"); continue; }
   await phase(`${routeUrl(f)} — a signed-in GET does not fall over`, async () => {
     const src = read(f);
     if (!/export async function GET|export function GET/.test(src)) return true;   // no GET to ask

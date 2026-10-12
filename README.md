@@ -50,7 +50,7 @@ admin's at `app/api/admin/*`.
 
 ## There is no `middleware.ts`, and that is deliberate
 
-The login check moved to each route: the admin console's layout and all 51 `/api/admin/*` handlers
+The login check moved to each route: the admin console's layout and all 48 `/api/admin/*` handlers
 check `tokenIsValid`, the panel APIs use `requireRole()`, the owner's use `ownerScope()`. Looking
 for a middleware file finds nothing and makes it look like the gate is missing — it isn't.
 The complete list of the few deliberately login-free routes is in `docs/CLAUDE-DETAIL.md`

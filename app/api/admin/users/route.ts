@@ -31,6 +31,10 @@ import { expectClash, clashJson } from "@/lib/clash";
 import { adminFail } from "@/lib/adminFail";
 // Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
 import { pageAll } from "@/lib/pageAll";
+// The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
+import { readablePassword } from "@/lib/readablePassword";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -49,14 +53,6 @@ async function admin(req: NextRequest): Promise<boolean> {
   return tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 }
 
-// A readable, reasonably strong auto-password (no ambiguous chars).
-function genPassword(): string {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = "";
-  const r = crypto.getRandomValues(new Uint8Array(10));
-  for (const b of r) s += a[b % a.length];
-  return s;
-}
 
 // The profile columns (migration 220/221). `profile` is one jsonb of soft personal details;
 // anything a report FILTERS or SUMS is a real column.
@@ -139,41 +135,44 @@ export async function GET(req: NextRequest) {
   const one = new URL(req.url).searchParams.get("id");
   if (one) return UUID.test(one) ? await detail(one) : bad("User not found.", 404);
   const [usersQ, restsQ] = await Promise.all([
-    sb.from("staff_users")
-      .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin, restaurant_id")
-      // Owners are a DIFFERENT lifecycle (multi-restaurant, primary/co-owner handoff)
-      // and are managed ONLY on the Owners page. Never surface or touch them here —
-      // editing/deleting an owner from this page was a side door that could orphan a
-      // restaurant's ownership (admin audit 2026-07-06).
-      .neq("role", "owner")
-      .order("created_at", { ascending: true })
-      .limit(2000), // safety cap so this never becomes an unbounded whole-table read; true per-restaurant server scoping/pagination is a follow-up (audit 2026-07-08)
+    // EVERY PERSON, PAGED (sweep #10 T29 round 2, item 14). This was `.limit(2000)` "as a safety cap",
+    // but PostgREST answers at most 1,000 rows per request, so past 1,000 logins the People list would
+    // have stopped short with no word. pageAll reads 1,000 at a time and refuses past 50,000 instead.
+    // Owners are a DIFFERENT lifecycle (multi-restaurant, primary/co-owner handoff) and are managed
+    // ONLY on the Owners page. Never surface or touch them here — editing/deleting an owner from this
+    // page was a side door that could orphan a restaurant's ownership (admin audit 2026-07-06).
+    pageAll<{ id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; last_seen_at: string | null; created_at: string; pin_hash: string | null; can_self_reset: boolean | null; can_self_set_pin: boolean | null; restaurant_id: string }>("staff_users", (from, to) =>
+      sb.from("staff_users")
+        .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin, restaurant_id")
+        .neq("role", "owner")
+        .order("created_at", { ascending: true }).order("id", { ascending: true })
+        .range(from, to)),
     // Paged for the same reason as its siblings: past the row cap a person's restaurant column went
     // blank, on the list the admin uses to tell one tenant's staff from another's.
     pageAll<{ id: string; name: string }>("restaurants", (from, to) =>
       sb.from("restaurants").select("id, name").order("id").range(from, to)),
   ]);
   // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
-  if (usersQ.error) return adminFail("the staff list", usersQ.error, { action: "load" });
+  if (usersQ.error) return adminFail("the staff list", usersQ.error as { message?: string }, { action: "load" });
   if (restsQ.error) console.error("[admin/users] restaurant names unread:", (restsQ.error as { message?: string })?.message);
   const nameById: Record<string, string> = Object.fromEntries((restsQ.rows || []).map((r) => [r.id, r.name]));
   // Strip the PIN hash to a boolean; attach the restaurant name (mapped, not a
   // PostgREST embed) so the admin sees WHICH restaurant each user belongs to.
-  const users = (usersQ.data || []).map(({ pin_hash, ...u }: any) => ({ ...u, hasPin: !!pin_hash, restaurantName: nameById[u.restaurant_id] || null }));
+  const users = (usersQ.rows || []).map(({ pin_hash, ...u }: any) => ({ ...u, hasPin: !!pin_hash, restaurantName: nameById[u.restaurant_id] || null }));
   return ok({ users });
 }
 
 export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {};
-  try { body = await req.json(); } catch {}
+  body = await jsonObject(req);
   // ONE "Name" is the whole identity: stored as-typed for display (`name`) and as
   // a normalized, unique key for login (`username`). No separate username concept.
   const display = String(body?.name ?? body?.username ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
   const role = String(body?.role || "") as Role;
   // WHICH restaurant this user works at. Admin picks it; defaults to #1 for back-compat.
-  const restaurantId = String(body?.restaurant_id || "").trim() || DEFAULT_RESTAURANT_ID;
+  const restaurantId = textOf(body?.restaurant_id).trim() || DEFAULT_RESTAURANT_ID;
   if (key.length < 2) return bad("Username must be at least 2 characters.");
   if (!ROLES.includes(role)) return bad("Pick a valid role.");
   if (!UUID.test(restaurantId)) return bad("Pick a valid restaurant.");
@@ -181,7 +180,11 @@ export async function POST(req: NextRequest) {
   // orphan rows the admin can never reach (login is blocked for binned restaurants).
   // A FAILED READ IS NOT "pick a valid restaurant" (T27 sweep #9, 2026-09-15) — the same correction
   // this file's PATCH and DELETE were given in sweep #7, on the one read the CREATE form depends on.
-  const restQ = await sb.from("restaurants").select("id").eq("id", restaurantId).is("deleted_at", null).limit(1);
+  // The restaurant check and the name-clash check do not depend on each other — asked together (item 24).
+  const [restQ, dupQ] = await Promise.all([
+    sb.from("restaurants").select("id").eq("id", restaurantId).is("deleted_at", null).limit(1),
+    sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).is("deleted_at", null).limit(1),
+  ]);
   if (restQ.error) return adminFail("this restaurant", restQ.error, { action: "load" });
   if (!restQ.data?.[0]) return bad("Pick a valid restaurant.");
   // Names are unique PER restaurant (mig 091) — clash-check within this one only.
@@ -190,10 +193,9 @@ export async function POST(req: NextRequest) {
   // skipped the clash check, and the admin got the insert's generic save failure instead of "That
   // username is taken at this restaurant — pick another." Nothing wrong was ever stored — mig 091's
   // unique index refuses the collision either way — but the sentence did not name the cause.
-  const dupQ = await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).is("deleted_at", null).limit(1);
   if (dupQ.error) return adminFail("whether that name is free", dupQ.error, { action: "load" });
   if (dupQ.data?.[0]) return bad("That username is taken at this restaurant — pick another.", 409);
-  const password = String(body?.password || "").trim() || genPassword();
+  const password = String(body?.password || "").trim() || readablePassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const row = {
     username: key, role, restaurant_id: restaurantId,
@@ -222,9 +224,9 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {};
-  try { body = await req.json(); } catch {}
-  const id = String(body?.id || "");
-  const action = String(body?.action || "");
+  body = await jsonObject(req);
+  const id = textOf(body?.id);
+  const action = textOf(body?.action);
   if (!id) return bad("Missing user id.");
   if (!UUID.test(id)) return bad("User not found.", 404);
   // NAMED COLUMNS, NOT `*` (sweep 2026-08-04). `staff_users` holds password_hash, and this handler
@@ -332,7 +334,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (action === "reset_password") {
-    const password = String(body?.password || "").trim() || genPassword();
+    const password = String(body?.password || "").trim() || readablePassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     // Bump token_version → kills all their existing logins immediately.
     const wr = await sb.from("staff_users").update({ ...(await passwordFields(password)), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);

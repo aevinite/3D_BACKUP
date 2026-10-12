@@ -62,7 +62,7 @@ export default function section(c) {
   c.phase("the single-login reset is refused for someone who does not belong to the restaurant", `read ${CR}`, () => /That login doesn't belong to this restaurant\./.test(c.clean(CR)));
   c.phase("nobody is signed out by a reset unless that is asked for", "read both reset paths", () => (c.clean(CR).match(/\.\.\.\(signOut \? \{ token_version:/g) || []).length === 2);
   c.phase("a handover reset names every login that FAILED instead of skipping it quietly", "read resetAll", () => /failed\.push\(p\.name \|\| p\.username\)/.test(c.clean(CR)) && /FAILED \(\$\{failed\.join/.test(c.clean(CR)));
-  c.phase("a password is reported only after the database took it", "read both writes", () => (c.clean(CR).match(/Couldn't set that password — nothing was changed|if \(wr\.error \|\| !wr\.data\)/g) || []).length >= 2);
+  c.phase("a password is reported only after the database took it", "read both writes (the one-login path, and the handover reset now written all together — item 24)", () => /Couldn't set that password — nothing was changed/.test(c.clean(CR)) && /return \{ p, password, ok: !wr\.error && !!wr\.data \}/.test(c.clean(CR)) && /if \(!ok\) \{ failed\.push/.test(c.clean(CR)));
   c.phase("a double press cannot burn two passwords (once-only POST)", "read the export", () => /export const POST = withIdempotency\(postImpl, "admin"\)/.test(c.clean(CR)));
   c.phase("no vault key on a deployment → the sheet says so instead of offering a button that does nothing", "read vaultReady", () => /vaultReady: vaultReady\(\)/.test(c.clean(CR)) && /This deployment has no credential key set/.test(c.clean(CR)));
 
@@ -91,5 +91,5 @@ export default function section(c) {
   c.phase("a person is read by id only — the screen cannot widen what comes back", `read ${RP}`, () => /\.eq\("id", userId\)\.is\("deleted_at", null\)\.maybeSingle\(\)/.test(c.clean(RP)));
   c.phase("looking at a password leaves a record naming who was looked at — never the password", "read the logAction", () => /looked at the password for "\$\{who\}"/.test(c.clean(RP)));
   c.phase("a PIN is not a password and is not on this door", "grep for pin", () => !/pin_hash|\bpin\b/.test(c.clean(RP)));
-  c.phase("the generator alphabet has no lookalikes (no l, o, 0, 1) on every door that mints", "read genPassword in the four routes", () => ["app/api/admin/reveal/password/route.ts", CR, "app/api/admin/restaurants/route.ts", "app/api/admin/users/route.ts"].every((f) => /"abcdefghijkmnpqrstuvwxyz23456789"/.test(c.clean(f))));
+  c.phase("the generator alphabet has no lookalikes (no l, o, 0, 1) on every door that mints", "every minting route imports the ONE maker (lib/readablePassword, round 2 item 15) and none keeps its own copy", () => { const lib = c.clean("lib/readablePassword.ts"); const doors = ["app/api/admin/reveal/password/route.ts", CR, "app/api/admin/restaurants/route.ts", "app/api/admin/users/route.ts"]; return /READABLE_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"/.test(lib) && doors.every((f) => /readablePassword\(\)/.test(c.clean(f)) && !/function genPassword/.test(c.clean(f))) || "a door keeps its own copy"; });
 }

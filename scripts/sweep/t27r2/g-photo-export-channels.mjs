@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 /**
  * G · three read-thin routes: a person's PHOTO, the recovery BACKUP, and the delivery CHANNELS.
  *
@@ -37,8 +38,8 @@ export default function section(c) {
     "read setUrl's merge", () => /const next = \{ \.\.\.\(current \|\| \{\}\) \}/.test(c.clean(FP)));
   phase("removing it deletes the KEY rather than storing an empty one", "read setUrl",
     () => /else delete next\.photo_url/.test(c.clean(FP)));
-  phase("the photo cannot be changed without being signed in", "DELETE with no cookie",
-    async () => (await req(`${PP}?id=${made.userId}`, { method: "DELETE", cookie: "" })).status === 401);
+  phase("the photo cannot be changed without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(`${PP}?id=${made.userId}`))
   phase("a malformed person id is refused in words", "DELETE with a junk id",
     async () => { const r = await req(`${PP}?id=nope`, { method: "DELETE" }); return r.status === 400 && !DB_WORDS.test(r.text); });
   phase("an unknown person says so", "DELETE an unknown uuid",
@@ -94,8 +95,8 @@ export default function section(c) {
     cache.set(rid, j);
     return j;
   };
-  phase("the backup cannot be downloaded without being signed in", "GET with no cookie",
-    async () => (await req(`${PE}?rid=${FH}`, { cookie: "" })).status === 401);
+  phase("the backup cannot be downloaded without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(`${PE}?rid=${FH}`))
   phase("a malformed restaurant id is refused in words", "GET with a junk rid",
     async () => { const r = await req(`${PE}?rid=nope`); return r.status === 400 && !DB_WORDS.test(r.text); });
   phase("an unknown restaurant says so", "GET an unknown uuid",
@@ -145,39 +146,44 @@ export default function section(c) {
   // ── platform-channels ────────────────────────────────────────────────────────────────────────
   const FC = "app/api/admin/restaurants/platform-channels/route.ts";
   const PC = "/api/admin/restaurants/platform-channels";
-  phase("the channels route's sign-in gate runs before the first database call", "compare positions",
+  // ── RETIRED 2026-10-12 (owner: "do all this rest of the things" — T29 round 2, item 13). Nothing on
+  // any screen called this route any more: Access & permissions does its job, and the owner's standing
+  // rule is that a new way replaces the old one. Its phases keep their ids and answer ⏭ with the reason
+  // while the file is gone; verify:admin-routes-t29 asserts it STAYS gone.
+  const phaseC = (label, how, fn) => phase(label, how, (...x) => existsSync(`${c.ROOT}${FC}`) ? fn(...x) : "skip:route retired 2026-10-12 — Access & permissions does this job (a new way replaces the old one)");
+  phaseC("the channels route's sign-in gate runs before the first database call", "compare positions",
     () => { const s = c.clean(FC); return s.indexOf("tokenIsValid") < s.indexOf("sb.from"); });
-  phase("the KEY VALUE is never returned to the browser — only whether one is saved",
+  phaseC("the KEY VALUE is never returned to the browser — only whether one is saved",
     "read present()", () => { const s = c.clean(FC); return /hasKey: typeof stored === "string" && stored\.length > 0/.test(s); });
-  phase("a channel this route does not know is refused", "POST an unknown channel",
+  phaseC("a channel this route does not know is refused", "POST an unknown channel",
     async () => { const r = await req(PC, { method: "POST", body: { restaurant_id: FH, channel: "deliveroo", on: true } }); return r.status === 400 && /unknown channel/.test(r.json?.error || ""); });
-  phase("the channels cannot be read without being signed in", "GET with no cookie",
-    async () => (await req(`${PC}?restaurant_id=${FH}`, { cookie: "" })).status === 401);
-  phase("a malformed restaurant id is refused in words", "GET with a junk id",
+  phaseC("the channels cannot be read without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(`${PC}?restaurant_id=${FH}`))
+  phaseC("a malformed restaurant id is refused in words", "GET with a junk id",
     async () => { const r = await req(`${PC}?restaurant_id=nope`); return r.status === 400 && !DB_WORDS.test(r.text); });
-  phase("an unknown restaurant is refused on a save, before it writes", "POST an unknown rid",
+  phaseC("an unknown restaurant is refused on a save, before it writes", "POST an unknown rid",
     async () => (await req(PC, { method: "POST", body: { restaurant_id: NOSUCH, channel: "zomato", on: true } })).status === 404);
-  phase("the answer reports all three channels, each with its on/off and whether a key is saved",
+  phaseC("the answer reports all three channels, each with its on/off and whether a key is saved",
     "GET and read the shape",
     async () => { const j = (await req(`${PC}?restaurant_id=${FH}`)).json; return ["zomato", "swiggy", "website"].every((k) => j?.channels?.[k] && typeof j.channels[k].on === "boolean" && typeof j.channels[k].hasKey === "boolean"); });
-  phase("turning one channel on does not touch the other two", "flip one and compare the others",
+  phaseC("turning one channel on does not touch the other two", "flip one and compare the others",
     async () => { const before = (await req(`${PC}?restaurant_id=${FH}`)).json.channels; const r = await req(PC, { method: "POST", body: { restaurant_id: FH, channel: "zomato", on: !before.zomato.on } }); const after = r.json.channels; return after.swiggy.on === before.swiggy.on && after.website.on === before.website.on; });
-  phase("saving a key reports that a key is saved, and never echoes it",
+  phaseC("saving a key reports that a key is saved, and never echoes it",
     "POST a key and read the answer",
     async () => { const r = await req(PC, { method: "POST", body: { restaurant_id: FH, channel: "swiggy", key: "T27R2-CHANNEL-SECRET" } }); return r.json?.channels?.swiggy?.hasKey === true && !r.text.includes("T27R2-CHANNEL-SECRET"); });
-  phase('a key sent as "" LEAVES the stored one alone — the form saves without retyping it',
+  phaseC('a key sent as "" LEAVES the stored one alone — the form saves without retyping it',
     "save a key, then save with an empty string",
     async () => { await req(PC, { method: "POST", body: { restaurant_id: FH, channel: "swiggy", key: "T27R2-KEEP" } }); await req(PC, { method: "POST", body: { restaurant_id: FH, channel: "swiggy", key: "" } }); const pc = (await sq(`settings?select=platform_channels&restaurant_id=eq.${FH}`)).json?.[0]?.platform_channels || {}; return (pc.swiggy?.key || pc.swiggy?.api_key) === "T27R2-KEEP"; });
-  phase("a key sent as null CLEARS it, deliberately", "save null",
+  phaseC("a key sent as null CLEARS it, deliberately", "save null",
     async () => { await req(PC, { method: "POST", body: { restaurant_id: FH, channel: "swiggy", key: null } }); const pc = (await sq(`settings?select=platform_channels&restaurant_id=eq.${FH}`)).json?.[0]?.platform_channels || {}; return !pc.swiggy?.key && !pc.swiggy?.api_key; });
-  phase("this route and the Access screen now agree about what an empty key means",
+  phaseC("this route and the Access screen now agree about what an empty key means",
     "both go through lib/channelKey", () => /import \{ applyChannelKey, channelKeyAction \}/.test(c.clean(FC)));
-  phase("a legacy api_key is still READ, so a restaurant split before 2026-08-13 is not asked twice",
+  phaseC("a legacy api_key is still READ, so a restaurant split before 2026-08-13 is not asked twice",
     "read the fallback in present()", () => /\(cell as \{ api_key\?: unknown \}\)\.api_key/.test(c.clean(FC)));
-  phase("the change is written into the record, naming the channel and never the key",
+  phaseC("the change is written into the record, naming the channel and never the key",
     "save a key and read the log",
     async () => { const since = new Date(Date.now() - 15000).toISOString(); await req(PC, { method: "POST", body: { restaurant_id: FH, channel: "zomato", on: true, key: "T27R2-LOGCHECK" } }); const rows = await c.actionsSince(since, ["platform_channel"]); return rows.length > 0 && rows.every((r) => !(r.detail || "").includes("T27R2-LOGCHECK")) && rows.some((r) => /zomato/.test(r.detail || "")); });
-  phase("…and it says a key was set, without saying what it was", "read that line",
+  phaseC("…and it says a key was set, without saying what it was", "read that line",
     async () => { const since = new Date(Date.now() - 15000).toISOString(); await req(PC, { method: "POST", body: { restaurant_id: FH, channel: "zomato", on: true, key: "T27R2-WORDS" } }); return (await c.actionsSince(since, ["platform_channel"])).some((r) => /key set/.test(r.detail || "")); });
   phase("no answer from any of these three routes carries a database sentence",
     "replay the refusals across all three",
@@ -185,7 +191,7 @@ export default function section(c) {
       const t = [];
       t.push((await req(`${PP}?id=nope`, { method: "DELETE" })).text);
       t.push((await req(`${PE}?rid=nope`)).text);
-      t.push((await req(PC, { method: "POST", body: { restaurant_id: "nope", channel: "zomato" } })).text);
+      if (existsSync(`${c.ROOT}${FC}`)) t.push((await req(PC, { method: "POST", body: { restaurant_id: "nope", channel: "zomato" } })).text);
       return t.every((x) => !DB_WORDS.test(x));
     });
 }

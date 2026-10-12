@@ -59,7 +59,7 @@ export default function section(c) {
   c.phase("…replacing a logo clears the old file so storage keeps only the current one", "read purgeLogos before upload", () => { const s = c.clean("app/api/admin/restaurants/logo/route.ts"); return s.indexOf("await purgeLogos(rid)") < s.indexOf(".upload(path"); });
   c.phase("…and a logo for a malformed restaurant is refused before storage is touched", "POST restaurant_id=nope", async () => { const f = new FormData(); f.set("restaurant_id", "nope"); f.set("file", new File([new Uint8Array(10)], "x.png", { type: "image/png" })); const r = await c.req("/api/admin/restaurants/logo", { method: "POST", form: f }); return r.status === 400 || `${r.status}`; });
 
-  c.sec("I · every restaurant's own — the four switch routes");
+  c.sec("I · every restaurant's own — the switches (quick features, and the three jobs Access now holds)");
   const eachLive = (label, path, check) => c.phase(label, `GET ${path} for every live restaurant; compare with its settings row`, async () => {
     const bad = [];
     for (const r of await live()) { const g = await c.req(`${path}?restaurant_id=${r.id}`); const s = (await c.sq(`settings?select=*&restaurant_id=eq.${r.id}`)).json[0] || {}; if (g.status !== 200 || !check(g.json, s)) bad.push(r.name); }
@@ -67,27 +67,57 @@ export default function section(c) {
   });
   eachLive("Quick features: banquet / auto-print / pay match each restaurant's own columns", "/api/admin/restaurants/quick-features",
     (j, s) => j.auto_print_kot === (s.auto_print_kot_allowed === true && s.auto_print_kot === true) && j.auto_print_kot_allowed === (s.auto_print_kot_allowed === true) && j.banquet === (s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false)));
-  eachLive("Staff features: the two entitlement flags match each restaurant's own columns", "/api/admin/restaurants/staff-features",
-    (j, s) => j.flags.auto_print_kot_allowed === !!s.auto_print_kot_allowed && j.flags.banquet_allowed === !!s.banquet_allowed);
-  eachLive("Google review: each restaurant's own link and a legal mode", "/api/admin/restaurants/google-review",
-    (j, s) => j.url === (s.google_review_url ?? null) && ["off", "google", "google_plus_normal", "google_after_normal"].includes(j.mode));
-  eachLive("Delivery channels: each restaurant's own on/off, and whether a key is stored — never the key", "/api/admin/restaurants/platform-channels",
-    (j, s) => ["zomato", "swiggy", "website"].every((k) => j.channels[k].on === (s.platform_channels?.[k]?.on === true)) && !/"key"\s*:\s*"/.test(JSON.stringify(j)));
-  c.phase("the four switch routes refuse a malformed restaurant id in words", "GET each with restaurant_id=nope", async () => {
-    for (const p of ["quick-features", "staff-features", "google-review", "platform-channels"]) { const r = await c.req(`/api/admin/restaurants/${p}?restaurant_id=nope`); if (r.status !== 400) return `${p} answered ${r.status}`; }
+  // ── THE THREE RETIRED DOORS (round 2, item 13) — Google review, delivery channels, staff features.
+  // No screen called them; Access & permissions does all three jobs. Each phase below keeps its id
+  // and now checks the job where it really lives.
+  const GONE = ["google-review", "platform-channels", "staff-features"];
+  c.phase("the retired staff-features door is gone, and no screen, script or library still calls it", "the files are absent; grep app, components, lib and public", async () => {
+    const { existsSync, readdirSync } = await import("node:fs");
+    if (GONE.some((g) => existsSync(`${c.ROOT}app/api/admin/restaurants/${g}/route.ts`))) return "a retired route file is back";
+    const walk = (d) => readdirSync(`${c.ROOT}${d}`, { withFileTypes: true }).flatMap((e) => e.name === "node_modules" ? [] : e.isDirectory() ? walk(`${d}/${e.name}`) : /\.(t|j)sx?$|\.mjs$/.test(e.name) ? [`${d}/${e.name}`] : []);
+    // Code only, comments stripped: a comment recording that a door was retired is history, not a caller.
+    const hits = ["app", "components", "lib", "public"].flatMap(walk).filter((f) => GONE.some((g) => c.clean(f).includes(`/api/admin/restaurants/${g}`)));
+    return hits.length === 0 || `still called from ${hits.join(", ")}`;
+  });
+  const access = async (rid) => (c.cache[`acc${rid}`] ||= (await c.req(`/api/admin/restaurants/access-tree?restaurant_id=${rid}`)).json?.state);
+  c.phase("Access shows each live restaurant's OWN Google review link and a legal review mode", "GET the Access state for every live restaurant; compare with its settings row", async () => {
+    const bad = [];
+    for (const r of await live()) { const st = await access(r.id); const s = (await c.sq(`settings?select=google_review_url,google_review_mode&restaurant_id=eq.${r.id}`)).json[0] || {};
+      if ((st?.settings?.google_review_url ?? null) !== (s.google_review_url ?? null) && !(st?.settings?.google_review_url === "" && !s.google_review_url)) bad.push(r.name);
+      if (!["off", "google", "google_plus_normal", "google_after_normal"].includes(st?.settings?.google_review_mode)) bad.push(`${r.name} (mode)`); }
+    return bad.length === 0 || bad.join(", ");
+  });
+  c.phase("Access shows each live restaurant's OWN delivery-channel on/off", "compare state.channels with settings.platform_channels", async () => {
+    const bad = [];
+    for (const r of await live()) { const st = await access(r.id); const s = (await c.sq(`settings?select=platform_channels&restaurant_id=eq.${r.id}`)).json[0] || {};
+      if (!["zomato", "swiggy", "website"].every((k) => st?.channels?.[k] === (s.platform_channels?.[k]?.on === true))) bad.push(r.name); }
+    return bad.length === 0 || bad.join(", ");
+  });
+  c.phase("the quick-feature route refuses a malformed restaurant id, and the three retired doors are simply not there", "GET quick-features ?restaurant_id=nope; GET each retired path signed in", async () => {
+    const q = await c.req("/api/admin/restaurants/quick-features?restaurant_id=nope"); if (q.status !== 400) return `quick-features answered ${q.status}`;
+    for (const g of GONE) { const r = await c.req(`/api/admin/restaurants/${g}?restaurant_id=${c.FH}`); if (r.status !== 404) return `${g} answered ${r.status}`; }
     return true;
   });
-  c.phase("…and refuse an unknown feature / staff feature / channel name without writing", "POST each with a made-up name", async () => {
+  c.phase("…an unknown quick feature, and an unknown delivery channel on Access, are refused without writing", "POST each with a made-up name; compare the settings row", async () => {
     const b = JSON.stringify((await c.sq(`settings?select=*&restaurant_id=eq.${c.FH}`)).json[0]);
     const a = await c.req("/api/admin/restaurants/quick-features", { method: "POST", body: { restaurant_id: c.FH, feature: "teleport", on: true } });
-    const s = await c.req("/api/admin/restaurants/staff-features", { method: "POST", body: { restaurant_id: c.FH, key: "teleport_allowed", value: true } });
-    const p = await c.req("/api/admin/restaurants/platform-channels", { method: "POST", body: { restaurant_id: c.FH, channel: "teleport", on: true } });
+    const p = await c.req("/api/admin/restaurants/access-tree", { method: "POST", body: { restaurant_id: c.FH, patch: { channels: { teleport: true } } } });
     const after = JSON.stringify((await c.sq(`settings?select=*&restaurant_id=eq.${c.FH}`)).json[0]);
-    return a.status === 400 && s.status === 400 && p.status === 400 && b === after || `${a.status}/${s.status}/${p.status}`;
+    return a.status === 400 && p.status === 400 && b === after || `${a.status}/${p.status}`;
   });
-  c.phase("…and a Google link that is not http(s) is refused", "POST url=ftp://x", async () => { const r = await c.req("/api/admin/restaurants/google-review", { method: "POST", body: { restaurant_id: c.FH, url: "ftp://example.com", mode: "google" } }); return r.status === 400 && /http/.test(r.json?.error) || `${r.status}`; });
-  c.phase("…and so is a link over 500 characters", "POST a 600-character url", async () => { const r = await c.req("/api/admin/restaurants/google-review", { method: "POST", body: { restaurant_id: c.FH, url: "https://x.com/" + "a".repeat(600), mode: "google" } }); return r.status === 400 && /too long/.test(r.json?.error) || `${r.status}`; });
-  c.phase("a delivery key save from either screen means the same thing ('' leaves it, null clears it)", "read both routes: they call lib/channelKey", () => /applyChannelKey/.test(c.clean("app/api/admin/restaurants/platform-channels/route.ts")) && /applyChannelKey/.test(c.clean("app/api/admin/restaurants/access-tree/route.ts")));
+  c.phase("…a Google review link that is not a web address is refused on Access (item 23)", "POST google_review_url='ftp://example.com'", async () => {
+    const b = (await c.sq(`settings?select=google_review_url&restaurant_id=eq.${c.FH}`)).json[0].google_review_url;
+    const r = await c.req("/api/admin/restaurants/access-tree", { method: "POST", body: { restaurant_id: c.FH, patch: { settings: { google_review_url: "ftp://example.com" } } } });
+    const a = (await c.sq(`settings?select=google_review_url&restaurant_id=eq.${c.FH}`)).json[0].google_review_url;
+    return r.status === 400 && /https:\/\//.test(r.json?.error) && a === b || `${r.status} ${r.json?.error}`;
+  });
+  c.phase("…and so is one pasted without its https:// — it would send a guest to a page of our own site", "POST google_review_url='g.page/r/abc/review'", async () => {
+    const b = (await c.sq(`settings?select=google_review_url&restaurant_id=eq.${c.FH}`)).json[0].google_review_url;
+    const r = await c.req("/api/admin/restaurants/access-tree", { method: "POST", body: { restaurant_id: c.FH, patch: { settings: { google_review_url: "g.page/r/abc/review" } } } });
+    const a = (await c.sq(`settings?select=google_review_url&restaurant_id=eq.${c.FH}`)).json[0].google_review_url;
+    return r.status === 400 && a === b || `${r.status}`;
+  });
+  c.phase("a delivery key keeps its one rule ('' leaves it, null clears it) now that Access is its only writer", "read access-tree: it goes through lib/channelKey", () => /applyChannelKey/.test(c.clean("app/api/admin/restaurants/access-tree/route.ts")));
 
   c.sec("I · health and the remembered create form");
   c.phase("health has one row per live restaurant and no money field", "GET; compare with a head count", async () => {

@@ -61,14 +61,14 @@ export default function section(c) {
     "check POST is wrapped in withIdempotency",
     () => /export const POST = withIdempotency/.test(c.clean(F)));
   phase("the password alphabet leaves out every letter that reads two ways (l, o, 0, 1)",
-    "read genPassword's alphabet",
-    () => { const m = c.clean(F).match(/const a = "([a-z0-9]+)"/); return !!m && !/[lo01]/.test(m[1]); });
+    "read the one readable-password maker the route imports (lib/readablePassword — T29 r2 item 15)",
+    () => { const m = c.clean("lib/readablePassword.ts").match(/READABLE_ALPHABET = "([a-z0-9]+)"/); return /import \{ readablePassword \} from "@\/lib\/readablePassword"/.test(c.clean(F)) && !!m && !/[lo01]/.test(m[1]); });
   phase("a minted password is ten characters",
-    "read genPassword's length",
-    () => /new Uint8Array\(10\)/.test(c.clean(F)));
+    "read the shared maker's default length",
+    () => /export function readablePassword\(length = 10\)/.test(c.clean("lib/readablePassword.ts")) && /readablePassword\(\)/.test(c.clean(F)));
   phase("the randomness is the platform's own, not Math.random",
-    "grep for getRandomValues and for Math.random",
-    () => { const s = c.clean(F); return /crypto\.getRandomValues/.test(s) && !/Math\.random/.test(s); });
+    "grep the shared maker (lib/readablePassword) and the route for getRandomValues / Math.random",
+    () => { const s = c.clean("lib/readablePassword.ts"); return /crypto\.getRandomValues/.test(s) && !/Math\.random/.test(s + c.clean(F)); });
   phase("a failed read answers in plain words, never with the database's own sentence",
     "check the load error goes through adminFail",
     () => /adminFail\("this login"/.test(c.clean(F)));
@@ -77,9 +77,8 @@ export default function section(c) {
     () => /if \(!wr\.data\) return err/.test(c.clean(F)));
 
   // ── the two doors ────────────────────────────────────────────────────────────────────────────
-  phase("with no admin sign-in at all, the door is shut",
-    `POST ${P} with no cookie`,
-    async () => (await req(P, { method: "POST", body: { user_id: made.userId }, cookie: "" })).status === 401);
+  phase("with no admin sign-in at all, the door is shut", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(P));
   phase("signed in but still covered, one person's password is refused",
     `POST ${P} with the admin cookie only`,
     async () => (await req(P, { method: "POST", body: { user_id: made.userId } })).status === 423);
@@ -91,8 +90,8 @@ export default function section(c) {
     "search that refusal body for every secret name",
     async () => !SECRETS.test((await req(P, { method: "POST", body: { user_id: made.userId } })).text));
   phase("the uncover cookie ALONE is not enough — the admin sign-in is still required",
-    "send only lfh_reveal",
-    async () => { const rv = (await uncover()).split("; ").find((x) => x.startsWith("lfh_reveal=")); return (await req(P, { method: "POST", body: { user_id: made.userId }, cookie: rv })).status === 401; });
+    "read the code: tokenIsValid is checked before revealUnlocked, so the uncover cookie alone opens nothing (sweep #10 rule 7)",
+    () => { const t = c.src("app/api/admin/reveal/password/route.ts"); return t.indexOf("tokenIsValid(req.cookies") > -1 && t.indexOf("tokenIsValid(req.cookies") < t.indexOf("revealUnlocked(req.cookies"); });
   for (const [m, label] of [["GET", "opened as a page"], ["PUT", "sent a PUT"], ["DELETE", "sent a DELETE"]])
     phase(`the door answers only to the one verb it documents — ${label} is refused`,
       `${m} ${P}`,
@@ -115,17 +114,16 @@ export default function section(c) {
     phase(`${label} is refused in words, never with a database sentence`,
       `POST ${P} uncovered with that body`,
       async () => { const r = await req(P, { method: "POST", body, cookie: await uncover() }); return r.status === 400 && /invalid user_id/.test(r.json?.error || "") && !DB_WORDS.test(r.text); });
-  phase("a list holding ONE id is treated as that id — and reaches nobody else",
-    "send [<uuid>] and check the answer is about that uuid alone",
+  phase("a list holding ONE id is refused like any other id that is not text (changed 2026-10-12)",
+    "send [<uuid>] and check it gets the same 400 \"invalid user_id\" as a number or an object",
     async () => {
-      // NOT A FINDING, and worth a row of its own so nobody files it. `String(["<uuid>"])` is the
-      // uuid, so a one-element list passes the shape test and the row is read by that id — which is
-      // the RIGHT person, scoped the right way, with the row deciding its own role and restaurant.
-      // The first draft of this section asserted a 400 here and got a 404 ("That login no longer
-      // exists"), which is an equally honest answer about a uuid that matches no row. Withdrawn.
+      // CHANGED BY SWEEP #10 T29 ROUND 2, ITEM 29. This row used to say "NOT A FINDING": String(["<uuid>"])
+      // is the uuid, the row was read by that id, and it was the right person. Here that held — but the
+      // very same conversion let four OTHER admin doors WRITE for a request no screen sends (French House
+      // switched off, its owner cleared, its colour changed). One rule for every door is safer than a
+      // door-by-door judgement, so every id is now read with textOf(): a list is not an id, and is refused.
       const r = await req(P, { method: "POST", body: { user_id: [NOSUCH] }, cookie: await uncover() });
-      const plain = await req(P, { method: "POST", body: { user_id: NOSUCH }, cookie: await uncover() });
-      return r.status === plain.status && r.text === plain.text;
+      return r.status === 400 && /invalid user_id/.test(r.json?.error || "") && !DB_WORDS.test(r.text);
     });
   phase("a body that is not JSON at all is refused the same way, not with a crash",
     `POST ${P} with a broken body`,

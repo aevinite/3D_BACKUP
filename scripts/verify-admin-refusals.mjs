@@ -107,9 +107,6 @@ console.log(`\nADMIN ROUTES · NO OPTIMISTIC ANSWERS — ${ROOT}\n`);
     "app/api/admin/restaurants/access-tree/route.ts",
     "app/api/admin/restaurants/route.ts",
     "app/api/admin/restaurants/quick-features/route.ts",
-    "app/api/admin/restaurants/staff-features/route.ts",
-    "app/api/admin/restaurants/google-review/route.ts",
-    "app/api/admin/restaurants/platform-channels/route.ts",
     "app/api/admin/users/route.ts",
   ];
   const offenders = [];
@@ -159,7 +156,8 @@ console.log(`\nADMIN ROUTES · NO OPTIMISTIC ANSWERS — ${ROOT}\n`);
       if (/slug/i.test(m[1])) offenders.push(`${rel} :: id: ${m[1]}`);
     }
   }
-  check("every admin route that clones a settings template was found", cloners.length >= 5, `${cloners.length}: ${cloners.map((c) => c.split("/").slice(-2)[0]).join(", ")}`);
+  // 4 since 2026-10-12: three unused switch doors that cloned it were retired (T29 round 2, item 13).
+  check("every admin route that clones a settings template was found", cloners.length >= 4, `${cloners.length}: ${cloners.map((c) => c.split("/").slice(-2)[0]).join(", ")}`);
   check("none of them keys the new settings row by a SLUG", offenders.length === 0,
     offenders.length ? `${offenders.join(", ")} — a slug freed by the recycle bin can still be taken in settings, and the upsert conflicts on restaurant_id, so this becomes a raw settings_pkey error on his screen` : "");
 }
@@ -298,7 +296,7 @@ const NOT_YET = new Map([
 }
 
 // ── 9 · THE SETTINGS TEMPLATE READ ANSWERS FOR ITSELF, EVERYWHERE (sweep #10 T29, item 4) ───────────
-// Seven admin routes build a settings row from restaurant #1's (`cleanClonedSettings(template.data)`).
+// Four admin routes (seven until 2026-10-12, when three unused doors were retired) build a settings row from restaurant #1's (`cleanClonedSettings(template.data)`).
 // Only the access-tree route checked that read; the other six — the CREATE-A-RESTAURANT path among
 // them, which runs on every create — handed a failed read's `null` on, and the restaurant was born
 // half-configured with a success answer. Matched by SHAPE, so an eighth clone site is held to it too.
@@ -319,7 +317,7 @@ const NOT_YET = new Map([
         new RegExp(`if \\(${m[1]}\\.error\\)`).test(after), "a failed read builds a half-configured settings row and still answers success");
     }
   }
-  check("…and the clone sites were found at all, every one read through the one-retry helper (a shape change would otherwise pass in silence)", sites >= 7, `${sites} found`);
+  check("…and the clone sites were found at all, every one read through the one-retry helper (a shape change would otherwise pass in silence)", sites >= 4, `${sites} found`);
   // …and no clone site reads the template WITHOUT the retry (an eighth site added the old way).
   const bare = walk(dir).filter((abs) => /await sb\.from\("settings"\)\.select\("\*"\)\.eq\("restaurant_id", DEFAULT_\w+\)/.test(code(abs.slice(ROOT.length + 1))));
   check("…and no route reads the settings template without that retry", bare.length === 0, bare.map((a) => a.slice(ROOT.length + 1)).join(", "));
@@ -453,9 +451,9 @@ const NOT_YET = new Map([
   check(`${rel} exists`, !!src);
   if (src) {
     check("Usage → a typed date must survive a round trip (no 31 February)",
-      /new Date\(ms\)\.toISOString\(\)\.slice\(0, 10\) === v/.test(src) && !/!isNaN\(Date\.parse\(v\)\)/.test(src));
-    check("…and an impossible or half-given range is refused, not swapped for the default view",
-      /Pick both a start date and an end date\./.test(src) && /That isn't a real date/.test(src));
+      /new Date\(ms\)\.toISOString\(\)\.slice\(0, 10\) === v/.test(src));
+    check("…and a date-shaped but impossible range is refused in words (junk words still get the honest default view, P74068)",
+      /if \(fromDay && toDay && !\(realDay\(fromDay\) && realDay\(toDay\)\)\)/.test(src) && /That isn't a real date/.test(src));
   }
 }
 
@@ -469,12 +467,140 @@ const NOT_YET = new Map([
   check(`${rel} exists`, !!src);
   if (src) {
     check("Recovery backup → no table is read in one request (PostgREST cuts every answer at 1,000)",
-      !/\.limit\(CAP\)/.test(src) && /\.range\(from, Math\.min\(from \+ PAGE, CAP\) - 1\)/.test(src));
+      !/\.limit\(CAP\)/.test(src) && /q\.limit\(Math\.min\(PAGE, CAP - from\)\)/.test(src));
     check("…every page is read in the table's own key order, so no row repeats or goes missing",
       /q = q\.order\(k, \{ ascending: true \}\)/.test(src) && /const ORDER_KEY: Record<string, string> = \{/.test(src));
     check("…and the staff logins go through the same pager",
       /const staffQ = await readAll\("staff_users"/.test(src));
+    // Round 2, item 22: deep "skip N rows" pages timed out on a busy database and marked `orders` failed;
+    // a single-key table is read "next after the last row" (keyset), and four tables are read at once.
+    check("…a single-key table is paged NEXT-AFTER-THE-LAST, not skip-N (a busy database timed out on deep skips)",
+      /if \(single && last !== null\) q = q\.gt\(key, last as string\)/.test(src) && /last = batch\[batch\.length - 1\]\[key\]/.test(src));
+    check("…and the tables are read four at a time, assembled in their own order",
+      /for \(let i = 0; i < TABLES\.length; i \+= 4\)/.test(src) && /results\[i \+ j\] = r/.test(src));
   }
+}
+
+// ── 18 · A LINK A GUEST WILL TAP MUST BE A WEB ADDRESS (sweep #10 T29 round 2, item 23) ──────────
+// Access & permissions → Ratings → "Google review link" is the one text a guest acts on (the menu's
+// "Review us on Google" card links to it). It took any text, so a link pasted without https:// sent a
+// happy guest to an error page on our own site. Since the google-review door was retired (item 13),
+// this screen is its only writer.
+{
+  const rel = "app/api/admin/restaurants/access-tree/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Access → the Google review link must be a full https:// web address (empty = no link)",
+      /if \(k === "google_review_url" && t && !\/\^https\?:\\\/\\\//.test(src) && /must be a full web address starting with https:\/\//.test(src),
+      "a link without https:// sends a guest to an error page on our own site");
+  }
+}
+
+// ── 19 · NO READ ASKS FOR MORE THAN 1,000 ROWS (sweep #10 T29 round 2, item 14) ──────────────────
+// PostgREST answers at most 1,000 rows per request whatever .limit() says, so `.limit(2000)` is a
+// silent 1,000 — the People list, a report's staff count and a void's Removals amount all leaned on it.
+// A read that must be complete pages (lib/pageAll or a keyset loop). Checked over the admin routes
+// from position 27 to the end of the sorted list — the territory this rule was written for; the other
+// half of the admin API is its own territory's to bring in.
+{
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  const mine = walk(join(ROOT, "app/api/admin")).map((a) => a.slice(ROOT.length + 1)).sort().slice(26);
+  const bad = [];
+  for (const rel of mine) {
+    for (const m of code(rel).matchAll(/\.limit\((\d[\d_]*)\)/g)) if (Number(m[1].replace(/_/g, "")) > 1000) bad.push(`${rel} .limit(${m[1]})`);
+  }
+  check("no admin route from position 27 on asks for more than 1,000 rows in one read", bad.length === 0,
+    bad.length ? `${bad.join("; ")} — PostgREST returns 1,000; page it` : "");
+}
+
+// ── 20 · ONE READABLE-PASSWORD MAKER (sweep #10 T29 round 2, item 15) ─────────────────────────────
+// Six routes carried their own copy of "make a password with no l/o/0/1". A copy that drifts prints a
+// handover sheet that reads two ways. app/ must hold no second copy of the alphabet.
+{
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []);
+  const copies = walk(join(ROOT, "app")).filter((a) => /abcdefghijkmnpqrstuvwxyz23456789|function genPassword/.test(readFileSync(a, "utf8"))).map((a) => a.slice(ROOT.length + 1));
+  check("every screen that mints a password uses lib/readablePassword — no route keeps its own copy", copies.length === 0, copies.join(", "));
+}
+
+// ── 21 · THE ACCESS LOG LINE SAYS WHAT WAS SAVED, NOT WHAT WAS ASKED (sweep #10 T29 r2, item 17) ──
+{
+  const rel = "app/api/admin/restaurants/access-tree/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Access → the Activity line is written from what LANDED (a clamped ceiling is logged clamped)",
+      /const changed = describeAccessPatch\(landed\)/.test(src) && !/describeAccessPatch\(patch\)/.test(src),
+      "the line would describe values the allow-lists dropped or clamped");
+    check("…and the clamped ceiling is what gets recorded", /\.limit = \{ \.\.\.\(landed\.config\[permId\]\.limit \|\| \{\}\), \[sd\]: dest\[sd\] \}/.test(src));
+  }
+}
+
+// ── 22 · THE MANAGER PANEL'S DELETE IS HELD TO THE SAME RULE (sweep #10 T29 round 2, item 18) ─────
+// The Repair Kit's "already deleted → no second Removals row" (§8) had a twin in the manager panel's
+// own order delete, plus a ₹0 amount whenever its second read hiccuped. Both closed; held here.
+{
+  const rel = "app/api/editor/[...path]/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    const a = src.lastIndexOf('if (a === "orders" && id) {');
+    const del = src.slice(a, src.indexOf('if (a === "calls" && id)', a));
+    check("Manager panel → delete an order reads its worth in the SAME checked read (no ₹0 on a hiccup)",
+      /must\(await sb\.from\("orders"\)\.select\("payment_status, status, total, session_id, table_number, deleted_at"\)/.test(del) && !/\)\)\.data as\s*\{ total/.test(del));
+    check("…an already-deleted order answers before anything is written",
+      del.indexOf("if (cur?.deleted_at) return") > -1 && del.indexOf("if (cur?.deleted_at) return") < del.indexOf("softDeleteOrders("));
+    check("…and the delete's own count decides whether a Removals row is written",
+      /\)\)\.deleted;\s*if \(gone === 0\) return/.test(del) && del.indexOf("if (gone === 0) return") < del.indexOf("recordRemoval("));
+  }
+}
+
+// ── 23 · A BODY THAT IS NOT AN OBJECT IS REFUSED IN WORDS, NEVER A CRASH (sweep #10 T29 r2, item 26) ─
+// `try { body = await req.json() } catch {}` leaves `body` null for the valid JSON `null` (or 42, or a
+// list) and the next `body.x` threw — a bare 500 from five doors. Every admin route from position 27 on
+// reads its body through lib/jsonObject, which turns anything but a plain object into {}.
+{
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  const mine = walk(join(ROOT, "app/api/admin")).map((a) => a.slice(ROOT.length + 1)).sort().slice(26);
+  const raw = mine.filter((rel) => /req\.json\(\)/.test(code(rel)));
+  check("no admin route from position 27 on reads its body with a bare req.json()", raw.length === 0, raw.join(", "));
+  const lib = code("lib/jsonObject.ts") || "";
+  check("…and the one reader turns null / a number / a list into {}", /parsed && typeof parsed === "object" && !Array\.isArray\(parsed\)/.test(lib));
+}
+
+// ── 24 · A PASSWORD-BEARING ANSWER IS STORED NOWHERE (sweep #10 T29 round 2, items 27 + 28) ────────
+// The handover sheet carries readable passwords while uncovered, and the per-person door hands one back.
+// Neither the browser's disk cache (Cache-Control) nor the offline helper (public/sw.js) may keep them.
+{
+  const cfg = raw("next.config.ts") || "";
+  for (const path of ["/api/admin/restaurants/credentials", "/api/admin/reveal", "/api/admin/reveal/:path*"])
+    check(`next.config: ${path} answers Cache-Control: no-store`, cfg.includes(`"${path}"`) && /\{ key: "Cache-Control", value: "no-store, max-age=0" \}/.test(cfg));
+  const sw = raw("public/sw.js") || "";
+  const never = (sw.match(/const NEVER = \[[\s\S]*?\];/) || [""])[0];
+  check("the offline helper never stores the handover sheet", /\\\/api\\\/admin\\\/restaurants\\\/credentials/.test(never));
+  check("…nor either password door", /\\\/api\\\/admin\\\/reveal/.test(never));
+}
+
+// ── 25 · AN ID IS TEXT, OR IT IS NOTHING (sweep #10 T29 round 2, item 29) ─────────────────────────
+// String(["<uuid>"]) is "<uuid>", so a ONE-ITEM LIST passed every id check: four doors switched French
+// House off, cleared its owner, changed its colour and saved an Access switch for a request no screen
+// sends. Every id / action / op read from a body in positions 27+ goes through textOf().
+{
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  const mine = walk(join(ROOT, "app/api/admin")).map((a) => a.slice(ROOT.length + 1)).sort().slice(26);
+  const coerced = mine.filter((rel) => /String\(body\??\.(?:[a-z_]*_id|id|action|op|feature)\b/.test(code(rel)));
+  check("no admin route from position 27 on turns a body id or action into text with String(…)", coerced.length === 0, coerced.join(", "));
+  check("…and textOf keeps only a value that already IS text", /typeof v === "string" \? v : ""/.test(code("lib/jsonObject.ts") || ""));
+}
+
+// ── 26 · LEAVING THE OWNER OUT IS NOT "CLEAR THE OWNER" (sweep #10 T29 round 2, item 30) ───────────
+// `raw == null` caught a MISSING field too, so a PATCH that never named an owner removed the primary
+// owner and their membership. The field must now be present (the console always sends it).
+{
+  const r = code("app/api/admin/restaurants/route.ts") || "";
+  const patch = r.slice(r.indexOf("export async function PATCH"), r.indexOf("export async function POST"));
+  check("restaurants PATCH refuses a body with no owner_user_id before reading or writing anything", /if \(!\("owner_user_id" in body\)\) return bad\(/.test(patch) && patch.indexOf('"owner_user_id" in body') < patch.indexOf("sb.from("));
+  check("…and the console's Save always sends the field", /owner_user_id: ownerId \|\| null/.test(raw("app/aevinite/restaurants/page.tsx") || ""));
 }
 
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);

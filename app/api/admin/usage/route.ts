@@ -26,26 +26,23 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   // ── A DATE THAT EXISTS, OR A REFUSAL — NEVER A DIFFERENT WINDOW (sweep #10 T29, item 11) ────────
   // The shape test plus Date.parse let "2026-02-31" through — JavaScript reads it as 3 March — so the
-  // figures were counted from 3 March while the answer echoed "2026-02-31" as the window used. And a
-  // date that failed outright ("2026-13-01"), or only one of the two, silently fell back to the default
-  // 7/30-day view, answering a question nobody asked. The Billing screen's dates were given this exact
-  // round trip by S10 T28 item 8. The calendar on the Usage page always sends two real dates or none,
-  // so nothing it does changes; only a typed or stale address now gets a sentence instead of a guess.
+  // figures were counted from 3 March while the answer echoed "2026-02-31" as the window used. A
+  // date-SHAPED value must now survive a round trip, or it is refused in words (the round trip S10 T28
+  // item 8 gave Billing).
+  // NARROWED IN ROUND 2 (2026-10-12): anything that is not two date-shaped values — a word like
+  // "yesterday", a half-given range — keeps the behaviour verify:bin-billing-usage P74068 has always
+  // held: the default view, answered with `range: null`, which says so truthfully. Only the case that
+  // produced a WRONG window is refused. The calendar on the Usage page always sends two real dates.
   const realDay = (v: string) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
     const ms = Date.parse(`${v}T00:00:00Z`);
     return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === v;
   };
-  const rawFrom = url.searchParams.get("from");
-  const rawTo = url.searchParams.get("to");
-  if ((rawFrom || rawTo) && !(rawFrom && rawTo)) {
-    return NextResponse.json({ error: "Pick both a start date and an end date." }, { status: 400 });
-  }
-  if (rawFrom && rawTo && !(realDay(rawFrom) && realDay(rawTo))) {
+  const shaped = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v)) ? v : null);
+  const fromDay = shaped(url.searchParams.get("from"));
+  const toDay = shaped(url.searchParams.get("to"));
+  if (fromDay && toDay && !(realDay(fromDay) && realDay(toDay))) {
     return NextResponse.json({ error: "That isn't a real date — pick one from the calendar." }, { status: 400 });
   }
-  const fromDay = rawFrom || null;
-  const toDay = rawTo || null;
   let range: { from: string; to: string } | null = null;
   if (fromDay && toDay) {
     // IST business days: the window runs from 00:00 on `from` to 00:00 on the day AFTER `to`, so

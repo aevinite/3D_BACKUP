@@ -28,6 +28,8 @@ import { expectClash, clashJson } from "@/lib/clash";
 import { adminFail } from "@/lib/adminFail";
 // One retry for a read that failed for a plumbing reason — see lib/readRetry.ts.
 import { retryRead } from "@/lib/readRetry";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -164,8 +166,8 @@ function describeAccessPatch(patch: Record<string, any>): string {
 
 export async function POST(req: NextRequest) {
   if (!(await gate(req))) return bad("unauthorized", 401);
-  let body: Record<string, any> = {}; try { body = await req.json(); } catch {}
-  const rid = String(body.restaurant_id || "");
+  let body: Record<string, any> = {}; body = await jsonObject(req);
+  const rid = textOf(body.restaurant_id);
   if (!uuid(rid)) return bad("Invalid restaurant_id.");
   // ── A BLIP MUST NOT READ AS "RESTAURANT NOT FOUND" ON THE PERMISSION SCREEN (T20 sweep #7,
   //    2026-08-27) ─────────────────────────────────────────────────────────────────────────────────
@@ -198,6 +200,15 @@ export async function POST(req: NextRequest) {
   }
 
   const patch = obj(body.patch ?? body);
+  // WHAT ACTUALLY LANDED (sweep #10 T29 round 2, item 17). The Activity line used to describe the patch
+  // AS SENT — so a hand-made 100,000% discount ceiling (stored clamped to 100%) was logged as 100,000%,
+  // and a key the allow-lists dropped was logged as if it had changed. Every branch below records the
+  // value it really accepted here, and the line is written from this.
+  const landed: Record<string, any> = {};
+  const land = (group: string, k: string, v: unknown, sub?: string) => {
+    const g = (landed[group] ||= {});
+    if (sub) (g[sub] ||= {})[k] = v; else g[k] = v;
+  };
 
   // ── restaurants columns ───────────────────────────────────────────────────
   const restUpdate: Record<string, any> = {};
@@ -208,13 +219,13 @@ export async function POST(req: NextRequest) {
   if (patch.grants) {
     const next = { ...obj(cur.manager_permissions) };
     let took = 0;
-    for (const [k, v] of Object.entries(obj(patch.grants))) if (GRANT_FLAGS.includes(k)) { next[k] = v === true; took++; }
+    for (const [k, v] of Object.entries(obj(patch.grants))) if (GRANT_FLAGS.includes(k)) { next[k] = v === true; took++; land("grants", k, v === true); }
     if (took) restUpdate.manager_permissions = next;
   }
   if (patch.sections) {
     const next = { ...obj(cur.owner_entitlements) };
     let took = 0;
-    for (const [k, v] of Object.entries(obj(patch.sections))) if (SECTION_ENTITLEMENTS.includes(k)) { next[k] = v === true; took++; }
+    for (const [k, v] of Object.entries(obj(patch.sections))) if (SECTION_ENTITLEMENTS.includes(k)) { next[k] = v === true; took++; land("sections", k, v === true); }
     if (took) restUpdate.owner_entitlements = next;
   }
 
@@ -236,7 +247,7 @@ export async function POST(req: NextRequest) {
     for (const [panel, keys] of Object.entries(obj(patch.tabs))) {
       if (!TAB_ALLOWED[panel]) continue;
       const dest = { ...obj(menus[panel]) };
-      for (const [k, v] of Object.entries(obj(keys))) if (TAB_ALLOWED[panel].has(k)) { dest[k] = v === true; cfgTook++; }
+      for (const [k, v] of Object.entries(obj(keys))) if (TAB_ALLOWED[panel].has(k)) { dest[k] = v === true; cfgTook++; land("tabs", k, v === true, panel); }
       menus[panel] = dest;
     }
     root.menus = menus;
@@ -250,11 +261,11 @@ export async function POST(req: NextRequest) {
       for (const [side, vals] of Object.entries(incoming)) {
         // config[id].on — "does this restaurant have it at all", the feature half of a row.
         if (side === "on") {
-          if (HAS_IDS.includes(permId)) { entry.on = vals === true; cfgTook++; }
+          if (HAS_IDS.includes(permId)) { entry.on = vals === true; cfgTook++; land("config", "on", vals === true, permId); }
           continue;
         }
         if (side === "tablet") {
-          if (CONFIG_TABLET.has(permId) && isTri(vals)) { entry.tablet = vals; cfgTook++; }
+          if (CONFIG_TABLET.has(permId) && isTri(vals)) { entry.tablet = vals; cfgTook++; land("config", "tablet", vals, permId); }
           continue;
         }
         if (side === "limit") {
@@ -268,6 +279,7 @@ export async function POST(req: NextRequest) {
             // dropdown could ever show or undo — and lib/discountCap.ts would honour it.
             const ceiling = CONFIG_LIMIT_MAX.get(`${permId}|${sd}`);
             dest[sd] = ceiling === undefined ? n : Math.max(0, Math.min(n, ceiling)); cfgTook++;
+            ((landed.config ||= {})[permId] ||= {}).limit = { ...(landed.config[permId].limit || {}), [sd]: dest[sd] };
           }
           entry.limit = dest;
           continue;
@@ -281,6 +293,7 @@ export async function POST(req: NextRequest) {
             if (legal === "bool" ? typeof v !== "boolean" : !(legal && typeof v === "string" && legal.has(v)))
               return bad(legal === "bool" ? `"${k}" is an on/off — send true or false.` : `"${String(v)}" isn't one of the choices for "${k}".`);
             dest[k] = v; cfgTook++;
+            (((landed.config ||= {})[permId] ||= {})[side] ||= {})[k] = v;
           }
         entry[side] = dest;
       }
@@ -337,13 +350,22 @@ export async function POST(req: NextRequest) {
   //                        them (lib/channelKey.ts's whole reason for reading "" as "leave it").
   // Refuse on doubt, exactly as the rest of this handler does: the admin presses Save again and the
   // second press is fine, whereas a dropped entitlement is invisible until a restaurant rings up.
+  // ── ONE READ OF THE SETTINGS ROW, NOT UP TO FOUR (sweep #10 T29 round 2, item 25) ────────────────
+  // The features, modules and delivery-channel merges each read the same row for their own column, and
+  // the write below read it a fourth time to learn whether it exists. One read carries all four. It
+  // answers for itself for every reason the long notes above and below give — a merge must never start
+  // from an unreadable row, and "is there a row?" must never be answered by a failed read.
+  const needSettingsRow = !!(patch.features || patch.modules || patch.channels || patch.creds || patch.settings);
+  const setRowQ = needSettingsRow
+    ? await sb.from("settings").select("id, features, modules, platform_channels").eq("restaurant_id", rid).maybeSingle()
+    : { data: null, error: null };
+  if (setRowQ.error) return adminFail("these permissions", setRowQ.error, { action: "load" });
+  const setRow = setRowQ.data as { id: string; features?: unknown; modules?: unknown; platform_channels?: unknown } | null;
   if (patch.features) {
-    const curFeatQ = await sb.from("settings").select("features").eq("restaurant_id", rid).maybeSingle();
-    if (curFeatQ.error) return adminFail("these permissions", curFeatQ.error, { action: "load" });
-    const curFeat = obj((curFeatQ.data as { features?: unknown } | null)?.features);
+    const curFeat = obj(setRow?.features);
     const next = { ...curFeat };
     let took = 0;
-    for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) { next[k] = v === true; took++; }
+    for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) { next[k] = v === true; took++; land("features", k, v === true); }
     if (took) setPatch.features = next;
   }
   // A BAG MODULE'S ON/OFF — settings.modules[key].allowed (mig 326). Same merge discipline as
@@ -356,15 +378,14 @@ export async function POST(req: NextRequest) {
   // owner-control rung was retired with the 4-rung ladder, and an entry left `enabled: false`
   // would read as OFF forever with no screen able to say why.
   if (patch.modules) {
-    const curModQ = await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle();
-    if (curModQ.error) return adminFail("these permissions", curModQ.error, { action: "load" });
-    const curMod = obj((curModQ.data as { modules?: unknown } | null)?.modules);
+    const curMod = obj(setRow?.modules);
     const next = { ...curMod };
     let took = 0;
     for (const [k, v] of Object.entries(obj(patch.modules))) {
       if (!MODULE_BAG_KEYS.includes(k)) continue;
       next[k] = { ...obj(next[k]), allowed: v === true, enabled: true };
       took++;
+      land("modules", k, v === true);
     }
     if (took) setPatch.modules = next;
   }
@@ -375,15 +396,14 @@ export async function POST(req: NextRequest) {
   if (patch.channels || patch.creds) {
     // Answers for itself for the reason written above the features branch — and this is the half
     // that loses a third party's credential, which nobody can retype from this screen.
-    const curPcQ = await sb.from("settings").select("platform_channels").eq("restaurant_id", rid).maybeSingle();
-    if (curPcQ.error) return adminFail("these permissions", curPcQ.error, { action: "load" });
-    const curPc = obj((curPcQ.data as { platform_channels?: unknown } | null)?.platform_channels);
+    const curPc = obj(setRow?.platform_channels);
     const next = { ...curPc };
     let took = 0;   // see the note on the features branch above
     for (const [k, v] of Object.entries(obj(patch.channels))) {
       if (!CHANNEL_KEYS.includes(k)) continue;
       next[k] = { ...obj(next[k]), on: v === true }; // keep any stored API credentials
       took++;
+      land("channels", k, v === true);
     }
     for (const [k, v] of Object.entries(obj(patch.creds))) {
       if (!CREDS_KEYS.includes(k)) continue;
@@ -396,6 +416,7 @@ export async function POST(req: NextRequest) {
       // `key`, NOT `api_key` (T17 sweep, 2026-08-13, finding F4): the legacy field is dropped on
       // every write, which is what makes an already-split restaurant converge on one copy.
       next[k] = applyChannelKey(obj(next[k]), v);
+      land("creds", k, v);
     }
     if (took) setPatch.platform_channels = next;
   }
@@ -404,7 +425,21 @@ export async function POST(req: NextRequest) {
       if (SETTING_KEYS.includes(k) || MODULE_COLS.has(k)) { if (typeof v === "boolean") setPatch[k] = v; continue; }
       if (TABLET_COLS.includes(k)) { if (isTri(v)) setPatch[k] = v; continue; }
       if (CHOICE_KEYS.includes(k)) { if (CHOICE_VALUES[k]?.has(String(v))) setPatch[k] = String(v); continue; }
-      if (TEXT_KEYS.includes(k)) { setPatch[k] = String(v ?? "").slice(0, 400); continue; }
+      if (TEXT_KEYS.includes(k)) {
+        const t = k === "google_review_url" ? String(v ?? "").trim().slice(0, 400) : String(v ?? "").slice(0, 400);
+        // ── A LINK A GUEST WILL TAP MUST BE A WEB ADDRESS (sweep #10 T29 round 2, item 23) ──────────
+        // The Google review link is the one text a GUEST acts on: the menu's "Review us on Google"
+        // card is a link to it. This took any text, so a link pasted without its https:// (say
+        // "g.page/r/…") became a link to a page of OUR site, and a happy guest asked for a review
+        // landed on an error page. The old google-review route checked this, but no screen used that
+        // route — this screen is the only writer, and it never did. Empty still means "no link",
+        // which keeps the Google invite hidden, exactly as the row's own help text says.
+        if (k === "google_review_url" && t && !/^https?:\/\/[^\s/$.?#][^\s]*$/i.test(t)) {
+          return bad("The Google review link must be a full web address starting with https:// — copy it from your Google Business profile → Ask for reviews.");
+        }
+        setPatch[k] = t;
+        continue;
+      }
       if (LIST_KEYS.includes(k)) {
         const legal = CHOICE_VALUES[k];
         const list = (Array.isArray(v) ? v : []).map(String).filter((x) => !legal || legal.has(x));
@@ -445,9 +480,9 @@ export async function POST(req: NextRequest) {
     // — verified 2026-09-15), so the clone branch is only ever reached by MISTAKE today. It is kept
     // rather than deleted because it is the NOT NULL safety net for a row that really is absent;
     // what changes is that a read failure can no longer be mistaken for that case.
-    const existingQ = await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle();
-    if (existingQ.error) return adminFail("these permissions", existingQ.error, { action: "save" });
-    const existing = existingQ.data;
+    // Answered by the one read above (item 25) — which refused on failure, so a failed read can never
+    // send this save down the clone branch.
+    const existing = setRow;
     if (existing) {
       const up = await sb.from("settings").update(setPatch).eq("restaurant_id", rid);
       if (up.error) return adminFail("these permissions", up.error, { action: "save" });
@@ -501,7 +536,8 @@ export async function POST(req: NextRequest) {
   //   · the device id rides along, and the whole thing is `.catch()`ed — a logging failure must
   //     never fail a save that already succeeded.
   // A credential's VALUE never reaches the log; only that one was saved or removed.
-  const changed = describeAccessPatch(patch);
+  for (const k of Object.keys(obj(patch.settings))) if (k in setPatch) land("settings", k, setPatch[k]);
+  const changed = describeAccessPatch(landed);
   const groups = Object.keys(patch).filter((k) => (patch[k] && typeof patch[k] === "object" ? Object.keys(patch[k]).length : patch[k] !== undefined));
 
   // A SAVE THAT LANDED NOWHERE MUST NOT SAY "Saved" (sweep 2026-08-05). Every allow-list above

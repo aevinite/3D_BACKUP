@@ -8,6 +8,8 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -105,7 +107,7 @@ export async function POST(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   let body: Record<string, unknown> = {};
-  try { body = await req.json(); } catch {}
+  body = await jsonObject(req);
   // "One setting for all" (owner 2026-07-09): the admin's retention window applies to EVERY
   // restaurant — a true platform-wide policy, no per-restaurant divergence (and no coupling to
   // restaurant #1's id='site' row). Capped at 1 month by clampDays.

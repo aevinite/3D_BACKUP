@@ -10,6 +10,8 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { businessDayStartIso } from "@/lib/businessDay";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// Read every row past PostgREST's 1,000-row cap — see lib/pageAll.ts.
+import { pageAll } from "@/lib/pageAll";
 // ONE retry for a read that failed for a plumbing reason — see the long note in lib/readRetry.ts.
 import { retryRead } from "@/lib/readRetry";
 
@@ -103,7 +105,8 @@ export async function GET(req: NextRequest) {
     // Bounded (T20 sweep #7, 2026-08-27): `staffTotal` is this read's own row count, so PostgREST's
     // cap was quietly deciding the figure. 2000 matches /api/admin/users' cap and is far above any
     // real restaurant's roll.
-    one(() => sb.from("staff_users").select("role").eq("restaurant_id", rid).eq("active", true).limit(2000)),
+    // Every active login, paged (item 14): `.limit(2000)` was silently 1,000 — PostgREST's own cap.
+    one(async () => { const p = await pageAll<{ role: string }>("staff_users", (from, to) => sb.from("staff_users").select("id, role").eq("restaurant_id", rid).eq("active", true).order("id").range(from, to)); return { data: p.rows ?? null, error: p.error ?? null }; }),
     one(() => sb.from("menu_items").select("id", { count: "exact", head: true }).eq("restaurant_id", rid)),
     one(() => sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: rid, p_from: fromIso, p_to: toIso })),
   ]);

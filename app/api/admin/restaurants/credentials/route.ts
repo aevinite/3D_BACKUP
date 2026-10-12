@@ -36,6 +36,10 @@ import { REVEAL_COOKIE, REVEAL_LOCKED_MESSAGE, revealUnlocked } from "@/lib/reve
 import { withIdempotency } from "@/lib/idempotency";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
+import { readablePassword } from "@/lib/readablePassword";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 export const dynamic = "force-dynamic";
 
@@ -43,14 +47,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const err = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 
-// Same alphabet as the restaurant builder's starter logins: no l/o/0/1, so nothing on a printed
-// sheet can be read two ways.
-function genPassword(): string {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = ""; const r = crypto.getRandomValues(new Uint8Array(10));
-  for (const b of r) s += a[b % a.length];
-  return s;
-}
 
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, kitchen: 2, tablet: 3, waiter: 4 };
 const ROLE_LABEL: Record<string, string> = {
@@ -79,7 +75,9 @@ export async function GET(req: NextRequest) {
 
   // Its own staff, plus every owner attached through the join table (an owner's `restaurant_id` is
   // only a filing anchor — mig 097 — so owners of THIS restaurant usually sit under another one).
-  const [staffQ, linkQ] = await Promise.all([
+  // The four reads the sheet is built from do not depend on each other, so they go together (item 24
+  // — the open-tables count and the primary-owner read used to wait for these two to finish first).
+  const [staffQ, linkQ, openQ, primaryQ] = await Promise.all([
     // Bounded (T20 sweep #7, 2026-08-27). Both are ONE restaurant's rows, so PostgREST's cap could
     // never plausibly bite — but this sheet is the thing the client is handed, and a silently short
     // list of logins is the one way it can be wrong while looking complete. A ceiling far above any
@@ -88,6 +86,8 @@ export async function GET(req: NextRequest) {
       .select("id, username, name, role, active, password_shown, last_seen_at")
       .eq("restaurant_id", rid).is("deleted_at", null).order("role").limit(500),
     sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).limit(500),
+    sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).in("status", ["open", "pending"]),
+    sb.from("restaurants").select("owner_user_id").eq("id", rid).maybeSingle(),
   ]);
   // Plain sentence to the console, the database's words in `detail` + the log — the same helper every
   // sibling admin route uses. These three were the last raw `error.message` bodies in this file
@@ -116,9 +116,6 @@ export async function GET(req: NextRequest) {
   // The card offers a "sign everyone out too" tick beside the reset, and this is what lets it say
   // "23 tables are open right now" in the moment he is deciding, instead of the server deciding for
   // him after the fact. `head: true` means the row bodies never cross the wire — only the count.
-  const openQ = await sb.from("sessions")
-    .select("id", { count: "exact", head: true })
-    .eq("restaurant_id", rid).in("status", ["open", "pending"]);
   // A failed count only costs the sentence. It must NOT cost the sheet, and it must not silently
   // read as zero — "no tables open" is the reassuring answer, and it is the one thing this may not
   // invent. null renders as "couldn't check" beside the tick.
@@ -127,7 +124,6 @@ export async function GET(req: NextRequest) {
 
   // The primary owner wears the ★ on the sheet, the same badge the Owners roster uses. A failed read
   // only costs the badge, so it is reported and the sheet still prints (`primaryUnread` below).
-  const primaryQ = await sb.from("restaurants").select("owner_user_id").eq("id", rid).maybeSingle();
   if (primaryQ.error) console.error("[admin/credentials] could not read the primary owner:", primaryQ.error.message);
   const primaryId = primaryQ.data?.owner_user_id as string | null | undefined;
 
@@ -198,8 +194,8 @@ async function postImpl(req: NextRequest) {
   if (!(await revealUnlocked(req.cookies.get(REVEAL_COOKIE)?.value))) return err(REVEAL_LOCKED_MESSAGE, 423);
   if (!vaultReady()) return err("This deployment has no credential key set, so a password can't be stored for printing.", 409);
   let body: Record<string, unknown> = {};
-  try { body = await req.json(); } catch { /* empty */ }
-  const rid = String(body.restaurant_id || "");
+  body = await jsonObject(req);
+  const rid = textOf(body.restaurant_id);
   if (!UUID.test(rid)) return err("invalid restaurant_id");
 
   // ── ONE PRESS FOR THE WHOLE RESTAURANT (owner, 2026-08-31 — item 28) ─────────────────────────────
@@ -207,9 +203,9 @@ async function postImpl(req: NextRequest) {
   // confirmation: owner, manager, kitchen, waiter — four rounds of the same dialogue for one handover.
   // Nobody is signed out unless it is asked for — see the note above resetAll().
   const signOut = body.signOut === true;
-  if (String(body.action || "") === "reset_all") return resetAll(rid, signOut);
+  if (textOf(body.action) === "reset_all") return resetAll(rid, signOut);
 
-  const userId = String(body.user_id || "");
+  const userId = textOf(body.user_id);
   if (!UUID.test(userId)) return err("invalid user_id");
 
   // The person must really belong to this restaurant — either its own staff, or one of its owners
@@ -229,7 +225,7 @@ async function postImpl(req: NextRequest) {
     if (!ownsQ.data) return err("That login doesn't belong to this restaurant.", 403);
   }
 
-  const password = genPassword();
+  const password = readablePassword();
   // A token_version bump is what ends every existing session on this account. It is now OPT-IN, and
   // the card says which of the two it is about to do — see rule 4 on resetAll() below.
   const wr = await sb.from("staff_users")
@@ -309,8 +305,12 @@ async function resetAll(rid: string, signOut: boolean): Promise<NextResponse> {
 
   const set: { id: string; name: string; role: string; username: string; password: string }[] = [];
   const failed: string[] = [];
-  for (const p of people) {
-    const password = genPassword();
+  // ALL AT ONCE, NOT ONE AFTER ANOTHER (sweep #10 T29 round 2, item 24). Each login is its own write
+  // (its own password and hash), so they cannot be one UPDATE — but they do not wait on each other:
+  // done in sequence, a 13-login handover was 13 round trips back to back. Done together, it is one
+  // trip's worth of waiting. The answer keeps the sheet's order, and a failure is still named.
+  const outcomes = await Promise.all(people.map(async (p) => {
+    const password = readablePassword();
     const wr = await sb.from("staff_users")
       .update({
         ...(await passwordFields(password)),
@@ -318,9 +318,12 @@ async function resetAll(rid: string, signOut: boolean): Promise<NextResponse> {
         failed_count: 0, locked_until: null,
       })
       .eq("id", p.id).select("id").maybeSingle();
+    return { p, password, ok: !wr.error && !!wr.data };
+  }));
+  for (const { p, password, ok } of outcomes) {
     // Never report a password the database didn't take (the 2026-07-07 rule), and never let one
     // failure hide behind the others.
-    if (wr.error || !wr.data) { failed.push(p.name || p.username); continue; }
+    if (!ok) { failed.push(p.name || p.username); continue; }
     set.push({ id: p.id, name: p.name || p.username, role: p.role, username: p.username, password });
   }
 

@@ -29,14 +29,14 @@ export default function section(c) {
     "check the imports carry the key lists",
     () => { const s = c.clean(F); return ["FEATURE_KEYS", "SETTING_KEYS", "CHOICE_KEYS", "LIST_KEYS", "TEXT_KEYS", "MODULE_KEYS", "CHANNEL_KEYS", "CREDS_KEYS", "GRANT_FLAGS", "SECTION_ENTITLEMENTS"].every((k) => s.includes(k)); });
   phase("the features merge can no longer start from an unreadable row (round 1, item 1)",
-    "the current-features read is assigned and its error answered",
-    () => /const curFeatQ = await sb[\s\S]{0,200}?if \(curFeatQ\.error\) return adminFail/.test(c.clean(F)));
+    "the settings-row read the merge starts from answers its own error (since T29 r2 item 25 one read carries features, modules, channels and the row id)",
+    () => { const s = c.clean(F); return /const setRowQ = needSettingsRow\s*\?\s*await sb\.from\("settings"\)\.select\("id, features, modules, platform_channels"\)[\s\S]{0,200}?if \(setRowQ\.error\) return adminFail/.test(s) && s.indexOf("setRowQ.error") < s.indexOf("const curFeat = obj(setRow?.features)"); });
   phase("the delivery-channel merge can no longer start from an unreadable row either",
-    "the current-channels read is assigned and its error answered",
-    () => /const curPcQ = await sb[\s\S]{0,220}?if \(curPcQ\.error\) return adminFail/.test(c.clean(F)));
+    "the same one read answers its error before the channels merge",
+    () => { const s = c.clean(F); return /const setRowQ = needSettingsRow\s*\?\s*await sb\.from\("settings"\)\.select\("id, features, modules, platform_channels"\)[\s\S]{0,200}?if \(setRowQ\.error\) return adminFail/.test(s) && s.indexOf("setRowQ.error") < s.indexOf("const curPc = obj(setRow?.platform_channels)"); });
   phase('"is there a settings row?" can no longer be answered by a FAILED read',
-    "the existing-row read is assigned and its error answered before the clone branch",
-    () => /const existingQ = await sb[\s\S]{0,200}?if \(existingQ\.error\) return adminFail/.test(c.clean(F)));
+    "the existing-row answer comes from that one read, which refused on failure, before the clone branch",
+    () => { const s = c.clean(F); return /const setRowQ = needSettingsRow\s*\?\s*await sb\.from\("settings"\)\.select\("id, features, modules, platform_channels"\)[\s\S]{0,200}?if \(setRowQ\.error\) return adminFail/.test(s) && /const existing = setRow;/.test(s) && s.indexOf("setRowQ.error") < s.indexOf("const existing = setRow;"); });
   phase("the template read answers for itself too, so a restaurant is never born half-configured",
     "the template read's error is answered",
     () => /const template = (?:\(await retryRead\(\(\) => |await )sb[\s\S]{0,260}?if \(template\.error\) return adminFail/.test(c.clean(F)));
@@ -69,8 +69,8 @@ export default function section(c) {
     () => /\{ \.\.\.cleanClonedSettings\(template\.data\), id: rid, restaurant_id: rid/.test(c.clean(F)));
 
   // ── GET ──────────────────────────────────────────────────────────────────────────────────────
-  phase("the screen cannot be read without being signed in", `GET ${P} with no cookie`,
-    async () => (await req(`${P}?restaurant_id=${FH}`, { cookie: "" })).status === 401);
+  phase("the screen cannot be read without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(`${P}?restaurant_id=${FH}`))
   phase("a signed-in admin gets the whole state in one call", `GET ${P}?restaurant_id=<FH>`,
     async () => { const r = await req(`${P}?restaurant_id=${FH}`); return r.status === 200 && !!r.json?.state; });
   phase("a malformed restaurant id is refused in words", "GET with a junk id",

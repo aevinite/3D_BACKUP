@@ -33,10 +33,7 @@ const fail = (m) => fails.push(m);
 const NOT_A_PANEL = {
   "app/api/admin/restaurants/route.ts": "reads restaurant #1 as a TEMPLATE for a new tenant; nothing is returned",
   "app/api/admin/restaurants/settings/route.ts": "same template clone; the response is the admin's own allow-listed set",
-  "app/api/admin/restaurants/staff-features/route.ts": "same template clone",
-  "app/api/admin/restaurants/google-review/route.ts": "same template clone",
   "app/api/admin/restaurants/access-tree/route.ts": "same template clone",
-  "app/api/admin/restaurants/platform-channels/route.ts": "same template clone; its own answer is hasKey only",
   "app/api/admin/restaurants/quick-features/route.ts": "same template clone",
   "app/api/admin/restaurants/bill-preview/route.ts": "renders HTML server-side; the row never leaves as data",
   // NOT listed: app/api/admin/restaurants/export/route.ts. The recovery backup is a FILE that

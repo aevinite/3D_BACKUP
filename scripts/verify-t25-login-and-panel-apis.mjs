@@ -2201,7 +2201,6 @@ const MONEY_GATES = [
   ["P79169", "mark_paid", "settling a bill"],
   ["P79170", "khata", "putting a bill on a tab"],
   ["P79171", "table_tags", "marking a table and comping it"],
-  ["P79172", "print_invoice", "issuing a numbered bill"],
   ["P79173", "take_orders", "punching an order from the manager panel"],
   ["P79174", "parcel", "a counter parcel"],
   ["P79176", "edit_menu", "changing the menu"],
@@ -2218,6 +2217,11 @@ for (const [id, flag, what] of MONEY_GATES) {
 // by me only", and printer setup became Aevidine's, from the admin console. The subject moved on
 // purpose; the check now says what is true today, so it goes red if the old door comes back.
 // (Sweep #10, T17, item 2. docs/REJECTED-IDEAS.md → Reversed, the `print_setup` row.)
+// P79172 used to demand managerCan(g, rid, "print_invoice") on the invoice door. The owner REJECTED that
+// switch on 2026-10-10 (R63 — "manager will always have option to print bill … there should [not] be
+// option to turn on and off") and the dead line was removed (2370ba95). Re-pointed by sweep #10 T29
+// round 2 (item 19): same id, now holding the owner's rule — the door asks for NO print_invoice switch.
+check("P79172", "issuing a numbered bill asks for NO separate switch — R63, owner 2026-10-10", !has(W, 'managerCan(g, rid, "print_invoice")'));
 check("P79177", "setting the printers up is NOT offered from the manager panel any more (owner, 2026-09-14)",
   !has(W, `managerCan(g, rid, "print_setup")`) && !/["']print_setup["']/.test(W));
 check("P79175", "a delivery-app order and a counter parcel are told apart, and each asks its OWN rung",
@@ -2264,8 +2268,11 @@ check("P79192", "…and only on a channel this restaurant actually has switched 
   const unexplained = naked.filter((c) => !KNOWN_FENCED_ELSEWHERE.some((k) => c.includes(k)));
   check("P79193", "every by-id write in the write half names the restaurant, or is fenced by a check one line up",
     unexplained.length === 0, unexplained.slice(0, 3));
-  check("P79250", "…and there are still exactly two that lean on the check rather than the pair",
-    naked.length === 2, naked.length);
+  // "Can only go DOWN" (the note above): both of the two named writes were later given the restaurant
+  // pair too, so the count reached 0 — the better state. Was `=== 2`, which went red on that
+  // improvement; now `<= 2` (sweep #10 T29 round 2, item 19). A THIRD naked write still fails P79193.
+  check("P79250", "…and no more than the two named writes lean on the check rather than the pair",
+    naked.length <= 2, naked.length);
 }
 {
   const tables = [...new Set((W.match(/\.from\("([a-z_]+)"\)/g) || []).map((m) => m.slice(7, -2)))].sort();

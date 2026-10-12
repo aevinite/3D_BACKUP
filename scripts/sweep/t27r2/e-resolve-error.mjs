@@ -58,8 +58,8 @@ export default function section(c) {
   phase("there is deliberately NO mute mode — resolving can never silence a future error",
     "the note is written down", () => /there is deliberately NO "mute" mode/.test(c.src(F)));
 
-  phase("the board cannot be acted on without being signed in", "POST with no cookie",
-    async () => (await req(P, { method: "POST", body: { action_id: NOSUCH }, cookie: "" })).status === 401);
+  phase("the board cannot be acted on without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(P));
   phase("a malformed row id is refused in words", "POST with a junk action_id",
     async () => { const r = await req(P, { method: "POST", body: { action_id: "nope" } }); return r.status === 400 && !DB_WORDS.test(r.text); });
   phase("an unknown row says so rather than answering a silent success", "POST with an unknown uuid",

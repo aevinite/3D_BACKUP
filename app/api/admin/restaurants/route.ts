@@ -25,6 +25,10 @@ import { retryRead } from "@/lib/readRetry";
 // Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
 import { pageAll } from "@/lib/pageAll";
 import { forgetRestaurant, ownersOf } from "@/lib/panelAccess";
+// The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
+import { readablePassword } from "@/lib/readablePassword";
+// A body that is not a plain object (null, a number, a list, broken text) reads as {} — lib/jsonObject.ts.
+import { jsonObject, textOf } from "@/lib/jsonObject";
 
 // The remembered "New restaurant" setup (panels + sample-menu), stored in
 // app_config (mig 186) so the create form auto-fills from the admin's last choice.
@@ -36,12 +40,6 @@ const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 
-function genPassword(): string {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = ""; const r = crypto.getRandomValues(new Uint8Array(10));
-  for (const b of r) s += a[b % a.length];
-  return s;
-}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -304,22 +302,32 @@ export async function GET(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
-  let body: any = {}; try { body = await req.json(); } catch {}
-  const rid = String(body?.restaurant_id || "");
+  let body: any = {}; body = await jsonObject(req);
+  const rid = textOf(body?.restaurant_id);
   if (!rid) return bad("Missing restaurant_id.");
   // Shape-checked before it reaches a uuid column, like every sibling admin route — otherwise a
   // stale link produces a raw Postgres 500 body instead of the tidy "Restaurant not found." below.
   if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
   // owner_user_id may be a uuid (assign) or null/"" (clear the owner).
+  // ── LEAVING THE FIELD OUT IS NOT "CLEAR THE OWNER" (sweep #10 T29 round 2, item 30) ─────────────
+  // `raw == null` also caught a MISSING field, so a request that never named an owner removed the
+  // primary owner AND their membership — that person lost the restaurant. The console always sends the
+  // field (null for "No owner"), so it must now be present; a missing one is refused, nothing changes.
+  if (!("owner_user_id" in body)) return bad("Choose an owner, or choose \"No owner\" — nothing was changed.");
   const raw = body?.owner_user_id;
-  const ownerId = raw == null || raw === "" ? null : String(raw);
+  const ownerId = raw == null || raw === "" ? null : textOf(raw);
+  if (ownerId && !UUID.test(ownerId)) return bad("That user isn't an owner.", 400);
+  // The two reads below do not depend on each other, so they are asked together (sweep #10 T29 round 2,
+  // item 24); each still answers for itself in the same order as before.
+  const [ownerQ, prevQ] = await Promise.all([
+    ownerId ? sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1) : Promise.resolve({ data: [{ id: "" }], error: null }),
+    sb.from("restaurants").select("owner_user_id, name").eq("id", rid).limit(1),
+  ]);
   if (ownerId) {
-    if (!UUID.test(ownerId)) return bad("That user isn't an owner.", 400);
     // A FAILED READ IS NOT "that user isn't an owner" (T27 sweep #9, 2026-09-15). This file gave
     // four of its reads that correction in sweep #7 and left this one: it is the only refusal on the
     // page that makes a CLAIM ABOUT A PERSON, so a blip told the admin that the owner he just picked
     // from the dropdown is not an owner.
-    const ownerQ = await sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1);
     if (ownerQ.error) return adminFail("this restaurant's owner", ownerQ.error, { action: "load" });
     if (!ownerQ.data?.[0]) return bad("That user isn't an owner.", 400);
   }
@@ -336,7 +344,6 @@ export async function PATCH(req: NextRequest) {
   // The console said "Saved" and the owner still could not see the restaurant — the same silent-
   // success shape the branding route was fixed for on 2026-07-06. A FAILED read is now told apart
   // from a MISSING row, because answering "not found" on a blip would be its own lie.
-  const prevQ = await sb.from("restaurants").select("owner_user_id, name").eq("id", rid).limit(1);
   if (prevQ.error) return adminFail("this restaurant's owner", prevQ.error, { action: "load" });
   const prev = prevQ.data?.[0];
   if (!prev) return bad("Restaurant not found — it may have been removed. Reload the list and try again.", 404);
@@ -369,14 +376,14 @@ export async function PATCH(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
-  let body: any = {}; try { body = await req.json(); } catch {}
-  const action = String(body?.action || "");
+  let body: any = {}; body = await jsonObject(req);
+  const action = textOf(body?.action);
 
   // ── set_restaurant_active — the platform kill switch (owner 2026-07-04: "where is
   // the button to suspend?"). active=false stops the tenant resolver serving the
   // guest menu; the admin can still reach every panel via act-as to inspect/fix. ──
   if (action === "set_restaurant_active") {
-    const rid = String(body?.restaurant_id || "");
+    const rid = textOf(body?.restaurant_id);
     const active = !!body?.active;
     if (!rid) return bad("Missing restaurant_id.");
     if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
@@ -403,7 +410,7 @@ export async function POST(req: NextRequest) {
   // longer log in, but nothing is erased. Reversible via restore for 90 days, then
   // purgeable. Restaurant #1 (the default) can never be binned. ─────────────────
   if (action === "soft_delete_restaurant") {
-    const rid = String(body?.restaurant_id || "");
+    const rid = textOf(body?.restaurant_id);
     if (!rid) return bad("Missing restaurant_id.");
     if (rid === DEFAULT_RID) return bad("The default restaurant can't be deleted.", 400);
     const reason = String(body?.reason ?? "").trim().slice(0, 300) || null;
@@ -434,7 +441,7 @@ export async function POST(req: NextRequest) {
   // by default (active=false) so it can't silently go live; pass activate:true to
   // reactivate it in one step. Clears the recycle-bin fields. ───────────────────
   if (action === "restore_restaurant") {
-    const rid = String(body?.restaurant_id || "");
+    const rid = textOf(body?.restaurant_id);
     if (!rid) return bad("Missing restaurant_id.");
     const activate = body?.activate === true;
     if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
@@ -555,7 +562,7 @@ export async function POST(req: NextRequest) {
   // WAIT IS GONE (owner, 2026-08-20 — see the note on RETENTION_DAYS at the top of this
   // file); migration 342 removed its SQL half so the two sides can't disagree. ────────
   if (action === "purge_restaurant") {
-    const rid = String(body?.restaurant_id || "");
+    const rid = textOf(body?.restaurant_id);
     if (!rid) return bad("Missing restaurant_id.");
     if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
     if (rid === DEFAULT_RID) return bad("The default restaurant can’t be permanently removed.", 400);
@@ -782,7 +789,7 @@ export async function POST(req: NextRequest) {
     const loginErrors: string[] = []; // panels whose starter login failed (bug #5) — reported so the admin isn't left with an enabled panel nobody can sign into
     for (const panel of ["manager", "kitchen", "tablet", "owner"] as const) {
       if (!panels[panel]) continue;
-      const pw = genPassword();
+      const pw = readablePassword();
       const ins = await sb.from("staff_users")
         .insert({ username: panel, name: `${name} ${panel}`, role: panel, restaurant_id: rid, ...(await passwordFields(pw)), active: true })
         .select("id").single();
@@ -841,7 +848,7 @@ export async function POST(req: NextRequest) {
   // (assigned via PATCH). Login names are globally unique, so clash-check globally.
   const taken = await nameTakenMessage(key);
   if (taken) return bad(taken, 409);
-  const password = String(body?.password || "").trim() || genPassword();
+  const password = String(body?.password || "").trim() || readablePassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const home = await resolveOwnerHomeRid();
   if (!home.rid) return bad(home.error || "Couldn't work out where to file this owner.", 500);
