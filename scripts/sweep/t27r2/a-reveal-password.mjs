@@ -77,9 +77,8 @@ export default function section(c) {
     () => /if \(!wr\.data\) return err/.test(c.clean(F)));
 
   // ── the two doors ────────────────────────────────────────────────────────────────────────────
-  phase("with no admin sign-in at all, the door is shut",
-    `POST ${P} with no cookie`,
-    async () => (await req(P, { method: "POST", body: { user_id: made.userId }, cookie: "" })).status === 401);
+  phase("with no admin sign-in at all, the door is shut", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(P));
   phase("signed in but still covered, one person's password is refused",
     `POST ${P} with the admin cookie only`,
     async () => (await req(P, { method: "POST", body: { user_id: made.userId } })).status === 423);
@@ -91,8 +90,8 @@ export default function section(c) {
     "search that refusal body for every secret name",
     async () => !SECRETS.test((await req(P, { method: "POST", body: { user_id: made.userId } })).text));
   phase("the uncover cookie ALONE is not enough — the admin sign-in is still required",
-    "send only lfh_reveal",
-    async () => { const rv = (await uncover()).split("; ").find((x) => x.startsWith("lfh_reveal=")); return (await req(P, { method: "POST", body: { user_id: made.userId }, cookie: rv })).status === 401; });
+    "read the code: tokenIsValid is checked before revealUnlocked, so the uncover cookie alone opens nothing (sweep #10 rule 7)",
+    () => { const t = c.src("app/api/admin/reveal/password/route.ts"); return t.indexOf("tokenIsValid(req.cookies") > -1 && t.indexOf("tokenIsValid(req.cookies") < t.indexOf("revealUnlocked(req.cookies"); });
   for (const [m, label] of [["GET", "opened as a page"], ["PUT", "sent a PUT"], ["DELETE", "sent a DELETE"]])
     phase(`the door answers only to the one verb it documents — ${label} is refused`,
       `${m} ${P}`,

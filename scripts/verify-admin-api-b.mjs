@@ -276,6 +276,9 @@ async function actionsSince(since, actions) {
 
 // ── the context every section gets ──────────────────────────────────────────────────────────────
 const ctx = {
+  // A route's sign-in gate, proved by READING it — never by calling the route signed out (sweep #10
+  // rule 7, adopted for this suite by T29 round 2 on the owner's word, 2026-10-12). `p` is a URL path.
+  gatePath: (p) => ctx.gateFirst(`app${String(p).split("?")[0]}/route.ts`),
   phase, sec, req, sq, uncover, actionsSince, made, makeFixtureUser,
   BASE, ADMIN, ADMIN_PW, FH, AANGAN, NOSUCH, DB_WORDS, SECRETS, ROOT,
   src: (rel) => readFileSync(`${ROOT}${rel}`, "utf8"),

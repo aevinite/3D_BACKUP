@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 /**
  * H · four small per-restaurant switch routes: the LOGO image, the GOOGLE review link and mode, the
  * QUICK feature toggles, and the STAFF-feature entitlements.
@@ -25,8 +26,8 @@ export default function section(c) {
     "the check answers its own error", () => /if \(existsQ\.error\) return adminFail\("this restaurant's logo"/.test(c.clean(FL)));
   phase("removing a logo nobody has writes NO record", "read the had-a-logo branch",
     () => { const s = c.clean(FL); return /if \(!exists\.data\.logo_url\)/.test(s) && /There was no logo to remove/.test(s); });
-  phase("the logo cannot be changed without being signed in", "DELETE with no cookie",
-    async () => (await req(`${PL}?restaurant_id=${FH}`, { method: "DELETE", cookie: "" })).status === 401);
+  phase("the logo cannot be changed without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(`${PL}?restaurant_id=${FH}`))
   phase("a malformed restaurant id is refused in words", "DELETE with a junk id",
     async () => { const r = await req(`${PL}?restaurant_id=nope`, { method: "DELETE" }); return r.status === 400 && !DB_WORDS.test(r.text); });
   phase("an unknown restaurant says so", "DELETE an unknown uuid",
@@ -41,31 +42,36 @@ export default function section(c) {
 
   // ── google review ────────────────────────────────────────────────────────────────────────────
   const FG = "app/api/admin/restaurants/google-review/route.ts", PG = "/api/admin/restaurants/google-review";
+  // ── RETIRED 2026-10-12 (owner: "do all this rest of the things" — T29 round 2, item 13). Nothing on
+  // any screen called this route any more: Access & permissions does its job, and the owner's standing
+  // rule is that a new way replaces the old one. Its phases keep their ids and answer ⏭ with the reason
+  // while the file is gone; verify:admin-routes-t29 asserts it STAYS gone.
+  const phaseG = (label, how, fn) => phase(label, how, (...x) => existsSync(`${c.ROOT}${FG}`) ? fn(...x) : "skip:route retired 2026-10-12 — Access & permissions does this job (a new way replaces the old one)");
   const keepG = { url: null, mode: null };
-  phase("the review route's sign-in gate runs before the first database call", "compare positions",
+  phaseG("the review route's sign-in gate runs before the first database call", "compare positions",
     () => { const s = c.clean(FG); return s.indexOf("tokenIsValid") < s.indexOf("sb.from"); });
-  phase("the current review link and mode are read, so the phases can put them back",
+  phaseG("the current review link and mode are read, so the phases can put them back",
     "GET and remember",
     async () => { const j = (await req(`${PG}?restaurant_id=${FH}`)).json; keepG.url = j?.url ?? null; keepG.mode = j?.mode ?? "off"; return typeof keepG.mode === "string"; });
-  phase("a mode this route does not know falls back to off, never to an error",
+  phaseG("a mode this route does not know falls back to off, never to an error",
     "save a made-up mode", async () => { const r = await req(PG, { method: "POST", body: { restaurant_id: FH, url: "", mode: "shout_at_them" } }); return r.status === 200 && r.json?.mode === "off"; });
-  phase("a link that is not an address is refused in words", "save a bare word",
+  phaseG("a link that is not an address is refused in words", "save a bare word",
     async () => { const r = await req(PG, { method: "POST", body: { restaurant_id: FH, url: "just-some-text", mode: "off" } }); return r.status === 400 && /must start with http/.test(r.json?.error || ""); });
-  phase("a link longer than 500 characters is refused", "save a very long URL",
+  phaseG("a link longer than 500 characters is refused", "save a very long URL",
     async () => (await req(PG, { method: "POST", body: { restaurant_id: FH, url: `https://x.com/${"y".repeat(600)}`, mode: "off" } })).status === 400);
-  phase("A GOOGLE MODE CANNOT BE ARMED WITH NO LINK — the guest CTA would go nowhere",
+  phaseG("A GOOGLE MODE CANNOT BE ARMED WITH NO LINK — the guest CTA would go nowhere",
     "save a google mode with an empty link",
     async () => { const r = await req(PG, { method: "POST", body: { restaurant_id: FH, url: "", mode: "google" } }); return r.status === 400 && /Add the Google review link before/.test(r.json?.error || ""); });
-  phase("a real link and mode are saved, and the answer reports what was stored",
+  phaseG("a real link and mode are saved, and the answer reports what was stored",
     "save both and read the answer",
     async () => { const r = await req(PG, { method: "POST", body: { restaurant_id: FH, url: "https://g.page/t27r2-probe", mode: "google_plus_normal" } }); return r.status === 200 && r.json?.url === "https://g.page/t27r2-probe" && r.json?.mode === "google_plus_normal"; });
-  phase("…and the database really holds it", "read the settings columns",
+  phaseG("…and the database really holds it", "read the settings columns",
     async () => { const s = await get("google_review_url,google_review_mode"); return s.google_review_url === "https://g.page/t27r2-probe" && s.google_review_mode === "google_plus_normal"; });
-  phase("the change is written into the record, naming the mode", "read staff_actions",
+  phaseG("the change is written into the record, naming the mode", "read staff_actions",
     async () => { const since = new Date(Date.now() - 15000).toISOString(); await req(PG, { method: "POST", body: { restaurant_id: FH, url: "https://g.page/t27r2-probe2", mode: "google" } }); return (await c.actionsSince(since, ["google_review"])).some((r) => /mode google/.test(r.detail || "")); });
-  phase("an unknown restaurant is refused before it writes", "POST an unknown rid",
+  phaseG("an unknown restaurant is refused before it writes", "POST an unknown rid",
     async () => (await req(PG, { method: "POST", body: { restaurant_id: NOSUCH, url: "", mode: "off" } })).status === 404);
-  phase("the review link and mode are put back as they were found", "restore and read back",
+  phaseG("the review link and mode are put back as they were found", "restore and read back",
     async () => { await req(PG, { method: "POST", body: { restaurant_id: FH, url: keepG.url ?? "", mode: keepG.mode } }); const s = await get("google_review_url,google_review_mode"); return (s.google_review_url ?? null) === (keepG.url ?? null) && s.google_review_mode === keepG.mode; });
 
   // ── quick features ───────────────────────────────────────────────────────────────────────────
@@ -96,33 +102,39 @@ export default function section(c) {
 
   // ── staff features ───────────────────────────────────────────────────────────────────────────
   const FS = "app/api/admin/restaurants/staff-features/route.ts", PS = "/api/admin/restaurants/staff-features";
-  phase("the staff-feature route's sign-in gate runs before the first database call", "compare positions",
+  // ── RETIRED 2026-10-12 (owner: "do all this rest of the things" — T29 round 2, item 13). Nothing on
+  // any screen called this route any more: Access & permissions does its job, and the owner's standing
+  // rule is that a new way replaces the old one. Its phases keep their ids and answer ⏭ with the reason
+  // while the file is gone; verify:admin-routes-t29 asserts it STAYS gone.
+  const phaseS = (label, how, fn) => phase(label, how, (...x) => existsSync(`${c.ROOT}${FS}`) ? fn(...x) : "skip:route retired 2026-10-12 — Access & permissions does this job (a new way replaces the old one)");
+  phaseS("the staff-feature route's sign-in gate runs before the first database call", "compare positions",
     () => { const s = c.clean(FS); return s.indexOf("tokenIsValid") < s.indexOf("sb.from"); });
-  phase("only the entitlement columns this route names may be flipped", "POST a made-up key",
+  phaseS("only the entitlement columns this route names may be flipped", "POST a made-up key",
     async () => { const r = await req(PS, { method: "POST", body: { restaurant_id: FH, key: "make_me_admin", value: true } }); return r.status === 400 && /unknown staff feature/.test(r.json?.error || ""); });
-  phase("the answer reports each entitlement as a real yes or no", "GET and read the flags",
+  phaseS("the answer reports each entitlement as a real yes or no", "GET and read the flags",
     async () => { const j = (await req(`${PS}?restaurant_id=${FH}`)).json; return j?.flags && Object.values(j.flags).every((v) => typeof v === "boolean"); });
-  phase("…and says whether the restaurant has a settings row at all", "read hasSettings",
+  phaseS("…and says whether the restaurant has a settings row at all", "read hasSettings",
     async () => typeof ((await req(`${PS}?restaurant_id=${FH}`)).json || {}).hasSettings === "boolean");
-  phase("a flip is stored and reported back", "flip one and read the column",
+  phaseS("a flip is stored and reported back", "flip one and read the column",
     async () => { const r = await req(PS, { method: "POST", body: { restaurant_id: FH, key: "banquet_allowed", value: true } }); const s = await get("banquet_allowed"); return r.status === 200 && r.json?.flags?.banquet_allowed === true && s.banquet_allowed === true; });
-  phase("a value that is not a boolean is stored as a definite no, never as text",
+  phaseS("a value that is not a boolean is stored as a definite no, never as text",
     'flip with the string "yes"',
     async () => { await req(PS, { method: "POST", body: { restaurant_id: FH, key: "banquet_allowed", value: "yes" } }); const s = await get("banquet_allowed"); return s.banquet_allowed === false; });
-  phase("the flip is written into the record, naming the feature and its new state",
+  phaseS("the flip is written into the record, naming the feature and its new state",
     "read staff_actions",
     async () => { const since = new Date(Date.now() - 15000).toISOString(); await req(PS, { method: "POST", body: { restaurant_id: FH, key: "banquet_allowed", value: true } }); return (await c.actionsSince(since, ["staff_feature"])).some((r) => /banquet_allowed" → on/.test(r.detail || "")); });
-  phase("an unknown restaurant is refused before it writes", "POST an unknown rid",
+  phaseS("an unknown restaurant is refused before it writes", "POST an unknown rid",
     async () => (await req(PS, { method: "POST", body: { restaurant_id: NOSUCH, key: "banquet_allowed", value: true } })).status === 404);
   phase("a malformed restaurant id is refused in words across all four of these routes",
     "GET each with a junk id",
     async () => {
       // The logo route answers no GET at all — it is POST (upload) and DELETE (remove) only — so it
       // is asked on the verb it HAS. The first draft sent it a GET and read the 405 as a failure.
-      const checks = [[`${PG}?restaurant_id=nope`, "GET"], [`${PQ}?restaurant_id=nope`, "GET"], [`${PS}?restaurant_id=nope`, "GET"], [`${PL}?restaurant_id=nope`, "DELETE"]];
+      const checks = [[`${PG}?restaurant_id=nope`, "GET"], [`${PQ}?restaurant_id=nope`, "GET"], [`${PS}?restaurant_id=nope`, "GET"], [`${PL}?restaurant_id=nope`, "DELETE"]]
+        .filter(([p]) => existsSync(`${c.ROOT}app${p.split("?")[0]}/route.ts`));   // a retired route (item 13) has nothing left to ask
       for (const [p, m] of checks) { const r = await req(p, { method: m }); if (r.status !== 400 || DB_WORDS.test(r.text)) return `${p} (${m}) → ${r.status}`; }
       return true;
     });
-  phase("none of these four routes can be read without being signed in", "GET each with no cookie",
-    async () => { for (const p of [`${PG}?restaurant_id=${FH}`, `${PQ}?restaurant_id=${FH}`, `${PS}?restaurant_id=${FH}`]) if ((await req(p, { cookie: "" })).status !== 401) return false; return true; });
+  phase("none of these four routes can be read without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => { for (const p of [PG, PQ, PS, PL]) { if (!existsSync(`${c.ROOT}app${p}/route.ts`)) continue; const r = c.gatePath(p); if (r !== true) return `${p}: ${r}`; } return true; });
 }

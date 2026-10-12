@@ -7,6 +7,7 @@
 //
 //   · app/api/admin/restaurants/access-tree        → `null` clears the key, `""` LEAVES IT ALONE
 //   · app/api/admin/restaurants/platform-channels  → `""`  clears the key, `null` was ignored
+//     (that route was RETIRED on 2026-10-12 — no screen used it; Access is now the one writer)
 //
 // Each route matched its own caller, so nothing was broken on any screen today — which is exactly
 // why it was reported as a decision rather than a fault. But it is the same trap as "one column,

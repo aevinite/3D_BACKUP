@@ -107,9 +107,6 @@ console.log(`\nADMIN ROUTES · NO OPTIMISTIC ANSWERS — ${ROOT}\n`);
     "app/api/admin/restaurants/access-tree/route.ts",
     "app/api/admin/restaurants/route.ts",
     "app/api/admin/restaurants/quick-features/route.ts",
-    "app/api/admin/restaurants/staff-features/route.ts",
-    "app/api/admin/restaurants/google-review/route.ts",
-    "app/api/admin/restaurants/platform-channels/route.ts",
     "app/api/admin/users/route.ts",
   ];
   const offenders = [];
@@ -159,7 +156,8 @@ console.log(`\nADMIN ROUTES · NO OPTIMISTIC ANSWERS — ${ROOT}\n`);
       if (/slug/i.test(m[1])) offenders.push(`${rel} :: id: ${m[1]}`);
     }
   }
-  check("every admin route that clones a settings template was found", cloners.length >= 5, `${cloners.length}: ${cloners.map((c) => c.split("/").slice(-2)[0]).join(", ")}`);
+  // 4 since 2026-10-12: three unused switch doors that cloned it were retired (T29 round 2, item 13).
+  check("every admin route that clones a settings template was found", cloners.length >= 4, `${cloners.length}: ${cloners.map((c) => c.split("/").slice(-2)[0]).join(", ")}`);
   check("none of them keys the new settings row by a SLUG", offenders.length === 0,
     offenders.length ? `${offenders.join(", ")} — a slug freed by the recycle bin can still be taken in settings, and the upsert conflicts on restaurant_id, so this becomes a raw settings_pkey error on his screen` : "");
 }
@@ -298,7 +296,7 @@ const NOT_YET = new Map([
 }
 
 // ── 9 · THE SETTINGS TEMPLATE READ ANSWERS FOR ITSELF, EVERYWHERE (sweep #10 T29, item 4) ───────────
-// Seven admin routes build a settings row from restaurant #1's (`cleanClonedSettings(template.data)`).
+// Four admin routes (seven until 2026-10-12, when three unused doors were retired) build a settings row from restaurant #1's (`cleanClonedSettings(template.data)`).
 // Only the access-tree route checked that read; the other six — the CREATE-A-RESTAURANT path among
 // them, which runs on every create — handed a failed read's `null` on, and the restaurant was born
 // half-configured with a success answer. Matched by SHAPE, so an eighth clone site is held to it too.
@@ -319,7 +317,7 @@ const NOT_YET = new Map([
         new RegExp(`if \\(${m[1]}\\.error\\)`).test(after), "a failed read builds a half-configured settings row and still answers success");
     }
   }
-  check("…and the clone sites were found at all, every one read through the one-retry helper (a shape change would otherwise pass in silence)", sites >= 7, `${sites} found`);
+  check("…and the clone sites were found at all, every one read through the one-retry helper (a shape change would otherwise pass in silence)", sites >= 4, `${sites} found`);
   // …and no clone site reads the template WITHOUT the retry (an eighth site added the old way).
   const bare = walk(dir).filter((abs) => /await sb\.from\("settings"\)\.select\("\*"\)\.eq\("restaurant_id", DEFAULT_\w+\)/.test(code(abs.slice(ROOT.length + 1))));
   check("…and no route reads the settings template without that retry", bare.length === 0, bare.map((a) => a.slice(ROOT.length + 1)).join(", "));

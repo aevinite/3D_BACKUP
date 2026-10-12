@@ -38,8 +38,8 @@ export default function section(c) {
     "the range is normalised once and used for both",
     () => { const s = c.clean(F); return /const RANGES = \["today", "7d", "30d"\]/.test(s) && /rangeBounds\(range\)/.test(s); });
 
-  phase("the report cannot be read without being signed in", "GET with no cookie",
-    async () => (await req(`${P}?restaurant_id=${FH}`, { cookie: "" })).status === 401);
+  phase("the report cannot be read without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(`${P}?restaurant_id=${FH}`))
   phase("a malformed restaurant id is refused in words, not with a database sentence", "GET junk",
     async () => { const r = await req(`${P}?restaurant_id=nope`); return r.status === 400 && !DB_WORDS.test(r.text); });
   phase("no restaurant id at all is refused", "GET with none",

@@ -51,8 +51,8 @@ export default function section(c) {
     () => !/\(\s*await\s+sb\s*\.\s*from\s*\([\s\S]{0,600}?\)\s*\.\s*data/.test(c.clean(F)));
 
   // ── the sheet, covered and uncovered ─────────────────────────────────────────────────────────
-  phase("the sheet cannot be read without being signed in", "GET with no cookie",
-    async () => (await req(`${P}?restaurant_id=${FH}`, { cookie: "" })).status === 401);
+  phase("the sheet cannot be read without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(`${P}?restaurant_id=${FH}`))
   phase("a malformed restaurant id is refused in words", "GET with a junk id",
     async () => { const r = await req(`${P}?restaurant_id=nope`); return r.status === 400 && !DB_WORDS.test(r.text); });
   phase("an unknown restaurant says so", "GET with an unknown uuid",

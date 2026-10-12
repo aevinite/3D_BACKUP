@@ -69,8 +69,8 @@ export default function section(c) {
     () => /\{ \.\.\.cleanClonedSettings\(template\.data\), id: rid, restaurant_id: rid/.test(c.clean(F)));
 
   // ── GET ──────────────────────────────────────────────────────────────────────────────────────
-  phase("the screen cannot be read without being signed in", `GET ${P} with no cookie`,
-    async () => (await req(`${P}?restaurant_id=${FH}`, { cookie: "" })).status === 401);
+  phase("the screen cannot be read without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(`${P}?restaurant_id=${FH}`))
   phase("a signed-in admin gets the whole state in one call", `GET ${P}?restaurant_id=<FH>`,
     async () => { const r = await req(`${P}?restaurant_id=${FH}`); return r.status === 200 && !!r.json?.state; });
   phase("a malformed restaurant id is refused in words", "GET with a junk id",

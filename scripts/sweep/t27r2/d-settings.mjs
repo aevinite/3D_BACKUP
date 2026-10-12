@@ -67,8 +67,8 @@ export default function section(c) {
     () => !/\(\s*await\s+sb\s*\.\s*from\s*\([\s\S]{0,600}?\)\s*\.\s*data/.test(c.clean(F)));
 
   // ── GET ─────────────────────────────────────────────────────────────────────────────────────
-  phase("the settings cannot be read without being signed in", "GET with no cookie",
-    async () => (await req(`${P}?restaurant_id=${FH}`, { cookie: "" })).status === 401);
+  phase("the settings cannot be read without being signed in", "read the code: the admin gate runs before the first database call (sweep #10 rule 7 — never called signed out)",
+    () => c.gatePath(`${P}?restaurant_id=${FH}`))
   phase("a signed-in admin gets the settings, the slug and the table codes", "GET",
     async () => { const r = await req(`${P}?restaurant_id=${FH}`); return r.status === 200 && !!r.json?.settings && !!r.json?.slug && !!r.json?.codes; });
   phase("a malformed restaurant id is refused in words", "GET with a junk id",

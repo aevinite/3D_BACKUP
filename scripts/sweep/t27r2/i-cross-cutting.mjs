@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 /**
  * I · the whole territory as ONE family — 26 files, the same question asked of each.
  *
@@ -9,20 +10,24 @@
 export default function section(c) {
   const { phase, sec, req, FILES, SECRETS } = c;
   sec("I · every route in the territory, asked the same questions");
+  // THREE OF THESE FILES WERE RETIRED on 2026-10-12 (sweep #10 T29 round 2, item 13 — the Google-review,
+  // delivery-channel and staff-feature doors; no screen called them, Access & permissions does their
+  // jobs). FILES keeps their names so no phase id moves; every question below is asked of LIVE.
+  const LIVE = FILES.filter((f) => existsSync(`${c.ROOT}${f}`));
 
 
   // One phase per file: the gate comes first, read in the source rather than guessed from a status.
   for (const f of FILES)
     phase(`${f.replace("app/api/admin/", "")} — the sign-in check runs before the first database call`,
       "slice each exported handler's own body (following withIdempotency and wrapper delegation) and compare the gate against the first database call INSIDE it",
-      () => c.gateFirst(f));
+      () => existsSync(`${c.ROOT}${f}`) ? c.gateFirst(f) : "skip:route retired 2026-10-12 — Access & permissions does this job (a new way replaces the old one)");
 
   // The four family rules, each asked once over all 26 files, with the offenders named.
   phase("no route in the territory reads a table with select(*) where a secret lives",
     "grep every file for select(\"*\") and check the table it reads",
     () => {
       const bad = [];
-      for (const f of FILES) {
+      for (const f of LIVE) {
         const s = c.clean(f);
         for (const m of s.matchAll(/from\("([a-z_]+)"\)\s*\.\s*select\("\*"\)/g))
           if (/staff_users|restaurant_payments/.test(m[1])) bad.push(`${f} → ${m[1]}`);
@@ -32,13 +37,13 @@ export default function section(c) {
   phase("no route in the territory decides anything from a read whose error is unreachable",
     "grep every file for the (await sb…).data shape",
     () => {
-      const bad = FILES.filter((f) => /\(\s*await\s+(?:sb|supabaseAdmin|supabase)\s*\.\s*(?:from|rpc)\s*\([\s\S]{0,700}?\)\s*\.\s*(?:data|error)\b/.test(c.clean(f)));
+      const bad = LIVE.filter((f) => /\(\s*await\s+(?:sb|supabaseAdmin|supabase)\s*\.\s*(?:from|rpc)\s*\([\s\S]{0,700}?\)\s*\.\s*(?:data|error)\b/.test(c.clean(f)));
       return bad.length === 0 || `still has it: ${bad.join(", ")}`;
     });
   phase("no route in the territory hands the console a raw database sentence",
     "every file that can fail a read or write reaches for adminFail or a plain sentence",
     () => {
-      const bad = FILES.filter((f) => {
+      const bad = LIVE.filter((f) => {
         const s = c.clean(f);
         if (!/\.error/.test(s)) return false;
         return /error\.message/.test(s) && !/adminFail/.test(s);
@@ -49,7 +54,7 @@ export default function section(c) {
     "for each .select() that is not a head count or a single-row read, follow the STATEMENT and the builder it was assigned to, and look for a limit, a range or pageAll",
     () => {
       const bad = [];
-      for (const f of FILES) {
+      for (const f of LIVE) {
         const src = c.clean(f);
         // The whole statement, not one line: these handlers write a query over three or four lines,
         // and the first draft of this rule looked at a 300-character window and reported seventeen
@@ -84,11 +89,11 @@ export default function section(c) {
     "/api/admin/restaurants/create-defaults",
   ];
   phase("every route in the territory that answers a GET requires being signed in",
-    "call each with no cookie and check every one is 401",
-    async () => {
+    "read each route: the admin gate runs before its first database call (sweep #10 rule 7 — never called signed out)",
+    () => {
       const bad = [];
-      for (const p of GETS) { const r = await req(p, { cookie: "" }); if (r.status !== 401) bad.push(`${p} → ${r.status}`); }
-      return bad.length === 0 || `answered without a sign-in: ${bad.join(", ")}`;
+      for (const p of GETS) { const r = c.gatePath(p); if (r !== true) bad.push(`${p}: ${r}`); }
+      return bad.length === 0 || bad.join(" | ");
     });
   phase("no answer in the territory carries a password hash, a PIN or a stored password copy",
     "call each signed in and scan every body",
@@ -153,6 +158,6 @@ export default function section(c) {
     async () => {
       const { execSync } = await import("node:child_process");
       const derived = execSync(`cd ${c.ROOT} && find app/api/admin -name route.ts | sort | sed -n '26,99p'`).toString().trim().split("\n");
-      return derived.length === FILES.length && derived.every((f, i) => f === FILES[i]) || `the filesystem now says: ${derived.join(", ")}`;
+      return derived.length === LIVE.length && derived.every((f, i) => f === LIVE[i]) || `the filesystem now says: ${derived.join(", ")}`;
     });
 }

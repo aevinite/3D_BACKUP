@@ -168,7 +168,7 @@ percent-escapes are damaged used to answer a bare HTTP 500 from inside Next's ow
 any page or error boundary could run, so it is turned into the guest "this menu isn't available"
 screen instead. Full story: `docs/CLAUDE-DETAIL.md` → Security gate. **Do not move any gate into
 it.** The gate stays per-route: `/aevinite` layout +
-all 51 `/api/admin/*` routes check `tokenIsValid` before any DB call (re-counted 2026-08-31 after the dead
+all 48 `/api/admin/*` routes check `tokenIsValid` before any DB call (re-counted 2026-10-12 after three unused switch doors were retired — sweep #10 T29; before that 2026-08-31, after the dead
 `restaurants/panels` route was retired — it answered a constant and its POST was already 410;
 `find app/api/admin -name route.ts | wc -l` must equal the number that grep `tokenIsValid`); panel APIs use
 `requireRole()` (re-checks entitlement every request); `/api/owner/*` uses `ownerScope()`.
