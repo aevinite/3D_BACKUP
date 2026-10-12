@@ -3,7 +3,8 @@
 // screens are reached by holding the DATABASE'S ANSWERS in the browser (Playwright routes on the public
 // client's RPC calls) — the page, its components and its network code are the real built app; only
 // what the database would have said is chosen. NOT ONE ROW IS WRITTEN by this block.
-import { check, band, FILES, rd } from "./lib.mjs";
+import { check, band, FILES, rd, REAL_FETCH } from "./lib.mjs";
+const fetch = (...a) => REAL_FETCH(...a);
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 const BASE = process.env.T4_BASE || "http://localhost:4404";

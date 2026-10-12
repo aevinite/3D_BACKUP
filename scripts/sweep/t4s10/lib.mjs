@@ -21,6 +21,9 @@ import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Node's own fetch, captured before any block stands in for it (blocks C and D replace globalThis.fetch
+// to watch the guest beacon) — the live block must talk to the real server.
+export const REAL_FETCH = globalThis.fetch;
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 export const rd = (rel) => readFileSync(join(ROOT, rel), "utf8");
 // Line comments first, then block comments — the order this repo learned the hard way.
