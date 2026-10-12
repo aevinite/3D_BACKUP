@@ -348,10 +348,19 @@ export async function POST(req: NextRequest) {
   //                        them (lib/channelKey.ts's whole reason for reading "" as "leave it").
   // Refuse on doubt, exactly as the rest of this handler does: the admin presses Save again and the
   // second press is fine, whereas a dropped entitlement is invisible until a restaurant rings up.
+  // ── ONE READ OF THE SETTINGS ROW, NOT UP TO FOUR (sweep #10 T29 round 2, item 25) ────────────────
+  // The features, modules and delivery-channel merges each read the same row for their own column, and
+  // the write below read it a fourth time to learn whether it exists. One read carries all four. It
+  // answers for itself for every reason the long notes above and below give — a merge must never start
+  // from an unreadable row, and "is there a row?" must never be answered by a failed read.
+  const needSettingsRow = !!(patch.features || patch.modules || patch.channels || patch.creds || patch.settings);
+  const setRowQ = needSettingsRow
+    ? await sb.from("settings").select("id, features, modules, platform_channels").eq("restaurant_id", rid).maybeSingle()
+    : { data: null, error: null };
+  if (setRowQ.error) return adminFail("these permissions", setRowQ.error, { action: "load" });
+  const setRow = setRowQ.data as { id: string; features?: unknown; modules?: unknown; platform_channels?: unknown } | null;
   if (patch.features) {
-    const curFeatQ = await sb.from("settings").select("features").eq("restaurant_id", rid).maybeSingle();
-    if (curFeatQ.error) return adminFail("these permissions", curFeatQ.error, { action: "load" });
-    const curFeat = obj((curFeatQ.data as { features?: unknown } | null)?.features);
+    const curFeat = obj(setRow?.features);
     const next = { ...curFeat };
     let took = 0;
     for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) { next[k] = v === true; took++; land("features", k, v === true); }
@@ -367,9 +376,7 @@ export async function POST(req: NextRequest) {
   // owner-control rung was retired with the 4-rung ladder, and an entry left `enabled: false`
   // would read as OFF forever with no screen able to say why.
   if (patch.modules) {
-    const curModQ = await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle();
-    if (curModQ.error) return adminFail("these permissions", curModQ.error, { action: "load" });
-    const curMod = obj((curModQ.data as { modules?: unknown } | null)?.modules);
+    const curMod = obj(setRow?.modules);
     const next = { ...curMod };
     let took = 0;
     for (const [k, v] of Object.entries(obj(patch.modules))) {
@@ -387,9 +394,7 @@ export async function POST(req: NextRequest) {
   if (patch.channels || patch.creds) {
     // Answers for itself for the reason written above the features branch — and this is the half
     // that loses a third party's credential, which nobody can retype from this screen.
-    const curPcQ = await sb.from("settings").select("platform_channels").eq("restaurant_id", rid).maybeSingle();
-    if (curPcQ.error) return adminFail("these permissions", curPcQ.error, { action: "load" });
-    const curPc = obj((curPcQ.data as { platform_channels?: unknown } | null)?.platform_channels);
+    const curPc = obj(setRow?.platform_channels);
     const next = { ...curPc };
     let took = 0;   // see the note on the features branch above
     for (const [k, v] of Object.entries(obj(patch.channels))) {
@@ -473,9 +478,9 @@ export async function POST(req: NextRequest) {
     // — verified 2026-09-15), so the clone branch is only ever reached by MISTAKE today. It is kept
     // rather than deleted because it is the NOT NULL safety net for a row that really is absent;
     // what changes is that a read failure can no longer be mistaken for that case.
-    const existingQ = await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle();
-    if (existingQ.error) return adminFail("these permissions", existingQ.error, { action: "save" });
-    const existing = existingQ.data;
+    // Answered by the one read above (item 25) — which refused on failure, so a failed read can never
+    // send this save down the clone branch.
+    const existing = setRow;
     if (existing) {
       const up = await sb.from("settings").update(setPatch).eq("restaurant_id", rid);
       if (up.error) return adminFail("these permissions", up.error, { action: "save" });
