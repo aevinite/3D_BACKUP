@@ -119,8 +119,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules")
           .order("restaurant_id").range(from, to)),
       // Only what is STILL WAITING, and only the two columns needed to count it and age it.
-      sb.from("print_jobs").select("restaurant_id, kind, created_at")
-        .in("status", ["queued", "printing"]).eq("kind", "kot").limit(2000),
+      // PAGED (S10 T28 item 17): a printer dead since Tuesday holds hundreds of waiting slips, and a
+      // `.limit(2000)` is silently 1,000 on this stack — so "waiting" would stop counting at a thousand.
+      pageAll<{ restaurant_id: string; kind: string; created_at: string }>("print_jobs", (from, to) =>
+        sb.from("print_jobs").select("restaurant_id, kind, created_at")
+          .in("status", ["queued", "printing"]).eq("kind", "kot").order("id").range(from, to)),
     ]);
     // …AND THE OTHER THREE, for the same reason one line down (item 20, T19 sweep #7, 2026-09-01).
     // The restaurants read was checked; these were not, and each one silently redraws the board as a
@@ -134,10 +137,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     if (rests.error) return adminFail("the printing overview", rests.error as { message?: string }, { action: "load" });
     if (agents.error) return adminFail("the printing overview", agents.error as { message?: string }, { action: "load" });
     if (sets.error) return adminFail("the printing overview", sets.error as { message?: string }, { action: "load" });
-    if (jobs.error) return adminFail("the printing overview", jobs.error, { action: "load" });
+    if (jobs.error) return adminFail("the printing overview", jobs.error as { message?: string }, { action: "load" });
     const now = Date.now();
     const byRest = new Map<string, { n: number; oldest: number | null }>();
-    for (const j of (jobs.data || []) as { restaurant_id: string; created_at: string }[]) {
+    for (const j of (jobs.rows || []) as { restaurant_id: string; created_at: string }[]) {
       const cur = byRest.get(j.restaurant_id) || { n: 0, oldest: null };
       cur.n++;
       const age = now - new Date(j.created_at).getTime();

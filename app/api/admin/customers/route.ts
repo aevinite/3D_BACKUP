@@ -18,6 +18,8 @@ import { adminFail } from "@/lib/adminFail";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 import { cachedOwnerPayload } from "@/lib/ownerCache";
 import { searchTerm } from "@/lib/searchText";
 
@@ -67,7 +69,7 @@ export async function GET(req: NextRequest) {
     //     the obvious fix and the wrong one: a guest row belonging to a binned restaurant would
     //     have lost its chip and read "—", which is the exact failure the comment above warns
     //     about. A deleted restaurant's guests are still real people with a real history.
-    const reads = new ReadSet("admin/customers", [await rd("restaurants", () => sb.from("restaurants").select("id, name, slug, accent_color, deleted_at").order("slug").limit(2000))]);
+    const reads = new ReadSet("admin/customers", [await rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, name, slug, accent_color, deleted_at").order("slug").order("id").range(f, t)))]);
     if (reads.failed("restaurants")) return adminFail("the restaurant list", reads.error("restaurants"), { action: "load" });
     const rests = reads.rows<{ id: string; name: unknown; slug: string; accent_color: string | null; deleted_at: string | null }>("restaurants");
     const liveRests = rests.filter((r) => r.deleted_at == null);

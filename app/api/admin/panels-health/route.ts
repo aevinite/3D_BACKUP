@@ -13,6 +13,8 @@ import { adminFail } from "@/lib/adminFail";
 // naming WHICH read went, and a read the screen tolerates says so at the call site. The console's
 // answer is unchanged: adminFail, plain words, raw text in `detail`.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 const ROLES = ["manager", "kitchen", "tablet", "owner"] as const;
@@ -22,11 +24,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const reads = new ReadSet("admin/panels-health", await Promise.all([
-    rd("restaurants", () => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000)),
-    rd("settings", () => sb.from("settings").select("restaurant_id, enabled_panels").limit(2000)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").order("id").range(f, t))),
+    rd("settings", () => pagedRead("settings", (f, t) => sb.from("settings").select("restaurant_id, enabled_panels").order("id").range(f, t))),
     // Active operational staff only, explicit columns, bounded — we just need the latest
     // last_seen per (restaurant, role); aggregated below in JS.
-    rd("staff", () => sb.from("staff_users").select("restaurant_id, role, last_seen_at").eq("active", true).in("role", ROLES as unknown as string[]).order("last_seen_at", { ascending: false, nullsFirst: false }).limit(3000)),
+    rd("staff", () => pagedRead("staff_users", (f, t) => sb.from("staff_users").select("restaurant_id, role, last_seen_at").eq("active", true).in("role", ROLES as unknown as string[]).order("id").range(f, t))),
   ]));
   // Check ALL three — a failed settings/staff read would otherwise show every panel "Off"/"Never
   // seen" (false "device down" for everyone) with a confident 200 (audit). Order the staff read

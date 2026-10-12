@@ -111,7 +111,7 @@ export async function GET(req: NextRequest) {
   const nameById = new Map<string, string>();
   if (ids.length) {
     // Tolerated: a miss leaves a row's restaurant unnamed rather than emptying the record.
-    const rest = new ReadSet("admin/audit:names", [await rd("names", () => sb.from("restaurants").select("id, name").in("id", ids).limit(2000))]);
+    const rest = new ReadSet("admin/audit:names", [await rd("names", () => sb.from("restaurants").select("id, name").in("id", ids).limit(ids.length))]);
     for (const x of rest.rowsOr<{ id: string; name: string }>("names", [])) nameById.set(x.id, x.name);
   }
   const removals = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null }));

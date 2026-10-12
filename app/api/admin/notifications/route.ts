@@ -18,6 +18,8 @@ import { adminFail } from "@/lib/adminFail";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site. The console's answer is unchanged.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -40,7 +42,7 @@ export async function GET(req: NextRequest) {
       .select("id, restaurant_id, subject, body, raised_by, raised_role, created_at, image_url, audio_url")
       .eq("status", "open").order("created_at", { ascending: false }).limit(TICKET_LIMIT)),
     rd("ticketCount", () => sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open")),
-    rd("restaurants", () => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).limit(2000)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("id").range(f, t))),
     // These four are DELIBERATELY soft — the bell still shows the rest if one of them goes (this
     // route's own rule, audit 2026-07-09). rowsOr/failed is how that is now stated at the call site.
     rd("errors", () => sb.from("staff_actions").select("id, panel, action, detail, restaurant_id, created_at")

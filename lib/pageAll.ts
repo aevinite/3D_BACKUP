@@ -63,3 +63,21 @@ export async function pageAll<T>(
   }
   return { rows };
 }
+
+/**
+ * pageAll, shaped as ONE supabase read — `{ data, error }` — so it drops straight into lib/readGuard's
+ * `rd()` (S10 T28 item 17, 2026-10-11).
+ *
+ * WHY THIS EXISTS: PostgREST on this stack answers at most 1,000 rows a request, whatever `.limit()`
+ * says. The admin routes carried `.limit(2000)`, `.limit(5000)`, `.limit(20000)` — numbers that LOOK
+ * like generous ceilings and are silently 1,000, so a list past a thousand came back short with no
+ * error and no hint (see the memory note "a .limit above 1,000 is silently 1,000"). Paging is the
+ * only honest way to read a list that must be complete and can grow past that.
+ */
+export async function pagedRead<T>(
+  label: string,
+  page: (from: number, to: number) => PromiseLike<Page<T>>,
+): Promise<{ data: T[] | null; error: unknown }> {
+  const r = await pageAll<T>(label, page);
+  return r.error ? { data: null, error: r.error } : { data: r.rows ?? [], error: null };
+}

@@ -12,6 +12,8 @@ import { cachedOwnerPayload, ordersFingerprint, scopeKeyOf } from "@/lib/ownerCa
 // ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
 // 2026-09-01). One retry on a transient connection failure, and a failure that names WHICH read went.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
 
@@ -235,12 +237,12 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
   const reads = new ReadSet("admin/analytics", await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): binned restaurants must not inflate
     // total/active counts. The busiest-restaurants RPC gets the same guard in mig 130.
-    rd("restaurants", () => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).limit(2000)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("id").range(f, t))),
     // Fetch active staff's restaurant_id (bounded) so we can DROP staff that belong to a
     // binned restaurant — a head count included them and over-stated "Active staff".
-    rd("staff", () => sb.from("staff_users").select("restaurant_id").eq("active", true).limit(5000)),
-    rd("openSessions", () => sb.from("sessions").select("restaurant_id").eq("status", "open").limit(20000)),
-    rd("tables", () => sb.from("settings").select("restaurant_id, table_count").limit(2000)),
+    rd("staff", () => pagedRead("staff_users", (f, t) => sb.from("staff_users").select("restaurant_id").eq("active", true).order("id").range(f, t))),
+    rd("openSessions", () => pagedRead("sessions", (f, t) => sb.from("sessions").select("restaurant_id").eq("status", "open").order("id").range(f, t))),
+    rd("tables", () => pagedRead("settings", (f, t) => sb.from("settings").select("restaurant_id, table_count").order("id").range(f, t))),
     // THE TILE MUST EQUAL THE LIST UNDER IT (mig 348, 2026-08-20). This was a plain head count
     // over `orders` with no restaurant test, while `lfh_admin_busiest_restaurants` right below has
     // excluded binned restaurants since mig 135 — so the "ORDERS · LAST 30 DAYS" tile read 6,260

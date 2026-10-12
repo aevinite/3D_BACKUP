@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
   const ids = [...new Set((ev.data ?? []).map((e) => e.restaurant_id).filter((x) => x && x !== "00000000-0000-0000-0000-000000000000"))];
   const names: Record<string, string> = {};
   if (ids.length) {
-    const rs = await sb.from("restaurants").select("id, name").in("id", ids).limit(2000);
+    const rs = await sb.from("restaurants").select("id, name").in("id", ids).limit(ids.length);
     for (const r of rs.data ?? []) names[r.id] = r.name;
   }
   const events = (ev.data ?? []).map((e) => ({ ...e, restaurant_name: names[e.restaurant_id] || null }));

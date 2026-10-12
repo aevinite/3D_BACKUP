@@ -35,6 +35,8 @@ import { adminFail } from "@/lib/adminFail";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site. The console's answer is unchanged.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 import { logAction } from "@/lib/oplog";
 import { softDeleteOrders, restoreOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
@@ -217,7 +219,7 @@ export async function GET(req: NextRequest) {
     // The identical split, with the identical reasoning, is in app/api/admin/customers/route.ts
     // (T18 handoff H3, approved by the owner 2026-08-20).
     rd("sessions", () => sq),
-    rd("restaurants", () => sb.from("restaurants").select("id, name, deleted_at").limit(2000)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, name, deleted_at").order("id").range(f, t))),
     rd("deletedCount", () => delCountQ),
     // The two breakdown counts are TOLERATED: they only split the Deleted tile's own total into how it
     // happened, so a failure leaves that split unsaid rather than taking the ledger down.
@@ -243,7 +245,7 @@ export async function GET(req: NextRequest) {
   const sessionIds = sessions.map((s) => s.id);
   const ordersBySession = new Map<string, BillOrder[]>();
   if (sessionIds.length) {
-    const oReads = new ReadSet("admin/bills:orders", [await rd("orders", () => sb.from("orders").select(ORDER_COLS).in("session_id", sessionIds).limit(5000))]);
+    const oReads = new ReadSet("admin/bills:orders", [await rd("orders", () => pagedRead("orders", (f, t) => sb.from("orders").select(ORDER_COLS).in("session_id", sessionIds).order("id").range(f, t)))]);
     if (oReads.failed("orders")) return adminFail("the bill ledger", oReads.error("orders"), { action: "load" });
     for (const o of oReads.rows<BillOrder>("orders")) {
       const k = o.session_id || "";
@@ -263,7 +265,7 @@ export async function GET(req: NextRequest) {
     // TOLERATED, and now it says so rather than looking like an omission (T26 sweep #9): a failure
     // leaves every bill reading "issued once", which understates a re-issue but takes nothing off
     // the ledger. Stated at the call site with rowsOr, the way this repo spells a tolerated read.
-    const evR = new ReadSet("admin/bills:invoice-gens", [await rd("gens", () => sb.from("invoice_events").select("session_id").eq("event", "generate").in("session_id", sessionIds).limit(5000))]);
+    const evR = new ReadSet("admin/bills:invoice-gens", [await rd("gens", () => pagedRead("invoice_events", (f, t) => sb.from("invoice_events").select("session_id").eq("event", "generate").in("session_id", sessionIds).order("id").range(f, t)))]);
     const genBy = new Map<string, number>();
     for (const e of evR.rowsOr<{ session_id: string }>("gens", [])) genBy.set(e.session_id, (genBy.get(e.session_id) || 0) + 1);
     for (const b of bills) b.invoiceGens = genBy.get(b.sessionId) || 0;
@@ -283,15 +285,15 @@ export async function GET(req: NextRequest) {
   // adds the (session_id, kind) index this filter needs.
   const needAnswer = bills.filter((b) => b.state === "cancelled").map((b) => b.sessionId);
   if (needAnswer.length) {
-    const ans = await sb.from("deletion_audit")
+    const ans = await pagedRead<{ order_id: string | null; meta: { made?: unknown } | null }>("deletion_audit", (f, t) => sb.from("deletion_audit")
       .select("order_id, meta")
       .eq("kind", "order_cancelled")
       .in("session_id", needAnswer)
-      .limit(5000);
+      .order("id").range(f, t));
     // NOT fatal, and deliberately so: a failure here must not take down the ledger, which is the
     // screen for proving no sale went missing. Every affected bill falls back to "unknown", which
     // is what the tile says when nobody has answered — honest either way, never a made-up ₹0.
-    if (ans.error) console.error("[admin/bills] cancellation answers unavailable:", ans.error.message);
+    if (ans.error) console.error("[admin/bills] cancellation answers unavailable:", (ans.error as { message?: string })?.message ?? String(ans.error));
     const madeByOrder = new Map<string, boolean>();
     for (const r of (ans.data || []) as { order_id: string | null; meta: { made?: unknown } | null }[]) {
       const made = r.meta?.made;

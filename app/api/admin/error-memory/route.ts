@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
   let names = new Map<string, string>();
   if (ids.length) {
     // Tolerated: a miss reads "—" for the restaurant, never a wrong one.
-    const n = new ReadSet("admin/error-memory:names", [await rd("names", () => sb.from("restaurants").select("id, name").in("id", ids).limit(2000))]);
+    const n = new ReadSet("admin/error-memory:names", [await rd("names", () => sb.from("restaurants").select("id, name").in("id", ids).limit(ids.length))]);
     names = new Map(n.rowsOr<{ id: string; name: string }>("names", []).map((x) => [x.id, x.name]));
   }
   return NextResponse.json({

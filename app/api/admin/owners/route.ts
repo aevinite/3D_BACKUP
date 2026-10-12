@@ -39,6 +39,8 @@ import { expectClash, clashJson } from "@/lib/clash";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -116,7 +118,7 @@ export async function GET(req: NextRequest) {
     // TOLERATED, and said so: a miss leaves a row's restaurant chip blank rather than emptying the
     // feed. Written out (T26 sweep #9) because inline the `.error` is unreachable, so "tolerated"
     // and "forgotten" looked identical.
-    const nQ = rids.length ? await sb.from("restaurants").select("id, name").in("id", rids).limit(2000) : null;
+    const nQ = rids.length ? await sb.from("restaurants").select("id, name").in("id", rids).limit(rids.length) : null;
     if (nQ?.error) console.error("[admin/owners] the activity chips have no restaurant names:", nQ.error.message);
     const restNames = new Map(((nQ?.data) || []).map((r) => [r.id, r.name]));
     return ok({
@@ -173,9 +175,9 @@ export async function GET(req: NextRequest) {
   // Kept separate from the main list so a binned owner never leaks back into the live table.
   if (new URL(req.url).searchParams.get("deleted") === "1") {
     const binReads = new ReadSet("admin/owners:bin", await Promise.all([
-      rd("binned", () => sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")
-        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(2000)),
-      rd("links", () => sb.from("restaurant_owners").select("user_id").limit(20000)),
+      rd("binned", () => pagedRead("staff_users", (f, t) => sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")
+        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }).order("id").range(f, t))),
+      rd("links", () => pagedRead("restaurant_owners", (f, t) => sb.from("restaurant_owners").select("user_id").order("restaurant_id").order("user_id").range(f, t))),
     ]));
     if (binReads.failed("binned")) return adminFail("the owners recycle bin", binReads.error("binned"), { action: "load" });
     // "How many restaurants are still linked" is the number that decides whether a permanent removal
@@ -204,15 +206,15 @@ export async function GET(req: NextRequest) {
   const reads = new ReadSet("admin/owners", await Promise.all([
     // deleted_at IS NULL → the live/suspended list; binned owners are hidden here
     // (they live in the recycle bin above).
-    rd("owners", () => sb.from("staff_users")
+    rd("owners", () => pagedRead("staff_users", (f, t) => sb.from("staff_users")
       .select("id, username, name, active, last_seen_at, created_at")
       // PAGED, like lib/ownerScope's scopedRestaurantIds (2026-08-05). A bare select with no
       // .limit() stops at PostgREST's cap and silently drops everyone past it — the same bug that
-      // "silently dropped every restaurant past the 100th" in the owner reports. 2000 is far above
-      // any real estate and still an explicit ceiling rather than a hidden one.
-      .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }).limit(2000)),
-    rd("links", () => sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000)),
-    rd("restaurants", () => sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000)),
+      // "silently dropped every restaurant past the 100th" in the owner reports. It said `.limit(2000)`
+      // here, which PostgREST silently answers as 1,000 — so it is paged now (S10 T28 item 17).
+      .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }).order("id").range(f, t))),
+    rd("links", () => pagedRead("restaurant_owners", (f, t) => sb.from("restaurant_owners").select("restaurant_id, user_id").order("restaurant_id").order("user_id").range(f, t))),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").order("id").range(f, t))),
   ]));
   // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). Every failure on this page answered with the
   // database's own sentence — `insert or update on table "restaurant_owners" violates foreign key
@@ -235,7 +237,7 @@ export async function GET(req: NextRequest) {
   const primaryIds = Array.from(new Set(restRows.map((r) => r.owner_user_id).filter(Boolean) as string[]));
   const primaryUser = new Map<string, { name: string; binned: boolean }>();
   if (primaryIds.length) {
-    const pq = await sb.from("staff_users").select("id, username, name, deleted_at").in("id", primaryIds).limit(2000);
+    const pq = await sb.from("staff_users").select("id, username, name, deleted_at").in("id", primaryIds).limit(primaryIds.length);
     for (const u of pq.data || []) primaryUser.set(u.id as string, { name: (u.name as string) || (u.username as string), binned: !!u.deleted_at });
   }
 
@@ -684,7 +686,7 @@ async function hardDeleteOwner(ownerId: string): Promise<{ error?: string; relea
   // it from a dangling pointer, but the audit line would still record "0 restaurant(s) released" for
   // a purge that released several, and nobody would know which co-owner inherited what. Refuse
   // instead: a permanent removal is the last place to guess.
-  const linksQ = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(2000);
+  const linksQ = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(1000);
   if (linksQ.error) return { error: dbNote("read this owner's restaurants", linksQ.error), released: 0 };
   const links = linksQ.data || [];
   for (const l of links) {
