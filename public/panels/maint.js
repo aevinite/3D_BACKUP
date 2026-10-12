@@ -265,7 +265,9 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     .lfh-sec:last-child{border-bottom:0}
     .lfh-sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,#7e93bd);margin:0 0 10px}
     .lfh-hd{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line,#1d2944)}
-    .lfh-x{margin-left:auto;background:var(--line,#243049);color:#fff;border:0;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px}
+    /* the panel's OWN ink, not white (sweep #10 T16, 2026-10-12): on the light skin --line is a pale
+       beige, and a white ✕ on it was all but invisible — the one way to close this drawer. */
+    .lfh-x{margin-left:auto;background:var(--line,#243049);color:var(--text,#fff);border:0;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px}
     .lfh-x:hover{filter:brightness(1.15)}
     .lfh-wrap{padding:26px 22px 4px;text-align:center}
     .lfh-bigav{width:66px;height:66px;border-radius:999px;margin:0 auto 12px;display:grid;place-items:center;font-weight:800;font-size:28px;color:#0b1220;box-shadow:0 0 0 5px rgba(148,163,184,.18)}

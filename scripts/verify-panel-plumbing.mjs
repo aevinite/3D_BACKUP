@@ -74,6 +74,12 @@ const hasNot = (f, re, why) => {
   if (re.test(s)) fails.push(`${f}: ${why}`);
 };
 
+// ── maint.js — the drawer's ✕ must be visible on BOTH skins (sweep #10 T16, 2026-10-12) ──────────
+// It sits on var(--line), which is near-black on the dark skin and pale beige on the light one, so a
+// hard-coded white glyph vanished on light. Its ink has to be the panel's own --text.
+has("maint.js", /\.lfh-x\{[^}]*color:var\(--text,#fff\)/, "the drawer's close ✕ is hard-coded white again — on the light skin it is all but invisible on its beige button");
+hasNot("maint.js", /\.lfh-x\{[^}]*color:#fff/, "the drawer's close ✕ is white on a token background that is pale on the light skin");
+
 // ── outbox.js — a change put back goes where it belongs ───────────────────────────────────────
 // A discount that ran out of automatic tries, retried by hand, used to land AFTER a later
 // "Mark paid" on the same bill — so the bill settled at the full amount and the discount was
