@@ -684,7 +684,12 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
   check(
     "tablet: the KOT menu's split row asks the switch",
-    /\(splitBillOn\(\)\s*\n?\s*\?\s*row\("split"/.test(src),
+    // R67 (owner, 2026-10-11): the row is ABSENT for a waiter who may not take payment, so the
+    // switch is now asked together with that permission — `splitBillOn() && tshow("tablet_mark_paid")`.
+    // The guard went red on main the day that landed (sweep #10 T12 found it): the product had moved
+    // deliberately and the pattern had not. It still insists the switch is asked, and now also the
+    // permission, so a future edit that drops either half goes red.
+    /\(splitBillOn\(\)\s*&&\s*tshow\("tablet_mark_paid"\)\s*\n?\s*\?\s*row\("split"/.test(src),
     `${TABLET}: the 🧾 KOT ▾ split row no longer asks splitBillOn().`,
   );
   check(
