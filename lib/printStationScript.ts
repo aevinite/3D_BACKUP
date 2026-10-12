@@ -247,7 +247,9 @@ REM ── AND IT WRITES TO THE FOLDER IT JUST MADE (T11 sweep #8, 2026-09-04) �
 REM This created a log folder and then never put a line in it, so "did the station ever start on
 REM that PC?" had no answer anywhere on the machine. One line per start is enough to tell "it was
 REM never run" from "it ran and Chrome died", which are the two things a restaurant is asked.
-echo %DATE% %TIME%  print station started, talking to %SITE% as the %PANEL% screen>>"%LOGDIR%\station.log"
+REM (Until sweep #10 T15, 2026-10-12, the line below lost its backslash on the way out of the app,
+REM so it wrote AevidinePrintHelperstation.log BESIDE this folder and the folder stayed empty.)
+echo %DATE% %TIME%  print station started, talking to %SITE% as the %PANEL% screen>>"%LOGDIR%\\station.log"
 
 set "CHROME=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"
 if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"

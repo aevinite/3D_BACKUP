@@ -1333,7 +1333,13 @@ EOF</pre>
     const b = document.createElement("button");
     b.className = "cpy"; b.type = "button"; b.textContent = "Copy";
     b.onclick = async () => {
-      const text = pre.innerText.replace(/\n\s*Copy\s*$/, "").trim();
+      // THE BLOCK WITHOUT ITS BUTTON, read off a copy (sweep #10 T15, 2026-10-12). This used to strip
+      // a trailing "Copy" off the block's text — but for 1.8 s after a press the button says
+      // "Copied ✓", so a second tap (a double-tap on a phone, an impatient click) put the command AND
+      // the words "Copied ✓" on the clipboard, and the last pasted line was broken.
+      const clone = pre.cloneNode(true);
+      for (const x of clone.querySelectorAll("button.cpy")) x.remove();
+      const text = (clone.innerText || clone.textContent || "").trim();
       try { await navigator.clipboard.writeText(text); }
       catch (e) {                                        // older browsers / no permission
         const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t);

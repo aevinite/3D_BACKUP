@@ -189,7 +189,14 @@ export async function POST(req: NextRequest) {
   const ids = scope.all ? [] : scope.ids;
   // THE SCOPE DECIDES, NEVER THE BODY — the same rule the GET above follows. An owner asking about a
   // restaurant that is not theirs is simply told no.
-  const target = rid && isRestaurantId(rid) && (scope.all || ids.includes(rid)) ? rid : ids[0];
+  //
+  // …AND "TOLD NO" MEANS NO, not "printed somewhere else" (sweep #10 T15, 2026-10-12). A rid that was
+  // sent and is not in scope used to fall through to `ids[0]`, so a Test pressed on a screen opened
+  // before the owner lost a restaurant printed a sample on their OTHER restaurant's printer, and the
+  // reply said "Sample sent". Only a request that names NO restaurant gets the default.
+  const target = rid
+    ? (isRestaurantId(rid) && (scope.all || ids.includes(rid)) ? rid : "")
+    : ids[0];
   if (!target) return NextResponse.json({ error: "Not your restaurant." }, { status: 403 });
 
   const kind = String(body.sample || "");

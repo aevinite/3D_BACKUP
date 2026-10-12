@@ -2327,8 +2327,14 @@ if (!browser) {
         const vis = (el) => (typeof el.checkVisibility !== "function"
           || el.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true }))
           && el.getBoundingClientRect().width > 0;
+        // THE SETUP, NOT THE HISTORY (sweep #10 T15, 2026-10-12). The "What has printed" log is a
+        // table of the last twelve jobs, each with its own "Take it out" / "Print it again", so this
+        // count grew with however much this run and the runs before it had printed — and with every
+        // computer linked to the restaurant (the owner's own PC is on French House now). It went
+        // red at 41 with the board unchanged since 2026-09-16. His complaint was about the SETUP
+        // being "too much complicated"; a log row is not a setting, so it is not counted here.
         return { text: root.innerText,
-          controls: [...root.querySelectorAll("button, select, input, a")].filter(vis).length };
+          controls: [...root.querySelectorAll("button, select, input, a")].filter((el) => vis(el) && !el.closest("table")).length };
       })()`);
       modeCounts[m] = seen.controls;
       await page.close();

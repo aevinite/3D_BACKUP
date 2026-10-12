@@ -745,7 +745,8 @@ Three parts:
 
 1. **The basket** — `print_jobs` (mig 269, auto-queued by mig 335). Already live. A ticket is a
    ROW, which is what makes it survive a covered window, a reload, a power cut.
-2. **The helper** — a ~40-line script on a computer that has printers. It polls, prints, confirms.
+2. **The helper** — one plain-text script per system on a computer that has printers (it began as
+   ~40 lines; with self-start, lanes and printer states it is several hundred now). It polls, prints, confirms.
    It holds NO rules and NO layout: the brain stays server-side so their machine is never
    revisited.
 3. **The address book** — per-restaurant routing rules in `settings.modules.printing`
@@ -765,7 +766,7 @@ CloudPRNT printer polls too, which is why it would drop straight into this desig
 |---|---|---|---|
 | 1 | `auto_print_kot_allowed` — printing exists for this restaurant | admin | nothing about printing renders anywhere (R36: no greyed-out controls) |
 | 2 | `auto_print_kot` — auto-print on | restaurant | "Auto-print is off" |
-| 3 | a route for that kind of paper | admin (or owner if granted) | "Kitchen slips: no printer chosen" |
+| 3 | a route for that kind of paper | admin only — setting printers up is Aevidine's (2026-09-14; the owner may only press Test) | "Kitchen slips: no printer chosen" |
 | 4 | the helper running | installed once, autostarts | "Shop's computer — last seen 6 minutes ago", notes wait |
 
 Tick 1 is DELIBERATELY the existing switch. Printing is already an admin-controlled feature
@@ -779,7 +780,7 @@ forget.
 | column | why |
 |---|---|
 | `id`, `restaurant_id`, `name` | "Shop's computer", "My Mac" — renameable, shown in every dropdown |
-| `token_hash` | the helper's code, stored **hashed** (sha-256). The plaintext is shown once, at install |
+| `token_hash` | the helper's code, stored **hashed** (sha-256). Since mig 380 no person ever sees it: the screen shows a ten-minute SETUP code (itself stored hashed in `print_setup_codes`), and the helper trades that for this token and keeps it on its own disk |
 | `fingerprint` | the machine that first used the code. A second machine reporting the same code with a different fingerprint is flagged, not silently accepted — that is the "someone copied the helper file" case |
 | `printers jsonb` | what the machine reported it can see, e.g. `[{name:"Printer_POS_80", desc:"…"}]`. Dropdowns are built from THIS, so a printer nobody owns can never be chosen |
 | `last_seen_at` | every poll touches it — this is the "connected / last seen 6m ago" line |
@@ -807,13 +808,19 @@ Agent-facing (`app/api/print-agent/[...path]/route.ts`), token in `X-LFH-Agent`:
 
 | route | does |
 |---|---|
-| `POST /hello` | register or heartbeat: fingerprint + printer list in, agent identity + poll interval out |
-| `GET  /next` | claim the next job for me (atomic), or 204 |
+| `POST /pair/claim` | the ONE verb with no token: trade a ten-minute setup code for this machine's token (mig 380). Behind a 20-tries-in-ten-minutes wall per address; every wrong code reads the same |
+| `POST /hello` | heartbeat: fingerprint + printer list in, agent identity + poll interval out. The Mac and Linux helpers send it every fifth round; the Windows one once, at start |
+| `GET  /next` | claim the next job for me (atomic), or 204. `?max=N` (1–4) asks for a batch — at most two per printer — answered as `{ jobs: [...] }` |
 | `GET  /job/:id/document` | the finished HTML for that job — built by `public/panels/billdoc.js`, the SAME file the screen prints, so there is never a second layout |
-| `POST /job/:id/done` · `/failed` | close it, or hand it back with a reason (and open a printer_event) |
+| `POST /job/:id/done` · `/failed` | close it, or hand it back with a reason; the FIFTH failure parks it and files a printer problem + pings the owner |
 
-Admin-facing (`/api/admin/printing/*`, behind `tokenIsValid` like all 48 others): list/rename/
-revoke agents, read/write routes, mint an install code, send a test page.
+Admin-facing (`/api/admin/printing/*`, behind `tokenIsValid` like every other admin route — count
+them with `find app/api/admin -name route.ts | wc -l`, never from this line): the overview, the
+board's state, show a setup code, rename/unlink a computer, read/write routes, the whole-feature
+switch, stop/restart/clear the queue, take out / print again one ticket, and a test page or a
+real sample of each paper. (Corrected 2026-10-12, sweep #10 T15: this table still offered the
+per-machine code that mig 368 deleted, left out `pair/claim` and the batch, and carried a typed
+route count three changes out of date.)
 
 ## The helper itself
 
@@ -828,10 +835,10 @@ loop:  curl /next  →  save HTML  →  chrome --headless=new --print-to-pdf  �
 ```
 
 **The one platform wart:** Windows has no built-in "print this PDF silently to that printer".
-Options, to be settled by testing on a real Windows box in stage 5: bundle SumatraPDF portable
-(~6 MB, no installer, `-print-to "<name>" -silent`), or — for thermal printers only — skip PDF
-entirely and copy the raster to the printer share (`\\localhost\<name>`). Whichever wins gets
-written into the guide; the other stays documented as the fallback.
+SETTLED: the helper fetches **SumatraPDF 3.6.1** portable once, from the vendor's own site, checks
+it against a pinned sha-256 before it is ever run (a mismatch is deleted and refused), and prints
+with `-print-to "<name>" -silent`. (Until 2026-10-12 this paragraph still said "to be settled in
+stage 5"; the raster-to-printer-share idea was never needed.)
 
 ## Stages (each one lands on its own)
 

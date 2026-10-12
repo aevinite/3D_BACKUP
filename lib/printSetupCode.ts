@@ -276,14 +276,16 @@ export async function claimSetupCode(rawCode: string, machine: ClaimMachine): Pr
   // The device that ISSUED the code is the honest answer: somebody pressed the button on that
   // screen, on that machine, moments ago. An admin-issued code carries no device, and the row
   // correctly gets none — which is exactly what "Aevidine set this one up" looks like on screen.
-  let made = await createAgent(row.restaurant_id, name, {
-    deviceId: row.issued_device, userId: row.issued_by,
-  });
+  const issuedBy = { deviceId: row.issued_device, userId: row.issued_by };
+  let made = await createAgent(row.restaurant_id, name, issuedBy);
   // AND A BELT AS WELL AS BRACES. Two machines redeeming two codes at the same moment can both read
   // the same "free" name and race for it, and the loser must not be handed a database word either.
+  // …and the loser keeps WHO set it up (sweep #10 T15, 2026-10-12): the retry used to drop the
+  // issuing device, so the computer that lost the race was the one machine whose own panel still
+  // said "this computer is not set up yet" — the exact fault the paragraph above was written for.
   for (let n = 2; "error" in made && /already a computer with that name/i.test(made.error) && n < 200; n++) {
     name = `${wanted} (${n})`;
-    made = await createAgent(row.restaurant_id, name);
+    made = await createAgent(row.restaurant_id, name, issuedBy);
   }
   if ("error" in made) {
     // The code was spent to win the race and the computer could not be made. Hand the code BACK

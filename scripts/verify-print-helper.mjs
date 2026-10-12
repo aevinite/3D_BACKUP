@@ -661,6 +661,14 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     && /already a computer with that name/i.test(codeLib),
     "a machine re-linking under its own name is renamed, never refused — revoked rows count too",
     "claimSetupCode filters revoked rows out of its name check again, or dropped the retry: unlink a computer, run the helper, type a fresh code, and the person at the printer is shown a uniqueness error");
+  {
+    // EVERY computer a code makes remembers which screen issued it — the retry included (sweep #10
+    // T15). The race loser was created with no device, so its own panel said "not set up yet".
+    const calls = [...code(codeLib).matchAll(/createAgent\(([^)]*)\)/g)].map((m) => m[1]);
+    check(calls.length >= 2 && calls.every((a) => a.split(",").length >= 3),
+      "every computer a setup code creates carries the device that issued the code, the name-clash retry too",
+      `lib/printSetupCode.ts calls createAgent without the issuing device (${calls.filter((a) => a.split(",").length < 3).join(" · ")}) — that machine's own panel will say it is not set up`);
+  }
   check(/expires_at/.test(codeLib) && /SETUP_CODE_TTL_MS = 10 \* 60_000/.test(codeLib),
     "…and it dies in ten minutes, which is the owner's own number",
     "the ten-minute life is gone from lib/printSetupCode.ts — a code left on a screen stays usable");
@@ -826,6 +834,17 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   check(/id="after"/.test(read("public/print-setup.html")) && /They shut the computer down at night/.test(read("public/print-setup.html")),
     "the guide answers what happens after it is installed — shutdowns, restarts, a new computer",
     "the after-install section is gone from /print-setup.html");
+  // A SECOND TAP ON COPY COPIES THE COMMAND, NOT "Copied ✓" (sweep #10 T15, item 8). The handler
+  // stripped a trailing "Copy" off the block's text, and the button says "Copied ✓" for 1.8 s after
+  // a press — so a double-tap put the words on the clipboard and broke the last pasted line. It must
+  // read the block with its button removed, not trim a word it guesses is there.
+  {
+    const g = read("public/print-setup.html");
+    const h = g.slice(g.indexOf('querySelectorAll("pre[data-copy]")'));
+    check(/cloneNode\(true\)/.test(h.slice(0, 900)) && /\.remove\(\)/.test(h.slice(0, 900)) && !/pre\.innerText\.replace\(/.test(h.slice(0, 900)),
+      "the guide's Copy reads the block without its own button, so a second tap copies the same command",
+      "public/print-setup.html derives the copied text by trimming the button's word off pre.innerText — a double-tap copies 'Copied ✓' onto the end of the command");
+  }
 }
 
 // ── 8e · THREE THINGS A REVIEW CAUGHT (owner relayed them, 2026-08-28) ────────────────────────
@@ -1103,6 +1122,35 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     "the sanitiser is now eating ordinary names");
 }
 
+// ── 8i · A WINDOWS PATH KEEPS ITS BACKSLASH ON THE WAY OUT OF THE APP (sweep #10 T15, 2026-10-12) ──
+//
+// Both files are JavaScript TEMPLATE strings, and inside one a lone `\s` is not a backslash and an
+// s — it is just "s". The Windows print-station file therefore shipped
+//     echo …>>"%LOGDIR%station.log"
+// for five weeks: the log landed BESIDE its folder (`…\AevidinePrintHelperstation.log`), the folder
+// the T11 fix of 2026-09-04 made "so the station leaves a trace" stayed empty, and every read of the
+// SOURCE looked right. So this asserts on the GENERATED text: no `%VAR%` glued straight onto a name.
+// (Node strips the TypeScript types itself; if it ever cannot, the check FAILS rather than passing.)
+{
+  const gen = [];
+  try {
+    const st = await import(new URL("../lib/printStationScript.ts", import.meta.url));
+    const hp = await import(new URL("../lib/printHelperScript.ts", import.meta.url));
+    gen.push(["the Windows print-station file", st.stationScript("windows", { origin: "https://example.test", panel: "kitchen", label: "x" })]);
+    gen.push(["the Windows print-helper file", hp.helperScript("windows", { origin: "https://example.test" })]);
+  } catch (e) { fails.push(`could not generate the two Windows files to check them: ${e && e.message}`); }
+  for (const [what, txt] of gen) {
+    const glued = txt.split("\n").filter((l) => !/^\s*REM\b/i.test(l) && /%[A-Z_]+%[A-Za-z]/.test(l));
+    check(txt.length > 1000 && glued.length === 0,
+      `${what}: every %FOLDER% is followed by a backslash, so nothing is written beside its folder`,
+      `${what} glues a folder variable straight onto a file name (a template string ate the backslash): ${glued.map((l) => l.trim().slice(0, 100)).join(" · ")}`);
+  }
+  const station = (gen[0] || ["", ""])[1];
+  check(/>>"%LOGDIR%\\station\.log"/.test(station),
+    "the print station's start-up line goes INTO its log folder",
+    "the Windows print station no longer writes its start-up line to %LOGDIR%\\station.log");
+}
+
 // ── 8h · THE BACKUP PRINTER IS GONE, AND STAYS GONE (T25 round 3, item 39, 2026-08-31) ────────────
 //
 // Removed across nine files on 2026-08-30 at the owner's word: *"What is this backup printer and all
@@ -1283,6 +1331,24 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
     && (script.match(/if \[ "\$HCODE" != "401" \]/g) || []).length >= 2,
     "…and only the site actually refusing the code (401) counts as being unlinked",
     "the helper throws its own token away on ANY answer that is not ok:true — an empty reply, a timeout or a 502 mid-deploy then unlinks a restaurant's printer and it needs a new setup code");
+  // …AND THE THIRD FILE, which the two counts above never looked at (sweep #10 T15, 2026-10-12).
+  // The Windows helper says hello ONCE, when the PC starts — the moment its Wi-Fi is least likely to
+  // be up — and deleted its token on anything that was not ok:true. Asserted on the GENERATED file:
+  // the status is captured, a non-200/401 waits and asks again, and the token is only deleted after
+  // both of those gates.
+  {
+    let win = "";
+    try { win = (await import(new URL("../lib/printHelperScript.ts", import.meta.url))).helperScript("windows", { origin: "https://example.test" }); }
+    catch (e) { fails.push(`could not generate the Windows helper to check its unlink rule: ${e && e.message}`); }
+    const at = (s) => win.indexOf(s);
+    const del = at('del /q "%TOKENFILE%"');
+    check(del > 0
+      && at('-w "%%{http_code}"') > 0 && at('-w "%%{http_code}"') < del
+      && at('if not "%HCODE%"=="200" if not "%HCODE%"=="401" (') > 0 && at('if not "%HCODE%"=="200" if not "%HCODE%"=="401" (') < del
+      && at('if errorlevel 1 if not "%HCODE%"=="401" (') > 0 && at('if errorlevel 1 if not "%HCODE%"=="401" (') < del,
+      "…the Windows helper too: only a 401 unlinks it, and a PC that starts before its Wi-Fi keeps its code",
+      "the Windows helper deletes its token on any hello that is not ok:true — a PC that boots before its Wi-Fi is up unlinks itself and stops printing until somebody fetches a new setup code");
+  }
   // Counted in both files, for the same reason as the check above.
   check((script.match(/cp -f "\$SELF" "\$run\.new"/g) || []).length >= 2
     && (script.match(/mv -f "\$run\.new" "\$run"/g) || []).length >= 2,
@@ -1566,6 +1632,18 @@ check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(e
   check(/paperStatus\(/.test(read("lib/printBoard.ts")) && /paperStatus\(target\)/.test(ownerApi2),
     "…and both the board and the owner's own route read that one function, never their own copy",
     "a screen has started deriving the printing status itself — that is how two boards come to disagree");
+  // ── THE OWNER'S TEST BUTTON NEVER PRINTS AT A RESTAURANT IT DID NOT NAME (sweep #10 T15) ─────
+  // The POST took `rid` when it was in scope and otherwise fell back to the owner's FIRST
+  // restaurant — so a stale screen's Test printed a sample on a different restaurant's printer and
+  // answered "Sample sent". A named restaurant that is not theirs must be refused; only a request
+  // naming none gets the default.
+  {
+    const post = code(ownerApi2).slice(code(ownerApi2).indexOf("export async function POST"));
+    const pick = (post.match(/const target = [\s\S]*?;/) || [""])[0];
+    check(/rid\s*\?\s*\(/.test(pick) && /:\s*""\s*\)/.test(pick) && /:\s*ids\[0\]/.test(pick),
+      "the owner's Test refuses a restaurant it was not given, instead of printing at their first one",
+      "app/api/owner/printing POST falls back to ids[0] for a named rid that is out of scope — a stale screen's Test prints at a different restaurant");
+  }
   // ── AN OWNER WITH MORE THAN ONE RESTAURANT (owner, 2026-09-14) ─────────────────────────────
   // Two faults, both measured on his own account, both of which made the owner's screen state
   // something confidently wrong rather than say nothing:
@@ -1910,6 +1988,17 @@ check(!/id: "kitchen", label: "Kitchen"/.test(epanel) && !/kotPreviewBtn/.test(e
 check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan),
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",
   "the print-helper design doc has shrunk to a stub");
+
+// …and its REFERENCE half describes today, not the first draft (sweep #10 T15, item 9). The dated
+// sections are history and may say anything; the undated "Endpoints" table is what a reader trusts,
+// and it still listed the deleted install code, left out the one tokenless verb, and quoted a route
+// count that had moved three times.
+{
+  const ep = plan.slice(plan.indexOf("## Endpoints"), plan.indexOf("## The helper itself"));
+  check(/`POST \/pair\/claim`/.test(ep) && /\?max=/.test(ep) && !/install code|all 48 others/.test(ep) && /FIFTH failure/.test(ep),
+    "docs/PRINT-HELPER.md's Endpoints table is today's: pair/claim, the batch, and when a failure tells somebody",
+    "docs/PRINT-HELPER.md's Endpoints table has drifted from the route again (pair/claim, ?max=, the fifth-failure rule, or a hard-coded admin route count)");
+}
 
 // ── 10 · WHICH PRINTERS, AND WHETHER THEY ARE ON (owner, 2026-09-14) ─────────────────────────
 // *"Right now, which printer are connected and which are online and all offline, all that stuff is
