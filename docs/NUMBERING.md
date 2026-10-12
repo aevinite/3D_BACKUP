@@ -10,7 +10,7 @@ some point, and they behave differently. This is the one page that says which is
 | Resets | every business day (05:00 IST) | every business day (05:00 IST) | **never** |
 | Given out when | the order is created | the table's **first order** lands | someone generates a tax invoice |
 | Per restaurant | yes | yes | yes |
-| Can have gaps | no (by design) | **yes** | **yes** |
+| Can have gaps | no (by design) | **yes** | only in history from before 2026-09-25 — see below |
 
 ## Why the day starts at 05:00, not midnight
 
@@ -28,6 +28,11 @@ so a day of ordinary floor work left big holes in the series for tables that nev
 Gaps can still appear, and each is honest:
 
 * a table was opened, ordered, and the order was later **cancelled** — the number stays spent;
+* the order was **moved** to another table, or the table was **merged** into another party — the
+  first table keeps the number it drew and closes with nothing on it, while the food is billed on
+  the table it went to (the move itself is in the Activity log as `order_move` / `table_shift` /
+  `table_merge`). A table an order moves ONTO draws its own number then, if it had none
+  (`trg_assign_bill_on_relink`);
 * two tables' first orders landed in the same instant — the counter is atomic, so they get
   different numbers, never the same one (migration 051 takes a row lock to guarantee it).
 
@@ -75,11 +80,16 @@ did. It is a decision about the customer's piece of paper only.
 
 ## A reprint is not a number, and not an event
 
-`sessions.bill_printed_at` (migration 333, re-commented by migration 339) records that a bill has
-been printed before. It exists so a panel's button can read **"Reprint"** — nothing more. The
-printed bill says nothing at all about being a second copy (owner, 2026-08-19; R37 in
-`docs/REJECTED-IDEAS.md`, guarded by `npm run verify:bill-reprint`), and no number is drawn or
-changed by a reprint. **Reopening** a bill is a different act and that one IS in the Audit.
+Printing a bill again draws no number, changes no number, and is recorded nowhere. The printed bill
+says nothing about being a second copy (owner, 2026-08-19 — R37 in `docs/REJECTED-IDEAS.md`), and
+since 2026-10-10 the bill's button always says **"Print"** — it never turns into "Reprint" (owner:
+*"this was for kot not bill so remove the thing"* — R62). Both are guarded by
+`npm run verify:bill-reprint`.
+
+`sessions.bill_printed_at` (migration 333, re-commented by 339) is still a column in the table, but
+nothing writes or reads it any more: the stamp it held existed only to relabel that button, and the
+route that set it was deleted with the label. **Reopening** a bill is a different act and that one
+IS in the Audit.
 
 The kitchen ticket keeps its big DUPLICATE banner (owner, 2026-08-04, re-confirmed 2026-08-19) —
 a cook who mistakes a duplicate for a fresh order cooks the food twice.
@@ -89,10 +99,17 @@ a cook who mistakes a duplicate for a fresh order cooks the food twice.
 A tax invoice number must be sequential forever, so it comes from a different counter
 (`seq_counters`, migration 037) that has no day in its key.
 
-When an invoice is **voided**, the number stays on the record and is never reused; re-issuing
-draws a fresh one (migration 073). So the invoice series can skip a number, and the skipped one is
-still findable on the voided record with its reason and timestamp. That is the compliant
-behaviour — a void that silently reused its number would be the opposite.
+**Once issued, an invoice number is final** (migration 398): the database refuses any change to a
+bill's `invoice_no` or `invoice_at`, so a number cannot be moved, re-dated or laundered. Reopening an
+invoiced bill sets the invoice aside while the table is served again (`invoice_voided`), and putting
+it back brings back **the same number and the same date**, with `invoice_reopen_count` going up by
+one so the bill can show it was reopened (migration 407, owner 2026-09-25). A reopen is the same
+supply still being served, not a new sale, so it takes no new number.
+
+Before 2026-09-25 it was the other way round — re-issuing a reopened bill drew a fresh number and
+left the old one on the record marked voided (migration 073) — so the invoice series of an older
+restaurant can still skip a number from that time. It was never reused, and every generate and
+void since migration 189 is in `invoice_events` with its number, reason and timestamp.
 
 **A bill that was CANCELLED before any invoice existed never takes a number at all** (owner,
 2026-08-16; migration 331). Until then `lfh_generate_invoice` would happily draw the next number
@@ -100,6 +117,18 @@ for a bill whose every order was cancelled — the series gained a number attach
 paper that printed was the "CANCELLED — NO CHARGE" sheet carrying a live invoice number. The two
 cases read the same in a list and are opposites: **no supply → no invoice**, but **invoice already
 issued → the number is retired, not freed**. Full rule: `docs/COMPLIANCE-GUARDRAILS.md` §3.0.
+
+## Which year the invoice number carries
+
+A printed invoice number reads `<prefix>/<financial year>/<six digits>` — `INV/2026-27/000042`.
+The year in the middle is **India's financial year, April to March**, taken from the invoice's
+**own issue date** in India time, never from today and never from the printing device's clock
+(`financialYear()` in `public/panels/billdoc.js`). So a March invoice reprinted in April still says
+`2025-26`, and a tablet set to London prints the same number as one set to Mumbai.
+
+The year is part of how the number is WRITTEN, not of how it is counted: the counter itself has no
+year in its key and does **not** restart on 1 April — every number stays unique for the life of the
+restaurant. The prefix is the restaurant's own (admin console → the restaurant's Settings → Billing → "Invoice prefix", default `INV`).
 
 ## One KOT series, all channels
 
@@ -123,11 +152,14 @@ today.
 | bill number on first order, not on open | `040_bill_no_lazy_and_otp_rename.sql` |
 | 05:00 IST business day | `044_business_day_counter.sql` |
 | two first orders in the same instant get different numbers | `051_concurrency_integrity_guards.sql` |
-| invoice generate / void | `073_invoice_pipeline.sql` |
+| invoice generate / void (before 2026-09-25 a re-issue drew a new number) | `073_invoice_pipeline.sql` |
 | per-restaurant counters | `080_tenant_counters.sql` |
+| every invoice generate / void kept in a trail | `189_invoice_events_and_settled_lock.sql` |
 | one series for parcel, banquet and the delivery platforms | `261_parcel_platform_bill_numbers.sql` |
 | no duplicate KOT on a backdated write | `296_database_layer_a_sweep_fixes.sql` |
 | a cancelled sale takes no invoice number | `331_a_cancelled_sale_takes_no_invoice_number.sql` |
 | every issued bill is signed and chained | `332_every_bill_is_signed_and_chained.sql` |
-| a bill remembers it has been printed (so the button can say "Reprint") | `333_a_reprinted_bill_knows_it_is_a_reprint.sql` |
-| …and the printed bill says nothing about it | `339_a_reprinted_bill_says_nothing.sql` |
+| the bill-printed stamp (still a column; nothing has written or read it since 2026-10-10, R62) | `333_a_reprinted_bill_knows_it_is_a_reprint.sql` |
+| …and the printed bill says nothing about being a second copy | `339_a_reprinted_bill_says_nothing.sql` |
+| an issued invoice number and date can never change | `398_an_issued_invoice_is_final_and_a_cancelled_one_is_corrected.sql` |
+| a reopened bill keeps its invoice number | `407_a_reopened_bill_keeps_its_number.sql` |

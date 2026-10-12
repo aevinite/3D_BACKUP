@@ -391,7 +391,9 @@
        strictly better than printing nothing. */
     var rows = (d.lines || []).filter(Boolean).map(function (i) {
       var q = Number(i.qty) || 1;
-      var opts = Array.isArray(i.options) ? i.options.filter(function (x) { return Number(x.price); }) : [];
+      // …and an empty entry inside a dish's ADD-ONS costs nothing either (sweep #10 T14, 2026-10-12):
+      // `x.price` on a null option threw, and the guest's bill window came up blank.
+      var opts = Array.isArray(i.options) ? i.options.filter(function (x) { return x && Number(x.price); }) : [];
       var addUnit = opts.reduce(function (a, x) { return a + (Number(x.price) || 0); }, 0);
       var baseUnit = (parseFloat(i.price) || 0) - addUnit;
       measure("qty", pn(q)); measure("rate", pn(baseUnit)); measure("amt", pn(baseUnit * q));
@@ -1621,7 +1623,14 @@
   function billData(a) {
     a = a || {};
     var s = a.settings || {};
-    var orders = a.orders || [];
+    /* A HOLE IN THE ORDERS LIST MUST NOT COST THE BILL — HERE TOO (sweep #10 T14, 2026-10-12).
+       billMoney() was taught this on 2026-09-07 (T11 sweep #8) and its note says why: a throw here
+       is a BLANK bill window. But billData() — the function every panel actually calls to make the
+       bill — then read `o.status` on the very same list three more times, so billData({orders:
+       [null, order]}) still threw, after billMoney had survived it. verify:print-paper asserted the
+       guard on billMoney and never on billData, so the guard and the bill disagreed. Dropped once,
+       here, so every read below sees the same list billMoney saw. */
+    var orders = (a.orders || []).filter(Boolean);
     var m = a.money || billMoney(orders, s);
     // THE ITEM ROWS AND THE MONEY MUST DROP THE SAME ORDERS (2026-08-06). billMoney() was taught
     // on 2026-08-05 to exclude a soft-deleted order from the subtotal, the tax and the TOTAL; this
@@ -1660,8 +1669,17 @@
     var printCust = s.bill_customer_print !== false;
     var row = orders.find(function (o) { return o.bill_cust_name || o.bill_cust_phone; }) || {};
     var named = orders.find(function (o) { return String(o.customer_name || "").trim(); }) || {};
-    var cust = printCust ? (row.bill_cust_name || named.customer_name || "") : "";
-    var phoneRaw = printCust ? String(row.bill_cust_phone || "").replace(/\D/g, "") : "";
+    /* THE PAIR LIVES ON THE SESSION — THE BILL ITSELF — SO READ IT FROM THERE TOO (sweep #10 T14,
+       2026-10-12). Mig 227 stores the customer on `sessions.cust_name / cust_phone`, and only the
+       MANAGER panel's route copied it onto each order as `bill_cust_*` before calling this. The
+       waiter tablet's route and the print helper (lib/printDocs.ts) hand over plain order rows, and
+       `orders` has no such columns — so a bill printed from the waiter tablet, or by a print computer,
+       never said who it was made out to, at a restaurant that asked for it on the paper. Same
+       restaurant, same bill, different paper depending on which screen pressed Print: the fault this
+       file was created to end. The order copy still wins when it is there. */
+    var sessFor = a.session || {};
+    var cust = printCust ? (row.bill_cust_name || sessFor.cust_name || named.customer_name || "") : "";
+    var phoneRaw = printCust ? String(row.bill_cust_phone || sessFor.cust_phone || "").replace(/\D/g, "") : "";
     // 10 digits print as "98250 12345" — easier to read back to a guest than one long run.
     //
     // A COUNTRY CODE MUST NOT COST THE GROUPING (2026-08-06). The grouping applied at EXACTLY ten
@@ -1841,6 +1859,13 @@
          set its own word was always consistent and is untouched. */
       mrpNote: inside > 0 ? "MRP items include " + inr(inside) + " " + bi.taxLabel : "",
       autoPrint: a.autoPrint !== false,
+      /* THE GUEST'S POINTS, PASSED THROUGH (sweep #10 T14, 2026-10-12). The manager panel and the
+         waiter tablet both fetch the points (one request per print) and hand them in HERE, and this
+         object never carried them out — so billDocHtml saw no `loyalty` and the points block, the
+         one thing that makes the feature cost ₹0 to run, never printed from either panel. Only the
+         print helper, which hands them straight to billDocHtml, ever printed them. Absent stays
+         absent: a restaurant with the module off still gets byte-for-byte the same sheet. */
+      loyalty: a.loyalty || null,
     };
   }
 
@@ -2042,8 +2067,9 @@ function banquetDocHtml(a) {
       ? [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }]
       : [{ label: bi.taxLabel, rate: Math.round(billRate * 10000) / 100 }]);   // one word — see billData's mrpNote
   let taxRows;
-  if (Array.isArray(b.tax_lines) && b.tax_lines.length) {
-    taxRows = b.tax_lines.map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));
+  if (Array.isArray(b.tax_lines) && b.tax_lines.filter(Boolean).length) {
+    // …and so does an empty frozen tax line (sweep #10 T14, 2026-10-12).
+    taxRows = b.tax_lines.filter(Boolean).map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));
   } else {
     const rateSum = comps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
     let run = 0;
@@ -2171,8 +2197,10 @@ function banquetDocHtml(a) {
 
   // Terms box: the advances, the remark, and the function line — each only if present.
   const terms = [];
-  for (const a of (b.advances || [])) {
-    if (Number(a.amt) > 0) {
+  // An empty entry in the advances list (JSONB, written with no cast — see bqDay above) costs that
+  // one line, never the sheet (sweep #10 T14, 2026-10-12: `a.amt` on null threw).
+  for (const a of (Array.isArray(b.advances) ? b.advances : [])) {
+    if (a && Number(a.amt) > 0) {
       const d = bqDay(a.date);
       terms.push(`${esc(String(a.mode || "").toUpperCase())} PAY${d ? " DT." + d : ""} — ${bq0(a.amt)}/-`);
     }

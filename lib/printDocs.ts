@@ -16,20 +16,46 @@ import { TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 
 const IDENTITY_COLUMNS = "restaurant_name, restaurant_address, restaurant_phone, gstin, invoice_prefix, bill_footer, tax_label, table_names";
 
+// WHAT THE GUEST'S BILL READS BEYOND TAX AND IDENTITY (sweep #10 T14, 2026-10-12). billData reads
+// `bill_customer_print` (does the customer's name and mobile print — the restaurant's own switch) and
+// `mrp_tax_treatment` (does the "MRP items include ₹X GST" note print). Neither was selected, so the
+// helper's bill treated an absent switch as ON and an inclusive-MRP restaurant as "none" — the same
+// bill coming out different from a print computer than from the manager panel. verify:print-helper
+// derives every setting the documents read from billdoc.js and fails if a read here misses one.
+const BILL_COLUMNS = "bill_customer_print, mrp_tax_treatment";
+
 // THE BANQUET SHEET'S OWN PAPER (mig 237). `bqPaper(settings)` reads these eight, and a column that
 // is not SELECTED comes back undefined — so it fell back to every default and the helper printed a
 // sheet the restaurant had not set up: A5 when they had chosen A4, 33/14/6mm margins whatever they
 // had typed, the signature line and the filler rows back on. The manager's own screen was always
 // right because it hands the whole settings row to the same function; only the helper's copy was
 // short. Found by the printing sweep on 2026-08-29, asking for A4 and measuring A5.
+//
+// …AND THE SHEET'S OWN TAX LINES AND FIELD LIST, for exactly the same reason (sweep #10 T14,
+// 2026-10-12). banquetDocHtml also reads `banquet_tax_components` (bqTaxModel — a banquet is taxed at
+// its OWN rate, mig 239) and `banquet_fields` (bqOn — whether "Prepared by" prints). Neither was
+// selected, so the helper's copy fell back again: every SAMPLE banquet sheet was taxed at the dine-in
+// rate (Aangan, set to CGST 9 + SGST 9 for banquets, printed 2.5 + 2.5), and a real sheet from a
+// restaurant that switched "Prepared by" on came out of the helper without that line while the
+// manager panel's copy had it. verify:print-helper now derives every setting the sheet reads from
+// billdoc.js and fails if this list misses one.
 const BANQUET_PAPER_COLUMNS =
   "banquet_paper, banquet_paper_size, banquet_paper_top, banquet_paper_bot, banquet_paper_side, " +
-  "banquet_paper_foot, banquet_paper_sign, banquet_paper_fill";
+  "banquet_paper_foot, banquet_paper_sign, banquet_paper_fill, banquet_tax_components, banquet_fields";
 
 /**
  * The table as the FLOOR knows it — the table's NAME when the owner set one, else "T7", and "T?"
  * when a row has no table at all (a banquet bill with the table left blank).
  *
+//
+// …AND THE SHEET'S OWN TAX LINES AND FIELD LIST, for exactly the same reason (sweep #10 T14,
+// 2026-10-12). banquetDocHtml also reads `banquet_tax_components` (bqTaxModel — a banquet is taxed at
+// its OWN rate, mig 239) and `banquet_fields` (bqOn — whether "Prepared by" prints). Neither was
+// selected, so the helper's copy fell back again: every SAMPLE banquet sheet was taxed at the dine-in
+// rate (Aangan, set to CGST 9 + SGST 9 for banquets, printed 2.5 + 2.5), and a real sheet from a
+// restaurant that switched "Prepared by" on came out of the helper without that line while the
+// manager panel's copy had it. verify:print-helper now derives every setting the sheet reads from
+// billdoc.js and fails if this list misses one.
  * "T7", NEVER "Table 7" (owner, 2026-08-05: "it should always be T7"). ONE short form everywhere —
  * panels, tickets and the printed bill — which is why this mirrors `tlong()` in the kitchen panel
  * exactly rather than inventing a longer wording for paper.
@@ -143,7 +169,7 @@ export async function kotHtmlForAggregator(rid: string, aggId: string, reprint: 
 export async function billHtmlForSession(rid: string, sessionId: string, opts?: { parcel?: boolean }): Promise<string | null> {
   const [sessQ, setQ, restQ] = await Promise.all([
     sb.from("sessions").select("*").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle(),
-    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}, ${BILL_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
     sb.from("restaurants").select("*").eq("id", rid).maybeSingle(),
   ]);
   const session = sessQ.data as Record<string, unknown> | null;
@@ -181,9 +207,15 @@ export async function billHtmlForSession(rid: string, sessionId: string, opts?: 
 
   // noBar goes to billDocHtml (the DOCUMENT), not to billData (the FIGURES) — they are two different
   // shapes and the compiler said so, which is the third time today a type has caught a real mistake.
+  const restaurant = (restQ.data || {}) as Record<string, unknown>;
+  // THE LOGO THE PANELS PRINT (sweep #10 T14, 2026-10-12) — the manager panel, the waiter tablet and
+  // the admin's preview all hand billData the restaurant's logo under the same http(s)-only rule;
+  // only this copy left it off, so a print computer's bill had no logo on top. The helper renders
+  // with a 4-second virtual-time budget, which lets the image load before the page is printed.
+  const logo = /^https?:\/\//i.test(String(restaurant.logo_url || "").trim()) ? String(restaurant.logo_url).trim() : "";
   return BILLDOC.billDocHtml({ ...BILLDOC.billData({
-    settings, restaurant: (restQ.data || {}) as Record<string, unknown>,
-    orders, session, tableDisp, parcel: !!opts?.parcel,
+    settings, restaurant,
+    orders, session, tableDisp, parcel: !!opts?.parcel, logo,
     // The helper prints it with the machine's own print command — there is no window to fire a
     // dialog in, so the document must not try to print itself.
     autoPrint: false,
@@ -425,7 +457,7 @@ export async function sampleKotHtml(rid: string): Promise<string> {
  *  bill, so the tax rows a restaurant is set up for are the tax rows that come out. */
 export async function sampleBillHtml(rid: string): Promise<string> {
   const [setQ, restQ] = await Promise.all([
-    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}, ${BILL_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
     sb.from("restaurants").select("*").eq("id", rid).maybeSingle(),
   ]);
   const settings = (setQ.data || {}) as Record<string, unknown>;
@@ -486,11 +518,17 @@ export async function sampleBanquetHtml(rid: string): Promise<string> {
   // rate. One source, one answer.
   const bqTm = BILLDOC.bqTaxModel((setQ.data || {}) as Record<string, unknown>) as
     { rate: number; pct: number; components: { label: string; rate: number }[] };
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-  const taxLines = (bqTm.components || []).map((c) => ({
-    label: c.label, rate: c.rate, amt: round2(subtotal * (c.rate / 100)),
-  }));
-  const taxAmt = round2(taxLines.reduce((a, c) => a + c.amt, 0));
+  // …AND A RESTAURANT ON A PLAIN RATE HAS NO COMPONENTS (sweep #10 T14, 2026-10-12). This built its
+  // tax lines from `components` only — EMPTY for a restaurant that set a rate and named no lines, the
+  // default state (French House, Pizza Palace and Demo Bistro among them) — so the sample still printed
+  // "GST 0% · 0.00" for a restaurant charging 5%, the very lie this paragraph says was removed.
+  // The answer is NOT to split the rate here: a caller doing its own CGST/SGST arithmetic is the drift
+  // verify:print-documents forbids. The sample hands over the TAX AMOUNT only, with no frozen lines,
+  // and banquetDocHtml splits it the way it splits any sheet without them — the restaurant's own
+  // banquet components when they describe the rate, else the CGST/SGST halves. One allocator.
+  const round2 = BILLDOC.moneyRound;   // the ONE paisa rule (item 10), not a float round
+  const taxAmt = round2(subtotal * (Number(bqTm.rate) || 0));
+  const taxLines: { label: string; rate: number; amt: number }[] = [];
   const bill = {
     bill_no: null, issued_at: new Date().toISOString(),
     cust_name: "Sample Customer", cust_person: "—", cust_phone: "", cust_addr: "", cust_gstin: "",

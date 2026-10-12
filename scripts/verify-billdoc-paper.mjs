@@ -925,6 +925,27 @@ dateBad.length === 0
                             ["combineBillLines", () => BILLDOC.combineBillLines([null, { title: "Dal", qty: 1, price: 200 }])]]) {
     try { fn(); } catch (e) { broke.push(`${name} with a hole in its lines → ${e.message}`); }
   }
+  /* …AND THE FUNCTION THE BILL ACTUALLY GOES THROUGH (sweep #10 T14, 2026-10-12). This block
+     asserted billMoney and mrpTaxInside and printed "no document is ever a blank window" — while
+     billData(), which every panel and the print helper call to MAKE the bill, read `o.status` on the
+     same list and threw. A guard that checks the helper and not the door is how that line stayed
+     green. Also: an empty entry inside a dish's add-ons, and in a banquet sheet's advances and
+     frozen tax lines — each JSONB, each a database write away from a null. */
+  for (const orders of HOLES) {
+    try {
+      const html = BILLDOC.billDocHtml(BILLDOC.billData({ orders, settings: { tax_rate: 0.05 }, session: { bill_no: 1 } }));
+      if (orders.includes(real) && !/TOTAL<\/span><span>₹105</.test(html)) broke.push(`billData(${JSON.stringify(orders).slice(0, 26)}) printed a TOTAL that is not ₹105`);
+    } catch (e) { broke.push(`billData(${JSON.stringify(orders).slice(0, 26)}) → ${e.message}`); }
+  }
+  for (const [name, fn] of [
+    ["a dish with an empty add-on", () => BILLDOC.billDocHtml(BILLDOC.billData({ orders: [{ ...real, items: [{ title: "Dal", qty: 1, price: 100, options: [null] }] }], settings: { tax_rate: 0.05 } }))],
+    ["billDocHtml with an empty add-on", () => BILLDOC.billDocHtml({ lines: [{ title: "Dal", qty: 1, price: 110, options: [null, { label: "Ghee", price: 10 }] }] })],
+    ["a banquet sheet with an empty advance", () => BILLDOC.banquetDocHtml({ bill: { advances: [null, { amt: 500, mode: "upi" }], subtotal: 100, tax: 5, total: 105 }, lines: [] })],
+    ["a banquet sheet whose advances are not a list", () => BILLDOC.banquetDocHtml({ bill: { advances: { amt: 500 }, subtotal: 100, tax: 5, total: 105 }, lines: [] })],
+    ["a banquet sheet with an empty frozen tax line", () => BILLDOC.banquetDocHtml({ bill: { tax_lines: [null, { label: "CGST", rate: 2.5, amt: 2.5 }], subtotal: 100, tax: 5, total: 105 }, lines: [{ title: "Hall", qty: 1, price: 100 }] })],
+  ]) {
+    try { fn(); } catch (e) { broke.push(`${name} → ${e.message}`); }
+  }
   broke.length === 0
     ? ok("a hole in a list of orders or of lines costs nothing — no document is ever a blank window")
     : bad("a hole in a list throws, and a throw here is a blank window", broke.join(" · "));

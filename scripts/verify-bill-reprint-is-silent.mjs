@@ -44,7 +44,7 @@ const read = (p) => readFileSync(join(ROOT, p), "utf8");
 
 const HOOK = process.argv.includes("--hook");
 // The files the rule lives in. Edit any of them and this runs; edit anything else and it exits.
-const GUARDED = /(panels\/billdoc\.(js|d\.ts)|panels\/editor\/app\.js|panels\/tablet\/app\.js|api\/editor\/\[\.\.\.path\]\/route\.ts|verify-bill-reprint-is-silent\.mjs)$/;
+const GUARDED = /(panels\/billdoc\.(js|d\.ts)|panels\/editor\/app\.js|panels\/tablet\/app\.js|api\/editor\/\[\.\.\.path\]\/route\.ts|docs\/NUMBERING\.md|verify-bill-reprint-is-silent\.mjs)$/;
 if (HOOK) {
   let raw = "";
   try { raw = readFileSync(0, "utf8"); } catch { process.exit(0); }
@@ -195,6 +195,28 @@ say("\n4. THE BILL'S BUTTON ALWAYS SAYS \"PRINT\" — no reprint marking on a gu
     ? ok("the Bills record's print button says Print whatever the bill's history")
     : bad("the Bills record's print button can say Reprint", "R62");
   // The kitchen ticket is the ONE place the reprint word lives (part 2 checks the banner itself).
+}
+
+// ── 5. THE PAGE THAT EXPLAINS THE NUMBERS TEACHES THE RULE AS IT STANDS (sweep #10 T14, 2026-10-12) ──
+// docs/NUMBERING.md is where staff and the next session go to learn "what does a reprint do to a
+// number". Three weeks after R62 it still said bill_printed_at "exists so a panel's button can read
+// Reprint", and that a re-issued invoice "draws a fresh" number — which mig 407 reversed on
+// 2026-09-25. A page that teaches the old rule is how the old rule gets rebuilt. It also never said
+// which YEAR the invoice number carries — a sweep-#8 check claimed it did, because /FY/i matched the
+// "fy" in "verify".
+say("\n5 · docs/NUMBERING.md teaches today's rule");
+{
+  const NUM = read("docs/NUMBERING.md");
+  const wrong = [];
+  if (/button can (?:read|say)[^.\n]{0,12}"?Reprint/i.test(NUM)) wrong.push('says the bill\'s button reads "Reprint"');
+  if (!/always says \*\*"Print"\*\*/.test(NUM)) wrong.push('no longer says the bill\'s button always says "Print"');
+  if (/re-issuing\s+draws a fresh one/i.test(NUM)) wrong.push("says a re-issued invoice draws a fresh number (mig 407 reversed that)");
+  if (!/407_a_reopened_bill_keeps_its_number\.sql/.test(NUM) || !/same number and the same date/i.test(NUM)) wrong.push("does not say a reopened bill keeps its invoice number and date (mig 407)");
+  if (!/financial year/i.test(NUM) || !/April/.test(NUM) || !/financialYear\(\)/.test(NUM)) wrong.push("does not say the invoice number carries India's April–March financial year of its own issue date");
+  if (!/\*\*moved\*\* to another table/.test(NUM) || !/trg_assign_bill_on_relink/.test(NUM)) wrong.push("its list of honest gaps leaves out a moved or merged table — the commonest one on a real floor");
+  wrong.length
+    ? bad("docs/NUMBERING.md teaches an old rule", wrong.join(" · "))
+    : ok("docs/NUMBERING.md: a reprint changes nothing, the button says Print, a reopen keeps its number, and the year is the invoice's own financial year");
 }
 
 if (fails) console.log(`\n${fails} FAILED — a reprint of a BILL is not an event (owner, 2026-08-19).`);

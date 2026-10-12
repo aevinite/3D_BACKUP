@@ -2183,6 +2183,64 @@ for (const f of ["scripts/verify-printing-sweep.mjs", "scripts/verify-print-spee
     "the keychain flags are gone from the helper's Chrome — a locked keychain could stall printing behind a modal nobody sees");
 }
 
+// ── THE HELPER'S PAPER READS EVERY SETTING THE DOCUMENT READS (sweep #10 T14, 2026-10-12) ──────────
+// lib/printDocs.ts builds the bill and the banquet sheet from a settings row it SELECTS by column
+// name, and a column that is not selected comes back undefined — so the document silently falls back
+// to a default and the print computer's paper differs from the manager panel's. It happened for the
+// banquet paper size on 2026-08-29 and, found 2026-10-12, for four more: the bill's own "print the
+// customer" switch and MRP-tax setting, and the banquet sheet's own tax lines and field list. So the
+// list is not kept by hand any more: every `s.<key>` / `settings.<key>` the document's functions read
+// is pulled out of billdoc.js, and each builder's select must contain all of them.
+{
+  const { createRequire } = await import("node:module");
+  const req = createRequire(import.meta.url);
+  const src = read("public/panels/billdoc.js");
+  const body = (fn) => { const i = src.indexOf("function " + fn + "("); if (i < 0) return ""; let j = src.indexOf("\n  function ", i + 10); const k = src.indexOf("\nfunction ", i + 10); if (k > 0 && (j < 0 || k < j)) j = k; return src.slice(i, j < 0 ? undefined : j); };
+  const keysOf = (fns) => [...new Set(fns.flatMap((f) => [...body(f).replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1").replace(/\/\*[\s\S]*?\*\//g, "")   // LINE comments first (P99916)
+    .matchAll(/(?:\b(?:s|settings)|\(\s*(?:s|settings)\s*\|\|\s*\{\}\s*\))\.([a-z_]+)/g)].map((m) => m[1])))];
+  const BILL_KEYS = keysOf(["billData", "billIdentity", "taxModel", "priceTaxMode", "billMoney", "mrpTaxInside"]);
+  const BQ_KEYS = keysOf(["banquetDocHtml", "bqPaper", "bqTaxModel", "bqOn", "billIdentity", "taxModel", "priceTaxMode"]);
+  const taxCols = (read("lib/tax.ts").match(/export const TAX_SETTINGS_COLUMNS = "([^"]+)"/) || [])[1] || "";
+  const consts = { TAX_SETTINGS_COLUMNS: taxCols };
+  for (const m of docs.matchAll(/const ([A-Z_]+_COLUMNS) =\s*((?:"[^"]*"\s*\+?\s*)+);/g)) consts[m[1]] = [...m[2].matchAll(/"([^"]*)"/g)].map((x) => x[1]).join("");
+  const selectOf = (fn) => {
+    const i = docs.indexOf(`export async function ${fn}(`);
+    const blk = docs.slice(i, docs.indexOf("\nexport ", i + 10));
+    const m = blk.match(/from\("settings"\)\.select\(`([^`]+)`\)/);
+    if (!m) return null;
+    return new Set(m[1].replace(/\$\{([A-Z_]+)\}/g, (_, k) => consts[k] || "").split(",").map((x) => x.trim()).filter(Boolean));
+  };
+  for (const [fn, keys] of [["billHtmlForSession", BILL_KEYS], ["sampleBillHtml", BILL_KEYS], ["banquetHtmlForBill", BQ_KEYS], ["sampleBanquetHtml", BQ_KEYS]]) {
+    const sel = selectOf(fn);
+    const miss = sel ? keys.filter((k) => !sel.has(k)) : ["(no settings select found)"];
+    check(miss.length === 0 && keys.length >= 10,
+      `lib/printDocs.ts ${fn} selects every setting its document reads (${keys.length} derived from billdoc.js)`,
+      `lib/printDocs.ts ${fn} does not select ${miss.join(", ")} — the print computer's paper falls back to a default the manager panel's does not`);
+  }
+  // The SAMPLE banquet sheet must fall back to the CGST/SGST halves when a restaurant set a rate and
+  // named no lines (the default) — before 2026-10-12 it printed "GST 0% · 0.00" for a 5% restaurant.
+  //    It hands over the tax AMOUNT at the restaurant's banquet rate and NO frozen lines, so the
+  //    document itself splits it (its components, else the halves) — never this file.
+  check(/const taxAmt = round2\(subtotal \* \(Number\(bqTm\.rate\) \|\| 0\)\);/.test(docs)
+      && /tax_lines: taxLines/.test(docs) && /const taxLines: \{ label: string; rate: number; amt: number \}\[\] = \[\];/.test(docs),
+    "lib/printDocs.ts sampleBanquetHtml taxes at the restaurant's banquet rate and lets the document split it — never 0%, never split here",
+    "the sample banquet sheet prints GST 0% for a restaurant that set a rate but named no tax lines");
+  // …and the two things only billData can get right for EVERY caller, run for real:
+  const BD = req("../public/panels/billdoc.js");
+  const ord = { status: "served", subtotal: 200, taxable_base: 200, items: [{ title: "Dal", qty: 1, price: 200 }] };
+  const sess = { cust_name: "Riya Sharma", cust_phone: "9825012345" };
+  const h = (a) => BD.billDocHtml(BD.billData(a));
+  check(/Riya Sharma/.test(h({ orders: [ord], session: sess, settings: {} })) && !/Riya/.test(h({ orders: [ord], session: sess, settings: { bill_customer_print: false } })),
+    "a bill built from plain order rows (the waiter tablet, the print helper) names the customer stored on the session — and hides it when the restaurant says so",
+    "billData ignores the session's own customer — the waiter tablet's and the print computer's bills never say who they are made out to");
+  check(/Points on this bill: 7/.test(h({ orders: [ord], settings: {}, loyalty: { earn: 7, balance: 1, toNext: 0 } })) && !/Points on this bill/.test(h({ orders: [ord], settings: {} })),
+    "the guest's points handed to billData reach the paper (the manager panel and the waiter tablet pass them there)",
+    "billData drops `loyalty` — the points block never prints from the manager panel or the waiter tablet");
+  check(/const logo = /.test(docs) && /parcel: !!opts\?\.parcel, logo,/.test(docs),
+    "lib/printDocs.ts billHtmlForSession hands billData the restaurant's logo, as every panel does",
+    "the print computer's bill has no logo while every panel's copy does");
+}
+
 if (fails.length) {
   console.log(`\n✗ verify:print-helper — ${fails.length} check(s) failed:`);
   for (const f of fails) console.log("   · " + f);
