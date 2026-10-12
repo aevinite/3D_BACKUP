@@ -110,10 +110,22 @@ function handlers(rel) {
   return out;
 }
 
+// THE FILED LIST (round 2, item 13): three routes were retired on 2026-10-12. Their phases keep their
+// ids — every id in LEDGER/T29-S10.md stays where it was — and answer ⏭ with the reason; the live
+// questions are asked of every route that still exists.
+const RETIRED = {
+  "app/api/admin/restaurants/google-review/route.ts": ["GET", "POST"],
+  "app/api/admin/restaurants/platform-channels/route.ts": ["GET", "POST"],
+  "app/api/admin/restaurants/staff-features/route.ts": ["GET", "POST"],
+};
+const GONE = "skip:route retired 2026-10-12 — Access & permissions does this job (a new way replaces the old one)";
+const FILED = [...new Set([...ROUTES, ...Object.keys(RETIRED)])].sort();
+const isGone = (rel) => rel in RETIRED && !ROUTES.includes(rel);
+
 const PHASES = [];
 let section = "";
 const ctx = {
-  BASE, FH, AANGAN, T0, ROOT, ROUTES, sq, count, req, raw, clean, handlers, adminCookie,
+  BASE, FH, AANGAN, T0, ROOT, ROUTES, RETIRED, GONE, FILED, isGone, sq, count, req, raw, clean, handlers, adminCookie,
   sec: (name) => { section = name; },
   phase: (check, how, fn) => PHASES.push({ id: `P${198001 + PHASES.length}`, section, check, how, fn }),
   cache: {},
@@ -123,7 +135,9 @@ const ctx = {
 };
 
 // ── the sections, in a fixed order (the ids depend on it) ────────────────────────────────────────
-for (const f of ["a-gate-and-separation", "b-repair", "c-resolve-error", "d-restaurants", "e-users", "f-access-and-settings", "g-credentials-and-reveal", "h-reports-and-money", "i-small-routes", "j-screens"]) {
+for (const f of ["a-gate-and-separation", "b-repair", "c-resolve-error", "d-restaurants", "e-users", "f-access-and-settings", "g-credentials-and-reveal", "h-reports-and-money", "i-small-routes", "j-screens",
+  // round 2 (2026-10-12, the owner: "check every single bit … dead code … unoptimized thing")
+  "k-dead-code", "l-efficiency", "m-responses", "n-bad-input", "o-every-restaurant", "p-speed"]) {
   (await import(`./sweep/t29s10/${f}.mjs`)).default(ctx);
 }
 

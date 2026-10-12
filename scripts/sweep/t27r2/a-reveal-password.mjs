@@ -114,17 +114,16 @@ export default function section(c) {
     phase(`${label} is refused in words, never with a database sentence`,
       `POST ${P} uncovered with that body`,
       async () => { const r = await req(P, { method: "POST", body, cookie: await uncover() }); return r.status === 400 && /invalid user_id/.test(r.json?.error || "") && !DB_WORDS.test(r.text); });
-  phase("a list holding ONE id is treated as that id — and reaches nobody else",
-    "send [<uuid>] and check the answer is about that uuid alone",
+  phase("a list holding ONE id is refused like any other id that is not text (changed 2026-10-12)",
+    "send [<uuid>] and check it gets the same 400 \"invalid user_id\" as a number or an object",
     async () => {
-      // NOT A FINDING, and worth a row of its own so nobody files it. `String(["<uuid>"])` is the
-      // uuid, so a one-element list passes the shape test and the row is read by that id — which is
-      // the RIGHT person, scoped the right way, with the row deciding its own role and restaurant.
-      // The first draft of this section asserted a 400 here and got a 404 ("That login no longer
-      // exists"), which is an equally honest answer about a uuid that matches no row. Withdrawn.
+      // CHANGED BY SWEEP #10 T29 ROUND 2, ITEM 29. This row used to say "NOT A FINDING": String(["<uuid>"])
+      // is the uuid, the row was read by that id, and it was the right person. Here that held — but the
+      // very same conversion let four OTHER admin doors WRITE for a request no screen sends (French House
+      // switched off, its owner cleared, its colour changed). One rule for every door is safer than a
+      // door-by-door judgement, so every id is now read with textOf(): a list is not an id, and is refused.
       const r = await req(P, { method: "POST", body: { user_id: [NOSUCH] }, cookie: await uncover() });
-      const plain = await req(P, { method: "POST", body: { user_id: NOSUCH }, cookie: await uncover() });
-      return r.status === plain.status && r.text === plain.text;
+      return r.status === 400 && /invalid user_id/.test(r.json?.error || "") && !DB_WORDS.test(r.text);
     });
   phase("a body that is not JSON at all is refused the same way, not with a crash",
     `POST ${P} with a broken body`,

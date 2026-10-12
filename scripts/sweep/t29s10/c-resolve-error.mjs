@@ -50,7 +50,6 @@ export default function section(c) {
     }
     return null;
   };
-  const open1 = () => lonely(false);
   const done1 = () => lonely(true);
   const logs = () => c.count("staff_actions", `action=in.(error_resolved,error_reopened,error_snoozed,errors_resolved_all,errors_snoozed_all)&created_at=gte.${c.T0}`);
   c.phase("a problem named by a malformed id is refused in words", "POST action_id=nope",

@@ -2,17 +2,7 @@
 // say which restaurant (or which one row) it is about? Proved by READING the code — never by calling a
 // route signed out (sweep #10 rule 7). One phase per exported handler, one per file.
 export default function section(c) {
-  // THE FILED LIST (round 2, item 13): three routes were retired on 2026-10-12. Their phases keep their
-  // ids — every id in LEDGER/T29-S10.md stays where it was — and answer ⏭ with the reason; the live
-  // questions are asked of every route that still exists.
-  const RETIRED = {
-    "app/api/admin/restaurants/google-review/route.ts": ["GET", "POST"],
-    "app/api/admin/restaurants/platform-channels/route.ts": ["GET", "POST"],
-    "app/api/admin/restaurants/staff-features/route.ts": ["GET", "POST"],
-  };
-  const GONE = "skip:route retired 2026-10-12 — Access & permissions does this job (a new way replaces the old one)";
-  const FILED = [...new Set([...c.ROUTES, ...Object.keys(RETIRED)])].sort();
-  const isGone = (rel) => rel in RETIRED && !c.ROUTES.includes(rel);
+  const { RETIRED, GONE, FILED, isGone } = c;   // the filed list (round 2, item 13) — defined in the main script
   c.sec("A · the admin login comes first, in every handler of every route (read, not probed)");
   const GATE = /tokenIsValid\(|requireAdmin\(req\)|await admin\(req\)|await gate\(req\)/;
   const DB = /\bsb\.(from|rpc|storage)\(|supabaseAdmin\.(from|rpc)\(|softDeleteOrders\(|closeSession\(|recordRemoval\(|logAction\(|pageAll</;

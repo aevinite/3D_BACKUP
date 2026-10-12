@@ -72,7 +72,7 @@ export default function section(c) {
   // and now checks the job where it really lives.
   const GONE = ["google-review", "platform-channels", "staff-features"];
   c.phase("the retired staff-features door is gone, and no screen, script or library still calls it", "the files are absent; grep app, components, lib and public", async () => {
-    const { existsSync, readdirSync, readFileSync } = await import("node:fs");
+    const { existsSync, readdirSync } = await import("node:fs");
     if (GONE.some((g) => existsSync(`${c.ROOT}app/api/admin/restaurants/${g}/route.ts`))) return "a retired route file is back";
     const walk = (d) => readdirSync(`${c.ROOT}${d}`, { withFileTypes: true }).flatMap((e) => e.name === "node_modules" ? [] : e.isDirectory() ? walk(`${d}/${e.name}`) : /\.(t|j)sx?$|\.mjs$/.test(e.name) ? [`${d}/${e.name}`] : []);
     // Code only, comments stripped: a comment recording that a door was retired is history, not a caller.
