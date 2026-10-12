@@ -33,7 +33,7 @@ export async function harness(o = {}) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 200)));
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script>${o.pre || ""}</script>${o.head || ""}</head><body>${o.body || ""}${(o.scripts || []).map((s) => { const [f, attrs] = s.split("|"); return `<script src="/panels/${f}"${attrs ? " " + attrs : ""}></script>`; }).join("")}${o.after ? `<script>${o.after}</script>` : ""}</body></html>`;
-  await page.route("**/__t16/h.html", (r) => r.fulfill({ contentType: "text/html; charset=utf-8", body: html }));
+  await page.route(/\/__t16\/h\.html(\?.*)?$/, (r) => r.fulfill({ contentType: "text/html; charset=utf-8", body: html }));
   if (o.pages) for (const [p, h] of Object.entries(o.pages)) await page.route(`**${p}`, (r) => r.fulfill({ contentType: "text/html; charset=utf-8", body: h }));
   if (o.from === "site") {
     await page.route(/\/panels\/[a-z0-9\-]+\.js(\?.*)?$/, async (r) => {
@@ -49,6 +49,7 @@ export async function harness(o = {}) {
     if (o.api) { const ans = await o.api(rec, r); if (ans === "handled") return; if (ans) return r.fulfill({ status: ans.status || 200, contentType: "application/json", headers: ans.headers || {}, body: typeof ans.body === "string" ? ans.body : JSON.stringify(ans.body || { ok: true }) }); }
     return r.fulfill({ status: 599, contentType: "application/json", body: '{"error":"t16 harness: no handler"}' });
   });
+  if (o.before) await o.before(page);   // routes / a fake clock that must exist BEFORE the page's scripts run
   await page.goto(BASE + (o.path || "/__t16/h.html"), { waitUntil: "load" });
   return { page, ctx, errors, sent, close: () => ctx.close().catch(() => {}) };
 }
