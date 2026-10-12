@@ -475,5 +475,21 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 18 · A LINK A GUEST WILL TAP MUST BE A WEB ADDRESS (sweep #10 T29 round 2, item 23) ──────────
+// Access & permissions → Ratings → "Google review link" is the one text a guest acts on (the menu's
+// "Review us on Google" card links to it). It took any text, so a link pasted without https:// sent a
+// happy guest to an error page on our own site. Since the google-review door was retired (item 13),
+// this screen is its only writer.
+{
+  const rel = "app/api/admin/restaurants/access-tree/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("Access → the Google review link must be a full https:// web address (empty = no link)",
+      /if \(k === "google_review_url" && t && !\/\^https\?:\\\/\\\//.test(src) && /must be a full web address starting with https:\/\//.test(src),
+      "a link without https:// sends a guest to an error page on our own site");
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

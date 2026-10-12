@@ -404,7 +404,21 @@ export async function POST(req: NextRequest) {
       if (SETTING_KEYS.includes(k) || MODULE_COLS.has(k)) { if (typeof v === "boolean") setPatch[k] = v; continue; }
       if (TABLET_COLS.includes(k)) { if (isTri(v)) setPatch[k] = v; continue; }
       if (CHOICE_KEYS.includes(k)) { if (CHOICE_VALUES[k]?.has(String(v))) setPatch[k] = String(v); continue; }
-      if (TEXT_KEYS.includes(k)) { setPatch[k] = String(v ?? "").slice(0, 400); continue; }
+      if (TEXT_KEYS.includes(k)) {
+        const t = k === "google_review_url" ? String(v ?? "").trim().slice(0, 400) : String(v ?? "").slice(0, 400);
+        // ── A LINK A GUEST WILL TAP MUST BE A WEB ADDRESS (sweep #10 T29 round 2, item 23) ──────────
+        // The Google review link is the one text a GUEST acts on: the menu's "Review us on Google"
+        // card is a link to it. This took any text, so a link pasted without its https:// (say
+        // "g.page/r/…") became a link to a page of OUR site, and a happy guest asked for a review
+        // landed on an error page. The old google-review route checked this, but no screen used that
+        // route — this screen is the only writer, and it never did. Empty still means "no link",
+        // which keeps the Google invite hidden, exactly as the row's own help text says.
+        if (k === "google_review_url" && t && !/^https?:\/\/[^\s/$.?#][^\s]*$/i.test(t)) {
+          return bad("The Google review link must be a full web address starting with https:// — copy it from your Google Business profile → Ask for reviews.");
+        }
+        setPatch[k] = t;
+        continue;
+      }
       if (LIST_KEYS.includes(k)) {
         const legal = CHOICE_VALUES[k];
         const list = (Array.isArray(v) ? v : []).map(String).filter((x) => !legal || legal.has(x));
