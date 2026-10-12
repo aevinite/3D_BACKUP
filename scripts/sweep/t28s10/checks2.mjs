@@ -31,7 +31,7 @@ import { join, relative } from "node:path";
 import { chromium } from "playwright";
 import { adminHeaders, loginAs } from "../login.mjs";
 import { refuseUnlessDevTestDb } from "../devStacks.mjs";
-import { read, strip, handlers, urlOf, queryParams, dbCalls, sentences } from "../t26/s9r2-lib.mjs";
+import { read, strip, handlers, urlOf, queryParams } from "../t26/s9r2-lib.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const BASE = arg("--base", "http://localhost:4428").replace(/\/$/, "");
