@@ -21,6 +21,8 @@ import { adminFail } from "@/lib/adminFail";
 //     empty" is a visible decision rather than an accident.
 // The console's answer is unchanged: still adminFail, still plain words with the raw text in `detail`.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest) {
       .gte("created_at", sinceIso)
       .order("created_at", { ascending: false })
       .limit(500)),
-    rd("restaurants", () => sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, name").is("deleted_at", null).order("id").range(f, t))),
   ]));
   if (reads.failed("orders")) return adminFail("today's cancelled orders", reads.error("orders"), { action: "load" });
   // THE NAME READ IS NOT OPTIONAL HERE, and that is the whole point of this line.

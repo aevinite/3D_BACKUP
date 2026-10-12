@@ -706,7 +706,9 @@ export async function POST(req: NextRequest) {
     // The access-tree route refuses this same read in the same words (T27 sweep #9). Nothing but the
     // restaurant row exists yet, so it is rolled back exactly as the settings-write failure below is.
     if (template.error) {
-      await sb.from("restaurants").delete().eq("id", rid);
+      // The roll-back is looked at too, like the settings-write one below (S10 T28 item 15).
+      const rb = await sb.from("restaurants").delete().eq("id", rid);
+      if (rb.error) console.error("[admin/restaurants] create failed AND its roll-back failed — a half-made restaurant remains:", rid, rb.error.message);
       return adminFail("the new restaurant's settings", template.error, { action: "save" });
     }
     // cleanClonedSettings strips #1's tenant-specific identity/geo/tax (and sets table_count:10)
@@ -734,7 +736,10 @@ export async function POST(req: NextRequest) {
       // Roll back the orphaned restaurant row (bug #5, 2026-07-06): without a settings
       // row the tenant is unusable, and leaving it made the admin — who just saw
       // "couldn't create" — retry and produce a duplicate with a "-2" slug.
-      await sb.from("restaurants").delete().eq("id", rid);
+      // …and the roll-back is looked at too (S10 T28 item 15): if IT fails, an unusable half-made
+      // restaurant is left behind, and the log is the only place that can say so.
+      const rb = await sb.from("restaurants").delete().eq("id", rid);
+      if (rb.error) console.error("[admin/restaurants] create failed AND its roll-back failed — a half-made restaurant remains:", rid, rb.error.message);
       return adminFail("the new restaurant's settings", setRes.error, { action: "save" });
     }
     // 2b) Seed the starter menu (categories → filters → items), scoped to this restaurant.
@@ -808,10 +813,11 @@ export async function POST(req: NextRequest) {
     // every future restaurant, and permissions are not this form's to decide.
     if (body?.saveDefaults !== false) {
       try {
-        await sb.from("app_config").upsert(
+        const remembered = await sb.from("app_config").upsert(
           { key: CREATE_DEFAULTS_KEY, value: { panels, seedMenu }, updated_at: new Date().toISOString() },
           { onConflict: "key" },
         );
+        if (remembered.error) console.error("[admin/restaurants] the New-restaurant defaults were not remembered:", remembered.error.message);
       } catch { /* remembering defaults is a convenience, not critical */ }
     }
     return ok({

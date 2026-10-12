@@ -39,10 +39,14 @@ const env = Object.fromEntries(readFileSync(join(ROOT, ".env.local"), "utf8").sp
   .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
 refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "the T28 sweep-10 checks");
 const svc = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-const H = adminHeaders(BASE);
+const H0 = adminHeaders(BASE);
 const FH = "00000000-0000-0000-0000-000000000001";
 const GONE = "11111111-2222-3333-4444-555555555555";
 const TAG = `t28s10c-${Date.now().toString(36)}`;
+// Every request carries this run's own device id, so a diary line our requests cause can be found
+// — and removed — by THAT id alone. A time-window delete on the shared dev DB removes other
+// terminals' rows too (memory: "test cleanup deletes only its own rows", 2026-10-11).
+const H = { ...H0, Cookie: `${H0.Cookie}; lfh_panel_device=${TAG}` };
 const LIVE = existsSync(arg("--live", "")) ? JSON.parse(readFileSync(arg("--live", ""), "utf8")) : null;
 const SCREENS = existsSync(arg("--screens", "")) ? JSON.parse(readFileSync(arg("--screens", ""), "utf8")) : null;
 
@@ -487,7 +491,7 @@ for (const rel of FILES) {
     const binnedR = (await svc.from("restaurants").select("id").not("deleted_at", "is", null).is("purged_at", null).limit(1)).data?.[0];
     if (binnedR) { const bp = await hit("/api/admin/act-as", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ restaurant_id: binnedR.id, bin: true }) }); await add("H", F("act-as"), "the POST twin lets the recycle bin's bin:true into a binned restaurant", "driven", () => ({ ok: bp.s === 200, note: String(bp.s) })); }
     // the doors log admin_enter_panel lines without the TAG — remove the ones this block caused
-    const enters = (await svc.from("staff_actions").select("id").eq("action", "admin_enter_panel").gte("created_at", new Date(Date.now() - 5 * 60e3).toISOString()).limit(20)).data || [];
+    const enters = (await svc.from("staff_actions").select("id").eq("action", "admin_enter_panel").eq("device_id", TAG).limit(50)).data || [];
     if (enters.length) await svc.from("staff_actions").delete().in("id", enters.map((e) => e.id));
   } finally {
     for (const id of made.filter(Boolean)) { await svc.from("restaurant_owners").delete().eq("user_id", id); await svc.from("staff_users").delete().eq("id", id); }

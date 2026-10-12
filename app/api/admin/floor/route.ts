@@ -14,6 +14,8 @@ import { adminFail } from "@/lib/adminFail";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site. The console's answer is unchanged.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 
 // Always fetch fresh — the floor is live, never cached.
 export const dynamic = "force-dynamic";
@@ -41,7 +43,7 @@ export async function GET(req: NextRequest) {
     // restaurants. Counts still come pre-summed from lfh_admin_floor_stats (one tiny row per
     // restaurant, counts only, NO revenue).
     const reads = new ReadSet("admin/floor", await Promise.all([
-      rd("restaurants", () => supabaseAdmin.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000)),
+      rd("restaurants", () => pagedRead("restaurants", (f, t) => supabaseAdmin.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").order("id").range(f, t))),
       // These two are DELIBERATELY soft: a missing migration must not blank the whole platform view,
       // it must say which half is unreadable (the two fields at the bottom). `rowsOr` is how that
       // decision is stated rather than assumed.

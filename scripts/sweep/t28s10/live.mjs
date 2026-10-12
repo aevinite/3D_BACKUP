@@ -29,10 +29,14 @@ const env = Object.fromEntries(readFileSync(new URL("../../../.env.local", impor
   .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
 refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "the T28 sweep-10 live pass");
 const svc = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-const H = adminHeaders(BASE);
+const H0 = adminHeaders(BASE);
 const FH = "00000000-0000-0000-0000-000000000001";       // My Little French House — the write target
 const GONE = "11111111-2222-3333-4444-555555555555";      // an id that belongs to nothing
 const TAG = `t28s10-${Date.now().toString(36)}`;           // marks every row this run makes
+// Every request carries this run's own device id, so a diary line our requests cause can be found
+// — and removed — by THAT id alone. A time-window delete on the shared dev DB removes other
+// terminals' rows too (memory: "test cleanup deletes only its own rows", 2026-10-11).
+const H = { ...H0, Cookie: `${H0.Cookie}; lfh_panel_device=${TAG}` };
 // A table name with NO DIGITS: the ledger search reads the last run of digits as a bill number.
 const LTAG = "zz-t-" + Array.from({ length: 8 }, () => "abcdefghjkmnpqrstuvwxyz"[Math.floor(Math.random() * 23)]).join("");
 
@@ -242,22 +246,25 @@ try {
     const before = (await svc.from("restaurant_billing").select("next_due_on").eq("restaurant_id", FH).maybeSingle()).data;
     made.restore.push(async () => { const r = await svc.from("restaurant_billing").update({ next_due_on: before?.next_due_on ?? null }).eq("restaurant_id", FH); return `next_due_on ${r.error ? "LEFT: " + r.error.message : "put back"}`; });
     const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
-    const add = await post("/api/admin/billing", { action: "add_payment", restaurant_id: FH, amount: "1,234", paid_on: today, method: TAG, note: TAG });
+    // A one-off amount (₹1,2xx.yy) so this run's own diary lines can be told apart by their figure.
+    const amt = 1200 + Math.floor(Math.random() * 99) + Math.floor(Math.random() * 99) / 100;
+    const amtText = amt.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const add = await post("/api/admin/billing", { action: "add_payment", restaurant_id: FH, amount: amtText, paid_on: today, method: TAG, note: TAG });
     if (add.j?.id) made.payments.push(add.j.id);
     const row = add.j?.id ? (await svc.from("restaurant_payments").select("amount").eq("id", add.j.id).single()).data : null;
-    check("billing.payment.comma-amount", add.s === 200 && Number(row?.amount) === 1234, `${add.s} · stored ${row?.amount}`);
+    check("billing.payment.comma-amount", add.s === 200 && Number(row?.amount) === amt, `${add.s} · "${amtText}" stored as ${row?.amount}`);
     const one = await hit(`/api/admin/billing?restaurant_id=${FH}`);
     check("billing.payment.in-history", (one.j?.payments || []).some((p) => p.id === add.j?.id), `${(one.j?.payments || []).length} payment(s) in the history`);
     const bad = await post("/api/admin/billing", { action: "set_plan", restaurant_id: FH, started_on: "27/08/2026" });
     check("billing.plan.typed-date-named", bad.s === 400 && /start date/.test(bad.j?.error || ""), `${bad.s} ${bad.j?.error || ""}`);
     const del = await post("/api/admin/billing", { action: "delete_payment", payment_id: add.j?.id });
     const log = (await svc.from("staff_actions").select("detail").eq("action", "billing_delete_payment").eq("restaurant_id", FH).order("created_at", { ascending: false }).limit(1)).data?.[0];
-    check("billing.payment.delete-names-it", del.s === 200 && /1234/.test(log?.detail || ""), `${del.s} · "${log?.detail}"`);
+    check("billing.payment.delete-names-it", del.s === 200 && (log?.detail || "").includes(String(amt)), `${del.s} · "${log?.detail}"`);
     if (del.s === 200) made.payments = made.payments.filter((x) => x !== add.j?.id);
     const del2 = await post("/api/admin/billing", { action: "delete_payment", payment_id: add.j?.id });
     check("billing.payment.delete-gone-404", del2.s === 404, `${del2.s} ${del2.j?.error || ""}`);
     // Its diary lines name ₹ and the date, not the TAG; remove the two this run caused by id.
-    const mine = (await svc.from("staff_actions").select("id").in("action", ["billing_add_payment", "billing_delete_payment"]).eq("restaurant_id", FH).gte("created_at", new Date(Date.now() - 10 * 60e3).toISOString()).ilike("detail", "%1234%").limit(5)).data || [];
+    const mine = (await svc.from("staff_actions").select("id").in("action", ["billing_add_payment", "billing_delete_payment"]).eq("restaurant_id", FH).ilike("detail", `%${amt}%`).limit(5)).data || [];
     if (mine.length) await svc.from("staff_actions").delete().in("id", mine.map((m) => m.id));
   }
 
@@ -282,7 +289,7 @@ try {
       check("actas.binned.plain-409-bin-302", plain.s === 409 && fromBin.s === 302, `${plain.s} / ${fromBin.s}`);
     } else check("actas.binned.plain-409-bin-302", true, "no binned restaurant on this database — nothing to drive");
     // The doors write admin_enter_panel lines; these carry no TAG, so remove the ones this run made.
-    const enters = (await svc.from("staff_actions").select("id").eq("action", "admin_enter_panel").gte("created_at", new Date(Date.now() - 5 * 60e3).toISOString()).limit(20)).data || [];
+    const enters = (await svc.from("staff_actions").select("id").eq("action", "admin_enter_panel").eq("device_id", TAG).limit(50)).data || [];
     if (enters.length) await svc.from("staff_actions").delete().in("id", enters.map((e) => e.id));
   }
 

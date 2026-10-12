@@ -350,7 +350,14 @@ for (const [key, f] of [["dashRoute", "app/api/admin/dashboard/route.ts"], ["edi
   });
 }
 await phase("the rate-limit edit records a sentence", () => /detail: rateEditWords\(/.test(CODE.dash + read("app/api/admin/rate-limits/route.ts")) || "back to stringifying its patch object");
-await phase("the platform toggle records a sentence", () => /TOGGLE_WORDS/.test(CODE.editorRoute) || "back to stringifying its patch object");
+// The toggle's DOOR was removed on 2026-10-09 (sweep #10 T10 item 2 — it asked for no permission), and
+// with it the only writer of this log line. A guard that still demanded TOGGLE_WORDS went red because
+// its subject deliberately moved (S10 T28, 2026-10-11). The property kept: the line is written as a
+// sentence if the door exists, and the door stays gone — never back as a stringified patch object.
+await phase("the platform toggle records a sentence", () => /TOGGLE_WORDS/.test(CODE.editorRoute)
+  // CODE is comment-stripped, so the obituary is invisible here — the door being GONE is the test.
+  || (/platform\/toggles IS GONE/.test(SRC.editorRoute || "") && !/platform\/toggles/.test(CODE.editorRoute))
+  || "the toggles door is back without its sentence map");
 // A7 · the manager panel is SENT the sentence, never left to write its own (3)
 await phase("/oplog attaches the plain sentence to error rows", () => /row\.plain\s*=\s*plainHeadline/.test(CODE.editorRoute) || "the manager panel has no way to write one itself and cannot import the translator");
 await phase("the manager panel prints the attached sentence", () => (/opDetailText\([^)]*\bplain\b/.test(CODE.panelJs) && /if \(plain\) return/.test(CODE.panelJs)) || "the manager's own Audit & logs tab is back to raw error text");

@@ -108,7 +108,7 @@ export async function GET(req: NextRequest) {
   if (ids.length) {
     // Tolerated: a miss leaves the restaurant chip blank rather than emptying the feed, and rowsOr
     // says so where it happens.
-    const rest = new ReadSet("admin/oplog:names", [await rd("names", () => sb.from("restaurants").select("id, name, slug").in("id", ids).limit(2000))]);
+    const rest = new ReadSet("admin/oplog:names", [await rd("names", () => sb.from("restaurants").select("id, name, slug").in("id", ids).limit(ids.length))]);
     for (const x of rest.rowsOr<{ id: string; name: string; slug: string }>("names", [])) nameById.set(x.id, { name: x.name, slug: x.slug });
   }
   const actions = rows.map((a) => {

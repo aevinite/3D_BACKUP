@@ -340,7 +340,18 @@ export default function AdminAnalytics() {
 
           <div className="adm-card" style={{ marginBottom: 14 }}>
             <h2>Orders by source</h2>
-            <p className="hint">Dine-in vs platform (Zomato / Swiggy / takeaway) order counts for {windowText}.</p>
+            <p className="hint">Dine-in vs platform (Zomato / Swiggy / website / parcel) order counts for {windowText}.</p>
+            {/* WHY THIS CARD CAN ADD UP TO MORE THAN THE ORDERS TILE (owner picked S10 T28 item 12,
+                2026-10-11). The tile counts orders taken in Aevidine; delivery-app, website and parcel
+                orders live in their own table (aggregator_orders, never linked to an order) and are
+                counted HERE on top. Tile 197 beside a card adding up to 210 read as two numbers for
+                one fact; it is two facts, and the card now says which. */}
+            {data && sourceTotal > (sources.find((x) => x.source === "dine_in")?.orders ?? 0) ? (
+              <p className="hint" style={{ marginTop: -4 }}>
+                Dine-in is the {nf.format(sources.find((x) => x.source === "dine_in")?.orders ?? 0)} orders in the tile above;
+                the other {nf.format(sourceTotal - (sources.find((x) => x.source === "dine_in")?.orders ?? 0))} come from delivery apps, the website and parcels, on top of it.
+              </p>
+            ) : null}
             {data === null ? (
               <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>
             ) : sourceTotal === 0 ? (

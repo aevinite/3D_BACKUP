@@ -63,16 +63,26 @@ export async function throttleFail(key: string, maxFails: number, lockMs: number
 // code path. throttleUnblock() lifts it. A "far future" lock is how listBlocked() tells a real
 // block apart from a normal few-minute lockout.
 const BLOCK_MS = 100 * 365 * 24 * 60 * 60 * 1000;
-export async function throttleBlock(key: string, note?: string): Promise<void> {
+// THESE TWO ANSWER WHETHER THEY WORKED (S10 T28 item 15, 2026-10-11). They are the admin's own
+// deliberate decisions about one device, and both used to swallow the database's answer — the upsert
+// result was never even looked at — so Rate limits → Block said "blocked" and wrote "admin-panel
+// access blocked" to the diary for a block that might not exist. Only the admin screen calls them, and
+// it now refuses in words when they return false. The sign-in path's own counters (throttleFail /
+// throttleReset) stay fail-open on purpose: a database blip must never lock a person out.
+export async function throttleBlock(key: string, note?: string): Promise<boolean> {
   try {
-    await sb.from("login_throttle").upsert(
+    const r = await sb.from("login_throttle").upsert(
       { key, fail_count: 0, locked_until: new Date(Date.now() + BLOCK_MS).toISOString(), updated_at: new Date().toISOString(), note: note ?? null },
       { onConflict: "key" },
     );
-  } catch { /* fail-open */ }
+    return !r.error;
+  } catch { return false; }
 }
-export async function throttleUnblock(key: string): Promise<void> {
-  await throttleReset(key);
+export async function throttleUnblock(key: string): Promise<boolean> {
+  try {
+    const r = await sb.from("login_throttle").delete().eq("key", key);
+    return !r.error;
+  } catch { return false; }
 }
 // Is this key under a DELIBERATE admin block (a far-future lock), as opposed to a normal few-minute
 // lockout? Distinguishes the "You're blocked" page (permanent, can request unblock) from the

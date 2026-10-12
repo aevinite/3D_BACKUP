@@ -11,6 +11,8 @@ import { adminFail } from "@/lib/adminFail";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site. The console's answer is unchanged.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 
@@ -79,12 +81,14 @@ export async function GET(req: NextRequest) {
     // the admin uses to answer "who did what". A hidden ceiling gives a wrong number silently; an
     // explicit one that is far above anything real gives the right one. 120 members × 60 orders is
     // a heavier day than either table has ever seen.
-    const MEMBER_ROW_CAP = 8000;
+    // (The 8,000 "ceiling" that stood here was silently 1,000 on this stack — PostgREST's own max —
+    // so both reads below are PAGED now, which is the only way "every order of these members" is true.
+    // S10 T28 item 17.)
     const memberIds = memberRows.map((m) => m.id).filter(Boolean);
     const counts = new ReadSet("admin/custlog:counts", memberIds.length
       ? await Promise.all([
-          rd("orders", () => sb.from("orders").select("member_id, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP)),
-          rd("calls", () => sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP)),
+          rd("orders", () => pagedRead("orders", (f, t) => sb.from("orders").select("member_id, created_at").in("member_id", memberIds).order("id").range(f, t))),
+          rd("calls", () => pagedRead("waiter_calls", (f, t) => sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds).order("id").range(f, t))),
         ])
       : []);
     // Same rule as the reads above: plain words on the screen, the raw text in the log.
@@ -98,7 +102,7 @@ export async function GET(req: NextRequest) {
     ].filter(Boolean))) as string[];
     const nameById = new Map<string, string>();
     if (rids.length) {
-      const rest = await sb.from("restaurants").select("id, name").in("id", rids).limit(2000);
+      const rest = await sb.from("restaurants").select("id, name").in("id", rids).limit(rids.length);
       for (const x of rest.data ?? []) nameById.set(x.id, x.name);
     }
     const tag = <T extends { restaurant_id?: string | null }>(r: T) =>

@@ -25,6 +25,8 @@ import { expectClash, clashJson } from "@/lib/clash";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site. The console's answer is unchanged.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 // The IST calendar date, from the one helper that already knows the rule.
 import { todayIST } from "@/lib/staffProfileShared";
 
@@ -111,13 +113,13 @@ export async function GET(req: NextRequest) {
   const reads = new ReadSet("admin/billing", await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): a binned restaurant must not appear
     // as a billable row in the SaaS billing table.
-    rd("restaurants", () => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").order("id").range(f, t))),
     // Named columns + a bound (sweep 2026-08-04). This whole-platform read had no .eq(), no column
     // list and no .limit() — the only read in the admin tree missing all three. One row per
     // restaurant makes it small today, but it grows with exactly the number this product is built
     // to increase. BILLING_COLS is the list the page renders.
-    rd("plans", () => sb.from("restaurant_billing").select(BILLING_COLS).limit(2000)),
-    rd("yearPayments", () => sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000)),
+    rd("plans", () => pagedRead("restaurant_billing", (f, t) => sb.from("restaurant_billing").select(BILLING_COLS).order("restaurant_id").range(f, t))),
+    rd("yearPayments", () => pagedRead("restaurant_payments", (f, t) => sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).order("id").range(f, t))),
   ]));
   // All three, and the sentence names the failed one in the server log rather than "something".
   if (reads.anyFailed) return adminFail("the billing table", reads.firstError, { action: "load" });

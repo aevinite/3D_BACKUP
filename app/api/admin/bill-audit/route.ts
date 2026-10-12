@@ -32,6 +32,8 @@ import { adminFail } from "@/lib/adminFail";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site. The console's answer is unchanged.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 import { redactMoney } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -106,7 +108,7 @@ export async function GET(req: NextRequest) {
   const reads = new ReadSet("admin/bill-audit", await Promise.all([
     rd("rows", () => q),
     // Every restaurant, binned ones included — see the note under `nameById` below.
-    rd("restaurants", () => sb.from("restaurants").select("id, name, deleted_at").limit(2000)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, name, deleted_at").order("id").range(f, t))),
     // The two totals are asked for only when the caller wants them, and they are TOLERATED: a failed
     // count travels as null so the page says it does not know, rather than "no removals".
     rd("total", () => (wantCount ? countOf(actions) : Promise.resolve({ data: null, error: null, count: null }))),

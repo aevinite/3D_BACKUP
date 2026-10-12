@@ -11,6 +11,8 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead, PAGE_ALL_MAX } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +30,10 @@ const BROKEN_3D_LIMIT = 200;
 // nothing to notice. Measured the day this was written: 50 staff, 177 restaurants. A long way off,
 // which is exactly why it costs nothing to make honest now. Named constants, so the ceiling and the
 // flag can never drift apart the way a hard-coded pair does.
-const STAFF_LIMIT = 5000;
-const RESTAURANT_LIMIT = 2000;
+// Both reads are PAGED now (S10 T28 item 17): the old 5,000 / 2,000 were silently 1,000 on this stack,
+// so `staffCapped` could never fire at its own number. The flags stay, keyed to the paging ceiling.
+const STAFF_LIMIT = PAGE_ALL_MAX;
+const RESTAURANT_LIMIT = PAGE_ALL_MAX;
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 
 export async function GET(req: NextRequest) {
@@ -52,7 +56,7 @@ export async function GET(req: NextRequest) {
     rd("estimates", () => sb.rpc("lfh_admin_table_estimates")),
     // Live restaurants only (bug H4/#6, 2026-07-06): binned restaurants must not be
     // counted as "suspended". With deleted_at excluded, suspended = live-but-inactive.
-    rd("restaurants", () => sb.from("restaurants").select("id, active").is("deleted_at", null).limit(RESTAURANT_LIMIT)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, active").is("deleted_at", null).order("id").range(f, t))),
     // Bounded read — this page auto-refreshes every 60s, so cap it so it can't grow
     // into a full-table pull as staff count climbs across all tenants (egress guard).
     //
@@ -64,7 +68,7 @@ export async function GET(req: NextRequest) {
     // attached to a deleted restaurant were counted here and nowhere else. One number, one meaning.
     // sw_version rides along on this SAME read — no extra query for the offline-layer check
     // below (mig 366). One more column on a slice this route already scans.
-    rd("staff", () => sb.from("staff_users").select("id, last_seen_at, restaurant_id, sw_version").eq("active", true).limit(STAFF_LIMIT)),
+    rd("staff", () => pagedRead("staff_users", (f, t) => sb.from("staff_users").select("id, last_seen_at, restaurant_id, sw_version").eq("active", true).order("id").range(f, t))),
     rd("openIssues", () => sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open")),
     // A DISH THAT PROMISES 3D AND CANNOT DELIVER IT (owner, 2026-08-12: *"whenever the 3-D is not
     // available, it should show me as a problem also notification"*).

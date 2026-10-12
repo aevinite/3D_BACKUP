@@ -181,7 +181,7 @@ export const ACT_LABEL: Record<string, string> = {
   // Bulk + wait, added with the board's "all" actions (owner, 2026-08-20). A WAIT is not a resolve:
   // the problem stays open and comes back by itself, which is why it has its own words here.
   error_snoozed: "Set a problem to come back later", errors_resolved_all: "Cleared every problem from the board",
-  errors_snoozed_all: "Set every problem to come back later", rate_limit_dismiss_all: "Cleared every limit-reached alert",
+  errors_snoozed_all: "Set every problem to come back later", rate_limit_dismiss_all: "Cleared every limit-reached alert", rate_limit_dismiss: "Cleared a limit-reached alert", fix_request_status: "Changed a repair request's status",
   // ── the bill: printing it, reopening it, settling it ──────────────────────
   invoice_generate: "Printed the bill", invoice_void: "Reopened the bill (invoice voided)", credit_note: "Issued a credit note",
   table_reopened: "Reopened the table (paid bill back on the floor)",

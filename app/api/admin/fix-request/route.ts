@@ -175,6 +175,17 @@ export async function PATCH(req: NextRequest) {
   // answered ok, so the tile changed on screen and came back on the next refresh, with nothing
   // saying why.
   if (!r.data) return err("That request is no longer there — refresh the page.", 404);
+  // ON THE RECORD (owner picked S10 T28 item 10, 2026-10-11). Filing a request wrote a diary line;
+  // closing it as fixed, dismissing it or re-opening it wrote none, so the trail of a repair stopped
+  // at "filed". On the `admin` panel, so a restaurant's own log never shows it.
+  {
+    const closedRow = r.data as { restaurant_id?: string | null; summary?: string | null };
+    const verb = status === "fixed" ? "marked a repair request fixed" : status === "dismissed" ? "dismissed a repair request" : "re-opened a repair request";
+    await logAction("admin", "fix_request_status", {
+      restaurant_id: closedRow.restaurant_id ?? undefined, level: "info",
+      detail: `${verb}: ${String(closedRow.summary || "").slice(0, 120)}`,
+    });
+  }
 
   // Closing a ticket as FIXED records the fix (migs 218/219), so pressing Fix-now on an older
   // occurrence answers "already fixed, here's the PR" instead of opening a duplicate session.

@@ -80,7 +80,7 @@ terminals' rows — keep both sides.
 | T25 | `P194001`–`P195000` | The admin console's home, shell, Repair and System health | ⏳ not run yet | — | — | — | — |
 | T26 | `P195001`–`P196000` | The admin's Restaurants and Owners | ⏳ not run yet | — | — | — | — |
 | T27 | `P196001`–`P197000` | The admin's Recycle bin, Billing, Usage, Rate limits, Platform floor, Logs and Bill ledger | ⏳ not run yet | — | — | — | — |
-| T28 | `P197001`–`P198000` + `P212001`–`P212999` (round 2, claimed on `main` before a row was written, owner's yes 2026-10-12 — above every claim in this table) | The admin server routes, part 1 | `T28-S10.md` | 650 | 647 | 8 | 8 |
+| T28 | `P197001`–`P198000` + `P212001`–`P212999` (round 2, claimed on `main` before a row was written, owner's yes 2026-10-12 — above every claim in this table) | The admin server routes, part 1 | `T28-S10.md` | 1650 | 1635 | 18 | 18 |
 | T29 | `P198001`–`P199000` | The admin server routes, part 2 | `T29-S10.md` | 502 | 501 | 12 | 12 |
 | T30 | `P199001`–`P200000` + `P168001`–`P168999` (round 2; top of the planning gap, owner asked 2026-10-09 for 500–1000 more) + `P167001`–`P167999` (round 3, claimed on `main` before a row was written) + `P166001`–`P166999` (round 4, claimed the same way) + `P210001`–`P210999` (round 5 — RENUMBERED from P165001–P165999, which T18 claimed first; #1487 briefly moved it to P164001–P164999, but T39 had claimed AND filed that block on `main` minutes earlier, so T39's stands and this returns to the P210 block claimed in #1479, which T10's later P211 claim numbered around) | The money and compliance libraries | `T30-S10.md` | 2578 | 2578 | 40 | 40 |
 | T31 | `P200001`–`P201000` | Every remaining shared library — the data-reading helpers | ⏳ not run yet | — | — | — | — |

@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
   const ids = [...new Set((ev.data ?? []).map((e) => e.restaurant_id).filter((x) => x && x !== "00000000-0000-0000-0000-000000000000"))];
   const names: Record<string, string> = {};
   if (ids.length) {
-    const rs = await sb.from("restaurants").select("id, name").in("id", ids).limit(2000);
+    const rs = await sb.from("restaurants").select("id, name").in("id", ids).limit(ids.length);
     for (const r of rs.data ?? []) names[r.id] = r.name;
   }
   const events = (ev.data ?? []).map((e) => ({ ...e, restaurant_name: names[e.restaurant_id] || null }));
@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
   if (action === "unblock") {
     const key = String(b.key || "");
     if (!/^admin:/.test(key)) return err("invalid key");
-    await throttleUnblock(key);
+    if (!(await throttleUnblock(key))) return err("Couldn't lift that block — nothing was changed. Please try again.", 500);
     // Any open unblock requests for this device are now moot → resolve them as approved. The block
     // itself is already lifted by the line above, so a failure here leaves a stale row in the ASK
     // list rather than a person still locked out — reported, not fatal (T20 sweep #7, 2026-08-27).
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
     if (rQ.error) return adminFail("that unblock request", rQ.error, { action: "load" });
     const r = rQ.data as { key: string } | null;
     if (!r) return err("that request no longer exists", 404);
-    await throttleUnblock(r.key);
+    if (!(await throttleUnblock(r.key))) return err("Couldn't lift that block — nothing was changed. Please try again.", 500);
     const tidy2 = await sb.from("unblock_requests").update({ status: "approved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("key", r.key).eq("status", "open");
     if (tidy2.error) console.error("[admin/rate-limits] approve lifted the block but not the request row:", tidy2.error.message);
     await logAction("admin", "admin_unblock", { level: "info", detail: `unblock request approved · ${r.key}` });
@@ -228,7 +228,8 @@ export async function POST(req: NextRequest) {
     if (e.key !== "admin_login") return err("blocking only applies to admin-login alerts");
     // Safeguard: never let the admin block their OWN current IP (would lock themselves out).
     if (e.subject && e.subject === clientIp(req)) return err("That's your own device — you can't block yourself.");
-    await throttleBlock(`admin:${e.subject}`, e.subject_label || `admin panel · ${e.subject}`);
+    if (!(await throttleBlock(`admin:${e.subject}`, e.subject_label || `admin panel · ${e.subject}`)))
+      return err("Couldn't block that device — nothing was changed. Please try again.", 500);
     // The BLOCK is what mattered and it has landed; a failure to mark the alert handled only leaves the
     // row on the board, so it is reported rather than fatal.
     const mark = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId);
@@ -249,7 +250,7 @@ export async function POST(req: NextRequest) {
     const e = eQ.data as { key: string; subject: string; subject_label: string | null } | null;
     if (!e) return err("that alert no longer exists", 404);
     if (e.key !== "admin_login") return err("clearing a lockout only applies to admin-login alerts");
-    if (e.subject) await throttleUnblock(`admin:${e.subject}`);
+    if (e.subject && !(await throttleUnblock(`admin:${e.subject}`))) return err("Couldn't clear that lockout — nothing was changed. Please try again.", 500);
     // Same rule as the block path above: the lockout is what mattered and it has been lifted, so a
     // failure to mark the alert handled is reported, not fatal — but it is no longer thrown away unread.
     const markC = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId);
@@ -275,9 +276,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (action === "dismiss") {
-    const r = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId).select("id").maybeSingle();
+    const r = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId).select("id, restaurant_id, key, subject, subject_label").maybeSingle();
     if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
     if (!r.data) return err("that limit-reached record no longer exists — refresh the page", 404);
+    // ON THE RECORD LIKE ITS SIBLINGS (owner picked S10 T28 item 9, 2026-10-11). "Clear all" wrote a
+    // line and dismissing ONE alert wrote nothing, so "who cleared that alert, and when?" had no
+    // answer for the single case. On the `admin` panel, so no restaurant's own log ever shows it.
+    const ev = r.data as { restaurant_id?: string | null; key?: string; subject?: string; subject_label?: string | null };
+    await logAction("admin", "rate_limit_dismiss", {
+      restaurant_id: ev.restaurant_id && ev.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? ev.restaurant_id : undefined,
+      level: "info",
+      detail: `Cleared one limit-reached alert (${ev.subject_label || ev.subject || ev.key || "an alert"}). No limit changed and nobody was let through or blocked.`,
+    });
     return NextResponse.json({ ok: true });
   }
   return err("unknown action");

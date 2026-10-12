@@ -14,6 +14,8 @@ import { adminFail } from "@/lib/adminFail";
 // naming WHICH read went, and a read the screen tolerates says so at the call site. The console's
 // answer is unchanged: adminFail, plain words, raw text in `detail`.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +24,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const reads = new ReadSet("admin/attention", await Promise.all([
-    rd("billing", () => sb.from("restaurant_billing").select("restaurant_id, status, plan").limit(2000)),
+    rd("billing", () => pagedRead("restaurant_billing", (f, t) => sb.from("restaurant_billing").select("restaurant_id, status, plan").order("restaurant_id").range(f, t))),
     rd("usage", () => sb.rpc("lfh_admin_usage")),
-    rd("restaurants", () => sb.from("restaurants").select("id, name, slug, active, created_at").is("deleted_at", null).limit(2000)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, name, slug, active, created_at").is("deleted_at", null).order("id").range(f, t))),
   ]));
   // Check ALL three — a partial failure (e.g. the usage RPC times out) would otherwise leave
   // usage empty and flag EVERY paying restaurant as churn-risk with a confident 200 (audit).

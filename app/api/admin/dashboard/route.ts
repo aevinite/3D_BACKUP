@@ -15,6 +15,8 @@ import { adminFail } from "@/lib/adminFail";
 // 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
 // a tolerated read that says so at the call site. The console's answer is unchanged.
 import { ReadSet, rd } from "@/lib/readGuard";
+// Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
+import { pagedRead } from "@/lib/pageAll";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { redactMoney } from "@/lib/oplog";
 // The SAME grouping the Repair board uses, so the button and the board can never disagree.
@@ -31,12 +33,12 @@ export async function GET(req: NextRequest) {
   const head = { count: "exact" as const, head: true };
 
   const reads = new ReadSet("admin/dashboard", await Promise.all([
-    rd("restaurants", () => sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000)),
-    rd("settings", () => sb.from("settings").select("restaurant_id, enabled_panels").limit(2000)),
-    rd("owners", () => sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).limit(2000)),
+    rd("restaurants", () => pagedRead("restaurants", (f, t) => sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").order("id").range(f, t))),
+    rd("settings", () => pagedRead("settings", (f, t) => sb.from("settings").select("restaurant_id, enabled_panels").order("id").range(f, t))),
+    rd("owners", () => pagedRead("staff_users", (f, t) => sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).order("id").range(f, t))),
     // The owner⇄restaurant join (mig 097) — so the "Owner" quick-open knows when a
     // restaurant has SEVERAL owners and shows a "which owner?" chooser (owner 2026-07-25).
-    rd("ownerLinks", () => sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000)),
+    rd("ownerLinks", () => pagedRead("restaurant_owners", (f, t) => sb.from("restaurant_owners").select("restaurant_id, user_id").order("restaurant_id").order("user_id").range(f, t))),
     // "Orders today" — the SAME population the Platform analytics tile counts, and the same
     // population its Busiest-restaurants table lists (mig 348). This was a bare head count with
     // no restaurant test, so a restaurant in the recycle bin still added its orders to the
@@ -44,7 +46,7 @@ export async function GET(req: NextRequest) {
     // then disagree with the table under it. Today's figures happened to match, which is exactly
     // what kept it quiet.
     rd("ordersToday", () => sb.rpc("lfh_admin_orders_count", { p_from: sinceIso, p_to: new Date().toISOString() })),
-    rd("maintenance", () => sb.from("settings").select("restaurant_id").eq("service_mode", true).limit(2000)),
+    rd("maintenance", () => pagedRead("settings", (f, t) => sb.from("settings").select("restaurant_id").eq("service_mode", true).order("id").range(f, t))),
     // Only the staff CURRENTLY online (seen in the last 3 min) — a small list, instead of
     // hauling the ENTIRE staff_users table every 60s just to filter it on the client.
     rd("onlineStaff", () => sb.from("staff_users").select("name, username, role, restaurant_id, last_seen_at", { count: "exact" }).eq("active", true).gte("last_seen_at", onlineSinceIso).limit(200)),
