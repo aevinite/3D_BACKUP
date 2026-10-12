@@ -106,6 +106,9 @@ const EXPLAINED_WRITES = {
   "scripts/verify-rid-required.mjs": ASKS,
   "scripts/verify-settings-columns.mjs": ASKS,
   "scripts/sweep/t29r2/lib.mjs": ASKS,
+  // its one POST is the dev project's SQL endpoint, and sql() refuses anything but SELECT/WITH before
+  // sending — read 2026-10-12 (S10 T14)
+  "scripts/sweep/t14s10/lib.mjs": ASKS,
   "scripts/sweep/t32/db.mjs": ASKS,
   "scripts/verify-outbound-honesty.mjs": "its one POST names a random restaurant id that can never exist, so the update matches nothing (asserted 409)",
   "scripts/verify-outbox-drain.mjs": "every POST goes to its own local http server or is aborted by page.route — nothing reaches the app",
