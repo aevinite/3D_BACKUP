@@ -22,15 +22,13 @@ import { DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 // React building blocks plus the TypeScript types for pointer (touch/mouse)
 // events and inline CSS styles, used by the drag-to-move code below.
 import { useEffect, useRef, useState, type PointerEvent as RPE, type CSSProperties } from "react";
-// Reads the restaurant's on/off settings (e.g. is the session system turned on).
-import { getSettings } from "@/lib/menu";
 // Lets us clear the "pre-fill this table" hint when you leave a table.
 import { setScannedTable } from "@/lib/table";
 // Helpers that talk to the server about the table's dining session.
 import { getStoredSession, storeSession, clearStoredSession, getSessionState, leaveSession, touchSession } from "@/lib/session";
 // Publish the live "can this guest order?" answer so the Add-to-cart gate can read
 // it synchronously (this widget already polls the session, so we reuse that poll).
-import { setTableConnection } from "@/lib/tableConnection";
+import { setTableConnection, watchSessionsSwitch } from "@/lib/tableConnection";
 import { enqueueGuestLeave } from "@/lib/guestOutbox";
 import { tremove } from "@/lib/tenantStorage";
 import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
@@ -168,11 +166,12 @@ export default function SessionStatusWidget() {
     // about. The effect re-runs the moment it settles (both are in the dependency list), so this
     // is a wait of a few hundred milliseconds, not a refusal.
     if (!restaurantReady || !restaurantId) return;
-    (async () => {
-      // Is the session system even turned on? If not, we'll never show anything.
-      let on = false;
-      try { on = (await getSettings(restaurantId)).sessionsEnabled; } catch {}
+    // Is the session system even turned on? Asked until it is ANSWERED (item 2): a failed read used
+    // to be taken as "off" for the whole visit. Until the first answer the gate is told exactly what
+    // it was always told on a failure — sessions off, not connected — so nothing is blocked by it.
+    const stopSwitch = watchSessionsSwitch(restaurantId, (settings) => {
       if (!alive) return;
+      const on = settings.sessionsEnabled;
       setEnabled(on);
       // Publish the sessions-on truth IMMEDIATELY (before the first session poll) so an
       // early "add to cart" tap on a sessions-ON restaurant can't slip past the connect
@@ -301,9 +300,15 @@ export default function SessionStatusWidget() {
       iv = setInterval(poll, RT_BACKUP_MS);
       onTick = () => poll();
       window.addEventListener("lfh:rt-tick", onTick);
-    })();
-    // Cleanup when the component disappears: stop the poll, listener and intro timer.
-    return () => { alive = false; if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); if (introTimer.current) clearTimeout(introTimer.current); };
+    }, () => {
+      // The FIRST failure publishes what a failure always published — sessions off, not connected —
+      // so the add-to-cart gate is never blocked by a read that did not answer. The retry carries on.
+      if (!alive) return;
+      setEnabled(false);
+      setTableConnection({ sessionsEnabled: false, connected: false });
+    });
+    // Cleanup when the component disappears: stop the poll, listener, intro timer and the retry.
+    return () => { alive = false; stopSwitch(); if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); if (introTimer.current) clearTimeout(introTimer.current); };
     // restaurantId in deps: the global widgets resolve their restaurant async (starts at
     // #1, then fixes itself). Reading `sessionsEnabled` once at mount cached restaurant
     // #1's value — on a NON-#1 restaurant that published `sessionsEnabled:false` to

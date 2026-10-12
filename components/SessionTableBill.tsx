@@ -19,8 +19,8 @@ import { getStoredSession, getSessionState } from "@/lib/session";
 // Imported the same way lib/billPreview.ts does it — the whole API object, not a named export:
 // the file is a plain CommonJS IIFE, so its exports are only visible at runtime.
 import BILLDOC from "@/public/panels/billdoc.js";
-// Reads the restaurant's on/off settings (e.g. is the session system turned on).
-import { getSettings } from "@/lib/menu";
+// Reads the restaurant's on/off switch for table sessions, asking again until it is answered.
+import { watchSessionsSwitch } from "@/lib/tableConnection";
 // Money-formatting helpers so prices show in the right currency.
 import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
@@ -103,17 +103,16 @@ export default function SessionTableBill() {
     let onTick: (() => void) | null = null; // realtime nudge → refetch now
     // Figure out which currency to display prices in.
     setCurrency(getCurrency());
-    (async () => {
-      // Ask the server: is the dining-session system even turned on?
-      let enabled = false;
-      try {
-        const s = await getSettings(restaurantId);
-        enabled = s.sessionsEnabled;
-        setComposition(s.priceTaxMode === "composition");
-      } catch {}
+    // Ask the server: is the dining-session system even turned on? Asked until it is ANSWERED
+    // (sweep #10 T4, item 2) — a failed read used to leave `enabled` at false, so the table's live
+    // bill stayed hidden for as long as this tab was open, with nothing on screen to say why.
+    const stopSwitch = watchSessionsSwitch(restaurantId, (settings) => {
+      if (!alive) return;
+      const enabled = settings.sessionsEnabled;
+      setComposition(settings.priceTaxMode === "composition");
       // Do we have a saved session on this device?
       const s = getStoredSession();
-      if (!alive || !enabled || !s) return; // not in session mode → stay hidden
+      if (!enabled || !s) return; // not in session mode → stay hidden
       // Remember our token and reveal the widget.
       tokenRef.current = s.token;
       setActive(true);
@@ -182,9 +181,9 @@ export default function SessionTableBill() {
       iv = setInterval(poll, RT_BACKUP_MS);
       onTick = () => poll();
       window.addEventListener("lfh:rt-tick", onTick);
-    })();
-    // Cleanup when the component disappears: stop the timer, listener; ignore late replies.
-    return () => { alive = false; if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); };
+    });
+    // Cleanup when the component disappears: stop the timer, listener and the retry; ignore late replies.
+    return () => { alive = false; stopSwitch(); if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); };
     // Depend on restaurantId: it starts as the #1 default and resolves from the
     // URL a beat later, so an empty dep array froze the wrong tenant's
     // sessionsEnabled (matches the fix already in CartPanel/ChefPopup). (audit)

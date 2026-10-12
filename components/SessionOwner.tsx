@@ -19,8 +19,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // Hardware back-button manager: registers this popup as a "layer" so the phone
 // back button closes IT instead of quitting the site (CLAUDE.md rule).
 import { useBackClose } from "@/lib/backStack";
-// Reads the restaurant's on/off settings (e.g. is the session system turned on).
-import { getSettings } from "@/lib/menu";
+// Reads the restaurant's on/off switch for table sessions, asking again until it is answered.
+import { watchSessionsSwitch } from "@/lib/tableConnection";
 // Helpers that talk to the server about the table's dining session: read the
 // state, approve/remove a guest, or flip on "let anyone join automatically".
 import {
@@ -86,10 +86,13 @@ export default function SessionOwner() {
     // landing wakes it: a wait of a few hundred milliseconds, not a refusal.
     if (!restaurantId) return;
     let alive = true; // guards against updating state after the component is gone
-    // Find out if the session system is on; if so, do an immediate first poll.
-    getSettings(restaurantId)
-      .then((s) => { if (alive) { enabledRef.current = s.sessionsEnabled; if (s.sessionsEnabled) poll(); } })
-      .catch(() => {});
+    // Find out if the session system is on; if so, do an immediate first poll. Asked until it is
+    // ANSWERED (sweep #10 T4, item 2): this used to be `.catch(() => {})`, which left the switch at
+    // "off" for the whole visit after one failed read — and the host's prompt then never appeared,
+    // so a friend asking to join waited for an approval nobody was being asked for.
+    const stopSwitch = watchSessionsSwitch(restaurantId, (s) => {
+      if (alive) { enabledRef.current = s.sessionsEnabled; if (s.sessionsEnabled) poll(); }
+    });
     // Realtime nudges drive instant refetches; this TIGHT 4s timer is the backup so
     // a waiting partner's request never lingers unseen if realtime briefly lapses.
     const id = setInterval(poll, OWNER_POLL_MS);
@@ -102,6 +105,7 @@ export default function SessionOwner() {
     // Cleanup when the component disappears: stop the timer and remove listeners.
     return () => {
       alive = false;
+      stopSwitch();
       clearInterval(id);
       window.removeEventListener("lfh:session-changed", onChanged);
       window.removeEventListener("lfh:rt-tick", onTick);

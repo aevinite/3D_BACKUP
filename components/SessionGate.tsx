@@ -35,6 +35,9 @@ import {
 import { enqueueGuestOrder, enqueueGuestCall, reasonMsg, refusalOf, dishFor } from "@/lib/guestOutbox";
 // Phone back button: while this sheet is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
+// "The restaurant's database didn't answer" vs "this value was refused" — the classifier lib/session.ts
+// already uses inside rpc(). It holds no imports of its own, so it is safe in the guest bundle.
+import { isDbUnreachable } from "@/lib/dbRefusal";
 // Which restaurant this guest is ordering at (from the /r/<slug> URL).
 import { useRestaurantId, useRestaurantMeta } from "@/lib/restaurant-context";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
@@ -112,6 +115,32 @@ interface Pending { action: "order" | "call" | "connect"; table: string; payload
 // Tiny helper to pop a notification toast.
 const toast = (message: string, kicker = "table", variant = "success") =>
   window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message, kicker, variant } }));
+
+// ── A JOIN THAT DIDN'T LAND: WHOSE FAULT WAS IT? (sweep #10 T4, item 1) ─────────────────────────────
+// Joining a table (as its head, or asking to join someone else's) used to answer every failure
+// with "check your internet". lib/session.ts deliberately turns a SATURATED restaurant database —
+// statement timeouts, too many connections, a gateway page — into the code `timed_out`, because a
+// diner whose phone is fine must not be sent off to fix their wifi during the exact busy hour when
+// the restaurant's own system is the thing struggling. afterLocation() already words it that way;
+// the two join screens did not. One sentence-maker for both, so they cannot drift apart again.
+const joinFailedNote = (r: { ok: boolean; reason?: string }): string =>
+  isSessionTimeout(r)
+    ? "The restaurant's system isn't answering right now — this one's on us. Please try again."
+    : "Couldn't reach the restaurant's system — check your internet and try again.";
+// …and the same split for the restaurant's RULES (the settings read that opens the sheet). That read
+// throws rather than answering a code, so it is told apart by what was thrown: our own 8-second
+// deadline (`settings_timed_out`), or a database that did not answer (the same classifier the panel
+// routes use) is the restaurant's side. Anything else — a phone with no signal — is the phone's.
+const settingsFailedNote = (err: unknown, again: boolean): string => {
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const ours = !offline && ((err as { message?: string } | null)?.message === "settings_timed_out" || isDbUnreachable(err));
+  if (ours) return again
+    ? "The restaurant's system still isn't answering — this one's on us. Please try again in a moment."
+    : "The restaurant's system isn't answering right now — this one's on us. Please try again.";
+  return again
+    ? "Still can't reach the restaurant's system — check your internet and try again."
+    : "We can't reach the restaurant's system right now — check your internet and retry.";
+};
 
 // SessionGate — the step-by-step pop-up that gets a guest connected to their table
 // (location check, joining, waiting for approval) and then carries out their
@@ -558,7 +587,8 @@ export default function SessionGate() {
       if (r.reason === "no_open_session") { setStep("not_open"); return; } // staff hasn't opened it
       // Unknown failure (usually a network blip): don't slam the popup shut and
       // lose their place — pre-fill the table and let them tap Continue again.
-      if (!r.ok) { setTableInput(p.table); setNote("Couldn't reach the restaurant's system — check your internet and try again."); setStep("ask_table"); return; }
+      // …and say WHOSE blip it was (sweep #10 T4, item 1): a busy restaurant is not their wifi.
+      if (!r.ok) { setTableInput(p.table); setNote(joinFailedNote(r)); setStep("ask_table"); return; }
       // Save the new session and make this table our default everywhere.
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
@@ -702,7 +732,10 @@ export default function SessionGate() {
       // NETWORK BLIP: the membership is still perfectly valid on the server —
       // forgetting it here would throw the guest off their table (and could cost
       // a head their role) over one second of bad Wi-Fi. Keep it; offer a retry.
-      setNote("We can't reach the restaurant's system right now — your spot at the table is safe. Check your internet and retry.");
+      // A BUSY RESTAURANT IS NOT THEIR WIFI (sweep #10 T4, item 1) — the same split afterLocation makes.
+      setNote(isSessionTimeout(state)
+        ? "The restaurant's system isn't answering right now — this one's on us, and your spot at the table is safe. Please try again."
+        : "We can't reach the restaurant's system right now — your spot at the table is safe. Check your internet and retry.");
       setStep("net_error");
       return;
     }
@@ -798,13 +831,13 @@ export default function SessionGate() {
         ]);
         settingsByRid.current.set(rid, s);
         settingsRef.current = s;
-      } catch {
+      } catch (err) {
         // …and if that read fails but we knew this restaurant a moment ago, carry on with what we
         // knew rather than dead-ending a diner who was fine a moment before.
         const known = settingsByRid.current.get(settledRid);
         if (known) settingsRef.current = known;
         else {
-          setNote("We can't reach the restaurant's system right now — check your internet and retry.");
+          setNote(settingsFailedNote(err, false));
           setOpen(true); setStep("net_error");
           return;
         }
@@ -898,7 +931,7 @@ export default function SessionGate() {
       if (r.reason === "no_open_session") { setStep("not_open"); return; }
       // Unknown failure (usually a network blip): keep their typed name and let
       // them tap "Ask to join" again instead of closing and losing everything.
-      if (!r.ok) { setNote("Couldn't reach the restaurant's system — check your internet and try again."); setStep("guest_name"); return; }
+      if (!r.ok) { setNote(joinFailedNote(r)); setStep("guest_name"); return; }
       // Save the session and make this our default table.
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
@@ -1066,8 +1099,8 @@ export default function SessionGate() {
       try {
         settingsRef.current = await getSettings(rid);
         settingsByRid.current.set(rid, settingsRef.current);
-      } catch {
-        setNote("Still can't reach the restaurant's system — check your internet and try again.");
+      } catch (err) {
+        setNote(settingsFailedNote(err, true));
         return;
       }
     }
@@ -1377,7 +1410,9 @@ export default function SessionGate() {
         {step === "net_error" && (<>
           <div className="sg-badge"><i className="fas fa-wifi"></i></div>
           <h3 className="sg-title">Connection trouble</h3>
-          <p className="sg-sub">{note || "We can't reach the restaurant's system right now. Check your internet and retry."}</p>
+          {/* The fallback names nobody's fault: every path that opens this screen sets its own note,
+              which says whose it was (item 1) — this only shows if one ever forgets to. */}
+          <p className="sg-sub">{note || "We can't reach the restaurant's system right now. Please try again in a moment."}</p>
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={close}>Close</button>
             <button className="sg-btn gold" onClick={retryFlow}>Retry</button>

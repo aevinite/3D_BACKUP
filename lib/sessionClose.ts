@@ -11,6 +11,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction } from "@/lib/oplog";
 import { recordRemoval } from "@/lib/removalAudit";
 import type { StaffUser } from "@/lib/userAuth";
+// Tells "this value was refused" apart from "the database did not answer" (item 3 below).
+import { isDataRefusal } from "@/lib/dbRefusal";
 
 const nowIso = () => new Date().toISOString();
 const must = (r: { error: { message: string } | null; data: unknown }) => {
@@ -95,8 +97,17 @@ export async function closeSession(
     return { ok: false, status: 400, message: "Couldn't tell which restaurant this table belongs to.", reason: "not_found" };
   }
   {
-    const owns = (await sb.from("sessions").select("id").eq("id", sessionId).eq("restaurant_id", ctx.restaurantId).maybeSingle()).data;
-    if (!owns) return { ok: false, status: 404, message: "That table isn't for this restaurant.", reason: "not_found" };
+    // "I COULDN'T ASK" IS NOT "IT ISN'T YOURS" (sweep #10 T4, item 3). This read used to keep only
+    // `.data`, which is null BOTH when the session belongs to another restaurant and when the read
+    // itself failed — so a Close tapped during one busy second answered 404 "That table isn't for
+    // this restaurant." to the staff member standing at it, and because a 4xx is "tell the person",
+    // the panel's queue did not keep the tap to send again. A database that did not answer now
+    // THROWS, like every other read in this function (`must`), which the panel routes turn into 503
+    // + busy — the tap is kept and replayed. A refused VALUE (a malformed id) still answers exactly
+    // as before: that is a real "not this restaurant's table", not a busy database.
+    const ownsRead = await sb.from("sessions").select("id").eq("id", sessionId).eq("restaurant_id", ctx.restaurantId).maybeSingle();
+    if (ownsRead.error && !isDataRefusal(ownsRead.error)) throw ownsRead.error;
+    if (!ownsRead.data) return { ok: false, status: 404, message: "That table isn't for this restaurant.", reason: "not_found" };
   }
 
   // Live orders that would block a close: not archived, not cancelled, and either

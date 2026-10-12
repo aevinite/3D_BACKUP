@@ -18,6 +18,50 @@
 
 import { getStoredSession } from "./session";
 import { getScannedTable } from "./table";
+import { getSettings, type Settings } from "./menu";
+import { RT_BACKUP_MS } from "./orderStatus"; // the shared 60-second backstop
+
+// ── "IS THE TABLE-SESSION SYSTEM ON HERE?" — ASKED UNTIL IT IS ANSWERED (sweep #10 T4, item 2) ──────
+// The table card, the head's "let them in" prompt, the shared basket and the live table bill each
+// read the restaurant's switch ONCE, when the menu opened, and treated a failed read as "sessions are
+// off" for the rest of the visit: `catch {}` left the answer at false, and nothing ever asked again.
+// One busy second at page load (the dev database is measured swapping at idle; a rush does the same)
+// therefore switched every shared-table feature off until the diner happened to reload — a partner
+// asking to join waited for a host whose prompt would never appear, and a dish added on one phone
+// never reached the table's shared basket.
+//
+// This asks again instead, on the same widening, jittered wait lib/restaurant-context.tsx uses
+// (about 2s, 5s, 12s, 25s), then once a minute — the backstop every one of these widgets already
+// runs, so a long outage costs no more than they do today. getSettings() dedups callers into ONE
+// request and caches a good answer, so four widgets asking at once is one read, not four.
+//
+// What callers see while it is unanswered is UNCHANGED: nothing. `onFirstFailure` lets the table card
+// publish the same "sessions off, not connected" answer it always fell back to, so the add-to-cart
+// gate behaves exactly as it did before the first answer — never blocked by ignorance.
+const SWITCH_RETRY_MS = [2_000, 5_000, 12_000, 25_000];
+export function watchSessionsSwitch(
+  restaurantId: string,
+  onAnswer: (s: Settings) => void,
+  onFirstFailure?: () => void,
+): () => void {
+  let alive = true;
+  let attempt = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const ask = () => {
+    getSettings(restaurantId)
+      .then((s) => { if (alive) onAnswer(s); })
+      .catch(() => {
+        if (!alive) return;
+        if (attempt === 0) { try { onFirstFailure?.(); } catch { /* a caller's fallback must not stop the retry */ } }
+        const wait = SWITCH_RETRY_MS[attempt] ?? RT_BACKUP_MS;
+        attempt += 1;
+        // Jittered, so twenty phones in one room do not come back on the same beat.
+        timer = setTimeout(() => { timer = null; if (alive) ask(); }, Math.round(wait * (0.75 + Math.random() * 0.5)));
+      });
+  };
+  ask();
+  return () => { alive = false; if (timer) { clearTimeout(timer); timer = null; } };
+}
 
 // Live answer, refreshed by SessionStatusWidget. Defaults to "sessions off" so that
 // before the first poll (or when sessions are off) adds are never blocked.

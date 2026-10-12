@@ -57,8 +57,10 @@ P("P41002", "…and whitespace alone counts as empty",
   /const value = \(raw \|\| ""\)\.trim\(\);/.test(F.table));
 P("P41003", "a non-numeric table number is refused",
   /!\/\^\\d\+\$\/\.test\(value\)/.test(F.table));
+// RE-AIMED, sweep #10 T4 (2026-10-12) — the rule holds; the code moved ON PURPOSE. Sweep #9 round 2 made the whole-number test
+// isSafeInteger (a 20-digit entry came back as digits nobody typed). A decimal still fails the digits test first.
 P("P41004", "…and so is a decimal, even though Number() would accept it",
-  /!Number\.isInteger\(num\)/.test(F.table));
+  /!\/\^\\d\+\$\/\.test\(value\) \|\| !Number\.isSafeInteger\(num\)/.test(F.table));
 P("P41005", "…and so is zero or a negative",
   /num < 1/.test(F.table));
 P("P41006", "a table past the restaurant's count is refused, NAMING the real range",
@@ -70,8 +72,10 @@ P("P41007", "…and the range check is SKIPPED when the restaurant has not said 
 P("P41008", "a refusal always returns an EMPTY value, so a caller cannot use a number that failed",
   (F.table.match(/ok: false/g) || []).length === 3
   && (F.table.match(/value: ""/g) || []).length === 3);
+// RE-AIMED, sweep #10 T4 (2026-10-12) — the rule holds; the code moved ON PURPOSE. Sweep #9 item 4 made a pass hand back the
+// CANONICAL number ("007" → "7"), which is trimmed AND what the floor compares on — stronger than trimming.
 P("P41009", "…and a pass returns the TRIMMED value, not the raw text",
-  /return \{ ok: true, value \};/.test(F.table));
+  /return \{ ok: true, value: String\(num\) \};/.test(F.table) && /const value = \(raw \|\| ""\)\.trim\(\);/.test(F.table));
 P("P41010", "the flag helper says something out loud as well as marking the box",
   /window\.dispatchEvent\(new CustomEvent\("lfh:toast"/.test(F.table));
 P("P41011", "…focuses the box, so the diner's next keystroke lands in the right place",
@@ -90,8 +94,11 @@ P("P41017", "…and writing an EMPTY value REMOVES the key rather than storing \
   /if \(value\) tset\(SCANNED_TABLE_KEY, value\);\s*else tremove\(SCANNED_TABLE_KEY\);/.test(bare(F.table)));
 P("P41018", "every screen that takes a table number judges it with THIS function, not its own rule",
   ["cart", "chef"].every((k) => /validateTable\(/.test(F[k])));
+// RE-AIMED, sweep #10 T4 (2026-10-12) — the rule holds; the code moved ON PURPOSE. Sweep #9 item 5 deleted the gate's private copy:
+// it now asks lib/table.ts, so the range is named by the ONE sentence all three doors share.
 P("P41019", "…and the gate's own typed-table check names the same range in the same words",
-  /This place has tables 1–\$\{max\}/.test(F.gate));
+  /const check = validateTable\(tableInput, settingsRef\.current\?\.tableCount \|\| 0\);/.test(F.gate)
+  && /we have tables 1–\$\{tableCount\}/.test(F.table));
 P("P41020", "…and nothing in the territory writes its own digits-only regex for a table",
   (bare(F.cart + F.chef).match(/\/\^\\d\+\$\//g) || []).length === 0);
 
@@ -210,8 +217,12 @@ P("P41071", "the settings read asks a function, not the settings table, so a col
   /\.rpc\("lfh_guest_settings", \{ p_restaurant_id: restaurantId \}\)/.test(F.menu));
 P("P41072", "…and a failure THROWS rather than silently returning defaults as if they were real",
   /throw new Error\(`Failed to load settings: \$\{error\.message\}`\)/.test(F.menu));
+// RE-AIMED, sweep #10 T4 item 2 (2026-10-12): the table card, the host prompt and the table bill now
+// read the switch through lib/tableConnection.ts watchSessionsSwitch(), which catches AND asks again.
 P("P41073", "…which every caller in the territory catches, so no screen dies of it",
-  ["cart", "chef", "tracker", "tbill", "widget", "owner", "sync"].every((k) => /catch/.test(F[k])));
+  ["cart", "chef", "tracker", "sync"].every((k) => /catch/.test(F[k]))
+  && ["tbill", "widget", "owner"].every((k) => /watchSessionsSwitch\(restaurantId,/.test(F[k]))
+  && /\.catch\(\(\) => \{\s*if \(!alive\) return;/.test(read("lib/tableConnection.ts")));
 P("P41074", "a dish row maps to camelCase in ONE place",
   /function mapRow\(row: any, agg\?: RatingAgg\): MenuItem/.test(F.menu));
 P("P41075", "…where a missing description becomes an empty string, not the word undefined",
@@ -288,8 +299,10 @@ P("P41108", "the default meta is ready:true, because bare routes ARE restaurant 
   /const DEFAULT_META: RestaurantMeta = \{ id: DEFAULT_RESTAURANT_ID, slug: DEFAULT_RESTAURANT_SLUG, name: null, ready: true \};/.test(F.ctx));
 P("P41109", "restaurant #1's own routes skip the lookup entirely",
   /if \(s === DEFAULT_RESTAURANT_SLUG\) \{ setId\(DEFAULT_RESTAURANT_ID\); setReady\(true\); return; \}/.test(F.ctx));
+// RE-AIMED, sweep #10 T4 (2026-10-12) — the rule holds; the code moved ON PURPOSE. Owner item 14 (2026-09-15) made the hook answer ""
+// until the restaurant is settled; it still reads only the context, never subscribes to anything new.
 P("P41110", "a widget that needs only the id does not subscribe to the name",
-  /export function useRestaurantId\(\): string \{\s*return useContext\(RestaurantContext\)\.id;/.test(bare(F.ctx)));
+  /export function useRestaurantId\(\): string \{\s*const \{ id, ready \} = useContext\(RestaurantContext\);\s*return ready \? id : "";/.test(bare(F.ctx)));
 P("P41111", "the basket is stored per restaurant",
   /tget\("lfh_cart"\)/.test(F.cart));
 P("P41112", "the tracked orders are stored per restaurant",

@@ -186,8 +186,12 @@ P("P16147", "no handler awaits setAutoApprove and drops the answer",
   !/^\s*await setAutoApprove\(/m.test(bare(ALL_GUEST)));
 P("P16148", "the join flow reads its answer and branches on every ending it can give",
   ["blocked", "too_far", "no_open_session"].every((r) => new RegExp(`r\\.reason === "${r}"`).test(F.gate)));
+// RE-AIMED, sweep #10 T4 item 1 (2026-10-12). The rule HOLDS: a failed join keeps the guest's place
+// and says it could not reach the restaurant. The sentence moved into joinFailedNote(), which now
+// also says "this one's on us" when the restaurant's own system was the one that did not answer.
 P("P16149", "…and treats anything else as 'could not reach', keeping the guest's place",
-  /if \(!r\.ok\) \{ setTableInput\(p\.table\); setNote\("Couldn't reach the restaurant's system/.test(F.gate));
+  /if \(!r\.ok\) \{ setTableInput\(p\.table\); setNote\(joinFailedNote\(r\)\);/.test(F.gate)
+  && /: "Couldn't reach the restaurant's system — check your internet and try again\.";/.test(F.gate));
 // RE-AIMED, sweep #8 (2026-09-02). The rule HOLDS and the code got STRONGER: the bare
 // `const r = await callWaiterSession(...)` is now wrapped in the gate's own `guarded()` helper and
 // falls back to `{ ok:false, reason:"timed_out" }`, so the answer is not only read, it can no longer
@@ -328,9 +332,14 @@ P("P16209", "…and the true 'nothing ordered yet' message is still a separate, 
   /No dishes sent to the kitchen yet/.test(F.tbill));
 P("P16210", "the green live dot stops claiming a live connection while that message is up",
   /!loaded && stalled \? \{ background: "var\(--muted\)"/.test(F.tbill));
+// RE-AIMED, sweep #10 T4 (2026-10-12). Sweep #9 item 7 DELIBERATELY added a third "working" screen:
+// Place order and Call a waiter now open the sheet on "One moment…" BEFORE the restaurant's rules are
+// read, so a tap is never silent. Every exit from it is a named screen (net_error, ask_table, or the
+// flow's own steps) — verify:session-gate section D guards that one. The count is three, not two.
 P("P16211", "the gate's 'One moment…' step is always left by one of a finite set of endings",
   /setStep\("working"\)/.test(F.gate)
-  && (bare(F.gate).match(/setStep\("working"\)/g) || []).length === 2);
+  && (bare(F.gate).match(/setStep\("working"\)/g) || []).length === 3
+  && /if \(detail\.action !== "connect"\) \{ setOpen\(true\); setStep\("working"\); \}/.test(F.gate));
 P("P16212", "…the order path leaves it by placing, refusing, saving or closing",
   /orderKeyRef\.current = null; \/\/ placed → the next basket is a new order/.test(F.gate));
 // RE-AIMED: `setOpen(true)` was inserted before setStep — the sheet may have been dismissed

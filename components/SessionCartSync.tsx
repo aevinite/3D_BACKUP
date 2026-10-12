@@ -6,8 +6,9 @@ import { useRestaurantId } from "@/lib/restaurant-context";
 // existing cart component (FoodCard, CartPanel, MiniCart, Header…) keeps working
 // unchanged. This component is the only thing that talks to the server cart:
 //
-//   PULL (every 2s): if the session's server cart changed, overwrite the local
-//     cart and fire `lfh:cart-updated` so all cart UIs re-render.
+//   PULL (on every live nudge for this table, with the shared 60-second backstop — it said "every
+//     2s" long after that stopped being true): if the session's server cart changed, overwrite the
+//     local cart and fire `lfh:cart-updated` so all cart UIs re-render.
 //   PUSH (debounced): when the local cart changes (lfh:cart-updated), write it up.
 //
 // It only runs for an APPROVED member of an OPEN session. A guest still waiting
@@ -60,7 +61,7 @@ export default function SessionCartSync() {
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // delays pushes so rapid edits batch into one
 
   // This runs once when the component first appears. It sets up the pull timer
-  // (every 2s) and the listeners that push local changes up to the server.
+  // (live nudges + the 60s backstop) and the listeners that push local changes up to the server.
   useEffect(() => {
     // ── NOT UNTIL WE KNOW WHICH RESTAURANT (owner, 2026-09-15, item 14) ─────────────────────────
     // `useRestaurantId()` answers "" until the restaurant is settled — see its own note. Asking
@@ -98,8 +99,13 @@ export default function SessionCartSync() {
     // copies it into the local cart so all the cart UIs update.
     const tick = async () => {
       // First time only: cache whether the session system is even turned on.
+      // A FAILED READ IS "WE DON'T KNOW YET", NOT "OFF" (sweep #10 T4, item 2). This used to cache
+      // `false` on the first blip and keep it for the whole visit, so a phone that opened the menu
+      // during one busy second never shared its basket with the table — whoever tapped Place order
+      // sent the dishes on THEIR phone and not this one. Left unknown, the next tick (the next live
+      // nudge, or the 60-second backstop) simply asks again; a good answer is cached by getSettings.
       if (enabled.current === null) {
-        try { enabled.current = (await getSettings(restaurantId)).sessionsEnabled; } catch { enabled.current = false; }
+        try { enabled.current = (await getSettings(restaurantId)).sessionsEnabled; } catch { return; }
       }
       if (!alive) return;
       // Only act if sessions are on AND we have a saved session.
@@ -226,7 +232,7 @@ export default function SessionCartSync() {
     const onSessionChanged = () => { reconciledToken.current = null; tick(); };
 
     // Start listening for cart edits and session changes, do one pull now, then
-    // keep pulling every 2 seconds.
+    // follow the live nudges, with the 60-second backstop.
     // Realtime nudge for this table → pull the shared cart immediately.
     const onTick = () => tick();
     window.addEventListener("lfh:cart-updated", onCartUpdated);

@@ -8,7 +8,7 @@
 // banned it renders nothing, so normal guests never see it. (owner, 2026-06-22)
 
 import { useEffect, useState } from "react";
-import { checkBan, requestUnban } from "@/lib/session";
+import { checkBan, requestUnban, isSessionTimeout } from "@/lib/session";
 import { useRestaurantMeta } from "@/lib/restaurant-context";
 
 export default function BanGate() {
@@ -26,7 +26,11 @@ export default function BanGate() {
   const [requested, setRequested] = useState(false);    // has an unblock request already gone in?
   const [phone, setPhone] = useState("");               // the number the guest types
   const [sending, setSending] = useState(false);        // request in flight
-  const [failed, setFailed] = useState(false);          // the server matched no block record
+  // Why the last request did not go in — "" when it did, or nothing has been tried. A CODE-driven
+  // sentence (sweep #10 T4, item 4): this used to be one flag, so a busy second or a dropped signal
+  // told a blocked guest "We couldn't match that number to this block", and they tried a different
+  // number instead of simply trying again.
+  const [failed, setFailed] = useState("");
 
   // Ask the server on mount, and re-ask when the tab is refocused — so the moment
   // staff unblock them, the wall lifts on their next look without a manual reload.
@@ -76,11 +80,21 @@ export default function BanGate() {
     const p = phone.trim();
     if (p.length < 5 || sending) return;
     setSending(true);
-    setFailed(false);
+    setFailed("");
     const r = await requestUnban(p, restaurantId);
     setSending(false);
-    if (r.ok) setRequested(true);
-    else setFailed(true); // refuse visibly rather than pretend
+    if (r.ok) { setRequested(true); return; }
+    // Refuse visibly rather than pretend — and say WHICH refusal. Only `not_blocked` (mig 385: no
+    // block record matched this device or number) means the number is the problem. A timeout is the
+    // restaurant's own system not answering (lib/session.ts words a saturated database as
+    // `timed_out`), and anything else came from the transport, i.e. nothing was decided at all.
+    setFailed(
+      r.reason === "not_blocked"
+        ? "We couldn't match that number to this block. Please speak to a member of staff."
+        : isSessionTimeout(r)
+          ? "The restaurant's system isn't answering right now — please try again in a moment."
+          : "We couldn't send that just now — please check your connection and try again.",
+    );
   };
 
   return (
@@ -109,9 +123,7 @@ export default function BanGate() {
               {sending ? "Sending…" : "Request unblock"}
             </button>
             {failed && (
-              <p className="ban-fail" role="status">
-                We couldn&apos;t match that number to this block. Please speak to a member of staff.
-              </p>
+              <p className="ban-fail" role="status">{failed}</p>
             )}
           </div>
         )}

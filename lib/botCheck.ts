@@ -18,9 +18,15 @@
 // mig 151), the request rate limit (lib/rateLimit, mig 205), and a password hash slow enough
 // (PBKDF2 ×120,000) that guessing costs real time. This is one more cheap layer in front.
 //
-// FOR THE STRONG VERSION, turn on Cloudflare Turnstile: set TURNSTILE_SECRET_KEY (server) and
-// NEXT_PUBLIC_TURNSTILE_SITE_KEY (browser) and it starts being enforced with NO code change —
-// see verifyTurnstile() below. With no keys set it is skipped entirely, which is the state today.
+// FOR THE STRONG VERSION, Cloudflare Turnstile — ⚠️ NOT a keys-only switch yet (sweep #10 T4, item 8).
+// This header used to say "set TURNSTILE_SECRET_KEY and NEXT_PUBLIC_TURNSTILE_SITE_KEY and it starts
+// being enforced with NO code change". Only the SERVER half exists: verifyTurnstile() below refuses a
+// sign-in that carries no Cloudflare token once the secret is set — but no login form renders the
+// Cloudflare box, so no form can ever send one (turnstileSiteKey() has no caller). Setting the secret
+// today would refuse EVERY staff and admin sign-in, the admin's own included. Before the keys are set,
+// the two login forms (app/login, app/staff-login) must render the widget inside the form — it adds
+// the `cf-turnstile-response` field the two login routes already read. With no keys set it is skipped
+// entirely, which is the state today. verify:panel-api keeps this paragraph honest.
 //
 // ── THE RULE THAT MATTERS MOST: IT FAILS OPEN ────────────────────────────────────────────────
 // If the signals are ABSENT, the login is ALLOWED. That is deliberate and non-negotiable:
@@ -99,6 +105,7 @@ export async function verifyTurnstile(token: unknown, ip?: string): Promise<bool
   }
 }
 
-/** Is Turnstile switched on for the browser? Used by the form to decide whether to render the
- *  widget at all. Reads the PUBLIC key, which is the one that is safe in the browser. */
+/** Is Turnstile switched on for the browser? MEANT for the form to decide whether to render the
+ *  widget at all — but no form calls it yet (see the ⚠️ in this file's header). Reads the PUBLIC key,
+ *  which is the one that is safe in the browser. */
 export const turnstileSiteKey = () => process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
