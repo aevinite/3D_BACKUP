@@ -158,6 +158,16 @@ const nextConfig: NextConfig = {
       ...STAFF_PATHS.map((source) => ({ source, headers: FRAME_HEADERS })),
       ...NOINDEX_PATHS.map((source) => ({ source, headers: NOINDEX })),
       { source: "/:path*", missing: [{ type: "host" as const, value: PUBLIC_HOST }], headers: NOINDEX },
+      // ── AN ANSWER THAT CAN CARRY A PASSWORD IS NEVER STORED (sweep #10 T29 round 2, item 27) ────
+      // The hosting default for these was `public, max-age=0, must-revalidate` — "public" lets a browser
+      // keep the answer in its disk cache. The handover sheet carries every login's readable password
+      // while the admin has them uncovered, and the per-person door hands one back; the uncover window
+      // is built to expire in five minutes (lib/revealGate.ts), a disk copy is not. The offline helper
+      // (public/sw.js NEVER, item 28) skips the same three.
+      ...["/api/admin/restaurants/credentials", "/api/admin/reveal", "/api/admin/reveal/:path*"].map((source) => ({
+        source,
+        headers: [{ key: "Cache-Control", value: "no-store, max-age=0" }, { key: "Pragma", value: "no-cache" }],
+      })),
     ];
   },
 };

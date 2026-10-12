@@ -568,5 +568,18 @@ const NOT_YET = new Map([
   check("…and the one reader turns null / a number / a list into {}", /parsed && typeof parsed === "object" && !Array\.isArray\(parsed\)/.test(lib));
 }
 
+// ── 24 · A PASSWORD-BEARING ANSWER IS STORED NOWHERE (sweep #10 T29 round 2, items 27 + 28) ────────
+// The handover sheet carries readable passwords while uncovered, and the per-person door hands one back.
+// Neither the browser's disk cache (Cache-Control) nor the offline helper (public/sw.js) may keep them.
+{
+  const cfg = raw("next.config.ts") || "";
+  for (const path of ["/api/admin/restaurants/credentials", "/api/admin/reveal", "/api/admin/reveal/:path*"])
+    check(`next.config: ${path} answers Cache-Control: no-store`, cfg.includes(`"${path}"`) && /\{ key: "Cache-Control", value: "no-store, max-age=0" \}/.test(cfg));
+  const sw = raw("public/sw.js") || "";
+  const never = (sw.match(/const NEVER = \[[\s\S]*?\];/) || [""])[0];
+  check("the offline helper never stores the handover sheet", /\\\/api\\\/admin\\\/restaurants\\\/credentials/.test(never));
+  check("…nor either password door", /\\\/api\\\/admin\\\/reveal/.test(never));
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);
