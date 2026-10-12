@@ -1072,7 +1072,7 @@ flush();
   // item 17 — the QR bell on a busy restaurant is saved, like no signal
   { const m = r2("lib/menu.ts"), ch = r2("components/ChefPopup.tsx");
     check("item 17 — a QR call the restaurant did not ANSWER is saved and sent later (busy = offline)",
-      /if \(isDbUnreachable\(error\)\) throw busyError\(/.test(m) && /if \(isServerBusy\(err\)\) \{[\s\S]{0,160}enqueueGuestCall\(/.test(ch)); }
+      /if \(isDbUnreachable\(error\)( \|\| isUnreachable\(error\))?\) throw busyError\(/.test(m) && /if \(isServerBusy\(err\)\) \{[\s\S]{0,160}enqueueGuestCall\(/.test(ch)); }
   // item 18 — the basket pill counts the same quantity the bill does
   { const c = r2("components/MiniCart.tsx");
     check("item 18 — the basket pill clamps a saved quantity to 1–99 exactly like the bill",
