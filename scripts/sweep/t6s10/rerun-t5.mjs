@@ -42,7 +42,7 @@ for (let i = 0; i < 1636 && i < lines.length; i++) {
   const L = lines[i];
   const m = L.match(/^\| (P\d{5,6}) \| (.*?) \| (.*?) \| (✅|❌|⏭)[^|]*\|(.*)\|\s*$/);
   if (!m) continue;
-  const [, id, title, how, prev, note] = m;
+  const [, id, title, how, prev] = m;
   const dsl = how.match(/^read the shipped files? · (.*)$/);
   if (!dsl) { out.push({ id, line: i + 1, title, how, prev, kind: "driven" }); continue; }
   let expr = dsl[1].replace(/¦/g, "|").replace(/noComments\(app\)/g, "noCommentsFn(app)");

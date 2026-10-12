@@ -15,7 +15,7 @@ const res = {};
 const mark = (id, ok, note) => { res[id] = { ok, note: note || "" }; };
 const BILLDOC = rd("public/panels/billdoc.js"), TABLET = rd("public/panels/tablet/app.js"), ROUTE = rd("app/api/editor/[...path]/route.ts");
 
-const p = await panel();
+await panel();
 // ── Bills ─────────────────────────────────────────────────────────────────────────────────────
 const bills = await ev(`(async () => { const r = {}; const now = new Date().toISOString();
   setTab('orders'); state.ordersView = 'live'; renderList(); renderEditor(); await new Promise((f) => setTimeout(f, 600));

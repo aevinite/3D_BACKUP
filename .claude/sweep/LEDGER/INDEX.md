@@ -58,7 +58,7 @@ terminals' rows — keep both sides.
 | T3 | `P172001`–`P173000` | Ordering — the basket, placing an order, calling staff, rating | `T3-S10.md` | 508 | 504 | 4 | 4 |
 | T4 | `P173001`–`P174000` | The table session — a table shows only its own party | `T4-S10.md` | 574 | 574 | 8 | 8 |
 | T5 | `P174001`–`P175000` | App shell, offline, realtime and the small shared components | ⏳ not run yet | — | — | — | — |
-| T6 | `P175001`–`P176000` | Manager panel — editor/app.js, part 1 of 3 | ⏳ not run yet | — | — | — | — |
+| T6 | `P175001`–`P176000` | Manager panel — editor/app.js, part 1 of 3 | `T6-S10.md` | 523 | 519 | 7 | 7 |
 | T7 | `P176001`–`P177000` | Manager panel — editor/app.js, part 2 of 3 | ⏳ not run yet | — | — | — | — |
 | T8 | `P177001`–`P178000` | Manager panel — editor/app.js part 3 of 3, the host page and inventory | ⏳ not run yet | — | — | — | — |
 | T9 | `P178001`–`P179000` | The manager panel's server route, part 1 of 2 | `T9-S10.md` | 840 | 838 | 12 | 12 |

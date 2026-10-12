@@ -15,7 +15,7 @@
 //   node scripts/sweep/t6s10/inventory.mjs --json f   # write the list for the re-run scripts
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ROOT, APP, CODE, MY_END_AT, DECLS } from "./lib.mjs";
+import { ROOT, APP, MY_END_AT, DECLS } from "./lib.mjs";
 
 const LEDGER = join(ROOT, ".claude/sweep/LEDGER");
 const A = process.argv.slice(2);

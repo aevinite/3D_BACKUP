@@ -527,7 +527,7 @@ async function driven() {
   }
   try { await narrow.ctx.close(); } catch {}
   // P60205–P60216 — the faults sweep #8 T6 fixed in MY half: is each fix still in place?
-  const MINE_SRC = APP.slice(0, MY_END_AT), MINE_C = CODE.slice(0, MY_END_AT);
+  const MINE_C = CODE.slice(0, MY_END_AT);
   mark("P60205", !/(?<![\w$.])(prompt|confirm)\(/.test(MINE_C.replace(/confirmDialog\(|promptDialog\(/g, "")), "no bare prompt()/confirm() left in my half — FIXED item 1 (2026-09-03) still holds");
   const pd = guard("scripts/verify-panel-dialogs.mjs");
   mark("P60206", pd.ok && /editor\/app\.js/.test(rd("scripts/verify-panel-dialogs.mjs")), `verify:panel-dialogs ${pd.ok ? "green" : "RED"} and names editor/app.js`);

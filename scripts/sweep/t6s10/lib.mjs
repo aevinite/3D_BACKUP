@@ -97,7 +97,7 @@ export const check = (id, what, how, fn) => defs.push({ id, what, how, fn });
 export const SUBJECT = "`public/panels/editor/app.js`";
 export const ID_FLOOR = 175001, ID_CEILING = 176000;
 
-export async function runAll({ ledger = false, quiet = false, only = null, block = null, json = null } = {}) {
+export async function runAll({ ledger = false, quiet = false, only = null, json = null } = {}) {
   const seen = new Set();
   for (const d of defs) {
     if (seen.has(d.id)) throw new Error(`duplicate id ${d.id}`);
