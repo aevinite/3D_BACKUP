@@ -467,11 +467,17 @@ const NOT_YET = new Map([
   check(`${rel} exists`, !!src);
   if (src) {
     check("Recovery backup → no table is read in one request (PostgREST cuts every answer at 1,000)",
-      !/\.limit\(CAP\)/.test(src) && /\.range\(from, Math\.min\(from \+ PAGE, CAP\) - 1\)/.test(src));
+      !/\.limit\(CAP\)/.test(src) && /q\.limit\(Math\.min\(PAGE, CAP - from\)\)/.test(src));
     check("…every page is read in the table's own key order, so no row repeats or goes missing",
       /q = q\.order\(k, \{ ascending: true \}\)/.test(src) && /const ORDER_KEY: Record<string, string> = \{/.test(src));
     check("…and the staff logins go through the same pager",
       /const staffQ = await readAll\("staff_users"/.test(src));
+    // Round 2, item 22: deep "skip N rows" pages timed out on a busy database and marked `orders` failed;
+    // a single-key table is read "next after the last row" (keyset), and four tables are read at once.
+    check("…a single-key table is paged NEXT-AFTER-THE-LAST, not skip-N (a busy database timed out on deep skips)",
+      /if \(single && last !== null\) q = q\.gt\(key, last as string\)/.test(src) && /last = batch\[batch\.length - 1\]\[key\]/.test(src));
+    check("…and the tables are read four at a time, assembled in their own order",
+      /for \(let i = 0; i < TABLES\.length; i \+= 4\)/.test(src) && /results\[i \+ j\] = r/.test(src));
   }
 }
 

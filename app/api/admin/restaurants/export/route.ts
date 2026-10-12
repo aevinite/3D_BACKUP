@@ -77,14 +77,24 @@ export async function GET(req: NextRequest) {
   const readAll = async (table: string, cols = "*"): Promise<{ rows: unknown[]; truncated: boolean; error?: undefined } | { error: string; rows?: undefined; truncated?: undefined }> => {
     const rows: unknown[] = [];
     const key = ORDER_KEY[table] || "id";
+    // NEXT-AFTER-THE-LAST, NOT SKIP-N (sweep #10 T29 round 2, item 22). Skipping N rows makes the
+    // database walk past all N again on every page, so a 20,000-order table got slower page after page
+    // — and on a busy moment the dev database stalled on exactly those deep pages, marking `orders`
+    // failed. With a single unique key each page starts right after the last row it returned
+    // ("keyset" paging), so every page costs the same. The one two-column key (daily_counters, one small
+    // row per counter per day) keeps the old way.
+    const single = !key.includes(",");
+    let last: unknown = null;
     for (let from = 0; from < CAP; from += PAGE) {
       let q = sb.from(table).select(cols).eq("restaurant_id", rid);
       for (const k of key.split(",")) q = q.order(k, { ascending: true });
-      const r = await q.range(from, Math.min(from + PAGE, CAP) - 1);
+      if (single && last !== null) q = q.gt(key, last as string);
+      const r = single ? await q.limit(Math.min(PAGE, CAP - from)) : await q.range(from, Math.min(from + PAGE, CAP) - 1);
       if (r.error) return { error: r.error.message || "this table could not be read" };
-      const batch = (r.data || []) as unknown[];
+      const batch = (r.data || []) as unknown as Record<string, unknown>[];
       rows.push(...batch);
       if (batch.length < PAGE) return { rows, truncated: false };
+      last = batch[batch.length - 1][key];
     }
     // Exactly CAP rows read: one more look says whether anything was left behind.
     const more = await sb.from(table).select("restaurant_id", { count: "exact", head: true }).eq("restaurant_id", rid);
@@ -103,8 +113,16 @@ export async function GET(req: NextRequest) {
   // not be complete has to name what is missing rather than let the reader assume it is all there.
   const failed: string[] = [];
 
-  for (const t of TABLES) {
-    const q = await readAll(t);
+  // FOUR TABLES AT A TIME (item 22): the twenty-odd tables are independent, and reading them one after
+  // another made the slowest part of the download a queue. Four at once keeps the database load modest
+  // (one admin, one rare deliberate download) and the file is assembled in the same table order.
+  const results: Awaited<ReturnType<typeof readAll>>[] = new Array(TABLES.length);
+  for (let i = 0; i < TABLES.length; i += 4) {
+    const batch = await Promise.all(TABLES.slice(i, i + 4).map((t) => readAll(t)));
+    batch.forEach((r, j) => { results[i + j] = r; });
+  }
+  for (const [ti, t] of TABLES.entries()) {
+    const q = results[ti];
     if (q.error !== undefined) { backup[t] = { error: q.error }; failed.push(t); continue; }
     // THE SETTINGS ROW CARRIES A CREDENTIAL, AND THIS FILE LEAVES THE BUILDING (T17 sweep,
     // 2026-08-13, finding F3). `settings.platform_channels` holds the delivery apps' connection
