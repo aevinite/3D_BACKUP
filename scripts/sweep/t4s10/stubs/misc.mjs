@@ -8,4 +8,4 @@ export function deviceIdFrom() { return W.misc.device ?? "dev-stub"; }
 export async function storeIssueMedia(rid, file, kind) { rec("store", { rid, kind, size: file && file.size }); if (W.misc.storeThrows) throw new Error(W.misc.storeThrows); return "https://stub/issue-media/" + rid + "/x"; }
 export async function getMenuBundle(rid) { rec("bundle", rid); if (W.misc.bundleThrows) throw new Error("bundle read failed"); return W.misc.bundle ?? { items: [{ id: "d1", title: "Dish" }], categories: [{ id: "c1", title: "Cat" }] }; }
 export const normTable = (v) => { const n = parseInt(String(v ?? "").trim(), 10); return Number.isFinite(n) && n > 0 ? String(n) : ""; };
-export async function affectedTables(rid, a, b, c, body) { rec("affected", { rid, a, b, c }); return W.misc.affected ?? { tables: [normTable(b)], unknown: false }; }
+export async function affectedTables(rid, a, b, c) { rec("affected", { rid, a, b, c }); return W.misc.affected ?? { tables: [normTable(b)], unknown: false }; }

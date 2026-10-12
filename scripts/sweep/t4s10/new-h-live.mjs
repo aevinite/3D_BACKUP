@@ -3,7 +3,7 @@
 // screens are reached by holding the DATABASE'S ANSWERS in the browser (Playwright routes on the public
 // client's RPC calls) — the page, its components and its network code are the real built app; only
 // what the database would have said is chosen. NOT ONE ROW IS WRITTEN by this block.
-import { check, band, FILES, rd, REAL_FETCH } from "./lib.mjs";
+import { check, band, FILES, REAL_FETCH } from "./lib.mjs";
 const fetch = (...a) => REAL_FETCH(...a);
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
@@ -217,7 +217,7 @@ const twoRun = (decision) => once("two-" + decision, async () => {
   const shared = { approved: false, removed: false, pending: [] };
   const head = await stubbed(PHONE, { lfh_guest_settings: "sessionsOn", lfh_touch_session: () => okJson({ ok: true }),
     lfh_session_state: () => okJson({ ok: true, session: { id: "s2", table_number: "7", status: "open" }, member: { id: "m-head", role: "owner", approved: true }, members: [{ id: "m-head" }], pending: shared.pending, calls: [], items: [], orders: [] }),
-    lfh_approve_member: (a) => { shared.approved = true; shared.pending = []; return okJson({ ok: true }); },
+    lfh_approve_member: () => { shared.approved = true; shared.pending = []; return okJson({ ok: true }); },
     lfh_remove_member: () => { shared.removed = true; shared.pending = []; return okJson({ ok: true }); } }, seed(HEAD));
   const guest = await stubbed(PHONE, { lfh_guest_settings: "sessionsOn",
     lfh_table_status: () => okJson({ ok: true, open: true, members: 1, session_id: "s2" }),

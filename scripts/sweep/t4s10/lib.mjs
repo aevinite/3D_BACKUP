@@ -16,7 +16,7 @@
 //
 // Never: a swapped id, a write to Aangan's switches, a repeat of a rate-limited action to "see the wall".
 import { readFileSync, mkdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

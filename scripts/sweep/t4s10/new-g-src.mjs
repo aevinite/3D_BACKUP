@@ -1,7 +1,7 @@
 // Block G — conformance to the rules CLAUDE.md sets for this territory, and per-file hygiene, read from
 // today's code with comments stripped (P173376…). A rule about CODE is checked against code, never
 // against the comment that describes it.
-import { check, band, FILES, SRC, CODE, rd, strip, count, bodyOf } from "./lib.mjs";
+import { check, band, FILES, SRC, CODE, rd, count, bodyOf } from "./lib.mjs";
 import { execSync } from "node:child_process";
 const HOW = "SRC — today's file, comments stripped";
 band(173376);
