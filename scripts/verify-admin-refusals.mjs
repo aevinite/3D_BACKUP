@@ -530,5 +530,24 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 22 · THE MANAGER PANEL'S DELETE IS HELD TO THE SAME RULE (sweep #10 T29 round 2, item 18) ─────
+// The Repair Kit's "already deleted → no second Removals row" (§8) had a twin in the manager panel's
+// own order delete, plus a ₹0 amount whenever its second read hiccuped. Both closed; held here.
+{
+  const rel = "app/api/editor/[...path]/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    const a = src.lastIndexOf('if (a === "orders" && id) {');
+    const del = src.slice(a, src.indexOf('if (a === "calls" && id)', a));
+    check("Manager panel → delete an order reads its worth in the SAME checked read (no ₹0 on a hiccup)",
+      /must\(await sb\.from\("orders"\)\.select\("payment_status, status, total, session_id, table_number, deleted_at"\)/.test(del) && !/\)\)\.data as\s*\{ total/.test(del));
+    check("…an already-deleted order answers before anything is written",
+      del.indexOf("if (cur?.deleted_at) return") > -1 && del.indexOf("if (cur?.deleted_at) return") < del.indexOf("softDeleteOrders("));
+    check("…and the delete's own count decides whether a Removals row is written",
+      /\)\)\.deleted;\s*if \(gone === 0\) return/.test(del) && del.indexOf("if (gone === 0) return") < del.indexOf("recordRemoval("));
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

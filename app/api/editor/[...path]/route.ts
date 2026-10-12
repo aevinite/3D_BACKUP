@@ -6749,15 +6749,25 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       // tax/audit and shows as a tombstone in the admin ledger; a restore brings it back.
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete bills");
       if (!(await canDeleteBill(g, rid))) return permDenied("delete bills");
-      const cur = must(await sb.from("orders").select("payment_status,status").eq("id", id).eq("restaurant_id", rid).single());
+      // ONE READ, AND IT ANSWERS FOR ITSELF (sweep #10 T29 round 2, item 18). The bill's worth used to be a
+      // SECOND read with its error unreachable (`.data` only), so a database hiccup recorded the deleted
+      // bill as ₹0 in the Removals record — the screen the owner and the manager total to answer "what
+      // came off my bills?". `must()` refuses on a failed read, before anything is written.
+      const cur = must(await sb.from("orders").select("payment_status, status, total, session_id, table_number, deleted_at").eq("id", id).eq("restaurant_id", rid).single()) as
+        { payment_status: string | null; status: string | null; total: number | null; session_id: string | null; table_number: string | null; deleted_at: string | null } | null;
       if (cur && cur.payment_status === "paid" && cur.status !== "cancelled")
         return err("Won't delete a PAID bill — it's a financial record. Mark it unpaid or void it first.", 409);
+      // …AND AN ORDER THAT IS ALREADY DELETED IS NOT RECORDED TWICE (item 18 — the admin Repair Kit's
+      // twin was item 3). A soft delete keeps the row, so it is still found; softDeleteOrders() then skips
+      // it and answers { deleted: 0 }, which was never read — a second device, an offline replay or a
+      // double press wrote a SECOND `order_deleted` row with the full amount. Checked before the write
+      // and from the write's own count, since another device can delete it in between.
+      if (cur?.deleted_at) return ok({ ok: true, alreadyDeleted: true });
       // Reason from the client (?reason=) → onto the tombstone + into the log so the audit shows WHY.
       const delReason = (req.nextUrl.searchParams.get("reason") || "").trim().slice(0, 200);
-      // Read the bill's worth BEFORE the soft delete, so the Audit row says what left the reports.
-      const wasWorth = (await sb.from("orders").select("total, session_id, table_number").eq("id", id).eq("restaurant_id", rid).maybeSingle()).data as
-        { total: number | null; session_id: string | null; table_number: string | null } | null;
-      await softDeleteOrders(rid, [id], { actor: actorName, actorId: g.user?.id ?? null, reason: delReason });
+      const wasWorth = cur;
+      const gone = (await softDeleteOrders(rid, [id], { actor: actorName, actorId: g.user?.id ?? null, reason: delReason })).deleted;
+      if (gone === 0) return ok({ ok: true, alreadyDeleted: true });
       await log("editor", "order_delete", { restaurant_id: rid, order_id: id, detail: delReason || undefined, device_id: deviceIdFrom(req) });
       // Server-side Audit row (was the browser's job — see the cancel path above).
       await recordRemoval({
