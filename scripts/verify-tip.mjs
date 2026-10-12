@@ -157,21 +157,39 @@ for (const [name, src] of [["the manager panel", editor], ["the waiter tablet", 
 // that every way out of the payment sheet records the tip exactly once, including the door to the
 // split screen, where it would otherwise be lost the moment the sheet closes.
 {
+  // …AND ONLY AFTER THE BILL ITSELF REALLY SETTLED, WITH ITS PIN (sweep #10 T12, item 5). The tip used
+  // to be posted alongside the payment and without the manager PIN, so a PIN-gated restaurant refused
+  // every tip ("Bill is paid, but the ₹50 tip was not recorded") and a cancelled PIN left a tip on a
+  // bill nobody paid. So for each way out: the settle comes FIRST, the tip AFTER it carries the PIN the
+  // settle answered with — and the split door hands the tip ACROSS rather than writing it early.
   const flow = tablet.slice(tablet.indexOf("async function payBillWithMethod"),
     tablet.indexOf("async function captureCustomer"));
-  const calls = (flow.match(/recordTip\(/g) || []).length;
-  const exits = ["special === \"split\"", "special === \"onhouse\"", "special === \"khata\""]
-    .filter((e) => new RegExp(e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(flow));
-  const missed = exits.filter((e) => {
-    const at = flow.search(new RegExp(e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    return !/recordTip\(/.test(flow.slice(at, at + 320));
-  });
-  check(calls >= 3 && missed.length === 0,
-    "every way out of the payment sheet records the tip once — including the door to the split screen",
-    `recordTip called ${calls}x across ${exits.length} special exits${missed.length ? "; NOT on: " + missed.join(", ") : ""}`);
+  const code = flow.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const branch = (marker) => { const at = code.indexOf(marker); return at < 0 ? "" : code.slice(at, code.indexOf("\n  if (", at + 10) > 0 ? code.indexOf("\n  if (", at + 10) : at + 700); };
+  const onhouse = branch('special === "onhouse"');
+  const khata = branch('special === "khata"');
+  const split = branch('special === "split"');
+  const plainAt = code.indexOf("payBill(t, picked.method");
+  const plain = plainAt < 0 ? "" : code.slice(plainAt - 40, plainAt + 220);
+  const after = (blk, settle, tipRe) => { const a = blk.search(settle), b = blk.search(tipRe); return a >= 0 && b > a; };
+  const bad = [];
+  if (!after(onhouse, /actGated\("POST", `\/tables\/\$\{t\}\/on-the-house`/, /recordTip\(t, picked\.tip, res\.pin\)/)) bad.push("on the house");
+  if (!after(khata, /tabletKhataFlow\(/, /recordTip\(t, picked\.tip, res\.pin\)/)) bad.push("pay later");
+  if (!after(plain, /payBill\(t, picked\.method/, /recordTip\(t, picked\.tip, paid\.pin\)/)) bad.push("a plain settle");
+  if (!/renderSplitBill\(t, \{[^}]*tip: picked\.tip/.test(split) || /recordTip\(/.test(split)) bad.push("the split door");
+  check(bad.length === 0,
+    "every way out of the payment sheet records the tip once, AFTER the bill settled, with its PIN — the split door hands it across",
+    `wrong on: ${bad.join(", ")}`);
   check(!/tip per part|splitLegs[\s\S]{0,120}tip/.test(flow),
     "…and never once per part",
     "a tip on every part of a split is how you double it");
+  const rt = tablet.slice(tablet.indexOf("async function recordTip"), tablet.indexOf("async function captureCustomer"));
+  check(/managerPin: pin/.test(rt) && /partyOrders\(t\)/.test(rt),
+    "the tip write carries the settle's manager PIN, and lands on the PARTY's first ticket (a merged child included)",
+    "without the PIN a PIN-gated restaurant refuses the tip; ordersOf() on a merged child finds no ticket at all");
+  check(/return \{ r, pin, queued: false \}/.test(tablet) && /return \{ r, pin, queued: true \}/.test(tablet),
+    "actGated answers what happened — so a second write waits for the first",
+    "without an answer the tip cannot know whether the bill was paid, refused, or the PIN cancelled");
 }
 check(/resolve\(\{ special: b\.dataset\.special, tip \}\)/.test(tablet),
   "a bill settled on the house or put on a tab still carries its tip",
@@ -188,8 +206,12 @@ check(/resolve\(\{ special: b\.dataset\.special, tip \}\)/.test(tablet),
   check(/class="pay-tip-pct"/.test(split) && /class="pay-tip-amt"/.test(split) && /class="pay-tip-paid"/.test(split),
     "the split screen has the same three linked tip boxes as the payment sheet",
     "a bill that closes here would otherwise have no way to be tipped at all");
-  check(/recordTip\(t, tip\)/.test(split),
-    "…and records it once the split has really gone through");
+  // After the split's own actGated has answered — never inside a success hook a saved-offline split
+  // skips — with that settle's PIN, and ₹0 allowed so clearing a tip already on the bill sticks.
+  check(/const res = await actGated\("POST", `\/tables\/\$\{t\}\/pay-split`/.test(split) && /if \(res\) await recordTip\(t, tip, res\.pin/.test(split),
+    "…and records it once the split has really gone through, with the PIN that authorised it");
+  check(/opts\.tip/.test(split),
+    "…and starts from the tip the payment sheet handed across, so a tip typed there is not shown as none");
   // The parts must still foot to the bill. If the tip ever entered `splits`, the server would
   // refuse the whole payment as an overpayment — so this is a correctness check, not a tidy-up.
   const splitsBlock = split.slice(split.indexOf("const splits = legs.map"), split.indexOf("const how ="));

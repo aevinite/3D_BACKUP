@@ -563,11 +563,12 @@ async function actGated(method, path, body, opts = {}) {
     // opts.expect (optional) says what the screen was editing FROM, so a PIN-gated value edit
     // (a discount, say) gets the same no-silent-overwrite protection as a plain one.
     const apiOpts = opts.expect ? { expect: opts.expect } : undefined;
+    let pin = null;
     try {
       r = await api(method, path, body, apiOpts);
     } catch (e) {
       if (!wantsPin(e)) throw e;
-      let pin = await pinPrompt(opts.message);
+      pin = await pinPrompt(opts.message);
       while (pin) {
         try { r = await api(method, path, { ...(body || {}), managerPin: pin }, apiOpts); break; }
         catch (e2) {
@@ -577,15 +578,20 @@ async function actGated(method, path, body, opts = {}) {
       }
       if (!pin) return; // cancelled
     }
-    if (isQueued(r)) { toast(savedMsg(r)); return; }  // #2: saved offline — skip the offline GET + the success toast
+    // WHAT HAPPENED IS ANSWERED (sweep #10 T12, item 5): `{ r, pin, queued }` when the write went
+    // through or was saved on the device, nothing when it was refused or the PIN was cancelled — so a
+    // caller with a SECOND write that belongs to this one (the tip that goes with a bill) can do it
+    // only after the first really happened, with the PIN the person has just typed.
+    if (isQueued(r)) { toast(savedMsg(r)); return { r, pin, queued: true }; }  // #2: saved offline — skip the offline GET + the success toast
     await load();
     // THE SERVER'S ANSWER IS HANDED TO onSuccess. Some writes decide something the screen cannot
     // work out for itself — a merge picks which table KEEPS the bill (the lowest number, not the one
     // that was tapped), and until this argument existed the tablet guessed, named the wrong table in
     // its toast, and pointed its undo at a table that was never the child. Every existing callback
     // ignores the argument, so adding it changes nothing for them.
-    if (typeof opts.onSuccess === "function") { try { opts.onSuccess(r); } catch (e) {} }
+    if (typeof opts.onSuccess === "function") { try { opts.onSuccess(r, pin); } catch (e) {} }
     else if (opts.toast) toast(opts.toast);
+    return { r, pin, queued: false };
   } catch (e) {
     toast("Failed: " + errText(e), false);
   }
@@ -3118,7 +3124,11 @@ function renderSplitBill(t, opts = {}) {
   // means a waiter who typed 200 there does not think it was lost and type it again. The write is
   // an overwrite, not an increment, so re-recording the same figure is harmless either way — but a
   // box that silently forgets what you typed is not.
-  let tip = Math.max(0, Math.round(((payable[0] && Number(payable[0].tip)) || 0) * 100) / 100);
+  // The pay sheet's door now HANDS the tip over (opts.tip) instead of writing it first — that write
+  // went out without the PIN and its figure never reached this screen, so a tip typed there showed
+  // here as none at all (item 5). Otherwise: what is already stored on the bill.
+  const storedTip = Math.max(0, Math.round(((payable[0] && Number(payable[0].tip)) || 0) * 100) / 100);
+  let tip = Number.isFinite(Number(opts.tip)) && Number(opts.tip) > 0 ? Math.round(Number(opts.tip) * 100) / 100 : storedTip;
   {
     const BD = window.LFH_BILLDOC || {};
     const TIP_MAX = Number(BD.TIP_MAX) || 100000;
@@ -3280,7 +3290,7 @@ function renderSplitBill(t, opts = {}) {
 
   // STAYS ENABLED AND SAYS WHY IT WON'T GO — a disabled button that swallows the tap is
   // indistinguishable from a broken one, and this is the most repeated money control in a service.
-  p.querySelector(".sb-go").onclick = () => {
+  p.querySelector(".sb-go").onclick = async () => {
     const left = legLeft();
     if (legs.some((l) => !(Number(l.amount) > 0))) { toast("Every part needs an amount above zero — remove the empty one.", false); return; }
     if (legs.length < 2) { toast("A split needs at least two parts.", false); return; }
@@ -3298,21 +3308,22 @@ function renderSplitBill(t, opts = {}) {
     }));
     const how = splits.map((l) => `${inr(l.amount)} ${l.method}`).join(" + ");
     dropLayer();
-    actGated("POST", `/tables/${t}/pay-split`, { splits }, {
+    const res = await actGated("POST", `/tables/${t}/pay-split`, { splits }, {
       message: "Enter a manager PIN to mark this bill paid.",
       // ASK THE QUEUE BEFORE CLAIMING THE MONEY ARRIVED (T28, 2026-08-30 — the manager panel had
       // the same gap, found the same day). actGated hands the server's own answer to onSuccess and
       // every other write on this screen reads it; this one threw it away, so offline the waiter
       // was told "Bill paid in 3 parts" and offered an UNDO for a payment the server had never
       // seen. savedMsg() is the sentence the rest of the panel already uses for exactly this.
-      onSuccess: (r) => {
-        // The tip goes with the bill, once, after the split is really through — and it is NOT one
-        // of the parts, so it never has to balance against the due.
-        void recordTip(t, tip);
-        if (isQueued(r)) { toast(savedMsg(r)); return; }
+      // (A saved-offline split never reaches here: actGated already said savedMsg() and returned.)
+      onSuccess: () => {
         offerPayUndo(t, { message: `Bill paid in ${splits.length} parts — ${how}${tip > 0 ? ` · ${inrExact(tip)} tip` : ""}` });
       },
     });
+    // The tip goes with the bill, once, after the split is really through (or saved to go) — with the
+    // PIN that authorised it — and it is NOT one of the parts, so it never balances against the due.
+    // Clearing a tip that was already on the bill writes ₹0, so "None" here means none.
+    if (res) await recordTip(t, tip, res.pin, { allowZero: storedTip > 0 });
   };
 }
 
@@ -3704,7 +3715,7 @@ async function runOptimistic(mutate, fn, onSuccess) {
   try {
     mutate(); renderFloor(); renderPanel();
     const r = await fn();
-    if (isQueued(r)) { toast(savedMsg(r)); return; }  // #2: saved offline — not a failure, and load() would no-op
+    if (isQueued(r)) { toast(savedMsg(r)); return "queued"; }  // #2: saved offline — not a failure, and load() would no-op
     done = true;
   }
   // On failure the optimistic mutate() must be REVERTED by the reconciling load() below. But if the
@@ -3717,6 +3728,7 @@ async function runOptimistic(mutate, fn, onSuccess) {
   // Run the success hook AFTER reconcile, so it can read the freshly-loaded state
   // (e.g. the settle-undo bar checks whether the table auto-closed on pay).
   if (done && typeof onSuccess === "function") { try { onSuccess(); } catch (e) {} }
+  return done ? "done" : "failed";
 }
 
 const act = async (fn) => {
@@ -3842,7 +3854,7 @@ async function ensurePartySlices(t) {
 // "paid" locally so the tile/detail re-read as paid (no due) right away, then persist
 // + reconcile. runOptimistic's load() reverts on failure. (owner, 2026-06-20)
 function optimisticPay(t, method, note) {
-  runOptimistic(
+  return runOptimistic(
     () => {
       // Only flip orders the server will actually settle: a 'received' (not-yet-accepted) or
       // cancelled order is NOT paid by /tables/:t/pay, so optimistically showing it paid made
@@ -3873,13 +3885,16 @@ async function markBillUnpaid(t) {
   if (!reason) { toast("Not reopened — a reason is required.", false); return; }
   actGated("POST", `/tables/${t}/unpay`, { reason }, { message: "Enter a manager PIN to mark this bill unpaid.", toast: "Bill reopened — marked unpaid" });
 }
-function payBill(t, method, note) {
+// Answers { pin } once the bill really was settled (or saved on the device to settle), and null when
+// it was refused or the PIN was cancelled — the tip that goes with it waits for that answer (item 5).
+async function payBill(t, method, note) {
   const body = method ? { payment_method: method, payment_note: note || "" } : null;
   if (tperm("tablet_mark_paid") === "pin") {
-    actGated("POST", `/tables/${t}/pay`, body, { message: "Enter a manager PIN to mark this bill paid.", onSuccess: () => offerPayUndo(t, { message: method ? `Bill paid via ${method}` : "Bill paid" }) });
-  } else {
-    optimisticPay(t, method, note);
+    const res = await actGated("POST", `/tables/${t}/pay`, body, { message: "Enter a manager PIN to mark this bill paid.", onSuccess: () => offerPayUndo(t, { message: method ? `Bill paid via ${method}` : "Bill paid" }) });
+    return res ? { pin: res.pin } : null;
   }
+  const how = await optimisticPay(t, method, note);
+  return how === "failed" ? null : { pin: null };
 }
 // After a successful "Mark paid", give a few-second takeback (owner undo bar, 2026-07-22).
 // Only while the table is STILL open. Paying no longer closes a table by itself (auto-settle
@@ -4271,18 +4286,24 @@ async function payBillWithMethod(t, a) {
   // and re-opening it behind the split screen would leave two money screens stacked.
   // The tip is recorded BEFORE we leave: it was typed on the sheet that is about to close, and a
   // split bill can be tipped like any other.
-  if (picked.special === "split") { await recordTip(t, picked.tip); renderSplitBill(t, { onBack: renderPanel }); return; }
+  // …and it is NOT written yet (item 5): it travels to the split screen, which shows it in its own tip
+  // box and records it once the parts are really paid — with the PIN, if this restaurant asks for one.
+  if (picked.special === "split") { renderSplitBill(t, { onBack: renderPanel, tip: picked.tip }); return; }
   // Whatever way the bill closed, the tip goes with it.
   if (picked.special === "onhouse") {
-    await recordTip(t, picked.tip);
     // actGated handles BOTH modes: direct when 'on', and the PIN round-trip when the
     // server answers "manager pin" ('pin' mode) — same as every other gated action.
-    actGated("POST", `/tables/${t}/on-the-house`, {}, { message: "Enter a manager PIN to settle this bill on the house.", onSuccess: () => offerPayUndo(t, { message: "On the house — settled free", icon: "🏠" }) });
+    const res = await actGated("POST", `/tables/${t}/on-the-house`, {}, { message: "Enter a manager PIN to settle this bill on the house.", onSuccess: () => offerPayUndo(t, { message: "On the house — settled free", icon: "🏠" }) });
+    if (res) await recordTip(t, picked.tip, res.pin);
     return;
   }
-  if (picked.special === "khata") { await recordTip(t, picked.tip); await tabletKhataFlow(t, a.due); return; }
-  payBill(t, picked.method, picked.note);
-  await recordTip(t, picked.tip);
+  if (picked.special === "khata") { const res = await tabletKhataFlow(t, a.due); if (res) await recordTip(t, picked.tip, res.pin); return; }
+  // THE TIP GOES WITH THE BILL, AFTER IT (item 5). It used to be posted at the same moment as the
+  // payment and without the PIN: on a restaurant that asks for a manager PIN to settle, the tip was
+  // refused every time ("Bill is paid, but the ₹50 tip was not recorded") while the waiter was still
+  // typing the PIN for the bill — and a cancelled PIN left a tip written onto a bill nobody paid.
+  const paid = await payBill(t, picked.method, picked.note);
+  if (paid) await recordTip(t, picked.tip, paid.pin);
   if (picked.cust) captureCustomer(t, picked.cust);
 }
 
@@ -4297,13 +4318,26 @@ async function payBillWithMethod(t, a) {
 // The whole tip goes on the FIRST non-cancelled order of the table — migration 154's own rule
 // ("for a multi-order table bill the whole tip is stored on the FIRST paid order"), and the same
 // order the manager panel picks. Tips are never split or clamped by a trigger, so one row is safe.
-async function recordTip(t, tip) {
+// `pin` = the manager PIN the payment was just authorised with (null when none was asked): the tip
+// rides on the same permission as the bill (tablet_mark_paid), so a PIN-gated restaurant refuses a
+// tip sent without it. `opts.allowZero` writes ₹0 — used when a tip already on the bill is cleared.
+// partyOrders(), not ordersOf(): a merged CHILD's own tickets can be none at all while its party's
+// bill is right there — the tip belongs to the bill, i.e. to the party head's first ticket.
+async function recordTip(t, tip, pin, opts = {}) {
   const amt = Math.round((Number(tip) || 0) * 100) / 100;
-  if (!(amt > 0)) return;
-  const first = ordersOf(t).filter((o) => o.status !== "cancelled")[0];
-  if (!first) { toast("The tip could not be recorded — this bill has no ticket to put it on.", false); return; }
+  if (!(amt > 0) && !opts.allowZero) return;
+  const first = partyOrders(t).filter((o) => o.status !== "cancelled")[0];
+  if (!first) { if (amt > 0) toast("The tip could not be recorded — this bill has no ticket to put it on.", false); return; }
   try {
-    await api("POST", `/orders/${first.id}/tip`, { amount: amt });
+    try {
+      await api("POST", `/orders/${first.id}/tip`, pin ? { amount: amt, managerPin: pin } : { amount: amt });
+    } catch (e) {
+      // The restaurant started asking for a PIN after this screen last looked: ask ONCE, here.
+      if (!wantsPin(e) || pin) throw e;
+      const again = await pinPrompt("Enter a manager PIN to record the tip.");
+      if (!again) { toast(`The ${inr(amt)} tip was not recorded — add it from the manager panel.`, false); return; }
+      await api("POST", `/orders/${first.id}/tip`, { amount: amt, managerPin: again });
+    }
   } catch (e) {
     // false = the error styling on this panel (toast(msg, ok)) — a failure dressed as a success is
     // the same fault in a different coat.
@@ -4325,9 +4359,10 @@ async function captureCustomer(t, cust) {
 // bill: the table frees up and the bill lives in the manager's Bills → Khata book.
 async function tabletKhataFlow(t, due) {
   const who = await openKhataPersonSheet(due, t);
-  if (!who) return;
-  await actGated("POST", `/tables/${t}/khata`, who, { message: "Enter a manager PIN to park this bill.", toast: "📒 Parked — collect later from the manager's Pay Later list" });
+  if (!who) return null;
+  const res = await actGated("POST", `/tables/${t}/khata`, who, { message: "Enter a manager PIN to park this bill.", toast: "📒 Parked — collect later from the manager's Pay Later list" });
   state.table = null; renderFloor(); renderPanel(); // the table just closed
+  return res;
 }
 
 // openKhataPersonSheet(due, t): the person picker — search the khata book by name or

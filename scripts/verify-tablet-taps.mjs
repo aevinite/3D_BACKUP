@@ -204,7 +204,7 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
   check(
     "tablet: the one split screen's Take-payment button refuses out loud too",
-    /p\.querySelector\("\.sb-go"\)\.onclick = \(\) => \{/.test(src)
+    /p\.querySelector\("\.sb-go"\)\.onclick = (async )?\(\) => \{/.test(src)
       && /Every part needs an amount above zero/.test(src)
       && !/sb-go[^>]*disabled/.test(src),
     `${TABLET}: the pattern the money buttons on this panel all copy — stay ENABLED and say WHY it\n    ` +
@@ -346,7 +346,9 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
   check(
     "tablet: actGated hands the server's answer to onSuccess",
-    /opts\.onSuccess\(r\)/.test(src),
+    // `(r, pin)` since sweep #10 T12 item 5 — the PIN rides along for a second write that belongs to
+    // the first (the tip that goes with a bill). The server's answer is still the first argument.
+    /opts\.onSuccess\(r(, pin)?\)/.test(src),
     `${TABLET}: actGated() must call opts.onSuccess(r). A merge decides which table keeps the bill, and\n    without the response the screen can only guess.`,
   );
   check(
