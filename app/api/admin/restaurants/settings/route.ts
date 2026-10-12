@@ -337,11 +337,13 @@ export async function POST(req: NextRequest) {
     if (Number.isFinite(n)) patch.banquet_bill_next = Math.min(Math.max(n, 1), 99_999_999);
   }
   if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to save" }, { status: 400 });
-  const rest = await sb.from("restaurants").select("id, slug").eq("id", rid).maybeSingle();
+  // Two independent reads, asked together rather than one after the other (sweep #10 T29 round 2, item 24).
+  const [rest, cur] = await Promise.all([
+    sb.from("restaurants").select("id, slug").eq("id", rid).maybeSingle(),
+    sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle(),
+  ]);
   if (rest.error) return adminFail("this restaurant's settings", rest.error, { action: "save" });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-
-  const cur = await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle();
   if (cur.error) return adminFail("this restaurant's settings", cur.error, { action: "save" });
 
   let saved;

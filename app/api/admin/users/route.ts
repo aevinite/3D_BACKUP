@@ -178,7 +178,11 @@ export async function POST(req: NextRequest) {
   // orphan rows the admin can never reach (login is blocked for binned restaurants).
   // A FAILED READ IS NOT "pick a valid restaurant" (T27 sweep #9, 2026-09-15) — the same correction
   // this file's PATCH and DELETE were given in sweep #7, on the one read the CREATE form depends on.
-  const restQ = await sb.from("restaurants").select("id").eq("id", restaurantId).is("deleted_at", null).limit(1);
+  // The restaurant check and the name-clash check do not depend on each other — asked together (item 24).
+  const [restQ, dupQ] = await Promise.all([
+    sb.from("restaurants").select("id").eq("id", restaurantId).is("deleted_at", null).limit(1),
+    sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).is("deleted_at", null).limit(1),
+  ]);
   if (restQ.error) return adminFail("this restaurant", restQ.error, { action: "load" });
   if (!restQ.data?.[0]) return bad("Pick a valid restaurant.");
   // Names are unique PER restaurant (mig 091) — clash-check within this one only.
@@ -187,7 +191,6 @@ export async function POST(req: NextRequest) {
   // skipped the clash check, and the admin got the insert's generic save failure instead of "That
   // username is taken at this restaurant — pick another." Nothing wrong was ever stored — mig 091's
   // unique index refuses the collision either way — but the sentence did not name the cause.
-  const dupQ = await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).is("deleted_at", null).limit(1);
   if (dupQ.error) return adminFail("whether that name is free", dupQ.error, { action: "load" });
   if (dupQ.data?.[0]) return bad("That username is taken at this restaurant — pick another.", 409);
   const password = String(body?.password || "").trim() || readablePassword();

@@ -73,7 +73,9 @@ export async function GET(req: NextRequest) {
 
   // Its own staff, plus every owner attached through the join table (an owner's `restaurant_id` is
   // only a filing anchor — mig 097 — so owners of THIS restaurant usually sit under another one).
-  const [staffQ, linkQ] = await Promise.all([
+  // The four reads the sheet is built from do not depend on each other, so they go together (item 24
+  // — the open-tables count and the primary-owner read used to wait for these two to finish first).
+  const [staffQ, linkQ, openQ, primaryQ] = await Promise.all([
     // Bounded (T20 sweep #7, 2026-08-27). Both are ONE restaurant's rows, so PostgREST's cap could
     // never plausibly bite — but this sheet is the thing the client is handed, and a silently short
     // list of logins is the one way it can be wrong while looking complete. A ceiling far above any
@@ -82,6 +84,8 @@ export async function GET(req: NextRequest) {
       .select("id, username, name, role, active, password_shown, last_seen_at")
       .eq("restaurant_id", rid).is("deleted_at", null).order("role").limit(500),
     sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).limit(500),
+    sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).in("status", ["open", "pending"]),
+    sb.from("restaurants").select("owner_user_id").eq("id", rid).maybeSingle(),
   ]);
   // Plain sentence to the console, the database's words in `detail` + the log — the same helper every
   // sibling admin route uses. These three were the last raw `error.message` bodies in this file
@@ -110,9 +114,6 @@ export async function GET(req: NextRequest) {
   // The card offers a "sign everyone out too" tick beside the reset, and this is what lets it say
   // "23 tables are open right now" in the moment he is deciding, instead of the server deciding for
   // him after the fact. `head: true` means the row bodies never cross the wire — only the count.
-  const openQ = await sb.from("sessions")
-    .select("id", { count: "exact", head: true })
-    .eq("restaurant_id", rid).in("status", ["open", "pending"]);
   // A failed count only costs the sentence. It must NOT cost the sheet, and it must not silently
   // read as zero — "no tables open" is the reassuring answer, and it is the one thing this may not
   // invent. null renders as "couldn't check" beside the tick.
@@ -121,7 +122,6 @@ export async function GET(req: NextRequest) {
 
   // The primary owner wears the ★ on the sheet, the same badge the Owners roster uses. A failed read
   // only costs the badge, so it is reported and the sheet still prints (`primaryUnread` below).
-  const primaryQ = await sb.from("restaurants").select("owner_user_id").eq("id", rid).maybeSingle();
   if (primaryQ.error) console.error("[admin/credentials] could not read the primary owner:", primaryQ.error.message);
   const primaryId = primaryQ.data?.owner_user_id as string | null | undefined;
 
@@ -303,7 +303,11 @@ async function resetAll(rid: string, signOut: boolean): Promise<NextResponse> {
 
   const set: { id: string; name: string; role: string; username: string; password: string }[] = [];
   const failed: string[] = [];
-  for (const p of people) {
+  // ALL AT ONCE, NOT ONE AFTER ANOTHER (sweep #10 T29 round 2, item 24). Each login is its own write
+  // (its own password and hash), so they cannot be one UPDATE — but they do not wait on each other:
+  // done in sequence, a 13-login handover was 13 round trips back to back. Done together, it is one
+  // trip's worth of waiting. The answer keeps the sheet's order, and a failure is still named.
+  const outcomes = await Promise.all(people.map(async (p) => {
     const password = readablePassword();
     const wr = await sb.from("staff_users")
       .update({
@@ -312,9 +316,12 @@ async function resetAll(rid: string, signOut: boolean): Promise<NextResponse> {
         failed_count: 0, locked_until: null,
       })
       .eq("id", p.id).select("id").maybeSingle();
+    return { p, password, ok: !wr.error && !!wr.data };
+  }));
+  for (const { p, password, ok } of outcomes) {
     // Never report a password the database didn't take (the 2026-07-07 rule), and never let one
     // failure hide behind the others.
-    if (wr.error || !wr.data) { failed.push(p.name || p.username); continue; }
+    if (!ok) { failed.push(p.name || p.username); continue; }
     set.push({ id: p.id, name: p.name || p.username, role: p.role, username: p.username, password });
   }
 

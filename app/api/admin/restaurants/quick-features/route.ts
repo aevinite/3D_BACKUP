@@ -82,11 +82,13 @@ export async function POST(req: NextRequest) {
   if (!PATCH[feature]) return NextResponse.json({ error: "unknown feature" }, { status: 400 });
 
   const patch = on ? PATCH[feature].on : PATCH[feature].off;
-  const rest = await sb.from("restaurants").select("id, slug").eq("id", rid).maybeSingle();
+  // Two independent reads, asked together rather than one after the other (sweep #10 T29 round 2, item 24).
+  const [rest, cur] = await Promise.all([
+    sb.from("restaurants").select("id, slug").eq("id", rid).maybeSingle(),
+    sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle(),
+  ]);
   if (rest.error) return adminFail("this restaurant's features", rest.error, { action: "save" });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-
-  const cur = await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle();
   if (cur.error) return adminFail("this restaurant's features", cur.error, { action: "save" });
 
   if (cur.data) {

@@ -309,13 +309,18 @@ export async function PATCH(req: NextRequest) {
   // owner_user_id may be a uuid (assign) or null/"" (clear the owner).
   const raw = body?.owner_user_id;
   const ownerId = raw == null || raw === "" ? null : String(raw);
+  if (ownerId && !UUID.test(ownerId)) return bad("That user isn't an owner.", 400);
+  // The two reads below do not depend on each other, so they are asked together (sweep #10 T29 round 2,
+  // item 24); each still answers for itself in the same order as before.
+  const [ownerQ, prevQ] = await Promise.all([
+    ownerId ? sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1) : Promise.resolve({ data: [{ id: "" }], error: null }),
+    sb.from("restaurants").select("owner_user_id, name").eq("id", rid).limit(1),
+  ]);
   if (ownerId) {
-    if (!UUID.test(ownerId)) return bad("That user isn't an owner.", 400);
     // A FAILED READ IS NOT "that user isn't an owner" (T27 sweep #9, 2026-09-15). This file gave
     // four of its reads that correction in sweep #7 and left this one: it is the only refusal on the
     // page that makes a CLAIM ABOUT A PERSON, so a blip told the admin that the owner he just picked
     // from the dropdown is not an owner.
-    const ownerQ = await sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1);
     if (ownerQ.error) return adminFail("this restaurant's owner", ownerQ.error, { action: "load" });
     if (!ownerQ.data?.[0]) return bad("That user isn't an owner.", 400);
   }
@@ -332,7 +337,6 @@ export async function PATCH(req: NextRequest) {
   // The console said "Saved" and the owner still could not see the restaurant — the same silent-
   // success shape the branding route was fixed for on 2026-07-06. A FAILED read is now told apart
   // from a MISSING row, because answering "not found" on a blip would be its own lie.
-  const prevQ = await sb.from("restaurants").select("owner_user_id, name").eq("id", rid).limit(1);
   if (prevQ.error) return adminFail("this restaurant's owner", prevQ.error, { action: "load" });
   const prev = prevQ.data?.[0];
   if (!prev) return bad("Restaurant not found — it may have been removed. Reload the list and try again.", 404);
