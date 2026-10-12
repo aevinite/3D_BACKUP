@@ -80,11 +80,19 @@ export default function section(c) {
     const a = (await c.sq(`staff_actions?select=resolved_at&id=eq.${d.id}`)).json[0];
     return r.status === 200 && r.json.already === true && a.resolved_at === d.resolved_at || `${r.status} ${JSON.stringify(r.json)}`;
   });
-  c.phase("reopening a problem that is still open answers 'already open' and changes nothing", "POST reopen on an open row", async () => {
-    const o = await open1(); if (!o) return "skip:every open problem among the newest 40 has a resolved twin, so pressing Reopen would really reopen it — not pressed";
-    const r = await c.req("/api/admin/resolve-error", { method: "POST", body: { action_id: o.id, reopen: true } });
-    const a = (await c.sq(`staff_actions?select=resolved_at,snoozed_until&id=eq.${o.id}`)).json[0];
-    return r.status === 200 && (r.json.already === true || r.json.reopened >= 0) && a.resolved_at === null || `${r.status} ${JSON.stringify(r.json)}`;
+  c.phase("reopening a problem that is still open answers 'already open' and changes nothing", "make a uniquely named throwaway problem, press Reopen, delete it by id (round 2, item 21)", async () => {
+    // Its own problem, never one of the board's: a real open problem may have resolved twins, and
+    // pressing Reopen on it would genuinely reopen them. A unique action name has no twins at all.
+    const ins = await c.sq("staff_actions", { method: "POST", body: JSON.stringify({ panel: "admin", action: `t29_probe_${Date.now()}`, level: "error", restaurant_id: c.FH, detail: "T29 sweep probe — deleted within the second, safe to ignore" }) });
+    const row = (ins.json || [])[0];
+    if (!row?.id) return `could not make the probe row (${ins.status})`;
+    try {
+      const r = await c.req("/api/admin/resolve-error", { method: "POST", body: { action_id: row.id, reopen: true } });
+      const a = (await c.sq(`staff_actions?select=resolved_at&id=eq.${row.id}`)).json[0];
+      return r.status === 200 && r.json.already === true && a.resolved_at === null || `${r.status} ${JSON.stringify(r.json)}`;
+    } finally {
+      await c.sq(`staff_actions?id=eq.${row.id}`, { method: "DELETE" });
+    }
   });
   c.phase("asking a resolved problem to wait changes nothing either", "POST snooze_hours:2 on a resolved row", async () => {
     const d = await done1(); if (!d) return "skip:no resolved problem";
