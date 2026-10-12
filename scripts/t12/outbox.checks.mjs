@@ -174,7 +174,10 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
   check("P04059", "boot() restores a previous session's queue in `at` order", () =>
     /\.sort\(\(a, b\) => a\.at - b\.at\)/.test(boot));
   check("P04060", "boot() separates failed from queued by stored status", () =>
-    /x\.status !== "failed"/.test(boot) && /x\.status === "failed"/.test(boot));
+    // sweep #10 T16: boot now MERGES the saved list into memory (x.status === "failed" ? failed : queued)
+    // instead of filtering it twice — the separation by stored status is the same.
+    (/x\.status !== "failed"/.test(boot) && /x\.status === "failed"/.test(boot)) ||
+    /\(x\.status === "failed" \? failed : queued\)\.push\(x\)/.test(boot));
   check("P04061", "coming back to the tab wakes the queue", () =>
     /visibilitychange", \(\) => \{ if \(!document\.hidden\) wake\(\); \}/.test(boot));
   check("P04062", "window focus wakes the queue", () => /"focus", \(\) => wake\(\)/.test(boot));

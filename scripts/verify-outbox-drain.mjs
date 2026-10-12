@@ -72,6 +72,15 @@ const server = http.createServer((req, res) => {
   }
   // THE BUSY-BOOT PAGE (section 14): the drawer, the queue and the profile screen, booted while the
   // profile read answers 503 — the shape of a database too busy to answer for the first moments.
+  // THE START-UP RACE PAGE (section 15): a change queued with no signal at DOMContentLoaded — while
+  // the queue's own start-up read of saved changes is still in flight.
+  if (req.url === "/page-race") {
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(`<!doctype html><meta charset="utf-8"><body><div class="topbar">panel</div>
+      <script>Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });</script>
+      <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>
+      <script>document.addEventListener("DOMContentLoaded", function () { window.__r = window.LFH_OUTBOX.send({ base: "", method: "POST", path: "/api/editor/tables/3/pay", body: {}, label: "Settle bill" }); });</script>`);
+  }
   if (req.url === "/page-boot") {
     res.writeHead(200, { "content-type": "text/html" });
     return res.end(`<!doctype html><meta charset="utf-8"><body><div class="topbar"><div class="top-actions"><button id="myProfileBtn" hidden>me</button></div></div>
@@ -467,6 +476,25 @@ const mine = await until(async () => page.evaluate(() => { const b = document.ge
 if (mine) ok("…and so did 'My profile & pay'");
 else bad("'My profile & pay' stayed hidden after a busy boot");
 mode = "ok";
+
+// ── 15. a change queued while the queue is still starting up stays in the list ───────────────
+// Sweep #10 T16, 2026-10-12. boot() read the saved changes asynchronously and then ASSIGNED them over
+// the in-memory list, so a change queued during that read vanished from it — on the device, but not
+// shown, not sent and with no timer, until a reload. Missing 5 times out of 5 when driven.
+console.log("\n15) A change queued while the queue is still starting up");
+let raceMissed = 0, raceNoTimer = 0;
+for (let i = 0; i < 4; i++) {
+  await page.goto(BASE + "/page-race", { waitUntil: "load" });
+  await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
+  await page.reload({ waitUntil: "load" });
+  await wait(400);
+  const r = await page.evaluate(async () => { await window.__r; return { n: window.LFH_OUTBOX.getSnapshot().queued.length, t: window.LFH_OUTBOX.nextTryAt() }; });
+  if (r.n !== 1) raceMissed++;
+  if (!r.t) raceNoTimer++;
+}
+if (!raceMissed) ok("the change is still in the list, every time (4 of 4)"); else bad(`the change fell out of the list ${raceMissed} time(s) in 4`);
+if (!raceNoTimer) ok("…and it has a next attempt scheduled"); else bad(`no next attempt was scheduled ${raceNoTimer} time(s) in 4`);
+await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
 
 await browser.close();
 server.close();

@@ -808,8 +808,14 @@
   // ── boot: load any actions left over from a previous (offline) session ──────
   async function boot() {
     const all = await idbAll();
-    queued = all.filter((x) => x.status !== "failed").sort((a, b) => a.at - b.at);
-    failed = all.filter((x) => x.status === "failed");
+    // MERGE, NEVER REPLACE (sweep #10 T16, 2026-10-12). The read above is asynchronous, and a change
+    // can be queued while it is still in flight — the panel's own start-up, or a tap in the first
+    // moment on a slow tablet. Assigning the saved list over the in-memory one threw that change out
+    // of the list: still on the device, but not shown, not sent and with no timer, until a reload.
+    // Driven: queued at DOMContentLoaded with no signal, it was missing 5 times out of 5.
+    const known = new Set(queued.concat(failed).map((x) => x.id));
+    all.forEach((x) => { if (!known.has(x.id)) (x.status === "failed" ? failed : queued).push(x); });
+    queued.sort((a, b) => a.at - b.at);
     notify();
     // Flush now (if online), whenever the connection returns, and whenever the person comes
     // back to this panel. The last two matter because the first two can BOTH stay silent while
