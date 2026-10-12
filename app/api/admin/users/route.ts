@@ -31,6 +31,8 @@ import { expectClash, clashJson } from "@/lib/clash";
 import { adminFail } from "@/lib/adminFail";
 // Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
 import { pageAll } from "@/lib/pageAll";
+// The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
+import { readablePassword } from "@/lib/readablePassword";
 
 export const dynamic = "force-dynamic";
 
@@ -49,14 +51,6 @@ async function admin(req: NextRequest): Promise<boolean> {
   return tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 }
 
-// A readable, reasonably strong auto-password (no ambiguous chars).
-function genPassword(): string {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = "";
-  const r = crypto.getRandomValues(new Uint8Array(10));
-  for (const b of r) s += a[b % a.length];
-  return s;
-}
 
 // The profile columns (migration 220/221). `profile` is one jsonb of soft personal details;
 // anything a report FILTERS or SUMS is a real column.
@@ -196,7 +190,7 @@ export async function POST(req: NextRequest) {
   const dupQ = await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).is("deleted_at", null).limit(1);
   if (dupQ.error) return adminFail("whether that name is free", dupQ.error, { action: "load" });
   if (dupQ.data?.[0]) return bad("That username is taken at this restaurant — pick another.", 409);
-  const password = String(body?.password || "").trim() || genPassword();
+  const password = String(body?.password || "").trim() || readablePassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const row = {
     username: key, role, restaurant_id: restaurantId,
@@ -335,7 +329,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (action === "reset_password") {
-    const password = String(body?.password || "").trim() || genPassword();
+    const password = String(body?.password || "").trim() || readablePassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     // Bump token_version → kills all their existing logins immediately.
     const wr = await sb.from("staff_users").update({ ...(await passwordFields(password)), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);

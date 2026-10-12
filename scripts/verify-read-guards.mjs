@@ -76,7 +76,7 @@ const read = (p) => {
   const FIXTURE = "app/api/admin/restaurants/credentials/route.ts";
   const src = read(FIXTURE);
   if (!readRaw(FIXTURE)) ok(`${FIXTURE} is gone — the stripper fixture needs a new file with "/*" in a line comment`);
-  else if (/linkQ\.error/.test(src) && /genPassword/.test(src)) {
+  else if (/linkQ\.error/.test(src) && /readablePassword/.test(src)) {   // genPassword → lib/readablePassword (T29 r2 item 15)
     ok("the comment stripper reaches the END of a file whose header quotes a \"/api/admin/*\" path");
   } else {
     fail(`the comment stripper is eating ${FIXTURE} again — a "/*" inside a line comment opens a block comment when blocks are stripped FIRST, so every rule below that reads this file silently passes. Strip LINE comments first.`);

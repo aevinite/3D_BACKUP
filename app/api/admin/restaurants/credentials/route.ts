@@ -36,6 +36,8 @@ import { REVEAL_COOKIE, REVEAL_LOCKED_MESSAGE, revealUnlocked } from "@/lib/reve
 import { withIdempotency } from "@/lib/idempotency";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
+import { readablePassword } from "@/lib/readablePassword";
 
 export const dynamic = "force-dynamic";
 
@@ -43,14 +45,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const err = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 
-// Same alphabet as the restaurant builder's starter logins: no l/o/0/1, so nothing on a printed
-// sheet can be read two ways.
-function genPassword(): string {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = ""; const r = crypto.getRandomValues(new Uint8Array(10));
-  for (const b of r) s += a[b % a.length];
-  return s;
-}
 
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, kitchen: 2, tablet: 3, waiter: 4 };
 const ROLE_LABEL: Record<string, string> = {
@@ -229,7 +223,7 @@ async function postImpl(req: NextRequest) {
     if (!ownsQ.data) return err("That login doesn't belong to this restaurant.", 403);
   }
 
-  const password = genPassword();
+  const password = readablePassword();
   // A token_version bump is what ends every existing session on this account. It is now OPT-IN, and
   // the card says which of the two it is about to do — see rule 4 on resetAll() below.
   const wr = await sb.from("staff_users")
@@ -310,7 +304,7 @@ async function resetAll(rid: string, signOut: boolean): Promise<NextResponse> {
   const set: { id: string; name: string; role: string; username: string; password: string }[] = [];
   const failed: string[] = [];
   for (const p of people) {
-    const password = genPassword();
+    const password = readablePassword();
     const wr = await sb.from("staff_users")
       .update({
         ...(await passwordFields(password)),

@@ -46,6 +46,8 @@ import {
 
 import { withIdempotency } from "@/lib/idempotency";
 import { expectClash, clashJson } from "@/lib/clash";
+// The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
+import { readablePassword } from "@/lib/readablePassword";
 
 export const dynamic = "force-dynamic";
 
@@ -70,12 +72,6 @@ const realCharCount = (s: string) => (String(s).match(/[\p{L}\p{N}]/gu) || []).l
 const isStaffId = (v: unknown): v is string =>
   typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
-function genPassword(): string {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = ""; const r = crypto.getRandomValues(new Uint8Array(10));
-  for (const b of r) s += a[b % a.length];
-  return s;
-}
 
 type Restaurant = { id: string; name: string; slug: string; accent_color: string | null; manager_permissions: Record<string, boolean>; owner_entitlements: Record<string, boolean> | null; owner_user_id: string | null };
 type Scope =
@@ -846,7 +842,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
   if (dupQ.error) return bad(BUSY_MESSAGE, 503);
   const dup = dupQ.data?.[0];
   if (dup) return bad("That username is taken at this restaurant — pick another.", 409);
-  const password = String(body?.password || "").trim() || genPassword();
+  const password = String(body?.password || "").trim() || readablePassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   if (password.length > 128) return bad("Password is too long (max 128 characters).");
   const row: Record<string, unknown> = { username: key, role, restaurant_id: rid, ...(await passwordFields(password)), name: display, phone: String(body?.phone || "").trim().slice(0, 20) || null };
@@ -1073,7 +1069,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     const mayReset = await mgrStaffOpt("reset_pw", true);
     if (mayReset === null) return cantCheckPower();
     if (!mayReset) return bad("Resetting a password isn't part of your staff access.", 403);
-    const password = String(body?.password || "").trim() || genPassword();
+    const password = String(body?.password || "").trim() || readablePassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     if (password.length > 128) return bad("Password is too long (max 128 characters).");
     // Capture the write error: without this, a failed UPDATE (row lock / timeout) still

@@ -33,20 +33,14 @@ import { openPassword, passwordFields, vaultReady } from "@/lib/passwordVault";
 import { REVEAL_COOKIE, REVEAL_LOCKED_MESSAGE, revealUnlocked } from "@/lib/revealGate";
 import { withIdempotency } from "@/lib/idempotency";
 import { adminFail } from "@/lib/adminFail";
+// The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
+import { readablePassword } from "@/lib/readablePassword";
 
 export const dynamic = "force-dynamic";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const err = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
 
-/** The same alphabet the restaurant builder and the handover card use: no l/o/0/1, so nothing on a
- *  printed sheet or read down a phone can be heard two ways. */
-export function genPassword(): string {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = ""; const r = crypto.getRandomValues(new Uint8Array(10));
-  for (const b of r) s += a[b % a.length];
-  return s;
-}
 
 async function postImpl(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value))) return err("unauthorized", 401);
@@ -94,7 +88,7 @@ async function postImpl(req: NextRequest) {
   if (!vaultReady()) {
     return err("This deployment has no credential key set, so a password can't be stored for printing.", 409);
   }
-  const password = genPassword();
+  const password = readablePassword();
   const wr = await sb.from("staff_users")
     .update({
       ...(await passwordFields(password)),

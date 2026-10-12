@@ -25,6 +25,8 @@ import { retryRead } from "@/lib/readRetry";
 // Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
 import { pageAll } from "@/lib/pageAll";
 import { forgetRestaurant, ownersOf } from "@/lib/panelAccess";
+// The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
+import { readablePassword } from "@/lib/readablePassword";
 
 // The remembered "New restaurant" setup (panels + sample-menu), stored in
 // app_config (mig 186) so the create form auto-fills from the admin's last choice.
@@ -36,12 +38,6 @@ const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 
-function genPassword(): string {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = ""; const r = crypto.getRandomValues(new Uint8Array(10));
-  for (const b of r) s += a[b % a.length];
-  return s;
-}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -782,7 +778,7 @@ export async function POST(req: NextRequest) {
     const loginErrors: string[] = []; // panels whose starter login failed (bug #5) — reported so the admin isn't left with an enabled panel nobody can sign into
     for (const panel of ["manager", "kitchen", "tablet", "owner"] as const) {
       if (!panels[panel]) continue;
-      const pw = genPassword();
+      const pw = readablePassword();
       const ins = await sb.from("staff_users")
         .insert({ username: panel, name: `${name} ${panel}`, role: panel, restaurant_id: rid, ...(await passwordFields(pw)), active: true })
         .select("id").single();
@@ -841,7 +837,7 @@ export async function POST(req: NextRequest) {
   // (assigned via PATCH). Login names are globally unique, so clash-check globally.
   const taken = await nameTakenMessage(key);
   if (taken) return bad(taken, 409);
-  const password = String(body?.password || "").trim() || genPassword();
+  const password = String(body?.password || "").trim() || readablePassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const home = await resolveOwnerHomeRid();
   if (!home.rid) return bad(home.error || "Couldn't work out where to file this owner.", 500);

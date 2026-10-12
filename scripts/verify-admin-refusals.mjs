@@ -508,5 +508,14 @@ const NOT_YET = new Map([
     bad.length ? `${bad.join("; ")} — PostgREST returns 1,000; page it` : "");
 }
 
+// ── 20 · ONE READABLE-PASSWORD MAKER (sweep #10 T29 round 2, item 15) ─────────────────────────────
+// Six routes carried their own copy of "make a password with no l/o/0/1". A copy that drifts prints a
+// handover sheet that reads two ways. app/ must hold no second copy of the alphabet.
+{
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []);
+  const copies = walk(join(ROOT, "app")).filter((a) => /abcdefghijkmnpqrstuvwxyz23456789|function genPassword/.test(readFileSync(a, "utf8"))).map((a) => a.slice(ROOT.length + 1));
+  check("every screen that mints a password uses lib/readablePassword — no route keeps its own copy", copies.length === 0, copies.join(", "));
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

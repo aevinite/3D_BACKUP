@@ -61,14 +61,14 @@ export default function section(c) {
     "check POST is wrapped in withIdempotency",
     () => /export const POST = withIdempotency/.test(c.clean(F)));
   phase("the password alphabet leaves out every letter that reads two ways (l, o, 0, 1)",
-    "read genPassword's alphabet",
-    () => { const m = c.clean(F).match(/const a = "([a-z0-9]+)"/); return !!m && !/[lo01]/.test(m[1]); });
+    "read the one readable-password maker the route imports (lib/readablePassword — T29 r2 item 15)",
+    () => { const m = c.clean("lib/readablePassword.ts").match(/READABLE_ALPHABET = "([a-z0-9]+)"/); return /import \{ readablePassword \} from "@\/lib\/readablePassword"/.test(c.clean(F)) && !!m && !/[lo01]/.test(m[1]); });
   phase("a minted password is ten characters",
-    "read genPassword's length",
-    () => /new Uint8Array\(10\)/.test(c.clean(F)));
+    "read the shared maker's default length",
+    () => /export function readablePassword\(length = 10\)/.test(c.clean("lib/readablePassword.ts")) && /readablePassword\(\)/.test(c.clean(F)));
   phase("the randomness is the platform's own, not Math.random",
-    "grep for getRandomValues and for Math.random",
-    () => { const s = c.clean(F); return /crypto\.getRandomValues/.test(s) && !/Math\.random/.test(s); });
+    "grep the shared maker (lib/readablePassword) and the route for getRandomValues / Math.random",
+    () => { const s = c.clean("lib/readablePassword.ts"); return /crypto\.getRandomValues/.test(s) && !/Math\.random/.test(s + c.clean(F)); });
   phase("a failed read answers in plain words, never with the database's own sentence",
     "check the load error goes through adminFail",
     () => /adminFail\("this login"/.test(c.clean(F)));

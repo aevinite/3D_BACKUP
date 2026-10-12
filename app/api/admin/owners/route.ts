@@ -41,6 +41,8 @@ import { expectClash, clashJson } from "@/lib/clash";
 import { ReadSet, rd } from "@/lib/readGuard";
 // Lists that can pass 1,000 rows are PAGED — PostgREST silently caps a read at 1,000 (S10 T28 item 17).
 import { pagedRead } from "@/lib/pageAll";
+// The one readable-password maker (no l/o/0/1) — see lib/readablePassword.ts.
+import { readablePassword } from "@/lib/readablePassword";
 
 export const dynamic = "force-dynamic";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -67,12 +69,6 @@ function dbNote(step: string, e: { message?: string; code?: string } | null): st
   return `couldn't ${step}`;
 }
 
-function genPassword(): string {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = ""; const r = crypto.getRandomValues(new Uint8Array(10));
-  for (const b of r) s += a[b % a.length];
-  return s;
-}
 
 
 export async function GET(req: NextRequest) {
@@ -460,7 +456,7 @@ export async function POST(req: NextRequest) {
   if (realCharCount(key) < 2) return bad("The name needs at least 2 letters or numbers.");
   const takenMsg = await nameTakenMessage(key);
   if (takenMsg) return bad(takenMsg, 409);
-  const password = String(body?.password || "").trim() || genPassword();
+  const password = String(body?.password || "").trim() || readablePassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
 
   const rids: string[] = Array.isArray(body?.restaurant_ids) ? body.restaurant_ids.map(String) : [];
@@ -601,7 +597,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (action === "reset_password") {
-    const password = String(body?.password || "").trim() || genPassword();
+    const password = String(body?.password || "").trim() || readablePassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     // token_version bump = "log out everywhere" (same rule as /api/admin/users).
     // READ IT PROPERLY, OR CHANGE NOTHING (T19 sweep #7, 2026-09-01). This took `.data` and ignored
