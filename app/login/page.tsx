@@ -10,6 +10,22 @@ import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
 import { ROLE_HOME, panelDoor, DOOR_GONE, DOOR_OFF } from "@/lib/panelGate";
 import LoginForm from "./LoginForm";
 
+// WHAT GOOGLE SHOWS FOR aevinite.shop (owner, 2026-10-12). "/" forwards here, so this title and
+// description ARE the aevinite.shop search result — every other page is kept out of Google
+// (next.config.ts → NOINDEX_PATHS). Brand first, so a search for "aevinite" finds it.
+export const metadata = {
+  title: "Aevidine by Aevinite — Restaurant OS",
+  description:
+    "Aevidine by Aevinite is the all-in-one restaurant platform: 3D QR menus, table ordering, kitchen display, billing and owner dashboards for cafés and restaurants.",
+  openGraph: {
+    type: "website",
+    url: "https://www.aevinite.shop/",
+    siteName: "Aevidine by Aevinite",
+    title: "Aevidine by Aevinite — Restaurant OS",
+    description: "The all-in-one platform that runs your restaurant: 3D QR menus, ordering, kitchen and billing.",
+  },
+};
+
 export default async function LoginPage({
   searchParams,
 }: {

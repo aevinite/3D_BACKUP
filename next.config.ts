@@ -101,6 +101,27 @@ const CSP_REPORT_ONLY = [
   "form-action 'self'",
 ].join("; ");
 
+// WHAT GOOGLE MAY LIST (owner, 2026-10-12): searching "aevinite" showed a client café's menu
+// (French House) as the aevinite.shop result. The owner's rule: Google shows ONLY the home page
+// of aevinite.shop; every café menu, dish page and panel stays out of search. Guests still reach
+// their menu through the QR on the table — this changes nothing they see, only what Google lists.
+//
+// Done with an X-Robots-Tag header, NOT a robots.txt "Disallow": Google has to be ALLOWED to fetch
+// a page to read its noindex, and a page it may not fetch can stay in results forever as a bare
+// link. So robots.txt (app/robots.ts) allows everything and this header does the hiding.
+//
+// The home page "/" forwards to /login (owner, 2026-07-08), so /login is deliberately NOT here:
+// it is what Google shows for aevinite.shop.
+const NOINDEX = [{ key: "X-Robots-Tag", value: "noindex, nofollow" }];
+const NOINDEX_PATHS = [
+  "/r/:path*", "/q/:path*", "/menu", "/item/:path*", "/view/:path*",
+  "/aevinite/:path*", "/owner/:path*", "/manager/:path*", "/kitchen/:path*", "/tablet/:path*",
+  "/editor/:path*", "/staff-login", "/api/:path*",
+];
+// Only the real client domain may appear in Google. The backup stack (3-d-backup.vercel.app) and
+// every preview deployment run this same code, and must never compete with aevinite.shop.
+const PUBLIC_HOST = "(?:www\\.)?aevinite\\.shop";
+
 const nextConfig: NextConfig = {
   // Pin the workspace root to THIS folder. A stray lockfile in the user's
   // home dir (C:\Users\rishi\package-lock.json) makes Turbopack otherwise
@@ -135,6 +156,8 @@ const nextConfig: NextConfig = {
         ],
       },
       ...STAFF_PATHS.map((source) => ({ source, headers: FRAME_HEADERS })),
+      ...NOINDEX_PATHS.map((source) => ({ source, headers: NOINDEX })),
+      { source: "/:path*", missing: [{ type: "host" as const, value: PUBLIC_HOST }], headers: NOINDEX },
     ];
   },
 };
