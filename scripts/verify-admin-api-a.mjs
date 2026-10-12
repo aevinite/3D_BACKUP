@@ -685,7 +685,7 @@ for (const rel of PART_A) {
 // three. They are listed by COUNT so a fourth fails at once, and so the list empties the day T29
 // fixes them (then this entry must be deleted, or rule 10 reports the stale allowance).
 const BARE_WRITE = /^\s*(?:if\s*\([^)]*\)\s*)?await\s+(?:(?:sb|supabaseAdmin)\s*\.\s*from\([^)]*\)\s*\.(?:update|insert|upsert|delete)\(|writeRoutes\()/gm;
-const BARE_PENDING = { "app/api/admin/restaurants/route.ts": 3 };
+const BARE_PENDING = {};   // the three in restaurants/route.ts were fixed 2026-10-11 (owner: "do all")
 for (const rel of PART_A) {
   const src = strip(readFileSync(join(root, rel), "utf8"));
   const n = [...src.matchAll(BARE_WRITE)].length;
@@ -749,6 +749,62 @@ for (const rel of PART_A) {
   const usesRound = /toISOString\(\)\.slice\(0,\s*10\)\s*===\s*t/.test(bl) && (bl.match(/realDate\(/g) || []).length >= 2;
   if (usesRound && !/Number\.isNaN\(Date\.parse\(paidOn\)\)/.test(bl)) ok("billing: every typed date is round-tripped, so 31 February is refused in words");
   else fail("billing: a typed date is checked by shape + Date.parse only — 2026-02-31 reaches Postgres and answers 'try again' (rule 13)");
+}
+
+// ── RULE 14 — THE OWNER'S ROUND-2 ASKS, PINNED (owner, 2026-10-11 — S10 T28 items 9–16) ──────────
+// *"admin log thing should not be shown on the owner or manager … owner should not have access to
+// create delete restore owner"* — and the "do all" list. Each line names the item it keeps true.
+{
+  const rd = (f) => strip(readFileSync(join(root, f), "utf8"));
+  const has = (cond, yes, no) => (cond ? ok(yes) : fail(no + " (rule 14)"));
+  const rl = rd("app/api/admin/rate-limits/route.ts");
+  const dismiss = rl.slice(rl.indexOf('action === "dismiss")'), rl.indexOf('return err("unknown action")'));
+  has(/logAction\(\s*"admin"\s*,\s*"rate_limit_dismiss"/.test(dismiss), "rate-limits: dismissing ONE alert writes a line on the admin's own log (item 9)", "rate-limits: a single dismiss writes no diary line again");
+  has(![...rl.matchAll(/await\s+throttle(Block|Unblock)\(/g)].some((m) => !/!\(\s*$/.test(rl.slice(Math.max(0, m.index - 6), m.index))), "rate-limits: every block/unblock answer is looked at (item 15)", "rate-limits: a block or unblock result is thrown away — the screen can say 'blocked' for a block that never saved");
+  const lt = rd("lib/loginThrottle.ts");
+  has(/function throttleBlock\([^)]*\):\s*Promise<boolean>/.test(lt) && /function throttleUnblock\([^)]*\):\s*Promise<boolean>/.test(lt), "loginThrottle: block and unblock say whether they worked (item 15)", "loginThrottle: block/unblock no longer report success or failure");
+  const fx = rd("app/api/admin/fix-request/route.ts");
+  has(/logAction\(\s*"admin"\s*,\s*"fix_request_status"/.test(fx.slice(fx.indexOf("export async function PATCH"))), "fix-request: closing or re-opening a request is on the admin's own log (item 10)", "fix-request: a status change writes no diary line again");
+  const ow = rd("app/api/admin/owners/route.ts");
+  const att = ow.slice(ow.indexOf("async function attach("), ow.indexOf("export async function POST"));
+  has(/\.is\(\s*"deleted_at"\s*,\s*null\s*\)/.test(att), "owners: attach() refuses a restaurant in the recycle bin, for create and for attach (item 11)", "owners: attach() no longer checks the restaurant is live");
+  const an = rd("app/aevinite/analytics/page.tsx");
+  has(/on top of it/.test(an) && /sourceTotal\s*>\s*\(sources\.find/.test(an), "analytics page: the by-source card says why it can add up to more than the tile (item 12)", "analytics page: the by-source card lost the line explaining its total");
+  const ov = readFileSync(join(root, "components/admin/OwnersView.tsx"), "utf8");
+  const kpi = ov.slice(ov.indexOf("function KpiButton"), ov.indexOf("function KpiButton") + 2000);
+  has(!/textOverflow:\s*"ellipsis"/.test(kpi), "Owners: the number-box labels wrap rather than cut off on a phone (item 15)", "Owners: a number-box label is back to a one-line ellipsis");
+  // item 16 — the admin's own words never reach an owner's or a manager's removal card
+  const bl = rd("app/api/admin/bills/route.ts");
+  const calls = [...bl.matchAll(/recordRemoval\(\{[\s\S]*?\}\);/g)].map((m) => m[0]);
+  has(calls.length > 0 && calls.every((c) => !/["'`][^"'`]*\badmin\b[^"'`]*["'`]/i.test(c.replace(/kind:\s*"[^"]*"/, ""))), "bills: no removal record the admin writes carries the word 'admin' in a reason or a note (item 16)", "bills: a removal record names the admin in its reason or meta — the owner's card prints it");
+  const aa = rd("lib/auditActor.ts");
+  has(/function forReader[\s\S]{0,1800}delete m\[k\]/.test(aa) && /put back from the admin bill ledger/.test(aa), "auditActor: a platform row's own admin-naming notes are withheld from owner and manager readers (item 16)", "auditActor: forReader no longer withholds the admin-naming notes on stored rows");
+  // the standing rule — only the admin manages owners
+  const st = rd("app/api/owner/staff/route.ts");
+  const assign = (st.match(/const ASSIGNABLE:\s*Role\[\]\s*=\s*\[([^\]]*)\]/) || [])[1] || "owner";
+  has(!/owner/.test(assign), "owner panel: an owner can create, edit or delete only manager / kitchen / tablet logins — never an owner (standing rule)", "owner panel: ASSIGNABLE now includes 'owner' — an owner could make owners");
+  const nonAdmin = [];
+  (function walk(d) { for (const e of readdirSync(d)) { const p2 = join(d, e); if (statSync(p2).isDirectory()) walk(p2); else if (e === "route.ts") nonAdmin.push(relative(root, p2)); } })(join(root, "app/api"));
+  const writersOfOwnership = nonAdmin.filter((f) => !f.startsWith("app/api/admin/")).filter((f) => /from\(\s*["']restaurant_owners["']\s*\)\s*\.(insert|upsert|update|delete)/.test(rd(f)));
+  has(!writersOfOwnership.length, "only admin routes change who owns a restaurant (restaurant_owners) — no owner or manager route can (standing rule)", `a non-admin route writes restaurant_owners: ${writersOfOwnership.join(", ")}`);
+  const ownerInserts = nonAdmin.filter((f) => !f.startsWith("app/api/admin/")).filter((f) => /role:\s*["']owner["']/.test(rd(f)) && /from\(\s*["']staff_users["']\s*\)\s*\.insert/.test(rd(f)));
+  has(!ownerInserts.length, "no owner or manager route can insert a staff login with the owner role (standing rule)", `a non-admin route inserts an owner login: ${ownerInserts.join(", ")}`);
+}
+
+// ── RULE 15 — NO CEILING ABOVE WHAT THE DATABASE WILL HAND BACK (S10 T28 item 17, 2026-10-11) ────
+// PostgREST on this stack answers at most 1,000 rows a request. `.limit(2000)` / `.limit(20000)` look
+// like generous ceilings and are silently 1,000 — a list past a thousand comes back short with no
+// error. A read that must be complete pages (lib/pageAll → pageAll / pagedRead); anything else asks
+// for at most 1,000. PENDING, by count, are the reads that sweep #10 T29 listed for the owner in its
+// own files on 2026-10-11 — a fifth fails at once, and an entry that reaches 0 must be deleted.
+const OVER_CAP_PENDING = { "app/api/admin/restaurants/report/route.ts": 1, "app/api/admin/users/route.ts": 1, "app/api/admin/repair/route.ts": 2 };
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  const over = [...src.matchAll(/\.limit\(\s*([0-9_]+)\s*\)/g)].filter((m) => Number(m[1].replace(/_/g, "")) > 1000).length;
+  const allowed = OVER_CAP_PENDING[rel] || 0;
+  if (allowed && over === 0) fail(`${rel} has no read over 1,000 any more — delete its OVER_CAP_PENDING entry (rule 15)`);
+  else if (over > allowed) fail(`${rel} caps a read above 1,000 rows — PostgREST silently answers 1,000; page it or ask for ≤1,000 (rule 15)`);
+  else ok(`${rel} ${allowed ? `has only its ${allowed} known over-1,000 cap(s) (T29's, listed)` : "never asks for more than the database will hand back in one read"}`);
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
