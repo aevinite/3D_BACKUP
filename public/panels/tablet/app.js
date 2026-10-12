@@ -6595,6 +6595,15 @@ function renderBanquetBody() {
         }
         if (!pin && !r) { btn.disabled = false; return; } // cancelled
       }
+      // SAVED IS NOT CREATED (sweep #10 T12, item 4). With no internet the device's queue keeps the
+      // bill and answers `{ queued: true }` — no total, no bill row yet. This used to announce
+      // "Banquet bill created … total ₹0" off that answer: a bill that did not exist yet, at a figure
+      // it would never have. Say what really happened; the queue sends it by itself.
+      if (isQueued(r)) {
+        toast(savedMsg(r) + " The banquet bill is made the moment it goes through.");
+        closeBanquet();
+        return;
+      }
       toast(t ? `Banquet bill created on table ${t} — total ${inr(r.total)}.`
              : `Banquet bill created — total ${inr(r.total)}. The manager settles it under Bills.`);
       closeBanquet();

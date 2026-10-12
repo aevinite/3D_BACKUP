@@ -1485,6 +1485,12 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
     /forgetQueued\(st\)/.test(lb) && /forgetQueued\(st\)/.test(rl),
     `${TABLET}: /tables/:t/loyalty is a read sent as a POST; offline it must not wait in the queue for hours.`,
   );
+  const bq = slice('body.querySelector("#bqCreate").onclick', null);
+  check(
+    "tablet: a banquet bill saved with no internet says 'Saved', never 'created — total ₹0'",
+    /if \(isQueued\(r\)\) \{[\s\S]{0,200}savedMsg\(r\)/.test(bq) && bq.indexOf("isQueued(r)") < bq.indexOf("Banquet bill created"),
+    `${TABLET}: the queue's answer has no total and no bill yet; announcing "created" off it is a bill that does not exist.`,
+  );
 }
 
 if (fails.length) {
