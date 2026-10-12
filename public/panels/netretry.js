@@ -94,11 +94,31 @@
     // A caller's OWN signal always wins — the same rule lib/adminFetch.ts and lib/supabase.ts
     // follow. Otherwise we give the read a ceiling so it can never hang the panel for ever.
     // ONE signal for all attempts on purpose: the retries share the 15s, they do not each get it.
+    var ours = null;
     if (!opts || !opts.signal) {
       var d = readDeadline();
-      if (d) opts = Object.assign({}, opts, { signal: d });
+      if (d) { ours = d; opts = Object.assign({}, opts, { signal: d }); }
     }
+    try {
+      return await attempts(url, opts);
+    } catch (e) {
+      // OUR DEADLINE SPEAKS ENGLISH (sweep #10 T16, 2026-10-12). When the 15s ceiling above fires, the
+      // browser rejects with its own words — Chrome's are "signal timed out" — and every panel that
+      // prints e.message showed exactly that: the manager Dashboard read "Couldn't load stats: signal
+      // timed out" on a slow database. maint.js already translates the same DOMException for its
+      // drawer (whyFailed); this is the one place every panel READ passes through, so it is said once
+      // here. Same name (TimeoutError), so anything that checks e.name behaves as before. A caller's
+      // OWN signal is their decision and passes through untouched.
+      if (ours && ours.aborted && isAbort(e)) {
+        var t = new Error("the server didn't answer in time");
+        t.name = "TimeoutError"; t.timeout = true;
+        throw t;
+      }
+      throw e;
+    }
+  }
 
+  async function attempts(url, opts) {
     var lastRes = null;
     var lastErr = null;
 

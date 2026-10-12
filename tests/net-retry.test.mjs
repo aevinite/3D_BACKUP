@@ -31,6 +31,7 @@ function load({ responses, onLine = true, hasAbortSignal = true }) {
       calls.push({ url, method: (opts && opts.method) || "GET", signal: opts && opts.signal });
       const next = responses.shift();
       if (next === undefined) throw new Error("test ran out of scripted responses");
+      if (typeof next === "function") return next(opts);   // a scripted answer that can see the signal
       if (next instanceof Error) throw next;
       return next;
     },
@@ -157,4 +158,22 @@ test("the panel copy and the TypeScript copy carry the SAME rule", () => {
   // Both must refuse to retry a write. The panel checks the method, the TS file checks the method.
   assert.ok(/GET"\s*\|\|\s*m === "HEAD"/.test(panel), "panel lost its idempotent-only guard");
   assert.ok(/GET"\s*\|\|\s*m === "HEAD"/.test(ts), "lib lost its idempotent-only guard");
+});
+
+// ── OUR DEADLINE SPEAKS ENGLISH (sweep #10 T16, 2026-10-12) ──────────────────────────────────────
+// The manager Dashboard printed "Couldn't load stats: signal timed out" — the browser's words for the
+// 15s read ceiling this file adds. When OUR deadline is what fired, the panel must get a sentence.
+const deadlineFires = (opts) => { opts.signal.aborted = true; throw Object.assign(new Error("signal timed out"), { name: "TimeoutError" }); };
+test("when OUR deadline fires, the panel is told in words, not the browser's", async () => {
+  const { netFetch } = load({ responses: [deadlineFires] });
+  await assert.rejects(() => netFetch("/api/editor/dashboard", { method: "GET" }), (e) => {
+    assert.equal(e.message, "the server didn't answer in time");
+    assert.equal(e.name, "TimeoutError", "the name must not change — callers test e.name");
+    return true;
+  });
+});
+test("a caller's OWN cancel is passed through exactly as it was", async () => {
+  const mine = { aborted: true };
+  const { netFetch } = load({ responses: [Object.assign(new Error("The user aborted a request."), { name: "AbortError" })] });
+  await assert.rejects(() => netFetch("/x", { method: "GET", signal: mine }), /The user aborted a request\./);
 });
