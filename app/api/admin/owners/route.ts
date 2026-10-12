@@ -299,6 +299,12 @@ async function isLivePrimaryHolder(userId: string | null | undefined): Promise<b
 // constraint "restaurant_owners_restaurant_id_fkey"` under a freshly-minted password. The raw text
 // goes to the server log, where it is searchable, and the caller gets words (sweep #6, T19).
 async function attach(ownerId: string, rid: string): Promise<string | null> {
+  // A RESTAURANT THAT IS STILL THERE (owner picked S10 T28 item 11, 2026-10-11). PATCH attach checks
+  // deleted_at before calling this; create_owner did not, so a New-owner form left open while a
+  // restaurant went to the recycle bin attached the binned restaurant. Checked here, once, for both.
+  const liveQ = await sb.from("restaurants").select("id").eq("id", rid).is("deleted_at", null).limit(1);
+  if (liveQ.error) { dbNote("check the restaurant is still live", liveQ.error); return "Couldn't check that restaurant — nothing was attached. Please try again."; }
+  if (!liveQ.data?.length) return "That restaurant is in the recycle bin or no longer exists — it was not attached.";
   const up = await sb.from("restaurant_owners")
     .upsert({ restaurant_id: rid, user_id: ownerId }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
   if (up.error) {
