@@ -139,27 +139,30 @@ export async function GET(req: NextRequest) {
   const one = new URL(req.url).searchParams.get("id");
   if (one) return UUID.test(one) ? await detail(one) : bad("User not found.", 404);
   const [usersQ, restsQ] = await Promise.all([
-    sb.from("staff_users")
-      .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin, restaurant_id")
-      // Owners are a DIFFERENT lifecycle (multi-restaurant, primary/co-owner handoff)
-      // and are managed ONLY on the Owners page. Never surface or touch them here —
-      // editing/deleting an owner from this page was a side door that could orphan a
-      // restaurant's ownership (admin audit 2026-07-06).
-      .neq("role", "owner")
-      .order("created_at", { ascending: true })
-      .limit(2000), // safety cap so this never becomes an unbounded whole-table read; true per-restaurant server scoping/pagination is a follow-up (audit 2026-07-08)
+    // EVERY PERSON, PAGED (sweep #10 T29 round 2, item 14). This was `.limit(2000)` "as a safety cap",
+    // but PostgREST answers at most 1,000 rows per request, so past 1,000 logins the People list would
+    // have stopped short with no word. pageAll reads 1,000 at a time and refuses past 50,000 instead.
+    // Owners are a DIFFERENT lifecycle (multi-restaurant, primary/co-owner handoff) and are managed
+    // ONLY on the Owners page. Never surface or touch them here — editing/deleting an owner from this
+    // page was a side door that could orphan a restaurant's ownership (admin audit 2026-07-06).
+    pageAll<{ id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; last_seen_at: string | null; created_at: string; pin_hash: string | null; can_self_reset: boolean | null; can_self_set_pin: boolean | null; restaurant_id: string }>("staff_users", (from, to) =>
+      sb.from("staff_users")
+        .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin, restaurant_id")
+        .neq("role", "owner")
+        .order("created_at", { ascending: true }).order("id", { ascending: true })
+        .range(from, to)),
     // Paged for the same reason as its siblings: past the row cap a person's restaurant column went
     // blank, on the list the admin uses to tell one tenant's staff from another's.
     pageAll<{ id: string; name: string }>("restaurants", (from, to) =>
       sb.from("restaurants").select("id, name").order("id").range(from, to)),
   ]);
   // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
-  if (usersQ.error) return adminFail("the staff list", usersQ.error, { action: "load" });
+  if (usersQ.error) return adminFail("the staff list", usersQ.error as { message?: string }, { action: "load" });
   if (restsQ.error) console.error("[admin/users] restaurant names unread:", (restsQ.error as { message?: string })?.message);
   const nameById: Record<string, string> = Object.fromEntries((restsQ.rows || []).map((r) => [r.id, r.name]));
   // Strip the PIN hash to a boolean; attach the restaurant name (mapped, not a
   // PostgREST embed) so the admin sees WHICH restaurant each user belongs to.
-  const users = (usersQ.data || []).map(({ pin_hash, ...u }: any) => ({ ...u, hasPin: !!pin_hash, restaurantName: nameById[u.restaurant_id] || null }));
+  const users = (usersQ.rows || []).map(({ pin_hash, ...u }: any) => ({ ...u, hasPin: !!pin_hash, restaurantName: nameById[u.restaurant_id] || null }));
   return ok({ users });
 }
 

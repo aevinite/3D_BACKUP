@@ -15,6 +15,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// Read every row past PostgREST's 1,000-row cap — see lib/pageAll.ts.
+import { pageAll } from "@/lib/pageAll";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
@@ -155,12 +157,15 @@ async function handler(req: NextRequest) {
       // manager open to answer "what came off my bills, and how much?". Refuse before touching the
       // invoice: reopening a bill is not urgent enough to record it wrongly, and the same request
       // succeeds a second later.
-      // `.limit(2000)` is a runaway guard, not a business bound — the same shape and the same reason as
-      // the khata balance read in /api/owner/customers. One sitting with 2000 orders on it is a
-      // different conversation; leaving it unbounded meant PostgREST's own cap decided the sum instead.
-      const beforeQ = await sb.from("orders").select("total, discount").eq("session_id", sessionId).eq("restaurant_id", rid).limit(2000);
-      if (beforeQ.error) return adminFail("this bill's figures before reopening it", beforeQ.error, { action: "load" });
-      const beforeVoid = beforeQ.data as { total: number | null; discount: number | null }[] | null;
+      // EVERY ORDER ON THE BILL, PAGED (sweep #10 T29 round 2, item 14). This was `.limit(2000)`, but
+      // PostgREST answers at most 1,000 rows per request whatever limit is asked, so the "runaway guard"
+      // was really a silent 1,000 — a bill with more orders would have recorded a smaller amount in the
+      // Removals record. One bill is a short list; pageAll costs nothing extra below 1,000 rows and
+      // refuses past 50,000 instead of shortening the sum.
+      const beforeQ = await pageAll<{ id: string; total: number | null }>("this bill's orders", (from, to) =>
+        sb.from("orders").select("id, total").eq("session_id", sessionId).eq("restaurant_id", rid).order("id").range(from, to));
+      if (beforeQ.error) return adminFail("this bill's figures before reopening it", beforeQ.error as { message?: string }, { action: "load" });
+      const beforeVoid = beforeQ.rows;
       const wasTotal = (beforeVoid || []).reduce((s, o) => s + (Number(o.total) || 0), 0);
       // p_actor was missing, so the append-only invoice history recorded a void with NO actor —
       // the one field whose whole job is answering "who did this?".

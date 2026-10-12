@@ -491,5 +491,22 @@ const NOT_YET = new Map([
   }
 }
 
+// ── 19 · NO READ ASKS FOR MORE THAN 1,000 ROWS (sweep #10 T29 round 2, item 14) ──────────────────
+// PostgREST answers at most 1,000 rows per request whatever .limit() says, so `.limit(2000)` is a
+// silent 1,000 — the People list, a report's staff count and a void's Removals amount all leaned on it.
+// A read that must be complete pages (lib/pageAll or a keyset loop). Checked over the admin routes
+// from position 27 to the end of the sorted list — the territory this rule was written for; the other
+// half of the admin API is its own territory's to bring in.
+{
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : e.name === "route.ts" ? [join(d, e.name)] : []);
+  const mine = walk(join(ROOT, "app/api/admin")).map((a) => a.slice(ROOT.length + 1)).sort().slice(26);
+  const bad = [];
+  for (const rel of mine) {
+    for (const m of code(rel).matchAll(/\.limit\((\d[\d_]*)\)/g)) if (Number(m[1].replace(/_/g, "")) > 1000) bad.push(`${rel} .limit(${m[1]})`);
+  }
+  check("no admin route from position 27 on asks for more than 1,000 rows in one read", bad.length === 0,
+    bad.length ? `${bad.join("; ")} — PostgREST returns 1,000; page it` : "");
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);
