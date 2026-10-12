@@ -27,7 +27,9 @@ export default function section(c) {
   phase("a figure that could not be read is null, never a confident zero",
     "read the tablesConfigured line", () => /settingsQ\.error \? null : Number/.test(c.clean(F)));
   phase("the staff roll read is bounded, so a cap cannot decide the head count",
-    "check the limit", () => /\.limit\(2000\)/.test(c.clean(F)));
+    // Since sweep #10 T29 round 2 item 14 the roll is PAGED (lib/pageAll) — `.limit(2000)` was a silent
+    // 1,000 at PostgREST's cap, the very cap this phase exists to keep from deciding the count.
+    "check the read is paged past PostgREST's 1,000-row cap", () => /pageAll<\{ role: string \}>\("staff_users"/.test(c.clean(F)) && !/\.limit\(2000\)/.test(c.clean(F)));
   phase("every count is a HEAD count, so row bodies never cross the wire for a number",
     "count the head:true reads", () => (c.clean(F).match(/head: true/g) || []).length >= 6);
   phase("every read is scoped to this one restaurant", "count the restaurant_id filters",

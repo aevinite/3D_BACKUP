@@ -759,12 +759,25 @@ await drove(R, "the 'Report a problem' box is NOT in a code font", async (p) => 
 await drove(R, "…and it is the same typeface as the page", async (p) => { const first = (f) => f.split(",")[0].trim().replace(/^["']|["']$/g, "").toLowerCase(); const a = await p.page.locator("textarea").evaluate((e) => getComputedStyle(e).fontFamily); const b = await p.page.locator("body").evaluate((e) => getComputedStyle(e).fontFamily); return first(a) === first(b) || `${a} vs ${b}`; });
 await drove(R, "the closed problem line is NOT in a code font", async (p) => { if (!(await p.page.locator(".rp-detail").count())) return "?"; const f = await p.page.locator(".rp-detail").first().evaluate((e) => getComputedStyle(e).fontFamily); return !/mono/i.test(f) || `computed font-family is ${f}`; });
 await drove(R, "…and it reads as an English sentence, not a browser message", async (p) => { if (!(await p.page.locator(".rp-detail").count())) return "?"; const t = await p.page.locator(".rp-detail").first().innerText(); return !/^(Uncaught|TypeError|Failed to execute|<!DOCTYPE)/.test(t.trim()) || `the line reads "${t.slice(0, 60)}"`; });
+// The code-face block is drawn ONLY when the tile's plain line is a TRANSLATION of the captured text
+// (app/aevinite/repair/page.tsx: `isOpen && plainProblem(a.detail).translated`) — an untranslated
+// tile's plain line already IS the captured text, so there is nothing second to show. So this tries the
+// tiles in turn until one opens onto a block, and answers "?" when no tile on today's board is a
+// translated one: it used to open only the FIRST tile and read an untranslated one as a failure
+// (sweep #10 T29 round 2 — the board's contents had simply changed).
 await drove(R, "opening a tile reveals the captured text, in a code face, unaltered", async (p) => {
-  const more = p.page.locator(".rp-link", { hasText: "more" }).first();
-  if (!(await more.count())) return "?";
-  await more.click(); await p.page.waitForTimeout(500);
-  const mono = await p.page.locator(".rp-detail div").first().evaluate((e) => getComputedStyle(e).fontFamily).catch(() => "");
-  return /mono/i.test(mono) || `the captured text is not in a code face (${mono})`;
+  const mores = p.page.locator(".rp-link", { hasText: /^more$/ });
+  const n = await mores.count();
+  if (!n) return "?";
+  for (let i = 0; i < Math.min(n, 6); i++) {
+    await mores.nth(0).click(); await p.page.waitForTimeout(400);
+    const block = p.page.locator(".rp-detail div");
+    if (await block.count()) {
+      const mono = await block.first().evaluate((e) => getComputedStyle(e).fontFamily).catch(() => "");
+      return /mono/i.test(mono) || `the captured text is not in a code face (${mono})`;
+    }
+  }
+  return "?";
 });
 // "?" when no tile on the board is long enough to need a 'more' (sweep #10 T39 item 29: an empty or short
 // board is not a control that failed to change).

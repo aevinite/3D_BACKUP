@@ -62,7 +62,7 @@ export default function section(c) {
   c.phase("the single-login reset is refused for someone who does not belong to the restaurant", `read ${CR}`, () => /That login doesn't belong to this restaurant\./.test(c.clean(CR)));
   c.phase("nobody is signed out by a reset unless that is asked for", "read both reset paths", () => (c.clean(CR).match(/\.\.\.\(signOut \? \{ token_version:/g) || []).length === 2);
   c.phase("a handover reset names every login that FAILED instead of skipping it quietly", "read resetAll", () => /failed\.push\(p\.name \|\| p\.username\)/.test(c.clean(CR)) && /FAILED \(\$\{failed\.join/.test(c.clean(CR)));
-  c.phase("a password is reported only after the database took it", "read both writes", () => (c.clean(CR).match(/Couldn't set that password — nothing was changed|if \(wr\.error \|\| !wr\.data\)/g) || []).length >= 2);
+  c.phase("a password is reported only after the database took it", "read both writes (the one-login path, and the handover reset now written all together — item 24)", () => /Couldn't set that password — nothing was changed/.test(c.clean(CR)) && /return \{ p, password, ok: !wr\.error && !!wr\.data \}/.test(c.clean(CR)) && /if \(!ok\) \{ failed\.push/.test(c.clean(CR)));
   c.phase("a double press cannot burn two passwords (once-only POST)", "read the export", () => /export const POST = withIdempotency\(postImpl, "admin"\)/.test(c.clean(CR)));
   c.phase("no vault key on a deployment → the sheet says so instead of offering a button that does nothing", "read vaultReady", () => /vaultReady: vaultReady\(\)/.test(c.clean(CR)) && /This deployment has no credential key set/.test(c.clean(CR)));
 
