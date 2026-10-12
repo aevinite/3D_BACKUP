@@ -713,6 +713,13 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     let res = null;
     // the shared single-flight (top of this file) — myprofile.js reads the same endpoint at boot
     try { res = await window.LFH_PROFILE_GET(); } catch {}
+    // A BUSY MOMENT AT BOOT MUST NOT HIDE THE PROFILE BUTTON ALL SHIFT (sweep #10 T16, 2026-10-12).
+    // The only second chance used to be the browser's `online` event — which never fires when the
+    // connection was fine and the SERVER was slow. Driven: two 503s at boot, the server healthy a
+    // second later, and the panel had no ⚙ Profile (so no Sign out, no first-login card) until a
+    // reload. A read that failed for a server reason is asked again on a gentle, bounded backoff; a
+    // real answer (signed out, not staff) is final, exactly as before.
+    if (!res || (!res.ok && res.status >= 500)) { retryInitLater(); return; }
     if (res && res.ok) {
       profile = res.json;
       // { staff: false } → admin super-access / signed-out tab: there is no per-user
@@ -736,6 +743,22 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     // The floating "Menu live/offline" button was removed — the admin manages
     // maintenance from the /aevinite admin panel, and managers from their profile.
   }
+
+  // The waits between boot retries: one GET each, never faster than 5s, giving up after eight.
+  // LFH_TEST_PACING.boot (verify:outbox) shrinks them; nothing in the app sets it.
+  let BOOT_WAITS = [5000, 15000, 30000, 60000, 120000];
+  try { if (window.LFH_TEST_PACING && window.LFH_TEST_PACING.boot) BOOT_WAITS = BOOT_WAITS.map(() => window.LFH_TEST_PACING.boot); } catch (e) { /* shipped timings */ }
+  let bootTries = 0, bootTimer = null;
+  function retryInitLater() {
+    if (bootTimer || bootTries >= 8) return;
+    const wait = BOOT_WAITS[Math.min(bootTries, BOOT_WAITS.length - 1)];
+    bootTries++;
+    bootTimer = setTimeout(() => { bootTimer = null; if (!document.getElementById("staffSettingsBtn") && !profile) init(); }, wait);
+  }
+  // …and the moment somebody looks at the panel again, without waiting out the backoff.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && bootTries > 0 && !document.getElementById("staffSettingsBtn") && !profile) init();
+  });
 
   if (document.readyState !== "loading") init();
   else document.addEventListener("DOMContentLoaded", init);

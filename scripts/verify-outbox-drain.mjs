@@ -48,6 +48,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 //   "signout" → 401 forever, the shape of a device whose session died
 //   "working" → 409 {retry:true} forever, the shape of a claim that never clears
 let mode = "ok";
+let profileBusyLeft = 0;   // section 14: how many more profile reads answer 503
 const seen = [];
 const server = http.createServer((req, res) => {
   if (req.url === "/page") {
@@ -69,8 +70,25 @@ const server = http.createServer((req, res) => {
       <script>${readFileSync(join(ROOT, "public/panels/maint.js"), "utf8")}</script>
       <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>`);
   }
+  // THE BUSY-BOOT PAGE (section 14): the drawer, the queue and the profile screen, booted while the
+  // profile read answers 503 — the shape of a database too busy to answer for the first moments.
+  if (req.url === "/page-boot") {
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(`<!doctype html><meta charset="utf-8"><body><div class="topbar"><div class="top-actions"><button id="myProfileBtn" hidden>me</button></div></div>
+      <script>window.LFH_TEST_PACING = { first: 300, base: 400, max: 800, wake: 50, stuck: 1500, boot: 400 };</script>
+      <script>${readFileSync(join(ROOT, "public/panels/backstack.js"), "utf8")}</script>
+      <script>${readFileSync(join(ROOT, "public/panels/maint.js"), "utf8")}</script>
+      <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>
+      <script>${readFileSync(join(ROOT, "public/panels/myprofile.js"), "utf8")}</script>`);
+  }
   if (req.method === "GET" && req.url === "/api/panel-profile") {
+    if (mode === "profile-busy" && profileBusyLeft > 0) {
+      profileBusyLeft--;
+      res.writeHead(503, { "content-type": "application/json" });
+      return res.end('{"error":"Server can\'t reach the database — retrying."}');
+    }
     res.writeHead(200, { "content-type": "application/json" });
+    if (mode === "profile-busy") return res.end(JSON.stringify({ staff: true, id: "u1", username: "diagm1", role: "manager", name: "Diag", phone: "9", needsProfile: false, profileModule: true, profile: {}, completeness: { filled: 1, total: 8 }, job: {} }));
     return res.end('{"staff":false}');
   }
   let body = "";
@@ -424,6 +442,22 @@ const order5 = seen.filter((x) => /\/tables\/5\//.test(x.path)).map((x) => x.pat
 if (released && order5.join(",") === "discount,pay") ok("Try again sent the discount FIRST, then the settle");
 else bad("after Try again the two did not go discount → settle", JSON.stringify(order5));
 await page.evaluate(() => window.LFH_OUTBOX.__resume());
+
+// ── 14. a busy moment at boot does not hide the Profile button, or claim you are not signed in ──
+// Sweep #10 T16, 2026-10-12. The profile read answered 503 twice at boot (a database too busy to
+// answer) and was healthy a second later. maint.js only ever asked again on the browser's `online`
+// event — which never fires when the connection was fine — so the panel had no ⚙ Profile (and no Sign
+// out) for the rest of the shift; and "My profile & pay" told a signed-in manager "You are not signed
+// in as a staff member". Both now treat a failed read as "could not ask", never as an answer.
+console.log("\n14) The profile read is busy at boot, then recovers");
+mode = "profile-busy"; profileBusyLeft = 2;
+await page.goto(BASE + "/page-boot", { waitUntil: "domcontentloaded" });
+await page.waitForFunction(() => !!(window.LFH_ME && window.LFH_PROFILE_GET), null, { timeout: 10000 });
+await wait(150);
+const backBy = await until(async () => page.evaluate(() => !!document.getElementById("staffSettingsBtn")), 8000);
+if (backBy) ok("the ⚙ Profile button (with Sign out) came back by itself once the server answered");
+else bad("the Profile button never came back after a busy boot — no Sign out for the rest of the shift");
+mode = "ok";
 
 await browser.close();
 server.close();
