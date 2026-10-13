@@ -100,13 +100,10 @@ const sealPassword = async (plain) => {
 };
 const openPassword = (sealed) => V.openPassword(sealed);
 
-// Same alphabet as the app's own generator: no l/o/0/1, so nothing printed can be read two ways.
-function genPassword() {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  let s = "";
-  for (const b of crypto.getRandomValues(new Uint8Array(10))) s += a[b % a.length];
-  return s;
-}
+// The app's OWN readable-password maker (no l/o/0/1), imported the same way as the vault above — this
+// file used to keep a seventh copy of it (sweep #10 T29 round 2, item 32; the six in the routes were
+// merged into lib/readablePassword.ts as item 15).
+const { readablePassword: genPassword } = await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "lib/readablePassword.ts")).href);
 
 // ── the known test logins (scripts/sweep/login.mjs and friends) ────────────────────────────────
 // Every one of these is VERIFIED against the row's own hash before it is used. The list is a set of
