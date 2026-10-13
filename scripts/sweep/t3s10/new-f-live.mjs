@@ -41,7 +41,15 @@ const bodyText = (p) => p.evaluate(() => document.body.innerText);
 
 // ── the one driven journey on French House (phone) ───────────────────────────────────────────────
 let myOrder = null, myTable = null;
+const journeyStart = new Date().toISOString();
 async function retire() {
+  // WHAT IF THE ORDER WENT THROUGH BUT THIS RUN NEVER SAW IT? (round 2) On a slow database the saved order
+  // was placed after the check stopped watching, and was left live on the floor. So when no id was seen,
+  // any live order on THIS run's table created since the run began is this run's, and is retired too.
+  if (!myOrder && myTable) {
+    const found = (await rest(`orders?restaurant_id=eq.${FH}&table_number=eq.${myTable}&archived=is.false&created_at=gte.${journeyStart}&select=id&limit=3`).catch(() => [])) || [];
+    if (Array.isArray(found) && found[0]) myOrder = found[0].id;
+  }
   if (!myOrder) return;
   const now = new Date().toISOString();
   await rest(`orders?restaurant_id=eq.${FH}&id=eq.${myOrder}`, "PATCH", { status: "cancelled", archived: true, archived_at: now, cancelled_at: now }).catch(() => {});
@@ -132,7 +140,7 @@ async function journey() {
     R.chipAfterReload = await p.locator(".gob-chip").innerText().catch(() => "");
     await ctx.setOffline(false);
     await p.evaluate(() => window.dispatchEvent(new Event("online")));
-    await p.locator(".gob-chip").waitFor({ state: "detached", timeout: 30000 }).catch(() => {});
+    await p.locator(".gob-chip").waitFor({ state: "detached", timeout: 90000 }).catch(() => {});
     R.chipGone = (await p.locator(".gob-chip").count()) === 0;
     const tracked = await p.evaluate(() => JSON.parse(localStorage.getItem("lfh_active_orders:french-house") || "[]"));
     myOrder = tracked[tracked.length - 1]?.id || null; R.order = myOrder; R.trackedTotal = tracked[tracked.length - 1]?.total;
@@ -338,13 +346,18 @@ async function stars() {
       await p.goto(BASE + path, { waitUntil: "domcontentloaded" }); await settle(p, 3000);
       const href = await p.locator('a[href*="/item/"]').first().getAttribute("href").catch(() => null);
       if (href) { await p.goto(BASE + href, { waitUntil: "domcontentloaded" }); await settle(p, 3500); }
+      // The picker sits behind the dish page's "⭐ Rate" tab. Round 1 never tapped it and so read
+      // "no stars" as "ratings off" — French House has ratings ON (corrected in round 2).
+      await p.locator(".review-tab-btn").first().click().catch(() => {}); await settle(p, 800);
       STAR[rest_] = { href, count: await p.locator(".sr-toggle").count() };
       if (STAR[rest_].count) {
         const t = p.locator(".sr-toggle").nth(3); await t.scrollIntoViewIfNeeded(); await t.focus(); await p.keyboard.press("Enter"); await settle(p, 2200);
         STAR[rest_].pill = await p.locator(".sr-score-num").innerText().catch(() => "");
         STAR[rest_].active = await p.locator(".sr-li.active").count();
         STAR[rest_].box = await p.locator(".sr-toggle").first().boundingBox();
-        STAR[rest_].rowW = await p.locator(".sr-rating").evaluate((e) => ({ w: e.scrollWidth, cw: e.clientWidth, top: [...e.children].map((c) => Math.round(c.getBoundingClientRect().top)) }));
+        // One row, and every star inside the card (the list's own box is 12px narrower than its stars,
+        // which is not a cut-off: nothing clips it — measured and looked at in round 2).
+        STAR[rest_].rowW = await p.locator(".sr-rating").evaluate((e) => { const card = e.closest(".sr-wrap").getBoundingClientRect(); return { top: [...e.children].map((c) => Math.round(c.getBoundingClientRect().top)), inside: [...e.children].every((c) => { const r = c.getBoundingClientRect(); return r.left >= card.left - 1 && r.right <= card.right + 1 && r.right <= innerWidth; }) }; });
         STAR[rest_].labels = await p.locator(".sr-toggle").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
       }
       await ctx.close();
@@ -355,10 +368,10 @@ async function stars() {
 const ST = (fn) => live(async () => { await stars(); return fn(STAR); });
 check("P172525", "components/StarRating.tsx", "the star row appears on a restaurant with ratings ON, or is absent with ratings OFF — never half-drawn", HOW, ST((s) => ({ ok: [s.fh, s.aa].every((x) => x && (x.count === 0 || x.count === 5)), note: `French House ${s.fh?.count} · Aangan ${s.aa?.count}` })));
 const anyStars = (s) => (s.fh?.count === 5 ? s.fh : s.aa?.count === 5 ? s.aa : null);
-check("P172526", "components/StarRating.tsx", "keyboard Enter on the 4th star sets the rating to 4 and lights four stars", HOW, ST((s) => { const x = anyStars(s); return x ? { ok: x.pill === "4" && x.active === 4, note: `pill ${x.pill} · lit ${x.active}` } : "skip: neither restaurant has ratings switched on today"; }));
-check("P172527", "components/StarRating.tsx", "each star names the rating it sets ('Rate 1 star' … 'Rate 5 stars')", HOW, ST((s) => { const x = anyStars(s); return x ? { ok: x.labels.join("|") === "Rate 1 star|Rate 2 stars|Rate 3 stars|Rate 4 stars|Rate 5 stars", note: x.labels.join(", ") } : "skip: neither restaurant has ratings switched on today"; }));
-check("P172528", "components/StarRating.tsx", "five stars sit on ONE row on a 360px phone", HOW, ST((s) => { const x = anyStars(s); return x ? { ok: new Set(x.rowW.top).size === 1 && x.rowW.w <= x.rowW.cw + 1, note: JSON.stringify(x.rowW) } : "skip: neither restaurant has ratings switched on today"; }));
-check("P172529", "components/StarRating.tsx", "a star is at least 32px to tap", HOW, ST((s) => { const x = anyStars(s); return x ? { ok: x.box.width >= 32 && x.box.height >= 32, note: `${Math.round(x.box.width)}×${Math.round(x.box.height)}` } : "skip: neither restaurant has ratings switched on today"; }));
+check("P172526", "components/StarRating.tsx", "keyboard Enter on the 4th star sets the rating to 4 and lights four stars", HOW, ST((s) => { const x = anyStars(s); return x ? { ok: x.pill === "4" && x.active === 4, note: `pill ${x.pill} · lit ${x.active}` } : "skip: no star picker appeared on either restaurant's dish page"; }));
+check("P172527", "components/StarRating.tsx", "each star names the rating it sets ('Rate 1 star' … 'Rate 5 stars')", HOW, ST((s) => { const x = anyStars(s); return x ? { ok: x.labels.join("|") === "Rate 1 star|Rate 2 stars|Rate 3 stars|Rate 4 stars|Rate 5 stars", note: x.labels.join(", ") } : "skip: no star picker appeared on either restaurant's dish page"; }));
+check("P172528", "components/StarRating.tsx", "five stars sit on ONE row on a 360px phone", HOW, ST((s) => { const x = anyStars(s); return x ? { ok: new Set(x.rowW.top).size === 1 && x.rowW.inside, note: JSON.stringify(x.rowW) } : "skip: no star picker appeared on either restaurant's dish page"; }));
+check("P172529", "components/StarRating.tsx", "a star is at least 32px to tap", HOW, ST((s) => { const x = anyStars(s); return x ? { ok: x.box.width >= 32 && x.box.height >= 32, note: `${Math.round(x.box.width)}×${Math.round(x.box.height)}` } : "skip: no star picker appeared on either restaurant's dish page"; }));
 
 check("P172530", "components/CartPanel.tsx", "'+' on a bill line raises it from 1× to 2× and the Total follows", HOW, J((r) => ({ ok: r.q1 === "1×" && r.q2 === "2×" && r.total2 > r.total, note: `${r.q1} → ${r.q2} · ₹${r.total} → ₹${r.total2}` })));
 check("P172531", "components/CartPanel.tsx", "'−' lowers it back to 1× and the Total returns", HOW, J((r) => ({ ok: r.q3 === "1×" && r.total3 === r.total, note: `${r.q3} · ₹${r.total3}` })));

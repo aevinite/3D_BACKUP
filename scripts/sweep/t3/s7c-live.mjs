@@ -5,6 +5,7 @@
 // The four improvements, on the rendered screen. Writes nothing to any restaurant: every block is
 // offline, has its send blocked, or fulfils the RPC locally.
 import { chromium } from "playwright";
+import { sessionsOnForRun } from "./sessionsOn.mjs";
 const BASE = process.env.T3_BASE || "http://localhost:4203";
 const AA = "/r/aangan-garden-restaurant/menu", FH = "/r/french-house/menu";
 const A35 = { viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
@@ -60,7 +61,7 @@ try {
     await p.goto(BASE + AA, { waitUntil: "domcontentloaded" });
     await p.locator(".food-card, .fc-card, [class*=card]").first().waitFor({ timeout: 60000 });
     await p.waitForTimeout(2500);
-    await p.locator('button[aria-label^="Add"], .fc-plus').first().click({force:true}); await p.waitForTimeout(1500);
+    await p.locator('button[aria-label^="Add"], .fc-plus').first().evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); }); await p.waitForTimeout(1500);
     await p.locator(".order-confirm-close").click({force:true}).catch(()=>{}); await p.waitForTimeout(600);
     await ctx.setOffline(true);
     await p.evaluate(()=>window.dispatchEvent(new Event("lfh:open-cart"))); await p.waitForTimeout(900);
@@ -125,7 +126,10 @@ try {
     await ctx.close();
   }
   // ── item 13: the elapsed line (P42406-P42425) ───────────────────────────────────────────────────
-  {
+  { // the join gate is a dining-sessions screen — French House is OFF by default, so switch it ON for
+    // this block only and put it back after (sweep #10 T3 round 2, item 8)
+  const sessionsBack = await sessionsOnForRun();
+  try {
     const ctx = await b.newContext(A35);
     await ctx.route("**/rest/v1/rpc/lfh_request*", (r)=>r.fulfill({status:200,contentType:"application/json",body:JSON.stringify({ok:true})}));
     await ctx.route("**/rest/v1/rpc/lfh_table_status*", (r)=>r.fulfill({status:200,contentType:"application/json",body:JSON.stringify({ok:true,open:false})}));
@@ -133,7 +137,7 @@ try {
     await p.goto(BASE + FH, { waitUntil: "domcontentloaded" });
     await p.locator(".food-card, .fc-card, [class*=card]").first().waitFor({ timeout: 60000 });
     await p.waitForTimeout(3000);
-    await p.locator('button[aria-label^="Add"], .fc-plus').first().click({force:true});
+    await p.locator('button[aria-label^="Add"], .fc-plus').first().evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); });
     await p.locator(".sg-overlay").waitFor({ timeout: 30000 });
     await p.locator(".sg-input").fill("12"); await p.locator(".sg-btn.gold").click();
     await p.locator(".sg-title",{hasText:/isn't open/i}).first().waitFor({ timeout: 30000 });
@@ -155,6 +159,7 @@ try {
     P("P42415","…and closes the sheet", await (async()=>{ await p.locator(".sg-btn.ghost").first().click(); await p.waitForTimeout(900); return (await p.locator(".sg-overlay").count())===0; })());
     await p.screenshot({ path: "/tmp/s7c-waited.png" });
     await ctx.close();
+  } finally { await sessionsBack(); }
   }
   // ── item 10: the shared basket, and that nothing else broke (P42416-P42440) ─────────────────────
   {
@@ -163,7 +168,7 @@ try {
     await p.goto(BASE + AA, { waitUntil: "domcontentloaded" });
     await p.locator(".food-card, .fc-card, [class*=card]").first().waitFor({ timeout: 60000 });
     await p.waitForTimeout(2500);
-    await p.locator('button[aria-label^="Add"], .fc-plus').first().click({force:true}); await p.waitForTimeout(1500);
+    await p.locator('button[aria-label^="Add"], .fc-plus').first().evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); }); await p.waitForTimeout(1500);
     await p.locator(".order-confirm-close").click({force:true}).catch(()=>{}); await p.waitForTimeout(600);
     const cart = await p.evaluate(()=>{ const k=Object.keys(localStorage).find(x=>x.startsWith("lfh_cart:")); return JSON.parse(localStorage.getItem(k)||"[]"); });
     P("P42416","the basket still takes a dish on a sessions-OFF restaurant", cart.length>0, cart.length);

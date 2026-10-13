@@ -227,6 +227,10 @@ export default function OrderConfirmModal() {
       // CLAMP to 99 per line to match the server cap — otherwise adding the same
       // dish twice via this popup (99 + 99) quoted 198 while the kitchen makes 99
       // (audit fix bug #6).
+      // …and SAY so when the cap bites (owner picked item 6, 2026-10-12). Merging into a line that already
+      // holds 90 used to stop at 99 in silence, while the bill's "+" and the dish card's "+" both explain
+      // the same ceiling — the one place that quietly took fewer than the diner asked for was this one.
+      const capped = !!existing && existing.qty + qty > 99;
       if (existing) existing.qty = Math.min(99, existing.qty + qty); // already there -> bump, capped
       else cart.push({ // otherwise add a brand-new line
         id: item.id, title: item.title, price: unit.toFixed(2), image: item.image, qty: Math.min(99, qty),
@@ -244,7 +248,15 @@ export default function OrderConfirmModal() {
       if (applyAll && finalRemoved.length) {
         window.dispatchEvent(new CustomEvent("lfh:avoid-all", { detail: { allergens: finalRemoved } }));
       }
-      if (editSig) {
+      if (capped) {
+        // Byte-identical to CartPanel's and FoodCard's toast, `info` because nothing went wrong.
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+          message: "Maximum 99 per dish",
+          subtitle: "that's the most we can add to one line",
+          kicker: "your order", variant: "info", duration: 1400,
+        } }));
+        setOpen(false);
+      } else if (editSig) {
         // Editing from the bill: the bill is already open behind us, so a
         // quick toast is enough feedback — close straight away.
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${item.title} updated`, kicker: "your order" } }));

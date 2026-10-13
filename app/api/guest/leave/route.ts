@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { invalidateFloor } from "@/lib/floorSummary";
+import { restaurantOfToken } from "@/lib/guestTokenRestaurant";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,10 @@ type Body = { token?: string; restaurantId?: string };
 async function postImpl(req: NextRequest): Promise<Response> {
   let b: Body;
   try { b = (await req.json()) as Body; } catch { return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 }); }
+  // A body that PARSES but is not an object — `null`, `5`, `"x"`, `[]` — is a broken body, not a crash
+  // (sweep #10 T3 round 2, item 20). `null` used to sail through `req.json()` and then throw on the
+  // first property read, so every guest door answered a bare 500 — measured on the built app.
+  if (!b || typeof b !== "object" || Array.isArray(b)) return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
   if (!b.token || typeof b.token !== "string") {
     return NextResponse.json({ ok: false, reason: "invalid_token" }, { status: 400 });
   }
@@ -64,10 +69,15 @@ async function postImpl(req: NextRequest): Promise<Response> {
   //
   // The two sibling doors already check first — /api/guest/place-order through dropFloorIfPlaced()
   // and /api/guest/call-waiter through callLanded(). This is the third door catching up with them.
-  const rid = isUuid(b.restaurantId) ? (b.restaurantId as string) : "";
+  //
+  // …AND WHEN THE BODY DOES NOT SAY WHICH RESTAURANT, THE TOKEN DOES (sweep #10 T3 round 2, item 7).
+  // This door alone had no fallback: an old saved leave with no `restaurantId` left the snapshot
+  // standing, while its two siblings already asked the token. Asked only when the leave really
+  // changed something, so an `already_gone` replay costs no read at all.
   const leaveLanded = !(data && typeof data === "object" && (data as { already_gone?: unknown }).already_gone === true);
+  const rid = isUuid(b.restaurantId) ? (b.restaurantId as string) : (leaveLanded ? await restaurantOfToken(b.token) : "");
   if (rid && leaveLanded) invalidateFloor(rid);
-  else if (!rid) console.warn("[guest/leave] no resolvable restaurant — floor snapshot not dropped");
+  else if (!rid && leaveLanded) console.warn("[guest/leave] no resolvable restaurant — floor snapshot not dropped");
 
   return NextResponse.json(data ?? { ok: false, reason: "empty" });
 }

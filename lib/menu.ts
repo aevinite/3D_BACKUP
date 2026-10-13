@@ -15,6 +15,7 @@ import { supabase } from "./supabase";
 // either rule here: a second copy is how the cart, the bill and the paper start disagreeing.
 import { effectiveTaxRate, priceTaxMode, itemTaxModesAllowed, type DishTaxMode } from "./tax";
 import { DEFAULT_RESTAURANT_ID } from "./tenant";
+import { isDbUnreachable } from "./dbRefusal";
 
 // One hotspot card on a 3D model (menu_items.model_tags, mig 402).
 //   id/emoji/name/b1/b2  — what the card says
@@ -301,10 +302,32 @@ export async function callWaiter(tableNumber: string, note?: string, restaurantI
   const { data, error } = signal
     ? await supabase.rpc("lfh_call_waiter_table", { p_table: tableNumber || null, p_note: note || null, p_restaurant_id: restaurantId }).abortSignal(signal)
     : await supabase.rpc("lfh_call_waiter_table", { p_table: tableNumber || null, p_note: note || null, p_restaurant_id: restaurantId });
-  // A real transport/DB failure is an error we surface.
-  if (error) throw new Error(`Call failed: ${error.message}`);
+  // A real transport/DB failure is an error we surface — and a restaurant that did not ANSWER is told
+  // apart from one that refused (owner picked item 17, 2026-10-12): busy = offline, both ways. The
+  // order path has saved a basket on a busy restaurant since 2026-08; the bell said "please try
+  // again", which on a struggling system only adds load. isDbUnreachable is the shared rule
+  // (lib/dbRefusal.ts — the same one lib/session.ts uses for the seated door), so a refused VALUE is
+  // never mistaken for a busy one.
+  if (error) {
+    if (isDbUnreachable(error) || isUnreachable(error)) throw busyError("could not reach the restaurant");
+    throw new Error(`Call failed: ${error.message}`);
+  }
   // Otherwise hand back the RPC's own {ok, reason} so the UI can react honestly.
   const res = (data ?? {}) as CallWaiterResult;
+  // ── THE OWNER'S PHONE HEARS ABOUT THIS LIMIT TOO (owner picked item 10, 2026-10-12) ────────────
+  // A table's waiter-call limit is enforced inside Postgres, so no server route sees it trip. The
+  // seated door and every order already send the limit beacon (lib/session.ts rpc(), and the
+  // /api/guest/place-order route's own ping); this direct QR call was the one guest limit that
+  // tripped in silence. Same beacon, same rule: the server pings only if a genuine open
+  // rate_limit_events row exists, so this cannot invent an alert. Fire-and-forget — never blocks.
+  if (res.reason === "rate_limited") {
+    try {
+      fetch("/api/guest/limit-hit", {
+        method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fn: "lfh_call_waiter_table", rid: restaurantId }),
+      }).catch(() => {});
+    } catch { /* best-effort */ }
+  }
   return { ok: res.ok !== false, reason: res.reason };
 }
 
@@ -341,7 +364,12 @@ function isUnreachable(err: unknown): boolean {
   const e = err as { message?: unknown; name?: unknown } | null;
   const msg = String(e?.message ?? "");
   const name = String(e?.name ?? "");
-  return /abort|timeout|timed out|network|fetch failed|load failed/i.test(msg) || /AbortError|TimeoutError/i.test(name);
+  // "failed to fetch" is CHROME's wording for a request that never reached the server (Safari says
+  // "Load failed", Firefox "NetworkError…", Node "fetch failed" — all three were already here). Without
+  // it, on Chrome a status check whose connection dropped came back as "no such order", and three of
+  // those in a row marked a cooking order CANCELLED on the diner's strip — measured on the built app
+  // with the phone online and only get_order_status failing (sweep #10 T3 round 2, item 23).
+  return /abort|timeout|timed out|network|fetch failed|failed to fetch|load failed/i.test(msg) || /AbortError|TimeoutError/i.test(name);
 }
 
 // A deadline on every order, WITHOUT assuming the browser can make one. `AbortSignal.timeout`

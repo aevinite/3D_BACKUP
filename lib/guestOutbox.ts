@@ -495,8 +495,12 @@ export async function enqueueGuestCall(p: {
   // So a still-unsent call for the same table/session simply keeps its place and takes the newer
   // note — the diner's most recent words — instead of queuing beside it. The at-most-once id is
   // kept too, so a call already in flight can't ring twice.
+  // …AND THE SAME RESTAURANT (sweep #10 T3 round 2, item 19). Table "4" at French House and table "4"
+  // at Aangan are two tables: two bell taps saved on one phone at two restaurants used to collapse
+  // into ONE call, and the second restaurant's waiter was never asked.
   const sameTable = (x: GuestOrder) =>
-    isCall(x) && x.mode === p.mode && String(x.table || "") === String(p.table || "") && String(x.token || "") === String(p.token || "");
+    isCall(x) && x.mode === p.mode && String(x.table || "") === String(p.table || "") && String(x.token || "") === String(p.token || "")
+    && String(x.restaurantId || "") === String(p.restaurantId || "");
   const already = queued.find(sameTable);
   if (already) {
     already.at = Date.now();
@@ -1032,12 +1036,20 @@ function restoreQueue() {
     // both keeps its IN-MEMORY version — that copy may already have been through a flush and be
     // carrying fresh attempt counters. Everything else is taken from storage. Sorted oldest-first
     // afterwards, exactly as before, so the queue still drains in the order the diner placed it.
+    //
+    // …AND ONE ROW LIVES IN ONE LIST (sweep #10 T3 round 2, item 15). Memory also wins ACROSS the two
+    // lists: a row the running flush had just moved to `failed`, whose storage write had not landed
+    // when this read came back, was still `queued` in storage — and was put back in the send list
+    // while it also sat in the failed list. The diner saw it twice ("waiting" AND "couldn't send"),
+    // and the queue would have sent an order it had just told them it couldn't. So a row memory holds
+    // in either list is taken from memory alone.
+    const inMemory = new Set([...queued, ...failed].map((x) => x.id));
     const byId = new Map<string, GuestOrder>();
-    for (const x of all.filter((x) => x.status !== "failed")) byId.set(x.id, x);
+    for (const x of all.filter((x) => x.status !== "failed" && !inMemory.has(x.id))) byId.set(x.id, x);
     for (const x of queued) byId.set(x.id, x);
     queued = [...byId.values()].sort((a, b) => a.at - b.at);
     const failedById = new Map<string, GuestOrder>();
-    for (const x of all.filter((x) => x.status === "failed")) failedById.set(x.id, x);
+    for (const x of all.filter((x) => x.status === "failed" && !inMemory.has(x.id))) failedById.set(x.id, x);
     for (const x of failed) failedById.set(x.id, x);
     failed = [...failedById.values()];
     notify();

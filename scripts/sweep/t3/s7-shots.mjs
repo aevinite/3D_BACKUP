@@ -53,7 +53,7 @@ for (const t of ["dark", "light"]) {
 await skin("dark", async (ctx, p) => {
   await p.goto(BASE + "/r/aangan-garden-restaurant/menu", { waitUntil: "domcontentloaded" });
   await p.waitForTimeout(7000);
-  await p.locator('button[aria-label^="Add"], .fc-plus').first().click({ force: true }); await p.waitForTimeout(1200);
+  await p.locator('button[aria-label^="Add"], .fc-plus').first().evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); }); await p.waitForTimeout(1200);
   await ctx.setOffline(true);
   await p.evaluate(() => window.dispatchEvent(new Event("lfh:open-cart"))); await p.waitForTimeout(800);
   await p.locator("#cart-table").fill("3"); await p.waitForTimeout(300);

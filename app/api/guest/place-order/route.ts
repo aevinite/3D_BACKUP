@@ -17,6 +17,7 @@ import { pingLatestGuestLimit } from "@/lib/rateLimit";
 import { replayClash, clashJson } from "@/lib/clash";
 import { offPlanTable } from "@/lib/planTable";
 import { invalidateFloor } from "@/lib/floorSummary";
+import { restaurantOfToken } from "@/lib/guestTokenRestaurant";
 
 export const dynamic = "force-dynamic";
 
@@ -59,23 +60,13 @@ function ridFromResult(data: unknown): string {
 // existed" — was never actually closed for the body it was written about: one saved by a build old
 // enough not to carry `restaurantId`.
 //
-// This is what the reply cannot tell us and the token can. The route already holds the service-role
-// client, and a session token maps to exactly one restaurant, so ONE narrow read settles it:
+// This is what the reply cannot tell us and the token can — `restaurantOfToken` in
+// lib/guestTokenRestaurant.ts, shared with the other two writing doors since sweep #10 T3 round 2
+// (item 7). The route already holds the service-role client, and a session token maps to exactly one restaurant, so ONE narrow read settles it:
 // two single-row lookups, each column-listed and capped, and ONLY on the path where both cheaper
 // answers came back empty — so the ordinary replay, which does carry the field, makes no extra read
 // at all. ridFromResult stays first in the chain: it costs nothing and becomes the right answer for
 // free if that function is ever given the field.
-async function ridFromToken(token: string | undefined): Promise<string> {
-  if (!token) return "";
-  try {
-    const m = await sb.from("session_members").select("session_id").eq("token", token).limit(1).maybeSingle();
-    const sid = m.data?.session_id;
-    if (!sid) return "";
-    const s = await sb.from("sessions").select("restaurant_id").eq("id", sid).limit(1).maybeSingle();
-    const rid = s.data?.restaurant_id;
-    return isUuid(rid) ? String(rid) : "";
-  } catch { return ""; }   // best-effort: a failed lookup must never cost the diner their order
-}
 
 function dropFloorIfPlaced(data: unknown, rid: string): void {
   if (rid && data && typeof data === "object" && (data as { ok?: unknown }).ok !== false) invalidateFloor(rid);
@@ -134,11 +125,30 @@ function busy(): Response {
 async function postImpl(req: NextRequest): Promise<Response> {
   let b: Body;
   try { b = (await req.json()) as Body; } catch { return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 }); }
+  // A body that PARSES but is not an object — `null`, `5`, `"x"`, `[]` — is a broken body, not a crash
+  // (sweep #10 T3 round 2, item 20). `null` used to sail through `req.json()` and then throw on the
+  // first property read, so every guest door answered a bare 500 — measured on the built app.
+  if (!b || typeof b !== "object" || Array.isArray(b)) return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
   const items = Array.isArray(b.items) ? b.items : [];
   const allergies = Array.isArray(b.allergies) ? b.allergies : [];
   if (items.length > MAX_ITEMS) return NextResponse.json({ ok: false, reason: "order_too_big" }, { status: 400 });
   if (allergies.length > MAX_ALLERGIES || allergies.some((a) => typeof a === "string" && a.length > MAX_ALLERGY_LEN)) {
     return NextResponse.json({ ok: false, reason: "allergies_too_long" }, { status: 400 });
+  }
+  // (After the size ceilings, so a huge body is turned away before it is walked.)
+  // ── A BODY THE DATABASE CANNOT READ IS REFUSED HERE, NOT RETRIED (sweep #10 T3 round 2, item 14) ──
+  // An item that is not an object with a dish id, an allergy that is not text, a token or table that
+  // is not text: Postgres rejected those with an error, which this route — correctly, for a REAL
+  // database error — answers as `server_busy`. So a corrupted saved order was retried by the phone
+  // for about four minutes (six rounds of backoff) before the diner was told anything. It is a body
+  // problem, not a busy restaurant: say so at once with the code the phone already words.
+  const textOrNum = (v: unknown) => v === undefined || v === null || typeof v === "string" || (typeof v === "number" && Number.isFinite(v));
+  const goodItem = (x: unknown) => !!x && typeof x === "object" && !Array.isArray(x)
+    && typeof (x as { id?: unknown }).id === "string" && (x as { id: string }).id.length > 0
+    && Number.isFinite(Number((x as { qty?: unknown }).qty ?? 1));
+  if (!items.every(goodItem) || !allergies.every((a) => typeof a === "string")
+    || !textOrNum(b.table) || (b.token !== undefined && b.token !== null && typeof b.token !== "string")) {
+    return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
   }
 
   if (b.mode === "session") {
@@ -155,12 +165,12 @@ async function postImpl(req: NextRequest): Promise<Response> {
     // When the body carried no (or a malformed) `restaurantId`, `invalidateFloor` was skipped — so a
     // replayed order reached the kitchen while a manager reloading inside the shared 1.5s window
     // could still be handed a floor computed before that order existed. Three answers, cheapest
-    // first: the RPC's own reply (which does not carry it today — see ridFromToken above), the
+    // first: the RPC's own reply (which does not carry it today — see the note above), the
     // phone's field, and finally the token itself, which always knows. The third is what makes the
     // sentence above actually true.
     const sessionRid = ridFromResult(data)
       || (isUuid(b.restaurantId) ? (b.restaurantId as string) : "")
-      || await ridFromToken(b.token);
+      || await restaurantOfToken(b.token);
     maybePing(data, sessionRid);
     dropFloorIfPlaced(data, sessionRid);
     if (!sessionRid) {

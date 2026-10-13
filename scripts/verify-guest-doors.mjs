@@ -1022,6 +1022,89 @@ flush();
   check("item 1 — …and never mistakes a busy restaurant, an empty answer or a refusal for an offline phone", !!re && notOffline.every((t) => !re.test(t)));
   check("item 1 — a busy restaurant (timed_out) can never count as an offline phone, whatever the browser says", /if \(r && r\.reason === "timed_out"\) return false;/.test(codeOnly(sess)));
 }
+// ── 13. ROUND 2 OF SWEEP #10 T3 — THE FIXES THE OWNER PICKED, AND THE ONES THE SECOND COMB FOUND ─────
+//
+// One sub-block per item, so a single item can be taken out with its guard. Asserted on the CODE
+// (comments stripped). Each was broken once on purpose and turned this guard red before it shipped.
+// The behaviour behind every one is also DRIVEN in scripts/sweep/t3s10 (round 2 blocks).
+{
+  say("\n── 13. sweep #10 T3 round 2 — what the second pass fixed ──");
+  const r2 = (p) => codeOnly(read(p));
+  // item 6 — the dish popup says so when "Add" hits the 99 ceiling, in the bill's own words
+  { const c = r2("components/OrderConfirmModal.tsx");
+    check("item 6 — the dish popup announces the 99-per-dish ceiling instead of stopping in silence",
+      /const capped = !!existing && existing\.qty \+ qty > 99;/.test(c) && /if \(capped\) \{[\s\S]{0,120}message: "Maximum 99 per dish"/.test(c)); }
+  // item 7 — ONE helper finds a token's restaurant, and all three writing doors use it
+  { const doors = ["place-order", "call-waiter", "leave"].map((d) => r2(`app/api/guest/${d}/route.ts`));
+    const anyCopy = doors.some((c) => /async function ridFromToken/.test(c));
+    check("item 7 — all three writing doors find a token's restaurant through lib/guestTokenRestaurant.ts (no private copies)",
+      !anyCopy && doors.every((c) => /restaurantOfToken\(b\.token\)/.test(c)) && /export async function restaurantOfToken/.test(r2("lib/guestTokenRestaurant.ts"))); }
+  // item 8 — the old T3 runners switch French House's sessions on ONLY around the gate sections
+  { const files = ["basket-and-doors", "order-end-to-end", "across-panels", "screens", "s7-live"].map((f) => r2(`scripts/sweep/t3/${f}.mjs`));
+    const helper = r2("scripts/sweep/t3/sessionsOn.mjs");
+    check("item 8 — the old runners that drive the join-a-table gate switch sessions ON for their run and put them back",
+      files.every((c) => /sessionsOnForRun\(\)/.test(c) && /sessionsBack\(\)/.test(c)) && /restoreOnExit\(/.test(helper) && /sessions_enabled: false/.test(helper)); }
+  // item 10 — the QR bell sends the owner's limit beacon like every other guest limit
+  { const m = r2("lib/menu.ts"); const cw = m.slice(m.indexOf("export async function callWaiter"), m.indexOf("export type OrderStatus"));
+    check("item 10 — a QR waiter call refused by the table's limit sends the owner's limit beacon",
+      /if \(res\.reason === "rate_limited"\) \{[\s\S]{0,200}"\/api\/guest\/limit-hit"[\s\S]{0,160}fn: "lfh_call_waiter_table"/.test(cw)); }
+  // item 11 — the Live-status dish reads follow a nudge + one-minute backstop, never the 5s redraw
+  { const c = r2("components/CartPanel.tsx");
+    check("item 11 — the bill reads each live order's dishes on a realtime nudge or the 60s backstop, not every 5 seconds",
+      /const cardsShown = open && showHistory && !sessionsEnabled;/.test(c) && /window\.addEventListener\("lfh:rt-tick", bump\)/.test(c)
+      && /setInterval\(bump, RT_BACKUP_MS\)/.test(c) && /\}, \[cardsShown, liveOrders, dishBeat\]\);/.test(c) && !/\}, \[open, liveOrders\]\);/.test(c)); }
+  // item 13 — the bill looks dishes up in a table built once, not by walking the menu per line
+  { const c = r2("components/CartPanel.tsx");
+    check("item 13 — the bill builds one menu lookup per menu change instead of walking the menu for every line",
+      !/menuItems\.find\(/.test(c) && /const menuById = useMemo\(/.test(c)); }
+  // item 14 — a body the database cannot read is refused at the door, not retried as "busy"
+  { const po = r2("app/api/guest/place-order/route.ts"), cw = r2("app/api/guest/call-waiter/route.ts");
+    check("item 14 — malformed items / allergies / token / table are refused as bad_body before any database call",
+      /if \(!items\.every\(goodItem\) \|\| !allergies\.every\(\(a\) => typeof a === "string"\)/.test(po) && /typeof raw\.token !== "string"/.test(cw)); }
+  // item 15 — a reload's restore never puts one saved row in BOTH lists
+  { const o = r2("lib/guestOutbox.ts");
+    check("item 15 — restoring after a reload lets memory win across BOTH lists (one row, one list)",
+      /const inMemory = new Set\(\[\.\.\.queued, \.\.\.failed\]\.map\(\(x\) => x\.id\)\);/.test(o) && (o.match(/!inMemory\.has\(x\.id\)/g) || []).length === 2); }
+  // item 16 — the star animation, not the render, decides when a star lights
+  { const c = r2("components/StarRating.tsx");
+    check("item 16 — the stars' 'lit' class is owned by the animation, never re-set by a render",
+      /<li key=\{i\} className="sr-li">/.test(c) && !/className=\{`sr-li \$\{i < value/.test(c)); }
+  // item 17 — the QR bell on a busy restaurant is saved, like no signal
+  { const m = r2("lib/menu.ts"), ch = r2("components/ChefPopup.tsx");
+    check("item 17 — a QR call the restaurant did not ANSWER is saved and sent later (busy = offline)",
+      /if \(isDbUnreachable\(error\)( \|\| isUnreachable\(error\))?\) throw busyError\(/.test(m) && /if \(isServerBusy\(err\)\) \{[\s\S]{0,160}enqueueGuestCall\(/.test(ch)); }
+  // item 18 — the basket pill counts the same quantity the bill does
+  { const c = r2("components/MiniCart.tsx");
+    check("item 18 — the basket pill clamps a saved quantity to 1–99 exactly like the bill",
+      /const qtyOf = \(q: unknown\) => Math\.min\(99, Math\.max\(1, Math\.floor\(/.test(c) && /qty: qtyOf\(it\.qty\)/.test(c)); }
+  // item 19 — saved bell taps at two restaurants stay two calls
+  { const o = r2("lib/guestOutbox.ts");
+    check("item 19 — two saved calls for table N at two different restaurants are kept apart",
+      /String\(x\.restaurantId \|\| ""\) === String\(p\.restaurantId \|\| ""\)/.test(o)); }
+  // item 20 — a JSON body of `null` (or any non-object) is a clear refusal on every guest door
+  { const ok3 = ["place-order", "call-waiter", "leave"].every((d) => /if \(!b \|\| typeof b !== "object" \|\| Array\.isArray\(b\)\) return NextResponse\.json\(\{ ok: false, reason: "bad_body" \}, \{ status: 400 \}\);/.test(r2(`app/api/guest/${d}/route.ts`)));
+    check("item 20 — a body that parses to null / a number / a list is refused (or a no-op beacon), never a 500",
+      ok3 && /if \(!b \|\| typeof b !== "object" \|\| Array\.isArray\(b\)\) b = \{\};/.test(r2("app/api/guest/limit-hit/route.ts"))); }
+  // item 22 — the limit beacon reads a function NAME only when it is text
+  { const c = r2("app/api/guest/limit-hit/route.ts");
+    check("item 22 — the limit beacon ignores a function name that is not text (a list is not a name)",
+      /const key = typeof b\.fn === "string" \? FN_TO_KEY\[b\.fn\] : undefined;/.test(c) && !/FN_TO_KEY\[String\(/.test(c)); }
+  // item 23 — a dropped connection on Chrome is "couldn't ask", never "the order is gone"
+  { const m = r2("lib/menu.ts"); const f = m.slice(m.indexOf("function isUnreachable("), m.indexOf("function isUnreachable(") + 400);
+    check("item 23 — Chrome's 'Failed to fetch' counts as the restaurant not answering (so a cooking order is never marked cancelled by a dropped connection)",
+      /failed to fetch/.test(f) && /if \(isDbUnreachable\(error\) \|\| isUnreachable\(error\)\) throw busyError\(/.test(m)); }
+  // item 24 — on a narrow phone the order strip ends before the bell's corner begins
+  { const css = codeOnly(read("app/globals.css"));
+    const strip = (css.match(/\.order-tracker \{[^}]*?width: min\(340px, calc\(100vw - (\d+)px\)\)/) || [])[1];
+    const bell = css.match(/\.chef-call \{[^}]*?right: calc\((\d+)px[^}]*?width: clamp\(\d+px, [\d.]+vw, (\d+)px\)/);
+    const left = Number((css.match(/\.order-tracker \{[^}]*?left: (\d+)px/) || [])[1]);
+    const need = bell ? left + Number(bell[1]) + Number(bell[2]) + 8 : Infinity;
+    check(`item 24 — the order strip leaves the fixed bell its corner on a phone (strip gives up ${strip}px, the bell needs ${need}px)`, !!strip && Number(strip) >= need); }
+  // item 21 — only a real duplicate reads "Already sent"
+  { const c = r2("components/ChefPopup.tsx");
+    check("item 21 — an unknown answer to a QR call is said honestly, never as 'Already sent'",
+      /\} else if \(res\.reason === "already_sent"\) \{/.test(c) && /message: "Couldn't call staff from here"/.test(c)); }
+}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9

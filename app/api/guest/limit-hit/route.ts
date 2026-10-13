@@ -42,7 +42,14 @@ const MAX_PER_WINDOW = 6;
 export async function POST(req: NextRequest) {
   let b: { fn?: string; rid?: string } = {};
   try { b = await req.json(); } catch { /* empty body → no-op below */ }
-  const key = FN_TO_KEY[String(b.fn || "")];
+  // A body that parses to `null` (or any non-object) is a no-op too, never a crash — it threw on `b.fn`
+  // and answered 500, the one thing this beacon promises never to do (sweep #10 T3 round 2, item 20).
+  if (!b || typeof b !== "object" || Array.isArray(b)) b = {};
+  // TEXT ONLY (sweep #10 T3 round 2, item 22). `String(b.fn)` turned a list `["lfh_place_order"]` into
+  // the name itself, so a wrong-typed field was read as a right one. It could never invent an alert
+  // (the ping still needs a real open event), but every other field on these doors is ignored when
+  // it is the wrong type, and this one now is too.
+  const key = typeof b.fn === "string" ? FN_TO_KEY[b.fn] : undefined;
   if (key) {
     const rid = typeof b.rid === "string" && UUID.test(b.rid) ? b.rid : null;
     // The device cookie when the panel set one, else the server-derived IP — NEVER a body field, so a

@@ -110,6 +110,10 @@ function punchHole(li: HTMLElement) {
   requestAnimationFrame(anim);
 }
 
+// REJECTED (owner, 2026-10-12): no "reduce motion" version of these stars — docs/REJECTED-IDEAS.md R69.
+// "we want the star animation, all the cool animation we want". Do not add a prefers-reduced-motion
+// branch here and do not suggest one again.
+//
 // The "turn a star ON" animation: the star leaps up, spins, drops down with a
 // springy bounce, and lands happy. It's a chain of tweens, each starting when
 // the previous one finishes. (You don't need to follow every number — the
@@ -349,8 +353,15 @@ export default function StarRating({
       <ul className="sr-rating" ref={listRef}>
         {/* Build the 5 star items. `i` is 0-based, so star number = i + 1. */}
         {Array.from({ length: STAR_COUNT }, (_, i) => (
-          // "active" means this star is filled (its index is below the value).
-          <li key={i} className={`sr-li ${i < value ? "active" : ""}`}>
+          // "active" means this star is filled — and the ANIMATION decides when, not the render
+          // (sweep #10 T3 round 2, item 16). This read `sr-li ${i < value ? "active" : ""}`, so the
+          // parent's re-render after onChange() lit every chosen star 5 ms after the tap — measured on
+          // the dish page — before diveIn() had lifted it; and un-lit them 14 ms after a lower tap,
+          // before crushOut() had split them. The leap-spin-land and the crush (owner, 2026-10-12: "all
+          // the cool animation we want", R69) played on stars that had already changed. React now
+          // renders a plain `sr-li`, never touches the class again, and the [value] effect above
+          // settles the stars for any value that arrives from outside (a reset, the first render).
+          <li key={i} className="sr-li">
             {/* The little "hole" graphic used by the punch animation */}
             <div className="sr-hole"></div>
             {/* The clickable star itself. role/tabIndex/onKeyDown make it

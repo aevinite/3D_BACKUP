@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 // callWaiter sends a service request; getSettings reads restaurant on/off options.
 import { enqueueGuestCall } from "@/lib/guestOutbox";
-import { callWaiter, getSettings } from "@/lib/menu";
+import { callWaiter, getSettings, isServerBusy } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
 // Helpers for checking/cleaning the table number and reading a scanned-QR table.
 import { validateTable, flagTableInput, getScannedTable, setScannedTable } from "@/lib/table";
@@ -203,12 +203,35 @@ export default function ChefPopup() {
         // Too many requests already pending for this table.
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "You've a few requests pending", subtitle: "staff are on the way", kicker: "service", icon: "🛎" } }));
         window.dispatchEvent(new Event("lfh:close-all"));
-      } else {
+      } else if (res.reason === "already_sent") {
         // already_sent: a recent identical request — reassure without a new call.
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Already sent", subtitle: `${reason} · staff are on the way`, kicker: "service", icon: "🛎" } }));
         window.dispatchEvent(new Event("lfh:close-all"));
+      } else {
+        // ANYTHING ELSE IS NOT "ALREADY SENT" (sweep #10 T3 round 2, item 21). This branch used to be the
+        // catch-all, so a refusal it did not know — `no_table`, or any code a later migration adds —
+        // told the diner "Already sent · staff are on the way" about a call that was never made. An
+        // unknown answer is said honestly, with the one thing that always works.
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't call staff from here", subtitle: "please ask a member of staff", kicker: "service", variant: "error" } }));
       }
-    } catch {
+    } catch (err) {
+      // THE RESTAURANT DIDN'T ANSWER → SAVE IT, exactly like no signal (owner picked item 17,
+      // 2026-10-12). "Busy = offline, both ways" is this project's rule: a timeout or a database that
+      // will not answer is not the diner's problem and not a refusal. Same queue, same at-most-once
+      // id, same ten-minute staleness as a call saved with no bars — it rings the floor once.
+      if (isServerBusy(err)) {
+        try {
+          const q = await enqueueGuestCall({ mode: "public", table: check.value, restaurantId, reason });
+          window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+            message: "Saved — we'll call them the moment the restaurant answers",
+            subtitle: q.persisted ? `${reason} · it goes through by itself` : `${reason} · keep this page open`,
+            kicker: "service", icon: "🛎",
+          } }));
+          window.dispatchEvent(new Event("lfh:close-all"));
+          setTableNumber("");
+          return;
+        } catch { /* couldn't even save it → the honest error below */ }
+      }
       // If the request failed, show an error toast asking them to try again.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't reach staff", subtitle: "please try again", kicker: "service", variant: "error" } }));
     } finally {

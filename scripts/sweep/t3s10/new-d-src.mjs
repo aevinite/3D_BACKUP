@@ -50,8 +50,10 @@ check("P172336", FILES.placeOrder, "every refusal code the four doors can answer
 check("P172337", FILES.placeOrder, "the three writing doors all spell `server_busy` and send a spread-out retryAfter (20–45s)", HOW, () =>
   ["placeOrder", "callWaiter", "leave"].every((k) => /reason: "server_busy", retryAfter/.test(CODE[k]) && /20 \+ Math\.floor\(Math\.random\(\) \* 25\)/.test(CODE[k])));
 check("P172338", FILES.placeOrder, "no door holds a timer or a poll of its own", HOW, () => ROUTES.every((k) => !/setInterval|setTimeout/.test(CODE[k])));
+// Round 2 (item 7): the lookup now lives ONCE in lib/guestTokenRestaurant.ts, used by all three doors.
 check("P172339", FILES.placeOrder, "each door's narrow token lookup is column-listed and capped at one row", HOW, () =>
-  ["placeOrder", "callWaiter"].every((k) => count(CODE[k], /\.select\("(session_id|restaurant_id)"\)\.eq\([^)]*\)\.limit\(1\)\.maybeSingle\(\)/g) === 2));
+  count(CODE.tokenRid, /\.select\("(session_id|restaurant_id)"\)\.eq\([^)]*\)\.limit\(1\)\.maybeSingle\(\)/g) === 2
+  && ["placeOrder", "callWaiter", "leave"].every((k) => /restaurantOfToken\(b\.token\)/.test(CODE[k])));
 
 // ── D2. the components: the rules every guest screen must keep (P172340–P172399) ─────────────────
 check("P172340", FILES.cart, "the bill registers with the back-button manager", HOW, () => /useBackClose\("cart", open,/.test(CODE.cart));
@@ -110,7 +112,8 @@ check("P172372", FILES.cart, "every error toast in the bill is marked as an erro
 });
 check("P172373", FILES.cart, "the full menu is fetched lazily from the cached bundle, once, on first open", HOW, () =>
   /fetch\(`\/api\/r\/\$\{tenantSlug\(\)\}\/menu-data`/.test(CODE.cart) && /if \(menuLoadedRef\.current\) return;/.test(CODE.cart));
-check("P172374", FILES.cart, "the live-card dish reads happen only while the bill is open", HOW, () => /useEffect\(\(\) => \{\s*if \(!open\) return;\s*let alive = true;/.test(CODE.cart));
+// Round 2 (item 11): narrowed further — only while the Live-status cards themselves are on screen.
+check("P172374", FILES.cart, "the live-card dish reads happen only while the bill is open", HOW, () => /const cardsShown = open && showHistory && !sessionsEnabled;/.test(CODE.cart) && /if \(!cardsShown\) return;/.test(CODE.cart));
 check("P172375", FILES.cart, "the 5-second re-check runs only while the bill is open, and is cleared on close", HOW, () => /if \(!open\) return;\s*const refreshLive[\s\S]{0,120}setInterval\(refreshLive, 5000\);\s*return \(\) => clearInterval\(iv\);/.test(CODE.cart));
 check("P172376", FILES.cart, "money is quoted through lib/tax.ts (splitBill / resolveTaxMode) — no second tax formula", HOW, () =>
   /splitBill\(dispLines, taxRules\)/.test(CODE.cart) && /resolveTaxMode\(dishMode\(it\.id\), taxRules\)/.test(CODE.cart) && !/\* 0\.05|\* 1\.05/.test(CODE.cart));

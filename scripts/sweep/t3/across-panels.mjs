@@ -3,6 +3,7 @@
 import { chromium } from "playwright";
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
+import { sessionsOnForRun } from "./sessionsOn.mjs";   // round 2 item 8: sessions ON only where the gate is driven
 // THIS CHECKOUT'S OWN KEYS, NOT THE SHARED FOLDER'S (sweep #6 / T28, 2026-08-22). This read
 // /Users/aevinite/Documents/Projects/backup_Menu/.env.local by absolute path. Every parallel lane of a
 // sweep runs from its OWN worktree — that is the rule — so a guard that reaches back into the shared
@@ -20,6 +21,9 @@ const FH = "00000000-0000-0000-0000-000000000001", BASE = process.env.T3_BASE ||
 // fixture has to survive sharing it. So the whole attempt is retryable — it cleans up everything it
 // made, waits for the restaurant's own limit window to roll over, and tries again on a different
 // table. A REAL fault fails every attempt; contention passes on a later one.
+// Round 2 item 8: the whole block drives the join-a-table gate, so French House's dining sessions are
+// switched ON for the run and put back before every exit (and on Ctrl-C / a crash — ./sessionsOn.mjs).
+const sessionsBack = await sessionsOnForRun();
 async function runAttempt(attemptNo) {
   // FIND A TABLE I CAN ACTUALLY OPEN, by trying — not by pre-checking.
   // `idx_one_open_session_per_table` means the database itself refuses a second open session on a
@@ -183,7 +187,7 @@ for (let n = 1; n <= MAX_ATTEMPTS; n++) {
   last = await runAttempt(n);
   if (last.noTable) {
     console.log('\n⏭ every candidate table already has a party on it — not opening one under anybody.');
-    if (n === MAX_ATTEMPTS) process.exit(0);
+    if (n === MAX_ATTEMPTS) { await sessionsBack(); process.exit(0); }
   } else if (last.fail === 0) {
     break;
   } else {
@@ -195,4 +199,5 @@ for (let n = 1; n <= MAX_ATTEMPTS; n++) {
   }
 }
 console.log(`\nBLOCK 5: ${last.pass} passed, ${last.fail} failed${last.fails.length ? ' -> ' + last.fails.join(', ') : ''}`);
+await sessionsBack();
 process.exit(last.fail ? 1 : 0);

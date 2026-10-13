@@ -16,6 +16,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { offPlanTable } from "@/lib/planTable";
 import { invalidateFloor } from "@/lib/floorSummary";
+// The restaurant a session token belongs to — ONE copy for the three writing doors (sweep #10 T3
+// round 2, item 7): `lfh_call_waiter` (migration 084) answers `{ok:true}` and nothing else, so an
+// older saved call carrying no `restaurantId` needs the token to drop the floor snapshot.
+import { restaurantOfToken } from "@/lib/guestTokenRestaurant";
 
 export const dynamic = "force-dynamic";
 
@@ -51,23 +55,6 @@ function callLanded(data: unknown): boolean {
   return !["already_sent", "capped", "rate_limited"].includes(String(d.reason ?? ""));
 }
 
-// The restaurant a session token belongs to. The twin of the helper in
-// /api/guest/place-order — and it exists for the same reason: `lfh_call_waiter` (migration 084)
-// returns `{ok:true}` and nothing else, so the "prefer the restaurant the RPC itself resolved"
-// note below has never had a value to prefer, and an older saved call carrying no `restaurantId`
-// left the floor snapshot standing. Two single-row, column-listed, capped reads, and only when
-// both cheaper answers came back empty.
-async function ridFromToken(token: string | undefined): Promise<string> {
-  if (!token) return "";
-  try {
-    const m = await sb.from("session_members").select("session_id").eq("token", token).limit(1).maybeSingle();
-    const sid = m.data?.session_id;
-    if (!sid) return "";
-    const s = await sb.from("sessions").select("restaurant_id").eq("id", sid).limit(1).maybeSingle();
-    const rid = s.data?.restaurant_id;
-    return isUuid(rid) ? String(rid) : "";
-  } catch { return ""; }
-}
 
 // ── "THE RESTAURANT IS BUSY — WAIT THIS LONG" (T10 sweep, improvement I2) ─────────────────────────
 //
@@ -111,6 +98,10 @@ type Body = {
 async function postImpl(req: NextRequest): Promise<Response> {
   let b: Body;
   try { b = (await req.json()) as Body; } catch { return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 }); }
+  // A body that PARSES but is not an object — `null`, `5`, `"x"`, `[]` — is a broken body, not a crash
+  // (sweep #10 T3 round 2, item 20). `null` used to sail through `req.json()` and then throw on the
+  // first property read, so every guest door answered a bare 500 — measured on the built app.
+  if (!b || typeof b !== "object" || Array.isArray(b)) return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
 
   // TOO LATE TO BE USEFUL. Answered as a plain refusal (not an error) so the phone stops
   // retrying it and can say something true to the person.
@@ -133,6 +124,13 @@ async function postImpl(req: NextRequest): Promise<Response> {
   if (hasAt && !Number.isFinite(at)) return NextResponse.json({ ok: false, reason: "call_too_old" });
   if (hasAt && Date.now() - at > STALE_CALL_MS) return NextResponse.json({ ok: false, reason: "call_too_old" });
 
+  // A token or table that is not text is a broken body, not a busy restaurant (item 14, as in
+  // place-order): refuse it now instead of letting the database error be retried for minutes.
+  const raw = b as { token?: unknown; table?: unknown };
+  if ((raw.token !== undefined && raw.token !== null && typeof raw.token !== "string")
+    || (raw.table !== undefined && raw.table !== null && typeof raw.table !== "string" && !(typeof raw.table === "number" && Number.isFinite(raw.table)))) {
+    return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
+  }
   const reason = String(b.reason || "").slice(0, 200);
 
   if (b.mode === "session") {
@@ -150,7 +148,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
       : null;
     const rid = isUuid(fromRpc)
       ? (fromRpc as string)
-      : (isUuid(b.restaurantId) ? (b.restaurantId as string) : await ridFromToken(b.token));
+      : (isUuid(b.restaurantId) ? (b.restaurantId as string) : await restaurantOfToken(b.token));
     // A raised hand changes the floor — a duplicate of one already raised does not.
     if (rid && callLanded(data)) invalidateFloor(rid);
     else if (!rid) console.warn("[guest/call-waiter] session replay had no resolvable restaurant — floor snapshot not dropped");

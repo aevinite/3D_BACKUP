@@ -288,8 +288,10 @@ P("P57401", "…through the one event that popup listens on", /"lfh:open-order-c
 P("P57402", "…carrying the dish, its options and its allergens", /options: dish\.options,\s*\n\s*allergens: dish\.allergens,/.test(C));
 P("P57403", "…and the line's own current choices", /preselect: \{ options: it\.options, removed: it\.removed, note: it\.note, qty: it\.qty \}/.test(C));
 P("P57404", "…identified by its option signature, so the right line is replaced", /editSig: it\.sig \|\| "\[\]"/.test(C));
-P("P57405", "…and it does nothing at all if the dish has left the menu", /const dish = menuItems\.find\(\(m\) => m\.id === it\.id\);\s*\n\s*if \(!dish\) return;/.test(C));
-P("P57406", "Edit is offered on EVERY dish still on the menu, not only customizable ones", /const canEdit = \(id: string\) => !!menuItems\.find\(\(m\) => m\.id === id\)/.test(C));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 13: one menu lookup table); the rule still holds
+P("P57405", "…and it does nothing at all if the dish has left the menu", /const dish = menuById\.get\(it\.id\);\s*\n\s*if \(!dish\) return;/.test(C));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 13); the rule still holds
+P("P57406", "Edit is offered on EVERY dish still on the menu, not only customizable ones", /const canEdit = \(id: string\) => menuById\.has\(id\)/.test(C));
 P("P57407", "…and it renders as a button", renders(C, "cart-edit-btn"));
 P("P57408", "…because even a plain dish can take a note or an allergy", /Even a plain dish with no options\/allergens can be customized/.test(C));
 P("P57409", "sold-out lines are computed from the menu, once", /const soldOutIds = new Set\(menuItems\.filter\(\(m\) => \(m\.tags \|\| \[\]\)\.includes\("sold-out"\)\)\.map\(\(m\) => m\.id\)\)/.test(C));
@@ -382,8 +384,10 @@ P("P57604", "…and the all-MRP case says something different and true", /No GST
 P("P57605", "the GST row prints the restaurant's real rate, to two decimals", /GST \(\{Math\.round\(taxRate \* 10000\) \/ 100\}%\)/.test(C));
 P("P57606", "…which starts at today's behaviour until settings load", /const \[taxRate, setTaxRate\] = useState\(0\.05\)/.test(C));
 P("P57607", "…and the rules do too", /const \[taxRules, setTaxRules\] = useState<TaxRules>\(DEFAULT_TAX_RULES\)/.test(C));
-P("P57608", "the stored total keeps its old floating-point shape to the paisa", /usdOnTopBase \* \(1 \+ taxRate\) \+ \(subtotalUsd - usdOnTopBase\)/.test(C));
-P("P57609", "…and is rounded to two decimals, once", /Math\.round\(\([\s\S]{0,120}\) \* 100\) \/ 100/.test(C));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 1 item 4); the rule still holds
+P("P57608", "the stored total keeps its old floating-point shape to the paisa", /const totalUsd = roundPaise\(subtotalUsd \+ roundPaise\(usdOnTopBase \* taxRate\)\);/.test(C));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 1 item 4: GST rounded to the paisa first, then the total — the bill's order); the rule still holds
+P("P57609", "…and is rounded to two decimals, once", /const totalUsd = roundPaise\(subtotalUsd \+ roundPaise\(usdOnTopBase \* taxRate\)\);/.test(C));
 P("P57610", "the subtotal shown is the sum of the printed lines, not a separate figure", /const subtotal = cart\.reduce\(\(sum, it\) => sum \+ lineDisp\(it\), 0\)/.test(C));
 P("P57611", "the item count counts items, not lines", /const itemCount = cart\.reduce\(\(sum, it\) => sum \+ it\.qty, 0\)/.test(C));
 P("P57612", "order records are stored in USD and converted at render, in one domain", /ORDER RECORDS are stored in USD/.test(C));

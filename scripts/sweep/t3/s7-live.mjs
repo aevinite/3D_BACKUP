@@ -9,6 +9,7 @@
 // and block the read that would confirm it, which is exactly the state a diner on a dead
 // connection is in.
 import { chromium } from "playwright";
+import { sessionsOnForRun } from "./sessionsOn.mjs";   // round 2 item 8: sessions ON only where the gate is driven
 
 const BASE = process.env.T3_BASE || "http://localhost:4103";
 const AA = "/r/aangan-garden-restaurant/menu";           // sessions OFF — the plain basket door
@@ -25,8 +26,11 @@ const settle = (p, ms = 7000) => p.waitForTimeout(ms);
 const txt = async (loc) => { try { return (await loc.innerText()).replace(/\s+/g, " ").trim(); } catch { return ""; } };
 // A dish "+" — the same selector the sweep-6 runners use, and force:true because the cards
 // animate in and are never "stable" (a real tap on a phone does not wait for that).
+// A DOM click on the button itself, scrolled to the middle first (sweep #10 T3 round 2): on a 360px phone
+// the first dish's + sits under the floating waiter bell, and a forced click at that spot opened the
+// BELL's popup instead — P16427-P16429 read that as "no gate". Same fix in s7b-live and s7c-live.
 const addFirstDish = async (p, n = 0) => {
-  await p.locator('button[aria-label^="Add"], .fc-plus').nth(n).click({ force: true }).catch(() => {});
+  await p.locator('button[aria-label^="Add"], .fc-plus').nth(n).evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); }).catch(() => {});
   await p.waitForTimeout(1200);
 };
 
@@ -113,7 +117,9 @@ try {
   }
 
   // ── the table gate, on the sessions-ON restaurant (P16426-P16440) ──────────────────────────────
-  {
+  { // the table gate — needs dining sessions ON (French House is OFF by default): on for this block only
+  const sessionsBack = await sessionsOnForRun();
+  try {
     const ctx = await b.newContext(A35);
     const p = await ctx.newPage();
     const errs = []; p.on("pageerror", (e) => errs.push(String(e)));
@@ -159,6 +165,7 @@ try {
     })());
     P("P16440", "no uncaught error across the whole gate journey", errs.length === 0, errs.slice(0, 2));
     await ctx.close();
+  } finally { await sessionsBack(); }
   }
 
   // ── with no signal (P16441-P16452) ─────────────────────────────────────────────────────────────
@@ -226,7 +233,9 @@ try {
   }
 
   // ── the live table bill with nothing to read (P16453-P16457) ───────────────────────────────────
-  {
+  { // the shared table bill — needs dining sessions ON (French House is OFF by default): on for this block only
+  const sessionsBack = await sessionsOnForRun();
+  try {
     const ctx = await b.newContext(A35);
     await ctx.route("**/rest/v1/rpc/lfh_session_state*", (r) => r.abort());
     const p = await ctx.newPage();
@@ -244,6 +253,7 @@ try {
     P("P16456", "…that nothing is lost", /nothing is lost/i.test(t));
     P("P16457", "…and offers a way to ask again", (await p.locator(".stb .sg-link").count()) === 1);
     await ctx.close();
+  } finally { await sessionsBack(); }
   }
 
   // ── desktop (P16458-P16460) ────────────────────────────────────────────────────────────────────

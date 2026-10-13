@@ -145,10 +145,13 @@ try {
     await p.waitForTimeout(1200);
     P("P57507", "two live orders make two cards", (await p.locator(".live-order").count()) === 2);
     P("P57508", "…and the count says 2", (await txt(p.locator(".live-count"))) === "2");
-    P("P57509", "…newest first", (await p.locator(".live-order").first().getAttribute("class") || "").includes("status-served"));
-    P("P57510", "…the served one says so", /Served/i.test(await txt(p.locator(".live-order").first())));
-    P("P57511", "…and offers no table move", (await p.locator(".live-order").first().locator(".live-order-fixlink").count()) === 0);
-    P("P57512", "…while the one still cooking does", (await p.locator(".live-order").nth(1).locator(".live-order-fixlink").count()) === 1);
+    // re-pointed (sweep #10 T3 round 2): since the owner's 2026-09-20 rule an UNFINISHED order sits above a
+    // finished one, whichever is newer — so card 1 is the cooking one now. Each row picks its card by status.
+    const served = p.locator(".live-order.status-served"), cooking = p.locator(".live-order.status-preparing");
+    P("P57509", "…unfinished above finished (owner, 2026-09-20 — was 'newest first')", (await p.locator(".live-order").first().getAttribute("class") || "").includes("status-preparing"));
+    P("P57510", "…the served one says so", /Served/i.test(await txt(served.first())));
+    P("P57511", "…and offers no table move", (await served.count()) === 1 && (await served.first().locator(".live-order-fixlink").count()) === 0);
+    P("P57512", "…while the one still cooking does", (await cooking.first().locator(".live-order-fixlink").count()) === 1);
     P("P57513", "the tab caption counts both", /Live status \(2\)/.test(await txt(p.locator("#cart-panel .cart-tabs button").nth(1))));
     P("P57514", "the empty state is NOT drawn when there are orders", !/Nothing cooking/i.test(await txt(p.locator(".order-history"))));
     await p.screenshot({ path: `${SHOTS}/s8b-a35-live-tab-two.png` });

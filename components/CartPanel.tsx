@@ -1,7 +1,7 @@
 // Runs in the browser so it can read/save the cart and react to taps.
 "use client";
 
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, taxRulesOf, DEFAULT_TAX_RULES, getOrderDishes, type MenuItem, type TaxRules, type OrderDish } from "@/lib/menu";
 // The ONE rule that turns a dish's price into money under the three behaviours (mig 270):
@@ -29,6 +29,7 @@ import {
   writeActiveOrders,
   liveActiveOrders,
   isFinalStatus,
+  RT_BACKUP_MS,
 } from "@/lib/orderStatus";
 
 // A single chosen option on a dish (e.g. group "Size", label "Large", +price).
@@ -365,6 +366,10 @@ export default function CartPanel() {
     // listeners, so re-running never double-subscribes.
     // features.allergies too: the switches also resolve a beat after the defaults, and the
     // allergy restore above must act on the REAL value, not the default "on".
+    // pruneCartToMenu is left out ON PURPOSE: it reads storage, never state, so a newer copy of it
+    // would do exactly what this one does — and listing it would re-run this whole setup (every
+    // listener, two settings reads) on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurantId, features.allergies]);
 
   // Persist the order-wide allergy avoidances. Skip the very first run: on mount
@@ -433,36 +438,72 @@ export default function CartPanel() {
   const lineDisp = (it: CartItem) =>
     unitDisplay(parseFloat(it.price), (it.options || []).map((o) => o.price || 0), currency || undefined) * it.qty;
   // Red dot on the Live-status tab: a live order whose floating strip was hidden.
-  // Ask for each live order's lines when the sheet is open, and again whenever the orders change
-  // (a realtime breadcrumb or the tracker's own poll moves an order's status). One small read per
-  // live order — the same cadence the card itself already refreshes at, and nothing at all while
-  // the sheet is shut, which is the rule every other read in this app follows.
+  // Ask for each live order's lines — ONLY when someone can see them, and only when something may
+  // have changed.
+  //
+  // ── IT WAS A FIVE-SECOND DATABASE POLL (sweep #10 T3 round 2, item 11) ────────────────────────
+  // This effect ran on `[open, liveOrders]`, and the 5-second re-check above hands `liveOrders` a
+  // NEW array every five seconds whether anything changed or not. So every five seconds, for every
+  // live order, the phone called `get_order_dishes` — measured on the built app: 7 reads in 30
+  // seconds for ONE order with the Live status tab open. It also read while the CURRENT bill tab
+  // was showing, and for a seated table, where these cards are not drawn at all (the shared table
+  // bill above them is). The rule everywhere else in this app is a realtime nudge plus a 60-second
+  // backstop, never a fixed fast beat (docs/SAAS-EFFICIENCY-PLAYBOOK.md).
+  //
+  // Now a card's dishes are read when the Live-status cards are actually on screen, and then again
+  // only when there is a reason: the order's own status moved, a realtime breadcrumb arrived for the
+  // table (`lfh:rt-tick`, the same nudge OrderTracker listens to), or the one-minute backstop passed.
+  // `dishAsked` remembers what each order was last asked under, so a re-render alone asks nothing.
+  const cardsShown = open && showHistory && !sessionsEnabled;
+  const dishAsked = useRef<Record<string, string>>({});
+  const [dishBeat, setDishBeat] = useState(0);
   useEffect(() => {
-    if (!open) return;
-    let alive = true;
-    const ids = liveOrders.filter((o) => !isFinalStatus(o.status) || !orderDishes[o.id]).map((o) => o.id);
-    if (!ids.length) return;
+    if (!cardsShown) { dishAsked.current = {}; return; }   // hidden → ask afresh the next time they show
+    const bump = () => setDishBeat((n) => n + 1);
+    window.addEventListener("lfh:rt-tick", bump);
+    const iv = setInterval(bump, RT_BACKUP_MS);
+    return () => { window.removeEventListener("lfh:rt-tick", bump); clearInterval(iv); };
+  }, [cardsShown]);
+  useEffect(() => {
+    if (!cardsShown) return;
+    const due = liveOrders.filter((o) => {
+      if (isFinalStatus(o.status) && orderDishes[o.id]) return false;   // finished and already drawn
+      return dishAsked.current[o.id] !== `${o.status}|${dishBeat}`;
+    });
+    if (!due.length) return;
+    for (const o of due) dishAsked.current[o.id] = `${o.status}|${dishBeat}`;
     (async () => {
-      for (const id of ids) {
+      for (const { id } of due) {
         try {
+          // No "still wanted?" check: the answer is about THIS order and stays true however the list
+          // re-rendered meanwhile, and the panel never unmounts (it draws nothing while shut). Dropping
+          // it would leave the card un-asked until the next beat, because it is already marked asked.
           const rows = await getOrderDishes(id);
-          if (!alive) return;
           // Only ever replace with something real: an empty answer for an order that already has
           // lines would blank the card, and "I could not ask" is not "there are no dishes".
           if (rows.length) setOrderDishes((m) => ({ ...m, [id]: rows }));
-        } catch { /* busy database — keep whatever the card already has */ }
+        } catch { /* busy database — keep the card; the next nudge or the backstop asks again (never sooner) */ }
       }
     })();
-    return () => { alive = false; };
+    // `orderDishes` is read only to skip a finished order already drawn; listing it would re-run this
+    // effect on every answer it writes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, liveOrders]);
+  }, [cardsShown, liveOrders, dishBeat]);
 
   const hiddenLive = liveOrders.some((o) => o.stripHidden && !isFinalStatus(o.status));
   // ── the three price behaviours (mig 270) ───────────────────────────────────
   // What a dish's own tax_mode is. A line whose dish hasn't loaded yet (the menu is fetched
   // lazily on first open) reads as "default" = follow the restaurant, which is exactly the
   // pre-269 behaviour, and settles the moment the menu lands.
-  const dishMode = (id: string) => menuItems.find((m) => m.id === id)?.taxMode;
+  // ONE lookup table for the menu, built when the menu changes (sweep #10 T3 round 2, item 13). Five
+  // helpers below each walked the whole `menuItems` array per bill line, and two of them run twice per
+  // line (the display money and the stored money), on every redraw — and the open bill redraws every
+  // five seconds. A Map turns each of those walks into one look-up; nothing it answers changes.
+  const menuById = useMemo(() => new Map(menuItems.map((m) => [m.id, m])), [menuItems]);
+  // First dish wins on a shared title, exactly as `.find()` did — a Map built straight from the array
+  // would keep the LAST one and could hand a live card a different dish's photo.
+  const menuByTitle = useMemo(() => { const t = new Map<string, MenuItem>(); for (const m of menuItems) if (!t.has(m.title)) t.set(m.title, m); return t; }, [menuItems]);
+  const dishMode = (id: string) => menuById.get(id)?.taxMode;
   // The BEHAVIOUR the line actually gets, decided ONLY by lib/tax.ts (mirrors SQL
   // lfh_resolve_tax_mode): 'excl' = GST on top, 'incl' = GST already in the price,
   // 'exempt' = never taxed. Never branch on the dish's raw setting instead of this.
@@ -526,7 +567,7 @@ export default function CartPanel() {
   // allergen lookups, so no request is made for it — same rule as everything else on this sheet.
   // Empty string when the dish has no picture or the menu has not arrived yet; the line then
   // renders a blank cell of the same size, so the grid never shifts when the photo appears.
-  const dishImage = (id: string) => menuItems.find((m) => m.id === id)?.image || "";
+  const dishImage = (id: string) => menuById.get(id)?.image || "";
   // itemAllergens(): the allergens a given dish contains.
   const itemAllergens = (id: string) => allergenMap[id] || [];
   // conflicts(): of a dish's allergens, which ones the guest said they avoid.
@@ -541,7 +582,7 @@ export default function CartPanel() {
   // We broadcast "lfh:open-order-confirm" with the dish + its current choices so
   // the OrderConfirmModal opens already filled in.
   const editLine = (it: CartItem) => {
-    const dish = menuItems.find((m) => m.id === it.id);
+    const dish = menuById.get(it.id);
     if (!dish) return;
     window.dispatchEvent(new CustomEvent("lfh:open-order-confirm", {
       detail: {
@@ -557,7 +598,7 @@ export default function CartPanel() {
   // 2026-07-05). Even a plain dish with no options/allergens can be customized —
   // the popup always lets the guest flag a per-dish allergy and add a kitchen
   // note. We only hide Edit if the dish is gone from the menu (nothing to open).
-  const canEdit = (id: string) => !!menuItems.find((m) => m.id === id);
+  const canEdit = (id: string) => menuById.has(id);
 
   // Which cart lines have gone sold-out (best-effort, from the menu we loaded on
   // open). Used to flag lines in the bill and to block placing with a CLEAR reason
@@ -1012,7 +1053,7 @@ export default function CartPanel() {
                       {orderDishes[o.id]?.length ? (
                         <div className="live-dishes">
                           {orderDishes[o.id].map((d, i) => {
-                            const m = menuItems.find((x) => x.title === d.title);
+                            const m = menuByTitle.get(d.title);
                             const bits: string[] = [];
                             if (d.options?.length) bits.push(d.options.map((x) => x.label).filter(Boolean).join(", "));
                             if (d.removed.length) bits.push(`No ${d.removed.map((r) => allergenLabel(r).toLowerCase()).join(", ")}`);
@@ -1122,7 +1163,6 @@ export default function CartPanel() {
           ) : (
             // One block per cart line.
             cart.map((item, idx) => {
-              const c = conflicts(item.id); // allergens in THIS dish the guest avoids
               return (
                 <div key={`${item.id}-${item.sig || ""}-${idx}`} className="cart-item">
                   {/* THE DISH'S OWN PHOTO (owner, 2026-09-20: "IF POSSIBLE ADD IMAGE LIKE D3").

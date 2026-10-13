@@ -97,8 +97,9 @@ P("P16113", "…and matched on table AND token AND mode, so two tables never mer
   /isCall\(x\) && x\.mode === p\.mode && String\(x\.table \|\| ""\) === String\(p\.table \|\| ""\) && String\(x\.token \|\| ""\) === String\(p\.token \|\| ""\)/.test(F.outbox));
 // EXPECTATION MOVED, RULE BROADENED (item 14, 2026-08-30): the same branch now also clears a
 // delivered LEAVE. "A delivered thing-with-no-order-id is removed" is what the row was always about.
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (sweep #9 item 4 checks a rate_limited answer first); the rule still holds
 P("P16114", "a delivered call is removed from the queue, not left to send twice",
-  /if \(res\.ok && j\?\.ok && \(isCall\(item\) \|\| isLeave\(item\)\)\) \{ progressed = true; await removeItem\(item\.id\)/.test(F.outbox));
+  /if \(res\.ok && j\?\.ok && \(isCall\(item\) \|\| isLeave\(item\)\)\) \{[\s\S]{0,260}progressed = true; await removeItem\(item\.id\)/.test(F.outbox));
 P("P16115", "the saved-work list can tell a call from an order",
   /const isCall = \(o: GuestOrder\): boolean => o\.kind === "call"/.test(F.chip));
 P("P16116", "…and names what was asked for",
@@ -121,8 +122,9 @@ P("P16122", "…and still says 'order' when that is all there is",
   /return n === 1 \? "1 order" : `\$\{n\} orders`;/.test(F.chip));
 P("P16123", "the plural of 'request for staff' is not 'request for staffs'",
   /`\$\{n\} requests for staff`/.test(F.chip));
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (sweep #10 T3 item 2: the bill's formatter); the rule still holds
 P("P16124", "a call has no price, so no money is invented on its row",
-  /o\.track\?\.total \? ` · \$\{formatPrice/.test(F.chip));
+  /o\.track\?\.total \? ` · \$\{formatMoney/.test(F.chip));
 P("P16125", "'Order the rest' cannot appear on a call (it has no lines and nothing blocked)",
   /\{o\.blocked && \(o\.lines \|\| \[\]\)\.length > 1 && \(/.test(F.chip));
 P("P16126", "…and the queue refuses one anyway if it is asked",
@@ -475,8 +477,9 @@ P("P16272", "the mini-cart shows a SUBTOTAL and never claims to be the amount pa
   /const dispSubtotal = lines\.reduce/.test(F.mini) && !/tax/i.test(bare(F.mini)));
 P("P16273", "…summed line by line in the display currency, so it matches the bill to the rupee",
   /unitDisplay\(l\.usd, l\.addons, currency \|\| undefined\) \* l\.qty/.test(F.mini));
+  // re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 18: the bill's 1–99 clamp); the rule still holds
 P("P16274", "…and its item count is the number of ITEMS, not the number of lines",
-  /setCount\(list\.reduce\(\(s, it\) => s \+ \(it\.qty \|\| 1\), 0\)\)/.test(F.mini));
+  /setCount\(list\.reduce\(\(s, it\) => s \+ qtyOf\(it\?\.qty\), 0\)\)/.test(F.mini));
 P("P16275", "the bill's header count agrees with that rule",
   /const itemCount = cart\.reduce\(\(sum, it\) => sum \+ it\.qty, 0\);/.test(F.cart));
 P("P16276", "a saved quantity is clamped to a whole number between 1 and 99",

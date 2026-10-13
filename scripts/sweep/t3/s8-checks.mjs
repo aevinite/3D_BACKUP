@@ -342,7 +342,8 @@ P("P56936", "…which is the LAST gate before the wire, not only where a line is
 P("P56937", "the free-text allergy travels only while ITS switch is on", /const other = features\.allergy_other \? otherAllergy\.trim\(\) : ""/.test(C));
 P("P56938", "money is computed in ONE domain for the screen and another for the record", /const usdLines = cart\.map/.test(C) && /const dispLines = cart\.map/.test(C));
 P("P56939", "…both through splitBill, never a second formula", count(C, /splitBill\(/g) >= 3);
-P("P56940", "…and the stored total keeps its old floating-point shape to the paisa", /usdOnTopBase \* \(1 \+ taxRate\) \+ \(subtotalUsd - usdOnTopBase\)/.test(C));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 1 item 4: the stored total is the bill's own (splitBill) rounding); the rule still holds
+P("P56940", "…and the stored total keeps its old floating-point shape to the paisa", /const totalUsd = roundPaise\(subtotalUsd \+ roundPaise\(usdOnTopBase \* taxRate\)\);/.test(C));
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // BLOCK A4 — components/OrderTracker.tsx, the floating strip (P56941–P56980)
@@ -422,10 +423,13 @@ P("P57001", "a table the restaurant does not have is refused", /const offPlan = 
 P("P57002", "…as a CODE, so the client owns the wording", /reason: "off_plan_table"/.test(PL));
 P("P57003", "the QR path checks the table has not moved on since the order was saved", /await replayClash\(req, publicRid, "order", undefined, undefined, \{ table: b\.table \}\)/.test(PL));
 P("P57004", "…and the session path deliberately does not (the RPC answers that itself)", /session path above doesn't need it/.test(PL));
-P("P57005", "a session replay's restaurant comes from the reply, the body, then the token", /ridFromResult\(data\)\s*\n?\s*\|\| \(isUuid\(b\.restaurantId\)[\s\S]{0,120}\|\| await ridFromToken\(b\.token\)/.test(PL));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 7: one shared helper); the rule still holds
+P("P57005", "a session replay's restaurant comes from the reply, the body, then the token", /ridFromResult\(data\)\s*\n?\s*\|\| \(isUuid\(b\.restaurantId\)[\s\S]{0,120}\|\| await restaurantOfToken\(b\.token\)/.test(PL));
 P("P57006", "…and a genuinely unresolvable one is logged, not left silently stale", /console\.warn\("\[guest\/place-order\] session replay had no resolvable restaurant/.test(PL));
-P("P57007", "the token lookup reads two columns and caps both reads", count(PL, /\.limit\(1\)\.maybeSingle\(\)/g) >= 2);
-P("P57008", "…and its failure can never cost the diner their order", /catch \{ return ""; \}/.test(PL));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 7); the rule still holds
+P("P57007", "the token lookup reads two columns and caps both reads", count(read("lib/guestTokenRestaurant.ts"), /\.limit\(1\)\.maybeSingle\(\)/g) >= 2);
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 7); the rule still holds
+P("P57008", "…and its failure can never cost the diner their order", /catch \{ return ""; \}/.test(read("lib/guestTokenRestaurant.ts")));
 P("P57009", "an empty RPC answer is reported as such, not as success", /return NextResponse\.json\(data \?\? \{ ok: false, reason: "empty" \}\)/.test(PL));
 P("P57010", "the route uses the service-role client, which is server-only", /import \{ supabaseAdmin as sb \}/.test(PL));
 
@@ -448,7 +452,8 @@ P("P57026", "…nor the session path's own duplicate answer", /already_active/.t
 // s8 self-correction: my regex was upper-case and the comment is not. Asserted on the CODE: the
 // landing rule compares CODES and never touches a message string.
 P("P57027", "…and it branches on codes, never on the server's prose", /\.includes\(String\(d\.reason \?\? ""\)\)/.test(CW) && !/\.message/.test(between(CW, "function callLanded", "\n}")));
-P("P57028", "the session path falls back to the token for its restaurant", /await ridFromToken\(b\.token\)/.test(CW));
+// re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 7); the rule still holds
+P("P57028", "the session path falls back to the token for its restaurant", /await restaurantOfToken\(b\.token\)/.test(CW));
 P("P57029", "…and says so in the log when even that cannot answer", /console\.warn\("\[guest\/call-waiter\] session replay had no resolvable restaurant/.test(CW));
 P("P57030", "the stale window matches the phone's own constant exactly", /const STALE_CALL_MS = 10 \* 60 \* 1000;/.test(CW));
 
