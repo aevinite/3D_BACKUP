@@ -103,6 +103,21 @@ for (const [name, body] of [["manager ordersForTable", mgr], ["waiter ordersOf",
     : fail(`${name} doesn't exclude archived rows — closed-out food would show on the floor`);
 }
 
+// A2 (sweep #10 T4, item 9, 2026-10-13): opening a table reads and returns NAMED columns. The waiter's
+// reply carried the whole session row ("*"), so every column added later rode along on every tap.
+{
+  const os = src("lib/openSession.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const cols = (os.match(/OPENED_SESSION_COLS\s*=\s*\n?\s*"([^"]+)"/) || [])[1] || "";
+  const reads = [...os.matchAll(/\.select\(([^)]*)\)/g)].map((m) => m[1].trim());
+  reads.length >= 2 && reads.every((x) => x === "OPENED_SESSION_COLS")
+    ? pass(`opening a table reads and returns only named columns (${reads.length} selects, all OPENED_SESSION_COLS)`)
+    : fail(`lib/openSession.ts has a select that is not the named list: ${JSON.stringify(reads)} — never "*" or a bare .select()`);
+  const need = ["id", "table_number", "status", "opened_at"];
+  cols && !cols.includes("*") && need.every((c) => cols.split(/\s*,\s*/).includes(c))
+    ? pass(`the named list keeps what a seated table is known by (${need.join(", ")})`)
+    : fail(`OPENED_SESSION_COLS is missing one of ${need.join(", ")} or contains "*" — got "${cols}"`);
+}
+
 // ── DB helpers ───────────────────────────────────────────────────────────────
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const must = (r) => { if (r.error) throw new Error(r.error.message); return r.data; };
