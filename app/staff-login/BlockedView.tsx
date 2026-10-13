@@ -36,7 +36,11 @@ export default function BlockedView() {
       if (!d.blocked) { window.location.assign("/staff-login"); return; }
       setNote("Still blocked — the admin hasn't lifted it yet.");
     } catch {
-      setNote("Couldn't reach the server — check your connection.");
+      // The connection is named ONLY when this device says it is offline — a busy server answering
+      // an error page lands here too, and must not be blamed on the person (owner, 2026-10-13).
+      setNote(typeof navigator !== "undefined" && navigator.onLine === false
+        ? "Couldn't reach the server — check your connection."
+        : "Couldn't reach the server just now — please try again in a moment.");
     } finally { setBusy(""); }
   };
 
@@ -62,7 +66,11 @@ export default function BlockedView() {
         setNote("Couldn't send your request — please try again.");
       }
     } catch {
-      setNote("Couldn't reach the server — check your connection.");
+      // The connection is named ONLY when this device says it is offline — a busy server answering
+      // an error page lands here too, and must not be blamed on the person (owner, 2026-10-13).
+      setNote(typeof navigator !== "undefined" && navigator.onLine === false
+        ? "Couldn't reach the server — check your connection."
+        : "Couldn't reach the server just now — please try again in a moment.");
     } finally { setBusy(""); }
   };
 

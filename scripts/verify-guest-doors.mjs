@@ -972,8 +972,13 @@ flush();
     /r\.reason === "not_blocked"\s*\n?\s*\? "We couldn't match that number to this block\./.test(ban));
   check("item 4 — a timeout is worded as the restaurant's system, never as the guest's number",
     /isSessionTimeout\(r\)\s*\n?\s*\? "The restaurant's system isn't answering right now/.test(ban));
+  // Re-aimed 2026-10-13 (owner: "make sure this never happens"): the fallback used to say "please check
+  // your connection" to EVERY unrecognised failure. The connection is now named only when the phone is
+  // really offline (isPhoneOffline); anything else is plain "not sent", blaming nobody.
+  check("item 4 — a phone that is really offline is told so, and only then",
+    /isPhoneOffline\(r\)\s*\n?\s*\? "Your phone seems to be offline — please check your connection and try again\."/.test(ban));
   check("item 4 — anything else is worded as 'not sent', so they try again rather than a new number",
-    /: "We couldn't send that just now — please check your connection and try again\."/.test(ban));
+    /: "We couldn't send that just now — please try again in a moment\."/.test(ban));
   check("item 4 — the line shows whatever was decided, not one fixed sentence", /<p className="ban-fail" role="status">\{failed\}<\/p>/.test(ban));
   check("item 4 — a success still says sent ONLY when the server says a row changed", /if \(r\.ok\) \{ setRequested\(true\); return; \}/.test(ban));
   // the function's real answers, read from the newest migration that defines it
@@ -982,6 +987,36 @@ flush();
   const body = def ? read(def).slice(read(def).search(/FUNCTION[^(]*lfh_request_unban/)) : "";
   check(`item 4 — the reason the wall branches on is one the function really sends (${def.split("/").pop() || "no migration found"})`,
     /'reason', 'not_blocked'/.test(body.slice(0, 3000)));
+}
+// ── 12. NOBODY IS TOLD TO CHECK THEIR INTERNET UNLESS THEIR DEVICE IS REALLY OFFLINE ────────────────
+// (sweep #10 T4 item 1; owner 2026-10-13: *"make sure this never happens it's too bad"*.) A busy
+// restaurant was blamed on diners' wifi. This scans EVERY screen in the product — guest pages, staff
+// panels, login doors — for a sentence that sends a person to their own internet / connection / wifi,
+// and each one must sit behind a test that PROVES the device is offline. A new screen that forgets is
+// caught here the day it is written.
+{
+  say("\n── 12. nobody is told to check their internet unless their device really is offline (sweep #10 T4) ──");
+  const files = execSync("git ls-files 'app/**/*.tsx' 'app/**/*.ts' 'components/*.tsx' 'lib/*.ts' 'lib/*.tsx' 'public/panels/**/*.js' 'public/*.html'", { cwd: ROOT, encoding: "utf8" }).split("\n").filter(Boolean);
+  const BLAME = /check (your|the) (internet|connection|wi-?fi|network|signal)|check your internet/gi;
+  // The proofs a sentence may sit behind: lib/session's offline test, the sheet's verdict, the browser's
+  // own offline flag, or a request that failed at the network (the login doors' `kind === "network"`).
+  const PROOF = /isPhoneOffline\(|fault === "phone"|navigator\.onLine === false|!navigator\.onLine|kind === "network"|kind === "offline"|level === "offline"|isOffline\(|offline \?/;
+  const unproven = [];
+  let seen = 0;
+  for (const f of files) {
+    const code = codeOnly(read(f)); if (!code) continue;
+    for (const m of code.matchAll(BLAME)) { seen++; const before = code.slice(Math.max(0, m.index - 260), m.index); if (!PROOF.test(before)) unproven.push(`${f}: "${code.slice(m.index - 30, m.index + 30).replace(/\s+/g, " ")}"`); }
+  }
+  check(`item 1 — every sentence telling a person to check their internet/connection sits behind proof the device is offline (${seen} found, ${unproven.length} unproven${unproven.length ? ": " + unproven.slice(0, 3).join(" | ") : ""})`, seen > 0 && unproven.length === 0);
+  // …and the proof itself: lib/session.ts's offline test, run against what real browsers say.
+  const sess = read("lib/session.ts");
+  const reSrc = (sess.match(/const NETWORK_FAILURE = \/(.+)\/i;/) || [])[1];
+  let re = null; try { re = reSrc ? new RegExp(reSrc, "i") : null; } catch { re = null; }
+  const offlineSays = ["TypeError: Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed", "The network connection was lost.", "The Internet connection appears to be offline."];
+  const notOffline = ["timed_out", "empty", "permission denied for function lfh_join_session", "invalid input syntax for type uuid", "no_open_session"];
+  check("item 1 — the offline test recognises what Chrome, Firefox and Safari say when a phone has no signal", !!re && offlineSays.every((t) => re.test(t)));
+  check("item 1 — …and never mistakes a busy restaurant, an empty answer or a refusal for an offline phone", !!re && notOffline.every((t) => !re.test(t)));
+  check("item 1 — a busy restaurant (timed_out) can never count as an offline phone, whatever the browser says", /if \(r && r\.reason === "timed_out"\) return false;/.test(codeOnly(sess)));
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

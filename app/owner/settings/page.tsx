@@ -149,7 +149,11 @@ export default function OwnerSettings() {
       setTestSays(r.ok ? (j?.note || "Sent to the printer.") : (j?.error || "Couldn't send that just now — try again."));
       if (r.ok) { setSentKind(kind); setTimeout(() => setSentKind((v) => (v === kind ? null : v)), 2200); }
     } catch {
-      setTestSays("Couldn't reach us just now — check the connection and try again.");
+      // The connection is named ONLY when this device says it is offline (owner, 2026-10-13) — a busy
+      // server answering an error page lands in this catch too.
+      setTestSays(typeof navigator !== "undefined" && navigator.onLine === false
+        ? "Couldn't reach us just now — check the connection and try again."
+        : "Couldn't reach us just now — please try again in a moment.");
     } finally { setTesting(null); }
   }, [printing]);
   // IT KEPT ASKING WITH THE TAB HIDDEN, AND WITH NOTHING ON SCREEN TO ASK FOR (T13 sweep,

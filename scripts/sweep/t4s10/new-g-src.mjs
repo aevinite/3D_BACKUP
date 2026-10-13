@@ -80,7 +80,7 @@ for (const k of ["gate", "card", "owner", "ban", "tbill", "blocked", "media", "m
   check(FILES[k], "no refusal hands a person our schema (relation / column / constraint / violates / PGRST in a string)", HOW, () => !/["'`][^"'`\n]*(relation "|column "|violates|constraint "|PGRST)[^"'`\n]*["'`]/.test(CODE[k]));
   check(FILES[k], "nothing decides by matching a message's prose (.includes / .test on a reason or error text)", HOW, () => !/(reason|message|error)\??\.(includes|startsWith)\(/.test(CODE[k]));
 }
-check(FILES.gate, "every sentence telling a diner to check their internet sits behind a 'was it us?' test (item 1)", HOW, () => [...CODE.gate.matchAll(/check your internet/gi)].every((m) => /isSessionTimeout\(|if \(ours\)/.test(CODE.gate.slice(Math.max(0, m.index - 420), m.index))));
+check(FILES.gate, "every sentence telling a diner to check their internet sits behind a 'was it us?' test (item 1)", HOW, () => [...CODE.gate.matchAll(/check your internet/gi)].every((m) => /fault === "phone"/.test(CODE.gate.slice(Math.max(0, m.index - 420), m.index))));
 check(FILES.gate, "every result the sheet reports carries WHICH action it was (12 fireDone calls)", HOW, () => { const n = count(CODE.gate, /fireDone\(\{/g); const a = count(CODE.gate, /fireDone\(\{[^}]*action/g); return { ok: n === a && n >= 12, note: `${a}/${n}` }; });
 // ── access and gates on the four routes
 check(FILES.media, "issue-media AWAITS the admin check (an un-awaited promise is always truthy)", HOW, () => /const isAdmin = await tokenIsValid\(/.test(CODE.media) && /if \(!staff && !isAdmin\) return bad\(/.test(CODE.media));

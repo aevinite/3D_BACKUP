@@ -155,6 +155,24 @@ const SESSION_TIMEOUT_MS = 15000;
 // the caller shows a very different screen for each.
 export const isSessionTimeout = (r: RpcResult): boolean => r.reason === "timed_out";
 
+// ── THE ONLY TIME A DINER MAY BE TOLD TO CHECK THEIR INTERNET (owner, 2026-10-13) ───────────────────
+// *"make sure this never happens it's too bad"* — about a busy restaurant being blamed on the diner's
+// wifi. The first fix split "busy" from everything else; but "everything else" still said "check your
+// internet", so an EMPTY answer, a refused request or anything unrecognised blamed the phone too.
+// The rule is now the other way round: the phone is only named when there is positive evidence the
+// PHONE is the problem — the browser itself says it is offline, or the request died at the network
+// before any server answered (each browser words that differently: Chrome "Failed to fetch", Firefox
+// "NetworkError…", Safari "Load failed" / "The network connection was lost"). Anything else is worded
+// without blaming anyone. A busy restaurant (`timed_out`) is never this, by construction.
+const NETWORK_FAILURE = /failed to fetch|networkerror|load failed|network connection was lost|internet connection appears to be offline|network request failed/i;
+/** True only when THIS PHONE is offline or its request never reached a server. */
+export const isNetworkFailureText = (text: unknown): boolean => NETWORK_FAILURE.test(String(text ?? ""));
+export const isPhoneOffline = (r?: { reason?: string } | null): boolean => {
+  if (r && r.reason === "timed_out") return false; // the restaurant's side, never the phone's
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  return isNetworkFailureText(r?.reason);
+};
+
 async function rpc(fn: string, args: Record<string, unknown>): Promise<RpcResult> {
   // AbortSignal.timeout is recent; on an older phone reading it throws, so it is feature-guarded
   // exactly like the twins in lib/menu.ts and public/panels/outbox.js.
