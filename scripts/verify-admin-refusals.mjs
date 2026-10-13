@@ -521,6 +521,10 @@ const NOT_YET = new Map([
   const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []);
   const copies = walk(join(ROOT, "app")).filter((a) => /abcdefghijkmnpqrstuvwxyz23456789|function genPassword/.test(readFileSync(a, "utf8"))).map((a) => a.slice(ROOT.length + 1));
   check("every screen that mints a password uses lib/readablePassword — no route keeps its own copy", copies.length === 0, copies.join(", "));
+  // …and the one SCRIPT that mints passwords imports it too (item 32 — the seventh copy lived there).
+  const bf = raw("scripts/backfill-readable-passwords.mjs") || "";
+  check("…and so does the backfill script — it imports lib/readablePassword and keeps no alphabet of its own",
+    /lib\/readablePassword\.ts/.test(bf) && !/abcdefghijkmnpqrstuvwxyz23456789|function genPassword/.test(bf));
 }
 
 // ── 21 · THE ACCESS LOG LINE SAYS WHAT WAS SAVED, NOT WHAT WAS ASKED (sweep #10 T29 r2, item 17) ──

@@ -88,7 +88,7 @@ check now uses an id that matches no restaurant, so a returning fault shows as a
   (36ca497d); the check still looks for its sentence. Owner of `app/api/editor` should retire it.
 - `verify:t25-doors` P79172 / P79250 — two checks on the manager panel route are red on this base.
 - ~~`app/api/editor` `orders/:id` DELETE ignores softDeleteOrders' count~~ — fixed as item 18.
-- **About 30 `.limit()` reads above 1,000 rows** in admin routes 1–26 (another terminal's territory) — same
-  silent cap as item 14. **The same `String(body.<id> || "")` reading** (item 29) sits in act-as, billing, bills,
+- ~~About 30 `.limit()` reads above 1,000 rows in admin routes 1–26~~ — fixed the same day by T28 (its item 17).
+- **The same `String(body.<id> || "")` reading** (item 29) sits in act-as, billing, bills,
   fix-request, oplog/cleanup, owners, printing and rate-limits — 21 places, also in routes 1–26.
-- `scripts/backfill-*` still carries its own copy of the password maker (a one-off script, left as is).
+- ~~`scripts/backfill-readable-passwords.mjs` kept its own copy of the password maker~~ — item 32 (2026-10-13): it imports lib/readablePassword now; guard verify-admin-refusals §20.
