@@ -56,8 +56,12 @@ const view = (role, dev, skin) => memo(async () => {
 });
 const COMBOS = [];
 for (const role of ["manager", "kitchen", "tablet"]) for (const dev of ["desk", "a35", "ipad"]) for (const skin of ["light", "dark"]) COMBOS.push([role, dev, skin]);
+const VIEWS = new Map();
+const viewOf = (role, dev, skin) => { const k = `${role}|${dev}|${skin}`; if (!VIEWS.has(k)) VIEWS.set(k, view(role, dev, skin)); return VIEWS.get(k); };
+let warmed = null;
+const warm = () => (warmed = warmed || (async () => { for (let i = 0; i < COMBOS.length; i += 3) await Promise.all(COMBOS.slice(i, i + 3).map((c) => viewOf(...c)().catch(() => null))); })());
 for (const [role, dev, skin] of COMBOS) {
-  const V = view(role, dev, skin), label = `${role} · ${dev === "a35" ? "Samsung A35 360px" : dev === "ipad" ? "iPad 1194px" : "desktop 1280px"} · ${skin}`;
+  const V0 = viewOf(role, dev, skin), V = async () => { await warm(); return V0(); }, label = `${role} · ${dev === "a35" ? "Samsung A35 360px" : dev === "ipad" ? "iPad 1194px" : "desktop 1280px"} · ${skin}`;
   N("theme.js", `${label}: the panel opens in the skin the person chose`, async () => ok((await V()).theme === skin, (await V()).theme));
   N("connbadge.js", `${label}: the connection pill is on screen, inside the top bar`, async () => { const p = (await V()).pill; return ok(p.on && p.inBar, JSON.stringify(p)); });
   N("errlog.js", `${label}: nothing on the screen prints code (undefined / NaN / [object Object])`, async () => ok(!(await V()).junk));
@@ -65,11 +69,11 @@ for (const [role, dev, skin] of COMBOS) {
   if (dev !== "desk") N("offline.js", `${label}: the page does not scroll sideways`, async () => ok(!(await V()).hscroll));
 }
 // what each panel is meant to have, on a phone (the rules the owner set)
-N("guestbell.js", "the kitchen never shows the guest bell (A35, light)", async () => ok((await view("kitchen", "a35", "light")()).bell === false));
-N("maint.js", "the kitchen never shows a profile button (A35, light)", async () => ok((await view("kitchen", "a35", "light")()).settings === false));
-N("maint.js", "the manager panel shows its profile button (desktop, light)", async () => ok((await view("manager", "desk", "light")()).settings === true));
-N("errlog.js", "no panel raised a page error on any device or skin", async () => { const all = []; for (const c of COMBOS) all.push(...(await view(...c)()).errors); return ok(!all.length, [...new Set(all)].join(" | ")); });
-N("connbadge.js", "the pill's words are readable ink in the dark skin (not the light-skin colour)", async () => { const d = (await view("manager", "desk", "dark")()).pill.color, l = (await view("manager", "desk", "light")()).pill.color; return ok(d !== l, `dark ${d} · light ${l}`); });
+N("guestbell.js", "the kitchen never shows the guest bell (A35, light)", async () => ok((await viewOf("kitchen", "a35", "light")()).bell === false));
+N("maint.js", "the kitchen never shows a profile button (A35, light)", async () => ok((await viewOf("kitchen", "a35", "light")()).settings === false));
+N("maint.js", "the manager panel shows its profile button (desktop, light)", async () => ok((await viewOf("manager", "desk", "light")()).settings === true));
+N("errlog.js", "no panel raised a page error on any device or skin", async () => { const all = []; for (const c of COMBOS) all.push(...(await viewOf(...c)()).errors); return ok(!all.length, [...new Set(all)].join(" | ")); });
+N("connbadge.js", "the pill's words are readable ink in the dark skin (not the light-skin colour)", async () => { const d = (await viewOf("manager", "desk", "dark")()).pill.color, l = (await viewOf("manager", "desk", "light")()).pill.color; return ok(d !== l, `dark ${d} · light ${l}`); });
 
 // ── keyboard and Back on the real manager panel ──
 const kb = memo(async () => {
@@ -89,20 +93,20 @@ const kb = memo(async () => {
   o.pill = await backTest(() => document.getElementById("lfhConnBadge").click(), ".lfh-conn-pop");
   o.bell = await backTest(() => window.LFH_BELL && window.LFH_BELL.open(), ".lfh-bell-back");
   o.drawer = await backTest(() => document.getElementById("staffSettingsBtn") && document.getElementById("staffSettingsBtn").click(), ".lfh-ov .lfh-dw");
-  o.me = await backTest(() => window.LFH_ME && window.LFH_ME.open(), ".me-wrap");
+  o.me = await backTest(() => { if (window.LFH_ME) window.LFH_ME.open(); }, ".me-wrap");
   o.issue = await backTest(() => window.LFH_ISSUE && window.LFH_ISSUE.open({ api: async () => ({ ok: true }) }), ".lfhir-ov");
   o.offline = await backTest(() => window.LFH_OFF && window.LFH_OFF.open(), ".lfh-off-back");
-  o.ask = await backTest(() => window.LFH_ASK && window.LFH_ASK.confirm("Test question?", { title: "A question" }), ".lfh-ask-yes");
+  o.ask = await backTest(() => { if (window.LFH_ASK) window.LFH_ASK.confirm("Test question?", { title: "A question" }); }, ".lfh-ask-yes");   // never hand back the promise: it only settles when answered
   // after six Back presses, the panel is still here and the history is not left holding stale entries
   o.stillHere = /panels\/editor/.test(p.url());
-  await p.evaluate(() => window.LFH_ISSUE.open({ api: async () => ({ ok: true }) })); await sleep(300);
+  await p.evaluate(() => { window.LFH_ISSUE.open({ api: async () => ({ ok: true }) }); }); await sleep(300);
   await p.keyboard.press("Escape"); await sleep(400);
   o.escIssue = await p.evaluate(() => !document.querySelector(".lfhir-ov"));
-  await p.evaluate(() => window.LFH_ASK.text("Why?", { title: "Reason" })); await sleep(300);
+  await p.evaluate(() => { window.LFH_ASK.text("Why?", { title: "Reason" }); }); await sleep(300);
   o.textBtnDisabled = await p.evaluate(() => [...document.querySelectorAll(".lfh-ask-yes")].pop().disabled);
   await p.keyboard.type("Wrong table"); o.textBtnEnabled = await p.evaluate(() => ![...document.querySelectorAll(".lfh-ask-yes")].pop().disabled);
   await p.keyboard.press("Enter"); await sleep(300); o.textClosedOnEnter = await p.evaluate(() => !document.querySelector(".lfh-ov input.lfh-in[aria-label='Reason']"));
-  await p.evaluate(() => window.LFH_ASK.confirm("Sure?", {})); await sleep(250);
+  await p.evaluate(() => { window.LFH_ASK.confirm("Sure?", {}); }); await sleep(250);
   o.yesFocused = await p.evaluate(() => document.activeElement && document.activeElement.classList.contains("lfh-ask-yes"));
   await p.keyboard.press("Escape").catch(() => {}); await p.evaluate(() => history.back()); await sleep(300);
   o.errors = errors;
