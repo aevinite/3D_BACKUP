@@ -2,7 +2,6 @@
 // The three deliberately-public endpoints in depth, every branch called IN MEMORY (routes.mjs):
 // boundaries, every browser tag, the restaurant label rules, the phone-alert rules, and the
 // "each restaurant only touches its own switch" questions. Nothing written, nothing sent.
-/* eslint-disable @typescript-eslint/no-unused-vars -- a check suite: helpers are imported whole */
 import { R, ok, eq, tag, src, code, ROUTES } from "./lib.mjs";
 import { call, world, g, FH, PP } from "./routes.mjs";
 
