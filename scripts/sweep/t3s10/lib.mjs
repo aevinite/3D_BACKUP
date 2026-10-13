@@ -41,6 +41,8 @@ export const FILES = {
   stars: "components/StarRating.tsx",
   outbox: "lib/guestOutbox.ts",
   status: "lib/orderStatus.ts",
+  // added to the territory in round 2 (item 7): the one shared "which restaurant is this token" helper
+  tokenRid: "lib/guestTokenRestaurant.ts",
 };
 export const SRC = Object.fromEntries(Object.entries(FILES).map(([k, f]) => [k, rd(f)]));
 export const CODE = Object.fromEntries(Object.entries(SRC).map(([k, t]) => [k, strip(t)]));
@@ -81,6 +83,9 @@ export async function runAll({ ledger = false, quiet = false, only = null } = {}
     rows.push({ ...d, mark, note });
     if (!ledger && (!quiet || mark === "❌")) console.log(`${mark} ${d.id}  ${d.what}${note ? `   — ${note}` : ""}`);
   }
+  // Every run also leaves its results as data, so a ledger can be written from the run that was
+  // actually looked at instead of from a second one (round 2).
+  try { const { writeFileSync } = await import("node:fs"); writeFileSync(join(CACHE, "t3s10-last.json"), JSON.stringify(rows, (k, v) => (k === "fn" ? undefined : v))); } catch { /* best-effort */ }
   const esc = (x) => String(x).replace(/\|/g, "\\|").replace(/\n/g, " ");
   if (ledger) {
     for (const r of rows) console.log(`| ${r.id} | \`${r.file}\` — ${esc(r.what)} | ${esc(r.how)} | ${r.mark} | ${esc(r.note)} |`);

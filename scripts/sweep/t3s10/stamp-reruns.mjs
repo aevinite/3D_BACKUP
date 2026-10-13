@@ -7,7 +7,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT } from "./lib.mjs";
 const WRITE = process.argv.includes("--write");
-const STAMP = "re-run 2026-10-11 (sweep #10, T3)";
+// The label is per round, so round 1's result stays readable beside round 2's.
+const STAMP = process.env.T3_STAMP || "re-run 2026-10-11 (sweep #10, T3)";
+const MARK = process.env.T3_MARK || "s10·T3";
 const decisions = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const byFile = new Map();
 for (const d of decisions) { if (!byFile.has(d.ledger)) byFile.set(d.ledger, []); byFile.get(d.ledger).push(d); }
@@ -22,7 +24,7 @@ for (const [file, ds] of byFile) {
     if (lines[i].includes(STAMP)) { already++; continue; }
     const inner = lines[i].split(/(?<!\\)\|/).slice(1, -1);
     const resIdx = inner.findIndex((c, k) => k >= 2 && /✅|❌|⏭/.test(c));
-    if (resIdx >= 0 && resIdx < inner.length - 1) inner[resIdx] = ` ${inner[resIdx].trim()} · s10·T3 ${d.mark} `;
+    if (resIdx >= 0 && resIdx < inner.length - 1) inner[resIdx] = ` ${inner[resIdx].trim()} · ${MARK} ${d.mark} `;
     const last = inner.length - 1;
     inner[last] = ` ${inner[last].trim()}${inner[last].trim() ? " · " : ""}**${STAMP}:** ${d.mark} ${esc(d.note)} `;
     lines[i] = `|${inner.join("|")}|`;
