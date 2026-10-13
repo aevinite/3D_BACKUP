@@ -31,28 +31,28 @@ Regressions: **0**. Problems found: **4**, all fixed, one commit each, each guar
 Owner's answers to round 1's list: **5 — NO** (reduce-motion stars; recorded as R69 + code comment),
 **9 — "you decide"** → dining sessions stay OFF (the factory default; commit 1eedf685 says so) and the
 old runners switch French House ON only around their gate sections (item 8), **6, 7, 8, 10 — do them**.
-Every fix is one commit, guarded in `verify:guest-doors` §11 and reverted once to see the guard go red.
+Every fix is one commit, guarded in `verify:guest-doors` §13 and reverted once to see the guard go red.
 
 | item | screen | what was wrong | guard / rows |
 |---|---|---|---|
-| 6 | dish popup → Add to Order | stopped at 99 in silence (bill and dish card both say "Maximum 99 per dish") | §11 · P172576–P172577 · P172983–P172984 |
-| 7 | backend only | "which restaurant is this table code" lived twice, copied; "I've left" had none — one helper now (`lib/guestTokenRestaurant.ts`) | §11 · P172551–P172562 |
-| 8 | backend only (sweep tools) | old runners crashed at the join gate (sessions OFF), taking every later row down | §11 · blocks 3a/3b/5 green again |
-| 10 | owner's phone alerts | a QR table hitting its waiter-call limit never pinged the owner | §11 · P172947–P172948 |
-| 11 | bill → Live status | **5-second database poll**: 7 `get_order_dishes` reads in 30 s for one live order; now nudge + 60 s backstop, only while the cards show | §11 · P172980–P172982 |
+| 6 | dish popup → Add to Order | stopped at 99 in silence (bill and dish card both say "Maximum 99 per dish") | §13 · P172576–P172577 · P172983–P172984 |
+| 7 | backend only | "which restaurant is this table code" lived twice, copied; "I've left" had none — one helper now (`lib/guestTokenRestaurant.ts`) | §13 · P172551–P172562 |
+| 8 | backend only (sweep tools) | old runners crashed at the join gate (sessions OFF), taking every later row down | §13 · blocks 3a/3b/5 green again |
+| 10 | owner's phone alerts | a QR table hitting its waiter-call limit never pinged the owner | §13 · P172947–P172948 |
+| 11 | bill → Live status | **5-second database poll**: 7 `get_order_dishes` reads in 30 s for one live order; now nudge + 60 s backstop, only while the cards show | §13 · P172980–P172982 |
 | 12 | none (tidy) | an unused leftover in the bill's line loop | lint |
-| 13 | none (speed) | five menu lookups walked the whole menu per line per redraw | §11 · P172567–P172568 |
-| 14 | backend only | a body the database cannot read was answered "busy" and retried for ~4 minutes | §11 · block I |
-| 15 | "On this phone" list | after a reload one saved row could be listed as BOTH waiting and couldn't-send | §11 · P172800–P172801 |
-| 16 | dish page → Rate | the page's redraw lit the stars 5 ms after the tap, before their dive; now 654/787/904 ms | §11 · P172986–P172989 |
-| 17 | bell (QR) | a restaurant that did not ANSWER got "please try again" — now saved like no signal | §11 · P172950–P172953 |
-| 18 | basket pill | counted a corrupted saved quantity raw (150 items over a bill of 99) | §11 · P172985 |
-| 19 | "On this phone" list | saved bell taps at two restaurants merged into one | §11 · P172798–P172799 |
-| 20 | backend only | a JSON body of `null` crashed all four guest doors with a 500 | §11 · P172990–P172999 |
-| 21 | bell (QR) | any unknown answer read "Already sent · staff are on the way" | §11 · P172949 |
-| 22 | backend only | the limit beacon read a list as a function name | §11 · P172714 · P173000 |
-| 23 | order strip | **on Chrome, a dropped connection marked a cooking order CANCELLED** ("Order cancelled · Please ask a member of staff") | §11 · P172977–P172978 |
-| 24 | order strip (phone) | the fixed bell covered the strip's end — "Table 2" for table 28, drag handle hidden | §11 · P172607–P172611 |
+| 13 | none (speed) | five menu lookups walked the whole menu per line per redraw | §13 · P172567–P172568 |
+| 14 | backend only | a body the database cannot read was answered "busy" and retried for ~4 minutes | §13 · block I |
+| 15 | "On this phone" list | after a reload one saved row could be listed as BOTH waiting and couldn't-send | §13 · P172800–P172801 |
+| 16 | dish page → Rate | the page's redraw lit the stars 5 ms after the tap, before their dive; now 654/787/904 ms | §13 · P172986–P172989 |
+| 17 | bell (QR) | a restaurant that did not ANSWER got "please try again" — now saved like no signal | §13 · P172950–P172953 |
+| 18 | basket pill | counted a corrupted saved quantity raw (150 items over a bill of 99) | §13 · P172985 |
+| 19 | "On this phone" list | saved bell taps at two restaurants merged into one | §13 · P172798–P172799 |
+| 20 | backend only | a JSON body of `null` crashed all four guest doors with a 500 | §13 · P172990–P172999 |
+| 21 | bell (QR) | any unknown answer read "Already sent · staff are on the way" | §13 · P172949 |
+| 22 | backend only | the limit beacon read a list as a function name | §13 · P172714 · P173000 |
+| 23 | order strip | **on Chrome, a dropped connection marked a cooking order CANCELLED** ("Order cancelled · Please ask a member of staff") | §13 · P172977–P172978 |
+| 24 | order strip (phone) | the fixed bell covered the strip's end — "Table 2" for table 28, drag handle hidden | §13 · P172607–P172611 |
 
 **Own slips found and corrected this round:** round 1 stamped five old rows ✅ from a run taken BEFORE its
 own fixes (P16124, P56940, P57608, P57609, P110096) — they had gone stale; re-pointed and re-stamped. Round 1
