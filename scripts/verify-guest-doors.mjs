@@ -874,7 +874,11 @@ flush();
   check("…with one definition of what a tidy name is, used on the way in and out",
     /export const tidyGuestName/.test(gname) && /GUEST_NAME_MAX = 40/.test(gname));
   check("…and it only announces a name that actually CHANGED",
-    /if \(before === tidy\) return false;/.test(gname));
+    /if \(getGuestName\(\) === tidy\) return false;/.test(gname));
+  // sweep #10 T4 item 10 (2026-10-13): …and that the phone KEPT — tset swallows a refused write, so
+  // the answer is read back, or a private window is told "saved as your name" after every review.
+  check("…and only one the phone actually KEPT (read back after the write — a private window keeps nothing)",
+    /tset\(KEY, tidy\);[\s\S]{0,600}?kept = getGuestName\(\) === tidy;/.test(gname) && /return kept;\s*\}\s*$/.test(gname.trim() + "\n"));
   check("the review box fills itself in from that one name",
     /getGuestName\(\)/.test(item) && /window\.addEventListener\(GUEST_NAME_EVENT, fill\)/.test(item));
   check("…in an EFFECT, never during render, because that page is server-rendered",

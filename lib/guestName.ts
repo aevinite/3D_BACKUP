@@ -64,8 +64,10 @@ export function getGuestName(): string {
 /**
  * Remember a name the diner has just given, wherever they gave it.
  *
- * Returns true when the stored name actually CHANGED — callers use that to avoid re-announcing
- * something nobody typed. When it changes we do two things beyond storing it: tell the rest of
+ * Returns true when the stored name actually CHANGED and the phone KEPT it — callers use that to
+ * avoid re-announcing something nobody typed, and the review toast uses it to say "saved as your
+ * name". A private window (storage switched off) keeps nothing: the name is still sent to rename
+ * past reviews, but the answer is false, because the next box will NOT be filled in with it. When it changes we do two things beyond storing it: tell the rest of
  * the app, and rename this device's past reviews at this restaurant so the diner is not signed
  * two different ways on the same menu.
  *
@@ -76,14 +78,16 @@ export function getGuestName(): string {
 export function setGuestName(name: string, restaurantId?: string): boolean {
   const tidy = tidyGuestName(name);
   if (!tidy) return false;                       // clearing a box is not the same as renaming
-  let before = "";
+  let kept = false;
   try {
-    before = getGuestName();
-    if (before === tidy) return false;           // nothing changed → no write, no event, no rename
+    if (getGuestName() === tidy) return false;   // nothing changed → no write, no event, no rename
     tset(KEY, tidy);
-  } catch {
-    return false;                                // storage blocked (private mode) → nothing to sync
-  }
+    // READ IT BACK (sweep #10 T4, item 10, 2026-10-13). tset swallows a refused write on purpose
+    // (a preference must never cost the page), so the old `catch { return false }` here could never
+    // run: in a private window every review answered "changed" and the toast said "saved as your
+    // name" — a promise the next visit broke, because nothing had been saved. Kept = it is there now.
+    kept = getGuestName() === tidy;
+  } catch { /* storage blocked outright — kept stays false */ }
   try {
     window.dispatchEvent(new CustomEvent(GUEST_NAME_EVENT, { detail: { name: tidy } }));
   } catch { /* not a browser, or events blocked — the stored name still stands */ }
@@ -93,5 +97,5 @@ export function setGuestName(name: string, restaurantId?: string): boolean {
       void renameMyReviews(getDeviceId(), restaurantId, tidy);
     } catch { /* best-effort, exactly as documented above */ }
   }
-  return true;
+  return kept;
 }

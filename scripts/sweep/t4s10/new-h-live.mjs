@@ -294,3 +294,18 @@ const banOdd = (mode) => once("ban-" + mode, async () => {
 });
 check(FILES.ban, "the ban wall tells a phone that really lost its signal to check its connection", HOWS, async () => { const r = await banOdd("abort"); return { ok: /phone seems to be offline/i.test(r.t), note: r.t }; });
 check(FILES.ban, "…and an odd server error on the ban wall says 'not sent', blaming neither the number nor the connection", HOWS, async () => { const r = await banOdd("odd"); return { ok: /couldn.t send that just now — please try again/i.test(r.t) && !/connection|internet|number/i.test(r.t), note: r.t }; });
+
+// ── H10 · item 10 live: a private window is never told its name was saved ───────────────────────────
+// The review's save and the past-review rename are answered in the browser (no row written). A
+// private window is a phone whose storage refuses every write — exactly what Safari's used to do.
+const reviewRun = (blocked) => once("review-" + blocked, async () => {
+  const setup = blocked ? { fn: () => { try { Storage.prototype.setItem = function () { throw new DOMException("QuotaExceededError", "QuotaExceededError"); }; } catch {} }, arg: null } : null;
+  const { ctx, page, log, errors } = await stubbed(PHONE, { lfh_submit_review: () => okJson({ ok: true }), lfh_rename_my_reviews: () => okJson({ ok: true, renamed: 0 }) }, setup);
+  await page.goto(`${BASE}/r/${FH}/item/arancini-balls`, { waitUntil: "networkidle" }); await settle(page, 1200);
+  await page.click(".review-tab-btn >> nth=0"); await settle(page, 500);
+  await page.click('[aria-label="Rate 5 stars"]', { force: true }); await page.fill("#review-name", "Mia T4"); await page.fill(".review-textarea", "lovely"); await page.click("#submit-review"); await settle(page, 1800);
+  const toasts = await page.evaluate(() => window.__toasts.filter((x) => x && x.kicker === "review").map((x) => `${x.message} / ${x.subtitle}`));
+  const renamed = log.some((x) => x.fn === "lfh_rename_my_reviews"); await ctx.close(); return { toasts, renamed, errors };
+});
+check(FILES.gname, "a normal phone that gives a new name on a review is told 'saved as your name' (item 10)", HOWS, async () => { const r = await reviewRun(false); return { ok: r.toasts.some((x) => /^Review posted \/ saved as your name — Mia T4$/.test(x)), note: r.toasts.join(" · ") }; });
+check(FILES.gname, "…a private window (storage refuses every write) is NOT told that — just 'thanks for sharing' — and its past reviews are still renamed (item 10)", HOWS, async () => { const r = await reviewRun(true); return { ok: r.toasts.some((x) => /^Review posted \/ thanks for sharing$/.test(x)) && !r.toasts.some((x) => /saved as your name/.test(x)) && r.renamed, note: `${r.toasts.join(" · ")} · rename sent ${r.renamed}` }; });
