@@ -54,6 +54,8 @@ export const RESERVED = [
   ["27", "verify-void-on-joined-party.mjs — the party that holds the bill"],
   ["28", "verify-void-on-joined-party.mjs — the joined table whose food must survive"],
   ["9", "verify-session-ux.mjs — the partner-approval walk"],
+  ["29", "scripts/sweep/t11s10/new-d-live.mjs — sweep #10 T11's one real kitchen ticket (cancelled then soft-deleted by id)"],
+  ["26", "scripts/sweep/t11s10/rerun-manual.mjs — sweep #10 T11's re-run tickets (cancelled then soft-deleted by id)"],
 ];
 
 /** Every table name any guard has claimed, as strings — for `busy.add(...)` in a dynamic picker. */

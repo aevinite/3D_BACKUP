@@ -340,7 +340,9 @@ row("P02782", "the panel adds no column to settings and declares no new module",
   const r = ROUTEC();
   const cols = new Set();
   for (const m of r.matchAll(/from\("settings"\)\s*\.select\("([^"]+)"\)/g)) for (const c of m[1].split(",")) cols.add(c.trim());
-  const known = new Set(["kitchen_can_accept_platform", "auto_print_kot", "auto_print_kot_allowed", "platform_channels", "table_names"]);
+  // EXPECTATION CHANGED (sweep #10 T11, item 4): `modules` is read too — an EXISTING column (the mig 326
+  // bag), for the one flag modules.printing.paused, the admin's STOP. Still no NEW column.
+  const known = new Set(["kitchen_can_accept_platform", "auto_print_kot", "auto_print_kot_allowed", "platform_channels", "table_names", "modules"]);
   const extra = [...cols].filter((c) => !known.has(c));
   return extra.length === 0 || `settings columns this route reads that the ledger did not know: ${extra.join(", ")}`;
 });

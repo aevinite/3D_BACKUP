@@ -325,16 +325,36 @@ let audioCtx = null;
 // chimed silently and the display never beeped until someone touched it (bug M8,
 // 2026-07-05). Fix: create the context eagerly and resume() it on the first ANY user
 // gesture (one-time), and also try to resume() on every chime in case it lapsed.
-function primeAudio() {
+// ── THE FIRST TAP OF THE SHIFT MUST LAND WHERE THE FINGER IS (sweep #10 T11, item 6) ────────────────
+// The gesture listener below unlocks sound on pointerDOWN, and the moment the audio starts the nudge row
+// under the top bar folds away — so the whole board jumped up ~45px while the cook's finger was still on
+// the glass. Measured on the running board: with a mouse the tap simply vanished (down on one ✓, up on
+// another spot, no click at all); on a TOUCH screen it was worse — the click landed on the line that had
+// slid under the finger, and the dish BELOW the one tapped was marked ready. So when the unlock comes
+// from a gesture, the nudge waits until that gesture's click has been delivered (or ~2.5s, for a press
+// that never becomes a click) before it folds. A tap ON the nudge itself is not affected: that tap is
+// for the nudge, and nothing underneath it is being aimed at.
+function afterGesture(fn) {
+  let done = false;
+  const go = () => {
+    if (done) return; done = true;
+    ["click", "pointercancel"].forEach((e) => window.removeEventListener(e, go, true));
+    setTimeout(fn, 0);   // after the click's own handlers have run on the element that was really tapped
+  };
+  ["click", "pointercancel"].forEach((e) => window.addEventListener(e, go, true));
+  setTimeout(go, 2500);
+}
+function primeAudio(fromGesture) {
+  const settle = fromGesture ? () => afterGesture(updateSoundNudge) : updateSoundNudge;
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     const p = audioCtx.resume?.();
-    if (p && p.then) p.then(() => updateSoundNudge()).catch(() => {}); // resume() is async — re-check once it settles
+    if (p && p.then) p.then(() => settle()).catch(() => {}); // resume() is async — re-check once it settles
   } catch {}
-  updateSoundNudge();
+  settle();
 }
 if (typeof window !== "undefined") {
-  const once = () => { primeAudio(); ["pointerdown", "keydown", "touchstart"].forEach((e) => window.removeEventListener(e, once)); };
+  const once = () => { primeAudio(true); ["pointerdown", "keydown", "touchstart"].forEach((e) => window.removeEventListener(e, once)); };
   ["pointerdown", "keydown", "touchstart"].forEach((e) => window.addEventListener(e, once, { once: true, passive: true }));
 }
 // Is sound actually usable right now (context exists AND is running, not suspended)?
@@ -869,6 +889,18 @@ function markItemReady(id, btn) {
   // ✓ buttons survive and the cook's next rapid tap isn't eaten. (owner, 2026-06-19)
   const o = (state.orders || []).find((x) => x.id === it.order_id);
   if (o && orderPhase(o) === "ready") moveCardToReady(o);
+  // …AND WHEN THE TICKET STAYS IN ITS LANE, RE-STAMP WHAT THE CARD NOW SAYS (sweep #10 T11, item 5).
+  // The edit above changes one line in place, so the card's `__kdsHtml` still holds the html from BEFORE
+  // the ✓. When the server then confirms the ✓, load() sees an unchanged signature and paints nothing —
+  // so that stale stamp survives. If the dish is later put back to cooking from another screen, the
+  // board's next desired html is the old pre-✓ html, it matches the stale stamp, reconcileList reuses
+  // the node, and the card goes on saying "ready" with no ✓ while every other panel says cooking.
+  // Watched on the running board. Stamping the html this card now corresponds to makes that change-check
+  // compare against the truth: a confirmation still reuses the node, a reversal repaints it.
+  else if (o) {
+    const card = document.querySelector(`.ticket[data-ticket="${window.CSS && CSS.escape ? CSS.escape(String(o.id)) : o.id}"]`);
+    if (card) card.__kdsHtml = ticketHtml(o);
+  }
   api("POST", `/items/${id}/status`, { status: "ready" }).then((r) => {
     // Saved on this device rather than sent — say so, and skip the reconcile (which would refetch
     // the board and paint the dish back as still cooking, exactly the "did my tap work?" moment
@@ -1101,8 +1133,10 @@ async function reprintOrder(id) {
   const dup = printedIds.has(o.id);
   // ── THE COMPUTER GETS FIRST REFUSAL, AND THERE IS NO WINDOW WHEN IT TAKES IT ─────────────────
   let says = null;
+  // toast(msg) ONLY — its second argument is the UNDO callback, so the "err" this used to pass drew an
+  // UNDO button on a refusal, and tapping it threw "undoFn is not a function" (sweep #10 T11, item 3).
   try { says = await askWhoPrints({ orderId: id, reprint: dup }); }
-  catch (e) { toast(e.message, "err"); return; }
+  catch (e) { toast(e.message); return; }
   if (says && says.queued) {
     // The ticket is a ROW now, and the row is what makes it come out exactly once — so this screen
     // records nothing in printedIds. The helper brands the DUPLICATE, on the paper, from the flag
@@ -1143,7 +1177,7 @@ async function reprintPlatform(id) {
   // kotHtmlForAggregator).
   let says = null;
   try { says = await askWhoPrints({ aggId: id, reprint: dup }); }
-  catch (e) { toast(e.message, "err"); return; }
+  catch (e) { toast(e.message); return; }   // no second argument — see reprintOrder (item 3)
   if (says && says.queued) { toast(says.note || ("Sent to " + (says.printer || "the printer"))); return; }
   // The order shape printKot reads: kot_no, created_at and items all exist on an aggregator row.
   if (printKot(p, Array.isArray(p.items) ? p.items : [], state.restaurant, { reprint: dup, tableLabel: label })) {
@@ -1754,10 +1788,17 @@ function renderKitchenSettings() {
   // and one is just showing."
   //
   // The admin names one person on Printing. This screen states where the paper comes out and stops.
-  const printSection = (!auto && tgt !== "counter" && !hlp) ? "" : `
+  // A STOPPED QUEUE IS NOT "OFF" EITHER (sweep #10 T11, item 4). The board now answers
+  // printRefused:"paused" when the admin has pressed Stop on Printing, and autoPrintKot:false with it —
+  // so without this the section below vanished exactly as it does for a restaurant that never prints,
+  // while the 🖨 sheet two taps away said "printing is stopped". Same words as that sheet.
+  const stopped = !hlp && state.printRefused === "paused";
+  const printSection = (!auto && tgt !== "counter" && !hlp && !stopped) ? "" : `
     <div class="kset-sec">
       <h4>🖨 Printing</h4>
-      ${hlp ? `<div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
+      ${stopped ? `<div class="kset-line"><span>Tickets print on</span><b>nobody right now</b></div>
+      <p class="kset-note">Printing is stopped for this restaurant, so nothing prints by itself — the tickets are waiting, not lost, and they come out when printing starts again.</p>`
+      : hlp ? `<div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
       <p class="kset-note">A printer program on <b>${esc(hlp.agent)}</b> prints this restaurant's kitchen slips, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : " It has not been heard from for a while — tickets are waiting, and print the moment it is back."}</p>`
       : tgt === "counter" && !auto ? `<p class="kset-note">Kitchen tickets print on <b>the counter screen</b> for this restaurant, so this screen prints nothing automatically. The 🖨 button on a ticket still prints here if this screen has a printer of its own.</p>` : `
       <div class="kset-line"><span>Automatic printing</span><b>${auto ? "ON" : "OFF"}</b></div>

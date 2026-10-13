@@ -75,8 +75,10 @@ row("P62979", "the platform read drops the two big JSON columns and keeps every 
 });
 row("P62980", "the platform read is scoped, status-filtered, ordered and limited", () =>
   hasRe(ROUTEC(), /from\("aggregator_orders"\)[\s\S]{0,400}\.eq\("restaurant_id", rid\)\.in\("status", \["new", "accepted", "preparing", "ready"\]\)\.order\("created_at"\)\.limit\(500\)/));
+// EXPECTATION CHANGED (sweep #10 T11, item 4): `modules` is read too — an EXISTING column (the mig 326
+// bag), for the one flag modules.printing.paused, the admin's STOP. Still no NEW column.
 row("P62981", "the settings read names exactly the columns the board needs", () =>
-  hasRe(ROUTEC(), /from\("settings"\)\.select\("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels, table_names"\)\.eq\("restaurant_id", rid\)\.maybeSingle\(\)/));
+  hasRe(ROUTEC(), /from\("settings"\)\.select\("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels, table_names, modules"\)\.eq\("restaurant_id", rid\)\.maybeSingle\(\)/));
 row("P62982", "the restaurant read is a single-row lookup with a column list", () =>
   hasRe(ROUTEC(), /from\("restaurants"\)\.select\("id, slug, name, logo_text, accent_color"\)\.eq\("id", rid\)\.maybeSingle\(\)/));
 row("P62983", "the eight board reads run in parallel, not one after another", () =>
@@ -549,7 +551,9 @@ row("P63206", "the route still cannot produce a third print-target value", () =>
 });
 row("P63207", "the ⚙️ Settings sheet keeps its Printing section when a COMPUTER owns the paper", () => {
   const s = slice("function renderKitchenSettings()", "function waitingWords()");
-  return hasRe(s, /const printSection = \(!auto && tgt !== "counter" && !hlp\) \? "" :/);
+  // EXPECTATION CHANGED (sweep #10 T11, item 4): the condition gained `&& !stopped` — a STOPPED queue is
+  // not "off" (the sheet says printing is stopped). The rule this row defends is unchanged.
+  return hasRe(s, /const printSection = \(!auto && tgt !== "counter" && !hlp && !stopped\) \? "" :/);
 });
 row("P63208", "that sheet reads the helper from the SAME state the 🖨 sheet reads", () => {
   const set = slice("function renderKitchenSettings()", "function waitingWords()");
@@ -582,7 +586,9 @@ row("P63211", "the helper's computer name is escaped exactly once on each route 
 row("P63212", "a restaurant with printing genuinely OFF still sees no Printing section at all", () => {
   const s = slice("function renderKitchenSettings()", "function waitingWords()");
   // off => auto false, tgt "kitchen", helper null → the guard must still collapse to ""
-  return hasRe(s, /\(!auto && tgt !== "counter" && !hlp\) \? ""/);
+  // EXPECTATION CHANGED (sweep #10 T11, item 4): the condition gained `&& !stopped` — a STOPPED queue is
+  // not "off" (the sheet says printing is stopped). The rule this row defends is unchanged.
+  return hasRe(s, /\(!auto && tgt !== "counter" && !hlp && !stopped\) \? ""/);
 });
 row("P63213", "the counter-screen explanation is untouched by the helper case", () => {
   const s = slice("function renderKitchenSettings()", "function waitingWords()");

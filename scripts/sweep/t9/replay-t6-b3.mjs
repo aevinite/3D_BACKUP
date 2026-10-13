@@ -235,7 +235,9 @@ t6("P17890", "no setTimeout re-arms itself into a disguised poll", "A", (a) => {
   const arms = [...a.matchAll(/setTimeout\((\w+),/g)].map((m) => m[1]);
   // renderDishes: the 86 drawer's 120 ms search DEBOUNCE (2026-09-17) — clearTimeout on every key,
   // armed by the input handler, never by itself. Not a poll (sweep #10 T39 item 22).
-  const bad = arms.filter((f) => !["step", "tick", "cleanup", "closeMore", "updateSoundNudge", "renderDishes"].includes(f));
+  // fn / go: afterGesture() (sweep #10 T11 item 6) — ONE deferred callback and ONE 2.5s fallback per
+  // first gesture of the shift, each fired at most once (`done`). Neither re-arms. Not a poll.
+  const bad = arms.filter((f) => !["step", "tick", "cleanup", "closeMore", "updateSoundNudge", "renderDishes", "fn", "go"].includes(f));
   return bad.length === 0 || `self-arming timers: ${bad.join(", ")}`;
 });
 t6("P17891", "the panel never uses eval or the Function constructor", "A", (a) => !/\beval\(|new Function\(/.test(a) || "eval or Function() is used");

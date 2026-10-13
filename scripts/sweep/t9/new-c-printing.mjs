@@ -247,8 +247,10 @@ row("P62923", "the 60s backstop still runs for a printing screen even when the w
 row("P62924", "the panel asks for the auto rows only by opting in, so an old panel cannot double-print", () =>
   hasRe(APPC(), /api\("GET", "\/board\?autojobs=1"\)/));
 row("P62925", "the route hands the auto rows ONLY to a panel that asked", () => hasRe(ROUTEC(), /const autoJobs = new URL\(req\.url\)\.searchParams\.get\("autojobs"\) === "1";/));
+// EXPECTATION CHANGED (sweep #10 T11, item 4): the line gained `paused ? [] :` — a stopped queue hands
+// over nothing at all. The rule this row defends (not the printer → no auto rows) is unchanged.
 row("P62926", "the route also refuses to hand them over when this room is not the printer", () =>
-  hasRe(ROUTEC(), /const printJobs = await pendingKotJobs\(rid, \{ includeAuto: autoJobs && screenPrints \}\);/));
+  hasRe(ROUTEC(), /const printJobs = paused \? \[\] : await pendingKotJobs\(rid, \{ includeAuto: autoJobs && screenPrints \}\);/));
 row("P62927", "the targeted slice carries the queue only while this screen is printing", () => hasRe(APPC(), /const jobsQ = state\.autoPrintKot \? "&jobs=1" : "";/));
 row("P62928", "the route honours that jobs=1 on the targeted path", () => hasRe(ROUTEC(), /const wantJobs = new URL\(req\.url\)\.searchParams\.get\("jobs"\) === "1";/));
 row("P62929", "the targeted slice's job read is only issued when asked", () => hasRe(ROUTEC(), /wantJobs \? pendingKotJobs\(rid, \{ includeAuto: true \}\) : Promise\.resolve\(\[\]\)/));

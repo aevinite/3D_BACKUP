@@ -138,7 +138,8 @@ row("P62773", "renderKitchenSettings bails harmlessly when the sheet is not on s
 // gained `&& !hlp`, because a print helper owning the paper is not "off" — the sheet used to go
 // silent in exactly the case a cook most needs an answer (see P63207).
 row("P62774", "printing is ABSENT, not greyed, when it is off for the restaurant (his standing rule)", () =>
-  hasRe(SET(), /const printSection = \(!auto && tgt !== "counter" && !hlp\) \? "" :/));
+  // EXPECTATION CHANGED again (sweep #10 T11, item 4): `&& !stopped` — a stopped queue is not "off" either.
+  hasRe(SET(), /const printSection = \(!auto && tgt !== "counter" && !hlp && !stopped\) \? "" :/));
 row("P62775", "the sheet reads whether THIS screen may print, not merely whether the feature is on", () =>
   hasRe(SET(), /const auto = !!state\.autoPrintKot;/));
 row("P62776", "the sheet says where tickets print in words, not in a code", () => {
