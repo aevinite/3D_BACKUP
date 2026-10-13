@@ -7,7 +7,7 @@
 //
 // The same three fixes are ALSO driven in memory (the real route, bundled, called against the stub
 // database) by scripts/sweep/t11s10/run.mjs — that is the proof they behave; this is the tripwire.
-import { row, APPC, ROUTEC, hasRe, lacksRe, src, code } from "../t9/lib.mjs";
+import { row, APPC, ROUTEC, hasRe, src, code } from "../t9/lib.mjs";
 const require_ = (rel) => code(src(rel));
 
 /** One POST branch of the kitchen route, from its test to the next top-level `if (a === "` test. */
