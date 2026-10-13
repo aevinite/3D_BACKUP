@@ -391,7 +391,10 @@ const sess = readFileSync(join(ROOT, "lib/session.ts"), "utf8");
 /reason: "timed_out"/.test(sess)
   ? ok("a timeout is reported as its own reason, not as a refusal")
   : bad("a timeout still comes back looking like the restaurant said no");
-/isSessionTimeout\(st\)/.test(gate)
+// Re-aimed 2026-10-13 (sweep #10 T4 item 1, owner: "make sure this never happens"): the sheet's answer
+// now goes through ONE three-way verdict — faultOfAnswer asks isSessionTimeout FIRST, so a timeout is
+// always "ours" and never reaches the offline-phone branch. verify:guest-doors §12 guards the wording.
+/const faultOfAnswer = \(r[^)]*\)[^=]*=>\s*\n?\s*isSessionTimeout\(r\) \? "ours"/.test(gate) && /reachNote\(faultOfAnswer\(st\)\)/.test(gate)
   ? ok("and the guest is told the restaurant didn't answer, not to check their own internet")
   : bad("a timeout still blames the guest's connection");
 

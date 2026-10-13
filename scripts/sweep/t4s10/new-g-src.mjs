@@ -43,7 +43,8 @@ check(FILES.close, "reads: every read on orders names its columns and is bounded
 check(FILES.close, "writes: every write is error-checked (must) — the only best-effort ones are the table-signal clean-up", HOW, () => count(CODE.close, /must\(await sb\.from\(/g) === 6 && /catch \{/.test(bodyOf(CODE.close, "export async function clearTableSignals(")));
 check(FILES.assign, "reads: the section's floor size is ONE column, one row, scoped (twice — waiterTables and fullFloorFor)", HOW, () => count(CODE.assign, /from\("settings"\)\.select\("table_count"\)\.eq\("restaurant_id", rid\)\.maybeSingle\(\)/g) === 2);
 check(FILES.merge, "reads: the merge lookup is one column, one live row, for this restaurant", HOW, () => /select\("parent_table"\)\s*\.eq\("restaurant_id", rid\)\.eq\("child_table", t\)\.is\("ended_at", null\)\.limit\(1\)/.test(CODE.merge));
-check(FILES.open, "reads: openSession reads ONE row (limit 1) — its select('*') hands the whole session to the caller (listed in Part 4, not a fault: one row)", HOW, () => /select\("\*"\)\s*\.eq\("restaurant_id", rid\)\.eq\("table_number", tableNumber\)\.neq\("status", "closed"\)\s*\.limit\(1\)/.test(CODE.open));
+// Re-aimed 2026-10-13 (item 9 fixed): the read was select("*"); it now names its columns.
+check(FILES.open, "reads: openSession reads ONE row (limit 1), naming its columns — never select('*') (item 9)", HOW, () => !/select\("\*"\)/.test(CODE.open) && /select\(OPENED_SESSION_COLS\)\s*\.eq\("restaurant_id", rid\)\.eq\("table_number", tableNumber\)\.neq\("status", "closed"\)\s*\.limit\(1\)/.test(CODE.open));
 check(FILES.sess, "the guest session library talks to NO table directly — every call is a named database function", HOW, () => !/\.from\(/.test(CODE.sess) && count(CODE.sess, /rpc\("lfh_/g) === 19);
 for (const k of ["gate", "card", "owner", "cartSync", "tbill", "ban", "ctx", "conn", "table", "ts", "gname", "gdev"]) {
   check(FILES[k], "guest code reads no table straight out of the database (no .from / supabase.from)", HOW, () => !/\b(supabase|sb)\.from\(/.test(CODE[k]));
@@ -80,7 +81,7 @@ for (const k of ["gate", "card", "owner", "ban", "tbill", "blocked", "media", "m
   check(FILES[k], "no refusal hands a person our schema (relation / column / constraint / violates / PGRST in a string)", HOW, () => !/["'`][^"'`\n]*(relation "|column "|violates|constraint "|PGRST)[^"'`\n]*["'`]/.test(CODE[k]));
   check(FILES[k], "nothing decides by matching a message's prose (.includes / .test on a reason or error text)", HOW, () => !/(reason|message|error)\??\.(includes|startsWith)\(/.test(CODE[k]));
 }
-check(FILES.gate, "every sentence telling a diner to check their internet sits behind a 'was it us?' test (item 1)", HOW, () => [...CODE.gate.matchAll(/check your internet/gi)].every((m) => /isSessionTimeout\(|if \(ours\)/.test(CODE.gate.slice(Math.max(0, m.index - 420), m.index))));
+check(FILES.gate, "every sentence telling a diner to check their internet sits behind a 'was it us?' test (item 1)", HOW, () => [...CODE.gate.matchAll(/check your internet/gi)].every((m) => /fault === "phone"/.test(CODE.gate.slice(Math.max(0, m.index - 420), m.index))));
 check(FILES.gate, "every result the sheet reports carries WHICH action it was (12 fireDone calls)", HOW, () => { const n = count(CODE.gate, /fireDone\(\{/g); const a = count(CODE.gate, /fireDone\(\{[^}]*action/g); return { ok: n === a && n >= 12, note: `${a}/${n}` }; });
 // ── access and gates on the four routes
 check(FILES.media, "issue-media AWAITS the admin check (an un-awaited promise is always truthy)", HOW, () => /const isAdmin = await tokenIsValid\(/.test(CODE.media) && /if \(!staff && !isAdmin\) return bad\(/.test(CODE.media));

@@ -8,7 +8,7 @@
 // banned it renders nothing, so normal guests never see it. (owner, 2026-06-22)
 
 import { useEffect, useState } from "react";
-import { checkBan, requestUnban, isSessionTimeout } from "@/lib/session";
+import { checkBan, requestUnban, isSessionTimeout, isPhoneOffline } from "@/lib/session";
 import { useRestaurantMeta } from "@/lib/restaurant-context";
 
 export default function BanGate() {
@@ -93,7 +93,11 @@ export default function BanGate() {
         ? "We couldn't match that number to this block. Please speak to a member of staff."
         : isSessionTimeout(r)
           ? "The restaurant's system isn't answering right now — please try again in a moment."
-          : "We couldn't send that just now — please check your connection and try again.",
+          // The guest's connection is named ONLY when the phone really is offline (owner 2026-10-13:
+          // a fine phone must never be blamed — lib/session.ts → isPhoneOffline).
+          : isPhoneOffline(r)
+            ? "Your phone seems to be offline — please check your connection and try again."
+            : "We couldn't send that just now — please try again in a moment.",
     );
   };
 

@@ -15,6 +15,23 @@ on purpose once and seen red.
 | 7 | Waiter tablet / manager → Mark paid (and 15 other actions) on a merged child table | a failed merge read answered "not merged" → Mark paid could settle the child's half of the joint bill (the 2026-08-03 incident) | verify:merge (runs the helper + the real tablet Mark paid) |
 | 8 | Login doors (/login, /staff-login) | lib/botCheck.ts + REQUESTS.md said Turnstile switches on "with no code change"; no form renders the widget, so setting the keys would refuse every sign-in. Documentation corrected; building the widget is the owner's decision. | verify:panel-api |
 
+### 2026-10-13 — owner: "make sure this never happens … don't do the eleventh one right now … do all the rest"
+
+- **Item 1, made product-wide.** A sentence may tell a person to check their internet / connection / wifi ONLY behind proof the
+  device is offline (`navigator.onLine === false`, or the browser's own "Failed to fetch" family) — `lib/session.ts` →
+  `isPhoneOffline`. The table sheet and ban wall now give three answers: the restaurant's system is busy ("this one's on us") ·
+  your phone seems to be offline · "we couldn't reach the restaurant's system just now" (blames nobody). Three staff sentences
+  that blamed the connection on any failure were fixed too: Owner → Settings → test print, and the staff-login "blocked" screen
+  (Retry and Request unblock); the Windows print helper's bad-download line no longer says "check the internet".
+  Guard: `verify:guest-doors` §12 scans app/, components/, lib/, public/panels and public/*.html — any such sentence without that
+  proof within the lines before it fails. Live: P173596–P173598.
+- **Item 9 done** — opening a table reads and returns 14 named columns, never `*` (`lib/openSession.ts` → `OPENED_SESSION_COLS`;
+  checked against the dev database). Guard: `verify:table-ownership` A2.
+- **Item 10 done** — in a private window the review toast no longer says "saved as your name": `setGuestName` reads the name back
+  after writing it and answers false when the phone kept nothing (the past-review rename is still sent). Guard: `verify:guest-doors`; live on the real dish page: P173599–P173600.
+- **Item 11 PARKED by the owner, 2026-10-13 — "we will do it later":** the Turnstile widget on the login forms. Until it is built,
+  the Turnstile keys must stay unset (setting them would refuse every sign-in — item 8).
+
 ## Looked like faults, are not (recorded so nobody files them)
 
 - **Every test restaurant has table sessions OFF on the dev database today** (French House, Spice Route, Green Bowl, Sakura Sushi).

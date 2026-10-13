@@ -29,7 +29,7 @@ import { setScannedTable, validateTable } from "@/lib/table";
 import {
   getStoredSession, storeSession, clearStoredSession,
   checkLocation, tableStatus, joinSession, getSessionState, requestAccess,
-  callWaiterSession, setMemberName, isSessionTimeout,
+  callWaiterSession, setMemberName, isSessionTimeout, isPhoneOffline, isNetworkFailureText,
 } from "@/lib/session";
 // Offline: save the order on-device and send it automatically when back online.
 import { enqueueGuestOrder, enqueueGuestCall, reasonMsg, refusalOf, dishFor } from "@/lib/guestOutbox";
@@ -116,31 +116,35 @@ interface Pending { action: "order" | "call" | "connect"; table: string; payload
 const toast = (message: string, kicker = "table", variant = "success") =>
   window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message, kicker, variant } }));
 
-// ── A JOIN THAT DIDN'T LAND: WHOSE FAULT WAS IT? (sweep #10 T4, item 1) ─────────────────────────────
-// Joining a table (as its head, or asking to join someone else's) used to answer every failure
-// with "check your internet". lib/session.ts deliberately turns a SATURATED restaurant database —
-// statement timeouts, too many connections, a gateway page — into the code `timed_out`, because a
-// diner whose phone is fine must not be sent off to fix their wifi during the exact busy hour when
-// the restaurant's own system is the thing struggling. afterLocation() already words it that way;
-// the two join screens did not. One sentence-maker for both, so they cannot drift apart again.
-const joinFailedNote = (r: { ok: boolean; reason?: string }): string =>
-  isSessionTimeout(r)
-    ? "The restaurant's system isn't answering right now — this one's on us. Please try again."
-    : "Couldn't reach the restaurant's system — check your internet and try again.";
-// …and the same split for the restaurant's RULES (the settings read that opens the sheet). That read
-// throws rather than answering a code, so it is told apart by what was thrown: our own 8-second
-// deadline (`settings_timed_out`), or a database that did not answer (the same classifier the panel
-// routes use) is the restaurant's side. Anything else — a phone with no signal — is the phone's.
-const settingsFailedNote = (err: unknown, again: boolean): string => {
-  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-  const ours = !offline && ((err as { message?: string } | null)?.message === "settings_timed_out" || isDbUnreachable(err));
-  if (ours) return again
-    ? "The restaurant's system still isn't answering — this one's on us. Please try again in a moment."
-    : "The restaurant's system isn't answering right now — this one's on us. Please try again.";
-  return again
-    ? "Still can't reach the restaurant's system — check your internet and try again."
-    : "We can't reach the restaurant's system right now — check your internet and retry.";
+// ── WHOSE FAULT WAS IT? — ONE ANSWER FOR EVERY "COULDN'T REACH" SENTENCE IN THIS SHEET ───────────────
+// (sweep #10 T4 item 1, and the owner's follow-up 2026-10-13: *"make sure this never happens it's too
+// bad"*.) A diner whose phone is fine must never be sent off to fix their wifi. So every sentence
+// about not reaching the restaurant is made HERE, from one of three verdicts:
+//   "ours"    — the restaurant's own system did not answer (lib/session.ts words a saturated database
+//               as `timed_out`; our own 8-second deadline on the rules read counts too) → "on us".
+//   "phone"   — POSITIVE evidence the phone is offline (lib/session.ts → isPhoneOffline: the browser
+//               says so, or the request died at the network) → the ONLY verdict that names the internet.
+//   "unknown" — anything else (an empty answer, a refusal we do not recognise) → blames nobody.
+// verify:session-gate §H fails if "internet" appears in any sentence this sheet can show outside the
+// "phone" branch below.
+type Fault = "ours" | "phone" | "unknown";
+const faultOfAnswer = (r: { ok: boolean; reason?: string }): Fault =>
+  isSessionTimeout(r) ? "ours" : isPhoneOffline(r) ? "phone" : "unknown";
+const faultOfError = (err: unknown): Fault => {
+  const msg = (err as { message?: string } | null)?.message;
+  if (msg === "settings_timed_out" || isDbUnreachable(err)) return "ours";
+  if ((typeof navigator !== "undefined" && navigator.onLine === false) || isNetworkFailureText(msg)) return "phone";
+  return "unknown";
 };
+const reachNote = (fault: Fault, o: { again?: boolean; spotSafe?: boolean } = {}): string => {
+  const safe = o.spotSafe ? " Your spot at the table is safe." : "";
+  if (fault === "ours") return `The restaurant's system ${o.again ? "still isn't" : "isn't"} answering right now — this one's on us.${safe} Please try again${o.again ? " in a moment" : ""}.`;
+  if (fault === "phone") return `Your phone seems to be offline — check your internet and try again.${safe}`;
+  return `We couldn't reach the restaurant's system just now.${safe} Please try again in a moment.`;
+};
+// The two join screens — kept as a name because the join branches read clearly with it.
+const joinFailedNote = (r: { ok: boolean; reason?: string }): string => reachNote(faultOfAnswer(r));
+const settingsFailedNote = (err: unknown, again: boolean): string => reachNote(faultOfError(err), { again });
 
 // SessionGate — the step-by-step pop-up that gets a guest connected to their table
 // (location check, joining, waiting for approval) and then carries out their
@@ -189,6 +193,9 @@ export default function SessionGate() {
   const [tableInput, setTableInput] = useState(""); // typed table number when no QR scan yet
   const [name, setName] = useState(""); // the name the guest types when asking to join
   const [note, setNote] = useState(""); // a small explanatory message (e.g. "too far")
+  // WHOSE fault the "couldn't reach" screen is showing (owner 2026-10-13: never blame a fine phone).
+  // The screen's icon and title follow it — a wifi mark and "Connection trouble" only for an offline phone.
+  const [netFault, setNetFault] = useState<Fault>("unknown");
   // Whether the "we've let staff know" screen may PROMISE the order sends automatically.
   // True only on the "open the table" path, where proceedWhenOpen is watching and will
   // auto-continue. On the "call a waiter" (access) path — used when the guest is too far
@@ -631,9 +638,7 @@ export default function SessionGate() {
     // telling the guest to check their internet sends them to fix something that isn't broken.
     // (Same rule as the offline page, which used to blame the owner's Wi-Fi on a day it was fine.)
     if (!st.ok) {
-      setNote(isSessionTimeout(st)
-        ? "The restaurant's system isn't answering right now — this one's on us. Please try again."
-        : "We can't reach the restaurant's system right now — check your internet and retry.");
+      setNetFault(faultOfAnswer(st)); setNote(reachNote(faultOfAnswer(st)));
       setStep("net_error");
       return;
     }
@@ -733,9 +738,7 @@ export default function SessionGate() {
       // forgetting it here would throw the guest off their table (and could cost
       // a head their role) over one second of bad Wi-Fi. Keep it; offer a retry.
       // A BUSY RESTAURANT IS NOT THEIR WIFI (sweep #10 T4, item 1) — the same split afterLocation makes.
-      setNote(isSessionTimeout(state)
-        ? "The restaurant's system isn't answering right now — this one's on us, and your spot at the table is safe. Please try again."
-        : "We can't reach the restaurant's system right now — your spot at the table is safe. Check your internet and retry.");
+      setNetFault(faultOfAnswer(state)); setNote(reachNote(faultOfAnswer(state), { spotSafe: true }));
       setStep("net_error");
       return;
     }
@@ -818,7 +821,7 @@ export default function SessionGate() {
       // …and the restaurant is settled BEFORE its rules are read, or the rules read are #1's.
       const settledRid = await settledRestaurant();
       if (!settledRid) {
-        setNote("We couldn't tell which restaurant this is — please reload the page, or ask a member of staff.");
+        setNetFault("unknown"); setNote("We couldn't tell which restaurant this is — please reload the page, or ask a member of staff.");
         setOpen(true); setStep("net_error");
         return;
       }
@@ -837,7 +840,7 @@ export default function SessionGate() {
         const known = settingsByRid.current.get(settledRid);
         if (known) settingsRef.current = known;
         else {
-          setNote(settingsFailedNote(err, false));
+          setNetFault(faultOfError(err)); setNote(settingsFailedNote(err, false));
           setOpen(true); setStep("net_error");
           return;
         }
@@ -1100,7 +1103,7 @@ export default function SessionGate() {
         settingsRef.current = await getSettings(rid);
         settingsByRid.current.set(rid, settingsRef.current);
       } catch (err) {
-        setNote(settingsFailedNote(err, true));
+        setNetFault(faultOfError(err)); setNote(settingsFailedNote(err, true));
         return;
       }
     }
@@ -1408,8 +1411,9 @@ export default function SessionGate() {
             Crucially: the guest's table membership was KEPT — only the action
             needs retrying once the connection is back. */}
         {step === "net_error" && (<>
-          <div className="sg-badge"><i className="fas fa-wifi"></i></div>
-          <h3 className="sg-title">Connection trouble</h3>
+          {/* The mark and the title say WHOSE trouble it is — only an offline phone gets the wifi mark. */}
+          <div className="sg-badge"><i className={`fas ${netFault === "phone" ? "fa-wifi" : netFault === "ours" ? "fa-hourglass-half" : "fa-circle-exclamation"}`}></i></div>
+          <h3 className="sg-title">{netFault === "phone" ? "Connection trouble" : netFault === "ours" ? "The restaurant's system is busy" : "That didn't go through"}</h3>
           {/* The fallback names nobody's fault: every path that opens this screen sets its own note,
               which says whose it was (item 1) — this only shows if one ever forgets to. */}
           <p className="sg-sub">{note || "We can't reach the restaurant's system right now. Please try again in a moment."}</p>

@@ -1913,3 +1913,10 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 
 - [x] **Google lists only the aevinite.shop home page** — backend only, nothing on screen. Every café menu (`/r/*`, `/q/*`, `/menu`, `/item/*`, `/view/*`), every panel and `/api/*` now answers `X-Robots-Tag: noindex, nofollow`; any host that is not aevinite.shop (backup, previews) is noindex everywhere. `/robots.txt` allows crawling (Google must fetch a page to read its noindex) and `/sitemap.xml` names only `https://www.aevinite.shop/`. `/login` (where "/" lands) gets the Google title "Aevidine by Aevinite — Restaurant OS". Owner chose "hide all café pages" (2026-10-12). Verified on a local production build: headers per path, robots.txt, sitemap.xml, login title.
 - [ ] **WAITING ON THE OWNER:** release to AV live (aevinite.shop), then Search Console → Removals for the French House URL.
+
+## 2026-10-13 — owner (on the table sheet blaming the diner's wifi): "make sure this never happens it's too bad don't do the eleventh one right now we will do it later do the all the rest one"
+
+- [x] **Nobody is told to check their internet unless their phone really is offline** — Guest menu → table sheet (open / join / re-check a table) and the ban wall → Request unblock; Owner → Settings → test print; staff login → blocked screen. Busy restaurant = "this one's on us"; offline phone = "your phone seems to be offline"; anything else blames nobody. Guard: verify:guest-doors §12 (whole product).
+- [x] **Opening a table reads only the columns it needs** — backend only, nothing on screen (lib/openSession.ts). Guard: verify:table-ownership A2.
+- [x] **A private window is not told "saved as your name" after a review** — Guest menu → a dish → leave a review in a private window: the thank-you no longer promises the name was saved. Guard: verify:guest-doors.
+- [ ] **PARKED by the owner ("we will do it later"):** the Turnstile robot-check widget on the login forms. Keep the Turnstile keys unset until it is built.

@@ -43,7 +43,9 @@
 //      words. The sheet must use the class, and the class must have a light-skin override placed
 //      BELOW its base rule (a later rule of equal weight is what wins).
 //
-//   H. A BUSY RESTAURANT IS NEVER BLAMED ON THE DINER'S WIFI (sweep #10 T4, item 1).
+//   H. A DINER IS TOLD TO CHECK THEIR INTERNET ONLY WHEN THEIR PHONE IS REALLY OFFLINE (sweep #10 T4
+//      item 1; owner 2026-10-13 "make sure this never happens"). Was: A BUSY RESTAURANT IS NEVER BLAMED
+//      ON THE DINER'S WIFI.
 //      lib/session.ts turns a saturated restaurant database into the code `timed_out` precisely so
 //      a diner whose phone is fine is not sent off to fix their wifi during the restaurant's own
 //      busy hour. afterLocation() honoured it; joining a table as its head, asking to join one,
@@ -269,29 +271,39 @@ function run(src) {
   check(/\}, \[restaurantId, restaurantReady\]\);/.test(cardSrc2),
     "…and wakes up the moment it becomes known, so this is a wait and not a refusal");
 
-  console.log("H. a busy restaurant is never blamed on the diner's wifi");
-  // Every sentence that sends the diner to their own internet, found in the CODE (comments
-  // stripped), must sit behind a test that rules out "the restaurant's own system did not answer".
-  const blames = [...code.matchAll(/check your internet/gi)].map((m) => m.index);
-  check(blames.length > 0, `${blames.length} sentence(s) in the sheet tell a diner to check their internet`);
-  const unguarded = blames.filter((i) => !/isSessionTimeout\(|if \(ours\)/.test(code.slice(Math.max(0, i - 420), i)));
-  check(unguarded.length === 0, `every one of them sits behind a "was it us?" test${unguarded.length ? ` (${unguarded.length} do not)` : ""}`);
-  check(/const joinFailedNote = \(r: \{ ok: boolean; reason\?: string \}\): string =>\s*\n\s*isSessionTimeout\(r\)/.test(code),
-    "the two join screens share ONE sentence-maker, and it splits on the timeout code");
+  console.log("H. a diner is told to check their internet ONLY when their phone is really offline");
+  // (item 1, and the owner 2026-10-13: "make sure this never happens".) Every sentence the sheet can
+  // show about not reaching the restaurant comes from reachNote(), and only its "phone" branch — which
+  // is reached only on POSITIVE evidence of an offline phone — may name the internet.
+  const words = /internet|wi-?fi|your connection|your signal/gi;
+  const mentions = [...code.matchAll(words)].map((m) => m.index);
+  const outsidePhone = mentions.filter((i) => { const before = code.slice(Math.max(0, i - 160), i);
+    return !/if \(fault === "phone"\) return `[^`]*$/.test(before) && !/netFault === "phone" \? "(fa-)?$/.test(before); });
+  check(mentions.length > 0 && outsidePhone.length === 0,
+    `no sentence in the sheet names the diner's internet except the offline-phone one${outsidePhone.length ? ` (${outsidePhone.length} elsewhere: ${outsidePhone.map((i) => JSON.stringify(code.slice(i - 40, i + 20))).join(" | ")})` : ""}`);
+  // …and the screen it lands on says the same: the wifi mark and "Connection trouble" ONLY for an
+  // offline phone, and every way onto that screen says whose fault it is first.
+  check(/fa-\$\{netFault === "phone" \? "fa-wifi"|netFault === "phone" \? "fa-wifi"/.test(code) && /\{netFault === "phone" \? "Connection trouble" :/.test(code),
+    "the 'couldn't reach' screen shows the wifi mark and 'Connection trouble' only when the phone is offline");
+  const opens = (code.match(/setStep\("net_error"\)/g) || []).length;
+  const said = (code.match(/setNetFault\([^)]*\)\)?; setNote\(/g) || []).length;
+  check(opens > 0 && said >= opens, `every way onto that screen sets whose fault it is first (${said} verdict(s) for ${opens} opening(s), plus Retry)`);
+  check(/const faultOfAnswer = \(r: \{ ok: boolean; reason\?: string \}\): Fault =>\s*\n\s*isSessionTimeout\(r\) \? "ours" : isPhoneOffline\(r\) \? "phone" : "unknown";/.test(code),
+    "the verdict asks 'was it the restaurant?' FIRST, then 'is the phone offline?', and anything else is 'unknown'");
+  const rn = (code.match(/const reachNote = [\s\S]*?\n\};/) || [""])[0];
+  const unknownLine = rn.split("\n").find((l) => /return `We couldn't reach/.test(l)) || "";
+  check(!!unknownLine && !words.test(unknownLine), "…and the 'unknown' sentence blames nobody");
   const head = bodyOf(code, "const joinAsHead = useCallback(async ()");
   const guest = bodyOf(code, "const doJoinAsGuest = async (preset?: string)");
-  check(!!head && /if \(!r\.ok\) \{ setTableInput\(p\.table\); setNote\(joinFailedNote\(r\)\);/.test(head),
-    "opening a table as its head words a failed join through it");
-  check(!!guest && /if \(!r\.ok\) \{ setNote\(joinFailedNote\(r\)\); setStep\("guest_name"\);/.test(guest),
-    "…and so does asking to join someone else's table");
+  check(!!head && /if \(!r\.ok\) \{ setTableInput\(p\.table\); setNote\(joinFailedNote\(r\)\);/.test(head), "opening a table as its head words a failed join through the verdict");
+  check(!!guest && /if \(!r\.ok\) \{ setNote\(joinFailedNote\(r\)\); setStep\("guest_name"\);/.test(guest), "…and so does asking to join someone else's table");
   const ready = bodyOf(code, "const ensureReadyAndAct = useCallback(async ()");
-  check(!!ready && /setNote\(isSessionTimeout\(state\)/.test(ready),
-    "re-checking a table you are already at splits on the timeout code too (your spot is kept either way)");
-  check(/const settingsFailedNote = \(err: unknown, again: boolean\): string =>/.test(code)
-    && /"settings_timed_out" \|\| isDbUnreachable\(err\)/.test(code),
-    "the first read of the restaurant's rules tells our own deadline and a silent database apart from no signal");
-  check((code.match(/setNote\(settingsFailedNote\(err, (true|false)\)\)/g) || []).length === 2,
-    "…and both places that read those rules use it (opening the sheet, and Retry)");
+  check(!!ready && /setNote\(reachNote\(faultOfAnswer\(state\), \{ spotSafe: true \}\)\);/.test(ready), "re-checking a table you are already at uses it too (and says the spot is safe)");
+  const after = bodyOf(code, "const afterLocation = useCallback(async ()");
+  check(!!after && /setNote\(reachNote\(faultOfAnswer\(st\)\)\);/.test(after), "…and so does checking whether the table is open");
+  check(/const settingsFailedNote = \(err: unknown, again: boolean\): string => reachNote\(faultOfError\(err\), \{ again \}\);/.test(code)
+    && /if \(msg === "settings_timed_out" \|\| isDbUnreachable\(err\)\) return "ours";/.test(code), "the rules read tells our deadline and a silent database ('ours') apart from an offline phone");
+  check((code.match(/setNote\(settingsFailedNote\(err, (true|false)\)\)/g) || []).length === 2, "…and both places that read those rules use it (opening the sheet, and Retry)");
   return failed;
 }
 
@@ -345,7 +357,10 @@ if (process.argv.includes("--self-test")) {
     ["a screen declared but never drawn", (s) => s.replace('| "nickname" | "access_name" |', '| "nickname" | "access_name" | "ghost_screen" |')],
     ["restaurant #1 substituted for an unknown one again", (s) => s.replace("const rid = settledRid;", "const rid = settledRid || DEFAULT_RESTAURANT_ID;")],
     ["a failed head-join blamed on the diner's wifi again", (s) => s.replace("setTableInput(p.table); setNote(joinFailedNote(r));", "setTableInput(p.table); setNote(\"Couldn't reach the restaurant's system — check your internet and try again.\");")],
-    ["a failed rejoin blamed on the wifi whatever happened", (s) => s.replace("setNote(isSessionTimeout(state)\n", "setNote(false\n")],
+    ["a failed rejoin blamed on the wifi whatever happened", (s) => s.replace("setNote(reachNote(faultOfAnswer(state), { spotSafe: true }));", "setNote(\"We can't reach the restaurant's system right now — check your internet and retry.\");")],
+    ["the 'unknown' verdict blaming the internet again", (s) => s.replace("return `We couldn't reach the restaurant's system just now.${safe} Please try again in a moment.`;", "return `We can't reach the restaurant's system — check your internet.${safe}`;")],
+    ["the busy screen wearing the wifi mark for everyone again", (s) => s.replace('netFault === "phone" ? "fa-wifi" : netFault === "ours" ? "fa-hourglass-half" : "fa-circle-exclamation"', '"fa-wifi"')],
+    ["an unrecognised failure treated as an offline phone", (s) => s.replace('isSessionTimeout(r) ? "ours" : isPhoneOffline(r) ? "phone" : "unknown";', 'isSessionTimeout(r) ? "ours" : "phone";')],
     ["the rules read's failure worded without asking whose it was", (s) => s.replace("setNote(settingsFailedNote(err, true));", "setNote(\"Still can't reach the restaurant's system — check your internet and try again.\");")],
   ];
   for (const [what, bend] of sabotage) {

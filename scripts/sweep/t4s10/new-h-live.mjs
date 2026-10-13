@@ -138,7 +138,7 @@ check(FILES.gate, "…no machine text anywhere on the sheet, and no page error",
 const GUEST = { table: "7", token: "t4-live-not-a-real-token", memberId: "m-live", role: "guest" };
 const NICK = { "lfh_nickname:french-house": JSON.stringify({ token: GUEST.token, name: "Ravi" }) };
 const busyRun = (stateAnswer) => once("busy-" + stateAnswer, async () => {
-  const { ctx, page, errors } = await stubbed(PHONE, { lfh_guest_settings: "sessionsOn", lfh_session_state: () => (stateAnswer === "timeout" ? pg500("57014", "canceling statement due to statement timeout") : "abort") }, seed(GUEST, NICK));
+  const { ctx, page, errors } = await stubbed(PHONE, { lfh_guest_settings: "sessionsOn", lfh_session_state: () => (stateAnswer === "timeout" ? pg500("57014", "canceling statement due to statement timeout") : stateAnswer === "odd" ? pg500("XX000", "internal error") : "abort") }, seed(GUEST, NICK));
   await page.goto(`${BASE}/r/${FH}/menu`, { waitUntil: "networkidle" }); await settle(page, 800);
   await fire(page, { action: "call", table: "7", payload: { reason: "Water" } }); await settle(page, 2500);
   const t = await sheetText(page); const btns = await page.evaluate(() => [...document.querySelectorAll(".sg-btn")].map((b) => b.textContent.trim()));
@@ -146,8 +146,8 @@ const busyRun = (stateAnswer) => once("busy-" + stateAnswer, async () => {
   await ctx.close(); return { t, btns, errors };
 });
 check(FILES.gate, "a seated diner whose table check TIMES OUT (the restaurant's system is busy) is told 'this one's on us' — not to check their wifi (item 1)", HOWS, async () => { const r = await busyRun("timeout"); return { ok: /this one.s on us/.test(r.t) && !/check your internet/i.test(r.t), note: r.t.split("\n").slice(1, 3).join(" · ") }; });
-check(FILES.gate, "…and their spot at the table is still safe, with Retry and Close offered", HOWS, async () => { const r = await busyRun("timeout"); return /your spot at the table is safe/.test(r.t) && r.btns.includes("Retry") && r.btns.includes("Close"); });
-check(FILES.gate, "…while a phone that genuinely lost its signal IS told to check its internet", HOWS, async () => { const r = await busyRun("abort"); return { ok: /Check your internet/.test(r.t) && !/on us/.test(r.t), note: r.t.split("\n").slice(1, 3).join(" · ") }; });
+check(FILES.gate, "…and their spot at the table is still safe, with Retry and Close offered", HOWS, async () => { const r = await busyRun("timeout"); return /your spot at the table is safe/i.test(r.t) && r.btns.includes("Retry") && r.btns.includes("Close"); });
+check(FILES.gate, "…while a phone that genuinely lost its signal IS told to check its internet", HOWS, async () => { const r = await busyRun("abort"); return { ok: /phone seems to be offline/.test(r.t) && /check your internet/i.test(r.t) && !/on us/.test(r.t), note: r.t.split("\n").slice(1, 3).join(" · ") }; });
 const joinRun = () => once("join", async () => {
   const { ctx, page, errors } = await stubbed(PHONE, { lfh_guest_settings: "sessionsOn", lfh_table_status: () => okJson({ ok: true, open: true, members: 2, session_id: "s-live" }), lfh_join_session: () => pg500("53300", "sorry, too many clients already") });
   await page.goto(`${BASE}/r/${FH}/menu`, { waitUntil: "networkidle" }); await settle(page, 800);
@@ -278,3 +278,34 @@ const NF = () => once("NF", async () => {
   const sessionCalls = log.filter((x) => /session|join|table_status/.test(x.fn)).length; await ctx.close(); return { status: res.status(), r, sessionCalls, errors };
 });
 check(FILES.ctx, "a slug nobody owns answers a not-found page — and no table-session widget opens on it", HOW, async () => { const r = await NF(); return { ok: r.status === 404 && !r.r.gate && !r.r.card && !r.r.ban && r.sessionCalls === 0, note: `${r.status} · ${r.r.text.replace(/\n/g, " ").slice(0, 70)}` }; });
+
+// ── H9 · owner 2026-10-13 "make sure this never happens": a fine phone is never blamed ──────────────
+// An answer the phone RECEIVED (a server error that is neither a timeout nor "offline") proves the
+// phone's internet works — the sheet must not tell the diner to check it, and must not claim it is ours.
+check(FILES.gate, "a server error that is neither busy nor offline blames NOBODY — no 'check your internet', no wifi mark", HOWS, async () => {
+  const r = await busyRun("odd");
+  return { ok: /couldn.t reach the restaurant.s system just now/i.test(r.t) && !/internet|wi-?fi|offline|connection/i.test(r.t) && !/on us/.test(r.t), note: r.t.split("\n").slice(0, 3).join(" · ") };
+});
+const banOdd = (mode) => once("ban-" + mode, async () => {
+  const { ctx, page, errors } = await stubbed(PHONE, { lfh_check_ban: () => okJson({ ok: true, banned: true, reason: "testing the wall", unban_requested: false }), lfh_request_unban: () => (mode === "abort" ? "abort" : pg500("XX000", "internal error")) });
+  await page.goto(`${BASE}/r/${FH}/menu`, { waitUntil: "networkidle" }); await settle(page, 1200);
+  await page.fill(".ban-input", "9876543210"); await page.click(".ban-btn"); await settle(page, 1800);
+  const t = await page.evaluate(() => (document.querySelector(".ban-fail") || {}).textContent || ""); await ctx.close(); return { t, errors };
+});
+check(FILES.ban, "the ban wall tells a phone that really lost its signal to check its connection", HOWS, async () => { const r = await banOdd("abort"); return { ok: /phone seems to be offline/i.test(r.t), note: r.t }; });
+check(FILES.ban, "…and an odd server error on the ban wall says 'not sent', blaming neither the number nor the connection", HOWS, async () => { const r = await banOdd("odd"); return { ok: /couldn.t send that just now — please try again/i.test(r.t) && !/connection|internet|number/i.test(r.t), note: r.t }; });
+
+// ── H10 · item 10 live: a private window is never told its name was saved ───────────────────────────
+// The review's save and the past-review rename are answered in the browser (no row written). A
+// private window is a phone whose storage refuses every write — exactly what Safari's used to do.
+const reviewRun = (blocked) => once("review-" + blocked, async () => {
+  const setup = blocked ? { fn: () => { try { Storage.prototype.setItem = function () { throw new DOMException("QuotaExceededError", "QuotaExceededError"); }; } catch {} }, arg: null } : null;
+  const { ctx, page, log, errors } = await stubbed(PHONE, { lfh_submit_review: () => okJson({ ok: true }), lfh_rename_my_reviews: () => okJson({ ok: true, renamed: 0 }) }, setup);
+  await page.goto(`${BASE}/r/${FH}/item/arancini-balls`, { waitUntil: "networkidle" }); await settle(page, 1200);
+  await page.click(".review-tab-btn >> nth=0"); await settle(page, 500);
+  await page.click('[aria-label="Rate 5 stars"]', { force: true }); await page.fill("#review-name", "Mia T4"); await page.fill(".review-textarea", "lovely"); await page.click("#submit-review"); await settle(page, 1800);
+  const toasts = await page.evaluate(() => window.__toasts.filter((x) => x && x.kicker === "review").map((x) => `${x.message} / ${x.subtitle}`));
+  const renamed = log.some((x) => x.fn === "lfh_rename_my_reviews"); await ctx.close(); return { toasts, renamed, errors };
+});
+check(FILES.gname, "a normal phone that gives a new name on a review is told 'saved as your name' (item 10)", HOWS, async () => { const r = await reviewRun(false); return { ok: r.toasts.some((x) => /^Review posted \/ saved as your name — Mia T4$/.test(x)), note: r.toasts.join(" · ") }; });
+check(FILES.gname, "…a private window (storage refuses every write) is NOT told that — just 'thanks for sharing' — and its past reviews are still renamed (item 10)", HOWS, async () => { const r = await reviewRun(true); return { ok: r.toasts.some((x) => /^Review posted \/ thanks for sharing$/.test(x)) && !r.toasts.some((x) => /saved as your name/.test(x)) && r.renamed, note: `${r.toasts.join(" · ")} · rename sent ${r.renamed}` }; });

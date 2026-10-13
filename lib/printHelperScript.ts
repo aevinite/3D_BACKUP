@@ -878,7 +878,7 @@ REM generated .bat and fails on any %VAR% read inside a block that sets VAR.
   set "GOT=!GOT: =!"
   if /I not "!GOT!"=="${SUMATRA.sha256}" (
     del /q "%WORK%\\sp.zip" 2>nul
-    echo   The PDF printer did not download correctly. Check the internet and start this again.
+    echo   The PDF printer did not download correctly. Please start this again.
     echo %DATE% %TIME%  SumatraPDF checksum mismatch - refused>>"%LOG%"
     timeout /t 12 /nobreak >nul & exit /b 1
   )

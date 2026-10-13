@@ -19,6 +19,13 @@ const isDuplicate = (msg: string) =>
 
 export type OpenedSession = Record<string, unknown> | null;
 
+// The columns a seated table is described by — the same list the waiter tablet's floor reads for a
+// session (app/api/tablet route, SESSION_COLS), plus who opened it. Named, never "*" (sweep #10 T4,
+// item 9, 2026-10-13): a wide read hands every future column — tax ids, notes, whatever is added
+// next — to a waiter's reply, and pays for it on every tap. Nothing on screen reads more than this.
+export const OPENED_SESSION_COLS =
+  "id, table_number, status, opened_at, opened_by, closed_at, bill_no, invoice_no, invoice_at, invoice_voided, discount, discount_note, cust_name, cust_phone";
+
 // openTableSession: return this table's open session, creating one if there isn't one yet.
 // Never throws on the concurrent-open race — it re-reads and returns the winning row.
 // Any OTHER database error still throws, so a real failure is never swallowed.
@@ -40,7 +47,7 @@ export async function openTableSession(
   // the route answers 503 + X-LFH-Busy, and public/panels/outbox.js queues the tap and replays it —
   // which is what every other write on a busy database already does.
   const readOpen = async (): Promise<OpenedSession> => {
-    const r = await sb.from("sessions").select("*")
+    const r = await sb.from("sessions").select(OPENED_SESSION_COLS)
       .eq("restaurant_id", rid).eq("table_number", tableNumber).neq("status", "closed")
       .limit(1);
     if (r.error) throw r.error;
@@ -54,7 +61,7 @@ export async function openTableSession(
   const ins = await sb.from("sessions").insert({
     table_number: tableNumber, status: "open", opened_by: opts.openedBy || "waiter",
     opened_at: nowIso, restaurant_id: rid,
-  }).select();
+  }).select(OPENED_SESSION_COLS);
   if (!ins.error) return (ins.data?.[0] ?? null) as OpenedSession;
 
   // Lost the race → the table is open, which is what the caller wanted. Return the winner.
