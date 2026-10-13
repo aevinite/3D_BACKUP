@@ -5,7 +5,7 @@
 //
 // Every row keeps its OLD id and is re-proven on today's code: driven on this terminal's own port
 // (:4411, French House's kitchen login), against the real dev database where the row asks for it.
-// The two test tickets this file creates (table 28, placed_by "sweep10-t11-rerun") are CANCELLED then
+// The two test tickets this file creates (table 26, placed_by "sweep10-t11-rerun") are CANCELLED then
 // soft-deleted by their own ids in a `finally` and on SIGINT; the one delivery ticket is cancelled and
 // removed by id; every setting it flips is restored. Aangan is never written to.
 import { writeFileSync } from "node:fs";
@@ -14,7 +14,7 @@ import { adminCookie } from "../login.mjs";
 
 const rows = [];
 const rr = (id, ledger, fn) => rows.push({ id, ledger, fn });
-const TABLE = "28";
+const TABLE = "26";   // registered in scripts/sweep/fixtureTables.mjs RESERVED (28 belongs to verify-void-on-joined-party)
 const created = { orders: [], agg: [] }; const restore = [];
 async function cleanup() {
   for (const fn of restore.splice(0).reverse()) { try { await fn(); } catch (e) { console.error("restore:", e.message); } }

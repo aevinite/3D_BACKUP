@@ -1,7 +1,9 @@
 // Screenshots for block D's LOOK rows — taken here, opened and looked at by the terminal, then deleted.
 import { openBoard, closeAll, sleep } from "./lib.mjs";
 const OUT = process.argv[2];
-const SAMPLE = () => { const T = (ms) => new Date(Date.now() - ms).toISOString();
+// inPanel marks the function as PAGE code (it runs in the kitchen panel, where state/render live).
+const inPanel = (fn) => fn;
+const SAMPLE = inPanel(() => { const T = (ms) => new Date(Date.now() - ms).toISOString();
   state.orders = [
     { id: "s1", status: "received", kot_no: 201, table_number: 3, created_at: T(60000), items: [] },
     { id: "s2", status: "preparing", kot_no: 202, table_number: 7, created_at: T(35 * 60000), allergies: ["nuts"], items: [] },
@@ -18,7 +20,7 @@ const SAMPLE = () => { const T = (ms) => new Date(Date.now() - ms).toISOString()
   state.platform = [{ id: "p1", source: "zomato", status: "accepted", kot_no: 90, created_at: T(20 * 60000), customer_name: "Asha", items: [{ title: "Veg Biryani", qty: 1 }] }];
   state.tableTags = { 7: "vip" }; state.tableNames = { 12: "Patio" };
   render();
-};
+});
 const shots = [
   ["desk-light", { width: 1280, height: 800 }, 1, "light"], ["desk-dark", { width: 1280, height: 800 }, 1, "dark"],
   ["a35-light", { width: 360, height: 780 }, 3, "light"], ["a35-dark", { width: 360, height: 780 }, 3, "dark"],

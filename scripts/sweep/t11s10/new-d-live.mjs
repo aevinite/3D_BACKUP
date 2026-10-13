@@ -36,7 +36,7 @@ check("P180450", H, "the served index.html points at the app.js it actually serv
 });
 
 // ── one real ticket, across the panels — P180451–P180470 ─────────────────────────────────────
-const TABLE = "29";
+const TABLE = "29";   // registered in scripts/sweep/fixtureTables.mjs RESERVED
 let order = null, dishes = [], restore = [];
 const pj = async () => (await db(`print_jobs?select=id,status&order_id=eq.${order.id}&limit=20`)) || [];
 async function cleanup() {
