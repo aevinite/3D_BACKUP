@@ -50,7 +50,7 @@ for (const th of ["dark", "light"]) {
   await p.goto(BASE + "/r/aangan-garden-restaurant/menu", { waitUntil: "domcontentloaded" });
   await p.locator(".food-card, .fc-card, [class*=card]").first().waitFor({ timeout: 60000 });
   await p.waitForTimeout(3000);
-  await p.locator('button[aria-label^="Add"], .fc-plus').first().click({ force: true }); await p.waitForTimeout(1500);
+  await p.locator('button[aria-label^="Add"], .fc-plus').first().evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); }); await p.waitForTimeout(1500);
   await p.locator(".order-confirm-close").click({ force: true }).catch(() => {}); await p.waitForTimeout(600);
   await p.evaluate(() => window.dispatchEvent(new Event("lfh:open-cart"))); await p.waitForTimeout(1000);
   const chips = p.locator(".allergy-chips .allergy-toggle");

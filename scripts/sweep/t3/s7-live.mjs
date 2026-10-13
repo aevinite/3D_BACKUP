@@ -26,8 +26,11 @@ const settle = (p, ms = 7000) => p.waitForTimeout(ms);
 const txt = async (loc) => { try { return (await loc.innerText()).replace(/\s+/g, " ").trim(); } catch { return ""; } };
 // A dish "+" — the same selector the sweep-6 runners use, and force:true because the cards
 // animate in and are never "stable" (a real tap on a phone does not wait for that).
+// A DOM click on the button itself, scrolled to the middle first (sweep #10 T3 round 2): on a 360px phone
+// the first dish's + sits under the floating waiter bell, and a forced click at that spot opened the
+// BELL's popup instead — P16427-P16429 read that as "no gate". Same fix in s7b-live and s7c-live.
 const addFirstDish = async (p, n = 0) => {
-  await p.locator('button[aria-label^="Add"], .fc-plus').nth(n).click({ force: true }).catch(() => {});
+  await p.locator('button[aria-label^="Add"], .fc-plus').nth(n).evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); }).catch(() => {});
   await p.waitForTimeout(1200);
 };
 

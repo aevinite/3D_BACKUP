@@ -6,6 +6,7 @@
 // FINISHED order's strip actually does. Writes nothing to any restaurant — the control restaurant
 // is read, and the two rows needing a session seed one in the PHONE's own storage.
 import { chromium } from "playwright";
+import { sessionsOnForRun } from "./sessionsOn.mjs";
 const BASE = process.env.T3_BASE || "http://localhost:4203";
 const AA = "/r/aangan-garden-restaurant/menu";
 const A35 = { viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
@@ -34,7 +35,7 @@ try {
     const card = p.locator(".item-card").first();
     await card.waitFor({ timeout: 30000 });
     const dishName = await txt(card.locator(".item-card-title, .fc-title, h3").first());
-    await p.locator('button[aria-label^="Add"], .fc-plus').first().click({ force: true });
+    await p.locator('button[aria-label^="Add"], .fc-plus').first().evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); });
     await p.waitForTimeout(1400);
     const popup = p.locator(".order-confirm");
     const popped = (await popup.count()) > 0;
@@ -50,11 +51,11 @@ try {
       P("P41338", "…and every one of them has a readable label", (await txt(chips.first())).length > 1);
       const esc = await (async () => { await p.keyboard.press("Escape"); await p.waitForTimeout(700); return (await p.locator(".order-confirm").count()) === 0; })();
       P("P41339", "Escape closes the dish popup", esc);
-      await p.locator('button[aria-label^="Add"], .fc-plus').first().click({ force: true }); await p.waitForTimeout(1200);
+      await p.locator('button[aria-label^="Add"], .fc-plus').first().evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); }); await p.waitForTimeout(1200);
       P("P41340", "…and it can be opened again afterwards", (await p.locator(".order-confirm").count()) === 1);
       await p.locator(".order-confirm-close").click(); await p.waitForTimeout(700);
       P("P41341", "the ✕ closes it too", (await p.locator(".order-confirm").count()) === 0);
-      await p.locator('button[aria-label^="Add"], .fc-plus').first().click({ force: true }); await p.waitForTimeout(1200);
+      await p.locator('button[aria-label^="Add"], .fc-plus').first().evaluate((el) => { el.scrollIntoView({ block: "center" }); el.click(); }); await p.waitForTimeout(1200);
       await p.goBack().catch(() => {}); await p.waitForTimeout(1200);
       P("P41342", "…and the phone's back button closes it rather than leaving the site", (await p.locator(".order-confirm").count()) === 0 && p.url().includes(AA));
     } else {
@@ -188,7 +189,10 @@ try {
     await ctx.close();
   }
   // ── the table card, seeded locally (P41391-P41400) ─────────────────────────────────────────────
-  {
+  { // the shared table bill only exists with dining sessions ON (French House is OFF by default): on
+    // for this block only, put back after (sweep #10 T3 round 2, item 8 — this block was missed then)
+  const sessionsBack = await sessionsOnForRun();
+  try {
     const ctx = await b.newContext(A35);
     await ctx.route("**/rest/v1/rpc/lfh_session_state*", (r) => r.abort());
     const p = await ctx.newPage();
@@ -213,6 +217,7 @@ try {
     P("P41399", "…with an honest empty state, since nothing was added", /empty|nothing/i.test(await txt(p.locator("#cart-panel"))), (await txt(p.locator("#cart-panel"))).slice(0, 70));
     P("P41400", "nothing this block did reached any restaurant", true, "the table read is blocked and the session is invented on the phone");
     await ctx.close();
+  } finally { await sessionsBack(); }
   }
 } finally { await b.close(); }
 console.log(`\nS7B LIVE: ${pass} passed, ${fails.length} failed`);
