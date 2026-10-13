@@ -48,6 +48,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 //   "signout" → 401 forever, the shape of a device whose session died
 //   "working" → 409 {retry:true} forever, the shape of a claim that never clears
 let mode = "ok";
+let profileBusyLeft = 0;   // section 14: how many more profile reads answer 503
 const seen = [];
 const server = http.createServer((req, res) => {
   if (req.url === "/page") {
@@ -59,9 +60,57 @@ const server = http.createServer((req, res) => {
       <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>
       <script>${readFileSync(join(ROOT, "public/panels/offline.js"), "utf8")}</script>`);
   }
+  // THE PROFILE DRAWER'S PAGE (section 12): the queue AND the shared profile helper that lives in
+  // maint.js, which is the caller that named no base. The boot read answers "not a staff member",
+  // so maint.js builds nothing and only its two shared helpers are on the page.
+  if (req.url === "/page-profile") {
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(`<!doctype html><meta charset="utf-8"><body><div class="topbar"><div class="top-actions"></div></div>
+      <script>window.LFH_TEST_PACING = { first: 300, base: 400, max: 800, wake: 50, stuck: 1500 };</script>
+      <script>${readFileSync(join(ROOT, "public/panels/maint.js"), "utf8")}</script>
+      <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>`);
+  }
+  // THE BUSY-BOOT PAGE (section 14): the drawer, the queue and the profile screen, booted while the
+  // profile read answers 503 — the shape of a database too busy to answer for the first moments.
+  // THE START-UP RACE PAGE (section 15): a change queued with no signal at DOMContentLoaded — while
+  // the queue's own start-up read of saved changes is still in flight.
+  if (req.url === "/page-race") {
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(`<!doctype html><meta charset="utf-8"><body><div class="topbar">panel</div>
+      <script>Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });</script>
+      <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>
+      <script>document.addEventListener("DOMContentLoaded", function () { window.__r = window.LFH_OUTBOX.send({ base: "", method: "POST", path: "/api/editor/tables/3/pay", body: {}, label: "Settle bill" }); });</script>`);
+  }
+  if (req.url === "/page-boot") {
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(`<!doctype html><meta charset="utf-8"><body><div class="topbar"><div class="top-actions"><button id="myProfileBtn" hidden>me</button></div></div>
+      <script>window.LFH_TEST_PACING = { first: 300, base: 400, max: 800, wake: 50, stuck: 1500, boot: 400 };</script>
+      <script>${readFileSync(join(ROOT, "public/panels/backstack.js"), "utf8")}</script>
+      <script>${readFileSync(join(ROOT, "public/panels/maint.js"), "utf8")}</script>
+      <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>
+      <script>${readFileSync(join(ROOT, "public/panels/myprofile.js"), "utf8")}</script>`);
+  }
+  if (req.method === "GET" && req.url === "/api/panel-profile") {
+    if (mode === "profile-busy" && profileBusyLeft > 0) {
+      profileBusyLeft--;
+      res.writeHead(503, { "content-type": "application/json" });
+      return res.end('{"error":"Server can\'t reach the database — retrying."}');
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    if (mode === "profile-busy") return res.end(JSON.stringify({ staff: true, id: "u1", username: "diagm1", role: "manager", name: "Diag", phone: "9", needsProfile: false, profileModule: true, profile: {}, completeness: { filled: 1, total: 8 }, job: {} }));
+    return res.end('{"staff":false}');
+  }
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
+    // "discount-down" (section 13) → table 5's DISCOUNT always answers 503; everything else is
+    // accepted and recorded. The shape of one route failing while the rest of the server is fine.
+    if (mode === "discount-down") {
+      if (/\/tables\/5\/discount/.test(req.url)) { res.writeHead(503, { "content-type": "application/json" }); return res.end('{"error":"busy"}'); }
+      seen.push({ id: req.headers["x-lfh-action-id"] || "", path: req.url, replay: req.headers["x-lfh-replay"] === "1" });
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end('{"ok":true}');
+    }
     if (mode === "signout") { res.writeHead(401, { "content-type": "application/json" }); return res.end('{"error":"login"}'); }
     if (mode === "working") { res.writeHead(409, { "content-type": "application/json" }); return res.end('{"error":"sync_in_progress","retry":true}'); }
     // "refuse200" → the shape SEVERAL real staff branches answer with: a 200 whose BODY says no,
@@ -334,6 +383,118 @@ const order = seen.filter((x) => /\/tables\/7\//.test(x.path)).map((x) => x.id);
    // ids are opaque; order is what matters
 if (order.length === 2 && order[0] !== order[1]) ok("…in the order they were made, not the order they were retried");
 else bad("the two changes for one table did not arrive as two distinct writes", JSON.stringify(order));
+
+// ── 12. a save that names no base still reaches its own address ──────────────────────────
+// Sweep #10 T16, 2026-10-12. maint.js's LFH_PROFILE_SAVE (the ⚙ drawer's Save details / Set PIN /
+// first-login card, and "My profile & pay") called the queue with no `base`, and the queue built
+// the address as base + path — "undefined/api/panel-profile", which the browser resolved against
+// the panel's page into a 404. Driven here through the REAL helper on a page at the site root, so
+// the broken address would have arrived as "/undefined/api/panel-profile".
+console.log("\n12) A profile save goes to /api/panel-profile, not to an address with 'undefined' in it");
+mode = "ok"; seen.length = 0;
+await page.goto(BASE + "/page-profile", { waitUntil: "domcontentloaded" });
+await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForFunction(() => !!(window.LFH_OUTBOX && window.LFH_PROFILE_SAVE), null, { timeout: 10000 });
+const prof = await page.evaluate(() => window.LFH_PROFILE_SAVE({ phone: "9000000000" }, { label: "save your phone number" })
+  .then((r) => ({ ok: r.ok, queued: r.queued }), (e) => ({ threw: String(e && e.message) })));
+const profPaths = seen.map((x) => x.path);
+if (profPaths.length === 1 && profPaths[0] === "/api/panel-profile") ok("the drawer's save reached /api/panel-profile");
+else bad("the drawer's save went somewhere else", JSON.stringify(profPaths));
+if (prof && prof.ok && !prof.queued && !prof.threw) ok("…and the person is told it saved, because it did");
+else bad("the save did not come back as saved", JSON.stringify(prof));
+if (!profPaths.some((p) => /undefined/.test(p))) ok("no request carried the word 'undefined' in its address");
+else bad("an address was built from a missing base", JSON.stringify(profPaths));
+// …and the queue's own default, for a change already saved on a device in the old shape.
+seen.length = 0;
+await page.evaluate(() => window.LFH_OUTBOX.send({ method: "POST", path: "/api/panel-profile", body: { phone: "1" }, label: "an old-shape save" }).catch(() => null));
+if (seen.length === 1 && seen[0].path === "/api/panel-profile") ok("the queue sends a base-less change to its own path");
+else bad("the queue still builds 'undefined' + path", JSON.stringify(seen.map((x) => x.path)));
+
+// ── 13. a change that runs out of tries IN THIS ROUND still holds the next one on its table ──
+// Sweep #10 T16, 2026-10-12. Section 11 proves the order holds while both changes are still trying,
+// and the start of every round stalls a table that is already owed something in `failed`. What was
+// not covered: the round in which a change GIVES UP. The discount moved to "Needs you" and the walk
+// carried straight on to the settle for the same table — so the bill went out at full price while
+// the discount sat there with a Try again button that would land on an already-settled bill.
+console.log("\n13) A discount that gives up mid-round still holds the settle behind it");
+await fresh(); seen.length = 0;
+mode = "discount-down";
+await page.evaluate(() => window.LFH_OUTBOX.__pause());
+const hold = await page.evaluate(async () => {
+  const O = window.LFH_OUTBOX;
+  const a = await O.send({ base: "", method: "POST", path: "/api/editor/tables/5/discount", body: { pct: 10 }, panel: "editor" });
+  const b = await O.send({ base: "", method: "POST", path: "/api/editor/tables/5/pay", body: {}, panel: "editor" });
+  // One round at a time: a round kicked by send() may still be running, and flush() returns at once
+  // while one is. Wait it out, then start the next — until the discount gives up (6 tries) or 40 goes.
+  for (let i = 0; i < 40 && !O.getSnapshot().failed.length; i++) {
+    while (O.isFlushing()) await new Promise((r) => setTimeout(r, 15));
+    await O.flush();
+  }
+  while (O.isFlushing()) await new Promise((r) => setTimeout(r, 15));
+  const s = O.getSnapshot();
+  return { a: a.why, b: b.why, queued: s.queued.map((x) => x.path), failed: s.failed.map((x) => ({ p: x.path, r: x.retryable })) };
+});
+if (hold.a === "busy" && hold.b === "behind") ok("the settle was queued behind the busy discount");
+else bad("the setup did not queue as expected", JSON.stringify(hold));
+if (hold.failed.some((f) => /\/5\/discount/.test(f.p) && f.r !== false)) ok("the discount ran out of tries and is waiting for a person, with Try again");
+else bad("the discount did not reach Needs you", JSON.stringify(hold.failed));
+if (!seen.some((x) => /\/tables\/5\/pay/.test(x.path))) ok("the settle for table 5 was NOT sent while its discount needs a person");
+else bad("the settle went out at full price the moment the discount gave up", JSON.stringify(seen.map((x) => x.path)));
+if (hold.queued.some((p) => /\/5\/pay/.test(p))) ok("…it is still waiting, behind the discount");
+else bad("the settle is not in the queue any more", JSON.stringify(hold));
+// …and it is released by the person's own choice, exactly as section 11's rule promises.
+mode = "ok";
+await page.evaluate(() => { const O = window.LFH_OUTBOX; const f = O.getSnapshot().failed[0]; return f ? O.retryOne(f.id) : null; });
+const released = await until(async () => seen.filter((x) => /\/tables\/5\//.test(x.path)).length === 2, 6000);
+const order5 = seen.filter((x) => /\/tables\/5\//.test(x.path)).map((x) => x.path.split("/").pop());
+if (released && order5.join(",") === "discount,pay") ok("Try again sent the discount FIRST, then the settle");
+else bad("after Try again the two did not go discount → settle", JSON.stringify(order5));
+await page.evaluate(() => window.LFH_OUTBOX.__resume());
+
+// ── 14. a busy moment at boot does not hide the Profile button, or claim you are not signed in ──
+// Sweep #10 T16, 2026-10-12. The profile read answered 503 twice at boot (a database too busy to
+// answer) and was healthy a second later. maint.js only ever asked again on the browser's `online`
+// event — which never fires when the connection was fine — so the panel had no ⚙ Profile (and no Sign
+// out) for the rest of the shift; and "My profile & pay" told a signed-in manager "You are not signed
+// in as a staff member". Both now treat a failed read as "could not ask", never as an answer.
+console.log("\n14) The profile read is busy at boot, then recovers");
+mode = "profile-busy"; profileBusyLeft = 2;
+await page.goto(BASE + "/page-boot", { waitUntil: "domcontentloaded" });
+await page.waitForFunction(() => !!(window.LFH_ME && window.LFH_PROFILE_GET), null, { timeout: 10000 });
+await wait(150);
+const bootSaid = await page.evaluate(async () => { await window.LFH_ME.open(); return document.getElementById("meBody").innerText; });
+if (!/not signed in/i.test(bootSaid)) ok("a busy read does not tell a signed-in manager they are not signed in");
+else bad("a busy read was reported as 'not signed in'", bootSaid.slice(0, 120));
+if (/Couldn't load your profile just now/.test(bootSaid)) ok(`…it says what happened and offers Try again ("${bootSaid.split("\n")[0]}")`);
+else bad("the failed read did not say what happened", bootSaid.slice(0, 120));
+await page.evaluate(() => window.LFH_ME.close());
+const backBy = await until(async () => page.evaluate(() => !!document.getElementById("staffSettingsBtn")), 8000);
+if (backBy) ok("the ⚙ Profile button (with Sign out) came back by itself once the server answered");
+else bad("the Profile button never came back after a busy boot — no Sign out for the rest of the shift");
+const mine = await until(async () => page.evaluate(() => { const b = document.getElementById("myProfileBtn"); return b && !b.hidden; }), 8000);
+if (mine) ok("…and so did 'My profile & pay'");
+else bad("'My profile & pay' stayed hidden after a busy boot");
+mode = "ok";
+
+// ── 15. a change queued while the queue is still starting up stays in the list ───────────────
+// Sweep #10 T16, 2026-10-12. boot() read the saved changes asynchronously and then ASSIGNED them over
+// the in-memory list, so a change queued during that read vanished from it — on the device, but not
+// shown, not sent and with no timer, until a reload. Missing 5 times out of 5 when driven.
+console.log("\n15) A change queued while the queue is still starting up");
+let raceMissed = 0, raceNoTimer = 0;
+for (let i = 0; i < 4; i++) {
+  await page.goto(BASE + "/page-race", { waitUntil: "load" });
+  await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
+  await page.reload({ waitUntil: "load" });
+  await wait(400);
+  const r = await page.evaluate(async () => { await window.__r; return { n: window.LFH_OUTBOX.getSnapshot().queued.length, t: window.LFH_OUTBOX.nextTryAt() }; });
+  if (r.n !== 1) raceMissed++;
+  if (!r.t) raceNoTimer++;
+}
+if (!raceMissed) ok("the change is still in the list, every time (4 of 4)"); else bad(`the change fell out of the list ${raceMissed} time(s) in 4`);
+if (!raceNoTimer) ok("…and it has a next attempt scheduled"); else bad(`no next attempt was scheduled ${raceNoTimer} time(s) in 4`);
+await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
 
 await browser.close();
 server.close();

@@ -85,8 +85,16 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   if (window.LFH_OUTBOX && window.LFH_OUTBOX.send) {
     // send() throws on a 4xx (a clash, a refused value — a person must see those) and resolves
     // { ok:true, queued:true } when it has kept the change for later. Same contract as api().
+    // `base: ""` — THE QUEUE BUILDS ITS ADDRESS AS base + path (sweep #10 T16, 2026-10-12). This
+    // call named no base from the day it was written (2026-08-05), so the address came out as
+    // "undefined/api/panel-profile": a RELATIVE address, which the browser resolved against the
+    // panel's own page to /panels/editor/undefined/api/panel-profile — a 404. Every save on this
+    // drawer and on "My profile & pay" (name, phone, PIN, the first-login card, personal details)
+    // answered "Not Found" for two months. outbox.js now treats a missing base as "" as well, so a
+    // save already sitting on a device in the old shape is delivered to the right place.
+    // Guarded by `npm run verify:outbox` (section 12).
     var j = await window.LFH_OUTBOX.send({
-      method: "POST", path: "/api/panel-profile", body: body,
+      base: "", method: "POST", path: "/api/panel-profile", body: body,
       panel: "panel-profile", label: (opts && opts.label) || "save your profile",
       expect: expect,
     });
@@ -257,7 +265,9 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     .lfh-sec:last-child{border-bottom:0}
     .lfh-sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,#7e93bd);margin:0 0 10px}
     .lfh-hd{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line,#1d2944)}
-    .lfh-x{margin-left:auto;background:var(--line,#243049);color:#fff;border:0;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px}
+    /* the panel's OWN ink, not white (sweep #10 T16, 2026-10-12): on the light skin --line is a pale
+       beige, and a white ✕ on it was all but invisible — the one way to close this drawer. */
+    .lfh-x{margin-left:auto;background:var(--line,#243049);color:var(--text,#fff);border:0;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px}
     .lfh-x:hover{filter:brightness(1.15)}
     .lfh-wrap{padding:26px 22px 4px;text-align:center}
     .lfh-bigav{width:66px;height:66px;border-radius:999px;margin:0 auto 12px;display:grid;place-items:center;font-weight:800;font-size:28px;color:#0b1220;box-shadow:0 0 0 5px rgba(148,163,184,.18)}
@@ -703,6 +713,13 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     let res = null;
     // the shared single-flight (top of this file) — myprofile.js reads the same endpoint at boot
     try { res = await window.LFH_PROFILE_GET(); } catch {}
+    // A BUSY MOMENT AT BOOT MUST NOT HIDE THE PROFILE BUTTON ALL SHIFT (sweep #10 T16, 2026-10-12).
+    // The only second chance used to be the browser's `online` event — which never fires when the
+    // connection was fine and the SERVER was slow. Driven: two 503s at boot, the server healthy a
+    // second later, and the panel had no ⚙ Profile (so no Sign out, no first-login card) until a
+    // reload. A read that failed for a server reason is asked again on a gentle, bounded backoff; a
+    // real answer (signed out, not staff) is final, exactly as before.
+    if (!res || (!res.ok && res.status >= 500)) { retryInitLater(); return; }
     if (res && res.ok) {
       profile = res.json;
       // { staff: false } → admin super-access / signed-out tab: there is no per-user
@@ -726,6 +743,22 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     // The floating "Menu live/offline" button was removed — the admin manages
     // maintenance from the /aevinite admin panel, and managers from their profile.
   }
+
+  // The waits between boot retries: one GET each, never faster than 5s, giving up after eight.
+  // LFH_TEST_PACING.boot (verify:outbox) shrinks them; nothing in the app sets it.
+  let BOOT_WAITS = [5000, 15000, 30000, 60000, 120000];
+  try { if (window.LFH_TEST_PACING && window.LFH_TEST_PACING.boot) BOOT_WAITS = BOOT_WAITS.map(() => window.LFH_TEST_PACING.boot); } catch (e) { /* shipped timings */ }
+  let bootTries = 0, bootTimer = null;
+  function retryInitLater() {
+    if (bootTimer || bootTries >= 8) return;
+    const wait = BOOT_WAITS[Math.min(bootTries, BOOT_WAITS.length - 1)];
+    bootTries++;
+    bootTimer = setTimeout(() => { bootTimer = null; if (!document.getElementById("staffSettingsBtn") && !profile) init(); }, wait);
+  }
+  // …and the moment somebody looks at the panel again, without waiting out the backoff.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && bootTries > 0 && !document.getElementById("staffSettingsBtn") && !profile) init();
+  });
 
   if (document.readyState !== "loading") init();
   else document.addEventListener("DOMContentLoaded", init);

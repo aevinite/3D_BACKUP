@@ -322,7 +322,13 @@
     // two waiters editing the same dish at the same moment is the common case.
     if (item.expect) headers["X-LFH-Expect"] = JSON.stringify(item.expect);
     if (replay) headers["X-LFH-Replay"] = "1";
-    return fetch(item.base + item.path, {
+    // `|| ""` — A CALLER THAT NAMES NO BASE STILL GETS ITS OWN ADDRESS (sweep #10 T16, 2026-10-12).
+    // `undefined + "/api/x"` is the string "undefined/api/x", a relative address the browser
+    // resolves against the panel's page, so the write went to /panels/<panel>/undefined/api/x and
+    // got a 404. That is exactly what every profile save did for two months (maint.js
+    // LFH_PROFILE_SAVE named no base). Defaulting here, not only at that call site, is what lets a
+    // change already saved on a device in that shape replay to the right place.
+    return fetch((item.base || "") + item.path, {
       method: item.method,
       headers: headers,
       body: item.body != null ? JSON.stringify(item.body) : undefined,
@@ -557,6 +563,23 @@
       // Retry and Dismiss on screen — in the connection panel and the offline bar — so the wait is
       // visible and the person has two ways to clear it. Either one unblocks the table.
       failed.forEach(function (f) { if (f.retryable !== false) stalled.add(orderKey(f)); });
+      // …AND ONE THAT GIVES UP IN THIS VERY ROUND STALLS ITS TABLE TOO (sweep #10 T16, 2026-10-12).
+      //
+      // The line above only covers a change that was ALREADY in `failed` when the round began. The
+      // round in which a change RUNS OUT of automatic tries — its sixth 5xx, its sixth timeout, its
+      // sixth "still working on it", its third signed-out — moved it to "Needs you" and then walked
+      // straight on, and the very next item was often the later change for the SAME table. Driven:
+      // a discount for table 5 answered 503 six times, the settle queued behind it went out in the
+      // round the discount gave up, and after Try again the server received "pay, discount" — the
+      // bill settled at full price and the discount landed on a settled bill. That is the exact swap
+      // this whole rule exists to stop, through the one door it did not watch.
+      //
+      // Same test as the line above, applied at the moment of giving up: only a RETRYABLE failure
+      // holds its table (a clash can never be sent, so it must never block — P04033).
+      const giveUp = async function (item, reason, info) {
+        await moveToFailed(item, reason, info);
+        if (item.retryable !== false) stalled.add(orderKey(item));
+      };
       let i = 0;
       while (i < queued.length && navigator.onLine !== false) {
         const item = queued[i];
@@ -575,7 +598,7 @@
           // buttons. Same treatment as the signed-out and still-busy cases beside it.
           item.netTries = (item.netTries || 0) + 1;
           if (item.netTries < NET_MAX_TRIES) { await idbPut(item); stalled.add(key); i++; continue; }
-          await moveToFailed(item, "The restaurant's system didn't answer", {
+          await giveUp(item, "The restaurant's system didn't answer", {
             plain: "The system didn't answer, several times over.",
             todo: "Check whether it already happened; if not, do it again.",
             retryable: true,
@@ -590,7 +613,7 @@
           // Signed out is a DEVICE-wide problem, not this table's: nothing else will get through
           // either, so park the whole round rather than walking the queue to fail every item.
           if (item.authTries < AUTH_MAX_TRIES) { await idbPut(item); break; }
-          await moveToFailed(item, "This device is signed out", {
+          await giveUp(item, "This device is signed out", {
             plain: "This device was signed out, so this couldn't be sent.",
             todo: "Sign in on this device, then tap Try again.",
             retryable: true,
@@ -617,7 +640,7 @@
           const j = await res.json().catch(() => null);
           if (j && j.ok === false) {
             const why = reasonText(j.reason);
-            await moveToFailed(item, "The system wouldn't accept this", {
+            await giveUp(item, "The system wouldn't accept this", {
               plain: why ? "It couldn't be applied — " + why + "." : "The system wouldn't accept this change.",
               todo: "Nothing was applied. Check that table and do it again if it's still needed.",
               // NOT retryable, for the same reason a clash isn't: every code above is a state
@@ -637,7 +660,7 @@
             // keeps saying it, something is wrong and a person should hear about it.
             item.busyTries = (item.busyTries || 0) + 1;
             if (item.busyTries < BUSY_MAX_TRIES) { await idbPut(item); stalled.add(key); i++; continue; }
-            await moveToFailed(item, "The system is still working on this one", {
+            await giveUp(item, "The system is still working on this one", {
               plain: "The system says it is still busy with this change.",
               todo: "Check whether it already happened; if not, do it again.",
               retryable: true,
@@ -647,7 +670,7 @@
           // A CLASH: while this device was offline, the same thing moved on (the table
           // was closed/billed, or another device changed exactly what this was changing).
           // The server refuses rather than overwrite it, and tells us how to say so.
-          await moveToFailed(item, (j && j.clash && j.clash.plain) || (j && j.error) || "Already changed", j && j.clash);
+          await giveUp(item, (j && j.clash && j.clash.plain) || (j && j.error) || "Already changed", j && j.clash);
           notify(); continue;
         }
         // A TRANSIENT server problem (5xx) is not a rejection — keep it queued so the
@@ -658,7 +681,7 @@
         if (res.status >= 500) {
           item.tries = (item.tries || 0) + 1;
           if (item.tries < SERVER_MAX_TRIES) { await idbPut(item); stalled.add(key); i++; continue; }
-          await moveToFailed(item, "The restaurant's system kept refusing this", {
+          await giveUp(item, "The restaurant's system kept refusing this", {
             plain: "The system couldn't accept this after several tries.",
             todo: "Check whether it already happened; if not, do it again.",
             retryable: true,
@@ -668,7 +691,7 @@
         // Any other 4xx → the server genuinely won't accept this action any more.
         // Surface it instead of losing it.
         const j = await res.json().catch(() => null);
-        await moveToFailed(item, (j && j.error) || ("Sync failed (" + res.status + ")"), j && j.clash); notify(); continue;
+        await giveUp(item, (j && j.error) || ("Sync failed (" + res.status + ")"), j && j.clash); notify(); continue;
       }
     } finally {
       flushing = false;
@@ -785,8 +808,14 @@
   // ── boot: load any actions left over from a previous (offline) session ──────
   async function boot() {
     const all = await idbAll();
-    queued = all.filter((x) => x.status !== "failed").sort((a, b) => a.at - b.at);
-    failed = all.filter((x) => x.status === "failed");
+    // MERGE, NEVER REPLACE (sweep #10 T16, 2026-10-12). The read above is asynchronous, and a change
+    // can be queued while it is still in flight — the panel's own start-up, or a tap in the first
+    // moment on a slow tablet. Assigning the saved list over the in-memory one threw that change out
+    // of the list: still on the device, but not shown, not sent and with no timer, until a reload.
+    // Driven: queued at DOMContentLoaded with no signal, it was missing 5 times out of 5.
+    const known = new Set(queued.concat(failed).map((x) => x.id));
+    all.forEach((x) => { if (!known.has(x.id)) (x.status === "failed" ? failed : queued).push(x); });
+    queued.sort((a, b) => a.at - b.at);
     notify();
     // Flush now (if online), whenever the connection returns, and whenever the person comes
     // back to this panel. The last two matter because the first two can BOTH stay silent while

@@ -74,6 +74,12 @@ const hasNot = (f, re, why) => {
   if (re.test(s)) fails.push(`${f}: ${why}`);
 };
 
+// ── maint.js — the drawer's ✕ must be visible on BOTH skins (sweep #10 T16, 2026-10-12) ──────────
+// It sits on var(--line), which is near-black on the dark skin and pale beige on the light one, so a
+// hard-coded white glyph vanished on light. Its ink has to be the panel's own --text.
+has("maint.js", /\.lfh-x\{[^}]*color:var\(--text,#fff\)/, "the drawer's close ✕ is hard-coded white again — on the light skin it is all but invisible on its beige button");
+hasNot("maint.js", /\.lfh-x\{[^}]*color:#fff/, "the drawer's close ✕ is white on a token background that is pale on the light skin");
+
 // ── outbox.js — a change put back goes where it belongs ───────────────────────────────────────
 // A discount that ran out of automatic tries, retried by hand, used to land AFTER a later
 // "Mark paid" on the same bill — so the bill settled at the full amount and the discount was
@@ -334,8 +340,26 @@ has("outbox.js", /const UNTABLED/, "per-table ordering is gone; one stuck change
 // 5/pay was sent immediately. The bill settles at the FULL amount and the discount the person is
 // about to retry lands on a settled bill. The round must stall a table that is already owed
 // something retryable, before the walk starts (T9 sweep #7, 2026-08-22).
-has("outbox.js", /failed\.forEach\(function \(f\) \{ if \(f\.retryable !== false\) stalled\.add\(orderKey\(f\)\); \}\);[\s\S]{0,80}?let i = 0;/,
+// The window before `let i = 0;` was 80 characters until sweep #10 T16 put the give-up helper there
+// (the line below this one): the forEach must still come BEFORE the walk, which is what this checks.
+has("outbox.js", /failed\.forEach\(function \(f\) \{ if \(f\.retryable !== false\) stalled\.add\(orderKey\(f\)\); \}\);[\s\S]{0,3000}?let i = 0;/,
   "flush() no longer stalls a table that already owes a retryable change — a later Mark paid on that table is sent ahead of it, and the bill settles at the wrong amount");
+// …AND A CHANGE THAT GIVES UP IN THIS ROUND STALLS ITS TABLE TOO (sweep #10 T16, 2026-10-12). Driven:
+// a discount's sixth 503 moved it to "Needs you" and the walk sent the settle for the same table
+// straight after. Every give-up inside the walk goes through giveUp(), which stalls when retryable.
+has("outbox.js", /const giveUp = async function \(item, reason, info\) \{\s*await moveToFailed\(item, reason, info\);\s*if \(item\.retryable !== false\) stalled\.add\(orderKey\(item\)\);/,
+  "a change that runs out of tries mid-round no longer holds its table — the settle behind a failed discount goes out at full price");
+// …and NO branch of the walk may bypass it: a direct moveToFailed() inside the walk is how the next
+// new branch would re-open the same swap without anyone noticing.
+{
+  const s = fileFor("outbox.js");
+  if (s != null) {
+    const a = s.indexOf("let i = 0;\n      while (i < queued.length"), b = s.indexOf("} finally {\n      flushing = false;");
+    if (a < 0 || b < a) fails.push("outbox.js: the flush walk could not be found — re-derive this check, never let it read an empty slice");
+    else if (/moveToFailed\(/.test(s.slice(a, b))) fails.push("outbox.js: a branch of the flush walk calls moveToFailed() directly instead of giveUp() — a change that gives up there will not hold its table");
+  }
+}
+
 
 // realtime: the connection budget and the no-amplifier rule
 has("realtime.js", /if \(sbPromise === p\) sbPromise = null/, "a failed realtime boot is remembered forever again");

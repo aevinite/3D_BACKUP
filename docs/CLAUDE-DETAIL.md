@@ -502,8 +502,11 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
   re-checks the per-restaurant panel entitlement and the recycle bin on **every request** (30s
   cache), so switching a panel off cuts an already-open tab instead of only blocking new logins.
 - **`/api/maintenance`** — the same `requireRole("manager")`, which a logged-in manager OR the admin
-  super-user passes, then `panelRestaurantId` for the acting restaurant. It is NOT one of the panel
-  `[...path]` families, so a family-shaped list walks straight past it.
+  super-user passes, then `panelRestaurantId` for the acting restaurant — except an OWNER (who also
+  passes `requireRole("manager")`): an owner must name a restaurant with `?rid=` and it must be one
+  they own (`enabledOwnedRestaurantIds`, the same check as the editor route's `editorScope`), never the
+  owner row's "home" anchor (sweep #10 T16, 2026-10-12; `npm run verify:public-endpoints`). It is NOT
+  one of the panel `[...path]` families, so a family-shaped list walks straight past it.
 - **`/api/issue-media`** — the staff cookie first, then the admin cookie; the restaurant comes from
   the session, never the body. Its own route because the body is multipart.
 - **`/api/print-agent/**`** — an `X-LFH-Agent` token, minted per machine and stored only as a

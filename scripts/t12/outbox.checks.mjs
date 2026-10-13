@@ -132,7 +132,11 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
     !/Tries < [0-9]/.test(flush));
   check("P04050", "any other 4xx surfaces instead of vanishing", () => {
     const tail = flush.slice(flush.lastIndexOf("res.status >= 500"));
-    return /await moveToFailed\(item, \(j && j\.error\) \|\| \("Sync failed \("/.test(tail);
+    // giveUp (sweep #10 T16) is moveToFailed plus "stall this table if it is still retryable" — it
+    // must still MOVE the change to failed, which is what this row is about.
+    const viaGiveUp = /const giveUp = async function \(item, reason, info\) \{\s*await moveToFailed\(item, reason, info\);/.test(flush);
+    return /await moveToFailed\(item, \(j && j\.error\) \|\| \("Sync failed \("/.test(tail) ||
+      (viaGiveUp && /await giveUp\(item, \(j && j\.error\) \|\| \("Sync failed \("/.test(tail));
   });
   check("P04051", "nothing is ever deleted on failure - it moves to failed, never away", () => {
     const m = fnBody(S, "async function moveToFailed(");
@@ -170,7 +174,10 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
   check("P04059", "boot() restores a previous session's queue in `at` order", () =>
     /\.sort\(\(a, b\) => a\.at - b\.at\)/.test(boot));
   check("P04060", "boot() separates failed from queued by stored status", () =>
-    /x\.status !== "failed"/.test(boot) && /x\.status === "failed"/.test(boot));
+    // sweep #10 T16: boot now MERGES the saved list into memory (x.status === "failed" ? failed : queued)
+    // instead of filtering it twice — the separation by stored status is the same.
+    (/x\.status !== "failed"/.test(boot) && /x\.status === "failed"/.test(boot)) ||
+    /\(x\.status === "failed" \? failed : queued\)\.push\(x\)/.test(boot));
   check("P04061", "coming back to the tab wakes the queue", () =>
     /visibilitychange", \(\) => \{ if \(!document\.hidden\) wake\(\); \}/.test(boot));
   check("P04062", "window focus wakes the queue", () => /"focus", \(\) => wake\(\)/.test(boot));

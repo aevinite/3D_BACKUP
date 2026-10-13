@@ -22,6 +22,9 @@
    ══════════════════════════════════════════════════════════════════════════════ */
 (function () {
   var el = null, off = null, me = null, saving = false;
+  // TRUE when the last read of /api/panel-profile did not get an ANSWER — it threw, or the server
+  // said 5xx. That is "we could not ask", never "you have no profile" (see render and available).
+  var readFailed = false;
 
   var money = function (n) { return "₹" + Math.round(Number(n || 0)).toLocaleString("en-IN"); };
   var esc = function (s) {
@@ -69,7 +72,9 @@
     // the top of maint.js). It only coalesces CONCURRENT reads and drops the entry the moment it
     // settles, so the re-read after a save below is still a real, fresh request.
     if (window.LFH_PROFILE_GET) {
-      me = (await window.LFH_PROFILE_GET()).json;
+      var got = await window.LFH_PROFILE_GET();
+      readFailed = !got.ok && got.status >= 500;
+      me = readFailed ? null : got.json;
     } else {
       // A DEADLINE ON THE FALLBACK READ TOO (T9, second sweep of #7). This path runs only when
       // maint.js is not on the page to share its single-flight; with no ceiling, a server that
@@ -78,7 +83,8 @@
       // carries on without if there is none.
       var sig = (window.LFH_ASK && window.LFH_PANEL_DEADLINE) ? window.LFH_PANEL_DEADLINE() : undefined;
       var r = await fetch("/api/panel-profile", { cache: "no-store", signal: sig });
-      me = await r.json();
+      readFailed = !r.ok && r.status >= 500;
+      me = readFailed ? null : await r.json();
     }
     return me;
   }
@@ -103,6 +109,17 @@
   function render() {
     var body = el && el.querySelector("#meBody");
     if (!body) return;
+    // A READ THAT GOT NO ANSWER IS NOT "YOU ARE NOT STAFF" (sweep #10 T16, 2026-10-12). A busy moment
+    // on the server (a 503) or a dropped request used to land in the branch below and tell a signed-in
+    // manager "You are not signed in as a staff member" — false, and alarming. Say what happened, and
+    // offer the one thing that helps.
+    if (readFailed) {
+      body.innerHTML = '<div class="me-empty">Couldn\'t load your profile just now — the system didn\'t answer.' +
+        '<div style="margin-top:12px"><button class="me-back" type="button" id="meRetry">Try again</button></div></div>';
+      var again = body.querySelector("#meRetry");
+      if (again) again.onclick = function () { open(); };
+      return;
+    }
     if (!me || me.error || me.staff === false) {
       body.innerHTML = '<div class="me-empty">You are not signed in as a staff member, so there is no profile to show.</div>';
       return;
@@ -269,7 +286,7 @@
     el.querySelector("#meBack").onclick = close;
     // The phone's back button must close THIS layer, never leave the site (the app's rule).
     if (window.LFH_BACK) off = window.LFH_BACK.layer("my-profile", close);
-    try { await load(); } catch (e) { /* offline: render says so below */ }
+    try { await load(); } catch (e) { readFailed = true; /* no answer at all: render says so */ }
     render();
   }
 
@@ -288,9 +305,21 @@
     if (availability !== null) return availability;
     try {
       var j = await load();
+      if (readFailed) { retryLater(); return false; }   // no answer this time — not remembered
       availability = !!(j && !j.error && j.profileModule);
-    } catch (e) { return false; }   // this time, no. Not remembered — ask again on the next call.
+    } catch (e) { retryLater(); return false; }   // this time, no. Not remembered — ask again on the next call.
     return availability;
+  }
+
+  // …AND ASKED AGAIN WITHOUT WAITING FOR AN 'online' EVENT (sweep #10 T16). A busy server is not an
+  // offline device, so that event never comes; a gentle, bounded backoff — one GET each, never
+  // faster than 5s, eight goes at most — is what brings the button back once the server answers.
+  var retryTimer = null, retries = 0, WAITS = [5000, 15000, 30000, 60000, 120000];
+  try { if (window.LFH_TEST_PACING && window.LFH_TEST_PACING.boot) WAITS = WAITS.map(function () { return window.LFH_TEST_PACING.boot; }); } catch (e) { /* shipped timings */ }
+  function retryLater() {
+    if (retryTimer || retries >= 8) return;
+    var w = WAITS[Math.min(retries, WAITS.length - 1)]; retries++;
+    retryTimer = setTimeout(function () { retryTimer = null; if (availability !== true) wireManagerButton(); }, w);
   }
 
   window.LFH_ME = { open: open, close: close, available: available };

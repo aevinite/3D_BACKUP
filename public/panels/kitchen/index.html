@@ -61,11 +61,11 @@
   </div>
 
   <div id="toasts" class="toasts"></div>
-  <script src="/panels/maint.js?v=293989ce"></script>
+  <script src="/panels/maint.js?v=3160e729"></script>
   <script src="/panels/realtime.js?v=122c17eb"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/netretry.js?v=064c1971"></script>
-  <script src="/panels/outbox.js?v=79344a64"></script>
+  <script src="/panels/netretry.js?v=146879f3"></script>
+  <script src="/panels/outbox.js?v=78c6624b"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
   <script src="/panels/connbadge.js?v=689dbf4f"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
@@ -78,9 +78,9 @@
        these tags the wrong way. T4 sweep, 2026-08-11.) -->
   <script src="/panels/swreg.js?v=0d429b78"></script>
   <script src="/panels/offline.js?v=9e03ae1a"></script>
-  <script src="/panels/backstack.js?v=efe8afdb"></script>
+  <script src="/panels/backstack.js?v=0ed28480"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
-  <script src="/panels/errlog.js?v=81a35c3c"></script>
+  <script src="/panels/errlog.js?v=2264cbbf"></script>
   <!-- shrinkimg.js: caps an uploaded photo at 1280px and re-encodes it as WebP BEFORE it is
        sent (owner, 2026-09-17: "compress all images"). Used by the dish photo in Edit menu and
        by a photo attached to an issue; it hands back the original file if anything goes wrong. -->

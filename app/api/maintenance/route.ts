@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { requireRole } from "@/lib/userAuth";
 import { panelRestaurantId } from "@/lib/panelScope";
+import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,21 @@ async function scope(req: NextRequest, forWrite = false): Promise<{ rid: string;
         : NextResponse.json({ error: "Not authorised." }, { status: 401 }),
     };
   }
-  const rid = panelRestaurantId(req, g);
+  // AN OWNER IS SCOPED TO A RESTAURANT THEY OWN, NEVER TO THEIR LOGIN'S "HOME" ROW (sweep #10 T16,
+  // 2026-10-12). requireRole("manager") lets an owner through (owner ⊇ everything), and an owner's
+  // staff row carries restaurant #1's id as a schema anchor, not as anything they own (lib/ownerHome).
+  // panelRestaurantId hands that anchor back — so an owner's request read and could flip restaurant
+  // #1's guest-menu switch instead of their own. The manager panel's route has always checked an
+  // owner's ?rid= against their own portfolio first (editorScope); this route now does the same, and
+  // an owner with no restaurant named is refused rather than guessed. Nothing on screen calls this as
+  // an owner today (the drawer shows the switch to managers only), so no screen changes.
+  if (g.user && g.user.role === "owner") {
+    const urlRid = req.nextUrl.searchParams.get("rid");
+    if (!urlRid) return { error: NextResponse.json({ error: "Open this from the restaurant whose menu you want to change." }, { status: 400 }) };
+    const owned = await enabledOwnedRestaurantIds(g.user.id);
+    if (!owned.includes(urlRid)) return { error: NextResponse.json({ error: "You can only change restaurants you own." }, { status: 403 }) };
+  }
+  const rid = g.user && g.user.role === "owner" ? req.nextUrl.searchParams.get("rid") : panelRestaurantId(req, g);
   if (!rid) return { error: NextResponse.json({ error: "No restaurant in context." }, { status: 400 }) };
 
   // WHO MAY TAKE THE MENU DOWN (owner, 2026-08-01). Taking it down stops every guest ordering,

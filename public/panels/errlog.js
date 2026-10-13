@@ -134,7 +134,11 @@
   // surface via the connection badge going red.
   var NETWORK_NOISE = [
     "Failed to fetch",                              // Chrome / Edge
-    "NetworkError when attempting to fetch",        // Firefox
+    // Firefox's WHOLE sentence (sweep #10 T16, 2026-10-12). This entry used to hold only the first five
+    // words, and since the match became whole-message (2026-08-16) that no longer equalled what Firefox
+    // really throws, which ends in the word resource and a full stop. So every Wi-Fi blip on a Firefox
+    // staff device filed a red crash row and could ping the owner's phone. Corrected, not widened.
+    "NetworkError when attempting to fetch resource", // Firefox
     "Load failed",                                  // Safari (fetch abort/offline)
     "The network connection was lost",              // iOS / Safari
     "The Internet connection appears to be offline",// iOS / Safari

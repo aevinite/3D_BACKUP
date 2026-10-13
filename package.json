@@ -110,6 +110,8 @@
     "verify:merge": "node scripts/verify-merge-party.mjs",
     "verify:busy": "node scripts/verify-busy-server.mjs",
     "verify:outbox": "node scripts/verify-outbox-drain.mjs",
+    "verify:panel-backstack": "node scripts/verify-panel-backstack.mjs",
+    "verify:public-endpoints": "node scripts/verify-public-endpoints.mjs",
     "verify:order-retry": "node scripts/verify-order-retry.mjs",
     "verify:basket": "node scripts/verify-basket.mjs",
     "verify:guest-doors": "node scripts/verify-guest-doors.mjs",
