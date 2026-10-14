@@ -506,7 +506,12 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
   passes `requireRole("manager")`): an owner must name a restaurant with `?rid=` and it must be one
   they own (`enabledOwnedRestaurantIds`, the same check as the editor route's `editorScope`), never the
   owner row's "home" anchor (sweep #10 T16, 2026-10-12; `npm run verify:public-endpoints`). It is NOT
-  one of the panel `[...path]` families, so a family-shaped list walks straight past it.
+  one of the panel `[...path]` families, so a family-shaped list walks straight past it. WHO may flip
+  the switch is one rule in `lib/maintenance.ts` (Access → Menu → "Put menu on maintenance" + its
+  "Who may do it"), shared with the owner's Settings page, which writes through
+  `PATCH /api/owner/settings { maintenance }` under `ownerScope` (sweep #10 T16 round 2, 2026-10-15).
+  The READ answers `canChange` so the manager's drawer leaves the control off the screen when it
+  was not handed over (R67).
 - **`/api/issue-media`** — the staff cookie first, then the admin cookie; the restaurant comes from
   the session, never the body. Its own route because the body is multipart.
 - **`/api/print-agent/**`** — an `X-LFH-Agent` token, minted per machine and stored only as a
