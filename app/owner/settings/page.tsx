@@ -1,6 +1,7 @@
 "use client";
 // Owner · Settings — the owner's ACCOUNT page (not the restaurant's admin config, which
-// stays with Aevidine/admin). Three safe things an owner controls or should see:
+// stays with Aevidine/admin). The safe things an owner controls or should see (plus, since sweep #10
+// T16 round 2, the guest menu's maintenance switch where the admin handed it over):
 //   1. Appearance — light/dark, shared with the header toggle (localStorage + cookie).
 //   2. Change password — self-service, verified server-side; re-login after.
 //   3. What's enabled — a read-only view of the owner-panel sections the admin turned on,
@@ -59,6 +60,11 @@ type Data = {
   // "this restaurant has printing off". Without this the two are the same screen: nothing at all.
   printingOk?: boolean;
   modules?: Module[];
+  // The guest menu's maintenance switch, one row per restaurant whose switch the admin HANDED OVER
+  // (sweep #10 T16 round 2). Absent or empty = nothing renders (R36). `maintenanceOk:false` = the read
+  // failed, which the card says rather than vanishing.
+  maintenance?: { restaurant_id: string; name: string; on: boolean }[];
+  maintenanceOk?: boolean;
 };
 // REJECTED (owner, 2026-08-18): DO NOT show the owner which sections are switched OFF.
 // *"owner can't know which option are not given to them only admin should know that"* — said after
@@ -191,6 +197,53 @@ export default function OwnerSettings() {
     return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
   }, [showsPrinting, loadPrinting]);
 
+  // ── THE GUEST MENU'S MAINTENANCE SWITCH (sweep #10 T16 round 2, owner 2026-10-15) ─────────────
+  // "Owner should get, in the setting thing, the maintenance switch." Taking the menu down stops
+  // every guest ordering, so going OFFLINE asks first, in the card itself (one tap to ask, one to
+  // confirm); bringing it back is one tap, because that is the urgent direction. The row only moves
+  // when the server says it moved — a refusal or a dropped connection leaves it exactly as it was and
+  // says so. `on` is the END STATE sent, never a toggle, so a manager flipping it at the same moment
+  // cannot make this press do the opposite of what the owner asked.
+  const [menuOn, setMenuOn] = useState<Record<string, boolean>>({});
+  const [askOff, setAskOff] = useState<string | null>(null);
+  const [menuBusy, setMenuBusy] = useState<string | null>(null);
+  const [menuSays, setMenuSays] = useState<{ rid: string; text: string; bad: boolean } | null>(null);
+  useEffect(() => {
+    if (!data?.maintenance) return;
+    setMenuOn(Object.fromEntries(data.maintenance.map((m) => [m.restaurant_id, m.on])));
+  }, [data]);
+  const setGuestMenu = useCallback(async (rid: string, offline: boolean) => {
+    setMenuBusy(rid); setMenuSays(null); setAskOff(null);
+    try {
+      const r = await fetch(`/api/owner/settings${scp}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maintenance: { restaurant_id: rid, on: offline } }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "The server wouldn't change it.");
+      const now = j.maintenance === true;
+      setMenuOn((m) => ({ ...m, [rid]: now }));
+      setMenuSays({ rid, bad: false, text: now
+        ? "Done — the guest menu is offline. Guests see “we’ll be right back” until you bring it back."
+        : "Done — the guest menu is back online. Guests can browse and order again." });
+    } catch (e) {
+      // The connection is named ONLY when this device says it is offline (owner, 2026-10-13).
+      const why = typeof navigator !== "undefined" && navigator.onLine === false
+        ? "this device is offline"
+        : e instanceof TypeError ? "we couldn't reach the server" : (e instanceof Error ? e.message : String(e));
+      setMenuSays({ rid, bad: true, text: `Couldn't change it: ${why}. The guest menu has NOT changed.` });
+    } finally { setMenuBusy(null); }
+  }, [scp]);
+  // A manager may flip it from their own panel while this page is open, so the card re-reads when the
+  // owner comes back to the tab — once, and only while the card is on the page.
+  const showsMenu = !!(data?.maintenance && data.maintenance.length);
+  useEffect(() => {
+    if (!showsMenu) return;
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [showsMenu, load]);
+
   // ── Appearance (mirrors OwnerShell.toggleSkin) ──
   const [skin, setSkin] = useState<"light" | "dark">("dark");
   useEffect(() => { try { const s = localStorage.getItem("aevidine_skin"); if (s === "light" || s === "dark") setSkin(s); } catch {} }, []);
@@ -249,6 +302,78 @@ export default function OwnerSettings() {
           </button>
         </div>
       </div>
+
+      {/* ═══ GUEST MENU — TAKE IT DOWN / BRING IT BACK (sweep #10 T16 round 2, owner 2026-10-15) ═══
+          Only for a restaurant whose switch the admin handed over on Access & permissions → Menu →
+          "Put menu on maintenance". A restaurant without it is not mentioned (R36). */}
+      {data && data.maintenanceOk === false && (
+        <div className="adm-card" style={{ marginBottom: 14 }}>
+          <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Guest menu</div>
+          <div className="adm-muted" style={{ fontSize: 13 }}>
+            Couldn&rsquo;t load this just now. Nothing has changed &mdash; refresh the page to try again.
+          </div>
+        </div>
+      )}
+      {showsMenu && (
+        <div className="adm-card" style={{ marginBottom: 14 }} data-guest-menu-card>
+          <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Guest menu</div>
+          <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+            Take the menu offline when the kitchen can&rsquo;t take orders. Guests see &ldquo;we&rsquo;ll be right back&rdquo; and
+            can&rsquo;t browse or order until you bring it back.
+          </p>
+          <div style={{ display: "grid", gap: 8 }}>
+            {data!.maintenance!.map((m) => {
+              const off = menuOn[m.restaurant_id] ?? m.on;
+              const busy = menuBusy === m.restaurant_id;
+              const asking = askOff === m.restaurant_id;
+              const says = menuSays && menuSays.rid === m.restaurant_id ? menuSays : null;
+              return (
+                <div key={m.restaurant_id} data-guest-menu={m.restaurant_id}
+                  style={{ border: "var(--border)", borderRadius: 9, padding: "10px 12px" }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    {data!.maintenance!.length > 1 ? <b style={{ fontSize: 13.5 }}>{m.name || "This restaurant"}</b> : null}
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700,
+                      color: off ? "var(--adm-danger, #dc2626)" : "var(--adm-ok, #16a34a)" }}>
+                      <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
+                      {off ? "Offline — guests can’t order" : "Live — guests can order"}
+                    </span>
+                    {/* The question comes BEFORE its Yes button on every width — on a phone the buttons
+                        wrap under the status, and a question under "Yes, take it offline" is read
+                        after the thumb is already on Yes. */}
+                    {asking && !off ? (
+                      <p style={{ fontSize: 12.5, margin: 0, fontWeight: 600, flexBasis: "100%", order: 1 }}>
+                        Every guest stops being able to browse or order until you bring it back. Take it offline?
+                      </p>
+                    ) : null}
+                    <span style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", order: 2 }}>
+                      {off ? (
+                        <button type="button" className="adm-btn ok" disabled={busy} onClick={() => setGuestMenu(m.restaurant_id, false)}>
+                          {busy ? "Bringing it back…" : "Bring menu back online"}
+                        </button>
+                      ) : asking ? (
+                        <>
+                          <button type="button" className="adm-btn danger" disabled={busy} onClick={() => setGuestMenu(m.restaurant_id, true)}>
+                            {busy ? "Taking it offline…" : "Yes, take it offline"}
+                          </button>
+                          <button type="button" className="adm-btn" disabled={busy} onClick={() => setAskOff(null)}>Cancel</button>
+                        </>
+                      ) : (
+                        <button type="button" className="adm-btn" disabled={busy} onClick={() => { setMenuSays(null); setAskOff(m.restaurant_id); }}>
+                          Take menu offline
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                  {says ? (
+                    <p role="status" style={{ fontSize: 12.5, margin: "8px 0 0", fontWeight: 600,
+                      color: says.bad ? "var(--adm-danger, #dc2626)" : undefined }}>{says.text}</p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ═══ KITCHEN PRINTING (owner, 2026-08-18) ═══
           ⚠️ NARROWED (owner, 2026-09-14) — see docs/REJECTED-IDEAS.md. The rule below ("the owner

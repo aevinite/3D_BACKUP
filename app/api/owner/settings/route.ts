@@ -2,6 +2,8 @@
 //   GET  → the signed-in owner's account view: their name, the owner-panel sections the
 //          admin has enabled for them (read-only — the admin controls these), and the list
 //          of restaurants they own. Scoped via ownerScope; no money, no other tenant.
+//   PATCH → an owner flips a module the admin handed over, OR takes a restaurant's guest menu down /
+//          brings it back ({ maintenance: { restaurant_id, on } }) where the admin handed THAT over.
 //   POST → self password change (the logged-in OWNER only): verify current, set new, bump
 //          token_version. That invalidates the current cookie, so the client re-logs in.
 import { NextRequest, NextResponse } from "next/server";
@@ -14,6 +16,8 @@ import { passwordFields } from "@/lib/passwordVault";
 import { MODULE_DEFS } from "@/lib/accessModel";
 import { logAction } from "@/lib/oplog";
 import { rateAllowed, rateResetOnSuccess } from "@/lib/rateLimit";
+import { maintenanceGrant, mayFlipMaintenance, setServiceMode } from "@/lib/maintenance";
+import type { OwnerScope } from "@/lib/ownerScope";
 
 export const dynamic = "force-dynamic";
 
@@ -231,7 +235,38 @@ export async function GET(req: NextRequest) {
     console.error("[owner/settings] the printing block failed:", e instanceof Error ? e.message : e);
     printingOk = false;
   }
-  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules, printing, printingOk });
+  // ── THE GUEST MENU'S MAINTENANCE SWITCH (sweep #10 T16 round 2, owner 2026-10-15: "owner should
+  //    get, in the setting thing, the maintenance switch") ─────────────────────────────────────────
+  // Access & permissions → Menu → "Put menu on maintenance" has always said "Only the owner sees the
+  // control" at its default — and there was no control here, so at the default nobody at the
+  // restaurant could take the menu down. One row per restaurant on this page whose switch the admin
+  // HANDED OVER; a restaurant without it is not mentioned at all (R36 — what is withheld is never
+  // shown, not even as "off"). Two small reads by primary key over restaurants already listed.
+  // `maintenanceOk:false` = we could not look, which the page says, rather than drawing "nothing".
+  const maintenance: { restaurant_id: string; name: string; on: boolean }[] = [];
+  let maintenanceOk = true;
+  {
+    const ids = restaurants.map((r) => r.id);
+    if (ids.length) {
+      const [acc, svc] = await Promise.all([
+        sb.from("restaurants").select("id, access_config").in("id", ids).limit(ids.length),
+        sb.from("settings").select("restaurant_id, service_mode").in("restaurant_id", ids).limit(ids.length),
+      ]);
+      if (acc.error || svc.error) {
+        console.error("[owner/settings] maintenance rows unread:", (acc.error || svc.error)?.message);
+        maintenanceOk = false;
+      } else {
+        const onNow = new Map(((svc.data || []) as { restaurant_id: string; service_mode: boolean | null }[]).map((x) => [String(x.restaurant_id), x.service_mode === true]));
+        const granted = new Set(((acc.data || []) as { id: string; access_config: unknown }[])
+          .filter((x) => maintenanceGrant(x.access_config).on).map((x) => String(x.id)));
+        for (const r of restaurants) {
+          // No settings row = nothing the switch could write to (setServiceMode answers 409), so no row.
+          if (granted.has(r.id) && onNow.has(r.id)) maintenance.push({ restaurant_id: r.id, name: r.name, on: onNow.get(r.id) === true });
+        }
+      }
+    }
+  }
+  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules, printing, printingOk, maintenance, maintenanceOk });
   } catch (e) {
     // A half-read restaurant list must not silently shorten the admin's page (same rule as
     // `scopedRestaurantIds` everywhere else).
@@ -247,6 +282,9 @@ export async function PATCH(req: NextRequest) {
   if (sc.resp) return sc.resp;
   const scope = sc.scope;
   const body = await req.json().catch(() => ({}));
+  if (body && typeof body === "object" && body.maintenance && typeof body.maintenance === "object") {
+    return patchMaintenance(scope, body.maintenance as { restaurant_id?: unknown; on?: unknown });
+  }
   const rid = String(body?.restaurant_id || "");
   const def = MODULE_DEFS.find((d) => d.key === String(body?.key || ""));
   const enabled = body?.enabled;
@@ -314,6 +352,40 @@ export async function PATCH(req: NextRequest) {
     detail: `${def.label} → ${enabled ? "on" : "off"}`,
   });
   return NextResponse.json({ ok: true });
+}
+
+// The owner takes a restaurant's guest menu down, or brings it back (sweep #10 T16 round 2).
+//   PATCH { maintenance: { restaurant_id, on: true|false } }
+// The same three gates as a module switch above — the restaurant is theirs, the admin gave them its
+// Settings, and the admin handed THIS switch over (lib/maintenance.ts, the rule /api/maintenance
+// uses for the manager panel). `on` is the end state asked for, never a toggle, so two people
+// pressing at once both get the menu they asked for and both screens tell the truth.
+async function patchMaintenance(scope: OwnerScope, m: { restaurant_id?: unknown; on?: unknown }) {
+  const rid = String(m.restaurant_id || "");
+  if (!rid || typeof m.on !== "boolean")
+    return NextResponse.json({ error: "restaurant_id and on (true/false) required." }, { status: 400 });
+  const on = m.on;
+  if (!scope.all && !scope.ids.includes(rid))
+    return NextResponse.json({ error: "That restaurant isn't yours." }, { status: 403 });
+  if (!scope.all && !scope.admin && !(await entitledSubset([rid], "settings")).length)
+    return NextResponse.json({ error: "The admin hasn't given you settings for this restaurant." }, { status: 403 });
+  const cfgQ = await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle();
+  if (cfgQ.error) return dbFail("owner/settings.maintenanceGate", cfgQ.error, { message: "Couldn't check that switch just now — please try again." });
+  const isAdmin = !!(scope.all || scope.admin);
+  if (!mayFlipMaintenance(maintenanceGrant(cfgQ.data?.access_config), isAdmin ? "admin" : "owner"))
+    return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
+  const w = await setServiceMode(rid, on, "owner/settings");
+  if (!w.ok) return NextResponse.json({ error: w.error }, { status: w.status });
+  // Recorded the way every owner write is: the owner's own feed for the owner, Aevidine's log for the
+  // admin's act-as (ownerLogPanel), with the person's name rather than a uuid (ownerActorName). The
+  // action codes are the ones /api/maintenance writes, so the Activity log reads both doors the same.
+  const who = ownerActorName(scope);
+  await logAction(ownerLogPanel(scope), on ? "maintenance_on" : "maintenance_off", {
+    restaurant_id: rid, actor: who,
+    ...(!scope.all && !scope.admin && "ownerId" in scope ? { actor_id: scope.ownerId } : {}),
+    detail: on ? `${who} took the guest menu OFFLINE` : `${who} put the guest menu back online`,
+  });
+  return NextResponse.json({ ok: true, maintenance: w.maintenance });
 }
 
 export async function POST(req: NextRequest) {
