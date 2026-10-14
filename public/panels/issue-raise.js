@@ -131,13 +131,33 @@
 
     // ── Photo ────────────────────────────────────────────────────────────────
     photoBtn.onclick = function () { if (imageFile) { clearImage(); } else { fileInp.click(); } };
-    fileInp.onchange = function () {
+    fileInp.onchange = async function () {
       var f = fileInp.files && fileInp.files[0];
       fileInp.value = ""; // allow re-picking the same file later
       if (!f) return;
       if (!OK_IMAGE[f.type]) { setStatus("Photo must be a PNG, JPG or WEBP.", "err"); return; }
-      if (f.size > MAX_IMAGE_BYTES) { setStatus("Photo must be 5 MB or smaller.", "err"); return; }
+      // A BIG PHOTO IS MADE SMALLER HERE, NOT REFUSED (sweep #10 T16 round 2, owner 2026-10-15: "do
+      // all five"). A new phone's camera makes an 8-12 MB picture; it used to be turned away with
+      // "Photo must be 5 MB or smaller", which nobody at a restaurant can act on. The shared shrinker
+      // (shrinkimg.js) brings it to 1280 px first; only if it is STILL over the server's 5 MB limit
+      // (lib/issues.ts IMAGE_MAX), or the device cannot shrink it, is it refused — and then in words
+      // that say what to do. Send waits while it shrinks, so the photo cannot be dropped mid-way.
+      if (f.size > MAX_IMAGE_BYTES) {
+        var shrunk = null;
+        if (window.LFH_IMG) {
+          setStatus("Making the photo smaller…");
+          sendBtn.disabled = true; photoBtn.disabled = true;
+          try { shrunk = (await LFH_IMG.shrink(f)).file; } catch (e) { shrunk = null; }
+          sendBtn.disabled = false; reflectOffline();
+        }
+        if (!shrunk || shrunk.size > MAX_IMAGE_BYTES) {
+          setStatus("This photo is too big to send. Take a new one, or pick a smaller picture.", "err");
+          return;
+        }
+        f = shrunk;
+      }
       setStatus("");
+      if (imageUrlLocal) URL.revokeObjectURL(imageUrlLocal);
       imageFile = f;
       imageUrlLocal = URL.createObjectURL(f);
       renderPrevs();
