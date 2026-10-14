@@ -27,6 +27,7 @@ export const ROUTES = {
   health: "app/api/health/route.ts",
   clientError: "app/api/log/client-error/route.ts",
   maintenance: "app/api/maintenance/route.ts",
+  ownerSettings: "app/api/owner/settings/route.ts",
 };
 const cache = new Map();
 /** The file's text as it is on disk today. Throws if it is missing — a check must never read nothing. */

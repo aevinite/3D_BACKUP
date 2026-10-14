@@ -26,7 +26,9 @@ export async function route(name) {
   const out = join(ROOT, `node_modules/.cache/t16s10-${name}.cjs`);
   execFileSync("npx", ["esbuild", ROUTES[name], "--bundle", "--platform=node", "--format=cjs", "--alias:@=.",
     "--alias:@/lib/supabaseAdmin=./scripts/panel-stubs/sb.mjs",
-    "--alias:@/lib/userAuth=./scripts/panel-stubs/userAuth.mjs",
+    "--alias:@/lib/userAuth=./scripts/sweep/t16s10/stubs/userAuth.mjs",
+    "--alias:@/lib/ownerScope=./scripts/sweep/t16s10/stubs/ownerScope.mjs",
+    "--alias:@/lib/ownerEntitlements=./scripts/sweep/t16s10/stubs/ownerEntitlements.mjs",
     "--alias:@/lib/oplog=./scripts/panel-stubs/oplog.mjs",
     "--alias:@/lib/alerts=./scripts/sweep/t16s10/stubs/alerts.mjs",
     "--alias:@/lib/tenant=./scripts/sweep/t16s10/stubs/tenant.mjs",
@@ -43,6 +45,9 @@ export async function world(o = {}) {
   await world0(); reset();
   delete G.FAIL; delete G.FAIL_NTH; delete G.CALLS; G.HONOUR_LIMIT = true;
   G.ALERTS = []; G.AFTER = []; G.SLUGS = []; G.OWNED = o.owned || {}; G.OWNED_ASKED = [];
+  // The owner panel's world (sweep #10 T16 round 2): the ownerScope answer, the cookie's owner, the
+  // sections, and which "<rid>:<key>" sections are withheld.
+  G.OSCOPE = o.oscope || null; G.COOKIE_USER = o.cookieUser || null; G.ENT = o.ent || {}; G.ENT_OFF = o.entOff || [];
   const who = o.who || "manager";
   const MANAGER = { id: "u1", role: "manager", name: "Diag Manager", username: "diagm1", restaurant_id: FH, permissions: {} };
   G.ACTOR = who === "admin" ? { ok: true, user: null }
@@ -52,7 +57,7 @@ export async function world(o = {}) {
     : { ok: true, user: MANAGER };
   G.FIX.restaurants = [
     { id: FH, slug: "french-house", name: "French House", access_config: o.access || {} },
-    { id: PP, slug: "pizza-palace", name: "Pizza Palace", access_config: {} },
+    { id: PP, slug: "pizza-palace", name: "Pizza Palace", access_config: o.accessPP || {} },
   ];
   G.FIX.settings = o.settings || [{ id: "site", restaurant_id: FH, service_mode: false }, { id: "s2", restaurant_id: PP, service_mode: true }];
   G.FIX.staff_actions = o.actions || [];
@@ -66,7 +71,7 @@ export async function call(name, verb, opts = {}) {
   const headers = { "content-type": "application/json", ...(opts.headers || {}) };
   const init = { method: verb, headers };
   if (opts.body !== undefined) init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
-  const path = { health: "/api/health", clientError: "/api/log/client-error", maintenance: "/api/maintenance" }[name];
+  const path = { health: "/api/health", clientError: "/api/log/client-error", maintenance: "/api/maintenance", ownerSettings: "/api/owner/settings" }[name];
   const res = await r[verb](new NextRequest(`http://localhost${path}${opts.query || ""}`, init));
   const text = await res.text();
   let json = null; try { json = JSON.parse(text); } catch { /* not json */ }
