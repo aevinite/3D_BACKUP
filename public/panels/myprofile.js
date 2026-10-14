@@ -14,7 +14,7 @@
      • their own pay — salary, what was paid this month, their payment history, any advance
        still to recover. The owner can switch this off per person (can_see_own_pay).
      • their job as read-only facts (joined, designation, shift, weekly off).
-   Nothing is compulsory: the header shows "5 of 8 filled" and every field can be left blank.
+   Nothing is compulsory: the header shows "5 of 8 key details added" and every field can be left blank.
    REJECTED (owner, 2026-10-11) — docs/REJECTED-IDEAS.md → R68: this page does NOT hold the
    waiter's section ("who serves which table"); that stays on Manager settings → Sections. And
    REJECTED (owner, 2026-10-11) — R67: it never lists a permission, given or not given.
@@ -139,8 +139,12 @@
       '<div class="me-mut">' + esc(me.role === "tablet" ? "waiter" : me.role) + " · " + esc(me.username) +
       (job.joined_on ? " · joined " + dateIN(job.joined_on) : "") + "</div></div></div>";
     h += '<div class="me-card me-prog"><div class="me-bar"><i style="width:' + pct + '%"></i></div>' +
-      "<div><b>" + c.filled + " of " + c.total + " details filled</b>" +
-      '<div class="me-mut">' + (c.filled >= c.total ? "All done — thank you." : "Nothing here is compulsory. Fill what you can; you can finish later.") +
+      // The count is of the KEY details only (lib/staffProfileShared.ts), while the screen shows more
+      // boxes than that — so "0 of 8 details filled" over a dozen boxes read like a score the person
+      // was failing (sweep #10 T16 round 2, owner 2026-10-15). It now says what the number counts,
+      // and a person who has added nothing yet is invited, not counted.
+      "<div><b>" + (c.filled <= 0 ? "No details added yet" : c.filled >= c.total ? "All " + c.total + " key details added" : c.filled + " of " + c.total + " key details added") + "</b>" +
+      '<div class="me-mut">' + (c.filled >= c.total ? "Thank you — that's everything." : "Nothing here is compulsory. Add what you like, whenever you like.") +
       "</div></div></div>";
 
     // ── your money (only if the owner allows this person to see it) ───────────
