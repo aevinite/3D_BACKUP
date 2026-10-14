@@ -192,6 +192,15 @@
 
   var num = function (v) { var n = parseFloat(String(v == null ? "" : v)); return isFinite(n) ? n : 0; };
   var txt = function (v) { return String(v == null ? "" : v).trim().toLowerCase(); };
+  /* A–Z with the BLANKS LAST (sweep #10 T16 round 2, owner 2026-10-15: "do all five"). A row with no
+     person — a system action, an old row from before names were recorded — used to sort FIRST, so
+     "Person (A–Z)" opened on a block of nameless rows and the real names started a screen down. An
+     empty value now goes after every real one, in every A–Z sort on both lists. */
+  var az = function (x, y) {
+    var A = txt(x), B = txt(y);
+    if (!A !== !B) return A ? -1 : 1;
+    return A.localeCompare(B);
+  };
   var when = function (r) { var t = Date.parse(r && r.at); return isFinite(t) ? t : 0; };
 
   /* THE SORT ORDERS, in the order they are offered. 'id' is what a screen stores, 'label' is what
@@ -212,10 +221,10 @@
       return (B - A) || tie(a, b);
     } },
     { id: "person", label: "Person (A–Z)", cmp: function (a, b) {
-      return txt(a.actor).localeCompare(txt(b.actor)) || (when(b) - when(a)) || tie(a, b);
+      return az(a.actor, b.actor) || (when(b) - when(a)) || tie(a, b);
     } },
     { id: "restaurant", label: "Restaurant (A–Z)", cmp: function (a, b) {
-      return txt(a.restaurant_name).localeCompare(txt(b.restaurant_name)) || (when(b) - when(a)) || tie(a, b);
+      return az(a.restaurant_name, b.restaurant_name) || (when(b) - when(a)) || tie(a, b);
     } },
   ];
   var DEFAULT_SORT = "new";
@@ -408,14 +417,14 @@
     { id: "new", label: "Newest first", cmp: function (a, b) { return (whenA(b) - whenA(a)) || tieA(a, b); } },
     { id: "old", label: "Oldest first", cmp: function (a, b) { return (whenA(a) - whenA(b)) || tieA(a, b); } },
     { id: "person", label: "Person (A–Z)", cmp: function (a, b) {
-      return txt(a.actor).localeCompare(txt(b.actor)) || (whenA(b) - whenA(a)) || tieA(a, b); } },
+      return az(a.actor, b.actor) || (whenA(b) - whenA(a)) || tieA(a, b); } },
     { id: "panel", label: "Panel (A–Z)", cmp: function (a, b) {
-      return txt(a.panel).localeCompare(txt(b.panel)) || (whenA(b) - whenA(a)) || tieA(a, b); } },
+      return az(a.panel, b.panel) || (whenA(b) - whenA(a)) || tieA(a, b); } },
     { id: "kind", label: "Type (A–Z)", cmp: function (a, b) {
       var A = (GROUP_BY_ID[groupOfRow(a)] || {}).label || "", B = (GROUP_BY_ID[groupOfRow(b)] || {}).label || "";
-      return txt(A).localeCompare(txt(B)) || (whenA(b) - whenA(a)) || tieA(a, b); } },
+      return az(A, B) || (whenA(b) - whenA(a)) || tieA(a, b); } },
     { id: "restaurant", label: "Restaurant (A–Z)", cmp: function (a, b) {
-      return txt(a.restaurant_name).localeCompare(txt(b.restaurant_name)) || (whenA(b) - whenA(a)) || tieA(a, b); } },
+      return az(a.restaurant_name, b.restaurant_name) || (whenA(b) - whenA(a)) || tieA(a, b); } },
   ];
   /* An activity row's time is 'created_at', not 'at' — one field name apart from the Audit's, which
      is exactly the kind of thing that makes a shared comparator quietly sort by nothing. */
