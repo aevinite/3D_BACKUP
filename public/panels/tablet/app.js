@@ -854,8 +854,11 @@ function banquetRate() {
 // A guest bill's button always says "Print" — the manager panel's billPrintLabel, same rule.
 // REJECTED (owner, 2026-10-10): no "Reprint" marking on the guest bill (R62) — the kitchen ticket's
 // DUPLICATE is the only reprint word in the product.
+// OBITUARY (sweep #10 T12 round 2, 2026-10-15): the label used to be wrapped in <span data-bill-print-btn>,
+// the hook the "bill printed → Reprint" stamp looked for. That stamp was removed on 2026-10-10 (R62) and
+// nothing has read the marker since — a hook with no hand on it. Plain text now.
 function billPrintLabel(_sess, _os, suffix) {
-  return `<span data-bill-print-btn>🖨 Print${suffix ? " " + suffix : ""}</span>`;
+  return `🖨 Print${suffix ? " " + suffix : ""}`;
 }
 
 // printTableBill(t): give the guest their bill FROM THE WAITER'S HANDHELD.
