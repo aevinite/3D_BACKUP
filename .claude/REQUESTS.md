@@ -1923,11 +1923,11 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 
 ## 2026-10-15 — owner (on the T16 sweep's five ideas): "do all five and yeah owner should get, in the setting thing, the maintenance switch … replan the whole test … make sure everything should be covered"
 
-- [ ] **Owner → Settings → Guest menu** — the owner's own switch to take a restaurant's guest menu offline / bring it back, only where the admin handed it over (Access → Menu → "Put menu on maintenance"); asks before going offline. Guard: verify:guest-menu-switch.
-- [ ] **Manager ⚙ drawer → Guest menu** — shown only to a manager it was handed to (it used to show to every manager and then refuse). Guard: verify:guest-menu-switch §1.
-- [ ] **Report an issue** — a big phone photo is made smaller, not refused; sent with no signal, the photo is kept and Send says why. Guard: verify:panel-helpers-driven §1, §7.
-- [ ] **My profile & pay** — "No details added yet" / "3 of 8 key details added"; a busy re-read after a save keeps the form; a second save is never called "someone else's change". Guard: verify:panel-helpers-driven §4, §6.
-- [ ] **Activity / Audit "A–Z" sorts** — unnamed rows go last. Guard: verify:panel-helpers-driven §5.
-- [ ] **First-login card** — a save made with no signal lets the person carry on. Guard: verify:panel-helpers-driven §3.
-- [ ] **The "saved on this device" sheet** — every waiting change has a readable name, and same-instant changes keep their order after a reload. Guard: verify:outbox §16, §17.
+- [x] **Owner → Settings → Guest menu** — the owner's own switch to take a restaurant's guest menu offline / bring it back, only where the admin handed it over (Access → Menu → "Put menu on maintenance"); asks before going offline. Guard: verify:guest-menu-switch.
+- [x] **Manager ⚙ drawer → Guest menu** — shown only to a manager it was handed to (it used to show to every manager and then refuse). Guard: verify:guest-menu-switch §1.
+- [x] **Report an issue** — a big phone photo is made smaller, not refused; sent with no signal, the photo is kept and Send says why. Guard: verify:panel-helpers-driven §1, §7.
+- [x] **My profile & pay** — "No details added yet" / "3 of 8 key details added"; a busy re-read after a save keeps the form; a second save is never called "someone else's change". Guard: verify:panel-helpers-driven §4, §6.
+- [x] **Activity / Audit "A–Z" sorts** — unnamed rows go last. Guard: verify:panel-helpers-driven §5.
+- [x] **First-login card** — a save made with no signal lets the person carry on. Guard: verify:panel-helpers-driven §3.
+- [x] **The "saved on this device" sheet** — every waiting change has a readable name, and same-instant changes keep their order after a reload. Guard: verify:outbox §16, §17.
 - [x] **The whole test re-planned by measurement** — coverage (every reachable line runs) + mutation testing (510 breaks, 459 caught, the other 49 shown harmless). `.claude/sweep/T16-S10-findings.md` → Round 2.
