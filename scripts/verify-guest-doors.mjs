@@ -1276,6 +1276,23 @@ flush();
   check("item — …a later failure still keeps the last good bill (the stalled message is for the first read only)", /\{!loaded && stalled \? \(/.test(tb));
   check("item — …and a read that lands clears it", /setStalled\(false\);/.test(tb));
 }
+// ── 17. A JOIN THE RESTAURANT ANSWERED IS NEVER "COULDN'T REACH IT" (sweep #10 T4 round 2, 2026-10-15) ──
+// components/SessionGate: the join's own rate limit and a device ban fell through to "We couldn't reach the
+// restaurant's system just now", so a diner tried again at once (the limit) or forever (the ban). The
+// no-signal order save could throw past its caller and leave "One moment…" up for good, and the Retry that
+// could not tell the restaurant kept the previous screen's fault (a wifi mark on a restaurant problem).
+{
+  say("\n── 17. a join the restaurant answered is said as its answer (sweep #10 T4 round 2) ──");
+  const gate = codeOnly(read("components/SessionGate.tsx"));
+  const jf = (gate.match(/const joinFailedNote = [\s\S]*?;\n/) || [""])[0];
+  check("item — a join over its limit says to WAIT, not that the restaurant could not be reached", /r\.reason === "rate_limited" \? "That's a lot of tries in a row — please wait a moment, then try again\."/.test(jf));
+  check("item — …a banned phone is sent to a member of staff, not told to try again", /r\.reason === "banned" \? "We can't seat this phone at a table — please speak to a member of staff\."/.test(jf));
+  check("item — …and anything else still goes through the one three-way verdict", /: reachNote\(faultOfAnswer\(r\)\)/.test(jf));
+  check("item — the no-signal order save cannot strand the sheet on 'One moment…' (its failure falls through)",
+    /navigator\.onLine === false\) \{\s*try \{ await saveForLater\(true\); return; \} catch \{/.test(gate));
+  const rf = (gate.match(/const retryFlow = async \(\) => \{[\s\S]*?\n {2}\};/) || [""])[0];
+  check("item — a Retry that cannot tell which restaurant this is says 'unknown', never the last screen's fault", /if \(!rid\) \{\s*setNetFault\("unknown"\);/.test(rf));
+}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9

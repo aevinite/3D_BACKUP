@@ -143,7 +143,15 @@ const reachNote = (fault: Fault, o: { again?: boolean; spotSafe?: boolean } = {}
   return `We couldn't reach the restaurant's system just now.${safe} Please try again in a moment.`;
 };
 // The two join screens — kept as a name because the join branches read clearly with it.
-const joinFailedNote = (r: { ok: boolean; reason?: string }): string => reachNote(faultOfAnswer(r));
+// A join the restaurant ANSWERED is not "couldn't reach" (sweep #10 T4 round 2, 2026-10-15). Two answers
+// used to fall through to reachNote's "We couldn't reach the restaurant's system just now": the join's own
+// rate limit (lfh_join_session → lfh_rate_check → 'rate_limited'), where trying again at once is exactly
+// wrong, and a device banned mid-visit ('banned'), who would have tried again forever. Both now say what
+// happened, in the words the waiter-call path already uses for the same two answers.
+const joinFailedNote = (r: { ok: boolean; reason?: string }): string =>
+  r.reason === "rate_limited" ? "That's a lot of tries in a row — please wait a moment, then try again."
+    : r.reason === "banned" ? "We can't seat this phone at a table — please speak to a member of staff."
+      : reachNote(faultOfAnswer(r));
 const settingsFailedNote = (err: unknown, again: boolean): string => reachNote(faultOfError(err), { again });
 
 // SessionGate — the step-by-step pop-up that gets a guest connected to their table
@@ -426,7 +434,13 @@ export default function SessionGate() {
       close();
     };
     // OFFLINE: save the order on-device and send it automatically on reconnect.
-    if (typeof navigator !== "undefined" && navigator.onLine === false) { await saveForLater(true); return; }
+    // NO SIGNAL → SAVE IT. If even the save fails (it never has — it would take a refused phone store
+    // AND a damaged address), fall through to the live attempt below, which says honestly what happened.
+    // It used to throw out of here with the sheet on "One moment…" and nothing to end it (sweep #10 T4
+    // round 2) — the waiter-call path beside it already fell through this way.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      try { await saveForLater(true); return; } catch { /* fall through */ }
+    }
 
     let orderId: string;
     // guarded: this is the call the whole item is about — while it is outstanding, a dismissed
@@ -1096,7 +1110,9 @@ export default function SessionGate() {
     if (!settingsRef.current) {
       const rid = await settledRestaurant();
       if (!rid) {
-        setNote("We couldn't tell which restaurant this is — please reload the page, or ask a member of staff.");
+        // "unknown", like the first time this screen said it: whatever the last failure was, THIS one is
+        // not the phone's connection, so the title and the wifi mark must not say it is.
+        setNetFault("unknown"); setNote("We couldn't tell which restaurant this is — please reload the page, or ask a member of staff.");
         return;
       }
       try {
