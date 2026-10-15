@@ -23,8 +23,10 @@ C("the Platform board lists a live parcel and a live Zomato order (and not a can
 // L1500 — a written-out date finds that day's bill
 C("searching the Bills record for a written-out date ('9 Oct 2026') FINDS that day's bill", "kills L1500 drop-!",
   async () => { const d = new Date(Date.now() + IST); const label = `${d.getUTCDate()} ${d.toUTCString().slice(8, 11)} ${d.getUTCFullYear()}`;
-    await world({ fix: { orders: [ORD("b1", { created_at: atIst(0, 12) })] } }); const r = await call("GET", "orders", { query: "?history=1&type=date&q=" + encodeURIComponent(label) });
-    return { ok: Array.isArray(r.json) && r.json.length === (Date.now() > Date.parse(atIst(0, 12)) ? 1 : r.json.length), note: `${label} → ${r.json?.length}` }; });
+    // The bill is dated ONE MINUTE AGO (sweep #10 T11 round 2). It was dated today at 12:00 IST, so before noon
+    // the bill was in the future and the row's own expectation flipped with the time of day it was run at.
+    await world({ fix: { orders: [ORD("b1", { created_at: new Date(Date.now() - 60000).toISOString() })] } }); const r = await call("GET", "orders", { query: "?history=1&type=date&q=" + encodeURIComponent(label) });
+    return { ok: Array.isArray(r.json) && r.json.length === 1, note: `${label} → ${r.json?.length}` }; });
 // L2480 + the poll actually handing a slip
 const POLL = (extra = {}) => ({ settings: { auto_print_kot: true, auto_print_kot_allowed: true, modules: { printing: { routes: { kot: { via: "screen", panel: "manager" } } } } },
   fix: { print_jobs: [{ id: "pj1", restaurant_id: RID, kind: "kot", order_id: "o1", status: "queued", reprint: false, attempts: 0, created_at: NOW() }], orders: [{ id: "o1", restaurant_id: RID, status: "received", kot_no: 7, table_number: "4", deleted_at: null, items: [] }], order_items: [], ...extra } });

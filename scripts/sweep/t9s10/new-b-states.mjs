@@ -397,7 +397,8 @@ C("…and on the today+yesterday reach it is included", "STUB · bills reach tod
 C("orders: each bill row carries its session's bill number, invoice state and who it is made out to", "STUB · session with invoice",
   async () => { await world({ fix: { orders: [O("b1")], sessions: [{ id: "s5", restaurant_id: RID, status: "closed", bill_no: 12, invoice_no: 7, invoice_voided: false, invoice_at: NOW(), cust_name: "Mehta", bill_printed_at: NOW() }] } });
     const r = await call("GET", "orders", { query: "?bills=1" }); const o = r.json?.rows?.[0] || {};
-    return { ok: o.bill_no === 12 && o.invoice_no === 7 && o.session_status === "closed" && o.bill_cust_name === "Mehta" && !!o.bill_printed_at, note: JSON.stringify({ b: o.bill_no, i: o.invoice_no }) }; });
+    // EXPECTATION CHANGED (sweep #10 T11 round 2): bill_printed_at no longer rides along (R62, owner 2026-10-10).
+    return { ok: o.bill_no === 12 && o.invoice_no === 7 && o.session_status === "closed" && o.bill_cust_name === "Mehta" && !("bill_printed_at" in o), note: JSON.stringify({ b: o.bill_no, i: o.invoice_no }) }; });
 C("orders: a split bill carries its parts, oldest first", "STUB · two legs",
   async () => { await world({ fix: { orders: [O("b1")], sessions: [{ id: "s5", restaurant_id: RID }], session_payments: [{ session_id: "s5", restaurant_id: RID, amount: 60, method: "Cash", created_at: NOW() }, { session_id: "s5", restaurant_id: RID, amount: 45, method: "UPI", created_at: NOW() }] } });
     const r = await call("GET", "orders", { query: "?bills=1" }); const p = r.json?.rows?.[0]?.pay_parts || [];

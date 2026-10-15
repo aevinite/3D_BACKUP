@@ -143,7 +143,7 @@ row("P63009", "the board ships the table display names, so the ticket reads what
 row("P63010", "the board ships the table marks", () => hasRe(ROUTEC(), /\n        tableTags,/));
 
 // ══ E3 · THE FIVE WRITE PATHS, IN DETAIL — P63011–P63070 ══
-const ACC = () => rslice('if (a === "orders" && c === "accept")', 'if (a === "orders" && c === "ready")');
+// (ACC, the accept-branch slice, went with the branch itself — sweep #10 T11 round 2, item 7.)
 const RDY = () => rslice('if (a === "orders" && c === "ready")', 'if (a === "orders" && c === "unready")');
 const UNR = () => rslice('if (a === "orders" && c === "unready")', 'if (a === "items" && c === "status")');
 const ITM = () => rslice('if (a === "items" && c === "status")', 'if (a === "platform" && c === "status")');

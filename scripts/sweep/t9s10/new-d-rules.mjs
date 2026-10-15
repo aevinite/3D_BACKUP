@@ -31,8 +31,10 @@ for (const [r, near, why] of [
     () => { const i = MINE.indexOf(near); if (i < 0) return { ok: false, note: "the guarded line moved" }; const above = MINE.slice(Math.max(0, i - 6000), i);
       return { ok: new RegExp(`REJECTED \\(owner, 20\\d\\d-\\d\\d-\\d\\d\\)[\\s\\S]{0,200}${r}|${r}[\\s\\S]{0,400}REJECTED|REJECTED[\\s\\S]{0,400}${r}`).test(above), note: r }; });
 }
-C("REJECTED (owner, 2026-08-19): the bill_printed_at read changes one word on one button and nothing else — its comment is in place", "read GET /orders",
-  () => /REJECTED \(owner, 2026-08-19\)/.test(endpoint("orders")));
+// EXPECTATION CHANGED (sweep #10 T11 round 2): the owner REVERSED the 2026-08-19 decision (R62, 2026-10-10 — "this
+// was for kot not bill so remove the thing"); the bill_printed_at read is gone and its obituary names R62.
+C("R62 (owner, 2026-10-10): the bill_printed_at read is GONE from GET /orders, and its obituary says so", "read GET /orders",
+  () => /bill_printed_at[^\n]*gone, R62/.test(endpoint("orders")) && !/bill_printed_at,|"bill_printed_at"/.test(endpoint("orders").replace(/\/\/[^\n]*/g, "")));
 C("`npm run verify:rejected` is green", "the guard run", () => { const g = guard(["node", "scripts/verify-rejected-ideas.mjs"]); return { ok: g.ok, note: g.ok ? "green" : g.out }; });
 
 // ── D3 · the statements that arrived since sweep #8 are scoped and bounded ───────────────────────
@@ -66,8 +68,10 @@ C(`${STAR.length} reads in this half still select every column — each is resta
     return { ok: bad.length === 0, note: `${STAR.map((c) => c.table).join(", ")}${bad.length ? ` · NOT: ${bad.map((c) => c.table).join(", ")}` : ""}` }; });
 C("…and the four in GET /all say WHY they stay whole-row (the editor form edits every column)", "read GET /all",
   () => /SELECT \* is kept here \(the editor form edits every column\)/.test(endpoint("all")));
-C("…and the live floor's whole-row orders read says why (the board renders every column)", "read GET /orders",
-  () => /The no-param floor read keeps select\("\*"\)/.test(endpoint("orders")));
+// EXPECTATION CHANGED (sweep #10 T11 round 2): T9's item 17 (14b62d99) gave the live floor read a column list, so
+// the note that defended select("*") is replaced by one saying the floor read names its columns.
+C("…and the live floor's orders read names its columns too (item 17: it used to fetch every column)", "read GET /orders",
+  () => /The no-param floor read names its columns as well/.test(endpoint("orders")));
 
 // ── D5 · nothing private leaves, nothing private is printed ──────────────────────────────────────
 C("this half never hands process.env to a response", "read the half", () => !/ok\([^)]*process\.env/.test(MC));
