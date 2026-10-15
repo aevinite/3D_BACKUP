@@ -1127,7 +1127,20 @@ flush();
     check("item 26 — on a 360px phone the five stars and the pill fit in one row (4px between stars under 380px)",
       /@media \(max-width: 379px\)\s*\{\s*\.sr-rating\s*\{\s*gap:\s*4px;?\s*\}/.test(css));
     check("item 26 — and below that the pill wraps to its own line rather than pushing a star out of the card",
-      /\.sr-wrap\s*\{[^}]*flex-wrap:\s*wrap/.test(css)); }}
+      /\.sr-wrap\s*\{[^}]*flex-wrap:\s*wrap/.test(css)); }  // item 27 — text on the ordering screens is written in the ink colours, readable on the light skin
+  { const ink = (sel, tok) => new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{[^}]*?color:\\s*var\\(" + tok + "\\)").test(css);
+    const accentInk = [".cart-item-price", ".cart-edit-btn", ".pairing-label", ".pairing-add", ".order-confirm-qty button", ".order-confirm-total-val", ".sr-score-num"];
+    const mutedInk = [".pairing-price", ".allergy-toggle", ".allergy-note", ".live-order-sub", ".live-order-table", ".live-order-items", ".live-order-fixlink"];
+    const missA = accentInk.filter((x) => !ink(x, "--accent-ink")), missM = mutedInk.filter((x) => !ink(x, "--muted-ink"));
+    check(`item 27 — accent-coloured text on the ordering screens uses --accent-ink (${missA.join(", ") || "all " + accentInk.length})`, !missA.length);
+    check(`item 27 — small muted text there uses --muted-ink (${missM.join(", ") || "all " + mutedInk.length})`, !missM.length);
+    check("item 27 — --muted-ink exists in both skins (same as --muted in dark, darkened in light)",
+      /--muted-ink:\s*var\(--muted\)/.test(css) && /--muted-ink:\s*color-mix\(in srgb, var\(--muted\) \d+%, #000\)/.test(css));
+    check("item 27 — the pale pink allergen text has a dark red on the light skin",
+      /\[data-theme="light"\] \.oc-allergen, \[data-theme="light"\] \.allergy-toggle\.on\s*\{\s*color:\s*#b91c1c/.test(css));
+    check("item 27 — the allergy note has no opacity on its text (it measured 4.0:1 in dark with it)",
+      /\.allergy-note\s*\{[^}]*\}/.test(css) && !/\.allergy-note\s*\{[^}]*opacity/.test(css));
+    check("item 27 — the retired .cart-total rules are gone", !/\.cart-total\b/.test(css)); }}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
