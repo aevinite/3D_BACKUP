@@ -203,6 +203,18 @@ export default function ChefPopup() {
         // Too many requests already pending for this table.
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "You've a few requests pending", subtitle: "staff are on the way", kicker: "service", icon: "🛎" } }));
         window.dispatchEvent(new Event("lfh:close-all"));
+      } else if (res.reason === "unknown_table" || res.reason === "off_plan_table") {
+        // ── A TABLE THAT DOES NOT EXIST CANNOT CALL (owner, 2026-10-15, migration 422) ────────────────
+        // The database refuses a number that is not on this restaurant's floor plan. The popup stays
+        // open with the box flagged and the database's own sentence ("Table 45 doesn't exist — tables
+        // are 1–30.") so the diner fixes the number instead of being told to "ask a member of staff".
+        // And if that number came from the remembered QR table, it is forgotten — device-wide, with the
+        // same announcement the ✕ makes — so the bill stops pre-filling a table that is not there.
+        if (getScannedTable() === check.value) {
+          setScannedTable(""); setScannedTableState("");
+          window.dispatchEvent(new Event("lfh:table-scanned"));
+        }
+        flagTableInput("chef-table", res.error || "That table number isn't one this restaurant has — please check it.");
       } else if (res.reason === "already_sent") {
         // already_sent: a recent identical request — reassure without a new call.
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Already sent", subtitle: `${reason} · staff are on the way`, kicker: "service", icon: "🛎" } }));

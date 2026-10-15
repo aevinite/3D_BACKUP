@@ -1144,7 +1144,21 @@ flush();
   // item 28 — the shared "database didn't answer" test keeps browser wording OUT, on purpose
   { const m = (read("lib/dbRefusal.ts").match(/const UNREACHABLE_TEXT =\s*\n?\s*\/(.+)\/i;/) || [])[1] || "";
     check("item 28 — 'did the restaurant's system answer?' never treats a phone's own no-signal wording as the restaurant being down",
-      !!m && !/failed to fetch|load failed|networkerror/i.test(m) && /fetch failed/.test(m)); }}
+      !!m && !/failed to fetch|load failed|networkerror/i.test(m) && /fetch failed/.test(m)); }
+  // item 29 — a table that does not exist cannot call a waiter: database, phone, popup
+  { const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
+    const def = migs.filter((f) => /FUNCTION[^(]*lfh_call_waiter_table/.test(read(`supabase/migrations/${f}`))).pop() || "";
+    const body = def ? read(`supabase/migrations/${def}`) : "";
+    check(`item 29 — the newest definition of the waiter call refuses a table that is not a whole number (${def || "no migration"})`,
+      /IF v_t !~ '\^\\d\{1,9\}\$' OR v_t::int < 1 THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body));
+    check("item 29 — …and a table above the floor plan, with the same sentence an order gets",
+      /IF COALESCE\(v_max, 0\) > 0 AND v_t::int > v_max THEN[\s\S]{0,140}'unknown_table'[\s\S]{0,80}Table %s doesn''t exist — tables are 1–%s\./.test(body));
+    check("item 29 — …and stores the table canonically (\"007\" is table 7)", /v_t := \(v_t::int\)::text;/.test(body));
+    check("item 29 — …before the blocked check, the rate limit and the insert", body.indexOf("'unknown_table'") > 0 && body.indexOf("'unknown_table'") < body.indexOf("lfh_is_blocked(NULL, v_t, v_rid)"));
+    const cp = r3("components/ChefPopup.tsx"), mn = r3("lib/menu.ts");
+    check("item 29 — the bell passes the database's sentence through to the popup", /error: typeof res\.error === "string" \? res\.error : undefined/.test(mn));
+    check("item 29 — the popup flags the table box with it and forgets a remembered table that does not exist",
+      /res\.reason === "unknown_table" \|\| res\.reason === "off_plan_table"/.test(cp) && /if \(getScannedTable\(\) === check\.value\) \{\s*setScannedTable\(""\)/.test(cp) && /flagTableInput\("chef-table", res\.error \|\|/.test(cp)); }}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9

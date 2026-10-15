@@ -241,7 +241,9 @@ export interface OrderInput {
 // NOT newly created (a recent duplicate, or the table already has 6 pending). The
 // caller uses this to tell the guest the truth instead of always saying "sent"
 // (audit fix 2026-07-06).
-export interface CallWaiterResult { ok: boolean; reason?: string }
+// `error` is the database's own sentence when it has one — today only `unknown_table` (mig 422:
+// "Table 45 doesn't exist — tables are 1–30."), which names the number the diner should check.
+export interface CallWaiterResult { ok: boolean; reason?: string; error?: string }
 
 // ── "" MEANS WE DO NOT KNOW WHICH RESTAURANT THIS IS — REFUSE IT HERE (owner, 2026-09-15) ───────
 //
@@ -328,7 +330,7 @@ export async function callWaiter(tableNumber: string, note?: string, restaurantI
       }).catch(() => {});
     } catch { /* best-effort */ }
   }
-  return { ok: res.ok !== false, reason: res.reason };
+  return { ok: res.ok !== false, reason: res.reason, error: typeof res.error === "string" ? res.error : undefined };
 }
 
 // Order lifecycle status. The restaurant advances received -> preparing -> served.
