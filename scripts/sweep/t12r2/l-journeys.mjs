@@ -10,6 +10,8 @@
 // WRITES (French House only): orders on tables picked from today's floor (never a claimed one), retired
 // by table; diagt1's rota (assigned_tables), put back in a finally AND on SIGINT/SIGTERM; nothing else.
 // One login per role (scripts/sweep/login.mjs caches); the admin view uses the admin cookie, no login.
+// Every phone-width context here is a FINGER: `touch: true` reaches the browser as hasTouch (lib.mjs
+// waiterContext), so the phone floor is the one a phone really gets, never the laptop's at 360px.
 import { ok, F_APP, F_HTML, RID, BASE, db, browser, waiterContext, openPanel, panelFrame, visible, sleep } from "../t12s10/lib.mjs";
 import { retireTables } from "../fixture.mjs";
 import { restoreOnExit, restoreNow } from "../restore.mjs";
@@ -246,7 +248,7 @@ export async function blockL(R, firstId) {
       await ctx.close();
     }
     for (const dark of [false, true]) {
-      const ctx = await waiterContext({ width: 360, height: 780, dpr: 3, mobile: true, dark });
+      const ctx = await waiterContext({ width: 360, height: 780, dpr: 3, mobile: true, touch: true, dark });
       const { page } = await openPanel(ctx, { theme: dark ? "dark" : "light" });
       const r = await page.evaluate(() => [...document.querySelectorAll("#tiles .tile.t-free")].map((t) => { const w = t.querySelector(".t-line-plain .t-linenum"); const cs = w && getComputedStyle(w); const tr = t.getBoundingClientRect(), wr = w && w.getBoundingClientRect(); return { shown: cs && cs.display !== "none", fits: wr && wr.width > 0 && wr.right <= tr.right + 0.5, text: w && w.textContent, color: cs && cs.color, bg: getComputedStyle(t).backgroundColor }; }));
       await check(id(), F_APP, `item 12 live (${dark ? "dark" : "light"} skin, 360px): every free tile says "Free", inside its own box`, LV, async () => ok(r.length > 0 && r.every((x) => x.shown && x.fits && x.text === "Free"), `${r.filter((x) => x.shown && x.fits).length}/${r.length}`));
@@ -255,7 +257,7 @@ export async function blockL(R, firstId) {
 
     // ── L8 · a whole service on a PHONE, real taps only (no in-page fallbacks) ───────────────────
     {
-      const ctx = await waiterContext({ width: 360, height: 780, dpr: 3, mobile: true });
+      const ctx = await waiterContext({ width: 360, height: 780, dpr: 3, mobile: true, touch: true });
       const { page } = await openPanel(ctx);
       await recordToasts(page);
       const tap = (sel) => page.locator(sel).first().tap({ timeout: 8000 });
