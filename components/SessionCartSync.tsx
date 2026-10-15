@@ -145,8 +145,16 @@ export default function SessionCartSync() {
           // re-run this first-sync merge on the next tick against the newer cart — first save wins,
           // the loser is told. (mig 311)
           const w = await setSessionCart(s.token, merged, (r as { cart_updated_at?: string | null }).cart_updated_at ?? null);
-          if (!w.ok && (w as { reason?: string }).reason === "cart_moved") {
-            reconciledToken.current = null; // someone else got there first — merge again next tick
+          // ANY FAILED FIRST WRITE MEANS "MERGE AGAIN", not only 'cart_moved' (sweep #10 T4 round 2,
+          // 2026-10-15). This used to re-merge for 'cart_moved' alone. When the write failed any other
+          // way — the restaurant's system busy for one second (timed_out), a dropped signal — this tick
+          // had already marked the merge done and set lastJson to the merged basket, so the NEXT tick
+          // saw the table's old basket differ from lastJson and wrote it over the phone: the dishes a
+          // diner brought to the table vanished from their own phone, and never reached the table.
+          // Measured in the screen lab (scripts/sweep/t4s10, block j): one busy second at the join lost them. Merging
+          // again is safe — reconcile() keeps every line this phone has that the table lacks.
+          if (!w.ok) {
+            reconciledToken.current = null; // someone else got there first, or nobody heard — merge again next tick
           }
         }
         return;

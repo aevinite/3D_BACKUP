@@ -52,8 +52,11 @@ P("P42005", "…and that write SETS the cart rather than adding to it",
   /setSessionCart/.test(F.sync) && !/mergeSessionCart\(s\.token/.test(F.sync));
 P("P42006", "…carrying the timestamp it read, so a concurrent add is refused not overwritten",
   /\(r as \{ cart_updated_at\?: string \| null \}\)\.cart_updated_at \?\? null/.test(F.sync));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15): the first-merge write now re-merges on ANY failure, not only
+// 'cart_moved' — a busy second used to mark the merge done and let the next refresh wipe the dishes a diner
+// brought to the table (measured in scripts/sweep/t4s10's screen lab). The rule this row states still holds.
 P("P42007", "…and a refusal re-merges against the newer cart instead of forcing through",
-  /reason === "cart_moved"/.test(F.sync));
+  /if \(!w\.ok\) \{\s*\n\s*reconciledToken\.current = null;/.test(F.sync));
 P("P42008", "THE DANGEROUS VERSION IS NOT WHAT WAS BUILT: the delta is never re-sent blindly",
   (bare(F.sync).match(/mergeSessionCart\(/g) || []).length === 1);
 P("P42009", "…and the reason is written down where the next reader will find it",

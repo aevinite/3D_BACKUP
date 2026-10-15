@@ -1246,6 +1246,22 @@ flush();
   check("item — the failed lookup still answers the same way (no id, not ready)", /\.catch\(\(\) => \{[\s\S]{0,120}setId\(""\);[\s\S]{0,200}setReady\(false\);/.test(ctxSrc));
   check("item — the hook every widget reads hands out \"\" until the restaurant is settled", /return ready \? id : "";/.test(ctxSrc));
 }
+// ── 15. A BUSY SECOND AT THE JOIN NEVER COSTS A DINER THEIR DISHES (sweep #10 T4 round 2, 2026-10-15) ──
+// components/SessionCartSync's first merge re-merged only when the write was refused as 'cart_moved'. Any
+// other failure (a busy database, a dropped signal) had already marked the merge done, so the next refresh
+// wrote the table's old basket over the phone and the dishes the diner brought were gone — measured in the
+// screen lab. ANY failed first write must re-merge; and the merge must keep this phone's own lines.
+{
+  say("\n── 15. a busy second at the join never costs a diner their dishes (sweep #10 T4 round 2) ──");
+  const sync = codeOnly(read("components/SessionCartSync.tsx"));
+  const first = (sync.match(/const w = await setSessionCart\(s\.token, merged,[\s\S]{0,400}?\n\s*\}\n/) || [""])[0];
+  check("item — the first merge's write is read, and EVERY failure re-merges next tick (not only 'cart_moved')",
+    /if \(!w\.ok\) \{\s*reconciledToken\.current = null;/.test(first) && !/reason === "cart_moved"/.test(first));
+  check("item — …and the merge keeps every line this phone has that the table lacks",
+    /for \(const li of local\) if \(!map\.has\(lineKey\(li\)\)\) map\.set\(lineKey\(li\), li\);/.test(sync) && /if \(server\.length === 0\) return local;/.test(sync));
+  check("item — a failed LATER change (the delta) re-merges too, rather than being forgotten",
+    /\} else \{\s*reconciledToken\.current = null;\s*\}/.test(sync));
+}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
