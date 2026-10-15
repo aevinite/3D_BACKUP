@@ -210,3 +210,9 @@ row("P180574", "item 10 · an owner request with no ?rid is refused before the s
   const refuse = blk.indexOf('return err("Open this from the owner panel'), fall = blk.indexOf("const rid = panelRestaurantId(req, g);");
   return (i > 0 && refuse > 0 && fall > refuse) || "the refusal is missing or comes after the fallback";
 });
+// ══ ROUND 2 · ITEM 11 · the 86 drawer reads in the light skin and keeps its toggles whole — P180575–P180576 ══
+const CSSC_ = () => src("public/panels/kitchen/style.css").replace(/\/\*[\s\S]*?\*\//g, "");
+row("P180575", "item 11 · the light skin's SOLD OUT word uses the deep red, not the dark skin's pink", () =>
+  hasRe(CSSC_(), /html\[data-theme="light"\] \.btn\.danger \{ color: #b91c1c; \}/));
+row("P180576", "item 11 · a dish's toggle never shrinks beside a long name; the name wraps instead", () =>
+  hasRe(CSSC_(), /\.dish-row \.btn \{ flex-shrink: 0; white-space: nowrap; \}/) && hasRe(CSSC_(), /\.dish-row \.dtitle \{ min-width: 0;/));
