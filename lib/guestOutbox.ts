@@ -11,7 +11,8 @@
 // place the order ONCE — never a duplicate. On a successful send we record the order
 // into the guest's active-orders list so the normal tracker follows it from then on.
 import { useSyncExternalStore } from "react";
-import { tgetFor, tsetFor, tenantSlug } from "@/lib/tenantStorage";
+import { tgetFor, tenantSlug } from "@/lib/tenantStorage";
+import { trackActiveOrder } from "@/lib/orderStatus";
 
 export type GuestTrack = { tableNumber?: string; total?: number; itemCount?: number; items?: { title: string; qty: number }[] };
 export type GuestOrder = {
@@ -105,7 +106,16 @@ const uuid = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID
 // value away between the guard and the loop, and so it's re-evaluated each pass.
 const isOffline = () => typeof navigator !== "undefined" && navigator.onLine === false;
 
-function recompute() { snapshot = { queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length }; }
+// ── A SNAPSHOT IS A COPY, NOT A WINDOW (sweep #10 T3 round 3) ─────────────────────────────────────
+// useSyncExternalStore's contract is that a snapshot never changes once handed out. This one held the
+// SAME row objects the queue goes on editing: moveToFailed() stamps `status` and `error` on a row before
+// the notify() that publishes the move, so for one storage write the published list still had the row
+// under "waiting" but already wearing its failure sentence — and any re-draw in that window (anything
+// else on the page changing) painted it that way. The round-3 queue model caught it ("a waiting row
+// still carries an old error", seeds 14004 and 16020). Each published row is now a copy of the row as it
+// was at that notify(); the queue's own rows stay the ones it edits. A shallow copy is enough — nothing
+// below a row's top level is ever edited in place.
+function recompute() { snapshot = { queued: queued.map((x) => ({ ...x })), failed: failed.map((x) => ({ ...x })), count: queued.length + failed.length }; }
 function notify() {
   recompute();
   listeners.forEach((l) => { try { l(); } catch { /* ignore */ } });
@@ -344,21 +354,15 @@ function recordActive(item: GuestOrder, orderId: string) {
     // tab happens to be on when the outbox flushes (fixes an offline order showing
     // under the wrong restaurant on the same device).
     const slug = item.restaurantSlug || tenantSlug();
-    const raw = tgetFor("lfh_active_orders", slug);
-    const list = raw ? JSON.parse(raw) : [];
-    const arr = Array.isArray(list) ? list : [];
-    if (arr.some((o: { id?: string }) => o?.id === orderId)) return; // already tracked — don't double-add
-    arr.push({
+    // One way an order joins the strip (lib/orderStatus.ts trackActiveOrder) — it skips an order already
+    // followed, which is what the copy that lived here did ("already tracked — don't double-add").
+    trackActiveOrder({
       id: orderId,
       tableNumber: item.track?.tableNumber ?? item.table ?? "",
       total: item.track?.total ?? 0,
       itemCount: item.track?.itemCount ?? 0,
       items: item.track?.items ?? [],
-      status: "received",
-      placedAt: Date.now(),
-    });
-    tsetFor("lfh_active_orders", slug, JSON.stringify(arr));
-    window.dispatchEvent(new Event("lfh:order-placed"));
+    }, slug);
   } catch { /* tracker record is best-effort */ }
 }
 
@@ -879,6 +883,9 @@ export async function cancelQueuedCall(id: string): Promise<{ ok: boolean; reaso
   if (!it) return { ok: false, reason: "not_found" };
   if (!isCall(it)) return { ok: false, reason: "not_a_call" };
   await removeItem(id);
+  // The last waiting thing taken back → nothing left for the retry timer to send. It used to stay set
+  // and wake the queue once for nothing (round-3 queue model, seeds 12002 and 13035).
+  if (!queued.length && retryTimer) { clearTimeout(retryTimer); retryTimer = null; retryStep = 0; }
   notify();
   return { ok: true };
 }

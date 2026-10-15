@@ -30,6 +30,7 @@ import {
   liveActiveOrders,
   isFinalStatus,
   RT_BACKUP_MS,
+  trackActiveOrder,
 } from "@/lib/orderStatus";
 
 // A single chosen option on a dish (e.g. group "Size", label "Large", +price).
@@ -103,6 +104,15 @@ export default function CartPanel() {
   // or composition (no GST to the diner at all) + whether per-dish overrides are allowed.
   // Starts at today's behaviour, so the quote never changes shape while settings load.
   const [taxRules, setTaxRules] = useState<TaxRules>(DEFAULT_TAX_RULES);
+  // ── A TAX RATE NOBODY READ IS NOT A TAX RATE (sweep #10 T3 round 3, owner's item 31) ─────────────
+  // `taxRate` and `taxRules` START as a guess — 5%, added on top — and stay that guess whenever the
+  // settings read fails (the dev database cancels it on its statement timeout when it is paging; a
+  // real restaurant's busiest minute does the same). At a restaurant charging 18%, or one whose prices
+  // already include GST, the bill then printed an invented GST line and Total as fact, and an order
+  // placed in that state carried the invented total onto the strip's card and the saved list. So the
+  // bill knows whether it has ever heard the restaurant's real rules. Until it has: Subtotal, then
+  // "Total ₹800 + any tax" and one line saying why — and no order record keeps a figure nobody read.
+  const [taxKnown, setTaxKnown] = useState(false);
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null); // currency for all prices
   const [allergenMap, setAllergenMap] = useState<Record<string, string[]>>({}); // dish id -> its allergens, for warnings
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]); // the full menu (for pairings/editing)
@@ -256,7 +266,7 @@ export default function CartPanel() {
     };
     // How many tables exist, so we can reject an out-of-range table number.
     getSettings(restaurantId)
-      .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); setTaxRules(taxRulesOf(s)); })
+      .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); setTaxRules(taxRulesOf(s)); setTaxKnown(true); })
       .catch(() => {});
 
     // Live orders are written/polled by OrderTracker; we just read them here.
@@ -306,7 +316,7 @@ export default function CartPanel() {
     const handleOpen = () => {
       setOpen(true); loadMenuOnce(); loadCart(); loadLive(); setShowHistory(false); prefillScanned(); syncSession();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
-      getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); setTaxRules(taxRulesOf(s)); }).catch(() => {});
+      getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); setTaxRules(taxRulesOf(s)); setTaxKnown(true); }).catch(() => {});
     };
     // handleShowPrev: open straight to the LIVE-STATUS tab (the live table view
     // with the served-progress bar). Fired when the multi-order tracker is tapped.
@@ -455,6 +465,16 @@ export default function CartPanel() {
   // table (`lfh:rt-tick`, the same nudge OrderTracker listens to), or the one-minute backstop passed.
   // `dishAsked` remembers what each order was last asked under, so a re-render alone asks nothing.
   const cardsShown = open && showHistory && !sessionsEnabled;
+  // …and the tax rules are asked for AGAIN while the bill is open and they are still unknown — on the
+  // same two signals as the cards (the realtime nudge, the one-minute backstop), never a faster poll:
+  // a read that timed out on a struggling database must not be hammered (CLAUDE.md, busy = offline).
+  useEffect(() => {
+    if (!open || taxKnown || !restaurantId) return;
+    const again = () => { getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); setTaxRules(taxRulesOf(s)); setTaxKnown(true); }).catch(() => {}); };
+    window.addEventListener("lfh:rt-tick", again);
+    const iv = setInterval(again, RT_BACKUP_MS);
+    return () => { window.removeEventListener("lfh:rt-tick", again); clearInterval(iv); };
+  }, [open, taxKnown, restaurantId]);
   const dishAsked = useRef<Record<string, string>>({});
   const [dishBeat, setDishBeat] = useState(0);
   useEffect(() => {
@@ -561,6 +581,10 @@ export default function CartPanel() {
   // affected. Same fault sweep #10 T30 item 32 removed from the menu's tax line. Guarded by
   // verify:guest-doors (it runs this expression against splitBill over 20,000 baskets).
   const totalUsd = roundPaise(subtotalUsd + roundPaise(usdOnTopBase * taxRate));
+  // What an order RECORD keeps: the real total, or 0 ("not known") when the tax rules were never read —
+  // every reader of a record already treats 0 as "no figure" (the saved list hides it, the live card
+  // drops its Total row), so a guessed number never outlives the bill it was guessed on.
+  const recordTotal = taxKnown ? totalUsd : 0;
 
   // dishImage(): the dish's own photo, for the bill line (owner, 2026-09-20 — "IF POSSIBLE ADD
   // IMAGE LIKE D3"). It comes from the menu the panel has ALREADY loaded for the edit/pairing/
@@ -732,7 +756,7 @@ export default function CartPanel() {
       // up from menu_items and prices the bill itself, so nothing here is trusted.
       const itemsS = orderItems();
       const trackS = cart.map((it) => ({ title: it.title, qty: it.qty })); // slim list for the tracker
-      const totalS = totalUsd, countS = itemCount; // USD — order records convert at render
+      const totalS = recordTotal, countS = itemCount; // USD — order records convert at render
       // ── A BUTTON THAT WAITS ON SOMEBODY ELSE NEEDS ITS OWN WAY BACK (owner picked item 12) ──────
       //
       // With dining sessions ON this button does not place the order itself: it hands the job to the
@@ -778,14 +802,8 @@ export default function CartPanel() {
           return;
         }
         if (!d?.ok || !d.orderId) return; // order cancelled / failed — the gate showed its own message
-        try {
-          // Save into the "active orders" list so the OrderTracker shows it.
-          const raw = tget("lfh_active_orders");
-          const arr = (() => { const p = raw ? JSON.parse(raw) : []; return Array.isArray(p) ? p : []; })();
-          arr.push({ id: d.orderId, tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS, status: "received", placedAt: Date.now() });
-          tset("lfh_active_orders", JSON.stringify(arr));
-          window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
-        } catch {}
+        // Follow it on the strip (lib/orderStatus.ts — the one way an order joins it).
+        try { trackActiveOrder({ id: d.orderId, tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS }); } catch {}
         // Empty the cart and reset the allergy fields, then refresh + close.
         setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
         window.dispatchEvent(new Event("lfh:cart-updated"));
@@ -841,7 +859,7 @@ export default function CartPanel() {
       // OFFLINE: save the order on-device and send it automatically on reconnect
       // (at-most-once via the guest outbox, using the SAME key as the online path).
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id, lines: cart.map((it) => ({ id: it.id, title: it.title })) });
+        const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: itemsS, allergies, track: { tableNumber: tableTrim, total: recordTotal, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id, lines: cart.map((it) => ({ id: it.id, title: it.title })) });
         // ONLY promise durability when the phone actually stored it. When storage refuses
         // (private browsing, no room), the order is real and WILL send — but it lives in memory
         // only, so closing the tab loses it, and saying "we'll send it automatically" would be a
@@ -862,22 +880,8 @@ export default function CartPanel() {
       }, restaurantId, orderKeyRef.current.id);
       orderKeyRef.current = null; // placed OK → next tap is a new order
       // Remember this order on THIS device so the guest can follow its status.
-      try {
-        const raw = tget("lfh_active_orders");
-        const list = raw ? JSON.parse(raw) : [];
-        const active = Array.isArray(list) ? list : [];
-        active.push({ // add this order to the live-tracking list
-          id: orderId,
-          tableNumber: tableTrim,
-          total: totalUsd, // USD — converted at render time like all order records
-          itemCount,
-          items: cart.map((it) => ({ title: it.title, qty: it.qty })),
-          status: "received",
-          placedAt: Date.now(),
-        });
-        tset("lfh_active_orders", JSON.stringify(active));
-        window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
-      } catch {}
+      // (lib/orderStatus.ts — the one way an order joins the strip; total in USD, 0 = tax never known)
+      try { trackActiveOrder({ id: orderId, tableNumber: tableTrim, total: recordTotal, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }); } catch {}
       // Pop a success toast confirming the order went to the kitchen.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
         message: "Order placed",
@@ -912,7 +916,7 @@ export default function CartPanel() {
           // Their `orderItems()` / `allergyPayload()` helpers (they replaced the inline builders
           // on main) + this branch's honest wording: only promise durability when the phone
           // actually stored it.
-          const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: orderItems(), allergies: allergyPayload(), track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id, lines: cart.map((it) => ({ id: it.id, title: it.title })) });
+          const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: orderItems(), allergies: allergyPayload(), track: { tableNumber: tableTrim, total: recordTotal, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id, lines: cart.map((it) => ({ id: it.id, title: it.title })) });
           window.dispatchEvent(new CustomEvent("lfh:toast", { detail: q.persisted
             ? { message: "Saved — sending your order now", subtitle: "the kitchen is very busy; it goes through by itself", kicker: "order", icon: "⏳", variant: "success" }
             : { message: "Saved — keep this page open", subtitle: "the kitchen is very busy; it goes through by itself", kicker: "order", icon: "⏳", variant: "success" } }));
@@ -1092,7 +1096,7 @@ export default function CartPanel() {
                           {o.items.map((it) => `${it.title} ×${it.qty}`).join(", ")}
                         </div>
                       ) : null}
-                      <div className="live-order-total"><span>Total</span><span>{showPrice(o.total)}</span></div>
+                      {o.total > 0 && <div className="live-order-total"><span>Total</span><span>{showPrice(o.total)}</span></div>}
                       {/* WRONG TABLE? Only while the order is still early — once it's served
                           the kitchen has already sent it somewhere, so the number is locked
                           (same rule the old tracker sheet used).
@@ -1242,9 +1246,9 @@ export default function CartPanel() {
                   {/* Quantity, Edit and the bin — on EVERY dish (owner: "THERE SHOULD BE EDIT AND
                       QUANTY BUTTON FOR EVERY DISH"), never hidden behind a tap. */}
                   <div className="cart-item-controls">
-                    <button type="button" aria-label={`Decrease ${item.title}`} onClick={() => decrement(idx)} style={qtyBtn}>−</button>
+                    <button type="button" className="cart-qty-btn" aria-label={`Decrease ${item.title}`} onClick={() => decrement(idx)} style={qtyBtn}>−</button>
                     <span style={{ minWidth: "26px", textAlign: "center", fontSize: "13px", fontWeight: 800, color: "var(--text)" }}>{item.qty}</span>
-                    <button type="button" aria-label={`Increase ${item.title}`} onClick={() => increment(idx)} style={qtyBtn}>+</button>
+                    <button type="button" className="cart-qty-btn" aria-label={`Increase ${item.title}`} onClick={() => increment(idx)} style={qtyBtn}>+</button>
                     {canEdit(item.id) && (
                       <button type="button" className="cart-edit-btn" onClick={() => editLine(item)}>
                         <i className="fas fa-pen"></i> Edit
@@ -1267,16 +1271,26 @@ export default function CartPanel() {
             {cart.length > 0 && (
           <div className="bill-rows">
                 <div className="bill-line"><span>Subtotal</span><span>{fmtDisp(subtotal)}</span></div>
-                {nontaxDisp > 0 && (
+                {/* Tax rules never read → no GST line, no MRP split and no "included" note, because each of
+                    those is decided by rules nobody has seen; the Total says so instead (item 31). */}
+                {!taxKnown && (
+                  <>
+                    <div className="bill-line grand"><span>Total</span><span>{fmtDisp(subtotal)} + any tax</span></div>
+                    <div className="bill-line bill-tax-unknown" style={{ color: "var(--muted)", fontSize: "12px" }}>
+                      <span>We couldn&apos;t load this restaurant&apos;s tax just now — it&apos;s added on your bill.</span><span />
+                    </div>
+                  </>
+                )}
+                {taxKnown && nontaxDisp > 0 && (
                   <div className="bill-line" style={{ color: "var(--muted)" }}>
                     <span>MRP items (no GST)</span><span>{fmtDisp(nontaxDisp)}</span>
                   </div>
                 )}
-                {showTaxRow && (
+                {taxKnown && showTaxRow && (
                   <div className="bill-line"><span>GST ({Math.round(taxRate * 10000) / 100}%)</span><span>{fmtDisp(tax)}</span></div>
                 )}
-                <div className="bill-line grand"><span>Total</span><span>{fmtDisp(total)}</span></div>
-                {!showTaxRow && !dispSplit.composition && subtotal > 0 && (
+                {taxKnown && <div className="bill-line grand"><span>Total</span><span>{fmtDisp(total)}</span></div>}
+                {taxKnown && !showTaxRow && !dispSplit.composition && subtotal > 0 && (
                   // Tax-inclusive prices: say WHY there's no GST line, or the guest reads the
                   // missing row as the restaurant forgetting to charge it.
                   <div className="bill-line" style={{ color: "var(--muted)", fontSize: "12px" }}>

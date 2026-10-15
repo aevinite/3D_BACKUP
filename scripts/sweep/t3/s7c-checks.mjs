@@ -181,7 +181,8 @@ P("P42065", "…BY KIND, not by trusting the screen that offered the button",
 P("P42066", "…and it looks only in `queued`, never in `failed`", !/failed\.find\([\s\S]{0,80}cancelQueuedCall/.test(F.outbox));
 P("P42067", "…because a FAILED row already has Remove", /className="gob-btn gob-drop"[\s\S]{0,200}dismissGuestFailed/.test(F.chip));
 P("P42068", "cancelling removes it from the phone's own storage, not just from the list",
-  /await removeItem\(id\);\s*notify\(\);\s*return \{ ok: true \};/.test(bare(F.outbox)));
+  // re-pointed (sweep #10 T3 round 3): between the two now sits item 33's "nothing left → no retry timer"
+  /await removeItem\(id\);\s*if \(!queued\.length && retryTimer\) \{[^}]*\}\s*notify\(\);\s*return \{ ok: true \};/.test(bare(F.outbox)));
 P("P42069", "…and tells every subscriber, so the chip re-counts", /notify\(\);/.test(F.outbox));
 P("P42070", "the button is offered on a call", /\{isCall\(o\) && !isLeave\(o\) \? \(/.test(F.chip));
 P("P42071", "…and never on an order", /<span className="gob-spin"/.test(F.chip));
@@ -206,7 +207,9 @@ P("P42088", "the queue's collapse of repeat bell taps is untouched", /const alre
 P("P42089", "…so cancelling one cannot leave a hidden second", /sameTable/.test(F.outbox));
 P("P42090", "a stale call is still dropped on the phone rather than delivered late", /STALE_CALL_MS/.test(F.outbox));
 P("P42091", "…and the diner is still told when that happens", /call_too_old/.test(F.outbox));
-P("P42092", "cancelling does not touch the retry timer's state machine", !/retryStep/.test((F.outbox.match(/export async function cancelQueuedCall[\s\S]{0,600}?\n\}/) || [""])[0]));
+// re-pointed (sweep #10 T3 round 3): item 33 — taking back the LAST waiting thing now stands the timer down (it used to wake the queue
+// once for nothing). The rule this row protects still holds: while anything else waits, its backoff is untouched.
+P("P42092", "cancelling does not touch the retry timer's state machine — unless it was the last thing waiting", (() => { const f = (F.outbox.match(/export async function cancelQueuedCall[\s\S]{0,900}?\n\}/) || [""])[0]; return (f.match(/retryStep/g) || []).length === 1 && /if \(!queued\.length && retryTimer\) \{ clearTimeout\(retryTimer\); retryTimer = null; retryStep = 0; \}/.test(f); })());
 P("P42093", "…nor the backoff", !/scheduleRetry/.test((F.outbox.match(/export async function cancelQueuedCall[\s\S]{0,600}?\n\}/) || [""])[0]));
 P("P42094", "…and the timer stands itself down when the queue empties", /if \(!queued\.length\) \{ retryStep = 0;/.test(F.outbox));
 P("P42095", "the chip still hides itself when nothing is left", /if \(count === 0\) return null;/.test(F.chip));
@@ -455,7 +458,8 @@ P("P42293", "the sold-out guard still names the dish", /Sold out: \$\{names\}/.t
 P("P42294", "Place Order with no table still flags the field", /flagTableInput\("cart-table", check\.message!\)/.test(F.cart));
 P("P42295", "…and still does not empty the basket", /if \(!check\.ok\) \{\s*flagTableInput/.test(bare(F.cart)));
 P("P42296", "the two currency domains are still kept apart", /const totalUsd = /.test(F.cart) && /const total = subtotal \+ tax;/.test(F.cart));
-P("P42297", "…and the stored total is still the USD one", /total: totalUsd/.test(F.cart));
+// re-pointed (sweep #10 T3 round 3): the record keeps recordTotal — USD, or 0 when the tax was never read (item 31)
+P("P42297", "…and the stored total is still the USD one", /const recordTotal = taxKnown \? totalUsd : 0;/.test(F.cart) && /total: recordTotal/.test(F.cart));
 P("P42298", "GST is still added only over NET-priced lines", /l\.tax_mode === "excl"/.test(F.cart));
 P("P42299", "…and a composition restaurant is still quoted none", /dispSplit\.composition \? 0/.test(F.cart));
 P("P42300", "the tax rate still comes from the restaurant's own settings", /setTaxRate\(s\.taxRate\)/.test(F.cart));

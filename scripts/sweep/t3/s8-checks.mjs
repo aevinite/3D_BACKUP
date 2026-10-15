@@ -79,7 +79,8 @@ P("P56711", "the offline test is a FUNCTION, so it is re-read every pass", /cons
 P("P56712", "…and it treats only an explicit false as offline", /navigator\.onLine === false/.test(O));
 P("P56713", "every listener notification is wrapped, so one bad subscriber cannot stop the rest", /listeners\.forEach\(\(l\) => \{ try \{ l\(\); \} catch/.test(O));
 P("P56714", "…and the window announcement is wrapped too (no window in a test runner)", /try \{ window\.dispatchEvent\(new CustomEvent\("lfh:guest-outbox-changed"\)\); \} catch/.test(O));
-P("P56715", "the snapshot is a COPY, so a subscriber cannot mutate the queue", /queued\.slice\(\), failed: failed\.slice\(\)/.test(O));
+// re-pointed (sweep #10 T3 round 3): a copy of each ROW too now (item 32) — slice() copied the lists but shared the rows the queue edits
+P("P56715", "the snapshot is a COPY, so a subscriber cannot mutate the queue", /queued: queued\.map\(\(x\) => \(\{ \.\.\.x \}\)\), failed: failed\.map\(\(x\) => \(\{ \.\.\.x \}\)\)/.test(O));
 P("P56716", "the count a badge reads is queued + failed, not just queued", /count: queued\.length \+ failed\.length/.test(O));
 P("P56717", "the server-side snapshot is a stable empty object (no hydration mismatch)", /const EMPTY = \{[\s\S]{0,120}\};[\s\S]{0,200}function getServerSnapshot\(\) \{ return EMPTY; \}/.test(O));
 P("P56718", "the hook subscribes through useSyncExternalStore, not a poll", /useSyncExternalStore\(subscribe, getSnapshot, getServerSnapshot\)/.test(O));
@@ -245,7 +246,8 @@ P("P56852", "…with a short TTL, so a toggle is picked up in seconds", /const S
 P("P56853", "…and a breadcrumb can say 'drop it' rather than waiting out the TTL", /export function invalidateSettings/.test(M));
 P("P56854", "…dropping the in-flight promise too, since it started before the change", /settingsInflight\.delete\(restaurantId\)/.test(between(M, "export function invalidateSettings", "export async function getSettings")));
 P("P56855", "a waiter call goes through the guarded RPC, never a direct insert", /\.rpc\("lfh_call_waiter_table"/.test(M));
-P("P56856", "…and hands back the RPC's own answer, so the UI can be honest", /return \{ ok: res\.ok !== false, reason: res\.reason \};/.test(M));
+// re-pointed (sweep #10 T3 round 3): …and the database's own sentence when it has one (item 29: "Table 45 doesn't exist…")
+P("P56856", "…and hands back the RPC's own answer, so the UI can be honest", /return \{ ok: res\.ok !== false, reason: res\.reason, error: typeof res\.error === "string" \? res\.error : undefined \};/.test(M));
 P("P56857", "…and now carries a deadline like every other guest write", /const signal = orderDeadline\(\);[\s\S]{0,600}lfh_call_waiter_table[\s\S]{0,300}\.abortSignal\(signal\)/.test(M));
 P("P56858", "correcting an order's table carries one too", /const signal = orderDeadline\(\);[\s\S]{0,400}set_order_table_number[\s\S]{0,200}\.abortSignal\(signal\)/.test(M));
 P("P56859", "…and reports failure as a plain false the caller already words", /return !error && Array\.isArray\(data\) && data\.length > 0;/.test(M));
@@ -419,9 +421,11 @@ P("P56997", "a placed order drops the shared floor snapshot", /invalidateFloor\(
 P("P56998", "…but a refusal does not, because it changed nothing", /\.ok !== false\) invalidateFloor\(rid\)/.test(PL));
 P("P56999", "the QR path REFUSES an unknown restaurant rather than guessing #1", /if \(!publicRid\) return NextResponse\.json\(\{ ok: false, reason: "unknown_restaurant" \}, \{ status: 400 \}\)/.test(PL));
 P("P57000", "…and the id must be a real uuid, not any string", /const isUuid = /.test(PL));
-P("P57001", "a table the restaurant does not have is refused", /const offPlan = await offPlanTable\(publicRid, b\.table(?:, \{ strict: true \})?\)/.test(PL)  /* re-stated 2026-10-10: the strict option (a guest is locked to a floor table) */);
+// re-pointed (sweep #10 T3 round 3): the door first makes the guest's table canonical (item 36 — guestTable) and checks THAT
+P("P57001", "a table the restaurant does not have is refused", /const table = guestTable\(b\.table\);/.test(PL) && /const offPlan = await offPlanTable\(publicRid, table, \{ strict: true \}\)/.test(PL)  /* re-stated 2026-10-10: the strict option (a guest is locked to a floor table) */);
 P("P57002", "…as a CODE, so the client owns the wording", /reason: "off_plan_table"/.test(PL));
-P("P57003", "the QR path checks the table has not moved on since the order was saved", /await replayClash\(req, publicRid, "order", undefined, undefined, \{ table: b\.table \}\)/.test(PL));
+// re-pointed (sweep #10 T3 round 3): with the canonical table (item 36)
+P("P57003", "the QR path checks the table has not moved on since the order was saved", /await replayClash\(req, publicRid, "order", undefined, undefined, \{ table \}\)/.test(PL));
 P("P57004", "…and the session path deliberately does not (the RPC answers that itself)", /session path above doesn't need it/.test(PL));
 // re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 7: one shared helper); the rule still holds
 P("P57005", "a session replay's restaurant comes from the reply, the body, then the token", /ridFromResult\(data\)\s*\n?\s*\|\| \(isUuid\(b\.restaurantId\)[\s\S]{0,120}\|\| await restaurantOfToken\(b\.token\)/.test(PL));
@@ -441,7 +445,8 @@ P("P57015", "…and an ordinary online call with no timestamp still goes straigh
 P("P57016", "the note is length-capped before it reaches the database", /String\(b\.reason \|\| ""\)\.slice\(0, 200\)/.test(CW));
 P("P57017", "the session path needs a token", /if \(!b\.token\) return NextResponse\.json\(\{ ok: false, reason: "invalid_token" \}/.test(CW));
 P("P57018", "the QR path refuses an unknown restaurant rather than guessing #1", /if \(!rid\) return NextResponse\.json\(\{ ok: false, reason: "unknown_restaurant" \}/.test(CW));
-P("P57019", "…and a table the restaurant does not have", /if \(await offPlanTable\(rid, b\.table(?:, \{ strict: true \})?\)\) return NextResponse\.json\(\{ ok: false, reason: "off_plan_table" \}/.test(CW));
+// re-pointed (sweep #10 T3 round 3): the canonical table again (item 36)
+P("P57019", "…and a table the restaurant does not have", /const table = guestTable\(b\.table\);/.test(CW) && /if \(await offPlanTable\(rid, table, \{ strict: true \}\)\) return NextResponse\.json\(\{ ok: false, reason: "off_plan_table" \}/.test(CW));
 P("P57020", "a database that will not answer is BUSY here too", /function busy\(\): Response/.test(CW));
 P("P57021", "…with the same server-set, jittered wait", /const retryAfter = 20 \+ Math\.floor\(Math\.random\(\) \* 25\);/.test(CW));
 P("P57022", "the floor snapshot is dropped only when a call really landed", /function callLanded\(data: unknown\): boolean/.test(CW));
@@ -518,7 +523,8 @@ P("P57081", "…falling back to opening it where that cannot be asked", /fall th
 P("P57082", "the queue wakes on four signals, not two", /addEventListener\("online"/.test(startFn) && /visibilitychange/.test(startFn) && /addEventListener\("focus"/.test(startFn));
 P("P57083", "…and a restored queue gets a timer, not a single attempt", /ensureRetry\(\);\s*\n\s*void flushGuestOutbox\(\);/.test(restore));
 P("P57084", "the tracker entry a queued order creates is scoped to the order's OWN restaurant", /const slug = item\.restaurantSlug \|\| tenantSlug\(\);/.test(O));
-P("P57085", "…and never double-added", /if \(arr\.some\(\(o: \{ id\?: string \}\) => o\?\.id === orderId\)\) return;/.test(O));
+// re-pointed (sweep #10 T3 round 3): the skip lives in trackActiveOrder, the one door (item 35)
+P("P57085", "…and never double-added", /if \(list\.some\(\(x\) => x\.id === o\.id\)\) return false;/.test(F.status) && /trackActiveOrder\(/.test(O));
 P("P57086", "…and a duplicate reply with no id records nothing", /if \(!orderId\) return;/.test(O));
 P("P57087", "the basket, the tracker and the bill all read ONE storage key", /export const ACTIVE_ORDERS_KEY = "lfh_active_orders";/.test(F.status));
 P("P57088", "…and one copy of the status wording", /export const STATUS_COPY/.test(F.status));

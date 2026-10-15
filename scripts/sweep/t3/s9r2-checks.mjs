@@ -160,10 +160,12 @@ P("P110083", "the total is subtotal + tax, in the display domain only", has(C_CA
 P("P110084", "a GST row appears only when GST is really ADDED to what is printed above it", has(C_CART, /const showTaxRow = !dispSplit\.composition && tax > 0/));
 P("P110085", "…so a composition restaurant never shows one", has(C_CART, /dispSplit\.composition \? 0 : toMinor/));
 P("P110086", "…and the rate is printed to two decimals without floating-point dust", has(C_CART, /Math\.round\(taxRate \* 10000\) \/ 100/));
-P("P110087", "when there is no GST row, the bill SAYS why rather than leaving a silent gap", has(C_CART, /\{!showTaxRow && !dispSplit\.composition && subtotal > 0 && \(/));
+// re-pointed (sweep #10 T3 round 3): decided only once the tax rules are KNOWN (item 31); until then the bill says why it shows "+ any tax"
+P("P110087", "when there is no GST row, the bill SAYS why rather than leaving a silent gap", has(C_CART, /\{taxKnown && !showTaxRow && !dispSplit\.composition && subtotal > 0 && \(/) && has(C_CART, /couldn&apos;t load this restaurant&apos;s tax just now/));
 P("P110088", "…and it tells the two reasons apart: all-MRP versus tax-inclusive prices", has(C_CART, /nontaxDisp >= subtotal \? "No GST on these items" : "GST is already included in these prices"/));
 P("P110089", "…and that line is suppressed on an empty bill, where it would mean nothing", has(C_CART, /subtotal > 0 && \(/));
-P("P110090", "an MRP row is printed only when there is MRP money to separate out", has(C_CART, /\{nontaxDisp > 0 && \(/));
+// re-pointed (sweep #10 T3 round 3): …and the rules behind it are known (item 31)
+P("P110090", "an MRP row is printed only when there is MRP money to separate out", has(C_CART, /\{taxKnown && nontaxDisp > 0 && \(/));
 P("P110091", "…and never under composition, where nothing is MRP and the row would be a lie", has(C_CART, /const nontaxDisp = dispSplit\.composition \? 0 : dispSplit\.nontaxAmount/));
 P("P110092", "the on-top GST base is the taxable base of the 'excl' lines ALONE", has(C_CART, /splitBill\(dispLines\.filter\(\(l\) => l\.tax_mode === "excl"\), taxRules\)\.taxableBase/));
 P("P110093", "…so a tax-INSIDE price can never be charged its GST twice", has(C_CART, /l\.tax_mode === "excl"/));
@@ -396,7 +398,8 @@ P("P110284", "a table correction only works while the order is still open", has(
 P("P110285", "…and proves a row was really updated before reporting success", has(C_MENU, /return !error && Array\.isArray\(data\) && data\.length > 0;/));
 P("P110286", "…and it carries a deadline, so the Saving… button cannot wedge", has(C_MENU, /set_order_table_number[\s\S]{0,200}abortSignal/));
 P("P110287", "the bell call carries one too", has(C_MENU, /lfh_call_waiter_table[\s\S]{0,200}abortSignal/));
-P("P110288", "…and hands back the RPC's own answer so the popup can tell the truth", has(C_MENU, /return \{ ok: res\.ok !== false, reason: res\.reason \}/));
+// re-pointed (sweep #10 T3 round 3): …with the database's own sentence when it has one (item 29)
+P("P110288", "…and hands back the RPC's own answer so the popup can tell the truth", has(C_MENU, /return \{ ok: res\.ok !== false, reason: res\.reason, error: typeof res\.error === "string" \? res\.error : undefined \}/));
 P("P110289", "…treating a missing ok as success, which is what the RPC means by it", has(C_MENU, /res\.ok !== false/));
 // re-pointed by sweep #10 T3 round 2: the code moved on purpose (round 2 item 17: an unanswered call is raised as BUSY, any other failure as an error — never 'sent'); the rule still holds
 P("P110290", "a real transport failure on the bell is raised, not swallowed as 'sent'", has(C_MENU, /throw new Error\(`Call failed/) && has(C_MENU, /throw busyError\("could not reach the restaurant"\)/));
@@ -414,7 +417,8 @@ P("P110297", "…so the caller can avoid promising durability it does not have",
 P("P110298", "the id is a real uuid where the browser can make one", has(C_OUT, /globalThis\.crypto\?\.randomUUID/));
 P("P110299", "…with a fallback that still produces a v4-shaped id on an older phone", has(C_OUT, /xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx/));
 P("P110300", "offline is read through a FUNCTION, so it is re-evaluated each pass", has(C_OUT, /const isOffline = \(\) => typeof navigator !== "undefined" && navigator\.onLine === false/));
-P("P110301", "the snapshot handed to React is a fresh object each change", has(C_OUT, /function recompute\(\) \{ snapshot = \{ queued: queued\.slice\(\), failed: failed\.slice\(\)/));
+// re-pointed (sweep #10 T3 round 3): fresh rows too, not only fresh lists (item 32)
+P("P110301", "the snapshot handed to React is a fresh object each change", has(C_OUT, /function recompute\(\) \{ snapshot = \{ queued: queued\.map\(\(x\) => \(\{ \.\.\.x \}\)\), failed: failed\.map\(\(x\) => \(\{ \.\.\.x \}\)\)/));
 P("P110302", "…so useSyncExternalStore actually re-renders", has(C_OUT, /export function useGuestOutbox\(\) \{ return useSyncExternalStore\(subscribe, getSnapshot, getServerSnapshot\); \}/));
 P("P110303", "…and the server snapshot is a STABLE constant, or React would loop", has(C_OUT, /const EMPTY = \{ queued: \[\] as GuestOrder\[\], failed: \[\] as GuestOrder\[\], count: 0 \}/));
 P("P110304", "a listener that throws cannot stop the others being told", has(C_OUT, /listeners\.forEach\(\(l\) => \{ try \{ l\(\); \} catch \{/));

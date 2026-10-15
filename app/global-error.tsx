@@ -7,7 +7,11 @@ import { useEffect } from "react";
 import { panelFromPath, reportClientError } from "@/lib/errorReport";
 import { canReloadForStaleCode, isStaleCodeError, reloadForStaleCode } from "@/lib/staleCode";
 
-export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+// `retry` (Next 16) refreshes from the server and THEN re-draws; `reset` only re-draws what is already
+// on the phone, so a server-side failure came straight back and "Try again" did nothing (sweep #10 T3
+// round 3, item 31 — the same fix as app/error.tsx, which also retries by itself; this one does not:
+// a root-layout failure is rarer and the person is given the button).
+export default function GlobalError({ error, reset, retry }: { error: Error & { digest?: string }; reset: () => void; retry?: () => void }) {
   // A tab left open across a deploy asks for a JavaScript file that no longer exists under that
   // name. `reset()` cannot cure that — one reload can. Decided during render so the person sees a
   // quiet line rather than a crash card flashing for the moment before it lands (lib/staleCode.ts).
@@ -48,7 +52,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
           </p>
           <button
             // A missing file is not cured by re-rendering the same tree; only a reload gets fresh names.
-            onClick={() => (isStaleCodeError(error?.message) ? window.location.reload() : reset())}
+            onClick={() => (isStaleCodeError(error?.message) ? window.location.reload() : (retry || reset)())}
             style={{ background: "#d4a574", color: "#1a1a1a", border: 0, borderRadius: 10, padding: "10px 20px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
           >
             Try again

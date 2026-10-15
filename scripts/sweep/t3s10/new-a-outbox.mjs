@@ -4,6 +4,12 @@
 import { check } from "./lib.mjs";
 import { phone, lists } from "./phone.mjs";
 
+// SAVED N ms AGO — by saving it while the clock reads N ms ago (re-pointed sweep #10 T3 round 3). These checks
+// used to age a saved row by editing it in the published list (lists(P).queued[0].at = …). Round 3 made that
+// list a COPY (item 32 — React's contract), so the edit no longer reached the queue: the "too old" checks went
+// red and the "still fresh" one passed while testing nothing. The clock is the honest way to age it.
+async function savedAgo(ms, save) { const real = Date.now; Date.now = () => real() - ms; try { return await save(); } finally { Date.now = real; } }
+
 const F = "lib/guestOutbox.ts";
 const HOW = "STUB — real lib/guestOutbox.ts on a fake phone";
 const FH = "00000000-0000-0000-0000-000000000001";
@@ -415,12 +421,12 @@ check("P172112", F, "a call answered ok:true + 'rate_limited' (nobody is coming)
   const L = lists(P); return { ok: L.failed.length === 1 && /call/i.test(L.failed[0].error), note: L.failed[0]?.error };
 }));
 check("P172113", F, "a call older than ten minutes is not sent at all — the diner is told it was too old", HOW, async () => S({ online: false }, async (P) => {
-  await P.M.enqueueGuestCall(CALL()); lists(P).queued[0].at = Date.now() - 11 * 60_000; P.setOnline(true);
+  await savedAgo(11 * 60_000, () => P.M.enqueueGuestCall(CALL())); P.setOnline(true);
   await P.M.flushGuestOutbox(); await P.settle();
   const L = lists(P); return { ok: P.fetches.length === 0 && L.failed.length === 1 && /too old/.test(L.failed[0].error), note: L.failed[0]?.error };
 }));
 check("P172114", F, "a call nine minutes old still goes", HOW, async () => S({ online: false, respond: () => ok({ ok: true }) }, async (P) => {
-  await P.M.enqueueGuestCall(CALL()); lists(P).queued[0].at = Date.now() - 9 * 60_000; P.setOnline(true);
+  await savedAgo(9 * 60_000, () => P.M.enqueueGuestCall(CALL())); P.setOnline(true);
   await P.M.flushGuestOutbox(); await P.settle();
   return P.fetches.length === 1 && lists(P).count === 0;
 }));

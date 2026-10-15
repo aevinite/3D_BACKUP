@@ -11,6 +11,23 @@
 // absurd is refused — the same line the suite's own check draws (+500).
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 
+/**
+ * A GUEST'S table, as the floor names it — or null when it is not one (sweep #10 T3 round 3, the owner's
+ * item 29 carried to orders: "if the thing doesn't even exist then why it is being called").
+ *
+ * A guest is locked to a floor table, and the floor's tables are numbers: so a guest's table must be a
+ * whole number (a JSON number or digits, spaces around it ignored), 1 or more, at most nine digits.
+ * Returned canonical — "007" and " 7 " are "7", the tile the floor draws — so the database never stores
+ * a name no tile has. Both guest doors call this BEFORE offPlanTable (which, by design, does not judge a
+ * label, because STAFF counters may have one); migrations 423 and 424 draw the same line in the database.
+ */
+export function guestTable(v: unknown): string | null {
+  const raw = typeof v === "number" ? (Number.isInteger(v) ? String(v) : "") : typeof v === "string" ? v.trim() : "";
+  if (!/^\d{1,9}$/.test(raw)) return null;
+  const n = Number(raw);
+  return n >= 1 ? String(n) : null;
+}
+
 /** How far above the floor plan a legitimate counter number may go. */
 export const PLAN_MARGIN = 500;
 

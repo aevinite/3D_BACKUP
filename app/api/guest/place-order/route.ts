@@ -15,7 +15,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { pingLatestGuestLimit } from "@/lib/rateLimit";
 import { replayClash, clashJson } from "@/lib/clash";
-import { offPlanTable } from "@/lib/planTable";
+import { offPlanTable, guestTable } from "@/lib/planTable";
 import { invalidateFloor } from "@/lib/floorSummary";
 import { restaurantOfToken } from "@/lib/guestTokenRestaurant";
 
@@ -216,13 +216,17 @@ async function postImpl(req: NextRequest): Promise<Response> {
   // A CODE, not the helper's sentence: the client owns the wording (lib/guestOutbox.ts
   // reasonMsg), and the helper's text names the restaurant's table count, which is a staff
   // detail rather than something to put in front of a diner.
-  const offPlan = await offPlanTable(publicRid, b.table, { strict: true });   // a guest is locked to a floor table (item 10)
+  // A guest's table is a real floor table, written the way the floor writes it (round 3 — migration 424
+  // draws the same line in the database). An empty, labelled or "007"-style table never reaches it.
+  const table = guestTable(b.table);
+  if (!table) return NextResponse.json({ ok: false, reason: "unknown_table" }, { status: 400 });
+  const offPlan = await offPlanTable(publicRid, table, { strict: true });   // a guest is locked to a floor table (item 10)
   if (offPlan) return NextResponse.json({ ok: false, reason: "off_plan_table" }, { status: 400 });
-  const clash = await replayClash(req, publicRid, "order", undefined, undefined, { table: b.table });
+  const clash = await replayClash(req, publicRid, "order", undefined, undefined, { table });
   if (clash) return clashJson(clash);
 
   const { data, error } = await sb.rpc("lfh_place_order_public", {
-    p_table: b.table || "",
+    p_table: table,
     p_items: items,
     p_allergies: allergies,
     p_restaurant_id: publicRid,

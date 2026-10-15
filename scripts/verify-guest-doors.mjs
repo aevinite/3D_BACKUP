@@ -1105,6 +1105,128 @@ flush();
     check("item 21 — an unknown answer to a QR call is said honestly, never as 'Already sent'",
       /\} else if \(res\.reason === "already_sent"\) \{/.test(c) && /message: "Couldn't call staff from here"/.test(c)); }
 }
+// ── 14. ROUND 3 OF SWEEP #10 T3 — THE SEVEN THE OWNER PICKED ON 2026-10-15 (items 25–31) ──────────
+//
+// One sub-block per item, asserted on the CODE (comments stripped). The behaviour behind each is also
+// DRIVEN (scripts/sweep/t3s10/r3), and each guard was broken once on purpose and seen red.
+{
+  say("\n── 14. sweep #10 T3 round 3 — items 25 to 31 ──");
+  const r3 = (p) => codeOnly(read(p));
+  const css = r3("app/globals.css");
+  // item 25 — the buttons' shine moves by transform, never by `left`, and is defined once
+  { const kf = [...css.matchAll(/@keyframes (shimmer|shimmerBack)\s*\{([^{}]*\{[^}]*\}[^{}]*)*\}/g)];
+    check(`item 25 — one shine keyframe, not three (${kf.length} found)`, kf.length === 1 && kf[0][1] === "shimmer");
+    check("item 25 — the shine slides with transform, so it costs no layout on every frame",
+      !!kf[0] && /transform:\s*translateX\(-100%\)/.test(kf[0][0]) && !/\bleft\s*:/.test(kf[0][0]));
+    check("item 25 — none of the three shining buttons starts its stripe with `left: -100%` any more",
+      !/(\.back-btn|\.ar-btn|\.btn-cyan)::before\s*\{[^}]*left:\s*-100%/.test(css)); }
+  // item 26 — ONE set of star-picker rules, and the score pill is shown
+  { const wraps = (css.match(/(^|\n)\.sr-wrap\s*\{/g) || []).length, pills = [...css.matchAll(/(^|\n)\.sr-score-pill\s*\{([^}]*)\}/g)];
+    check(`item 26 — the star picker has one set of rules, not two (${wraps} .sr-wrap rule(s))`, wraps === 1);
+    check("item 26 — the score pill (\"3 / 5\") is not hidden", pills.length === 1 && !/display:\s*none/.test(pills[0][2]));
+    check("item 26 — on a 360px phone the five stars and the pill fit in one row (4px between stars under 380px)",
+      /@media \(max-width: 379px\)\s*\{\s*\.sr-rating\s*\{\s*gap:\s*4px;?\s*\}/.test(css));
+    check("item 26 — and below that the pill wraps to its own line rather than pushing a star out of the card",
+      /\.sr-wrap\s*\{[^}]*flex-wrap:\s*wrap/.test(css)); }  // item 27 — text on the ordering screens is written in the ink colours, readable on the light skin
+  { const ink = (sel, tok) => new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{[^}]*?color:\\s*var\\(" + tok + "\\)").test(css);
+    const accentInk = [".cart-item-price", ".cart-edit-btn", ".pairing-label", ".pairing-add", ".order-confirm-qty button", ".order-confirm-total-val", ".sr-score-num"];
+    const mutedInk = [".pairing-price", ".allergy-toggle", ".allergy-note", ".live-order-sub", ".live-order-table", ".live-order-items", ".live-order-fixlink"];
+    const missA = accentInk.filter((x) => !ink(x, "--accent-ink")), missM = mutedInk.filter((x) => !ink(x, "--muted-ink"));
+    check(`item 27 — accent-coloured text on the ordering screens uses --accent-ink (${missA.join(", ") || "all " + accentInk.length})`, !missA.length);
+    check(`item 27 — small muted text there uses --muted-ink (${missM.join(", ") || "all " + mutedInk.length})`, !missM.length);
+    check("item 27 — --muted-ink exists in both skins (same as --muted in dark, darkened in light)",
+      /--muted-ink:\s*var\(--muted\)/.test(css) && /--muted-ink:\s*color-mix\(in srgb, var\(--muted\) \d+%, #000\)/.test(css));
+    check("item 27 — the pale pink allergen text has a dark red on the light skin",
+      /\[data-theme="light"\] \.oc-allergen, \[data-theme="light"\] \.allergy-toggle\.on\s*\{\s*color:\s*#b91c1c/.test(css));
+    check("item 27 — the allergy note has no opacity on its text (it measured 4.0:1 in dark with it)",
+      /\.allergy-note\s*\{[^}]*\}/.test(css) && !/\.allergy-note\s*\{[^}]*opacity/.test(css));
+    check("item 27 — the retired .cart-total rules are gone", !/\.cart-total\b/.test(css)); }
+  // item 28 — the shared "database didn't answer" test keeps browser wording OUT, on purpose
+  { const m = (read("lib/dbRefusal.ts").match(/const UNREACHABLE_TEXT =\s*\n?\s*\/(.+)\/i;/) || [])[1] || "";
+    check("item 28 — 'did the restaurant's system answer?' never treats a phone's own no-signal wording as the restaurant being down",
+      !!m && !/failed to fetch|load failed|networkerror/i.test(m) && /fetch failed/.test(m)); }
+  // item 29 — a table that does not exist cannot call a waiter: database, phone, popup
+  { const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
+    const def = migs.filter((f) => /FUNCTION[^(]*lfh_call_waiter_table/.test(read(`supabase/migrations/${f}`))).pop() || "";
+    const body = def ? read(`supabase/migrations/${def}`) : "";
+    check(`item 29 — the newest definition of the waiter call refuses a table that is not a whole number (${def || "no migration"})`,
+      /IF v_t !~ '\^\\d\{1,9\}\$' THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && /IF v_t::int < 1 THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && !/!~ '\^\\d\{1,9\}\$' OR /.test(body));
+    check("item 29 — …and a table above the floor plan, with the same sentence an order gets",
+      /IF COALESCE\(v_max, 0\) > 0 AND v_t::int > v_max THEN[\s\S]{0,140}'unknown_table'[\s\S]{0,80}Table %s doesn''t exist — tables are 1–%s\./.test(body));
+    check("item 29 — …and stores the table canonically (\"007\" is table 7)", /v_t := \(v_t::int\)::text;/.test(body));
+    check("item 29 — …before the blocked check, the rate limit and the insert", body.indexOf("'unknown_table'") > 0 && body.indexOf("'unknown_table'") < body.indexOf("lfh_is_blocked(NULL, v_t, v_rid)"));
+    const cp = r3("components/ChefPopup.tsx"), mn = r3("lib/menu.ts");
+    check("item 29 — the bell passes the database's sentence through to the popup", /error: typeof res\.error === "string" \? res\.error : undefined/.test(mn));
+    check("item 29 — the popup flags the table box with it and forgets a remembered table that does not exist",
+      /res\.reason === "unknown_table" \|\| res\.reason === "off_plan_table"/.test(cp) && /if \(getScannedTable\(\) === check\.value\) \{\s*setScannedTable\(""\)/.test(cp) && /flagTableInput\("chef-table", res\.error \|\|/.test(cp)); }
+  // item 30 — the admin settings suite puts every setting back the moment each phase ends
+  { const d = r3("scripts/sweep/t27r2/d-settings.mjs");
+    check("item 30 — the admin settings suite remembers each column the first time a phase saves it",
+      /const fresh = Object\.keys\(body\)\.filter\(\(k\) => !touched\.has\(k\)\);/.test(d));
+    check("item 30 — …and writes it back in a finally, whatever the phase did",
+      /const phase = \(check, how, fn\) => c\.phase\(check, how, async \(\.\.\.a\) => \{ touched = new Map\(\); try \{ return await fn\(\.\.\.a\); \} finally \{ await putBack\(\); \} \}\);/.test(d)); }
+  // item 31 — a settings read that failed is not a tax rate, and "Try again" asks the server again
+  { const c = r3("components/CartPanel.tsx");
+    check("item 31 — the bill knows whether it has ever read the restaurant's tax rules",
+      /const \[taxKnown, setTaxKnown\] = useState\(false\);/.test(c) && (c.match(/setTaxRules\(taxRulesOf\(s\)\); setTaxKnown\(true\);/g) || []).length === 3);
+    check("item 31 — until then it prints \"+ any tax\", never a guessed GST line or total",
+      /\{!taxKnown && \(/.test(c) && /\+ any tax/.test(c) && /\{taxKnown && showTaxRow && \(/.test(c) && /\{taxKnown && <div className="bill-line grand">/.test(c));
+    check("item 31 — no order record keeps a total computed from rules nobody read",
+      /const recordTotal = taxKnown \? totalUsd : 0;/.test(c) && !/total: totalUsd/.test(c) && /const totalS = recordTotal/.test(c));
+    check("item 31 — a live card with no recorded total shows no ₹0 Total row", /\{o\.total > 0 && <div className="live-order-total">/.test(c));
+    check("item 31 — while unknown, the rules are asked for again only on the realtime nudge and the 60 s backstop",
+      /if \(!open \|\| taxKnown \|\| !restaurantId\) return;[\s\S]{0,400}addEventListener\("lfh:rt-tick", again\);\s*const iv = setInterval\(again, RT_BACKUP_MS\);/.test(c));
+    const e = r3("app/error.tsx"), g = r3("app/global-error.tsx");
+    check("item 31 — the guest error screen's Try again asks the SERVER again (Next's retry, not reset)",
+      /const again = retry \|\| reset;/.test(e) && /window\.location\.reload\(\) : again\(\)\)/.test(e));
+    check("item 31 — …and tries by itself up to three times, spread out, only for a server-side failure and only on screen",
+      /const AUTO_WAITS_MS = \[4000, 12000, 30000\];/.test(e) && /if \(!error\?\.digest \|\| isStaleCodeError/.test(e) && /document\.visibilityState !== "visible"/.test(e) && /0\.85 \+ Math\.random\(\) \* 0\.3/.test(e));
+    check("item 31 — the root error screen's button asks the server again too", /\(retry \|\| reset\)\(\)/.test(g)); }
+  // ── found by round 3's full test (owner, 2026-10-15: "do a full bug test … check every single bit") ──
+  // item 32 — the saved list a screen draws from is a COPY, so React never sees a row change under it
+  { const o = r3("lib/guestOutbox.ts");
+    check("item 32 — the published saved list holds copies of its rows, never the rows the queue goes on editing",
+      /function recompute\(\) \{ snapshot = \{ queued: queued\.map\(\(x\) => \(\{ \.\.\.x \}\)\), failed: failed\.map\(\(x\) => \(\{ \.\.\.x \}\)\)/.test(o));
+  // item 33 — taking back the last saved call leaves no retry timer behind
+    check("item 33 — taking back the last waiting call clears the retry timer (and only then)",
+      /await removeItem\(id\);\s*if \(!queued\.length && retryTimer\) \{ clearTimeout\(retryTimer\); retryTimer = null; retryStep = 0; \}/.test(o)); }
+  // item 34 — one corrupted entry in the phone's saved orders can no longer take the whole menu down
+  { const st = r3("lib/orderStatus.ts");
+    check("item 34 — the saved orders are read entry by entry: anything without a usable id is left out, every field a screen reads is made safe",
+      /if \(!o \|\| typeof o !== "object" \|\| Array\.isArray\(o\) \|\| typeof o\.id !== "string" \|\| !o\.id\) continue;/.test(st) && /placedAt: Number\.isFinite\(placedAt\) \? placedAt : 0/.test(st) && /: "received",/.test(st));
+  // item 35 — ONE way an order joins the strip
+    check("item 35 — following an order has one door (trackActiveOrder), which skips an order already followed",
+      /export function trackActiveOrder\(/.test(st) && /if \(list\.some\(\(x\) => x\.id === o\.id\)\) return false;/.test(st));
+    const writers = ["components/CartPanel.tsx", "lib/guestOutbox.ts"].filter((f) => /(tset|tsetFor)\("lfh_active_orders"/.test(r3(f)));
+    check(`item 35 — …and nothing else writes the followed-orders list by hand (${writers.join(", ") || "none"})`, !writers.length); }
+  // item 36 — a guest order is for a table that exists (migration 424 + both guest doors)
+  { const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
+    const def = migs.filter((f) => /FUNCTION[^(]*lfh_place_order_public/.test(read(`supabase/migrations/${f}`))).pop() || "";
+    const body = def ? read(`supabase/migrations/${def}`) : "";
+    check(`item 36 — the newest guest-order function refuses a missing or non-number table, before the rate limit (${def || "none"})`,
+      /IF v_tbl IS NULL THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && /IF btrim\(v_tbl\) !~ '\^\\d\{1,9\}\$' THEN/.test(body) && body.indexOf("IF v_tbl IS NULL THEN") < body.indexOf("lfh_rate_check(v_rid, 'guest_order'"));
+    check("item 36 — …and stores the table canonically", /v_tbl := \(btrim\(v_tbl\)::int\)::text;/.test(body));
+    const plan = r3("lib/planTable.ts"), po = r3("app/api/guest/place-order/route.ts"), cw = r3("app/api/guest/call-waiter/route.ts");
+    check("item 36 — one helper names a guest's table the way the floor does (a whole number, \"007\" → \"7\")", /export function guestTable\(v: unknown\): string \| null \{/.test(plan));
+    check("item 36 — both guest doors refuse a table that is not one before asking the database, and pass on the canonical one",
+      [po, cw].every((t) => /const table = guestTable\(b\.table\);\s*if \(!table\) return NextResponse\.json\(\{ ok: false, reason: "unknown_table" \}, \{ status: 400 \}\);/.test(t)) && /p_table: table,/.test(po) && /p_table: table,/.test(cw)); }
+  // item 37 — a refused leave did not land
+  { const lv = r3("app/api/guest/leave/route.ts");
+    check("item 37 — the leave door counts a leave as landed only when it was not refused and not already done",
+      /const leaveLanded = !!d && d\.ok !== false && d\.already_gone !== true;/.test(lv)); }
+  // item 38 — every small control on the ordering screens can be hit with a thumb
+  { const sel = [".gob-x", ".cart-back", "#cart-panel .nav-btn", ".cart-qty-btn", ".live-order-fixlink", ".oc-choice", ".cart-edit-btn", ".remove-item", ".pairing-add", ".allergy-toggle", ".order-confirm-close", ".cart-tabs button"];
+    const rule = (css.match(/((?:[.#][^{}]*::after,?\s*)+)\{\s*content: ""; position: absolute; left: 50%; top: 50%;\s*width: max\(100%, 44px\); height: max\(100%, 44px\); transform: translate\(-50%, -50%\);\s*\}/) || [])[1] || "";
+    const missing = sel.filter((x) => !rule.includes(x + "::after"));
+    check(`item 38 — a 44×44 tap area behind every small ✕, Back, −/+, tab, chip and link on the ordering screens (${missing.join(", ") || "all " + sel.length})`, !!rule && !missing.length);
+    check("item 38 — …on a control that is positioned for it", /\.cart-edit-btn, \.remove-item, \.pairing-add, \.allergy-toggle \{ position: relative; \}/.test(css));
+    const cp = r3("components/CartPanel.tsx");
+    check("item 38 — the bill's − and + carry the class that gives them their tap area", (cp.match(/className="cart-qty-btn"/g) || []).length === 2); }
+  // item 39 — no styles left for screens that no longer exist
+  { const gone = ["ot-sheet", "ot-hide-link", "ot-cancelled-note", "ot-table-row", "ot-save", "order-confirm-done", "allergy-banner", "allergy-popup", "cart-item-warn"];
+    const left = gone.filter((c) => new RegExp(`\\.${c}\\b`).test(css));
+    check(`item 39 — the retired detail sheet, success step, allergy banner and warn line have no styles left (${left.join(", ") || "none"})`, !left.length); }
+}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9

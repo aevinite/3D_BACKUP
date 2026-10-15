@@ -222,6 +222,16 @@ const UNREACHABLE_CODES = new Set([
 // message (the 2026-07-31 ticket — errorSignature.readableError exists for the same reason). We
 // match the WORDS such a page carries rather than parsing HTML here, so there is no second copy
 // of that parser to drift from the first.
+// ── NO BROWSER WORDING HERE, ON PURPOSE (sweep #10 T3 round 3, item 28 — checked, not changed) ─────
+// Chrome's "Failed to fetch", Safari's "Load failed" and Firefox's "NetworkError…" are deliberately
+// ABSENT. They are what a PHONE says when its own request never left — no signal, or a dropped
+// connection — and this helper's "true" means "the restaurant's system didn't answer". lib/session.ts
+// turns that "true" into `timed_out`, which the table screen words as "this one's on us", and
+// `isPhoneOffline` (T4 sweep #10, item 1 — the owner: "make sure this never happens") refuses to call
+// a `timed_out` an offline phone. Adding the browser words here would tell a diner with no bars that
+// the restaurant is down. Screens that need them handle them themselves, next to the offline test:
+// lib/session.ts NETWORK_FAILURE, lib/menu.ts isUnreachable. Node's own "fetch failed" (a SERVER that
+// could not reach the database) is the one fetch phrase that belongs below.
 const UNREACHABLE_TEXT =
   /statement timeout|operation was aborted|aborted due to timeout|fetch failed|socket hang up|econnreset|econnrefused|etimedout|enotfound|eai_again|epipe|connection (refused|reset|closed|terminated|timed out)|too many (clients|connections)|server closed the connection|upstream request timeout|gateway time-?out|service unavailable|temporarily unavailable|bad gateway|web server is down|origin is unreachable|5(0[234]|22|23|24)\s*:/i;
 

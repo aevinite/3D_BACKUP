@@ -187,10 +187,12 @@ console.log("\n#7-10) the four the owner picked on 2026-09-14");
   // unreachable for a waiter.
   check("the table check can be strict, and says why in the file",
     /opts\?: \{ strict\?: boolean \}/.test(plan) && /PLAN_MARGIN/.test(plan));
+  // Re-pointed (sweep #10 T3 round 3): both doors now hand offPlanTable the guest's table in its canonical
+  // form (lib/planTable.ts guestTable — a whole number, "007" → "7"), refusing anything else first.
   check("…the guest's ordering door is strict — the floor plan is the line",
-    /offPlanTable\(publicRid, b\.table, \{ strict: true \}\)/.test(place));
+    /const table = guestTable\(b\.table\);\s*if \(!table\) return/.test(place) && /offPlanTable\(publicRid, table, \{ strict: true \}\)/.test(place));
   check("…the guest's bell is too",
-    /offPlanTable\(rid, b\.table, \{ strict: true \}\)/.test(bell));
+    /const table = guestTable\(b\.table\);\s*if \(!table\) return/.test(bell) && /offPlanTable\(rid, table, \{ strict: true \}\)/.test(bell));
   {
     const staff = read("app/api/editor/[...path]/route.ts") + read("app/api/tablet/[...path]/route.ts");
     check("…and NEITHER staff door is strict, so a parcel counter above the floor plan still opens",
