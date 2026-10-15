@@ -1140,7 +1140,11 @@ flush();
       /\[data-theme="light"\] \.oc-allergen, \[data-theme="light"\] \.allergy-toggle\.on\s*\{\s*color:\s*#b91c1c/.test(css));
     check("item 27 — the allergy note has no opacity on its text (it measured 4.0:1 in dark with it)",
       /\.allergy-note\s*\{[^}]*\}/.test(css) && !/\.allergy-note\s*\{[^}]*opacity/.test(css));
-    check("item 27 — the retired .cart-total rules are gone", !/\.cart-total\b/.test(css)); }}
+    check("item 27 — the retired .cart-total rules are gone", !/\.cart-total\b/.test(css)); }
+  // item 28 — the shared "database didn't answer" test keeps browser wording OUT, on purpose
+  { const m = (read("lib/dbRefusal.ts").match(/const UNREACHABLE_TEXT =\s*\n?\s*\/(.+)\/i;/) || [])[1] || "";
+    check("item 28 — 'did the restaurant's system answer?' never treats a phone's own no-signal wording as the restaurant being down",
+      !!m && !/failed to fetch|load failed|networkerror/i.test(m) && /fetch failed/.test(m)); }}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
