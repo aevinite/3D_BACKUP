@@ -1,7 +1,7 @@
 // SWEEP #8 · T9 · NEW CHECKS, block E — P62951–P63200.
 // The route's own endpoints end to end, the ⋯ menu machinery, the "Sold out only" filter, the
 // whole-table note, the guest chime contract, and the card-forget path.
-import { row, APP, APPC, HTML, CSS, CSSC, ROUTE, ROUTEC, PAGE, has, hasRe, lacksRe, P, src, contentHash } from "./lib.mjs";
+import { row, APP, APPC, HTML, CSS, CSSC, ROUTE, ROUTEC, PAGE, has, hasRe, lacksRe, P, src, code, contentHash } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };
@@ -150,15 +150,17 @@ const ITM = () => rslice('if (a === "items" && c === "status")', 'if (a === "pla
 const PLT = () => rslice('if (a === "platform" && c === "status")', 'if (a === "dishes" && c === "sold-out")');
 const SO = () => rslice('if (a === "dishes" && c === "sold-out")', 'if (a === "print-jobs" && b === "claim")');
 
-row("P63011", "accept reads the order scoped to this restaurant before touching it", () => hasRe(ACC(), /\.eq\("id", b\)\.eq\("restaurant_id", rid\)\.maybeSingle\(\)/));
-row("P63012", "accept refuses an order that is not on this restaurant's board, by name", () =>
-  hasRe(ACC(), /if \(!cur\) return err\("That order isn't on this restaurant's board any more\.", 404\)/));
-row("P63013", "accept never un-serves a dish that has already gone out", () => hasRe(ACC(), /i\.status === "served" \? "served" : "preparing"/));
-row("P63014", "accept tolerates an order whose items JSON is not an array", () => hasRe(ACC(), /Array\.isArray\(cur\.items\) \? cur\.items\.map/));
-row("P63015", "accept's update is scoped by restaurant as well as by id", () => hasRe(ACC(), /\.update\(\{ items, status: "preparing" \}\)\.eq\("id", b\)\.eq\("restaurant_id", rid\)/));
-row("P63016", "accept only promotes the order_items rows that are still 'received'", () =>
-  hasRe(ACC(), /\.update\(\{ status: "preparing" \}\)\.eq\("order_id", b\)\.eq\("restaurant_id", rid\)\.eq\("status", "received"\)/));
-row("P63017", "accept is logged with the order and the device", () => hasRe(ACC(), /logAction\("kitchen", "order_accept", \{ \.\.\.adminMark, order_id: b, device_id: dev, restaurant_id: rid \}\)/));
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 7 — owner: "do all the fixes"): the kitchen route's accept door is GONE and 'served' is no longer a status it takes; accepting lives on the waiter route.
+// The seven accept rows now assert the door is gone from THIS route and that the ONE place accepting
+// lives (the waiter route) still keeps the rules these rows were written to defend.
+const TAB = () => { const t = code(src("app/api/tablet/[...path]/route.ts")); const i = t.indexOf('if (a === "orders" && c === "accept")'); return i < 0 ? "" : t.slice(i, i + 2600); };
+row("P63011", "the kitchen route has NO accept branch any more (item 7)", () => lacksRe(ROUTEC(), /if \(a === "orders" && c === "accept"\)/));
+row("P63012", "its obituary names where accepting lives now", () => hasRe(ROUTE(), /\/api\/tablet\/orders\/:id\/accept/));
+row("P63013", "the waiter route's accept still never un-serves a dish that has already gone out", () => hasRe(TAB(), /i\.status === "served" \? "served" : "preparing"/));
+row("P63014", "…tolerates an order whose items JSON is not an array", () => hasRe(TAB(), /Array\.isArray\(cur\.items\) \? cur\.items\.map/));
+row("P63015", "…scopes its order read and update by restaurant", () => hasRe(TAB(), /\.eq\("id", b\)\.eq\("restaurant_id", rid\)/));
+row("P63016", "…and refuses a cancelled ticket (Restore only)", () => hasRe(TAB(), /if \(cur\.status === "cancelled"\) return err\(VOIDED_MSG, 409\)/));
+row("P63017", "a request to the old kitchen accept path now falls to the plain 404", () => hasRe(ROUTEC(), /return err\("unknown POST endpoint", 404\)/));
 row("P63018", "ready refuses a missing order the same way accept does", () =>
   hasRe(RDY(), /if \(!cur\) return err\("That order isn't on this restaurant's board any more\.", 404\)/));
 row("P63019", "ready marks every not-served dish ready, and leaves served alone", () => hasRe(RDY(), /i\.status === "served" \? "served" : "ready"/));
@@ -195,8 +197,9 @@ row("P63037", "the unready rollup is the SAME formula the single-dish path uses"
 });
 row("P63038", "unready counts how many dishes moved, and says so in the log", () => hasRe(UNR(), /detail: `\$\{moved\} \$\{moved === 1 \? "dish" : "dishes"\} taken back`/));
 row("P63039", "unready answers the count, so the panel can report honestly", () => hasRe(UNR(), /return ok\(\{ ok: true, count: moved \}\)/));
-row("P63040", "items/status refuses a status that is not one of the four", () => hasRe(ITM(), /if \(!\["received", "preparing", "ready", "served"\]\.includes\(status\)\) return err\("invalid status"\)/));
-row("P63041", "serving stamps served_at and any pre-served state clears it", () => hasRe(ITM(), /patch\.served_at = status === "served" \? nowIso\(\) : null;/));
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 7 — owner: "do all the fixes"): the kitchen route's accept door is GONE and 'served' is no longer a status it takes; accepting lives on the waiter route.
+row("P63040", "items/status refuses a status that is not one of the kitchen's three", () => hasRe(ITM(), /if \(!\["received", "preparing", "ready"\]\.includes\(status\)\) return err\("invalid status"\)/));
+row("P63041", "every status this route sets is pre-served, so it always clears served_at", () => hasRe(ITM(), /const patch: any = \{ status, served_at: null \};/));
 row("P63042", "the dish update is scoped by restaurant, so a foreign id cannot be advanced", () =>
   hasRe(ITM(), /\.update\(patch\)\.eq\("id", b\)\.eq\("restaurant_id", rid\)\.select\("order_id"\)/));
 row("P63043", "a tap that moved NO row answers 404 instead of reporting success", () =>
@@ -529,8 +532,10 @@ row("P63198", "the panel exposes no way to set a restaurant's settings from the 
 });
 row("P63199", "the kitchen cannot accept a dine-in order — there is no such call anywhere", () =>
   lacksRe(APPC(), /\/orders\/\$\{[^}]+\}\/accept/));
-row("P63200", "the route still HAS the accept endpoint, because the waiter tablet and manager use the same family", () =>
-  hasRe(ROUTEC(), /if \(a === "orders" && c === "accept"\)/));
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 7 — owner: "do all the fixes"): the kitchen route's accept door is GONE and 'served' is no longer a status it takes; accepting lives on the waiter route. (This row used to assert the door's presence "because the waiter tablet and manager use the same
+// family" — they never called the KITCHEN's door; each panel accepts through its own route.)
+row("P63200", "the kitchen route has no accept endpoint — accepting is the waiter's, on the waiter's route", () =>
+  lacksRe(ROUTEC(), /if \(a === "orders" && c === "accept"\)/));
 
 // ══ E6 · THE TWO FIXES THIS RUN MADE, AND THE RULES THEY RESTORE — P63201–P63220 ══
 row("P63201", "the ticket header's age chip can never break its own text in half", () => hasRe(CSS(), /\.age \{[^}]*white-space: nowrap;/));

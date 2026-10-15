@@ -44,10 +44,11 @@ row("P02965", "the panel and the route agree on which statuses a platform ticket
   const bad = sent.filter((s) => !["accepted", "preparing", "ready", "handed_over"].includes(s));
   return bad.length === 0 || `the panel sends a platform status the route refuses: ${bad.join(", ")}`;
 });
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 7 — owner: "do all the fixes"): the kitchen route's accept door is GONE and 'served' is no longer a status it takes; accepting lives on the waiter route.
 row("P02966", "the panel and the route agree on which dish statuses exist", () => {
-  if (!/\["received", "preparing", "ready", "served"\]\.includes\(status\)/.test(ROUTEC())) return "the route's dish status allow-list has changed shape";
+  if (!/\["received", "preparing", "ready"\]\.includes\(status\)/.test(ROUTEC())) return "the route's dish status allow-list has changed shape";
   const sent = [...APPC().matchAll(/\/items\/\$\{[^}]+\}\/status`, \{ status: ("(\w+)"|[\w.]+) \}/g)].map((m) => m[2] || m[1]);
-  const literal = sent.filter((s) => /^\w+$/.test(s) && !["received", "preparing", "ready", "served"].includes(s) && !/prev|status/.test(s));
+  const literal = sent.filter((s) => /^\w+$/.test(s) && !["received", "preparing", "ready"].includes(s) && !/prev|status/.test(s));
   return literal.length === 0 || `the panel sends a dish status the route refuses: ${literal.join(", ")}`;
 });
 row("P02967", "the panel's unready body shape matches what the route validates", () => {

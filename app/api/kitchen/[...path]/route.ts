@@ -600,23 +600,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       });
     }
 
-    // orders/:id/accept — everything not served → preparing
-    if (a === "orders" && c === "accept") {
-      // .eq(restaurant_id, rid) on EVERY by-id write: sb is the service-role client (RLS
-      // bypassed), so this filter is the ONLY tenant boundary — without it a stale/foreign
-      // order id would be actioned across restaurants (owner's isolation concern, 2026-07-03).
-      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
-      if (!cur) return err("That order isn't on this restaurant's board any more.", 404);
-      if (cur.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409); // sweep #10 T10 round 2, item 12 — a cancelled ticket comes back only through Restore (the manager route's VOIDED_MSG rule)
-      if (cur.status === "served") return err(SERVED_MSG, 409); // item 1 — the same rule as /ready below
-      const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-      // return=minimal: the client discards the body and re-fetches the board, so we skip
-      // BOTH the .select() on the update and the full-row re-read (server↔DB egress saver).
-      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
-      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
-      await logAction("kitchen", "order_accept", { ...adminMark, order_id: b, device_id: dev, restaurant_id: rid });
-      return ok({ ok: true });
-    }
+    // ── orders/:id/accept IS GONE (sweep #10 T11 round 2, item 7 — owner: "do all the fixes") ──────────
+    // OBITUARY. This door moved a NEW ticket to cooking. The owner ruled on 2026-06-14 that the kitchen
+    // does not accept orders — the waiter does — and the screen has offered no Accept since; this route
+    // kept the door for two load scripts only, so a kitchen login could still do by hand what its own
+    // screen deliberately cannot. Those scripts now accept through the waiter's route
+    // (/api/tablet/orders/:id/accept), which is the one place accepting lives. A request here now gets
+    // the ordinary "unknown POST endpoint" 404. Do not bring it back for a test: point the test at the
+    // waiter route instead.
 
     // orders/:id/ready — kitchen finished the whole order: every dish → READY
     // (cooked, waiting for the waiter to carry it out). NOT served — serving is
@@ -708,12 +699,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // sends "ready" (cooked); the tablet sends "served" (delivered).
     if (a === "items" && c === "status") {
       const status = body && body.status;
-      if (!["received", "preparing", "ready", "served"].includes(status)) return err("invalid status");
+      // THE KITCHEN NEVER SERVES (sweep #10 T11 round 2, item 7). Serving is the waiter's action on the
+      // tablet ("↩ Send back to kitchen" is its undo), so 'served' is no longer a word this route takes:
+      // the kitchen's ✓ sends 'ready' and its take-back sends the dish's own earlier status, and neither
+      // can ever be 'served'. It was accepted here only for a load script, now moved to the waiter route.
+      if (!["received", "preparing", "ready"].includes(status)) return err("invalid status");
 
-      const patch: any = { status };
-      // Serving stamps served_at; sending a dish back to a pre-served state (undo a
-      // mis-tap) must clear it again so the row never keeps a stale time (2026-07-22).
-      patch.served_at = status === "served" ? nowIso() : null;
+      // Every status this route can set is pre-served, so the row never keeps a "served at" time it no
+      // longer earns (same rule as /unready below; 2026-07-22).
+      const patch: any = { status, served_at: null };
       // Only need order_id to roll the parent up; the client discards the body → no full row.
       // Scoped by rid so a foreign dish id can't be advanced (service-role bypasses RLS).
       // Item 12 (sweep #10 T10 round 2): ask the dish's ORDER first — this handler rewrites that order's
@@ -725,7 +719,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // 'served', clear served_at and roll the whole order back to 'preparing' — so the floor said
         // the table was cooking again. /unready above has always left a served dish alone; this is the
         // same rule. Un-serving is the waiter tablet's own explicit "↩ Send back to kitchen".
-        if (own && own.status === "served" && status !== "served") return err(SERVED_DISH_MSG, 409);
+        if (own && own.status === "served") return err(SERVED_DISH_MSG, 409);
         if (own && own.order_id) {
           const ord = (await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
           if (ord && ord.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409);

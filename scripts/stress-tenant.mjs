@@ -373,7 +373,9 @@ async function kitchenScreen() {
       if (!o?.id || cooking.has(o.id) || toServe.has(o.id)) continue;
       if (o.table_number != null) tableOf.set(o.id, o.table_number);
       if (o.status === "received") {
-        const a = await panelPOST("kitchen_accept", `/api/kitchen/orders/${o.id}/accept`, {});
+        // The WAITER accepts (owner, 2026-06-14) — through the waiter's route. The kitchen route has
+        // had no accept door since sweep #10 T11 round 2 (item 7).
+        const a = await panelPOST("waiter_accept", `/api/tablet/orders/${o.id}/accept`, {});
         if (a.ok) { cooking.set(o.id, Date.now() + 20000 + ri(40000)); markFloor(o.table_number); }   // 20-60s on the stove
       } else if (o.status === "preparing") {
         // A FOLLOW-UP ORDER IS ALREADY 'preparing' AND NOBODY PRESSED ACCEPT. Migration 163/357:
@@ -393,10 +395,10 @@ async function kitchenScreen() {
       if (Date.now() < when) continue;
       toServe.delete(id);
       // The dish leaves the pass. Order-level status stays coarse and rolls up to 'served' on
-      // its own once every dish is out (kitchen route, items/:id/status) — which is what finally
+      // its own once every dish is out (the waiter route's items/:id/status) — which is what finally
       // lets the table be closed.
       for (const it of itemsOf.get(id) || []) {
-        await panelPOST("waiter_serve", `/api/kitchen/items/${it.id}/status`, { status: "served" });
+        await panelPOST("waiter_serve", `/api/tablet/items/${it.id}/status`, { status: "served" });   // the waiter's route — the kitchen never serves (T11 r2 item 7)
       }
     }
     await waitForWork("kitchen");
