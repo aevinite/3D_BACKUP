@@ -1507,6 +1507,20 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── ONE SAVED MENU PER RESTAURANT (sweep #10 T12 round 2, item 8) ──────────────────────────────────
+// The dish list a tablet saves for "Take order opens instantly" was one key per DEVICE, so a shared
+// tablet opened on the previous restaurant's dishes. Every write and read goes through menuCacheKey(rid),
+// and the old device-wide key is removed rather than left to be read.
+{
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const raw = (code.match(/localStorage\.(setItem|getItem)\("lfh_tablet_menu"/g) || []).length;
+  check(
+    "tablet: the saved dish list is keyed per restaurant (no device-wide copy is written or read)",
+    raw === 0 && /function menuCacheKey\(rid\)/.test(code) && /localStorage\.setItem\(k, JSON\.stringify\(\{ dishes/.test(code) && /localStorage\.removeItem\("lfh_tablet_menu"\)/.test(code),
+    `${TABLET}: the menu cache must go through menuCacheKey(rid); ${raw} raw use(s) of the device-wide key remain.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");

@@ -5860,7 +5860,9 @@ async function loadImpl() {
   if (Array.isArray(dishes)) {
     patch.dishes = dishes;
     state._menuStale = false;
-    try { if (dishes.length) localStorage.setItem("lfh_tablet_menu", JSON.stringify({ dishes, categories: categories || [] })); } catch (_e) {}
+    // ONE SAVED MENU PER RESTAURANT (owner's yes to sweep #10 T12 item 8, 2026-10-15) — the restaurant
+    // this board just came from, never a device-wide copy (see menuCacheKey below).
+    try { const k = menuCacheKey((restaurant && restaurant.id) || panelRid()); if (k && dishes.length) localStorage.setItem(k, JSON.stringify({ dishes, categories: categories || [] })); } catch (_e) {}
   } else {
     patch.dishes = state.data.dishes || [];
   }
@@ -5913,8 +5915,17 @@ tickClock(); setInterval(tickClock, 1000);
 
 // ── Instant menu: hydrate the last dish list from on-device cache so Take-order NEVER waits on
 // the network (the load() below refreshes it + rewrites the cache). Fixes the ~5s menu wait. (audit 2026-07-09)
+// ONE SAVED MENU PER RESTAURANT (owner's yes to sweep #10 T12 item 8, 2026-10-15). It used to be ONE
+// key per DEVICE, "lfh_tablet_menu", so a shared tablet that last served another restaurant opened
+// Take order on THAT restaurant's dishes until the first load replaced them. The key now carries the
+// restaurant id, and the boot read only uses the restaurant this tab already knows (the admin's ?rid,
+// or a waiter's own ?skel hint) — a tab that knows no restaurant yet simply waits for the real menu.
+// The old device-wide copy is removed, so it can never be read again (a new way replaces the old one).
+function menuCacheKey(rid) { return rid ? "lfh_tablet_menu:" + rid : ""; }
+try { localStorage.removeItem("lfh_tablet_menu"); } catch (_e) {}
 try {
-  const _mc = JSON.parse(localStorage.getItem("lfh_tablet_menu") || "null");
+  const _mk = menuCacheKey(PANEL_RID || PANEL_SKEL_RID);
+  const _mc = _mk ? JSON.parse(localStorage.getItem(_mk) || "null") : null;
   if (_mc && Array.isArray(_mc.dishes) && _mc.dishes.length) {
     state.data.dishes = _mc.dishes;
     if (Array.isArray(_mc.categories) && _mc.categories.length) state.data.categories = _mc.categories;
