@@ -315,6 +315,16 @@
     sendBtn.onclick = async function () {
       var subject = subj.value.trim();
       if (!subject) { setStatus("Please add a subject.", "err"); subj.focus(); return; }
+      // A PHOTO OR VOICE NOTE IS NEVER DROPPED IN SILENCE (sweep #10 T16 round 2, item 20). With no
+      // signal the attachments cannot be uploaded, and this used to queue the ticket WITHOUT them and
+      // say "Saved — will send when you reconnect ✓" — so a manager who photographed the broken fridge
+      // believed the photo had gone with it. Now Send says so and keeps the attachment: remove it to
+      // save the ticket as it is, or press Send again once the signal is back.
+      if (!online() && (imageFile || audioBlob)) {
+        var what = imageFile && audioBlob ? "photo and voice note" : imageFile ? "photo" : "voice note";
+        setStatus("You're offline, so the " + what + " can't go with it yet. Remove it to save the ticket now, or press Send again when you're back online.", "err");
+        return;
+      }
       sendBtn.disabled = true; photoBtn.disabled = true; recBtn.disabled = true;
       var imageUrl = null, audioUrl = null;
       try {

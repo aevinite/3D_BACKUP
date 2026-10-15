@@ -12,6 +12,8 @@
 //   5. Audit / Activity "A–Z" sorts → a row with no name goes LAST, not first (auditsort.js)
 //   6. My profile & pay → a failed re-read after a save keeps the form; a second save never re-sends
 //      the phone from the old number (myprofile.js, items 18 and 19)
+//   7. Report an issue → a photo is never dropped in silence when Send is pressed with no signal
+//      (issue-raise.js, item 20)
 import { chromium } from "playwright";
 import http from "node:http";
 import { readFileSync } from "node:fs";
@@ -35,6 +37,7 @@ const page = (scripts, pre = "") => `<!doctype html><meta charset="utf-8"><body>
 const server = http.createServer((req, res) => {
   const json = (code, o) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(o)); };
   if (req.url === "/issue") { res.writeHead(200, { "content-type": "text/html" }); return res.end(page(["shrinkimg.js", "issue-raise.js"])); }
+  if (req.url === "/issue-off") { res.writeHead(200, { "content-type": "text/html" }); return res.end(page(["shrinkimg.js", "issue-raise.js"], `<script>Object.defineProperty(navigator, "onLine", { configurable: true, get: () => window.__on !== false });</script>`)); }
   if (req.url === "/issue-noshrink") { res.writeHead(200, { "content-type": "text/html" }); return res.end(page(["issue-raise.js"])); }
   if (req.url === "/drawer") { res.writeHead(200, { "content-type": "text/html" }); return res.end(page(["backstack.js", "maint.js", "outbox.js", "myprofile.js"])); }
   if (req.url === "/drawer-offline") {
@@ -220,6 +223,24 @@ await p.fill('input[name="phone"]', "3333333333"); await p.click(".me-save"); aw
 const chain = await p.evaluate(() => window.LFH_OUTBOX.getSnapshot().queued.filter((x) => x.body && "phone" in x.body).map((x) => x.expect.fields.phone + "→" + x.body.phone).join(", "));
 ok(chain === "1111111111→2222222222, 2222222222→3333333333", "two saves kept on the device: each phone change is edited from the number this device last sent", chain);
 await p.evaluate(() => new Promise((r) => { const q = indexedDB.deleteDatabase("lfh_outbox"); q.onsuccess = q.onerror = q.onblocked = () => r(); }));
+
+// ── 7. Report an issue with no signal (item 20, round 2) ───────────────────────────────────
+console.log("\n7) Report an issue — a photo attached, then Send with no signal");
+await p.goto(BASE + "/issue-off");
+await p.evaluate(() => { window.__sent = []; window.LFH_ISSUE.open({ api: async (m, path, b) => { window.__sent.push(b); return { ok: true, queued: true }; } }); });
+await p.evaluate(async () => { const c = document.createElement("canvas"); c.width = 60; c.height = 60; const b = await new Promise((r) => c.toBlob(r, "image/png"));
+  const dt = new DataTransfer(); dt.items.add(new File([b], "f.png", { type: "image/png" })); const i = document.getElementById("lfhirFile"); i.files = dt.files; i.dispatchEvent(new Event("change")); });
+await until(() => p.evaluate(() => !!document.querySelector("#lfhirPrevs img")), 5000);
+await p.evaluate(() => { window.__on = false; window.dispatchEvent(new Event("offline")); });
+await p.fill("#lfhirSubj", "Fridge not cooling"); await p.click("#lfhirSend"); await p.waitForTimeout(300);
+const off7 = await p.evaluate(() => ({ sent: window.__sent.length, img: !!document.querySelector("#lfhirPrevs img"), s: document.getElementById("lfhirStatus").textContent }));
+ok(off7.sent === 0 && off7.img && /You're offline, so the photo can't go with it yet\. Remove it to save the ticket now/.test(off7.s), "the photo is NOT dropped: nothing is saved, it stays attached, and Send says why", JSON.stringify(off7));
+if (off7.img && !off7.sent && await p.evaluate(() => !!document.getElementById("lfhirSend"))) {
+  await p.evaluate(() => { window.__on = true; window.dispatchEvent(new Event("online")); }); W.uploads = [];
+  await p.click("#lfhirSend"); await until(async () => W.uploads.length > 0, 8000); await p.waitForTimeout(300);
+  const on7 = await p.evaluate(() => window.__sent[0] || null);
+  ok(W.uploads.length === 1 && on7 && /^https:/.test(on7.image_url || ""), "…and back online, the same Send uploads it and the photo goes with the ticket", JSON.stringify({ up: W.uploads.length, t: on7 }));
+} else ok(false, "…and back online, the same Send uploads it — not reached: the ticket had already gone without the photo");
 
 ok(errs.length === 0, "no page threw while being driven", errs.join(" | "));
 await covStop(p);
