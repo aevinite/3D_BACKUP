@@ -1,6 +1,6 @@
 # Sweep #10 · Terminal 4 — findings (the table session — a table shows only its own party)
 
-Ledger: `LEDGER/T4-S10.md` (574 new rows, all ✅ after the fixes) · re-run stamps `re-run 2026-10-12 (sweep #10, T4)` on 2,000
+Ledger: `LEDGER/T4-S10.md` (579 round-1 rows + 361 round-2 rows, all ✅ after the fixes) · re-run stamps `re-run 2026-10-12 (sweep #10, T4)` on 2,000
 earlier rows (1,997 ✅ · 3 ⏭ · **0 regressions**). Problems found: **8**, all fixed, one commit each, each with a guard that was broken
 on purpose once and seen red.
 
@@ -31,6 +31,52 @@ on purpose once and seen red.
   after writing it and answers false when the phone kept nothing (the past-review rename is still sent). Guard: `verify:guest-doors`; live on the real dish page: P173599–P173600.
 - **Item 11 PARKED by the owner, 2026-10-13 — "we will do it later":** the Turnstile widget on the login forms. Until it is built,
   the Turnstile keys must stay unset (setting them would refuse every sign-in — item 8).
+
+### Round 2 — 2026-10-15/16 — owner: "replan the whole test … every single thing within the boundaries … covered … completely error free"
+
+**Re-run first.** All 579 round-1 rows re-run (579 ✅); the 2,000 earlier rows on these files stamped `re-run 2026-10-15
+(sweep #10, T4 round 2)` against today's code, the 32 guards they lean on and the old T3/T5 runners. Nine old checks whose
+subject moved on purpose were re-aimed (reason beside each); three that phase 1 had filed as "not my files" were mine and are
+corrected (P16129, P59098, P59470).
+
+**Measured, not claimed.** `scripts/sweep/t4s10/cover.mjs` maps V8 coverage of every run — in memory, and in the new **screen
+lab** (`scripts/sweep/t4s10/lab/`: the seven screens and the restaurant context bundled for Chromium, every database answer held
+in the page) — back to the lines of the 24 files. Then `mutate.mjs` broke the code ONE place at a time, with a control first,
+until **every one of the 1,022 break points in the 24 files had been tried**; each break no check noticed was run again on a
+quiet machine, and is either now caught by a check written for it or explained as making no difference (163, below).
+
+| | |
+|---|---|
+| new checks this round | **361** (P173601–P173987: in memory 29 · screen lab 253 · written for surviving breaks 60 + 13 · live on :4404 6) — all ✅ |
+| lines of the 24 files run by a check | 99.2% → **every reachable line** (left: two catches that cannot be reached, one dead line — below) |
+| deliberate breaks | **1,022** = every point · **859 caught** · 163 make no difference (timings, pixel sizes, `null`/`undefined`, a guard backed by a disabled button, starting values overwritten before anything shows, fields nobody reads) |
+
+| item | where it lives | what was wrong | guard |
+|---|---|---|---|
+| R2-1 | Guest menu → a mistyped or dead restaurant link (`/r/<a slug nobody owns>/…`) → the "not available" page | the page still mounts every guest widget, and they asked the database about **French House** (its settings, ban list, customer greeting) — on a page that is not French House | verify:guest-doors §18 · live P173961–P173966 |
+| R2-2 | Guest menu → a diner with dishes in their basket joins a table that has its own | one busy second on the first send marked the merge done, so the next refresh wrote the table's basket over the phone: **the dishes the diner brought vanished** and never reached the table | verify:guest-doors §15 · lab |
+| R2-3 | Guest menu → basket → "Your table" bill → the pulsing green dot | the dot greyed only when the FIRST read failed; a restaurant that stopped answering mid-meal left a pulsing "live" dot over numbers that could be minutes old | verify:guest-doors §16 · lab |
+| R2-4 | Guest menu → table sheet → after a failed join | the join's own limit and a phone banned mid-visit both said "We couldn't reach the restaurant's system just now" (untrue; and a banned phone would retry for ever); the no-signal order save could leave "One moment…" up for good; a Retry that could not tell the restaurant kept the last screen's "Connection trouble" | verify:guest-doors §17 · lab |
+
+**Round 2 — looked like faults, are not:** the table card appears ~0.5 s after a join because components/RealtimeProvider.tsx turns
+"session changed" into the refresh nudge (a lab without it showed a one-minute wait — the lab now mounts it) · `tenantSlug()` throws
+on a damaged percent-escape, but middleware.ts redirects such an address before any page runs, and every storage read catches it ·
+"Leave" / "Change table" tapped twice in the SAME instant could send twice; a human double tap (≥80 ms) cannot (the card re-draws
+with its buttons off first) · lib/guestName.ts's two catches cannot be reached (tget/tset swallow every failure) — a harmless second
+net · components/SessionGate.tsx `pollRef` is cleared but never set (dead, harmless) · 15 lab "reds" were the lab's own `http://`
+origin (no geolocation, no crypto.randomUUID) — the lab is https now.
+
+**Round 2 — outside this territory:** `/q/<a code nobody owns>` shows GuestNotFound with no restaurant pinned, so the guest widgets
+fall back to French House there too (app/q/[code]/page.tsx — the page that knows the code matched nothing; fix: pin "no
+restaurant" for the tab, and lib/restaurant-context.tsx then reads it — offered in the report) · verify:scoped-reads:
+lib/guestTokenRestaurant.ts reads session_members by token with no restaurant filter · verify:rpc-scoped:
+scripts/sweep/t10s10/new-r3.mjs:719 · verify:guards-alive: t27r2 / verify-admin-* name three retired admin routes,
+verify-guest-menu-switch.mjs has no app-up preflight or --base, t11s10/run.mjs ends on a bare process.exit · T5 static P58782
+(public/sw.js), P59073 / P59080 (components/GuestNotFound.tsx), P59116 (components/ChefPopup.tsx dispatches table-scanned 3×,
+the row expects 2) — all red on main, none in these files.
+
+**Round 2 — improvements, not faults:** the table card's remembered "keep it open" choice is overridden by its open-then-fold
+greeting on every reload (lib: components/SessionStatusWidget.tsx) — harmless, the owner may prefer it either way.
 
 ## Looked like faults, are not (recorded so nobody files them)
 
