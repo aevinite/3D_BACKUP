@@ -237,6 +237,14 @@
         expect: me.id ? { table: "staff_users", id: me.id, fields: { "profile.notes": (me.profile || {}).notes ?? null } } : null,
       });
       queued = queued || res2.queued;
+      // WHAT THIS DEVICE SENT IS NOW WHAT IT EDITS FROM (sweep #10 T16 round 2, item 19). The next
+      // save's `expect` reads me.phone; it was only ever refreshed by the re-read below, so when that
+      // read failed — or the save was kept on the device — a second save (adding an email, say) sent
+      // the phone AGAIN, marked as edited from the OLD number. Once the first write had landed the
+      // server's clash rule (lib/clash.ts) refused it: "Someone else changed Phone while you had it
+      // open" — about the person's own change, and on a live save it read "Not saved".
+      me.phone = phone;
+      me.profile = Object.assign({}, me.profile || {}, profile);
       if (queued) {
         if (btn) { btn.disabled = false; btn.textContent = "Save my details"; }
         tell("Saved on this device — it will sync when you're back online.", "Saved here for now");

@@ -10,12 +10,16 @@
 //   3. First-login card → a save kept on the device (no signal) lets the person carry on (maint.js)
 //   4. My profile & pay → says what the number counts, and invites rather than scores (myprofile.js)
 //   5. Audit / Activity "A–Z" sorts → a row with no name goes LAST, not first (auditsort.js)
+//   6. My profile & pay → a failed re-read after a save keeps the form; a second save never re-sends
+//      the phone from the old number (myprofile.js, items 18 and 19)
 import { chromium } from "playwright";
 import http from "node:http";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+// Coverage for sweep #10 T16 round 2 (scripts/sweep/t16s10/cov.mjs) — a no-op unless T16_COV is set.
+import { covStart, covStop } from "./sweep/t16s10/cov.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const file = (f) => readFileSync(join(ROOT, "public/panels", f), "utf8");
@@ -35,9 +39,12 @@ const server = http.createServer((req, res) => {
   if (req.url === "/drawer") { res.writeHead(200, { "content-type": "text/html" }); return res.end(page(["backstack.js", "maint.js", "outbox.js", "myprofile.js"])); }
   if (req.url === "/drawer-offline") {
     res.writeHead(200, { "content-type": "text/html" });
-    return res.end(page(["backstack.js", "maint.js", "outbox.js"], `<script>window.__off = false; Object.defineProperty(navigator, "onLine", { configurable: true, get: () => !window.__off });</script>`));
+    return res.end(page(["backstack.js", "maint.js", "outbox.js", "myprofile.js"], `<script>window.__off = false; Object.defineProperty(navigator, "onLine", { configurable: true, get: () => !window.__off });</script>`));
   }
-  if (req.method === "GET" && req.url.startsWith("/api/panel-profile")) return json(200, W.profile || { staff: false });
+  if (req.method === "GET" && req.url.startsWith("/api/panel-profile")) {
+    if (W.gets && W.gets.length) { const g = W.gets.length > 1 ? W.gets.shift() : W.gets[0]; return json(g.status, g.body); }   // section 6: scripted reads
+    return json(200, W.profile || { staff: false });
+  }
   if (req.url.startsWith("/api/maintenance")) return json(W.maintStatus, W.maint);
   let body = [];
   req.on("data", (c) => body.push(c));
@@ -50,7 +57,7 @@ const server = http.createServer((req, res) => {
       W.uploads.push({ type, bytes: buf.length });
       return json(200, { url: "https://example.invalid/p.webp" });
     }
-    if (req.url.startsWith("/api/panel-profile")) { W.saves.push(buf.toString("utf8")); return json(200, { ok: true }); }
+    if (req.url.startsWith("/api/panel-profile")) { W.saves.push(buf.toString("utf8")); (W.expects ||= []).push(req.headers["x-lfh-expect"] || ""); return json(200, { ok: true }); }
     return json(200, { ok: true });
   });
 });
@@ -59,6 +66,7 @@ const BASE = "http://127.0.0.1:" + server.address().port;
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 const p = await ctx.newPage();
+await covStart(p);
 const errs = [];
 p.on("pageerror", (e) => errs.push(String(e).slice(0, 160)));
 const until = async (fn, ms = 8000) => { const t = Date.now() + ms; while (Date.now() < t) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 100)); } return false; };
@@ -186,7 +194,35 @@ for (const [list, name] of [[S.SORTS || S.AUDIT_SORTS, "Audit"], [S.ACTIVITY_SOR
   }
 }
 
+// ── 6. My profile & pay — saving twice (items 18 and 19, round 2) ────────────────────────────
+console.log("\n6) My profile & pay — a save whose re-read fails, then a second save");
+const ME6 = { staff: true, id: "u1", username: "w1", role: "tablet", name: "Asha", phone: "1111111111", profileModule: true, profile: {}, completeness: { filled: 1, total: 8 }, job: {} };
+W.profile = null; W.saves = []; W.expects = [];
+W.gets = [{ status: 200, body: ME6 }, { status: 200, body: ME6 }, { status: 503, body: {} }];
+await p.goto(BASE + "/drawer"); await until(() => p.evaluate(() => !!window.LFH_ME), 5000);
+await p.evaluate(() => window.LFH_ME.open()); await p.waitForSelector("#meForm", { timeout: 5000 });
+await p.fill('input[name="phone"]', "2222222222"); await p.click(".me-save"); await p.waitForTimeout(800);
+const after1 = await p.evaluate(() => ({ t: document.getElementById("meBody").innerText, b: (document.querySelector(".me-save") || {}).textContent, d: (document.querySelector(".me-save") || {}).disabled }));
+ok(!/Couldn't load/.test(after1.t) && after1.b === "Saved ✓" && after1.d === false, "a save the server accepted, then a busy re-read: the form and 'Saved ✓' stay (never 'Couldn't load'), and Save works again", JSON.stringify({ b: after1.b, d: after1.d, t: after1.t.slice(0, 60) }));
+if (after1.b === "Saved ✓") {
+  await p.fill('input[name="email"]', "asha@example.invalid"); await p.click(".me-save"); await p.waitForTimeout(800);
+  const phones = W.saves.map((x) => JSON.parse(x)).filter((x) => "phone" in x).length;
+  ok(phones === 1, "…and the second save does not send the phone again from the old number (which the server would call someone else's change)", `${phones} phone write(s)`);
+}
+W.gets = null;
+W.profile = ME6;
+await p.goto(BASE + "/drawer-offline"); await until(() => p.evaluate(() => !!window.LFH_ME), 5000);
+await p.evaluate(() => { window.__off = true; });
+await p.evaluate(() => window.LFH_ME.open()); await p.waitForSelector("#meForm", { timeout: 5000 });
+await p.fill('input[name="phone"]', "2222222222"); await p.click(".me-save"); await p.waitForTimeout(600);
+await p.evaluate(() => { const o = [...document.querySelectorAll(".lfh-ov")].pop(); if (o) o.remove(); });
+await p.fill('input[name="phone"]', "3333333333"); await p.click(".me-save"); await p.waitForTimeout(600);
+const chain = await p.evaluate(() => window.LFH_OUTBOX.getSnapshot().queued.filter((x) => x.body && "phone" in x.body).map((x) => x.expect.fields.phone + "→" + x.body.phone).join(", "));
+ok(chain === "1111111111→2222222222, 2222222222→3333333333", "two saves kept on the device: each phone change is edited from the number this device last sent", chain);
+await p.evaluate(() => new Promise((r) => { const q = indexedDB.deleteDatabase("lfh_outbox"); q.onsuccess = q.onerror = q.onblocked = () => r(); }));
+
 ok(errs.length === 0, "no page threw while being driven", errs.join(" | "));
+await covStop(p);
 await browser.close(); server.close();
 console.log(`\n${fail ? "❌" : "✅"} panel helpers driven: ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
