@@ -76,3 +76,39 @@ floor plan from a direct QR call (the database, T35) · `lib/dbRefusal.ts` does 
 the browser re-lays the page out every frame and counts ~0.07 layout shift per 8 s on the dish page — the
 same look on `transform: translateX(…)` costs no layout (dish page / THE LOOK) · French House's join gate
 said "tables 1–13" during one run while `settings.table_count` is 30 (floor plan, T4).
+
+## Round 3 (2026-10-15) — owner picked 25–31; the full re-test found 32–39
+
+Owner's words: *"do 25,26,27,28 and for 29 … the table which are not there they shouldn't be able to call …
+solve the 30th one also … solve 31 … do a full bug test … Replan whole test. Don't use the previous one."*
+
+| # | Where | What was wrong | Status |
+|---|---|---|---|
+| 25 | dish page → cyan buttons | the shine moved by `left`, re-laying the page out every frame | fixed — `transform`, one keyframe |
+| 26 | dish page → Rate tab | two sets of star rules; the later one hid the "3 / 5" pill | fixed — one set, pill shows |
+| 27 | bill, dish popup, saved list (light skin) | 23 pieces of text below the readable line (line prices 2.2:1) | fixed — all 200 measured pass |
+| 28 | backend only | Chrome's "Failed to fetch" not read as "database down" | checked, NOT changed — a phone with no bars would read as the restaurant down; comment in `lib/dbRefusal.ts` |
+| 29 | menu → bell popup | a table that does not exist could call a waiter (phantom tile on every floor) | fixed — migration 423, the popup names the real tables |
+| 30 | backend only (test tools) | T27's admin suite left French House on 12 tables for minutes | fixed — each phase puts back what it touched |
+| 31 | bill + guest error screen | a failed settings read printed a guessed 5% GST as fact; "Try again" re-drew the same failure | fixed — "+ any tax"; error screen re-asks and retries 3× |
+| 32 | "On this phone" list | the queue handed out its live rows | fixed |
+| 33 | backend only | cancelling the last saved item left the retry timer ticking | fixed |
+| 34 | order strip | two writers of the live-order list | fixed — one writer |
+| 35 | order strip | a damaged saved list was trusted as read | fixed — cleaned on read |
+| 36 | menu → place order | an order for table "04", " 4" or no table was accepted | fixed — both doors + migration 424 |
+| 37 | backend only | leave reported success when the database did nothing | fixed |
+| 38 | bill, dish popup, saved list | 12 controls under 44 px | fixed — invisible tap areas (bin ≈ 26 px, above 24 px floor) |
+| 39 | backend only | 17 dead style rules | removed with obituary comments |
+
+**Test, re-planned from zero:** 145 in-memory checks · 19 live on a production build behind a fault proxy
+(`scripts/sweep/t3s10/r3/`) · coverage 674/674 lines in the 7 code files · mutation 525 breaks, 499 caught,
+26 equivalent · old suites still green (934 · 52 · 31 · 62 · 70 · 70 · 2 · static 300/330/370/430/320/380).
+
+**Own slips this round:** an offline-then-online contrast run sent 6 real orders to French House table 4
+(cancelled, archived, stamped, session closed; memory written) · L601 first passed on the previous run's
+order (now counts only orders made after it starts) · block F reds came from running on the dev server,
+which has no service worker (green on the production build).
+
+**For other terminals:** migrations 423/424 are on the dev DB only — AV live needs the ask-first release.
+Hook failures seen in the shared folder belong to other terminals' work (t27r2 retired admin routes,
+verify-guest-menu-switch preflight, t11s10 run.mjs exit).
