@@ -242,8 +242,7 @@ for (const spec of REACT_VALUE_EDITS) {
   console.log(`\n${spec.file}  (React — matched by action, not by path)`);
 
   // (2) first: does the route even read an expectation? If not, every call site below is theatre.
-  // expectClashInTurn (mig 422, sweep #10 T12 round 2) is the same gate after waiting its turn on the row.
-  const routeReads = !!routeSrc && /expectClash(InTurn)?\s*\(/.test(routeSrc);
+  const routeReads = !!routeSrc && /expectClash\s*\(/.test(routeSrc);
   if (routeReads) console.log(`  ✅ ${spec.route} reads the expectation (expectClash)`);
   else { problems++; console.log(`  ❌ ${spec.route} NEVER CALLS expectClash — an X-LFH-Expect header sent from the screen would be ignored`); }
 

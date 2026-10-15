@@ -147,6 +147,10 @@ const TENANT_ROW_TABLES = new Set(["settings", "restaurants", "restaurant_billin
  * staff learn one behaviour. FAILS OPEN on any lookup problem.
  */
 export async function expectClash(req: NextRequest, rid: string): Promise<ClashInfo | null> {
+  // Inside a write that can give a turn back (withIdempotency opens the scope — see below), wait this
+  // request's turn on the row first, so two saves of one row in the same instant compare one after the
+  // other instead of both against the old value. Outside such a scope: exactly the old behaviour.
+  if (turnScope.has(req)) await takeEditTurn(req, rid);
   type Want = { table?: string; id?: string; where?: Record<string, unknown>; fields?: Record<string, unknown>; label?: string };
   let want: Want | null = null;
   try {
@@ -255,17 +259,19 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
 // expectClash() READS the row and compares; the handler WRITES later, in another round trip. Two saves of
 // the same row arriving in the same instant both read the old value, both pass, and the later write
 // silently replaces the earlier one — measured: two tablets asking a dish's qty 1 → 2 and 1 → 3 at once
-// were BOTH answered 200 and nobody was told. A dispatcher that calls expectClashInTurn() instead first
+// were BOTH answered 200 and nobody was told. Inside a panel write, expectClash() now first
 // takes a short TURN on the row its expectation names (lfh_edit_turn_take); a second save of that row
 // waits for the first to finish and then compares against what the first one wrote — so it is refused,
-// as if it had arrived a moment later. The route releases the turn when its request ends
-// (releaseEditTurnAfter around the handler); a request that died holding one is taken over after 8s.
+// as if it had arrived a moment later. withIdempotency (lib/idempotency.ts) — which already wraps every
+// panel write route — opens the scope and gives the turn back when the request ends, so no route had to
+// change; a request that died holding one is taken over after 8s.
 //
 // FAILS OPEN, like everything in this file: no turn table yet (a stack without migration 422), a database
 // blip, or a wait longer than TURN_WAIT_MS all fall through to the plain comparison — never a refused save.
 const TURN_TTL_MS = 8000;
 const TURN_WAIT_MS = 4000;
 const turns = new WeakMap<NextRequest, { key: string; token: string }>();
+const turnScope = new WeakSet<NextRequest>();
 function turnKeyOf(req: NextRequest, rid: string): string | null {
   try {
     const raw = req.headers.get("x-lfh-expect");
@@ -294,24 +300,15 @@ async function takeEditTurn(req: NextRequest, rid: string): Promise<void> {
     await new Promise((r) => setTimeout(r, Math.min(120 + step * 60, 400)));
   }
 }
-/** expectClash, after waiting this request's turn on the row it names. Use it in a dispatcher whose
- *  route export is wrapped in releaseEditTurnAfter(), so the turn is given back when the request ends. */
-export async function expectClashInTurn(req: NextRequest, rid: string): Promise<ClashInfo | null> {
-  await takeEditTurn(req, rid);
-  return expectClash(req, rid);
-}
+/** Called by lib/idempotency.ts's withIdempotency around every panel write: from here until
+ *  releaseEditTurn(req), an expectClash() on this request waits its turn on the row it names. */
+export function openEditTurnScope(req: NextRequest): void { turnScope.add(req); }
 export async function releaseEditTurn(req: NextRequest): Promise<void> {
+  turnScope.delete(req);
   const t = turns.get(req);
   if (!t) return;
   turns.delete(req);
   try { await sb.rpc("lfh_edit_turn_release", { p_key: t.key, p_token: t.token }); } catch { /* the 8s expiry frees it */ }
-}
-/** Wrap a route handler so a turn taken while it ran is always given back, whatever it returned or threw. */
-export function releaseEditTurnAfter<A extends unknown[], R>(fn: (req: NextRequest, ...rest: A) => Promise<R>) {
-  return async (req: NextRequest, ...rest: A): Promise<R> => {
-    try { return await fn(req, ...rest); }
-    finally { await releaseEditTurn(req); }
-  };
 }
 
 // Money columns: the refusal says a value MOVED without repeating the figure, because this gate

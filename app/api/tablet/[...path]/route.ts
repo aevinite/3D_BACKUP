@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
-import { replayClash, clashJson, expectClashInTurn, releaseEditTurnAfter } from "@/lib/clash";
+import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { offPlanTable } from "@/lib/planTable";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { recordRemoval, reasonFromBody } from "@/lib/removalAudit";
@@ -930,7 +930,7 @@ function invalidateFloorAfter(fn: (req: NextRequest, ctx: Ctx) => Promise<NextRe
 
 // ── POST: place order / attend call / approve member / open session ──────────
 // Wrapped so a replayed offline action runs at most once (see lib/idempotency.ts).
-export const POST = withIdempotency(invalidateFloorAfter(releaseEditTurnAfter(postImpl)), "tablet");
+export const POST = withIdempotency(invalidateFloorAfter(postImpl), "tablet");
 async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
@@ -1223,7 +1223,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // changed it — and tell that person what it says now. One gate for every action here:
     // a feature opts in from its CALL SITE (see the NEW-FEATURE CHECKLIST in CLAUDE.md), so
     // this cannot be forgotten on the server side when a new endpoint is added.
-    const overwrite = await expectClashInTurn(req, rid);   // waits its turn on that row first (lib/clash.ts, mig 422)
+    const overwrite = await expectClash(req, rid);
     if (overwrite) return clashJson(overwrite);
 
     // ── Raise an issue / complaint (photo + voice note optional) ────────────────

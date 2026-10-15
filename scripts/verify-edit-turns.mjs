@@ -6,13 +6,13 @@
 // WHY. lib/clash.ts's expectClash READS a row and compares it with what the screen was editing from; the
 // handler WRITES later. Two saves of the same row in the same instant both passed and the later one
 // silently replaced the earlier — the "first save wins, loser told" rule broken exactly when it matters.
-// The fix is a short TURN per row (migration 422's lfh_edit_turn_take / _release), taken by
-// expectClashInTurn() and given back by releaseEditTurnAfter() around the route handler.
+// The fix is a short TURN per row (migration 422's lfh_edit_turn_take / _release), taken by expectClash()
+// inside withIdempotency's scope and given back when the request ends.
 //
 // THIS GUARD HOLDS BOTH HALVES:
-//   1. every panel dispatcher compares through expectClashInTurn, and every route export whose handler
-//      does so is wrapped in releaseEditTurnAfter — a turn taken and never released would make the next
-//      person editing that row wait for the 8-second expiry;
+//   1. withIdempotency (which wraps every panel write) opens the turn scope and always releases it, and
+//      expectClash waits its turn only inside that scope — a turn taken and never released would make the
+//      next person editing that row wait for the 8-second expiry;
 //   2. on the DEV database: a second token cannot take a held turn, the holder's release frees it, and a
 //      stranger's release cannot. The probe uses its own key and deletes it before it exits.
 import { readFileSync } from "node:fs";
@@ -26,28 +26,24 @@ const fails = [];
 let passed = 0;
 const check = (name, ok, why) => { if (ok) { passed++; console.log("  ✅ " + name); } else { fails.push(name); console.log("  ❌ " + name + (why ? " — " + why : "")); } };
 
-console.log("1. the code: every panel dispatcher waits its turn and gives it back");
-const ROUTES = {
-  "app/api/tablet/[...path]/route.ts": ["POST"],
-  "app/api/editor/[...path]/route.ts": ["POST", "PATCH"],
-  "app/api/kitchen/[...path]/route.ts": ["POST"],
-  "app/api/inventory/[...path]/route.ts": ["POST"],
-};
-for (const [file, exps] of Object.entries(ROUTES)) {
-  const src = read(file);
-  const code = src.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
-  check(`${file}: compares through expectClashInTurn (never the bare expectClash)`,
-    /await expectClashInTurn\(req, rid\)/.test(code) && !/await expectClash\(req, rid\)/.test(code));
-  for (const e of exps) {
-    const line = (code.match(new RegExp(`export const ${e} = [^\\n]+`)) || [""])[0];
-    check(`${file}: ${e} is wrapped in releaseEditTurnAfter`, /releaseEditTurnAfter\(/.test(line), line.trim() || "export not found");
-  }
+console.log("1. the code: every panel write waits its turn and gives it back");
+// The scope lives in lib/idempotency.ts's withIdempotency — which already wraps every panel write route —
+// so no route had to change shape (round 2's first cut changed four export lines and eleven other guards
+// that read those lines went red; this way the routes are byte-for-byte what they were).
+const idem = read("lib/idempotency.ts");
+check("lib/idempotency.ts: withIdempotency opens the turn scope before the handler and releases it in a finally",
+  /openEditTurnScope\(req\);\s*try \{ return await idempotent\(req, ctx\); \}\s*finally \{ await releaseEditTurn\(req\); \}/.test(idem));
+const ROUTES = ["app/api/tablet/[...path]/route.ts", "app/api/editor/[...path]/route.ts", "app/api/kitchen/[...path]/route.ts", "app/api/inventory/[...path]/route.ts"];
+for (const file of ROUTES) {
+  const code = read(file).split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  check(`${file}: its writes go through withIdempotency AND compare through expectClash — so they take turns`,
+    /export const (POST|PATCH) = withIdempotency\(/.test(code) && /await expectClash\(req, rid\)/.test(code));
 }
 const lib = read("lib/clash.ts");
+check("lib/clash.ts: expectClash waits its turn only inside that scope (everywhere else, exactly as before)",
+  /if \(turnScope\.has\(req\)\) await takeEditTurn\(req, rid\);/.test(lib));
 check("lib/clash.ts: a failed or missing turn table FAILS OPEN (the save is compared, never refused for it)",
   /if \(res\.error\) return;/.test(lib) && /if \(Date\.now\(\) >= until\) return;/.test(lib));
-check("lib/clash.ts: the release runs in a finally, whatever the handler returned or threw",
-  /try \{ return await fn\(req, \.\.\.rest\); \}\s*finally \{ await releaseEditTurn\(req\); \}/.test(lib));
 const mig = read("supabase/migrations/422_two_saves_of_one_thing_take_turns.sql").replace(/--[^\n]*/g, "");
 check("migration 422: both functions are service_role-only and the table has RLS on with no public grant",
   /REVOKE ALL ON FUNCTION public\.lfh_edit_turn_take[^;]+FROM PUBLIC, anon, authenticated/.test(mig)

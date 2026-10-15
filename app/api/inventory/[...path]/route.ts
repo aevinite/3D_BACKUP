@@ -19,7 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
-import { clashJson, expectClashInTurn, releaseEditTurnAfter } from "@/lib/clash";
+import { expectClash, clashJson } from "@/lib/clash";
 import { signRows, signOne } from "@/lib/mediaLinks";
 import { logAction } from "@/lib/oplog";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
@@ -377,7 +377,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
 }
 
 // ═════════════════════════════════════ POST ════════════════════════════════════
-export const POST = withIdempotency(releaseEditTurnAfter(async (req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) => {
+export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) => {
   const g = await gate(req);
   if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
@@ -397,7 +397,7 @@ export const POST = withIdempotency(releaseEditTurnAfter(async (req: NextRequest
   // person was told. Same one-line gate as the three staff panels; a call site opts in by
   // sending what it was editing FROM (see public/panels/editor/inventory.js).
   {
-    const overwrite = await expectClashInTurn(req, rid);   // waits its turn on that row first (lib/clash.ts, mig 422)
+    const overwrite = await expectClash(req, rid);
     if (overwrite) return clashJson(overwrite);
   }
 
@@ -868,4 +868,4 @@ export const POST = withIdempotency(releaseEditTurnAfter(async (req: NextRequest
     if (e instanceof BadInput) return err(e.message, 400);
     return panelFailure(e, { unknown: "Inventory write failed." });
   }
-}), "inventory");
+}, "inventory");

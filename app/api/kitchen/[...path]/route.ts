@@ -8,7 +8,7 @@ import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { menuTag } from "@/lib/menuDataServer";
 import { withIdempotency } from "@/lib/idempotency";
-import { replayClash, clashJson, expectClashInTurn, releaseEditTurnAfter } from "@/lib/clash";
+import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { liveOrdersAndItems, stripPlacedBy } from "@/lib/liveBoard";
@@ -428,7 +428,7 @@ function invalidateFloorAfter(fn: (req: NextRequest, ctx: Ctx) => Promise<NextRe
 
 // ── POST: accept / ready / item status / sold-out ────────────────────────────
 // Wrapped so a replayed offline action runs at most once (see lib/idempotency.ts).
-export const POST = withIdempotency(invalidateFloorAfter(releaseEditTurnAfter(postImpl)), "kitchen");
+export const POST = withIdempotency(invalidateFloorAfter(postImpl), "kitchen");
 async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
@@ -475,7 +475,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // ── NO SILENT OVERWRITES (owner, 2026-07-30) ──────────────────────────────────
     // If the screen told us what it was editing FROM, refuse when someone else has since
     // changed it — and tell that person what it says now. One gate for every action here.
-    const overwrite = await expectClashInTurn(req, rid);   // waits its turn on that row first (lib/clash.ts, mig 422)
+    const overwrite = await expectClash(req, rid);
     if (overwrite) return clashJson(overwrite);
 
     // ── Raise an issue / complaint (photo + voice note optional) ────────────────
