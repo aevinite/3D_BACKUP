@@ -253,10 +253,16 @@
       //
       // If the refresh cannot be had, the button keeps saying Saved ✓ and the fields keep what was
       // typed — which is exactly what is true. The next open reads it fresh.
+      // …AND A RE-READ THAT GETS NO ANSWER IS NOT A REASON TO WIPE THE SCREEN (sweep #10 T16 round 2,
+      // item 18). Round 1 (item 8) taught render() to say "Couldn't load your profile just now" when a
+      // read fails — and this re-read is a read, so a busy moment straight after a save replaced the
+      // form and its "Saved ✓" with that sentence, about a save the server had accepted. A failed
+      // re-read now keeps what is on screen, exactly as the note above promises.
+      var held = me;
       try {
         await load();
-        render();
-      } catch (e) { /* saved; only the read back failed. Nothing to correct and nothing to confess. */ }
+        if (readFailed) { readFailed = false; me = held; if (btn) btn.disabled = false; } else render();
+      } catch (e) { readFailed = false; me = held; if (btn) btn.disabled = false; /* saved; only the read back failed. Nothing to correct and nothing to confess. */ }
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = "Save my details"; }
       tell(e && e.message ? e.message : "Couldn't save. Please try again.", "Not saved");
