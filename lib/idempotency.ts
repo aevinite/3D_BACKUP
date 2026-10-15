@@ -18,6 +18,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 // The "was anything actually changed?" rule lives in its own import-free file so the guard
 // (scripts/verify-order-retry.mjs) can execute the REAL rule instead of a copy. See it for why.
 import { didSomething, storedIsRefusal, keptReply, replyFor } from "@/lib/idempotencyRule";
+import { openEditTurnScope, releaseEditTurn } from "@/lib/clash";
 
 // A claimed-but-not-completed row older than this is treated as a crashed attempt
 // and allowed to run again (otherwise a server crash mid-write would wedge that
@@ -117,7 +118,15 @@ export function withIdempotency<C>(
   fn: (req: NextRequest, ctx: C) => Promise<Response> | Response,
   panel: string,
 ): (req: NextRequest, ctx: C) => Promise<Response> {
+  // TWO SAVES OF ONE THING TAKE TURNS (sweep #10 T12 round 2, item 10; mig 422): every write that passes
+  // through here may wait its turn on the row its expectation names (lib/clash.ts expectClash), and the
+  // turn is ALWAYS given back when the request ends — returned, refused or thrown.
   return async (req: NextRequest, ctx: C): Promise<Response> => {
+    openEditTurnScope(req);
+    try { return await idempotent(req, ctx); }
+    finally { await releaseEditTurn(req); }
+  };
+  async function idempotent(req: NextRequest, ctx: C): Promise<Response> {
     const actionId = req.headers.get("x-lfh-action-id");
     if (!actionId) return fn(req, ctx);
 
@@ -150,5 +159,5 @@ export function withIdempotency<C>(
     // the full original response below — only the copy stored for a duplicate loses them.
     await finish(actionId, didSomething(res.status, body), keptReply(body, by));
     return res;
-  };
+  }
 }

@@ -6,7 +6,7 @@
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=2d19fa63">
+  <link rel="stylesheet" href="style.css?v=cc5ee9b7">
   <!-- the "who is this bill for?" box — shared with the other panel that opens it -->
   <link rel="stylesheet" href="/panels/billcustomer.css?v=615afbec" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
@@ -67,7 +67,7 @@
   <div id="toasts" class="toasts"></div>
   <!-- The are-you-sure dialog used before sending an order to the kitchen. -->
   <div class="confirm-overlay" id="confirmOverlay" hidden>
-    <div class="confirm-box">
+    <div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirmText">
       <p id="confirmText"></p>
       <div class="confirm-actions">
         <button class="btn" id="confirmNo">Cancel</button>
@@ -95,7 +95,9 @@
   <!-- What the GUEST MENU is waiting for (owner, 2026-08-13): the 🔔 in the top bar + its sheet.
        Reads NOTHING of its own — the panel hands it rows off the board it already has — and it
        renders nothing at all when the guest menu is switched off for the restaurant.
-       After backstack.js, because its sheet registers a back layer. -->
+       It loads BEFORE backstack.js and that is fine: it reaches LFH_BACK only when its sheet opens,
+       long after every tag here has run. (This line used to say "After backstack.js", which was
+       never the order — sweep #10 T12 round 2.) -->
   <script src="/panels/guestbell.js?v=df6b7ef1"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js?v=0ed28480"></script>
@@ -119,6 +121,6 @@
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
   <script src="/panels/billdoc.js?v=49856d75"></script>
-  <script src="app.js?v=739d12a5"></script>
+  <script src="app.js?v=d7427a15"></script>
 </body>
 </html>

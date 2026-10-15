@@ -14807,7 +14807,14 @@ function openReprintKotPicker(t) {
     if (ownAsked === undefined) {
       try {
         const r = await api("POST", "/print/send", { kind: "kot" });
-        ownAsked = r && r.printer ? r : null;
+        // A QUESTION THE QUEUE SAVED IS NOT AN ANSWER (sweep #10 T12 round 2, item 11 — the tablet's
+        // item 3, here too). With no signal the outbox keeps this "who owns the slips?" probe and lists it
+        // under "waiting to sync" as a change nobody made, to send hours later. Take it back out and answer
+        // from what the panel last knew — the bill print above does the same for its own send.
+        if (r && r.queued && r.action_id) {
+          try { if (window.LFH_OUTBOX && LFH_OUTBOX.dismiss) LFH_OUTBOX.dismiss(r.action_id); } catch (e) { /* best effort */ }
+          ownAsked = printOwner("kot");
+        } else ownAsked = r && r.printer ? r : null;
       } catch (e) { ownAsked = printOwner("kot"); }
       if (!picked) return;                       // they pressed Back while we were asking
     }
@@ -19115,6 +19122,16 @@ function printBanquetBill(b, lines) {
   if (b && b.id) {
     api("POST", "/print/send", { kind: "banquet", billId: b.id })
       .then((r) => {
+        // SAVED ON THIS DEVICE IS NOT "SENT TO THE PRINTER" (sweep #10 T12 round 2, item 11). The bill
+        // print above was fixed for exactly this on 2026-10-12 (T6); the banquet sheet was its twin and
+        // still read the outbox's own { queued, action_id } as the printer's answer: "Sent to the printer",
+        // no sheet, and a late print when the signal returned. Same answer as the bill: take the send back
+        // out and show the sheet here.
+        if (r && r.queued && r.action_id) {
+          try { if (window.LFH_OUTBOX && LFH_OUTBOX.dismiss) LFH_OUTBOX.dismiss(r.action_id); } catch (e) { /* the sheet still opens */ }
+          openBanquetWindow(b, lines);
+          return;
+        }
         if (r && r.queued) { toast(r.note || ("Sent to " + (r.printer || "the printer")), "ok"); return; }
         if (r && r.adminView) toast("Admin view — showing the sheet here, not printing at the restaurant.", "ok");
         openBanquetWindow(b, lines);

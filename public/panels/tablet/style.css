@@ -350,6 +350,12 @@ html[data-theme="light"] .t-new .tnum { color: color-mix(in srgb, var(--c) 50%, 
 @container (max-width: 64px) { .tseats, .tile .tmerge .tm-t { display: none; } } /* seats, and the
    merged table LIST — the ⇄ itself never goes, or a joined table would read as a solo one */
 @container (max-width: 56px) { .t-linenum { display: none; } }               /* the count, keep the bar */
+/* …BUT A WORD THAT IS THE WHOLE STATE STAYS (owner's yes to sweep #10 T12 item 12, 2026-10-15). On a
+   phone (four per row, ~50px inside a tile) the rule above also removed the plain line — "Free",
+   "Wants in" — so a free table read as a bare number. That line has no bar to fall back on: it IS the
+   state. It stays, one size smaller, and still ellipsizes rather than overflowing. The served COUNT
+   above a progress bar keeps going, because its bar still says it. */
+@container (max-width: 56px) { .t-line-plain .t-linenum { display: block; font-size: 9.5px; letter-spacing: 0; } }
 /* FOUR ROWS DO NOT FIT A SMALL SQUARE — and the row that was being cut is the one you tap (T7,
    2026-08-19, measured; pre-existing). A tile that has BOTH a badge row (a call, a request, someone
    waiting to join) AND an action row carries four rows: number 16px + badges 16px + the served line

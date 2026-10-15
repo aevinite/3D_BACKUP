@@ -27,3 +27,19 @@ Sabotage: with origin/main's `app.js` put back, verify:tablet-taps fails 5 and v
   T30's / T13's): both requests carry `expect: {qty: 1}` and both are answered 200, so the second silently replaces
   the first — the "first save wins, loser told" rule holds only when the two saves are a moment apart (P181165 ✅
   there). Row P181166 ❌. Needs the write itself to be conditional (e.g. `UPDATE … WHERE qty = <expected>`).
+
+## Round 2 (2026-10-15) — the owner's "do all the things you listed", then a re-planned full test
+
+| # | what | commit | guard |
+|---|---|---|---|
+| 6 | two notes in index.html / app.js described a load order and a phone band that are not the real ones | 28955a46 | — (wording) |
+| 7 | "Your tables 1–500 · 500 tables" on a 30-table floor — the strip now counts only tables on the floor | c0fe2913 | verify:tablet-taps |
+| 8 | a shared tablet opened Take order on the previous restaurant's saved dishes — the cache is per restaurant now, the old key removed | bbd9303c | verify:tablet-taps |
+| 9 | back-button count drift — fixed by T16 (merged 2026-10-13), proved here by round 2 L6 | (T16) | verify:panel-backstack |
+| 10 | two same-instant saves of one row both won — saves that carry an expectation now take a turn on the row (mig 422) | 6035aee3 | verify:edit-turns (new), verify:clash-coverage |
+| 11 | the manager panel's banquet sheet printed offline said "Sent to the printer"; its KOT "where?" probe sat in the queue | 6fde5e4e | verify:queued-truth §D3 |
+| 12 | on a phone a free table showed only its number — the state word now stays | 43be9da8 | verify:tablet-taps |
+| R2-a | a dead `data-bill-print-btn` hook left on the Print bill label since R62 (found by G2) | 8d61ce33 | t12r2 G2 |
+| R2-b | no box on the tablet was a dialog to a screen reader (found by L9) | 23c723ef | verify:tablet-taps |
+
+Re-planned test: `scripts/sweep/t12r2/` — 452 rows, 452 ✅ on the final run (`LEDGER/T12-S10.md` → ROUND 2).

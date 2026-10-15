@@ -356,6 +356,7 @@ const pinPrompt = (message, errText) => new Promise((resolve) => {
   const ov = document.createElement("div");
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
+  box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");   // a screen reader announces it as a dialog (round 2)
   Object.assign(box.style, { width: "min(92vw,340px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
     <div style="font-size:16px;font-weight:800;margin:0 0 6px">🔑 Manager PIN</div>
@@ -391,6 +392,7 @@ const reasonPrompt = (message, placeholder) => new Promise((resolve) => {
   const ov = document.createElement("div");
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
+  box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");   // a screen reader announces it as a dialog (round 2)
   Object.assign(box.style, { width: "min(92vw,360px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
     <div style="font-size:16px;font-weight:800;margin:0 0 6px">↩ Reason required</div>
@@ -426,6 +428,7 @@ const pricePrompt = (title, current) => new Promise((resolve) => {
   const ov = document.createElement("div");
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
+  box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");   // a screen reader announces it as a dialog (round 2)
   Object.assign(box.style, { width: "min(92vw,340px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
     <div style="font-size:16px;font-weight:800;margin:0 0 6px">💰 Enter price</div>
@@ -470,6 +473,7 @@ const allergyPrompt = (already) => new Promise((resolve) => {
   const ov = document.createElement("div");
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
+  box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");   // a screen reader announces it as a dialog (round 2)
   Object.assign(box.style, { width: "min(92vw,360px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
     <div style="font-size:16px;font-weight:800;margin:0 0 6px">⚠ Add an allergy</div>
@@ -513,6 +517,7 @@ const askAllergyReason = (what) => new Promise((resolve) => {
   const ov = document.createElement("div");
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100001", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
+  box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");   // a screen reader announces it as a dialog (round 2)
   Object.assign(box.style, { width: "min(94vw,400px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
     <div style="font-size:16px;font-weight:800;margin:0 0 6px">⚠ Why is this changing?</div>
@@ -854,8 +859,11 @@ function banquetRate() {
 // A guest bill's button always says "Print" — the manager panel's billPrintLabel, same rule.
 // REJECTED (owner, 2026-10-10): no "Reprint" marking on the guest bill (R62) — the kitchen ticket's
 // DUPLICATE is the only reprint word in the product.
+// OBITUARY (sweep #10 T12 round 2, 2026-10-15): the label used to be wrapped in <span data-bill-print-btn>,
+// the hook the "bill printed → Reprint" stamp looked for. That stamp was removed on 2026-10-10 (R62) and
+// nothing has read the marker since — a hook with no hand on it. Plain text now.
 function billPrintLabel(_sess, _os, suffix) {
-  return `<span data-bill-print-btn>🖨 Print${suffix ? " " + suffix : ""}</span>`;
+  return `🖨 Print${suffix ? " " + suffix : ""}`;
 }
 
 // printTableBill(t): give the guest their bill FROM THE WAITER'S HANDHELD.
@@ -1167,8 +1175,16 @@ function renderMySection() {
   // already says it, in more words and more kindly. Two identical warnings stacked on a
   // 360px phone just eats the screen.
   if (my === null || !my.length) { el.style.display = "none"; el.innerHTML = ""; return; }
+  // THE TABLES THAT ARE REALLY ON THIS FLOOR (owner's yes to sweep #10 T12 item 7, 2026-10-15). A rota
+  // can name more tables than the floor has — diagt1's said 1–500 on a 30-table floor — and the strip
+  // used to repeat it: "Your tables 1–500 · 500 tables". It now names only the ones that exist: the
+  // floor plan plus any occupied table drawn above it (floorTableList), so it can never promise a table
+  // the waiter cannot see. Still never hidden for covering the whole floor (R2).
+  const onFloor = new Set(floorTableList().map(String));
+  const real = my.filter((n) => onFloor.has(String(n)));
+  if (!real.length) { el.style.display = "none"; el.innerHTML = ""; return; }
   el.style.display = "flex";
-  el.innerHTML = `<span class="ms-key">Your tables</span><b>${esc(rangeText(my))}</b><span class="ms-n">${my.length} table${my.length === 1 ? "" : "s"}</span>`;
+  el.innerHTML = `<span class="ms-key">Your tables</span><b>${esc(rangeText(real))}</b><span class="ms-n">${real.length} table${real.length === 1 ? "" : "s"}</span>`;
 }
 // tableLabel(t): the table's display name (mig 131) with the number kept alongside,
 // else "Table t". Display-only — bills/KOTs/ids all keep the number.
@@ -1504,9 +1520,11 @@ const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
 // deliberately chose a small number keeps it (4 stays 4). A PC is untouched: a mouse reports
 // `pointer: fine`, so `coarse` is what tells the two apart, exactly as the CSS does it.
 //
-// ⚠️ AND BELOW TABLET WIDTH THE SCREEN BANDS OVERRIDE ALL OF IT (owner, 2026-08-15): a phone draws
-// 2 per row and a phone turned sideways draws 4, in CSS, whatever this function returns. The cap
-// above is what decides a TABLET.
+// ⚠️ AND ON A SMALLER TOUCH SCREEN THE STYLESHEET'S BAND OVERRIDES ALL OF IT: any touch screen whose
+// two edges are both under 1150px — a phone either way up, an iPad held upright — draws FOUR per row
+// (style.css, "matching the manager's floor", owner 2026-09-03), whatever this function returns.
+// The cap above is what decides a tablet held sideways and anything wider. (This note said "a phone
+// draws 2 per row" until sweep #10 T12 round 2 — the band had moved to 4 and the note had not.)
 //
 // THE MANAGER FLOOR NOW HAS THE SAME CAP (2026-08-16). It used to be this panel's alone, so the two
 // floors showed different counts on the same iPad — 6 here, 12 there. That was never a decision,
@@ -1846,7 +1864,7 @@ function openDishEditModal(itemId) {
   const ov = document.createElement("div");
   ov.className = "dish-edit-overlay";
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
-  ov.innerHTML = `<div class="dish-edit-box" style="width:min(94vw,460px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+  ov.innerHTML = `<div class="dish-edit-box" role="dialog" aria-modal="true" style="width:min(94vw,460px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
     <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Edit dish · ${esc(item.title)}</h3><button class="dish-edit-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
       ${item.status === "served" ? `<div class="muted" style="font-size:13px;line-height:1.5;margin:0 0 12px;padding:9px 11px;border:1px solid var(--line);border-radius:9px">This dish is already <b style="color:#4ade80">served</b> — allergens &amp; note are locked now. If it went out by mistake, use <b>↩ Send back to kitchen</b> below.</div>` : ""}
@@ -3939,7 +3957,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
     const ov = document.createElement("div");
     ov.className = "pay-overlay";
     Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
-    ov.innerHTML = `<div class="pay-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+    ov.innerHTML = `<div class="pay-box" role="dialog" aria-modal="true" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
       <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${esc(label)}</h3><button class="pay-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
       <div style="padding:16px 18px">
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:var(--muted);margin-bottom:12px"><span>Amount collected</span><b style="color:var(--text);font-size:15px">${inr(due)}</b></div>
@@ -4375,7 +4393,7 @@ function openKhataPersonSheet(due, t) {
     ov.className = "khata-overlay";
     Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
     const inputCss = "width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px";
-    ov.innerHTML = `<div style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+    ov.innerHTML = `<div role="dialog" aria-modal="true" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
       <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Pay Later — who's this bill on?</h3><button class="kp-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
       <div style="padding:16px 18px">
         <div style="display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted);margin-bottom:10px"><span>T${esc(t)} bill</span><b style="color:var(--text)">${inr(due)}</b></div>
@@ -4444,7 +4462,7 @@ function openTagSheet(t) {
   ov.className = "tag-overlay";
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const opt = (tag) => `<button type="button" class="tag-pick" data-tag="${tag}" style="display:flex;align-items:center;gap:12px;width:100%;padding:12px;margin-bottom:8px;border-radius:12px;border:1.5px solid ${colors[tag]};background:linear-gradient(120deg, color-mix(in srgb, ${colors[tag]} 18%, var(--panel)), var(--panel));color:var(--text);font-size:14px;font-weight:600;text-align:left;cursor:pointer${cur === tag ? ";outline:2px solid var(--gold, #d4a574)" : ""}"><span style="font-size:19px">${TABLE_TAG_INFO[tag].emoji}</span><span>${TABLE_TAG_INFO[tag].label}<small style="display:block;font-weight:400;font-size:11.5px;color:var(--muted)">${subs[tag]}</small></span></button>`;
-  ov.innerHTML = `<div style="width:min(94vw,380px);background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+  ov.innerHTML = `<div role="dialog" aria-modal="true" style="width:min(94vw,380px);background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
     <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Mark table ${esc(t)}</h3><button class="tg-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
       <p style="margin:0 0 10px;font-size:12.5px;color:var(--muted)">How should staff treat this table? The mark clears itself when the table closes.</p>
@@ -4569,7 +4587,7 @@ function openDiscountModal(order, opts = {}) {
   const ov = document.createElement("div");
   ov.className = "disc-overlay";
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
-  ov.innerHTML = `<div class="disc-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+  ov.innerHTML = `<div class="disc-box" role="dialog" aria-modal="true" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
     <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${opts.bill ? "Discount whole bill" : "Apply discount"}</h3><button class="disc-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:var(--muted);margin-bottom:12px"><span>Bill total</span><b style="color:var(--text);font-size:15px">${inr(total)}</b></div>
@@ -5365,7 +5383,7 @@ function openQuickDest() {
       <div style="font-weight:800;font-size:14px;color:var(--text)">No tables assigned to you yet</div>
       <div style="font-size:12.5px;margin-top:3px">Ask your manager to give you a section — your order stays here until then.</div>
     </div>`;
-  ov.innerHTML = `<div class="qdest-box">
+  ov.innerHTML = `<div class="qdest-box" role="dialog" aria-modal="true">
     <div class="qdest-head"><h3>Which table gets this order?</h3><button class="qdest-x" aria-label="Close">✕</button></div>
     <div class="muted small" style="margin:2px 0 12px">${tiles.length ? "Tap a table to send it to the kitchen — a busy table adds it to that table's bill." : "This order is safe — nothing has been sent yet."}</div>
     <div class="qdest-grid">${tiles.length ? tiles.join("") : emptyPick}</div>
@@ -5850,7 +5868,9 @@ async function loadImpl() {
   if (Array.isArray(dishes)) {
     patch.dishes = dishes;
     state._menuStale = false;
-    try { if (dishes.length) localStorage.setItem("lfh_tablet_menu", JSON.stringify({ dishes, categories: categories || [] })); } catch (_e) {}
+    // ONE SAVED MENU PER RESTAURANT (owner's yes to sweep #10 T12 item 8, 2026-10-15) — the restaurant
+    // this board just came from, never a device-wide copy (see menuCacheKey below).
+    try { const k = menuCacheKey((restaurant && restaurant.id) || panelRid()); if (k && dishes.length) localStorage.setItem(k, JSON.stringify({ dishes, categories: categories || [] })); } catch (_e) {}
   } else {
     patch.dishes = state.data.dishes || [];
   }
@@ -5903,8 +5923,17 @@ tickClock(); setInterval(tickClock, 1000);
 
 // ── Instant menu: hydrate the last dish list from on-device cache so Take-order NEVER waits on
 // the network (the load() below refreshes it + rewrites the cache). Fixes the ~5s menu wait. (audit 2026-07-09)
+// ONE SAVED MENU PER RESTAURANT (owner's yes to sweep #10 T12 item 8, 2026-10-15). It used to be ONE
+// key per DEVICE, "lfh_tablet_menu", so a shared tablet that last served another restaurant opened
+// Take order on THAT restaurant's dishes until the first load replaced them. The key now carries the
+// restaurant id, and the boot read only uses the restaurant this tab already knows (the admin's ?rid,
+// or a waiter's own ?skel hint) — a tab that knows no restaurant yet simply waits for the real menu.
+// The old device-wide copy is removed, so it can never be read again (a new way replaces the old one).
+function menuCacheKey(rid) { return rid ? "lfh_tablet_menu:" + rid : ""; }
+try { localStorage.removeItem("lfh_tablet_menu"); } catch (_e) {}
 try {
-  const _mc = JSON.parse(localStorage.getItem("lfh_tablet_menu") || "null");
+  const _mk = menuCacheKey(PANEL_RID || PANEL_SKEL_RID);
+  const _mc = _mk ? JSON.parse(localStorage.getItem(_mk) || "null") : null;
   if (_mc && Array.isArray(_mc.dishes) && _mc.dishes.length) {
     state.data.dishes = _mc.dishes;
     if (Array.isArray(_mc.categories) && _mc.categories.length) state.data.categories = _mc.categories;
@@ -6446,7 +6475,7 @@ window.addEventListener("online", () => load().catch(() => {}));
     const ov = document.createElement("div");
     ov.className = "set-overlay";
     Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
-    ov.innerHTML = `<div style="width:min(92vw,360px);background:var(--panel);color:var(--text);border-radius:16px;padding:18px 18px calc(18px + var(--sab));box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+    ov.innerHTML = `<div role="dialog" aria-modal="true" style="width:min(92vw,360px);background:var(--panel);color:var(--text);border-radius:16px;padding:18px 18px calc(18px + var(--sab));box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
       <div style="display:flex;align-items:center;gap:10px;margin:0 0 14px"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">⚙️ Settings</h3><button class="set-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;width:40px;height:40px;font-size:16px;cursor:pointer">✕</button></div>
       <!-- A FORM, not a link (T9 improvement 13, 2026-08-06): /api/panel-logout is POST-only now,
            because a GET that ends a session fires from anything that merely POINTS at the URL — a
@@ -6528,6 +6557,7 @@ async function openBanquet() {
   closeBanquet();
   bqEl = document.createElement("div");
   bqEl.style.cssText = "position:fixed;inset:0;z-index:120;background:var(--bg);display:flex;flex-direction:column";
+  bqEl.setAttribute("role", "dialog"); bqEl.setAttribute("aria-modal", "true"); bqEl.setAttribute("aria-label", "Banquet billing");
   bqEl.innerHTML =
     '<div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel)">' +
       '<button class="btn small" id="bqBack" type="button">← Back</button>' +

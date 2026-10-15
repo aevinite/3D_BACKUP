@@ -188,13 +188,9 @@ export async function blockD(R = makeRunner("T12 · block D · pages, shell, and
   await check("P181461", F_APP, "the restaurant name in the header is set with textContent", S, () => ok(/if \(el\) el\.textContent = restDisplayName\(r\)/.test(app)));
   await check("P181462", F_APP, "the per-device caches are keyed per restaurant, so a shared device never paints one tenant's floor with another's numbers", S, () =>
     ok(/"lfh_tablet_per_row:" \+ r/.test(app) && /"lfh_tablet_table_count:" \+ r/.test(app)));
-  await check("P181463", F_APP, "the cached dish list is NOT keyed per restaurant — only the first network load can replace it", S, () => {
-    // Recorded honestly: lfh_tablet_menu is one key per device. A device that changes restaurant shows
-    // the previous restaurant's dish list until the first load lands (state._menuStale forces that load
-    // to be a full one). It is listed in Part 4 as an improvement, not filed as a problem: the first
-    // load replaces it within a second and nothing can be ordered from it that the server would accept.
-    return ok(/localStorage\.setItem\("lfh_tablet_menu"/.test(app) && /state\._menuStale = true;/.test(app), "one device-wide key; the first load is forced full — Part 4");
-  });
+  await check("P181463", F_APP, "the saved dish list is kept per restaurant, and the old device-wide copy is removed", S, () =>
+    // Was "the cached dish list is NOT keyed per restaurant" (an honest Part 4 note) — fixed in round 2, item 8.
+    ok(/function menuCacheKey\(rid\) \{ return rid \? "lfh_tablet_menu:" \+ rid : ""; \}/.test(app) && /localStorage\.removeItem\("lfh_tablet_menu"\)/.test(app)));
 
   // ── D4 · project rules this panel lives under ───────────────────────────────────────────────
   await check("P181464", F_APP, "every overlay app.js builds registers with LFH_BACK (one layer id per overlay)", S, () => {

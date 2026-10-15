@@ -1495,6 +1495,60 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── THE "YOUR TABLES" STRIP COUNTS ONLY TABLES THAT EXIST (sweep #10 T12 round 2, item 7) ────────────
+// A rota naming 1–500 on a 30-table floor read "Your tables 1–500 · 500 tables". The strip must count
+// the rota's tables that are on the floor (floorTableList), and must still never hide for covering it all (R2).
+{
+  const fn = src.slice(src.indexOf("function renderMySection"), src.indexOf("// tableLabel(t): the table's display name"));
+  check(
+    "tablet: the 'Your tables' strip names only the rota's tables that are on this floor",
+    /const onFloor = new Set\(floorTableList\(\)\.map\(String\)\);/.test(fn) && /rangeText\(real\)/.test(fn) && /\$\{real\.length\} table/.test(fn) && !/rangeText\(my\)/.test(fn),
+    `${TABLET}: renderMySection must count my ∩ floorTableList(), not the raw rota — or a wide rota promises tables nobody can see.`,
+  );
+}
+
+// ── ONE SAVED MENU PER RESTAURANT (sweep #10 T12 round 2, item 8) ──────────────────────────────────
+// The dish list a tablet saves for "Take order opens instantly" was one key per DEVICE, so a shared
+// tablet opened on the previous restaurant's dishes. Every write and read goes through menuCacheKey(rid),
+// and the old device-wide key is removed rather than left to be read.
+{
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const raw = (code.match(/localStorage\.(setItem|getItem)\("lfh_tablet_menu"/g) || []).length;
+  check(
+    "tablet: the saved dish list is keyed per restaurant (no device-wide copy is written or read)",
+    raw === 0 && /function menuCacheKey\(rid\)/.test(code) && /localStorage\.setItem\(k, JSON\.stringify\(\{ dishes/.test(code) && /localStorage\.removeItem\("lfh_tablet_menu"\)/.test(code),
+    `${TABLET}: the menu cache must go through menuCacheKey(rid); ${raw} raw use(s) of the device-wide key remain.`,
+  );
+}
+
+// ── A FREE TABLE ON A PHONE STILL SAYS "FREE" (sweep #10 T12 round 2, item 12) ─────────────────────
+// At four per row a phone tile is ~50px inside, and the container rule that drops the served COUNT
+// (it has its bar) also dropped the plain state line — a free table read as a bare number.
+{
+  const css = fs.readFileSync(path.join(ROOT, CSS), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  check(
+    "tablet: on a narrow tile the plain state word (Free, Wants in) stays while the count goes",
+    /@container \(max-width: 56px\) \{ \.t-linenum \{ display: none; \} \}/.test(css)
+      && /@container \(max-width: 56px\) \{ \.t-line-plain \.t-linenum \{ display: block;/.test(css),
+    `${CSS}: the plain line IS the state on a free tile — keep it under 56px, smaller, instead of hiding it.`,
+  );
+}
+
+// ── EVERY BOX IS A DIALOG TO A SCREEN READER (sweep #10 T12 round 2) ───────────────────────────────
+// Round 2's keyboard/screen-reader pass found the are-you-sure box — and every one-field box, the pay,
+// discount, dish-edit, pay-later, table-type, settings and table-picker sheets — announced as plain
+// text, so a screen reader never said "dialog" and a person could tab straight out behind it.
+{
+  const html = fs.readFileSync(path.join(ROOT, HTML), "utf8");
+  const built = (src.match(/box\.setAttribute\("role", "dialog"\); box\.setAttribute\("aria-modal", "true"\)/g) || []).length;
+  const inline = (src.match(/role="dialog" aria-modal="true"/g) || []).length;
+  check(
+    "tablet: every box the panel builds is marked as a dialog (role + aria-modal), the are-you-sure box as an alertdialog",
+    built >= 5 && inline >= 8 && /class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirmText"/.test(html) && /bqEl\.setAttribute\("role", "dialog"\)/.test(src),
+    `${TABLET}: ${built} built + ${inline} inline dialog marks; ${HTML} confirm-box ${/role="alertdialog"/.test(html) ? "ok" : "unmarked"}.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");
