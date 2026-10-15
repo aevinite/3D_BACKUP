@@ -2479,168 +2479,6 @@ body.ar-presenting .viewer-wrapper .hotspot{ display:none; }
   margin-bottom: 10px;
 }
 
-/* ── New Dive-in Star Rating (no GSAP) ── */
-.sr-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 0 0;
-}
-.sr-rating {
-  list-style: none;
-  display: flex;
-  flex-direction: row;
-  gap: 6px;
-  align-items: flex-end;
-  padding: 0;
-  margin: 0;
-}
-.sr-li {
-  width: 40px;
-  height: 36px;
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-.sr-hole {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%) scale(0);
-  width: 36px;
-  height: 11px;
-  background: rgba(0, 0, 0, 0.55);
-  box-shadow: inset 0 3px 0 0 rgba(0, 0, 0, 0.35);
-  border-radius: 100px / 20px;
-  transform-origin: 50% 100%;
-  opacity: 0;
-  pointer-events: none;
-}
-[data-theme="light"] .sr-hole {
-  background: rgba(139, 90, 43, 0.18);
-  box-shadow: inset 0 3px 0 0 rgba(139, 90, 43, 0.25);
-}
-.sr-toggle {
-  --y: 0px;
-  --scale: 1;
-  --rotate: 0deg;
-  --face-scale: 1;
-  --toggle-y: 0px;
-  width: 32px;
-  height: 32px;
-  display: block;
-  cursor: pointer;
-  position: absolute;
-  bottom: 0;
-  left: 4px;
-  transform: translateY(var(--toggle-y)) translateZ(0);
-  -webkit-tap-highlight-color: transparent;
-}
-.sr-toggle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
-  border-radius: 50%;
-}
-.sr-clip {
-  position: absolute;
-  left: -12px;
-  bottom: 0;
-  width: 56px;
-  height: 160px;
-  overflow: hidden;
-  pointer-events: none;
-}
-.sr-star {
-  width: 32px;
-  height: 32px;
-  position: absolute;
-  left: 12px;
-  bottom: 0;
-  transform: translateY(var(--y)) rotate(var(--rotate)) scale(var(--scale)) translateZ(0);
-  border-radius: var(--sr-radius, 0px);
-  background: var(--sr-color, rgba(245, 230, 211, 0.25));
-  clip-path: var(
-    --sr-clip,
-    polygon(50% 0, 65% 32%, 100% 37%, 75% 63%, 80% 100%, 50% 79%, 20% 100%, 25% 63%, 0% 37%, 35% 32%)
-  );
-  -webkit-clip-path: var(
-    --sr-clip,
-    polygon(50% 0, 65% 32%, 100% 37%, 75% 63%, 80% 100%, 50% 79%, 20% 100%, 25% 63%, 0% 37%, 35% 32%)
-  );
-  transition: clip-path 0.2s, border-radius 0.2s, background 0.2s, opacity 0.15s;
-}
-[data-theme="light"] .sr-star {
-  background: var(--sr-color, rgba(60, 42, 30, 0.18));
-}
-.sr-li.active .sr-star {
-  --sr-color: var(--accent);
-}
-.sr-li.hover-on:not(.active) .sr-star {
-  --sr-color: var(--accent);
-  opacity: 0.4;
-}
-.sr-li.hover-on.active .sr-star {
-  --sr-color: #f0c98a;
-  opacity: 1;
-}
-.sr-toggle.sr-round .sr-star {
-  --sr-clip: polygon(50% 0%, 100% 0%, 100% 37%, 100% 63%, 100% 100%, 50% 100%, 0% 100%, 0% 63%, 0% 37%, 0% 0%);
-  --sr-radius: 50%;
-}
-.sr-toggle.sr-bottom .sr-star {
-  --sr-clip: polygon(50% 0, 65% 32%, 100% 37%, 75% 63%, 83% 96%, 50% 79%, 17% 96%, 25% 63%, 0% 37%, 35% 32%);
-}
-.sr-crush-top,
-.sr-crush-bot {
-  position: absolute;
-  bottom: 0;
-  left: 4px;
-  width: 32px;
-  height: 32px;
-  pointer-events: none;
-  opacity: 0;
-}
-.sr-crush-top::before {
-  content: "";
-  display: block;
-  width: 32px;
-  height: 32px;
-  position: absolute;
-  clip-path: polygon(50% 5%, 65% 35%, 30% 60%, 2.5% 40%, 35% 35%);
-  background: var(--accent);
-}
-.sr-crush-bot::before {
-  content: "";
-  display: block;
-  width: 32px;
-  height: 32px;
-  position: absolute;
-  clip-path: polygon(65% 35%, 97.5% 40%, 70% 60%, 80% 95%, 50% 74%, 20% 95%, 30% 60%);
-  background: var(--accent);
-}
-.sr-score-pill {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  letter-spacing: 0.06em;
-}
-.sr-score-num {
-  color: var(--accent);
-  font-family: 'Playfair Display', serif;
-  font-size: 22px;
-  font-weight: 600;
-  min-width: 1.2ch;
-  text-align: center;
-  transition: color 0.3s;
-}
-.sr-score-num.zero {
-  color: var(--muted2, var(--muted));
-}
-
 /* Legacy elastic star rating (kept for any other call sites) */
 .rating-el {
   list-style: none; display: flex; flex-direction: row-reverse; padding:0; margin:0;
@@ -2952,13 +2790,25 @@ a *:active,
   text-decoration: none !important;
 }
 
-/* --- STAR RATING (diving/crushing star) --- */
+/* --- STAR RATING (diving/crushing star) — THE ONLY SET ---
+   There used to be TWO complete sets of these rules: an older "New Dive-in Star Rating" block earlier in
+   this file, and this one. This one came later in the file, so it won every property the two shared —
+   the older block decided only the wrapper's 4px top padding and styled a score pill that this block
+   then hid with `display: none`. Merged (sweep #10 T3 round 3, owner's item 26): the older block is
+   gone, its two survivors live here, and the score pill ("3 / 5") SHOWS. Every computed style of
+   every star element was recorded before and after the merge, in both skins, idle / picked / hovered,
+   and only the pill differs. The animation itself is untouched (R69 — full motion, owner 2026-10-12). */
 .sr-wrap {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: flex-end;
   gap: 14px;
+  padding: 4px 0 0;
+  /* Only ever wraps on a phone narrower than ~340px (232px inside the card at 320 — the five stars
+     alone): the pill then takes its own line instead of pushing a star out of the card. */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 .sr-rating {
   list-style: none;
@@ -3129,9 +2979,34 @@ a *:active,
   clip-path: polygon(65% 35%, 97.5% 40%, 70% 60%, 80% 95%, 50% 74%, 20% 95%, 30% 60%);
   background: #F6C206;
 }
-/* score pill */
+/* On the narrowest phones (a 360px A35) the rating card has 270px inside it: five 40px stars at 8px
+   apart are 232px, the pill 40px and the 14px gap between them — 286px, so the row spilled 16px out of
+   the card's left padding and the first star touched its border. 4px between stars fits it exactly in
+   one row, keeps every star its full size, and changes nothing about the animation. */
+@media (max-width: 379px) {
+  .sr-rating { gap: 4px; }
+}
+/* score pill — the number picked, out of five, beside the stars */
 .sr-score-pill {
-  display: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.sr-score-num {
+  color: var(--accent-ink);
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  font-weight: 600;
+  min-width: 1.2ch;
+  text-align: center;
+  transition: color 0.3s;
+}
+.sr-score-num.zero {
+  color: var(--muted2, var(--muted));
 }
 
 /* --- NAV PICKER DROPDOWN (currency / language) --- */

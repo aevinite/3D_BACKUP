@@ -1119,7 +1119,15 @@ flush();
     check("item 25 — the shine slides with transform, so it costs no layout on every frame",
       !!kf[0] && /transform:\s*translateX\(-100%\)/.test(kf[0][0]) && !/\bleft\s*:/.test(kf[0][0]));
     check("item 25 — none of the three shining buttons starts its stripe with `left: -100%` any more",
-      !/(\.back-btn|\.ar-btn|\.btn-cyan)::before\s*\{[^}]*left:\s*-100%/.test(css)); }}
+      !/(\.back-btn|\.ar-btn|\.btn-cyan)::before\s*\{[^}]*left:\s*-100%/.test(css)); }
+  // item 26 — ONE set of star-picker rules, and the score pill is shown
+  { const wraps = (css.match(/(^|\n)\.sr-wrap\s*\{/g) || []).length, pills = [...css.matchAll(/(^|\n)\.sr-score-pill\s*\{([^}]*)\}/g)];
+    check(`item 26 — the star picker has one set of rules, not two (${wraps} .sr-wrap rule(s))`, wraps === 1);
+    check("item 26 — the score pill (\"3 / 5\") is not hidden", pills.length === 1 && !/display:\s*none/.test(pills[0][2]));
+    check("item 26 — on a 360px phone the five stars and the pill fit in one row (4px between stars under 380px)",
+      /@media \(max-width: 379px\)\s*\{\s*\.sr-rating\s*\{\s*gap:\s*4px;?\s*\}/.test(css));
+    check("item 26 — and below that the pill wraps to its own line rather than pushing a star out of the card",
+      /\.sr-wrap\s*\{[^}]*flex-wrap:\s*wrap/.test(css)); }}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
